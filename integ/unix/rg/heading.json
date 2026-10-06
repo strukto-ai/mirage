@@ -1,0 +1,43 @@
+{
+  "cases": [
+    {
+      "id": "rg_heading_groups_matches_under_each_file",
+      "seq": 15200091,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "rg -j1 --heading o /data/a.txt /data/mixed.txt; rg -j1 --heading --no-heading o /data/a.txt /data/mixed.txt; rg -j1 --no-heading --heading -n -A1 world /data/a.txt /data/mixed.txt; rg -j1 --heading -c o /data/a.txt /data/mixed.txt; rg --heading o /data/a.txt; rg -j1 --heading -l o /data/a.txt /data/mixed.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\nhello\nworld\nfoo\n\n/data/mixed.txt\nHello World\nHELLO world\nhello WORLD\n/data/a.txt:hello\n/data/a.txt:world\n/data/a.txt:foo\n/data/mixed.txt:Hello World\n/data/mixed.txt:HELLO world\n/data/mixed.txt:hello WORLD\n/data/a.txt\n2:world\n3-foo\n\n/data/mixed.txt\n2:HELLO world\n3-hello WORLD\n/data/a.txt:3\n/data/mixed.txt:3\nhello\nworld\nfoo\n/data/a.txt\n/data/mixed.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "heading",
+        "no_heading",
+        "j",
+        "n",
+        "A",
+        "c",
+        "l"
+      ]
+    }
+  ]
+}

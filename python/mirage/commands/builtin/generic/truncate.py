@@ -5,10 +5,12 @@ from dataclasses import dataclass
 from mirage.commands.builtin.utils.paths import absent_dest_strerror
 from mirage.commands.builtin.utils.size_suffix import size_suffixes
 from mirage.commands.errors import UsageError
+from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, PathSpec
 from mirage.utils.errors import (
     FS_ERRORS,
@@ -62,15 +64,17 @@ def parse_size(value: str, current: int) -> int:
     )
     digits = raw[: -len(suffix)] if suffix else raw
     # GNU quotes what xdectoimax saw: the remainder past the skipped
-    # whitespace and mode character, sign included (`<abc` says 'abc').
+    # whitespace and mode character, sign included (`<abc` says 'abc'),
+    # escaped the way its quote() escapes a word.
+    shown = quote_text(remainder)
     if _DIGITS.fullmatch(digits) is None:
-        raise UsageError(f"truncate: Invalid number: '{remainder}'", 1)
+        raise UsageError(f"truncate: Invalid number: '{shown}'", 1)
     number = int(digits) * _UNITS.get(suffix, 1)
     # off_t is signed, so the bound is 2**63 - 1 upward but 2**63 downward
     # (`-s -8E` reduces to zero while `-s 8E` is too large).
     if number > _OFF_T_MAX + (1 if sign == "-" else 0):
         raise UsageError(
-            f"truncate: Invalid number: '{remainder}': "
+            f"truncate: Invalid number: '{shown}': "
             "Value too large for defined data type",
             1,
         )
@@ -125,7 +129,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TruncateFlags:
     return TruncateFlags(size=size, no_create=fl.as_bool("no_create"))
 
 
-async def truncate(
+async def truncate_generic(
     paths: list[PathSpec],
     *,
     flags: TruncateFlags,
@@ -152,7 +156,7 @@ async def truncate(
             await _truncate_one(path, flags, stat, truncate_fn)
         except FS_ERRORS as exc:
             errors.append(fs_error_line("truncate", path, exc))
-    err = "".join(errors).encode()
+    err = encode_text("".join(errors))
     return None, IOResult(exit_code=1 if err else 0, stderr=err or None)
 
 
@@ -206,4 +210,4 @@ async def _truncate_one(
     await truncate_fn(path, parse_size(flags.size, current), flags.no_create)
 
 
-__all__ = ["TruncateFlags", "parse_flags", "parse_size", "truncate"]
+__all__ = ["TruncateFlags", "parse_flags", "parse_size", "truncate_generic"]

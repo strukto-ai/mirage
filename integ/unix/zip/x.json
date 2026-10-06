@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "zip_x_strips_only_a_leading_dot_slash",
+      "seq": 15100621,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "(mkdir -p /data/fcA_zx/sub && cd /data/fcA_zx && printf 'alpha\\n' > a.txt && printf 'beta\\n' > sub/b.txt && zip -q -r d.zip ././a.txt sub/. ./sub/b.txt -x ./sub/b.txt && unzip -Z1 d.zip && zip -q -r x1.zip sub -x b.txt && unzip -Z1 x1.zip && zip -q -r x2.zip sub a.txt -x '*.txt' && unzip -Z1 x2.zip; cd / && rm -r /data/fcA_zx)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a.txt\nsub/./\nsub/./b.txt\nsub/\nsub/b.txt\nsub/\n",
+        "stderr": ""
+      },
+      "flags": [
+        "q",
+        "r",
+        "x"
+      ]
+    }
+  ]
+}

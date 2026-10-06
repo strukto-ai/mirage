@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "captured_only",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "smolvm",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "uname"
+        ]
+      },
+      "steps": [
+        {
+          "command": "uname",
+          "expect": {
+            "exit": 0,
+            "stdout": "Linux\n"
+          }
+        },
+        {
+          "command": "echo local-vfs",
+          "expect": {
+            "exit": 0,
+            "stdout": "local-vfs\n"
+          }
+        }
+      ]
+    }
+  ]
+}

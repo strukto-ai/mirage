@@ -16,7 +16,7 @@ import git from 'isomorphic-git'
 
 import type { LinkView, StatPath } from '../../../../ops/types.ts'
 import { FileType, type FileStat } from '../../../../types.ts'
-import { isMissingPath } from '../../../../utils/errors.ts'
+import { isEisdir, isEnotdir, isMissingPath } from '../../../../utils/errors.ts'
 import { entryMode } from './add.ts'
 import { GITLINK_MODE, SYMLINK } from './constants.ts'
 import { readIndex } from './index_file.ts'
@@ -341,7 +341,7 @@ async function differs(
   try {
     data = await entryBytes(dispatch, under(worktree, path), info)
   } catch (err) {
-    if (isMissingPath(err)) return true
+    if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return true
     throw err
   }
   const oid = await git.hashBlob({ object: data })

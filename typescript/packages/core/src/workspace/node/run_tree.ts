@@ -20,6 +20,8 @@ import { postExecuteGate, refusalOf, renderDeny } from '../../policy/index.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
+import { concat } from '../../io/cachable_iterator.ts'
+import { Terminal } from '../../shell/console/index.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { inputSubstitutionRedirect } from '../../shell/helpers.ts'
 import { expandRedirects } from '../expand/redirects.ts'
@@ -33,6 +35,7 @@ import { Admitted, admit } from './admission.ts'
 import { claimantFor } from './occurrence.ts'
 import { PathSpec } from '../../types.ts'
 import { executeNode, type ExecuteNodeDeps } from './execute_node.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -118,7 +121,7 @@ export async function runCommandTree(
     // surface that as a failed command, not a crash.
     const msg = err instanceof Error ? err.message : String(err)
     const existing = await materialize(io.stderr)
-    const added = new TextEncoder().encode(`${msg}\n`)
+    const added = encodeText(`${msg}\n`)
     const merged = new Uint8Array(existing.byteLength + added.byteLength)
     merged.set(existing, 0)
     merged.set(added, existing.byteLength)
@@ -127,6 +130,16 @@ export async function runCommandTree(
     materialized = null
     execNode.exitCode = 1
     return [materialized, io, execNode]
+  }
+  // A line written to a terminal (a typed line's, a substitution's) is
+  // bounded as what reached it, its jobs' output included, and what the
+  // bound leaves goes back ahead of anything later.
+  const screen = deps.sink instanceof Terminal && deps.sink.reader === null ? deps.sink : null
+  if (screen !== null) {
+    const [out, err] = screen.drain()
+    materialized = concat([out, await materialize(materialized)])
+    const stderr = concat([err, await materialize(io.stderr)])
+    io.stderr = stderr.byteLength > 0 ? stderr : null
   }
   // The boundary consultation: the envelope's producer facts become
   // the postExecute context; the built-in cap and any user policies
@@ -146,6 +159,10 @@ export async function runCommandTree(
     io.exitCode = exitCode
     io.refusal = refusalOf(deny)
     execNode.exitCode = io.exitCode
+    if (screen !== null) {
+      screen.putBack(new Uint8Array(), mergedErr)
+      io.stderr = null
+    }
     return [null, io, execNode]
   }
   const [guarded, guardedErr, guardedCode] = await guardOutput(
@@ -157,5 +174,10 @@ export async function runCommandTree(
   materialized = guarded !== null ? await materialize(guarded) : null
   io.stderr = guardedErr
   io.exitCode = guardedCode
+  if (screen !== null) {
+    screen.putBack(materialized ?? new Uint8Array(), await materialize(io.stderr))
+    materialized = null
+    io.stderr = null
+  }
   return [materialized, io, execNode]
 }

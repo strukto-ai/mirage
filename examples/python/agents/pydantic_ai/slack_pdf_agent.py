@@ -15,14 +15,13 @@
 import asyncio
 import os
 import time
-from dataclasses import dataclass
 
 from dotenv import load_dotenv
 from pydantic_ai import Agent
-from pydantic_ai_backends import create_console_toolset
+from pydantic_ai_backends import PERMISSIVE_RULESET, ConsoleCapability
 
 from mirage import MountMode, Workspace
-from mirage.agents.pydantic_ai import PydanticAIWorkspace
+from mirage.agents.pydantic_ai import MirageWorkspace
 from mirage.vfs.slack import SlackConfig, SlackVFS
 
 load_dotenv(".env.development")
@@ -36,25 +35,17 @@ slack = SlackVFS(
 ws = Workspace({"/slack": slack}, mode=MountMode.READ)
 
 
-@dataclass
-class Deps:
-    backend: PydanticAIWorkspace
-
-
-backend = PydanticAIWorkspace(ws)
-
-
 async def main() -> None:
     agent = Agent(
         "openai:gpt-5.4-mini",
-        system_prompt=(await ws.vfs_md()),
-        deps_type=Deps,
-        toolsets=[
-            create_console_toolset(
-                require_execute_approval=False,
+        system_prompt=await ws.vfs_md(),
+        capabilities=[
+            MirageWorkspace(ws),
+            ConsoleCapability(
                 image_support=True,
                 document_support=True,
-            )
+                permissions=PERMISSIVE_RULESET,
+            ),
         ],
     )
 
@@ -65,7 +56,7 @@ async def main() -> None:
     print(f"=== Task: {task} ===")
     print()
     t0 = time.perf_counter()
-    result = await agent.run(task, deps=Deps(backend=backend))
+    result = await agent.run(task)
     elapsed = time.perf_counter() - t0
     print(result.output)
     print()

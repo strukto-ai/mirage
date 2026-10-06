@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "xm_mkdir_continues_after_missing",
+      "seq": 9900017,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir /data/xm_mkd_missing/child /data2/xm_mkd_after; echo status:$?; test -d /data2/xm_mkd_after && rmdir /data2/xm_mkd_after && echo created",
+      "expect": {
+        "exit": 0,
+        "stdout": "status:1\ncreated\n",
+        "stderr": "mkdir: cannot create directory '/data/xm_mkd_missing/child': No such file or directory\n"
+      }
+    }
+  ]
+}

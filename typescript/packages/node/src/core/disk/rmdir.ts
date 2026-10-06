@@ -24,7 +24,6 @@ export async function rmdir(accessor: DiskAccessor, path: PathSpec): Promise<voi
   try {
     await fsRmdir(full)
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return
     throw diskError(err, path)
   }
   await invalidateAfterUnlink(path)

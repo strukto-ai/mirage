@@ -1,0 +1,62 @@
+{
+  "optional": true,
+  "optional_reason": "Requires the Sandlock CLI and Linux Landlock ABI v6. Set MIRAGE_INTEG_SANDLOCK to run the same cases through both SDKs on a supported host.",
+  "requires": {
+    "python": [
+      "env:MIRAGE_INTEG_SANDLOCK"
+    ],
+    "typescript": [
+      "env:MIRAGE_INTEG_SANDLOCK"
+    ]
+  },
+  "cases": [
+    {
+      "id": "real_cpython_not_a_subset",
+      "world": {
+        "runtimes": [
+          {
+            "name": "sandlock",
+            "captures": [
+              "python3",
+              "node",
+              "@external"
+            ]
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import sqlite3, decimal; print(decimal.Decimal('1.5') * 2)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "3.0\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "node_argv",
+      "world": {
+        "runtimes": [
+          {
+            "name": "sandlock",
+            "captures": [
+              "python3",
+              "node",
+              "@external"
+            ]
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "node -e 'console.log(JSON.stringify(process.argv.slice(1)))' 'a b' '$(echo literal)' '' ",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"a b\",\"$(echo literal)\",\"\"]\n"
+          }
+        }
+      ]
+    }
+  ]
+}

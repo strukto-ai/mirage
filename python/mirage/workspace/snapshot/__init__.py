@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.workspace.snapshot.api import snapshot
+from mirage.workspace.snapshot.api import read_snapshot, snapshot
 from mirage.workspace.snapshot.config import MountArgs
 from mirage.workspace.snapshot.drift import (
     ContentDriftError,
@@ -42,6 +42,7 @@ from mirage.workspace.snapshot.utils import (
 
 __all__ = [
     "snapshot",
+    "read_snapshot",
     "to_state_dict",
     "build_mount_args",
     "requires_vfs_override",

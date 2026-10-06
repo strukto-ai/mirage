@@ -57,10 +57,9 @@ RETRACT_FINGERPRINT_OPS = frozenset(
 # The subset that moved a whole prefix, and so takes every pin beneath
 # it. Membership is what the op *did*, never what it could have done:
 # rename has two code paths and only one of them is a prefix walk, so it
-# spells them with two names. A point op must not take a subtree, because
-# on a keyed store `a` and `a/b` are both objects -- `rm a` leaves `a/b`
-# alone, and so does `mv a b`, which moves the single object at `a` and
-# never touches `a/b`.
+# spells them with two names. A point op must not take a subtree: it
+# touched one key, and on a keyed store the keys beneath its path are
+# objects of their own.
 SUBTREE_RETRACT_OPS = frozenset({"rm_r", "rename_prefix"})
 
 

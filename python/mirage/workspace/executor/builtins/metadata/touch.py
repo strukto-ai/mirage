@@ -15,15 +15,13 @@
 from collections.abc import AsyncIterator
 from functools import partial
 
-from mirage.commands.builtin.utils.paths import (
-    dispatch_stat,
-    dot_refusal,
-    typed_spec,
-)
-from mirage.commands.spec.usage import unknown_option_error, usage_hint
+from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
+from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
+from mirage.commands.spec.usage import invalid_argument_error, usage_hint
 from mirage.context import DEFAULT_UMASK
 from mirage.io import IOResult
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import decode_text
 from mirage.types import PathSpec
 from mirage.utils.errors import (
     FS_ERRORS,
@@ -43,11 +41,14 @@ from mirage.workspace.executor.builtins.shared import (
     expand_operands,
     fail,
     finish,
-    split_value_flags,
+    parse_line,
 )
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState
+
+# GNU touch's --time words, aliases of one value together.
+TIME_GROUPS = (("atime", "access", "use"), ("mtime", "modify"))
 
 
 async def handle_touch(
@@ -68,42 +69,65 @@ async def handle_touch(
         session (SessionState): session whose cwd resolves relative -r paths.
         args (list[str | PathSpec]): args after the command name.
     """
-    flags, values, operands, bad = split_value_flags(args, "acmh", "tdr")
-    if bad is not None:
-        message, code = unknown_option_error("touch", bad)
-        return fail("touch", message.decode(), code)
-    if not operands:
-        return fail(
-            "touch", f"touch: missing file operand\n{usage_hint('touch')}\n"
-        )
-
+    parsed, fl, refused = parse_line("touch", args, session.cwd)
+    if refused is not None:
+        return refused
+    time = fl.as_str("time")
+    if time is not None:
+        match = argmatch(time, TIME_GROUPS)
+        if not isinstance(match, ArgmatchMatch):
+            message, code = invalid_argument_error(
+                "touch", "--time", time, TIME_GROUPS, kind=match.kind
+            )
+            return fail("touch", decode_text(message), code)
+        time = match.word
+    stamp_text = fl.as_str("t")
+    date_text = fl.as_str("date")
+    ref = fl.raw("reference")
     try:
-        stamp = parse_touch_stamp(values.get("t"), values.get("d"))
+        stamp = parse_touch_stamp(stamp_text, None)
     except ValueError as exc:
         return fail("touch", f"touch: invalid date format '{exc}'\n", 1)
-    if stamp is None and "r" in values:
-        # The spelling as typed, so the empty name is refused rather than
-        # read as the working directory.
-        ref = typed_spec(values["r"], session.cwd)
+    if stamp is not None and (date_text is not None or ref is not None):
+        return fail(
+            "touch",
+            "touch: cannot specify times from more than one source\n"
+            f"{usage_hint('touch')}\n",
+        )
+    ref_time = None
+    if isinstance(ref, PathSpec):
         try:
             ref_stat, _ = await dispatch("stat", ref)
         except FS_ERRORS as exc:
             return fail(
                 "touch",
                 f"touch: failed to get attributes of "
-                f"'{values['r']}': {fs_strerror(exc)}\n",
+                f"'{ref.raw_path}': {fs_strerror(exc)}\n",
             )
-        stamp = ref_stat.modified
+        ref_time = ref_stat.modified
+    try:
+        stamp = stamp or parse_touch_stamp(None, date_text) or ref_time
+    except ValueError:
+        return fail("touch", f"touch: invalid date format '{date_text}'\n", 1)
     if stamp is None:
         stamp = now_iso()
+    # GNU checks for a file operand only once the times are settled.
+    operands = parsed.paths
+    if not operands:
+        return fail(
+            "touch", f"touch: missing file operand\n{usage_hint('touch')}\n"
+        )
 
-    atime = stamp if "a" in flags or "m" not in flags else None
-    mtime = stamp if "m" in flags or "a" not in flags else None
+    only_atime = fl.as_bool("a") or time == "atime"
+    only_mtime = fl.as_bool("m") or time == "mtime"
+    atime = stamp if only_atime or not only_mtime else None
+    mtime = stamp if only_mtime or not only_atime else None
+    no_create = fl.as_bool("no_create")
 
     errors: list[str] = []
     writes: dict[str, bytes | AsyncIterator[bytes]] = {}
     for target in await expand_operands(namespace, operands):
-        if "h" in flags and namespace.is_link(target.virtual):
+        if fl.as_bool("no_dereference") and namespace.is_link(target.virtual):
             await apply_link_attrs(
                 dispatch, "touch", target, errors, mtime=stamp
             )
@@ -114,9 +138,9 @@ async def handle_touch(
             # loop name nothing to touch. -c never opens the file, so it
             # meets the walk when it sets the times, where ENOENT is the
             # silent miss -c asks for.
-            if "c" in flags and target.walk_error == "ENOENT":
+            if no_create and target.walk_error == "ENOENT":
                 continue
-            action = "setting times of" if "c" in flags else "cannot touch"
+            action = "setting times of" if no_create else "cannot touch"
             errors.append(
                 f"touch: {action} '{target.raw_path}': "
                 f"{fs_strerror(walk_refusal(target))}\n"
@@ -145,7 +169,7 @@ async def handle_touch(
         resolved = follow_operand(
             namespace,
             "touch",
-            "setting times of" if "c" in flags else "cannot touch",
+            "setting times of" if no_create else "cannot touch",
             target,
             errors,
         )
@@ -166,7 +190,7 @@ async def handle_touch(
             except NotADirectoryError as exc:
                 # -c never opens the file, so GNU meets the bad parent
                 # when it sets the times, and says so in those words.
-                if "c" not in flags:
+                if not no_create:
                     raise
                 errors.append(
                     f"touch: setting times of "
@@ -174,7 +198,7 @@ async def handle_touch(
                 )
                 continue
             except FileNotFoundError:
-                if "c" in flags:
+                if no_create:
                     continue
                 try:
                     await dispatch("write", resolved, data=b"")
@@ -203,7 +227,7 @@ async def handle_touch(
                     continue
             await setattr_via(dispatch, resolved, atime=atime, mtime=mtime)
         except PermissionError as exc:
-            action = "setting times of" if "c" in flags else "cannot touch"
+            action = "setting times of" if no_create else "cannot touch"
             errors.append(permission_error("touch", action, target, exc))
         except FS_ERRORS as exc:
             # A destination whose parent chain is not all directories is one

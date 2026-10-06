@@ -110,6 +110,43 @@
       "flags": [
         "n"
       ]
+    },
+    {
+      "id": "tail_n_counts_lines_from_either_end",
+      "seq": 15400001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail -n 0 /data/a.txt; echo rc=$?; tail -n -3 /data/a.txt; tail -n +0 /data/a.txt | wc -l; tail -n +1 /data/a.txt | wc -l; tail -n +99 /data/a.txt | wc -c; printf 'a\\nb\\nc' | tail -n 2 | od -An -c; printf '\\n\\n\\n' | tail -n 2 | wc -c; printf 'a\\nb\\nc' | tail -n 100 | od -An -c; printf 'a\\000b\\nc\\001\\n\\377d\\n' | tail -n +2 | od -An -tx1",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nfoo\nbar\nbaz\n5\n5\n0\n   b  \\n   c\n2\n   a  \\n   b  \\n   c\n 63 01 0a ff 64 0a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
     }
   ]
 }

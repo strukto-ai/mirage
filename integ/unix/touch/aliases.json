@@ -1,0 +1,26 @@
+{
+  "cases": [
+    {
+      "id": "touch_long_options_match_the_short_ones",
+      "seq": 15000041,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "touch --no-create /data/fc0nc; ls /data/fc0nc; touch --date=2020-01-02 /data/fc0a; stat -c %Y /data/fc0a; touch --reference=/data/fc0a /data/fc0b; stat -c %Y /data/fc0b; touch -f /data/fc0c; echo rc=$?; touch /data/fc0d --no-cr; ls /data/fc0d; rm -f /data/fc0a /data/fc0b /data/fc0c",
+      "expect": {
+        "exit": 0,
+        "stdout": "1577923200\n1577923200\nrc=0\n",
+        "stderr": "ls: cannot access '/data/fc0nc': No such file or directory\nls: cannot access '/data/fc0d': No such file or directory\n"
+      },
+      "flags": [
+        "no-create",
+        "date",
+        "reference",
+        "f"
+      ]
+    }
+  ]
+}

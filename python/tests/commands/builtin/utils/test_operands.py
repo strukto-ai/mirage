@@ -44,7 +44,6 @@ def _stat_over(files: dict[str, bytes], dirs: set[str] | None = None):
 
 
 def _read_over(files: dict[str, bytes]):
-
     async def read(path):
         if path.virtual not in files:
             raise FileNotFoundError(path.virtual)
@@ -91,7 +90,6 @@ async def test_split_readable_all_good_no_stderr():
 
 @pytest.mark.asyncio
 async def test_split_readable_propagates_non_fs_errors():
-
     async def stat(path):
         raise RuntimeError("backend broke")
 
@@ -117,7 +115,6 @@ async def test_read_operands_reports_and_continues():
 
 @pytest.mark.asyncio
 async def test_read_operands_propagates_non_fs_errors():
-
     async def read(path):
         raise RuntimeError("boom")
         yield b""
@@ -132,8 +129,6 @@ def test_operands_io_exit_codes():
     failed = operands_io(b"cat: /x: No such file or directory\n")
     assert failed.exit_code == 1
     assert failed.stderr == b"cat: /x: No such file or directory\n"
-    cached = operands_io(b"", cache=["/a"])
-    assert cached.cache == ["/a"]
 
 
 @pytest.mark.asyncio
@@ -157,7 +152,6 @@ async def test_merge_split_errors_appends_after_existing_stderr():
 
 @pytest.mark.asyncio
 async def test_normalized_read_accepts_bytes_awaitable_and_stream():
-
     async def gives_bytes(path):
         return b"bytes"
 
@@ -174,7 +168,6 @@ async def test_normalized_read_accepts_bytes_awaitable_and_stream():
 
 @pytest.mark.asyncio
 async def test_materialized_read_accepts_bytes_awaitable_and_stream():
-
     async def gives_bytes(path):
         return b"bytes"
 

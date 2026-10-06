@@ -28,7 +28,7 @@
       "command": "find /data/guard -type f",
       "expect": {
         "exit": 0,
-        "stdout": "/data/guard/g.txt\n/data/guard/sub/g.txt\n/data/guard/sub/s.txt\n",
+        "stdout": "/data/guard/g.txt\n/data/guard/sub/g.txt\n/data/guard/sub/s.txt\n/data/guard/sub/sub/s.txt\n",
         "stderr": ""
       }
     }

@@ -23,7 +23,8 @@ import { DEFAULT_COMMAND_LIMITS } from '../../../policy/builtin/output_cap.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
 import { Runtime } from '../../../runtime/base.ts'
 import { MontyRuntime } from '../../../runtime/python/monty/runtime.ts'
-import { ScriptSource, type RouteContext } from '../../../runtime/routing/types.ts'
+import type { RouteContext } from '../../../runtime/routing/types.ts'
+import { ScriptSource } from '../../../runtime/types.ts'
 import {
   LINE_EXECUTOR,
   PROCESS_EXECUTOR,
@@ -500,7 +501,7 @@ describe.each(['process', 'shell'] as const)('external %s path admission', (kind
     try {
       const result = await ws.shell(line)
       expect(result.exitCode).not.toBe(0)
-      expect(DEC.decode(result.stderr)).toContain('protected')
+      expect(result.refusal?.reason).toBe('protected')
       expect(probe instanceof ProcessProbe ? probe.requests : probe.lines).toHaveLength(0)
     } finally {
       await ws.close()
@@ -592,7 +593,7 @@ describe.each(['process', 'shell'] as const)('external %s text-slot globs', (kin
       // that lands in the file slot is a path the gate reads.
       const refused = await ws.shell('grep *.txt')
       expect(refused.exitCode).not.toBe(0)
-      expect(DEC.decode(refused.stderr)).toContain('protected')
+      expect(refused.refusal?.reason).toContain('protected')
       expect(probe instanceof ProcessProbe ? probe.requests : probe.lines).toHaveLength(0)
       // A match in a text slot is text, as the word typed by hand is.
       for (const [line, tokens] of [
@@ -650,7 +651,8 @@ describe.each(['process', 'shell'] as const)('interpreter %s script admission', 
       const words = line.split(' ')
       const [name = '', operand = ''] = [words[0], words.at(-1)]
       expect(result.exitCode).toBe(1)
-      expect(DEC.decode(result.stderr)).toBe(`${name}: ${operand}: protected\n`)
+      expect(DEC.decode(result.stderr)).toBe(`${name}: ${operand}: Permission denied\n`)
+      expect(result.refusal?.reason).toBe('protected')
       expect(probe instanceof ProcessProbe ? probe.requests : probe.lines).toHaveLength(0)
     } finally {
       await ws.close()

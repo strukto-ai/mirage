@@ -1,0 +1,88 @@
+{
+  "cases": [
+    {
+      "id": "user_tracebacks",
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "python3 -c 'print(1'",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "  File \"<string>\", line 1\n    print(1\n         ^\nSyntaxError: '(' was never closed\n"
+          }
+        },
+        {
+          "command": "python3 -c 'x = 1/0'",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nZeroDivisionError: division by zero\n"
+          }
+        },
+        {
+          "command": "python3 -c 'def fail():\n    return 1/0\nfail()'",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "Traceback (most recent call last):\n  File \"<string>\", line 3, in <module>\n  File \"<string>\", line 2, in fail\nZeroDivisionError: division by zero\n"
+          }
+        },
+        {
+          "command": "python3 -c 'raise SyntaxError('\"'\"'user error'\"'\"')'",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nSyntaxError: user error\n"
+          }
+        },
+        {
+          "command": "python3 -c 'try:\n    1/0\nexcept ZeroDivisionError as error:\n    raise ValueError('\"'\"'outer'\"'\"') from error'",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "Traceback (most recent call last):\n  File \"<string>\", line 2, in <module>\nZeroDivisionError: division by zero\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"<string>\", line 4, in <module>\nValueError: outer\n"
+          }
+        }
+      ],
+      "hosts": [
+        "typescript"
+      ]
+    },
+    {
+      "id": "system_exit_sets_the_status",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "python3 -c 'import sys; sys.exit()'",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c 'import sys; sys.exit(\"boom\")'",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "boom\n"
+          }
+        }
+      ]
+    }
+  ]
+}

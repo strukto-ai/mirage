@@ -1,0 +1,94 @@
+{
+  "cases": [
+    {
+      "id": "unmapped_constructor",
+      "world": {
+        "session_id": "constructor",
+        "runtimes": [
+          {
+            "name": "apple_container",
+            "captures": [
+              "uname"
+            ],
+            "config": {
+              "containers": {
+                "agent_a": "unused"
+              }
+            }
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "uname -s",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "apple_container has no container for session constructor:"
+          }
+        }
+      ]
+    },
+    {
+      "id": "unmapped_toString",
+      "world": {
+        "session_id": "toString",
+        "runtimes": [
+          {
+            "name": "apple_container",
+            "captures": [
+              "uname"
+            ],
+            "config": {
+              "containers": {
+                "agent_a": "unused"
+              }
+            }
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "uname -s",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "apple_container has no container for session toString:"
+          }
+        }
+      ]
+    },
+    {
+      "id": "unmapped___proto__",
+      "world": {
+        "session_id": "__proto__",
+        "runtimes": [
+          {
+            "name": "apple_container",
+            "captures": [
+              "uname"
+            ],
+            "config": {
+              "containers": {
+                "agent_a": "unused"
+              }
+            }
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "uname -s",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "apple_container has no container for session __proto__:"
+          }
+        }
+      ]
+    }
+  ]
+}

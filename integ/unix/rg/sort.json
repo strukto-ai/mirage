@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "rg_sort_files_is_sort_path",
+      "seq": 15200121,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcB_so/b && printf 'x\\n' > /data/fcB_so/c.txt && printf 'x\\n' > /data/fcB_so/a.txt && printf 'x\\n' > /data/fcB_so/b/z.txt && rg -l --sort-files x /data/fcB_so; rg -l --sortr path --sort-files x /data/fcB_so; rg -l --sort-files --sortr path x /data/fcB_so; rg -l --sort-files --no-sort-files x /data/fcB_so | sort; rg -l --sort path --sort none x /data/fcB_so | sort; rm -rf /data/fcB_so",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fcB_so/a.txt\n/data/fcB_so/b/z.txt\n/data/fcB_so/c.txt\n/data/fcB_so/a.txt\n/data/fcB_so/b/z.txt\n/data/fcB_so/c.txt\n/data/fcB_so/c.txt\n/data/fcB_so/b/z.txt\n/data/fcB_so/a.txt\n/data/fcB_so/a.txt\n/data/fcB_so/b/z.txt\n/data/fcB_so/c.txt\n/data/fcB_so/a.txt\n/data/fcB_so/b/z.txt\n/data/fcB_so/c.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "sort_files",
+        "no_sort_files",
+        "sort",
+        "sortr",
+        "l"
+      ]
+    }
+  ]
+}

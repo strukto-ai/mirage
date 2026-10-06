@@ -67,6 +67,40 @@
         "stdout": "6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n13\n14\n15\nno trailing newline\n0\n24\n24\n0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "tail_heads_a_directory_operand_before_its_error",
+      "seq": 15400005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcD_dir; printf k > /data/fcD_dir/k; tail -n1 /data/fcD_dir /data/a.txt; echo rc=$?; tail -n1 /data/a.txt /data/fcD_dir /data/b.txt; echo rc=$?; rm -r /data/fcD_dir",
+      "expect": {
+        "exit": 0,
+        "stdout": "==> /data/fcD_dir <==\n\n==> /data/a.txt <==\nbaz\nrc=1\n==> /data/a.txt <==\nbaz\n\n==> /data/fcD_dir <==\n\n==> /data/b.txt <==\n3\nrc=1\n",
+        "stderr": "tail: error reading '/data/fcD_dir': Is a directory\ntail: error reading '/data/fcD_dir': Is a directory\n"
+      }
     }
   ]
 }

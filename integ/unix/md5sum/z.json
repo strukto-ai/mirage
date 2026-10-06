@@ -1,0 +1,42 @@
+{
+  "cases": [
+    {
+      "id": "md5sum_z_ends_each_line_with_nul",
+      "seq": 15600715,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "md5sum -z /data/a.txt /data/b.txt | tr '\\0' '|'; echo; md5sum --zero /data/b.txt | tr '\\0' '|'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "191c53e00627438f88824862472a3f59  /data/a.txt|c0710d6b4f15dfa88f600b0e6b624077  /data/b.txt|\nc0710d6b4f15dfa88f600b0e6b624077  /data/b.txt|\n",
+        "stderr": ""
+      },
+      "flags": [
+        "z",
+        "zero"
+      ]
+    }
+  ]
+}

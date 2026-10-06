@@ -85,7 +85,9 @@
         "nextcloud",
         "gdrive",
         "gdrive-folder",
-        "box"
+        "box",
+        "databricks",
+        "databricks-prefix"
       ],
       "command": "rm -f /data/prm7_nope.txt; echo rc=$?",
       "expect": {
@@ -157,6 +159,38 @@
         "stdout": "",
         "stderr": "rm: missing operand\nTry 'rm --help' for more information.\n"
       }
+    },
+    {
+      "id": "rm_refused_operands_keep_their_spelling_and_the_rest_go",
+      "seq": 15600503,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcF_rr && echo a > /data/fcF_rr/ok1 && echo b > /data/fcF_rr/ok2 && echo c > /data/fcF_rr/keep && ln -s fcF_lp /data/fcF_lp && rm -f ''; echo rc=$?; rm '' /data/fcF_rr/ok1; echo rc=$?; rm -f /data/fcF_lp/x /data/fcF_rr/ok2; echo rc=$?; ls /data/fcF_rr; rm -r /data/fcF_rr /data/fcF_lp",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrc=1\nrc=1\nkeep\n",
+        "stderr": "rm: cannot remove '': No such file or directory\nrm: cannot remove '/data/fcF_lp/x': Too many levels of symbolic links\n"
+      },
+      "flags": [
+        "f"
+      ]
     }
   ]
 }

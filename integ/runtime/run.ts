@@ -13,14 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
-import { readdirSync, readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CreateBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { MongoClient } from 'mongodb'
+import type { FileEntryWithStats, SFTPWrapper } from 'ssh2'
 import {
   buildRuntime,
   CLISpec,
+  DiskVFS,
   Limit,
   MongoDBVFS,
   MountMode,
@@ -33,6 +36,7 @@ import {
   Runtime,
   S3VFS,
   ScriptSource,
+  SSHVFS,
   snakeToCamel,
   Workspace,
   type Action,
@@ -81,13 +85,20 @@ interface Expect {
   content?: string
   ops_contain?: string[]
   ops_absent?: string[]
+  ops_count?: Record<string, number>
   value?: unknown
+  // An expect keyed by language, as `program` is: each language's own
+  // answer for the step.
+  python?: Expect
+  js?: Expect
 }
 
 interface FacadeSpec {
   method: string
   path: string
   data?: string
+  offset?: number
+  length?: number
 }
 
 interface Step {
@@ -105,6 +116,8 @@ interface Step {
   expect_on?: Record<string, Expect>
   facade?: FacadeSpec
   expect?: Expect
+  // Steps run at once, each on a session of its own.
+  parallel?: Step[]
 }
 
 interface MountSpecJson {
@@ -164,6 +177,8 @@ interface Case {
   backends?: string[]
   backend?: string
   requires?: string[]
+  optional?: boolean
+  entry?: { captures?: string[]; config?: Record<string, unknown> }
   world?: World
   filesystem?: Record<string, Partial<Record<FilesystemOperation, boolean>>>
   build_error?: { contains: string }
@@ -171,7 +186,6 @@ interface Case {
 }
 
 interface Suite {
-  suite: string
   requires?: string[] | Record<string, string[]>
   optional?: boolean
   cases: Case[]
@@ -503,6 +517,31 @@ async function buildVfs(spec: MountSpecJson, runId: string): Promise<BaseVFS> {
     }
     return vfs
   }
+  if (spec.vfs === 'disk') {
+    return new DiskVFS({ root: mkdtempSync(join(tmpdir(), `mirage-integ-runtime-ts-${runId}-`)) })
+  }
+  if (spec.vfs === 'ssh') {
+    // The ssh runtime's box: a fresh directory per mount, made before the
+    // mount is, since a root that does not exist serves nothing.
+    const root = `/tmp/mirage-integ-runtime-ts-${runId}`
+    const username = process.env.MIRAGE_INTEG_SSH_USERNAME
+    const identityFile = process.env.MIRAGE_INTEG_SSH_KEY
+    const vfs = new SSHVFS({
+      host: process.env.MIRAGE_INTEG_SSH_HOST ?? '',
+      port: 2222,
+      ...(username === undefined ? {} : { username }),
+      ...(identityFile === undefined ? {} : { identityFile }),
+      root,
+    })
+    const sftp = await vfs.accessor.sftp()
+    await new Promise<void>((resolve, reject) => {
+      sftp.mkdir(root, (err) => {
+        if (err) reject(err)
+        else resolve()
+      })
+    })
+    return vfs
+  }
   if (spec.vfs === 'redis') {
     return new RedisVFS({
       url: process.env.REDIS_URL ?? '',
@@ -664,6 +703,14 @@ function checkOps(expect: Expect, seen: string[]): string[] {
       problems.push(`ledger must not hold ${JSON.stringify(entry)}: got ${JSON.stringify(seen)}`)
     }
   }
+  for (const [entry, want] of Object.entries(expect.ops_count ?? {})) {
+    const got = seen.filter((s) => s === entry || s.split(' ', 1)[0] === entry).length
+    if (got !== want) {
+      problems.push(
+        `ledger holds ${JSON.stringify(entry)} ${String(got)} times, not ${String(want)}: got ${JSON.stringify(seen)}`,
+      )
+    }
+  }
   return problems
 }
 
@@ -676,6 +723,8 @@ async function runFacade(ws: Workspace, expect: Expect, spec: FacadeSpec): Promi
   if (method === undefined) return [`facade has no method ${spec.method}`]
   const args: unknown[] = [spec.path]
   if (spec.data !== undefined) args.push(ENC.encode(spec.data))
+  if (spec.offset !== undefined) args.push(spec.offset)
+  if (spec.length !== undefined) args.push(spec.length)
   if (expect.errno !== undefined) {
     // The cross-language error assertion. `throws_contains` reads the
     // message, which the two languages word differently for the same
@@ -716,14 +765,44 @@ async function runFacade(ws: Workspace, expect: Expect, spec: FacadeSpec): Promi
   return []
 }
 
-async function runStep(
+/**
+ * Run each branch on a session of its own, all at once. The branches
+ * start together, so their ops reach the mounts interleaved as two
+ * agents' would, and each is checked against its own `expect`. A branch
+ * cannot check the ledger: the workspace keeps one, and every branch's
+ * ops land in it. Mirrors run.py `_run_parallel`.
+ */
+async function runParallel(
   ws: Workspace,
   caseId: string,
   index: number,
+  branches: Step[],
+): Promise<string[]> {
+  const ledger = branches.flatMap((branch, k) =>
+    Object.keys(branch.expect ?? {}).some((key) => LEDGER_CHECKS.has(key))
+      ? [
+          `${caseId} step[${index}].parallel[${k}]: a branch cannot check ` +
+            "the ledger, which holds every branch's ops",
+        ]
+      : [],
+  )
+  if (ledger.length > 0) return ledger
+  const runs = branches.map((branch, k) => {
+    const sessionId = `parallel-${index}-${k}`
+    ws.createSession(sessionId)
+    return runStep(ws, caseId, `step[${index}].parallel[${k}]`, branch, sessionId)
+  })
+  return (await Promise.all(runs)).flat()
+}
+
+async function runStep(
+  ws: Workspace,
+  caseId: string,
+  label: string,
   step: Step,
+  sessionId?: string,
 ): Promise<string[]> {
   const expect = step.expect ?? {}
-  const label = `step[${index}]`
   // The ledger slice this step adds: ws.records delegates to the Ops
   // facade's account, so the step's own ops are the tail.
   const ledgerBefore = ws.records.length
@@ -781,6 +860,7 @@ async function runStep(
     command += ' ' + singleQuote(source)
   }
   const options: Record<string, unknown> = {}
+  if (sessionId !== undefined) options.sessionId = sessionId
   if (step.runtime !== undefined) options.runtime = step.runtime
   if (step.stdin !== undefined) options.stdin = ENC.encode(step.stdin)
   if (expect.throws_contains !== undefined) {
@@ -808,68 +888,156 @@ async function runStep(
 // What a case's `backends` entry needs on this host before it can run.
 const BACKEND_REQUIRES: Record<string, string[]> = {
   ram: [],
+  disk: [],
+  ssh: ['env:MIRAGE_INTEG_SSH_HOST'],
   redis: ['env:REDIS_URL'],
   s3: ['s3'],
 }
 // The guest language of every runtime a case's `runtimes` may name, and
-// the line head a step's program runs under in it.
-const RUNTIME_LANGUAGE: Record<string, string> = {
+// the line head a step's program runs under in it. A sandbox has none: it
+// runs whole lines, so a case's plain commands are its program.
+const RUNTIME_LANGUAGE: Record<string, string | null> = {
   monty: 'python',
   wasi: 'python',
   pyodide: 'python',
   quickjs: 'js',
+  local: 'python',
+  sandlock: 'python',
+  docker: null,
+  ssh: null,
+  e2b: null,
+  smolvm: null,
+  apple_container: null,
 }
 const PROGRAM_HEAD: Record<string, string> = { python: 'python3 -c', js: 'node -e' }
+// The expect keys that read the workspace's op ledger.
+const LEDGER_CHECKS = new Set(['ops_contain', 'ops_absent', 'ops_count'])
 // What a `runtimes` entry needs on this host before it can run. A runtime
 // missing here does not exist on this host (wasi is python's), so its
-// variant is not listed at all.
+// variant is not listed at all. e2b is left out: E2B's sandbox proxy drops
+// the JS SDK's command streams now and then (see the README).
 const RUNTIME_REQUIRES: Record<string, string[]> = {
   monty: [],
   pyodide: [],
   quickjs: [],
+  local: [],
+  sandlock: ['env:MIRAGE_INTEG_SANDLOCK'],
+  docker: ['env:MIRAGE_INTEG_DOCKER_CONTAINER'],
+  ssh: ['env:MIRAGE_INTEG_SSH_HOST'],
+  smolvm: ['env:MIRAGE_INTEG_SMOLVM_MACHINE'],
+  apple_container: ['env:MIRAGE_INTEG_APPLE_CONTAINER'],
+}
+// The world entry a runtime is built from, before a case's own `entry`
+// narrows its captures or adds config. Mirrors run.py RUNTIME_ENTRY.
+const RUNTIME_ENTRY: Record<string, { captures?: string[]; config?: Record<string, unknown> }> = {
+  sandlock: { captures: ['python3', 'node', '@external'] },
+  docker: { captures: ['*'], config: { container: '${MIRAGE_INTEG_DOCKER_CONTAINER}' } },
+  ssh: {
+    captures: ['*'],
+    config: {
+      host: '${MIRAGE_INTEG_SSH_HOST}',
+      port: 2222,
+      username: '${MIRAGE_INTEG_SSH_USERNAME}',
+      identity_file: '${MIRAGE_INTEG_SSH_KEY}',
+    },
+  },
+  e2b: { captures: ['*'], config: { sandbox_id: '${MIRAGE_INTEG_E2B_SANDBOX}' } },
+  smolvm: { captures: ['*'], config: { machine: '${MIRAGE_INTEG_SMOLVM_MACHINE}' } },
+  apple_container: {
+    captures: ['*'],
+    config: { container: '${MIRAGE_INTEG_APPLE_CONTAINER}' },
+  },
+}
+// Runtimes that need a host the hosted runners do not give every job: an
+// unmet requirement skips their variants even under INTEG_RUNTIME_STRICT.
+const OPTIONAL_RUNTIMES = new Set(['sandlock', 'e2b', 'smolvm', 'apple_container'])
+
+/** The world entry for one runtime of a case's matrix. Mirrors run.py `_entry`. */
+function runtimeEntry(
+  runtime: string,
+  override: { captures?: string[]; config?: Record<string, unknown> },
+): string | Record<string, unknown> {
+  const base = RUNTIME_ENTRY[runtime] ?? {}
+  if (Object.keys(base).length === 0 && Object.keys(override).length === 0) return runtime
+  const entry: Record<string, unknown> = { name: runtime, ...base, ...override }
+  if (base.config !== undefined || override.config !== undefined) {
+    entry.config = { ...base.config, ...override.config }
+  }
+  return entry
 }
 
 /**
- * The case as one runtime runs it, or null when nothing runs there. A
- * step's `program` (inline source) or `script` (a fixture path) maps a
- * guest language to what that language runs, under `python3 -c` or
- * `node -e`, and a `command` map gives the whole line per language; a
- * step with nothing in the runtime's language is left out, and a case
- * left with no program is not the runtime's. A step's `expect_on` keyed
- * by the runtime, then by `runtime@host`, is what it answers
- * differently, and the case's `filesystem` entry for it is the
- * capabilities it declares. Mirrors run.py `_for_runtime`.
+ * The step with its `expect_on` entries for `keys` laid over `expect` in
+ * order, a parallel step's branches each the same way. Mirrors run.py
+ * `_overlay`.
+ */
+function overlay(step: Step, keys: string[]): Step {
+  const on = step.expect_on ?? {}
+  let expect: Expect = { ...(step.expect ?? {}) }
+  for (const key of keys) expect = { ...expect, ...on[key] }
+  const overlaid: Step = { ...step, expect }
+  if (step.parallel !== undefined) overlaid.parallel = step.parallel.map((b) => overlay(b, keys))
+  return overlaid
+}
+
+/**
+ * One step as a runtime of `language` runs it, and whether it holds a
+ * guest program; null when nothing in it runs there. A `program` (inline
+ * source) or `script` (a fixture path) maps a guest language to what that
+ * language runs, under `python3 -c` or `node -e`, and a `command` map
+ * gives the whole line per language. An `expect` keyed by language, as
+ * `program` is, gives each language its own answer. A parallel step keeps
+ * the branches that run there. Mirrors run.py `_step_for`.
+ */
+function stepFor(step: Step, language: string | null): [Step | null, boolean] {
+  if (step.parallel !== undefined) {
+    const mapped = step.parallel.map((branch) => stepFor(branch, language))
+    const branches = mapped.flatMap(([branch]) => (branch === null ? [] : [branch]))
+    if (branches.length === 0) return [null, false]
+    return [{ ...step, parallel: branches }, mapped.some(([, guest]) => guest)]
+  }
+  const key = (['program', 'script', 'command'] as const).find((k) => typeof step[k] === 'object')
+  if (key === undefined) return [step, false]
+  const source = language === null ? undefined : (step[key] as Record<string, string>)[language]
+  if (language === null || source === undefined) return [null, false]
+  const head = PROGRAM_HEAD[language] ?? ''
+  const rest = { ...step }
+  delete rest.program
+  const mapped: Step =
+    key === 'program'
+      ? { ...rest, command: `${head} ${singleQuote(source)}` }
+      : key === 'script'
+        ? { ...rest, command: head, script: source }
+        : { ...rest, command: source }
+  const expect = step.expect ?? {}
+  if (Object.keys(expect).some((k) => k in PROGRAM_HEAD)) {
+    mapped.expect = (expect as Record<string, Expect | undefined>)[language] ?? {}
+  }
+  return [mapped, true]
+}
+
+/**
+ * The case as one runtime runs it, or null when nothing runs there. Each
+ * step runs as `stepFor` maps it to the runtime's language; a step with
+ * nothing in that language is left out, and a case left with no program
+ * is not the runtime's. A step's `expect_on` keyed by the runtime, then
+ * by `runtime@host`, is what it answers differently, and the case's
+ * `filesystem` entry for it is the capabilities it declares. Mirrors
+ * run.py `_for_runtime`.
  */
 function forRuntime(testCase: Case, runtime: string): Case | null {
-  const language = RUNTIME_LANGUAGE[runtime] ?? ''
-  const head = PROGRAM_HEAD[language] ?? ''
+  const language = RUNTIME_LANGUAGE[runtime] ?? null
   const steps: Step[] = []
   let programs = 0
   for (const listed of testCase.steps ?? []) {
-    let step = listed
-    const key = (['program', 'script', 'command'] as const).find(
-      (k) => typeof listed[k] === 'object',
-    )
-    if (key !== undefined) {
-      const source = (listed[key] as Record<string, string>)[language]
-      if (source === undefined) continue
-      programs += 1
-      const rest = { ...listed }
-      delete rest.program
-      step =
-        key === 'program'
-          ? { ...rest, command: `${head} ${singleQuote(source)}` }
-          : key === 'script'
-            ? { ...rest, command: head, script: source }
-            : { ...rest, command: source }
-    }
-    const on = step.expect_on ?? {}
-    const expect = { ...(step.expect ?? {}), ...on[runtime], ...on[`${runtime}@${HOST}`] }
-    steps.push({ ...step, expect })
+    const [step, guest] = stepFor(listed, language)
+    if (step === null) continue
+    if (guest) programs += 1
+    steps.push(overlay(step, [runtime, `${runtime}@${HOST}`]))
   }
-  if (programs === 0) return null
+  if (programs === 0 && language !== null) return null
   const world = structuredClone(testCase.world ?? {})
-  world.runtimes = [runtime, 'workspace']
+  world.runtimes = [runtimeEntry(runtime, testCase.entry ?? {}), 'workspace']
   return {
     ...testCase,
     id: `${testCase.id}@${runtime}`,
@@ -877,6 +1045,7 @@ function forRuntime(testCase: Case, runtime: string): Case | null {
     world,
     steps,
     requires: [...(testCase.requires ?? []), ...(RUNTIME_REQUIRES[runtime] ?? [])],
+    optional: OPTIONAL_RUNTIMES.has(runtime),
     filesystem: Object.fromEntries(
       Object.entries(testCase.filesystem ?? {}).filter(([name]) => name === runtime),
     ),
@@ -896,8 +1065,10 @@ function variants(testCase: Case): Case[] {
   if (testCase.runtimes === undefined) return backendVariants(testCase)
   const unknown = testCase.runtimes.filter((r) => RUNTIME_LANGUAGE[r] === undefined)
   if (unknown.length > 0) throw new Error(`${testCase.id}: unknown runtimes ${unknown.join(', ')}`)
+  const only = new Set((process.env.INTEG_RUNTIMES ?? '').split(',').filter((r) => r !== ''))
   return testCase.runtimes
     .filter((runtime) => RUNTIME_REQUIRES[runtime] !== undefined)
+    .filter((runtime) => only.size === 0 || only.has(runtime))
     .flatMap((runtime) => {
       const variant = forRuntime(testCase, runtime)
       return variant === null ? [] : backendVariants(variant)
@@ -924,6 +1095,45 @@ function backendVariants(testCase: Case): Case[] {
         ...(BACKEND_REQUIRES[backend] ?? [`unknown backend ${backend}`]),
       ],
     }
+  })
+}
+
+// Remove the directory each disk and ssh backend mount was given; an ssh root
+// goes over the mount's own connection, so this runs before the close.
+async function removeRoots(ws: Workspace): Promise<void> {
+  for (const entry of ws.mounts()) {
+    const vfs = entry.vfs
+    if (vfs instanceof DiskVFS) rmSync(vfs.root, { recursive: true })
+    else if (vfs instanceof SSHVFS)
+      await removeRemote(await vfs.accessor.sftp(), vfs.config.root ?? '/')
+  }
+}
+
+async function removeRemote(sftp: SFTPWrapper, dir: string): Promise<void> {
+  const entries = await new Promise<FileEntryWithStats[]>((resolveFn, rejectFn) => {
+    sftp.readdir(dir, (err, list) => {
+      if (err) rejectFn(err)
+      else resolveFn(list)
+    })
+  })
+  for (const entry of entries) {
+    const path = `${dir}/${entry.filename}`
+    if (entry.attrs.isDirectory()) {
+      await removeRemote(sftp, path)
+      continue
+    }
+    await new Promise<void>((resolveFn, rejectFn) => {
+      sftp.unlink(path, (err) => {
+        if (err) rejectFn(err)
+        else resolveFn()
+      })
+    })
+  }
+  await new Promise<void>((resolveFn, rejectFn) => {
+    sftp.rmdir(dir, (err) => {
+      if (err) rejectFn(err)
+      else resolveFn()
+    })
   })
 }
 
@@ -960,19 +1170,25 @@ async function runCase(suite: string, testCase: Case): Promise<string[]> {
           )
       }
     }
+    const backend = testCase.backend
+    const keys = backend === undefined ? [] : [backend]
+    if (backend !== undefined && testCase.runtime !== undefined) {
+      keys.push(`${testCase.runtime}@${backend}`)
+    }
     for (const [index, listed] of (testCase.steps ?? []).entries()) {
-      const on = listed.expect_on ?? {}
-      const backend = testCase.backend ?? ''
-      const expect = {
-        ...(listed.expect ?? {}),
-        ...on[backend],
-        ...on[`${testCase.runtime ?? ''}@${backend}`],
-      }
-      const step = { ...listed, expect }
-      problems.push(...(await runStep(ws, caseId, index, step)))
+      const step = overlay(listed, keys)
+      problems.push(
+        ...(step.parallel !== undefined
+          ? await runParallel(ws, caseId, index, step.parallel)
+          : await runStep(ws, caseId, `step[${index}]`, step)),
+      )
     }
   } finally {
-    await ws.close()
+    try {
+      await removeRoots(ws)
+    } finally {
+      await ws.close()
+    }
   }
   return problems
 }
@@ -984,23 +1200,23 @@ async function main(): Promise<number> {
   let failed = 0
   let skipped = 0
   const failures: string[] = []
-  const files = readdirSync(SUITE_DIR)
+  const files = readdirSync(SUITE_DIR, { recursive: true, encoding: 'utf8' })
     .filter((f) => f.endsWith('.json'))
+    .map((f) => f.split(sep).join('/'))
     .sort()
   for (const file of files) {
     const suite = JSON.parse(readFileSync(join(SUITE_DIR, file), 'utf8')) as Suite
-    if (only.size > 0 && !only.has(suite.suite)) continue
+    const name = file.slice(0, -'.json'.length)
+    if (only.size > 0 && ![...only].some((o) => name === o || name.startsWith(`${o}/`))) continue
     const requires = suite.requires ?? {}
     const hostRequires = Array.isArray(requires) ? requires : (requires[HOST] ?? [])
     const unmet = hostRequires.filter((r) => !requirementMet(r))
     if (unmet.length > 0) {
       if (strict && suite.optional !== true) {
-        failures.push(
-          `${suite.suite}: unmet requirements ${unmet.join(', ')} (INTEG_RUNTIME_STRICT=1)`,
-        )
+        failures.push(`${name}: unmet requirements ${unmet.join(', ')} (INTEG_RUNTIME_STRICT=1)`)
         failed += 1
       } else {
-        console.log(`skip ${suite.suite} (unmet: ${unmet.join(', ')})`)
+        console.log(`skip ${name} (unmet: ${unmet.join(', ')})`)
         skipped += 1
       }
       continue
@@ -1011,24 +1227,24 @@ async function main(): Promise<number> {
       for (const testCase of variants(listed)) {
         const unmetCase = (testCase.requires ?? []).filter((r) => !requirementMet(r))
         if (unmetCase.length > 0) {
-          if (strict) {
+          if (strict && testCase.optional !== true) {
             failures.push(
-              `${suite.suite}/${testCase.id}: unmet requirements ${unmetCase.join(', ')} (INTEG_RUNTIME_STRICT=1)`,
+              `${name}/${testCase.id}: unmet requirements ${unmetCase.join(', ')} (INTEG_RUNTIME_STRICT=1)`,
             )
             failed += 1
           } else {
-            console.log(`skip ${suite.suite}/${testCase.id} (unmet: ${unmetCase.join(', ')})`)
+            console.log(`skip ${name}/${testCase.id} (unmet: ${unmetCase.join(', ')})`)
           }
           continue
         }
-        const problems = await runCase(suite.suite, testCase)
+        const problems = await runCase(name, testCase)
         if (problems.length > 0) {
           failed += 1
           failures.push(...problems)
-          console.log(`FAIL ${suite.suite}/${testCase.id}`)
+          console.log(`FAIL ${name}/${testCase.id}`)
         } else {
           passed += 1
-          console.log(`ok ${suite.suite}/${testCase.id}`)
+          console.log(`ok ${name}/${testCase.id}`)
         }
       }
     }

@@ -334,6 +334,236 @@
       "flags": [
         "follow"
       ]
+    },
+    {
+      "id": "tail_follow_quotes_every_refused_word",
+      "seq": 15400008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "n=0; for w in $'x\\r' $'x\\001' $'x\\177' \"x'\" 'x\\' nn; do tail --follow=\"$w\" /data/a.txt || n=$((n+1)); done; echo refused=$n",
+      "expect": {
+        "exit": 0,
+        "stdout": "refused=6\n",
+        "stderr": "tail: invalid argument 'x\\r' for '--follow'\nValid arguments are:\n  - 'descriptor'\n  - 'name'\nTry 'tail --help' for more information.\ntail: invalid argument 'x\\001' for '--follow'\nValid arguments are:\n  - 'descriptor'\n  - 'name'\nTry 'tail --help' for more information.\ntail: invalid argument 'x\\177' for '--follow'\nValid arguments are:\n  - 'descriptor'\n  - 'name'\nTry 'tail --help' for more information.\ntail: invalid argument 'x\\'' for '--follow'\nValid arguments are:\n  - 'descriptor'\n  - 'name'\nTry 'tail --help' for more information.\ntail: invalid argument 'x\\\\' for '--follow'\nValid arguments are:\n  - 'descriptor'\n  - 'name'\nTry 'tail --help' for more information.\ntail: invalid argument 'nn' for '--follow'\nValid arguments are:\n  - 'descriptor'\n  - 'name'\nTry 'tail --help' for more information.\n"
+      },
+      "flags": [
+        "follow"
+      ]
+    },
+    {
+      "id": "tail_follow_accepts_an_unambiguous_prefix",
+      "seq": 15400009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for w in d de descriptor n na name; do tail -n1 --follow=$w /data/a.txt | head -n1; done; for w in d n; do tail -n1 --follow=$w --retry /data/a.txt | head -n1; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "baz\nbaz\nbaz\nbaz\nbaz\nbaz\nbaz\nbaz\n",
+        "stderr": "tail: warning: --retry only effective for the initial open\n"
+      },
+      "flags": [
+        "follow",
+        "n",
+        "retry"
+      ]
+    },
+    {
+      "id": "tail_f_reads_a_piped_stdin_once",
+      "seq": 15400010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nb\\n' | tail -n1 -f; echo rc=$?; printf 'a\\nb\\n' | tail -n1 --follow=descriptor; echo rc=$?; printf 'a\\nb\\n' | tail -c2 -f -s 0.1; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "b\nrc=0\nb\nrc=0\nb\nrc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f",
+        "follow",
+        "s"
+      ]
+    },
+    {
+      "id": "tail_f_follows_growth_truncation_and_headers_by_descriptor",
+      "seq": 15400012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'p\\n' > /data/fcD_P; printf 'q\\n' > /data/fcD_Q; printf 'a\\n' > /data/fcD_F; printf 'l1\\nl2\\n' > /data/fcD_T; printf 'r\\n' > /data/fcD_R; rm -f /data/fcD_L; tail -f --retry -s 0.1 /data/fcD_P /data/fcD_Q /data/fcD_F /data/fcD_T /data/fcD_R /data/fcD_R /data/fcD_L | { head -n 18; rm /data/fcD_F; mkdir /data/fcD_F; printf k > /data/fcD_F/k; printf 'p2\\n' >> /data/fcD_P; head -n 3; printf 'q2\\n' >> /data/fcD_Q; printf 'q3\\n' >> /data/fcD_Q; head -n 4; printf 'z\\n' > /data/fcD_T; printf 'y\\n' >> /data/fcD_T; head -n 4; printf 'r2\\n' >> /data/fcD_R; head -n 6; printf 'born\\n' > /data/fcD_L; head -n 3; rm /data/fcD_L; printf 'p3\\n' >> /data/fcD_P; head -n 3; }; echo rc=$?; rm -rf /data/fcD_P /data/fcD_Q /data/fcD_F /data/fcD_T /data/fcD_R /data/fcD_L",
+      "expect": {
+        "exit": 0,
+        "stdout": "==> /data/fcD_P <==\np\n\n==> /data/fcD_Q <==\nq\n\n==> /data/fcD_F <==\na\n\n==> /data/fcD_T <==\nl1\nl2\n\n==> /data/fcD_R <==\nr\n\n==> /data/fcD_R <==\nr\n\n==> /data/fcD_P <==\np2\n\n==> /data/fcD_Q <==\nq2\nq3\n\n==> /data/fcD_T <==\nz\ny\n\n==> /data/fcD_R <==\nr2\n\n==> /data/fcD_R <==\nr2\n\n==> /data/fcD_L <==\nborn\n\n==> /data/fcD_P <==\np3\nrc=0\n",
+        "stderr": "tail: warning: --retry only effective for the initial open\ntail: cannot open '/data/fcD_L' for reading: No such file or directory\ntail: /data/fcD_T: file truncated\ntail: '/data/fcD_L' has appeared;  following new file\n"
+      },
+      "flags": [
+        "f",
+        "retry",
+        "s"
+      ]
+    },
+    {
+      "id": "tail_f_reads_a_piped_dash_operand_once",
+      "seq": 15400011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nb\\n' | timeout 2 tail -n1 -f -; echo rc=$?; printf 'a\\nb\\n' | timeout 2 tail -n1 --follow=descriptor -; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "b\nrc=0\nb\nrc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f",
+        "follow"
+      ]
+    },
+    {
+      "id": "tail_follow_name_drops_a_file_that_vanishes",
+      "seq": 15400013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' > /data/fcD_V; { tail --follow=name -s 0.1 /data/fcD_V; echo rc=$?; } | { head -n 1; rm /data/fcD_V; cat; }; rm -f /data/fcD_V",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\nrc=1\n",
+        "stderr": "tail: /data/fcD_V: No such file or directory\ntail: no files remaining\n"
+      },
+      "flags": [
+        "follow",
+        "s"
+      ]
     }
   ]
 }

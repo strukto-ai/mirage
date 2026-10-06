@@ -1,0 +1,55 @@
+{
+  "cases": [
+    {
+      "id": "rg_tuning_switches_change_nothing",
+      "seq": 15200161,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "rg --no-line-buffered --block-buffered --no-block-buffered --mmap --no-stats --no-crlf --no-multiline --no-multiline-dotall --no-json --no-search-zip --no-encoding --no-pre --unicode --no-auto-hybrid-regex --no-config -j2 --line-buffered --no-mmap -n world /data/a.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "2:world\nrc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "no_line_buffered",
+        "block_buffered",
+        "no_block_buffered",
+        "mmap",
+        "no_stats",
+        "no_crlf",
+        "no_multiline",
+        "no_multiline_dotall",
+        "no_json",
+        "no_search_zip",
+        "no_encoding",
+        "no_pre",
+        "unicode",
+        "no_auto_hybrid_regex",
+        "no_config",
+        "j",
+        "line_buffered",
+        "no_mmap",
+        "n"
+      ]
+    }
+  ]
+}

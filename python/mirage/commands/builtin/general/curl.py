@@ -12,9 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import base64
 import time
-from collections.abc import Mapping
-from urllib.parse import urlsplit
+from collections.abc import Sequence
+from urllib.parse import quote, urlsplit
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.errors import HttpConnectError, HttpTimeoutError
@@ -67,6 +68,18 @@ HEAD_FORM_WARNING = (
 # curl's own Content-Type for a -d body, sent unless the line names one:
 # httpx's `content=` and fetch's body carry no type of their own.
 BODY_CONTENT_TYPE = "application/x-www-form-urlencoded"
+JSON_TYPE = "application/json"
+# Every option that adds a piece to the body, in the order curl joins
+# them, and the spelling curl names in a read failure.
+DATA_OPTIONS = ("data", "data_binary", "data_raw", "data_urlencode", "json")
+DATA_SPELLING = {
+    "data": "-d",
+    "data_binary": "--data-binary",
+    "data_urlencode": "--data-urlencode",
+    "json": "--json",
+}
+# -d @FILE drops these bytes from what it reads; --data-binary keeps them.
+DATA_STRIPPED = b"\r\n\0"
 
 
 def resolve_target(o: str | PathSpec, cwd: PathSpec | str | None) -> PathSpec:
@@ -89,36 +102,65 @@ def resolve_target(o: str | PathSpec, cwd: PathSpec | str | None) -> PathSpec:
     )
 
 
-def names_content_type(headers: Mapping[str, str]) -> bool:
-    """Whether the line's headers already carry a Content-Type.
+def header_lines(
+    values: Sequence[str],
+) -> tuple[list[tuple[str, str]], set[str]]:
+    """The headers -H sends, and every name it mentions.
+
+    curl's reading of each line: ``Name: value`` sends the header,
+    ``Name:`` with nothing after it sends nothing and still stops curl
+    adding its own of that name, ``Name;`` sends it empty, and a line
+    with neither separator is dropped. The value loses its leading
+    blanks only. A name given twice in any case is one header whose
+    values are joined with ``, ``, a deliberate divergence from curl,
+    which sends two lines: fetch merges them so, and RFC 9110 reads the
+    two forms alike.
 
     Args:
-        headers (Mapping[str, str]): the headers the line added.
+        values (Sequence[str]): the -H values, in line order.
     """
-    return any(k.lower() == "content-type" for k in headers)
+    sent: dict[str, tuple[str, str]] = {}
+    named: set[str] = set()
+    for line in values:
+        colon = line.find(":")
+        if colon > 0:
+            name, value = line[:colon], line[colon + 1 :].lstrip()
+        elif colon < 0 and line.endswith(";") and len(line) > 1:
+            name, value = line[:-1], ""
+        else:
+            continue
+        key = name.lower()
+        named.add(key)
+        if colon > 0 and not value:
+            continue
+        if key in sent:
+            first, joined = sent[key]
+            sent[key] = (first, f"{joined}, {value}")
+        else:
+            sent[key] = (name, value)
+    return list(sent.values()), named
 
 
 def request_lines(
     url: str,
     method: str,
-    headers: Mapping[str, str],
+    headers: Sequence[tuple[str, str]],
     body_len: int | None,
     body_type: str | None,
 ) -> list[str]:
     """The request curl -v shows, as far as mirage can see it.
 
     Only what leaves mirage is dumped: the request line, Host, the
-    User-Agent, curl's own Accept, the headers the line added, and the
-    two a -d body adds. curl's ``*`` transport lines (resolving,
-    connecting, TLS) have no source here and are omitted, as are the
-    headers the HTTP stack appends on its own and a -F body's encoding,
-    which the client builds.
+    headers in curl's order, and the two a -d body adds. curl's ``*``
+    transport lines (resolving, connecting, TLS) have no source here
+    and are omitted, as are the headers the HTTP stack appends on its
+    own and a -F body's encoding, which the client builds.
 
     Args:
         url (str): the request URL.
         method (str): the HTTP method sent.
-        headers (Mapping[str, str]): the headers the line added,
-            User-Agent included.
+        headers (Sequence[tuple[str, str]]): every header between Host
+            and the body's own, in the order curl sends them.
         body_len (int | None): the -d body's byte length, None without
             one.
         body_type (str | None): the Content-Type curl added for the body
@@ -129,18 +171,140 @@ def request_lines(
     host = parts.hostname or ""
     if parts.port is not None:
         host = f"{host}:{parts.port}"
-    lines = [
-        f"{method} {target} HTTP/1.1",
-        f"Host: {host}",
-        f"User-Agent: {headers.get('User-Agent', DEFAULT_USER_AGENT)}",
-        "Accept: */*",
-    ]
-    lines.extend(f"{k}: {v}" for k, v in headers.items() if k != "User-Agent")
+    lines = [f"{method} {target} HTTP/1.1", f"Host: {host}"]
+    lines.extend(f"{k}: {v}" for k, v in headers)
     if body_len is not None:
         lines.append(f"Content-Length: {body_len}")
     if body_type is not None:
         lines.append(f"Content-Type: {body_type}")
     return lines
+
+
+def url_encoded(data: bytes) -> str:
+    """curl's escaping for --data-urlencode.
+
+    Everything but letters, digits and ``-._~`` becomes ``%XX``, and a
+    space then becomes ``+`` (curl 8.14.1).
+
+    Args:
+        data (bytes): the content to encode.
+    """
+    return quote(data, safe="").replace("%20", "+")
+
+
+async def _read_at(
+    option: str, name: str, opts: CommandOpts, silent: bool
+) -> bytes:
+    """Read the file an ``@NAME`` value names, ``-`` being stdin.
+
+    curl gives up on the whole line when it cannot (exit 26), naming
+    the file unless -s, and the option either way.
+
+    Args:
+        option (str): the option's spelling, for the refusal.
+        name (str): the file as the line named it.
+        opts (CommandOpts): the invocation, for stdin and the dispatcher.
+        silent (bool): whether -s mutes the file's own line.
+    """
+    try:
+        if name == "-":
+            return await materialize(opts.stdin)
+        if opts.dispatch is None:
+            raise OperationNotSupportedError("no filesystem dispatcher")
+        content, _ = await opts.dispatch(
+            "read", resolve_target(name, opts.cwd)
+        )
+        return await materialize(content)
+    except WALK_ERRORS as exc:
+        detail = "" if silent else f"curl: Failed to open {name}\n"
+        raise UsageError(
+            f"{detail}curl: option {option}: error encountered when reading "
+            f"a file\n{HELP_HINT}",
+            exit_code=EXIT_READ,
+        ) from exc
+
+
+async def _data_piece(
+    kind: str, value: str, opts: CommandOpts, silent: bool
+) -> bytes:
+    """One data option's contribution to the body.
+
+    Args:
+        kind (str): which data option it is.
+        value (str): its value as typed.
+        opts (CommandOpts): the invocation, for files and stdin.
+        silent (bool): whether -s is on.
+    """
+    if kind == "data_raw":
+        return value.encode()
+    if kind == "data_urlencode":
+        # `=` is looked for before `@`: `name=content` encodes the
+        # content, `name@file` a file's, and a bare value all of it.
+        sep = value.find("=")
+        if sep < 0:
+            sep = value.find("@")
+        name = value[:sep] if sep > 0 else ""
+        content = value[sep + 1 :] if sep >= 0 else value
+        raw = (
+            await _read_at(DATA_SPELLING[kind], content, opts, silent)
+            if sep >= 0 and value[sep] == "@"
+            else content.encode()
+        )
+        encoded = url_encoded(raw)
+        return (f"{name}={encoded}" if name else encoded).encode()
+    if not value.startswith("@"):
+        return value.encode()
+    raw = await _read_at(DATA_SPELLING[kind], value[1:], opts, silent)
+    if kind == "data":
+        return raw.translate(None, DATA_STRIPPED)
+    return raw
+
+
+async def request_body(
+    fl: FlagView, opts: CommandOpts
+) -> tuple[bytes | None, bool]:
+    """The body the data options build, and whether --json was among them.
+
+    The pieces are joined in line order with ``&`` between them, except
+    before a --json piece, and only once the body so far is not empty
+    (curl 8.14.1: ``-d '' -d b`` sends ``b``).
+
+    Args:
+        fl (FlagView): the line's flags.
+        opts (CommandOpts): the invocation, for files and stdin.
+    """
+    silent = fl.as_bool("silent")
+    occurrences = fl.occurrences(*DATA_OPTIONS)
+    if not occurrences:
+        return None, False
+    body = b""
+    json = False
+    for kind, value in occurrences:
+        piece = await _data_piece(kind, str(value), opts, silent)
+        if body and kind != "json":
+            body += b"&"
+        body += piece
+        json = json or kind == "json"
+    return body, json
+
+
+def basic_auth(user: str, stdin: bytes) -> tuple[str, bytes]:
+    """The Authorization value -u sends, and the prompt it costs.
+
+    A user without a ``:`` has curl ask for the password on stderr and
+    read it from stdin, which is all a workspace has: the bytes it read
+    minus the last one, which curl takes to be the newline.
+
+    Args:
+        user (str): the -u value.
+        stdin (bytes): what the line's stdin holds.
+    """
+    prompt = b""
+    if ":" not in user:
+        prompt = f"Enter host password for user '{user}':\n".encode()
+        user = f"{user}:{stdin[:-1].decode(errors='replace')}"
+    token = base64.b64encode(user.encode()).decode()
+    return f"Basic {token}", prompt
 
 
 def response_lines(resp: HttpResponse) -> list[str]:
@@ -225,10 +389,9 @@ async def curl(
     opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(opts.flags, spec=SPECS["curl"])
-    header = fl.as_str("header")
     user_agent = fl.as_str("user_agent")
     request = fl.as_str("request")
-    data = fl.as_str("data")
+    has_data = bool(fl.occurrences(*DATA_OPTIONS))
     form = fl.as_str("form")
     output = fl.raw("output")
     # -D names a file, or stdout as a lone `-`, which the parser leaves
@@ -249,12 +412,7 @@ async def curl(
     include = fl.as_bool("include")
     head = fl.as_bool("head")
     max_time = fl.as_float("max_time")
-    headers: dict[str, str] = {}
-    if header:
-        k, _, v = header.partition(":")
-        headers[k.strip()] = v.strip()
-    if user_agent:
-        headers["User-Agent"] = user_agent
+    sent, named = header_lines(fl.as_list("header"))
     # curl refuses these lines before any transfer (curl 8.7.1, exit 2).
     # A negative --max-time is not a number curl takes; curl names the
     # spelling typed, which the handler cannot see, so the long one.
@@ -267,10 +425,10 @@ async def curl(
     # -I beside a body option asks two methods of one request: curl warns
     # and refuses. -s mutes the warning and -S does not bring it back; the
     # option error -F adds is never muted.
-    if head and (data is not None or form is not None):
-        warning = HEAD_DATA_WARNING if data is not None else HEAD_FORM_WARNING
+    if head and (has_data or form is not None):
+        warning = HEAD_DATA_WARNING if has_data else HEAD_FORM_WARNING
         refusal = "" if fl.as_bool("silent") else warning
-        if data is None:
+        if not has_data:
             refusal += f"curl: option -F: is badly used here\n{HELP_HINT}\n"
         return None, IOResult(exit_code=EXIT_USAGE, stderr=refusal.encode())
     if not texts:
@@ -285,33 +443,46 @@ async def curl(
     if max_time is not None:
         timeout = None if max_time == 0 else max_time
     template = fl.as_str("write_out") or ""
+    # curl 8.14.1: -s suppresses only the opening diagnostic; -S does not
+    # restore it. The option error is always printed. The parsed flags no
+    # longer retain the spelling, so each option names its usual one.
     if template.startswith("@"):
-        try:
-            if template == "@-":
-                content = opts.stdin
-            else:
-                if opts.dispatch is None:
-                    raise OperationNotSupportedError(
-                        "no filesystem dispatcher"
-                    )
-                content, _ = await opts.dispatch(
-                    "read", resolve_target(template[1:], opts.cwd)
-                )
-            template = (await materialize(content)).decode(errors="replace")
-        except WALK_ERRORS as exc:
-            # curl 8.14.1: -s suppresses only the opening diagnostic; -S
-            # does not restore it. The option error is always printed.
-            # The parsed flags no longer retain the spelling, so use -w.
-            detail = (
-                ""
-                if fl.as_bool("silent")
-                else (f"curl: Failed to open {template[1:]}\n")
-            )
-            raise UsageError(
-                f"{detail}curl: option -w: error encountered when reading "
-                f"a file\n{HELP_HINT}",
-                exit_code=EXIT_READ,
-            ) from exc
+        raw = await _read_at("-w", template[1:], opts, fl.as_bool("silent"))
+        template = raw.decode(errors="replace")
+    body, json = await request_body(fl, opts)
+    # A custom header of a name curl would add itself takes its place,
+    # so curl's own goes only where the line names none. The trace lists
+    # them in curl's order; the wire leaves User-Agent and Accept to the
+    # client's defaults unless the line set them.
+    auth: list[tuple[str, str]] = []
+    prompt = b""
+    user = fl.as_str("user")
+    if user is not None and "authorization" not in named:
+        stdin = b"" if ":" in user else await materialize(opts.stdin)
+        token, prompt = basic_auth(user, stdin)
+        auth.append(("Authorization", token))
+    agent = (
+        [("User-Agent", user_agent)]
+        if user_agent and "user-agent" not in named
+        else []
+    )
+    typed = [
+        (name, JSON_TYPE)
+        for name in ("Content-Type", "Accept")
+        if json and name.lower() not in named
+    ]
+    headers = [*auth, *agent, *sent, *typed]
+    trace_headers = [
+        *auth,
+        *(
+            []
+            if "user-agent" in named
+            else [("User-Agent", user_agent or DEFAULT_USER_AGENT)]
+        ),
+        *([] if "accept" in named or json else [("Accept", "*/*")]),
+        *sent,
+        *typed,
+    ]
     started = time.monotonic()
 
     async def finish(
@@ -343,12 +514,12 @@ async def curl(
             "method": response.method
             if response is not None
             else request
-            or ("HEAD" if head else "POST" if data or form else "GET"),
+            or ("HEAD" if head else "POST" if has_data or form else "GET"),
             "exitcode": str(io.exit_code),
             "time_total": f"{time.monotonic() - started:.6f}",
         }
         out, err = render_write_out(template, values)
-        io.stderr = (await materialize(io.stderr)) + err
+        io.stderr = prompt + (await materialize(io.stderr)) + err
         return (await materialize(stdout)) + out, io
 
     body_len: int | None = None
@@ -361,30 +532,27 @@ async def curl(
                 url,
                 method=method,
                 form_data={key: value},
-                headers=headers,
+                headers=dict(headers),
                 timeout=timeout,
                 follow_redirects=location,
                 verify=verify,
             )
         else:
             method = request or (
-                "HEAD" if head else ("POST" if data else "GET")
+                "HEAD" if head else ("POST" if body is not None else "GET")
             )
-            body = data.encode() if data else None
             body_len = len(body) if body is not None else None
             # -v shows what is sent, so curl's default for the body goes
             # on the request, not on the trace alone.
-            if body is not None and not names_content_type(headers):
+            if body is not None and not json and "content-type" not in named:
                 body_type = BODY_CONTENT_TYPE
-            sent = (
-                {**headers, "Content-Type": body_type}
-                if body_type is not None
-                else headers
-            )
+            wire = dict(headers)
+            if body_type is not None:
+                wire["Content-Type"] = body_type
             resp = await http_request(
                 url,
                 method=method,
-                headers=sent,
+                headers=wire,
                 data=body,
                 timeout=timeout,
                 follow_redirects=location,
@@ -429,7 +597,7 @@ async def curl(
                     request_lines(
                         target,
                         sent_as,
-                        headers,
+                        trace_headers,
                         body_len if carries else None,
                         body_type if carries else None,
                     ),

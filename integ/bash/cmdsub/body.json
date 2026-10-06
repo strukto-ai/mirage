@@ -747,6 +747,40 @@
         "stdout": "[hello $literal]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "cmdsub_keeps_raw_bytes",
+      "seq": 1346042,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=$(printf 'a\\377b\\n\\n'); y=`printf 'c\\376d'`; printf '%s|%s\\n' \"$x\" \"$y\" | od -An -tx1",
+      "expect": {
+        "exit": 0,
+        "stdout": " 61 ff 62 7c 63 fe 64 0a\n",
+        "stderr": ""
+      }
     }
   ]
 }

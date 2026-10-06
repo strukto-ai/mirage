@@ -15,7 +15,8 @@
 import { compilePosixRegex } from '../../utils/posix.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
 import { closeQuietly } from '../../io/stream.ts'
-import { decodeLine, encodeLine, MatchOffsets, prefixOf } from './grep_offsets.ts'
+import { prefixOf } from './grep_offsets.ts'
+import { byteView, encodeText, fromByteView } from '../../shell/bytes.ts'
 import { requiredNeedles } from './grep_prefilter.ts'
 import type { RegexSyntax } from './types.ts'
 import { matchStart, matchText } from './utils/pcre.ts'
@@ -99,6 +100,7 @@ function binaryNotice(io: IOResult, path: string): void {
   io.stderr = err
 }
 
+/** Whether every byte of `data` belongs to a UTF-8 character. */
 export function validUtf8(data: Uint8Array): boolean {
   try {
     new TextDecoder('utf-8', { fatal: true }).decode(data)
@@ -135,6 +137,13 @@ function outputLine(
   return out
 }
 
+/**
+ * Scan one input, yielding grep's output for it. Under a UTF-8 locale
+ * (`utf8`) a line is matched as text, and a line or match to print that holds
+ * a byte no character owns is binary output: GNU leaves it out and ends with
+ * the binary-file notice, as it does for a NUL, but goes on printing the lines
+ * after it.
+ */
 export async function* grepInput(
   source: AsyncIterable<Uint8Array>,
   pat: RegExp,
@@ -147,10 +156,10 @@ export async function* grepInput(
   // groups within one input.
   afterOutput = false,
   signal?: AbortSignal,
+  utf8 = false,
 ): AsyncIterable<Uint8Array> {
   const budget = new YieldBudget(signal)
   io.exitCode = 1
-  pat = utf8Pattern(pat)
   const binary = new BinaryInput(f.binaryMode)
   let count = 0
   let notified = false
@@ -197,7 +206,7 @@ export async function* grepInput(
       number += 1
       const lineStart = bytePos
       bytePos += raw.length + 1
-      const line = decodeLine(raw)
+      const line = byteView(raw, utf8)
       let hit = pat.test(line) !== f.invert
       if (f.maxCount !== null && count >= f.maxCount) hit = false
       if (hit) {
@@ -233,21 +242,21 @@ export async function* grepInput(
               pat.source,
               pat.flags.includes('g') ? pat.flags : pat.flags + 'g',
             )
-            const offsets = f.byteOffsets ? new MatchOffsets(lineStart, line) : null
             for (const m of line.matchAll(re)) {
               const pending = budget.run()
               if (pending !== undefined) await pending
               const text = matchText(m)
+              const start = matchStart(m)
               if (text !== '')
                 chunks.push(
                   outputLine(
-                    encodeLine(text),
+                    fromByteView(text, utf8),
                     number,
                     true,
                     path,
                     showFilename,
                     f,
-                    offsets?.at(matchStart(m)) ?? 0,
+                    lineStart + (utf8 ? encodeText(line.slice(0, start)).length : start),
                   ),
                 )
             }
@@ -276,7 +285,7 @@ export async function* grepInput(
         notified = true
       }
       for (const chunk of chunks) {
-        if (f.binaryMode !== 'text' && (binary.nul || !validUtf8(chunk))) {
+        if (f.binaryMode !== 'text' && (binary.nul || (utf8 && !validUtf8(chunk)))) {
           if (f.binaryMode === 'binary' && !notified) {
             binaryNotice(io, path)
             notified = true
@@ -309,32 +318,4 @@ export async function* grepInput(
   }
   if (f.countOnly && !(f.quiet || f.filesOnly))
     yield ENC.encode((showFilename ? path + ':' : '') + String(count) + '\n')
-}
-
-function utf8Pattern(pat: RegExp): RegExp {
-  let pattern = ''
-  let escaped = false
-  let inClass = false
-  let classStart = 0
-  for (let index = 0; index < pat.source.length; index += 1) {
-    const char = pat.source.charAt(index)
-    if (escaped) {
-      pattern += char
-      escaped = false
-    } else if (char === '\\') {
-      pattern += char
-      escaped = true
-    } else if (char === '[' && !inClass) {
-      pattern += char
-      inClass = true
-      // A leading ] after an optional ^ is a class member.
-      classStart = index + 1
-      if (pat.source.charAt(classStart) === '^') classStart += 1
-    } else if (char === ']' && inClass && index > classStart) {
-      pattern += char
-      inClass = false
-    } else if (char === '.' && !inClass) pattern += '[^\\n\\udc80-\\udcff]'
-    else pattern += char
-  }
-  return compilePosixRegex(pattern, pat.flags)
 }

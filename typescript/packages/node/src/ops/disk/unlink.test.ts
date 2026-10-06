@@ -40,7 +40,9 @@ describe('unlinkOp', () => {
     expect(await existsCore(res.accessor, spec('/x'))).toBe(false)
   })
 
-  it('is a no-op on missing file', async () => {
-    await expect(unlinkOp.fn(res.accessor, spec('/missing'), [], {})).resolves.toBeUndefined()
+  it('is ENOENT on a missing file', async () => {
+    await expect(unlinkOp.fn(res.accessor, spec('/missing'), [], {})).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })

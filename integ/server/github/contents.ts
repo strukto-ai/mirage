@@ -115,7 +115,7 @@ async function nextCommitSeq(db: Client, tenant: string, repo: string): Promise<
 }
 
 // Record one commit. Its sha is content-addressed the way git's is: the
-// parent, the tree, the people and the message decide it, and nothing about
+// parents, the tree, the people and the message decide it, and nothing about
 // where it sits does. That is the whole reason a sha cannot be reproduced by a
 // later commit landing in a freed slot, which is what a position-derived sha
 // allowed every time a move or a reset released one. `seq` survives only as
@@ -125,7 +125,8 @@ async function nextCommitSeq(db: Client, tenant: string, repo: string): Promise<
 // /contents write does: the write IS the ref update, and a push, so a Pages
 // site built from the branch builds again. A plumbing commit passes false and
 // is born dangling, reachable by sha but on no branch until a ref update
-// points at it.
+// points at it. `parents` are in order, the first parent first; null takes
+// the branch's head as the one parent, and an empty sha names none.
 export async function recordCommit(
   db: Client,
   tenant: string,
@@ -137,13 +138,15 @@ export async function recordCommit(
     author: null,
     committer: null,
   },
-  parent: string | null = null,
+  parents: readonly string[] | null = null,
   advance = true,
 ): Promise<CommitRow> {
   const seq = await nextCommitSeq(db, tenant, repo.fullName)
   const authorJson = personJson(people.author)
   const committerJson = personJson(people.committer)
-  const parentSha = parent ?? (await visibleHeadOf(db, tenant, repo, branch))
+  const named = (parents ?? [await visibleHeadOf(db, tenant, repo, branch)]).filter(
+    (sha) => sha !== '',
+  )
   // EVERY commit names a tree, so every commit is a snapshot that can be read
   // back on its own. A plumbing commit names the one its caller staged; a
   // /contents commit stages the tree its own write just produced, which is why
@@ -166,14 +169,15 @@ export async function recordCommit(
         )
       : tree
   const sha = commitSha(
-    [repo.fullName, parentSha, stored, authorJson, committerJson, message].join('\0'),
+    [repo.fullName, named.join(' '), stored, authorJson, committerJson, message].join('\0'),
   )
   const row = (await db.githubCommit.create({
     data: {
       tenant,
       repo: repo.fullName,
       sha,
-      parentSha,
+      parentSha: named[0] ?? '',
+      otherParentsJson: JSON.stringify(named.slice(1)),
       message,
       authorLogin: '',
       date: '',
@@ -294,16 +298,9 @@ const putContents = withRepo(async (ctx, repo) => {
   await keepTree(ctx.db, ctx.tenant, repo, branch)
   await writeFile(ctx.db, ctx.tenant, repo, branch, path, data)
   const message = str(body, 'message') === '' ? `Update ${path}` : str(body, 'message')
-  const commit = await recordCommit(
-    ctx.db,
-    ctx.tenant,
-    repo,
-    message,
-    branch,
-    '',
-    undefined,
+  const commit = await recordCommit(ctx.db, ctx.tenant, repo, message, branch, '', undefined, [
     parent,
-  )
+  ])
   return {
     status: created ? 201 : 200,
     body: {
@@ -332,16 +329,9 @@ const deleteContents = withRepo(async (ctx, repo) => {
   await keepTree(ctx.db, ctx.tenant, repo, branch)
   await ctx.db.githubFile.delete({ where: { pk: row.pk } })
   const message = str(body, 'message') === '' ? `Delete ${path}` : str(body, 'message')
-  const commit = await recordCommit(
-    ctx.db,
-    ctx.tenant,
-    repo,
-    message,
-    branch,
-    '',
-    undefined,
+  const commit = await recordCommit(ctx.db, ctx.tenant, repo, message, branch, '', undefined, [
     parent,
-  )
+  ])
   return {
     status: 200,
     body: { content: null, commit: gitCommitJson(repo.fullName, commit, commit.treeSha) },

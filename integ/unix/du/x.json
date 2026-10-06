@@ -1,0 +1,43 @@
+{
+  "cases": [
+    {
+      "id": "du_x_walks_a_tree_with_no_mount_below_it",
+      "seq": 15600302,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcF_dx/s && echo x > /data/fcF_dx/s/f && du -x /data/fcF_dx | cut -f2; du -a --one-file-system /data/fcF_dx | cut -f2; rm -r /data/fcF_dx",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fcF_dx/s\n/data/fcF_dx\n/data/fcF_dx/s/f\n/data/fcF_dx/s\n/data/fcF_dx\n",
+        "stderr": ""
+      },
+      "flags": [
+        "x",
+        "one-file-system",
+        "a"
+      ]
+    }
+  ]
+}

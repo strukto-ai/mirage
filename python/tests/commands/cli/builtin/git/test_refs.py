@@ -21,7 +21,9 @@ from mirage.commands.cli.builtin.git.refs import (
     mapped,
     parse_refspec,
     read_head,
+    safe_ref_name,
     valid_ref_name,
+    whole_ref_name,
     without_packed,
 )
 from mirage.commands.cli.builtin.git.types import Refspec
@@ -238,3 +240,27 @@ def test_a_refspec_splits_into_source_destination_and_force(text, expected):
 )
 def test_a_refspec_maps_a_remote_ref(spec, name, expected):
     assert mapped(parse_refspec(spec), name) == expected
+
+
+@pytest.mark.parametrize(
+    ("name", "safe"),
+    [
+        ("HEAD", True),
+        ("ORIG_HEAD", True),
+        ("refs/heads/main", True),
+        ("refs/heads/a..b", True),
+        ("lower", False),
+        ("A1", False),
+        ("refs/", False),
+        ("refs/heads//x", False),
+        ("refs/heads/./x", False),
+        ("refs/heads/../x", False),
+    ],
+)
+def test_safe_ref_name_follows_refname_is_safe(name: str, safe: bool):
+    assert safe_ref_name(name) is safe
+
+
+def test_a_bare_at_is_no_whole_ref_name():
+    assert not whole_ref_name("@")
+    assert whole_ref_name("HEAD")

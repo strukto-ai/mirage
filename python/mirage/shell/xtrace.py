@@ -15,6 +15,8 @@
 import shlex
 from collections.abc import Iterable
 
+from mirage.shell.bytes import encode_text
+
 
 def trace_command(words: Iterable[str]) -> bytes:
     """Render one `set -x` trace line for an expanded simple command.
@@ -25,7 +27,7 @@ def trace_command(words: Iterable[str]) -> bytes:
     Args:
         words (Iterable[str]): expanded command words, name first.
     """
-    return ("+ " + shlex.join(words) + "\n").encode()
+    return encode_text("+ " + shlex.join(words) + "\n")
 
 
 def trace_assignment(key: str, val: str, append: bool) -> bytes:
@@ -37,4 +39,4 @@ def trace_assignment(key: str, val: str, append: bool) -> bytes:
         append (bool): `+=` form instead of `=`.
     """
     op = "+=" if append else "="
-    return f"+ {key}{op}{shlex.quote(val) if val else ''}\n".encode()
+    return encode_text(f"+ {key}{op}{shlex.quote(val) if val else ''}\n")

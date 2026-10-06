@@ -1,12 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="16 7 128 146" width="128" height="146">
-  <polygon points="19,45 80,10 80,45 50,63" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
-  <polygon points="80,10 141,45 110,63 80,45" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
-  <polygon points="141,45 141,115 110,98 110,63" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
-  <polygon points="141,115 80,150 80,115 110,98" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
-  <polygon points="80,150 19,115 50,98 80,115" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
-  <polygon points="19,115 19,45 50,63 50,98" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
-  <polygon points="80,45 110,63 110,98 80,115 50,98 50,63" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
-  <line x1="80" y1="80" x2="50" y2="63" stroke="#000000" stroke-width="2.5"/>
-  <line x1="80" y1="80" x2="110" y2="63" stroke="#000000" stroke-width="2.5"/>
-  <line x1="80" y1="80" x2="80" y2="115" stroke="#000000" stroke-width="2.5"/>
+  <polygon points="19,45 80,10 80,45 50,63" fill="#ffffff" stroke="#000000" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+  <polygon points="80,10 141,45 110,63 80,45" fill="#ffffff" stroke="#000000" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+  <polygon points="141,45 141,115 110,98 110,63" fill="#ffffff" stroke="#000000" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+  <polygon points="141,115 80,150 80,115 110,98" fill="#ffffff" stroke="#000000" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+  <polygon points="80,150 19,115 50,98 80,115" fill="#ffffff" stroke="#000000" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+  <polygon points="19,115 19,45 50,63 50,98" fill="#ffffff" stroke="#000000" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+  <polygon points="80,45 110,63 110,98 80,115 50,98 50,63" fill="#ffffff" stroke="#000000" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+  <line x1="80" y1="80" x2="50" y2="63" stroke="#000000" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+  <line x1="80" y1="80" x2="110" y2="63" stroke="#000000" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+  <line x1="80" y1="80" x2="80" y2="115" stroke="#000000" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
 </svg>

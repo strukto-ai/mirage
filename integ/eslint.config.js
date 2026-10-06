@@ -25,7 +25,7 @@ export default tseslint.config(
     languageOptions: { globals: { TextEncoder: 'readonly', TextDecoder: 'readonly' } },
   },
   {
-    files: ['fixtures/runtime/fs/js/*.js'],
+    files: ['fixtures/runtime/*/js/*.js'],
     languageOptions: { globals: { console: 'readonly', std: 'readonly', os: 'readonly' } },
   },
   {

@@ -12,11 +12,13 @@ icon: /images/langchain-logo.svg
 uv add 'mirage-ai[deepagents]' langchain-anthropic
 ```
 
-This pulls in `deepagents>=0.6.12`. Bring your own LangChain chat model (`langchain-anthropic`, `langchain-openai`, etc.).
+Bring your own LangChain chat model, such as `langchain-anthropic` or `langchain-openai`.
 
 ## Usage
 
 ```python
+import asyncio
+
 from deepagents import create_deep_agent
 from langchain_anthropic import ChatAnthropic
 
@@ -30,19 +32,23 @@ from mirage.vfs.ram import RAMVFS
 
 ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 
-agent = create_deep_agent(
-    model=ChatAnthropic(model="claude-sonnet-4-20250514"),
-    system_prompt=await build_system_prompt(
-        mount_info={"/": "In-memory filesystem (read/write)"},
-    ),
-    backend=LangchainWorkspace(ws),
-)
 
-result = agent.invoke({
-    "messages": [{"role": "user", "content": "Create /report.md and summarize."}],
-})
-for text in extract_text(result["messages"][-1:]):
-    print(text)
+async def main() -> None:
+    agent = create_deep_agent(
+        model=ChatAnthropic(model="claude-sonnet-4-20250514"),
+        system_prompt=await build_system_prompt(
+            mount_info={"/": "In-memory filesystem (read/write)"},
+        ),
+        backend=LangchainWorkspace(ws),
+    )
+    result = await agent.ainvoke({
+        "messages": [{"role": "user", "content": "Create /report.md and summarize."}],
+    })
+    for text in extract_text(result["messages"][-1:]):
+        print(text)
+
+
+asyncio.run(main())
 ```
 
 ## Multimodal files

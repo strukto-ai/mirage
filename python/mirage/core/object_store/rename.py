@@ -14,8 +14,8 @@
 
 from mirage.cache.context import (
     evict_after,
+    invalidate_after_move,
     invalidate_ancestors,
-    invalidate_subtree,
 )
 from mirage.core.object_store.driver import (
     A,
@@ -101,13 +101,13 @@ def make_rename(
             # carries a token.
             record(op, src_spec.virtual, driver.vfs, 0, timer)
             record(op, dst_spec.virtual, driver.vfs, 0, timer)
-            # The eviction rides with the records, as in unlink.
-            # Subtrees, not single paths: move_prefix relocates every key
-            # under src, so each listing and body cached below the old
-            # name names something that is no longer there, and each one
-            # below the new name predates the move.
-            await invalidate_subtree(dst_spec)
-            await invalidate_subtree(src_spec)
+            # The eviction rides with the records, as in unlink. Only a
+            # clean move_file names a file, which has nothing beneath it;
+            # move_prefix relocates every key under src, and a raise
+            # leaves the kind unknown, so those evict both subtrees.
+            folder = op != "rename" or moved is None
+            await invalidate_after_move(dst_spec, folder)
+            await invalidate_after_move(src_spec, folder)
             # The move can create the destination's missing ancestors and
             # erase the source's prefix-only ones in the same call.
             await invalidate_ancestors(dst_spec)

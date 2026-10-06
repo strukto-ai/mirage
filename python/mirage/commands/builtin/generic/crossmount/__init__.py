@@ -12,7 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic.crossmount.detect import is_cross_mount
-from mirage.commands.builtin.generic.crossmount.route import handle_cross_mount
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
 
-__all__ = ["is_cross_mount", "handle_cross_mount"]
+if TYPE_CHECKING:
+    from mirage.commands.builtin.generic.crossmount.detect import (
+        is_cross_mount as is_cross_mount,
+    )
+    from mirage.commands.builtin.generic.crossmount.route import (
+        handle_cross_mount as handle_cross_mount,
+    )
+
+_EXPORTS = {
+    "is_cross_mount": "mirage.commands.builtin.generic.crossmount.detect",
+    "handle_cross_mount": "mirage.commands.builtin.generic.crossmount.route",
+}
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name: str) -> Any:
+    if name not in _EXPORTS:
+        raise AttributeError(name)
+    value = getattr(import_module(_EXPORTS[name]), name)
+    globals()[name] = value
+    return value

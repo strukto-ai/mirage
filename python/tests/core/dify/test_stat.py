@@ -76,7 +76,6 @@ async def test_stat_fills_the_detail_fields(
 async def test_stat_falls_back_to_the_listing_without_detail_times(
     monkeypatch, dify_accessor, dify_index, guide_path
 ):
-
     async def bare_detail(config, document_id):
         return {}
 

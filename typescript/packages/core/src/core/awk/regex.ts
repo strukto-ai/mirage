@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { AwkSyntaxError } from './errors.ts'
-import { translateBracket } from '../../utils/posix.ts'
+import { compilePosixRegex, translateBracket } from '../../utils/posix.ts'
 
 const WORD_BOUNDARY_ESCAPES: Readonly<Record<string, string>> = {
   y: '\\b',
@@ -74,7 +74,7 @@ export function compileEre(pattern: string): RegExp {
   if (cached !== undefined) return cached
   let compiled: RegExp
   try {
-    compiled = new RegExp(translate(pattern), 'gs')
+    compiled = compilePosixRegex(translate(pattern), 'gs')
   } catch (err) {
     if (err instanceof SyntaxError) throw regexError(pattern)
     throw err
@@ -102,7 +102,7 @@ export function matches(pattern: string, subject: string): boolean {
  */
 export function splitPattern(separator: string): RegExp | null {
   if (separator === ' ') return null
-  if (Array.from(separator).length === 1) {
+  if (separator.length === 1) {
     return compileEre(SINGLE_CHAR_META.test(separator) ? '\\' + separator : separator)
   }
   return compileEre(separator)

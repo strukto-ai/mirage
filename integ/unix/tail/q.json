@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "id": "tail_q_v_and_a_failed_operand_shape_the_headers",
+      "seq": 15400003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail -q -n1 /data/a.txt /data/b.txt; tail -n1 /data/a.txt /data/b.txt; tail -n1 -v -q /data/a.txt /data/b.txt; tail -n1 /data/fcD_nope.txt /data/a.txt /data/b.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "baz\n3\n==> /data/a.txt <==\nbaz\n\n==> /data/b.txt <==\n3\nbaz\n3\n==> /data/a.txt <==\nbaz\n\n==> /data/b.txt <==\n3\nrc=1\n",
+        "stderr": "tail: cannot open '/data/fcD_nope.txt' for reading: No such file or directory\n"
+      },
+      "flags": [
+        "q",
+        "v",
+        "n"
+      ]
+    },
+    {
+      "id": "tail_q_then_v_prints_the_headers",
+      "seq": 15400004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail -n1 -q -v /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "==> /data/a.txt <==\nbaz\n\n==> /data/b.txt <==\n3\n",
+        "stderr": ""
+      },
+      "flags": [
+        "q",
+        "v",
+        "n"
+      ]
+    }
+  ]
+}

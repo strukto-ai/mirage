@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { shlexSplit } from '../utils/shlex.ts'
-import { byteChar } from './bytes.ts'
+import { byteChar, decodeText, encodeText } from './bytes.ts'
 
 // The ANSI-C escape table $'...' shares with bash's strtrans.c. \e/\E
 // are here although printf lacks them; \c takes an argument here while
@@ -104,6 +104,18 @@ export function codePointText(value: number): string {
 }
 
 /**
+ * The decoded pieces as text, a byte run read back as its characters.
+ *
+ * bash builds a $'...' word as bytes, so `\xc3\xa9` is the two bytes of an é
+ * and names the same file as a typed one. The escapes arrive one raw byte at
+ * a time, so the joined word is read back once: a run that is valid UTF-8
+ * becomes its characters and any other byte stays raw.
+ */
+function asText(out: readonly string[]): string {
+  return decodeText(encodeText(out.join('')))
+}
+
+/**
  * Decode the body of a $'...' word to the text it names.
  *
  * Follows bash 5.2 (lib/sh/strtrans.c, under a UTF-8 locale): simple
@@ -139,7 +151,7 @@ export function decodeAnsiC(content: string): string {
         end += 1
       }
       const value = parseInt(content.slice(i + 1, end), 8)
-      if ((value & 0xff) === 0) return out.join('')
+      if ((value & 0xff) === 0) return asText(out)
       out.push(byteChar(value))
       i = end
       continue
@@ -152,7 +164,7 @@ export function decodeAnsiC(content: string): string {
         continue
       }
       const value = parseInt(digits, 16)
-      if (value === 0) return out.join('')
+      if (value === 0) return asText(out)
       out.push(byteChar(value))
       i += 2 + digits.length
       continue
@@ -165,7 +177,7 @@ export function decodeAnsiC(content: string): string {
         continue
       }
       const value = parseInt(digits, 16)
-      if (value === 0) return out.join('')
+      if (value === 0) return asText(out)
       out.push(codePointText(value))
       i += 2 + digits.length
       continue
@@ -184,14 +196,14 @@ export function decodeAnsiC(content: string): string {
         i += 1
       }
       const value = operand === '?' ? 0x7f : (operand.toUpperCase().codePointAt(0) ?? 0) & 0x1f
-      if (value === 0) return out.join('')
+      if (value === 0) return asText(out)
       out.push(String.fromCharCode(value))
       continue
     }
     out.push(char + marker)
     i += 2
   }
-  return out.join('')
+  return asText(out)
 }
 
 // The text an unquoted word's backslash escapes name.

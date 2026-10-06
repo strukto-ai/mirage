@@ -1,0 +1,22 @@
+{
+  "cases": [
+    {
+      "id": "numfmt_to_iec_i_renders_a_bare_number",
+      "seq": 15500013,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "numfmt --to=iec-i 1000 1024 2048 0",
+      "expect": {
+        "exit": 0,
+        "stdout": "1000\n1.0Ki\n2.0Ki\n0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "to"
+      ]
+    }
+  ]
+}

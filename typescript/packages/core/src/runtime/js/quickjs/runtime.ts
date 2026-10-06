@@ -26,7 +26,7 @@ import type {
   RuntimeContext,
 } from '../../types.ts'
 import { RuntimeVFS } from '../../vfs.ts'
-import { installQuickJsFs } from './fs.ts'
+import { fromGuestText, installQuickJsFs, toGuestText } from './fs.ts'
 import { cwdPreamble } from './execution.ts'
 import BOOTSTRAP from '../../../generated/quickjs.ts'
 import { loadQuickJsModule, type NewAsyncModule } from './loader.ts'
@@ -110,7 +110,7 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
     try {
       this.installGlobals(ctx, args, out, err, exit)
       const vfs = context !== undefined ? RuntimeVFS.of(context) : null
-      installQuickJsFs(ctx, vfs)
+      const closeAll = installQuickJsFs(ctx, vfs)
 
       const boot = ctx.evalCode(BOOTSTRAP, 'mirage:bootstrap')
       if (boot.error) {
@@ -134,6 +134,7 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
       if (result.error) {
         if (timedOut.value && args.timeoutSeconds !== undefined) {
           result.error.dispose()
+          await closeAll()
           throw new CommandTimeoutError(this.name, args.timeoutSeconds)
         }
         if (exit.called) {
@@ -148,6 +149,11 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
         const drained = this.drainJobs(runtime, ctx, err)
         if (drained !== null) exitCode = exit.called ? exit.code : drained
       }
+      // Files the guest left open still owe the mount their writes, however
+      // the program ended.
+      const lost = await closeAll()
+      for (const line of lost) err.push(`${this.name}: ${line}\n`)
+      if (lost.length > 0 && exitCode === 0) exitCode = 1
       return {
         stdout: ENC.encode(out.join('')),
         stderr: err.length > 0 ? ENC.encode(err.join('')) : null,
@@ -203,7 +209,7 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
       // std.open/os.readdir, so a JS policy script can read mounted
       // content (the python evaluator gets this via run()'s RuntimeVFS).
       const vfs = context !== undefined ? RuntimeVFS.of(context) : null
-      installQuickJsFs(ctx, vfs)
+      const closeAll = installQuickJsFs(ctx, vfs)
       const boot = ctx.evalCode(BOOTSTRAP, 'mirage:bootstrap')
       if (boot.error) {
         boot.error.dispose()
@@ -228,6 +234,7 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
       if (result.error) {
         const message = this.formatError(ctx, result.error)
         result.error.dispose()
+        await closeAll()
         if (timedOut.value) {
           throw new EvalError(`quickjs eval timed out after ${String(EVAL_INTERRUPT_SECONDS)}s`)
         }
@@ -236,6 +243,10 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
       const dumped: unknown = ctx.dump(result.value)
       result.value.dispose()
       const drained = this.drainJobs(runtime, ctx, err)
+      // Files the evaluation left open still owe the mount their writes,
+      // as they do when run() ends.
+      const lost = await closeAll()
+      for (const line of lost) err.push(`${this.name}: ${line}\n`)
       if (drained !== null && drained !== 0) {
         throw new EvalError(err.join('').trim() || 'quickjs eval failed while draining jobs')
       }
@@ -293,7 +304,7 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
     }
     const hostLog = (sink: string[]): QuickJSHandle =>
       ctx.newFunction('', (h) => {
-        sink.push(ctx.getString(h))
+        sink.push(fromGuestText(ctx, h))
       })
     setGlobal('__mirage_log', hostLog(out))
     setGlobal('__mirage_error', hostLog(err))
@@ -305,7 +316,7 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
       }),
     )
     const stdin = args.stdin !== null ? DEC.decode(args.stdin) : ''
-    setGlobal('__mirage_stdin', ctx.newString(stdin))
+    setGlobal('__mirage_stdin', toGuestText(ctx, stdin))
     const argv = ctx.newArray()
     // A named program takes scriptArgs[0], the slot qjs fills with a
     // script's path when it runs a file; an unnamed run leaves the args

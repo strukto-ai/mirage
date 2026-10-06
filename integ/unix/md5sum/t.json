@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "id": "md5sum_t_and_b_set_the_mode_marker",
+      "seq": 15600713,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "md5sum -t /data/b.txt; md5sum --binary /data/b.txt; md5sum --text /data/b.txt; md5sum -tb /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "c0710d6b4f15dfa88f600b0e6b624077  /data/b.txt\nc0710d6b4f15dfa88f600b0e6b624077 */data/b.txt\nc0710d6b4f15dfa88f600b0e6b624077  /data/b.txt\nc0710d6b4f15dfa88f600b0e6b624077 */data/b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "b",
+        "binary",
+        "text"
+      ]
+    },
+    {
+      "id": "md5sum_t_and_b_the_last_one_wins",
+      "seq": 15600714,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "md5sum -bt /data/b.txt; md5sum --binary --text /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "c0710d6b4f15dfa88f600b0e6b624077  /data/b.txt\nc0710d6b4f15dfa88f600b0e6b624077  /data/b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "b"
+      ]
+    }
+  ]
+}

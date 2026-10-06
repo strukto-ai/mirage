@@ -20,19 +20,16 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '@struktoai/mirage-node'
 import ssh2, { type Client, type ClientChannel } from 'ssh2'
 import { afterEach, describe, expect, it } from 'vitest'
-import { JobTable } from '../jobs.ts'
-import { McpDoor } from '../mcp/http.ts'
 import { WorkspaceRegistry, type WorkspaceEntry } from '../registry.ts'
-import { argvLine, processEnv, toPath, toUri } from './codex.ts'
 import {
-  CODEX_RETAINED_OUTPUT,
-  CODEX_SUBSYSTEM,
   RPC_INTERNAL_ERROR,
   RPC_INVALID_PARAMS,
   RPC_INVALID_REQUEST,
   RPC_METHOD_NOT_FOUND,
   RPC_NOT_FOUND,
-} from './constants.ts'
+} from '../rpc/constants.ts'
+import { argvLine, processEnv, toPath, toUri } from './codex.ts'
+import { CODEX_RETAINED_OUTPUT, CODEX_SUBSYSTEM } from './constants.ts'
 import { CodexRPCError } from './errors.ts'
 import { mintKeyPair } from './keys.ts'
 import { startSSHServer } from './server.ts'
@@ -59,17 +56,12 @@ async function startHarness(mode: MountMode = MountMode.WRITE, ws?: Workspace): 
   writeFileSync(join(dir, 'authorized_keys'), `${pair.public}\n`)
   const registry = new WorkspaceRegistry({ idleGraceSeconds: 0 })
   const entry = registry.add(ws ?? new Workspace({ '/': new RAMVFS() }, { mode }), 'demo')
-  const door = new McpDoor(registry, new JobTable())
-  const listener = await startSSHServer(
-    registry,
-    {
-      port: 0,
-      host: '127.0.0.1',
-      hostKeyFile: join(dir, 'host_key'),
-      authorizedKeysFile: join(dir, 'authorized_keys'),
-    },
-    door,
-  )
+  const listener = await startSSHServer(registry, {
+    port: 0,
+    host: '127.0.0.1',
+    hostKeyFile: join(dir, 'host_key'),
+    authorizedKeysFile: join(dir, 'authorized_keys'),
+  })
   const harness = {
     registry,
     entry,

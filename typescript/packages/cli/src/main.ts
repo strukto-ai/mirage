@@ -21,7 +21,10 @@ import { registerDaemonCommands } from './daemon.ts'
 import { registerShellCommand } from './shell.ts'
 import { registerToolCommands } from './tools.ts'
 import { registerJobCommands } from './job.ts'
+import { registerLoginCommands } from './login.ts'
 import { registerMcpCommand } from './mcp.ts'
+import { registerRpcCommand } from './rpc.ts'
+import { registerSshProxyCommand } from './ssh.ts'
 import { registerSessionCommands } from './session.ts'
 import { registerWorkspaceCommands } from './workspace.ts'
 
@@ -54,6 +57,9 @@ export function buildProgram(): Command {
   registerShellCommand(program)
   registerToolCommands(program)
   registerMcpCommand(program)
+  registerRpcCommand(program)
+  registerSshProxyCommand(program)
+  registerLoginCommands(program)
   registerDaemonCommands(program)
   registerConfigCommands(program)
   return program

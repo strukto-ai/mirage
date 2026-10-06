@@ -17,7 +17,7 @@ from mirage.commands.builtin.utils.limit import truncate_stream
 from mirage.commands.builtin.utils.operands import (
     normalized_read,
     operands_io,
-    split_readable,
+    split_opened,
 )
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
@@ -32,6 +32,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import async_chain, ensure_stream
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import encode_text
 from mirage.types import FileType, Limit, PathSpec, PolymorphicReadFn, StatFn
 
 
@@ -51,11 +52,14 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> HeadFlags:
     error = number_flag_error("head", n_raw, c_raw)
     if error is not None:
         raise ValueError(error)
+    # The last of -q and -v decides, as in GNU head.
+    order = fl.typed_order("quiet", "silent", "verbose")
+    headers = order[-1] if order else None
     return HeadFlags(
         lines=int(n_raw) if n_raw is not None else None,
         bytes_=parse_byte_count(c_raw) if c_raw is not None else None,
-        quiet=fl.as_bool("quiet") or fl.as_bool("silent"),
-        verbose=fl.as_bool("verbose"),
+        quiet=headers in ("quiet", "silent"),
+        verbose=headers == "verbose",
         zero_terminated=fl.as_bool("zero_terminated"),
     )
 
@@ -136,6 +140,7 @@ def head_multi(
     c: int | None = None,
     show_headers: bool = False,
     zero_terminated: bool = False,
+    unread: frozenset[str] = frozenset(),
 ) -> AsyncIterator[bytes]:
     """Run head over multiple already-resolved paths.
 
@@ -156,6 +161,8 @@ def head_multi(
         paths (list[PathSpec]): Resolved paths; only ``.virtual`` is read.
         read (Callable[..., Any]): Bound reader called as ``read(path)``;
             returns bytes, an awaitable of bytes, or an async byte iterator.
+        unread (frozenset[str]): operands that opened but do not read (a
+            directory): each prints its header and nothing else.
     """
     cached = cache_aware_read(read)
     return _head_multi(
@@ -165,6 +172,7 @@ def head_multi(
         c=c,
         show_headers=show_headers,
         zero_terminated=zero_terminated,
+        unread=unread,
     )
 
 
@@ -176,13 +184,16 @@ async def _head_multi(
     c: int | None = None,
     show_headers: bool = False,
     zero_terminated: bool = False,
+    unread: frozenset[str] = frozenset(),
 ) -> AsyncIterator[bytes]:
     for i, p in enumerate(paths):
         if show_headers:
             header = f"==> {operand_label(p, STDIN_HEADER_NAME)} <==\n"
             if i > 0:
                 header = "\n" + header
-            yield header.encode()
+            yield encode_text(header)
+        if p.virtual in unread:
+            continue
         source = read(p)
         if inspect.isawaitable(source):
             source = await source
@@ -222,12 +233,12 @@ async def head_generic(
     try:
         parsed = parse_flags(opts.flags)
     except ValueError as exc:
-        return None, IOResult(exit_code=1, stderr=str(exc).encode())
+        return None, IOResult(exit_code=1, stderr=encode_text(str(exc)))
     if paths:
         show_headers = (parsed.verbose or len(paths) > 1) and not parsed.quiet
-        readable, err = await split_readable(paths, stat, "head")
+        opened, unread, err = await split_opened(paths, stat, "head")
         io = operands_io(err)
-        if not readable:
+        if not opened:
             return None, io
         read = normalized_read(stream)
 
@@ -251,12 +262,13 @@ async def head_generic(
             return bounded()
 
         return head_multi(
-            readable,
+            opened,
             read=source_for,
             n=parsed.lines,
             c=parsed.bytes_,
             show_headers=show_headers,
             zero_terminated=parsed.zero_terminated,
+            unread=unread,
         ), io
     source = resolve_source(opts.stdin)
     body = head(
@@ -267,5 +279,7 @@ async def head_generic(
     )
     if parsed.verbose and not parsed.quiet:
         # -v heads a stdin nobody named with the name it gives `-`.
-        body = async_chain([f"==> {STDIN_HEADER_NAME} <==\n".encode(), body])
+        body = async_chain(
+            [encode_text(f"==> {STDIN_HEADER_NAME} <==\n"), body]
+        )
     return body, IOResult()

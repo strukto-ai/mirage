@@ -36,10 +36,11 @@ async def document(
     session_id: str | None,
     profile: str | None,
 ) -> Response:
-    registry = request.app.state.registry
-    if workspace_id not in registry:
+    entry = request.app.state.registry.visible(
+        workspace_id, request.state.account
+    )
+    if entry is None:
         raise HTTPException(404, "workspace not found")
-    entry = registry.get(workspace_id)
     method = (
         entry.runner.ws.vfs_md if kind == "vfs" else entry.runner.ws.skill_md
     )

@@ -37,8 +37,7 @@ import { fail, ok, operandText, result, splitValueFlags } from '../shared.ts'
 import { BLOCK_SUFFIX, SI_UNITS } from './constants.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { Result } from '../types.ts'
-
-const ENC = new TextEncoder()
+import { encodeText } from '../../../../shell/bytes.ts'
 
 // Parse a -B/--block-size argument into [bytes, header-label]; a plain byte
 // count or a 1024-based suffix (K/M/G/T), labelled after the raw argument.
@@ -315,7 +314,7 @@ export async function handleDf(
     data.push(cells)
   }
 
-  const table = data.length > 0 ? ENC.encode(renderTable(header, data, showType)) : null
+  const table = data.length > 0 ? encodeText(renderTable(header, data, showType)) : null
   if (errors.length > 0) {
     return result('df', { out: table, exitCode: 1, stderr: errors.join('') })
   }

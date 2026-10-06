@@ -245,6 +245,42 @@
         "stdout": "rc=0\nY\nX\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "mv_T_backup_none_still_refuses_a_nonempty_directory",
+      "seq": 15600203,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcF_m3/d1 /data/fcF_m3/d2 && echo x > /data/fcF_m3/d1/x && echo y > /data/fcF_m3/d2/y && mv -T --backup=none /data/fcF_m3/d1 /data/fcF_m3/d2; echo rc=$?; cat /data/fcF_m3/d1/x /data/fcF_m3/d2/y; rm -r /data/fcF_m3",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nx\ny\n",
+        "stderr": "mv: cannot overwrite '/data/fcF_m3/d2': Directory not empty\n"
+      },
+      "flags": [
+        "T",
+        "backup"
+      ]
     }
   ]
 }

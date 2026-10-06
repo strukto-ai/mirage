@@ -748,6 +748,122 @@
         "h",
         "c"
       ]
+    },
+    {
+      "id": "sort_check_refusal_escapes_the_word",
+      "seq": 15300101,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for w in $'x\\303\\251' $'x\\r' $'x\\001' $'x\\177' \"x'\" 'x\\' qu1et; do sort --check=\"$w\" 2>&1 | head -n 1; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "sort: invalid argument 'x\\303\\251' for '--check'\nsort: invalid argument 'x\\r' for '--check'\nsort: invalid argument 'x\\001' for '--check'\nsort: invalid argument 'x\\177' for '--check'\nsort: invalid argument 'x\\'' for '--check'\nsort: invalid argument 'x\\\\' for '--check'\nsort: invalid argument 'qu1et' for '--check'\n",
+        "stderr": ""
+      },
+      "flags": [
+        "check"
+      ]
+    },
+    {
+      "id": "sort_check_prefixes_and_repeated_modes",
+      "seq": 15300102,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'b\\na\\n' | sort --check=q; echo rc=$?; printf 'b\\na\\n' | sort --check=silent; echo rc=$?; printf 'b\\na\\n' | sort --check=diagnose; echo rc=$?; printf 'b\\na\\n' | sort -C --check=quiet; echo rc=$?; printf 'b\\na\\n' | sort -c --check=diagnose-first; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "sort: -:2: disorder: a\nsort: -:2: disorder: a\n"
+      },
+      "flags": [
+        "check",
+        "c",
+        "C"
+      ]
+    },
+    {
+      "id": "sort_check_modes_refuse_an_output_and_each_other",
+      "seq": 15300103,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'b\\na\\n' | sort --check -o /data/fcC_o 2>&1; echo rc=$?; printf 'b\\na\\n' | sort --check=silent -o /data/fcC_o 2>&1; echo rc=$?; printf 'b\\na\\n' | sort --check=diagnose-first -o /data/fcC_o 2>&1; echo rc=$?; printf 'a\\n' | sort -C -c 2>&1; echo rc=$?; printf 'a\\n' | sort --check=silent -c 2>&1; echo rc=$?; printf 'a\\n' | sort -c --check=quiet 2>&1; echo rc=$?; printf 'a\\n' | sort -C --check 2>&1; echo rc=$?; sort -C -o /data/fcC_o /data/a.txt /data/b.txt 2>&1; echo rc=$?; printf 'a\\n' | sort -c -C -o /data/fcC_p1 -o /data/fcC_p2 2>&1; echo rc=$?; rm -f /data/fcC_o /data/fcC_p1 /data/fcC_p2",
+      "expect": {
+        "exit": 0,
+        "stdout": "sort: options '-co' are incompatible\nrc=2\nsort: options '-Co' are incompatible\nrc=2\nsort: options '-co' are incompatible\nrc=2\nsort: options '-cC' are incompatible\nrc=2\nsort: options '-cC' are incompatible\nrc=2\nsort: options '-cC' are incompatible\nrc=2\nsort: options '-cC' are incompatible\nrc=2\nsort: extra operand '/data/b.txt' not allowed with -C\nrc=2\nsort: options '-cC' are incompatible\nrc=2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "check",
+        "c",
+        "C",
+        "o"
+      ]
     }
   ]
 }

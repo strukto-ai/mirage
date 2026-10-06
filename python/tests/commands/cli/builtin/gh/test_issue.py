@@ -132,7 +132,6 @@ async def test_a_pull_prints_the_fields_only_an_issue_has_at_their_zero(
 async def test_comments_page_through_the_half_the_number_turned_out_to_be(
     monkeypatch,
 ):
-
     def page(body, following):
         return {
             "__typename": "PullRequest",

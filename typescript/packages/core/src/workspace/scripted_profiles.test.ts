@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { ScriptSource } from '../runtime/routing/types.ts'
+import { ScriptSource } from '../runtime/types.ts'
 import { MountMode } from '../types.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -330,7 +330,8 @@ describe('profile policies at the op and session doors', () => {
       ws.createSession('s', { profile: 'release' })
       const refused = await ws.shell('export AWS_SECRET=x', { sessionId: 's' })
       expect(refused.exitCode).toBe(1)
-      expect(refused.stderrText).toBe('credentials are set by the operator\n')
+      expect(refused.stderrText).toBe('AWS_SECRET: permission denied\n')
+      expect(refused.refusal?.reason).toBe('credentials are set by the operator')
       const landed = await ws.shell('export SAFE=1 && echo $SAFE', { sessionId: 's' })
       expect(landed.exitCode).toBe(0)
       expect(landed.stdoutText).toBe('1\n')

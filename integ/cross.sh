@@ -65,11 +65,10 @@ check_limit() {
 
 # cross.yaml sets default_session_id: crosssess. Both CLIs must read the
 # snake_case top-level key and seed the workspace's default session with it.
-# (TS emits sessionId, Python emits session_id in the create payload.)
 check_default_session() {
   local create_json="$1" name="$2"
   local sid
-  sid="$(echo "$create_json" | jq -r '.sessions[0].sessionId // .sessions[0].session_id // empty')"
+  sid="$(echo "$create_json" | jq -r '.sessions[0].session_id // empty')"
   if [ "$sid" == "crosssess" ]; then
     echo "  OK   default_session_id applied ($name)"
   else

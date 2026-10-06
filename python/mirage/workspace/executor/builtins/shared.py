@@ -12,9 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Sequence
+
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.flag_view import FlagView
 from mirage.io import IOResult
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.errors import ArithError
 from mirage.types import PathSpec, word_text
 from mirage.utils.path import resolve_path
@@ -23,6 +28,8 @@ from mirage.workspace.executor.builtins.constants import (
     IDENTIFIER_RE,
 )
 from mirage.workspace.executor.builtins.types import Result
+from mirage.workspace.executor.command.flags import option_error, parse_flags
+from mirage.workspace.executor.command.types import ParsedCommand
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.types import ExecutionNode
 
@@ -44,7 +51,7 @@ def result(
         io (IOResult | None): prebuilt IOResult to reuse (e.g. carrying
             writes); its exit_code/stderr are overwritten.
     """
-    err = stderr.encode() if stderr else b""
+    err = encode_text(stderr) if stderr else b""
     io = io if io is not None else IOResult()
     io.exit_code = exit_code
     if err:
@@ -97,42 +104,31 @@ def abs_path(arg: str | PathSpec, cwd: str) -> str:
     return resolve_path(arg, cwd)
 
 
-def split_flags(
-    args: list[str | PathSpec],
-    known: str,
-) -> tuple[set[str], list[str | PathSpec]]:
-    """Split leading single-letter flags, permissively.
+def parse_line(
+    cmd: str, args: list[str | PathSpec], cwd: str
+) -> tuple[ParsedCommand, FlagView, Result | None]:
+    """Parse a builtin's words with its spec, the way getopt_long does.
 
-    A token containing any unknown letter is kept as an operand instead
-    of erroring (``ln``/``readlink`` behavior).
+    Options may follow operands until ``--``, long options take their
+    unique abbreviations, and a bad one is refused in GNU's words with
+    the ``Try`` line. The operands keep the PathSpecs the classifier made.
 
     Args:
-        args (list[str | PathSpec]): args after the command name.
-        known (str): accepted single-letter flags.
-
-    Returns:
-        tuple: (flags, operands).
+        cmd (str): the builtin's name.
+        args (list[str | PathSpec]): the classified words after the name.
+        cwd (str): the session working directory.
     """
-    flags: set[str] = set()
-    operands: list[str | PathSpec] = []
-    parsing = True
-    for arg in args:
-        s = operand_text(arg)
-        if parsing and s == "--":
-            parsing = False
-            continue
-        if (
-            parsing
-            and s != "-"
-            and len(s) >= 2
-            and s.startswith("-")
-            and all(c in known for c in s[1:])
-        ):
-            flags.update(s[1:])
-            continue
-        parsing = False
-        operands.append(arg)
-    return flags, operands
+    spec = SPECS[cmd]
+    parsed = parse_flags(args, spec, cmd, cwd)
+    refused = option_error(cmd, parsed)
+    if refused is not None:
+        message, code = refused
+        return (
+            parsed,
+            FlagView({}, spec=spec),
+            fail(cmd, decode_text(message), code),
+        )
+    return parsed, FlagView(parsed.flag_kwargs, spec=spec), None
 
 
 def split_value_flags(
@@ -196,13 +192,13 @@ def split_value_flags(
 
 async def expand_operands(
     namespace: Namespace,
-    operands: list[str | PathSpec],
+    operands: Sequence[str | PathSpec],
 ) -> list[PathSpec]:
     """Coerce operands to PathSpec and expand glob patterns per mount.
 
     Args:
         namespace (Namespace): addressing authority (mount lookup).
-        operands (list[str | PathSpec]): positional operands.
+        operands (Sequence[str | PathSpec]): positional operands.
     """
     out: list[PathSpec] = []
     for item in operands:
@@ -252,7 +248,7 @@ def refusal(cmd: str, exc: PolicyDenied) -> Result:
         cmd (str): builtin name for the node.
         exc (PolicyDenied): the gate's refusal.
     """
-    err = f"{exc.strerror}\n".encode()
+    err = encode_text(f"{exc.strerror}\n")
     return (
         None,
         IOResult(exit_code=1, stderr=err),
@@ -267,7 +263,7 @@ def readonly_refusal(cmd: str, name: str) -> Result:
         cmd (str): builtin name for the node.
         name (str): the frozen variable.
     """
-    err = f"bash: {name}: readonly variable\n".encode()
+    err = encode_text(f"bash: {name}: readonly variable\n")
     return (
         None,
         IOResult(exit_code=1, stderr=err),
@@ -289,12 +285,27 @@ def arith_refusal(cmd: str, exc: ArithError) -> Result:
         cmd (str): builtin name for the node.
         exc (ArithError): the evaluator's refusal, text already led.
     """
-    err = f"bash: {cmd}: {exc}\n".encode()
+    err = encode_text(f"bash: {cmd}: {exc}\n")
     return (
         None,
         IOResult(exit_code=1, stderr=err),
         ExecutionNode(command=cmd, exit_code=1, stderr=err),
     )
+
+
+def record_delimiter(text: str | None) -> bytes:
+    """The byte ``read -d`` and ``mapfile -d`` stop at.
+
+    Bash takes the first byte of the argument, not its first character
+    (bash 5.2: ``-d é`` stops at 0xc3, ``-d $'\\xff'`` at the raw byte);
+    an empty argument is NUL and no ``-d`` is a newline.
+
+    Args:
+        text (str | None): the ``-d`` argument, or None when not given.
+    """
+    if text is None:
+        return b"\n"
+    return encode_text(text)[:1] or b"\0"
 
 
 def is_valid_name(name: str) -> bool:
@@ -336,7 +347,7 @@ def builtin_error(name: str, message: str) -> bytes:
         name (str): the builtin.
         message (str): what went wrong, without the newline.
     """
-    return f"bash: {name}: {message}\n".encode()
+    return encode_text(f"bash: {name}: {message}\n")
 
 
 def numeric_operands(args: list[str]) -> list[str]:

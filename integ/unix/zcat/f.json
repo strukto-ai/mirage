@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "id": "zcat_f_copies_bytes_that_are_not_gzip",
+      "seq": 15100221,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_zf && cd /data/fcA_zf && printf '' > e && printf '\\037' > o && (printf hello | gzip; printf '\\0\\0') > z && zcat -f e o z | od -An -tx1; cd / && rm -r /data/fcA_zf)",
+      "expect": {
+        "exit": 0,
+        "stdout": " 1f 68 65 6c 6c 6f 00 00\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
+    }
+  ]
+}

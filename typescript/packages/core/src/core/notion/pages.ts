@@ -52,17 +52,6 @@ async function paginateTool(
   return items.map(asObject)
 }
 
-export async function searchTopLevelPages(transport: NotionTransport): Promise<Json[]> {
-  const baseArgs = { filter: { value: 'page', property: 'object' }, page_size: 100 }
-  const all = await paginateTool(transport, 'API-post-search', baseArgs)
-  const filtered: Json[] = []
-  for (const page of all) {
-    const parent = asObject(page.parent)
-    if (parent.type === 'workspace') filtered.push(page)
-  }
-  return filtered
-}
-
 export async function searchDataSources(transport: NotionTransport): Promise<Json[]> {
   const baseArgs = { filter: { value: 'data_source', property: 'object' }, page_size: 100 }
   return paginateTool(transport, 'API-post-search', baseArgs)
@@ -132,7 +121,10 @@ export async function queryDataSourcePage(
   )
 }
 
-export async function getChildBlocks(transport: NotionTransport, blockId: string): Promise<Json[]> {
+export async function listBlockChildren(
+  transport: NotionTransport,
+  blockId: string,
+): Promise<Json[]> {
   return paginateTool(transport, 'API-retrieve-block-children', {
     block_id: blockId,
     page_size: 100,
@@ -141,18 +133,18 @@ export async function getChildBlocks(transport: NotionTransport, blockId: string
 
 const MAX_BLOCK_DEPTH = 10
 
-export async function getBlockTree(
+export async function listBlockTree(
   transport: NotionTransport,
   blockId: string,
   depth = 0,
 ): Promise<Json[]> {
-  const blocks = await getChildBlocks(transport, blockId)
+  const blocks = await listBlockChildren(transport, blockId)
   if (depth >= MAX_BLOCK_DEPTH) return blocks
   for (const block of blocks) {
     const btype = block.type
     if (btype === 'child_page' || btype === 'child_database') continue
     if (block.has_children === true && typeof block.id === 'string') {
-      block.children = await getBlockTree(transport, block.id, depth + 1)
+      block.children = await listBlockTree(transport, block.id, depth + 1)
     }
   }
   return blocks
@@ -168,7 +160,7 @@ export async function getChildPages(
   transport: NotionTransport,
   parentBlockId: string,
 ): Promise<ChildPageRef[]> {
-  const blocks = await getChildBlocks(transport, parentBlockId)
+  const blocks = await listBlockChildren(transport, parentBlockId)
   const refs: ChildPageRef[] = []
   for (const block of blocks) {
     if (block.type !== 'child_page') continue
@@ -188,8 +180,8 @@ export async function getChildPages(
 
 export async function searchPages(
   transport: NotionTransport,
-  query: string,
-  pageSize: number,
+  query = '',
+  pageSize = 100,
   maxResults?: number,
 ): Promise<Json[]> {
   const baseArgs: Json = {
@@ -198,14 +190,6 @@ export async function searchPages(
   }
   if (query !== '') baseArgs.query = query
   return paginateTool(transport, 'API-post-search', baseArgs, maxResults)
-}
-
-export async function appendBlocks(
-  transport: NotionTransport,
-  blockId: string,
-  body: Json,
-): Promise<Json> {
-  return transport.callTool('API-patch-block-children', { ...body, block_id: blockId })
 }
 
 export async function createComment(transport: NotionTransport, body: Json): Promise<Json> {

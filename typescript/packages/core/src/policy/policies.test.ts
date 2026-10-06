@@ -120,6 +120,12 @@ class DenyBigResults implements Policy {
   }
 }
 
+class SuppressCapacity implements Policy {
+  postOps(ctx: OpsResultContext): Action | null {
+    return ctx.op === 'statfs' ? { kind: 'deny', reason: 'no capacity' } : null
+  }
+}
+
 class ReadOnlyProd implements Policy {
   preOps(ctx: OpsContext): Action | null {
     if (ctx.write && ctx.path.virtual.startsWith('/data/prod/')) {
@@ -184,7 +190,7 @@ describe('Policies', () => {
   it('registry seeds the mount-root policy', async () => {
     const reg = registry()
     const deny = await reg.policies.preCommand(ctx('rm', [path('/data')], reg))
-    expect(deny?.reason).toContain('Device or resource busy')
+    expect(deny?.reason).toContain("cannot remove '/data'")
   })
 
   it('builtin runs first, then user policies in order', async () => {
@@ -192,7 +198,7 @@ describe('Policies', () => {
     policies.add(new RulePolicy({ reason: 'user rule', commands: ['rm'] }))
     // Both match `rm /data`; the built-in GNU message wins by order.
     let deny = await policies.preCommand(ctx('rm', [path('/data')]))
-    expect(deny?.reason).toContain('Device or resource busy')
+    expect(deny?.reason).toContain('Is a directory')
     // Only the user rule matches `rm /data/x`.
     deny = await policies.preCommand(ctx('rm', [path('/data/x')]))
     expect(deny).toEqual({ kind: 'deny', reason: 'user rule', policy: 'RulePolicy' })
@@ -266,7 +272,8 @@ describe('Policies', () => {
     } catch (err) {
       expect((err as PolicyDenied).code).toBe('EACCES')
       expect((err as PolicyDenied).virtualPath).toBe('/data/x')
-      expect((err as PolicyDenied).message).toBe('no reads')
+      expect((err as PolicyDenied).message).toBe('Permission denied')
+      expect((err as PolicyDenied).refusal?.reason).toBe('no reads')
     }
     // No opinion on writes: the gate passes silently.
     await preOpsGate(policies, 'write', path('/data/x'), true, '/data/')
@@ -278,7 +285,7 @@ describe('Policies', () => {
     await postOpsGate(policies, 'read', path('/data/x'), false, '/data/', new Uint8Array(4))
     await expect(
       postOpsGate(policies, 'read', path('/data/x'), false, '/data/', new Uint8Array(64)),
-    ).rejects.toThrow(/result too large/)
+    ).rejects.toMatchObject({ refusal: { reason: 'result too large' } })
   })
 
   it('add takes code only: a policy that also carries a reason field is just a policy', async () => {
@@ -299,6 +306,22 @@ describe('Policies', () => {
 })
 
 describe('workspace policies', () => {
+  it('a postOps deny suppresses a capacity reply', async () => {
+    const ws = executableWorkspace()
+    try {
+      await ws.shell('touch /data/f')
+      ws.policies.add(new SuppressCapacity())
+      const result = await ws.shell('stat -f -c %b /data/f')
+      expect(result.exitCode).toBe(1)
+      expect(new TextDecoder().decode(result.stdout)).toBe('')
+      expect(new TextDecoder().decode(result.stderr)).toBe(
+        "stat: cannot read file system information for '/data/f': Permission denied\n",
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('guards refuse before backend I/O and leave other paths open', async () => {
     const ws = executableWorkspace([
       {
@@ -312,7 +335,7 @@ describe('workspace policies', () => {
       const refused = await ws.shell('rm /data/prod/x.txt')
       expect(refused.exitCode).toBe(1)
       expect(new TextDecoder().decode(refused.stderr)).toBe(
-        'rm: /data/prod/x.txt: production data is protected\n',
+        "rm: cannot remove '/data/prod/x.txt': Permission denied\n",
       )
       const intact = await ws.shell('cat /data/prod/x.txt')
       expect(new TextDecoder().decode(intact.stdout)).toBe('keep\n')
@@ -382,7 +405,10 @@ describe('workspace policies', () => {
       })
       const frozen = await ws.shell('touch /data/prod/x')
       expect(frozen.exitCode).toBe(1)
-      expect(new TextDecoder().decode(frozen.stderr)).toContain('frozen')
+      expect(new TextDecoder().decode(frozen.stderr)).toBe(
+        "touch: cannot touch '/data/prod/x': Permission denied\n",
+      )
+      expect(frozen.refusal?.reason).toBe('frozen')
       const ok = await ws.shell('touch /data/dev-x && echo done')
       expect(new TextDecoder().decode(ok.stdout)).toContain('done')
     } finally {
@@ -400,7 +426,7 @@ describe('workspace policies', () => {
       await ws.shell('mkdir -p /data/prod')
       const refused = await ws.shell('shuf -e a -o /data/prod/out')
       expect(refused.exitCode).toBe(1)
-      expect(new TextDecoder().decode(refused.stderr)).toContain('prod is protected')
+      expect(refused.refusal?.reason).toBe('prod is protected')
       const listing = await ws.shell('ls /data/prod')
       expect(new TextDecoder().decode(listing.stdout)).not.toContain('out')
     } finally {
@@ -418,7 +444,9 @@ describe('workspace policies', () => {
       await expect(
         ws.dispatch('write', '/data/prod/x.txt', [new TextEncoder().encode('nope')]),
       ).rejects.toThrow(PolicyDenied)
-      await expect(ws.dispatch('read', '/data/prod/x.txt')).rejects.toThrow(/prod is protected/)
+      await expect(ws.dispatch('read', '/data/prod/x.txt')).rejects.toMatchObject({
+        refusal: { reason: 'prod is protected' },
+      })
     } finally {
       await ws.close()
     }
@@ -620,7 +648,9 @@ describe('Limit end to end', () => {
       ws.policies.add(new CapFour())
       ws.policies.add(new DenyReads())
       await ws.dispatch('write', '/data/f.txt', [new TextEncoder().encode('hello world')])
-      await expect(ws.dispatch('read', '/data/f.txt')).rejects.toThrow(/reads are suppressed/)
+      await expect(ws.dispatch('read', '/data/f.txt')).rejects.toMatchObject({
+        refusal: { reason: 'reads are suppressed' },
+      })
     } finally {
       await ws.close()
     }

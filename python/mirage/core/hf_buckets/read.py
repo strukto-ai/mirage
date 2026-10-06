@@ -42,7 +42,7 @@ def is_missing(exc: HfHubError) -> bool:
     return exc.status == 404 and exc.error_code == MISSING_ENTRY
 
 
-async def read_bytes(
+async def read(
     accessor: HfBucketsAccessor,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,

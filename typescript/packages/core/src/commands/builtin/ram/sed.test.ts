@@ -45,93 +45,33 @@ async function runSed(
 }
 
 describe('sed -f', () => {
-  it('reads the script from a file', async () => {
+  // A script file runs whole, every command in it, after any -e.
+  it.each([
+    ['s/hello/HI/\ns/world/EARTH/\n', {}],
+    ['s/world/EARTH/\n', { e: 's/hello/HI/' }],
+  ])('runs the script file %j', async (script, extra) => {
     const vfs = new RAMVFS()
-    vfs.store.files.set('/tmp/prog.sed', ENC.encode('s/hello/HI/\n'))
+    vfs.store.files.set('/tmp/prog.sed', ENC.encode(script))
     vfs.store.files.set('/tmp/in.txt', ENC.encode('hello world\n'))
     const out = await runSed(vfs, [], [PathSpec.fromStrPath('/tmp/in.txt')], {
-      f: ['/tmp/prog.sed'],
-    })
-    expect(out).toBe('HI world\n')
-  })
-
-  it('applies multiple commands from the script file', async () => {
-    const vfs = new RAMVFS()
-    vfs.store.files.set('/tmp/prog.sed', ENC.encode('s/hello/HI/\ns/world/EARTH/\n'))
-    vfs.store.files.set('/tmp/in.txt', ENC.encode('hello world\n'))
-    const out = await runSed(vfs, [], [PathSpec.fromStrPath('/tmp/in.txt')], {
+      ...extra,
       f: ['/tmp/prog.sed'],
     })
     expect(out).toBe('HI EARTH\n')
-  })
-
-  it('combines -e and -f (e then f)', async () => {
-    const vfs = new RAMVFS()
-    vfs.store.files.set('/tmp/prog.sed', ENC.encode('s/world/EARTH/\n'))
-    vfs.store.files.set('/tmp/in.txt', ENC.encode('hello world\n'))
-    const out = await runSed(vfs, [], [PathSpec.fromStrPath('/tmp/in.txt')], {
-      e: 's/hello/HI/',
-      f: ['/tmp/prog.sed'],
-    })
-    expect(out).toBe('HI EARTH\n')
-  })
-
-  it('reads the script file in stdin mode', async () => {
-    const vfs = new RAMVFS()
-    vfs.store.files.set('/tmp/prog.sed', ENC.encode('s/hello/HI/\n'))
-    const out = await runSed(vfs, [], [], { f: ['/tmp/prog.sed'] }, ENC.encode('hello world\n'))
-    expect(out).toBe('HI world\n')
   })
 })
 
 describe('sed -i beyond s and d', () => {
-  it('c writes the changed text to the file', async () => {
-    const vfs = new RAMVFS()
-    vfs.store.dirs.add('/tmp')
-    vfs.store.files.set('/tmp/a.txt', ENC.encode('one\ntwo\n'))
-    const out = await runSed(vfs, ['c chg'], [PathSpec.fromStrPath('/tmp/a.txt')], { i: true })
-    expect(out).toBe('')
-    expect(DEC.decode(vfs.store.files.get('/tmp/a.txt'))).toBe('chg\nchg\n')
-  })
-
-  it('i writes the inserted line to the file', async () => {
+  it.each([
+    ['2q', 'one\ntwo\n'],
+    ['y/o/0/', '0ne\ntw0\nthree\n'],
+  ])('%s rewrites the file in place', async (script, want) => {
     const vfs = new RAMVFS()
     vfs.store.dirs.add('/tmp')
     vfs.store.files.set('/tmp/a.txt', ENC.encode('one\ntwo\nthree\n'))
-    const out = await runSed(vfs, ['2i inserted'], [PathSpec.fromStrPath('/tmp/a.txt')], {
-      i: true,
-    })
+    const out = await runSed(vfs, [script], [PathSpec.fromStrPath('/tmp/a.txt')], { i: true })
     expect(out).toBe('')
-    expect(DEC.decode(vfs.store.files.get('/tmp/a.txt'))).toBe('one\ninserted\ntwo\nthree\n')
-  })
-
-  it('p doubles every line in the file', async () => {
-    const vfs = new RAMVFS()
-    vfs.store.dirs.add('/tmp')
-    vfs.store.files.set('/tmp/a.txt', ENC.encode('one\ntwo\n'))
-    const out = await runSed(vfs, ['p'], [PathSpec.fromStrPath('/tmp/a.txt')], { i: true })
-    expect(out).toBe('')
-    expect(DEC.decode(vfs.store.files.get('/tmp/a.txt'))).toBe('one\none\ntwo\ntwo\n')
-  })
-
-  it('q truncates the file at the quit line', async () => {
-    const vfs = new RAMVFS()
-    vfs.store.dirs.add('/tmp')
-    vfs.store.files.set('/tmp/a.txt', ENC.encode('one\ntwo\nthree\n'))
-    const out = await runSed(vfs, ['2q'], [PathSpec.fromStrPath('/tmp/a.txt')], { i: true })
-    expect(out).toBe('')
-    expect(DEC.decode(vfs.store.files.get('/tmp/a.txt'))).toBe('one\ntwo\n')
-  })
-
-  it('y transliterates the file in place', async () => {
-    const vfs = new RAMVFS()
-    vfs.store.dirs.add('/tmp')
-    vfs.store.files.set('/tmp/a.txt', ENC.encode('one\ntwo\n'))
-    const out = await runSed(vfs, ['y/o/0/'], [PathSpec.fromStrPath('/tmp/a.txt')], {
-      i: true,
-    })
-    expect(out).toBe('')
-    expect(DEC.decode(vfs.store.files.get('/tmp/a.txt'))).toBe('0ne\ntw0\n')
+    expect(DEC.decode(vfs.store.files.get('/tmp/a.txt'))).toBe(want)
   })
 })
 

@@ -96,6 +96,19 @@
         "stdout": "",
         "stderr": "cat: /docs/owned/File__id.wrong.json: No such file or directory\n"
       }
+    },
+    {
+      "id": "gapp_rm_operand_refusals",
+      "seq": 930034,
+      "targets": [
+        "gapps"
+      ],
+      "command": "(cd /docs/owned && rm; echo rc=$?; rm -f; echo rc=$?; rm -f nope/x.gdoc.json; echo rc=$?; rm ''; echo rc=$?)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=0\nrc=0\nrc=1\n",
+        "stderr": "rm: missing operand\nTry 'rm --help' for more information.\nrm: cannot remove '': No such file or directory\n"
+      }
     }
   ]
 }

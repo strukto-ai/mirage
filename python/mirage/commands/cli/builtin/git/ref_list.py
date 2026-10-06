@@ -642,7 +642,7 @@ def unique_width(oid: str, width: int, ids: Sequence[str]) -> int:
     return min(width, len(oid))
 
 
-def _unique_abbreviations(
+def unique_abbreviations(
     repo: BaseRepo, widths: Mapping[str, int]
 ) -> dict[str, int]:
     """Widen requested prefixes against loose and packed objects, including
@@ -760,7 +760,7 @@ async def ref_listing(
         ctx = replace(
             ctx,
             abbreviations=await asyncio.to_thread(
-                _unique_abbreviations, repo, widths
+                unique_abbreviations, repo, widths
             ),
         )
     return items, ctx, errors

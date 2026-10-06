@@ -15,11 +15,15 @@
 import errno
 import inspect
 import logging
+import os
 from dataclasses import replace
 from typing import Any
 
 from mirage.commands.spec.usage import operand_exit_code
+from mirage.context import note_refusal
 from mirage.policy.base import Policy
+from mirage.policy.builtin.hidden_paths import HiddenPathsPolicy
+from mirage.policy.builtin.mount_mode import MountModePolicy
 from mirage.policy.constants import POLICY_DENIED_EXIT
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.mixin import SessionScopedMixin
@@ -30,12 +34,14 @@ from mirage.policy.types import (
     Deny,
     DenyScope,
     ExecuteResultContext,
+    Hide,
     OpsContext,
     OpsResultContext,
     Pending,
     SessionContext,
 )
-from mirage.types import Limit, PathSpec, Refusal
+from mirage.types import Limit, MountMode, PathSpec, Refusal
+from mirage.utils.errors import eacces, fs_error_line
 
 logger = logging.getLogger(__name__)
 
@@ -52,22 +58,27 @@ def render_deny(subject: str, deny: Deny) -> tuple[bytes, int]:
     """The command plane's rendering of a refusal: stderr and exit code.
 
     The one place the outcome table for that plane is written down, so
-    a document rule and a coded policy print alike: a whole-command
-    Deny is bash's own ``<subject>: Permission denied`` at 126, with
-    the reason on the result's ``refusal`` record rather than on
-    stderr; an operand Deny keeps the GNU voice ``<subject>: <reason>``
-    at the command's operand-refusal code (1, tar 2), because there
-    the reason is the diagnostic.
+    a document rule and a coded policy print alike, and the policy's
+    reason is never mixed into what the terminal says: a whole-command
+    Deny is bash's own ``<subject>: Permission denied`` at 126; an
+    operand Deny about a path is the command's own GNU line for that
+    operand and EACCES; both leave the reason on the result's
+    ``refusal`` record. An operand Deny that names no path keeps
+    ``<subject>: <reason>``, because there the reason is the diagnostic
+    a built-in worded in POSIX's terms. Operand refusals exit at the
+    command's operand-refusal code (1, tar 2).
 
     Args:
         subject (str): the command name (or ``line`` at the boundary).
         deny (Deny): the action.
     """
     if deny.scope is DenyScope.OPERAND:
-        return (
-            f"{subject}: {deny.reason}\n".encode(),
-            operand_exit_code(subject),
+        line = (
+            fs_error_line(subject, deny.path, eacces(deny.path))
+            if deny.path is not None
+            else f"{subject}: {deny.reason}\n"
         )
+        return line.encode(), operand_exit_code(subject)
     return f"{subject}: Permission denied\n".encode(), POLICY_DENIED_EXIT
 
 
@@ -118,8 +129,8 @@ def says_why(text: str, refusal: Refusal) -> bool:
     """Whether ``text`` already carries the line that says why the
     command was refused.
 
-    Only an operand-scoped denial has one: its GNU diagnostic
-    ``<command>: <reason>`` is the reason, wherever a redirect landed
+    Only an operand-scoped denial that names no path has one: its
+    diagnostic ``<command>: <reason>`` is the reason, wherever a redirect landed
     it, so a surface that describes the record after the text looks
     for that line rather than for the scope (``2>/dev/null`` takes the
     line away and the record is the only reason left, ``2>&1`` moves it
@@ -139,6 +150,28 @@ def says_why(text: str, refusal: Refusal) -> bool:
     return any(line.endswith(tail) for line in text.split("\n"))
 
 
+def policy_denied(
+    deny: Deny, filename: str, strerror: str = os.strerror(errno.EACCES)
+) -> PolicyDenied:
+    """The error a door raises for a policy's Deny, its record noted for
+    the line running it.
+
+    The error says what the terminal would, EACCES and ``strerror``;
+    the reason rides the record, on the error for a caller that catches
+    it and on the line's result for one that only reads what a command
+    printed.
+
+    Args:
+        deny (Deny): the policy's refusal.
+        filename (str): the path or name refused.
+        strerror (str): the terminal's words, ``Permission denied``
+            unless the door words its own.
+    """
+    refusal = refusal_of(deny)
+    note_refusal(refusal)
+    return PolicyDenied(errno.EACCES, strerror, filename, refusal=refusal)
+
+
 async def pre_ops_gate(
     policies: "Policies",
     op: str,
@@ -146,6 +179,11 @@ async def pre_ops_gate(
     write: bool,
     prefix: str,
     session_id: str = "",
+    *,
+    mode: MountMode | None = None,
+    create: bool = False,
+    subtree: bool = False,
+    check_hidden: bool = True,
 ) -> None:
     """Fire pre_ops at an op door; a Deny becomes EACCES.
 
@@ -163,16 +201,38 @@ async def pre_ops_gate(
         prefix (str): the owning mount's prefix.
         session_id (str): the session the door serves, empty for the
             unbound host view.
+        mode (MountMode | None): the owning mount's mode, judged by the
+            mount-mode built-in; None at a door that judges it itself.
+        create (bool): the op creates the path.
+        subtree (bool): the op mutates the path's descendants too.
+        check_hidden (bool): False only for a door that has already
+            answered the hides itself.
     """
-    if not policies.wants("pre_ops"):
+    if not (
+        policies.wants("pre_ops")
+        or check_hidden
+        or (write and mode is not None)
+    ):
         return
-    deny = await policies.pre_ops(
+    answer = await policies.pre_ops(
         OpsContext(
-            op=op, path=path, write=write, prefix=prefix, session_id=session_id
-        )
+            op=op,
+            path=path,
+            write=write,
+            prefix=prefix,
+            session_id=session_id,
+            mode=mode,
+            create=create,
+            subtree=subtree,
+        ),
+        check_hidden=check_hidden,
     )
-    if deny is not None:
-        raise PolicyDenied(errno.EACCES, deny.reason, path.virtual)
+    if isinstance(answer, Hide):
+        raise answer.error
+    if answer is not None:
+        if answer.error is not None:
+            raise answer.error
+        raise policy_denied(answer, path.virtual)
 
 
 async def post_ops_gate(
@@ -205,7 +265,9 @@ async def post_ops_gate(
         )
     )
     if deny is not None:
-        raise PolicyDenied(errno.EACCES, deny.reason, path.virtual)
+        if deny.error is not None:
+            raise deny.error
+        raise policy_denied(deny, path.virtual)
     return bound
 
 
@@ -229,7 +291,7 @@ async def pre_session_gate(
         return
     deny = await policies.pre_session(ctx)
     if deny is not None:
-        raise PolicyDenied(errno.EACCES, deny.reason, ctx.key)
+        raise policy_denied(deny, ctx.key, f"{ctx.key}: permission denied")
 
 
 async def post_execute_gate(
@@ -296,6 +358,8 @@ class Policies:
         self._policies: list[Policy] = list(policies or [])
         self._wanted: frozenset[str] = frozenset()
         self._rescan()
+        self._hidden = HiddenPathsPolicy()
+        self._mode = MountModePolicy()
 
     def add(self, policy: Policy) -> None:
         """Register a policy after the existing ones.
@@ -387,7 +451,12 @@ class Policies:
         asked: Ask | None = None
         # Keep this gate's order stable if the host edits registrations
         # while a hook awaits. Changes take effect at the next gate.
-        for policy in tuple(self._policies):
+        chain: tuple[Policy, ...] = tuple(self._policies)
+        if hook == "pre_ops":
+            # The mode answers last, after every policy that could
+            # explain the refusal in its own words.
+            chain = (*chain, self._mode)
+        for policy in chain:
             if getattr(type(policy), hook) is base:
                 continue
             name = type(policy).__name__
@@ -431,12 +500,26 @@ class Policies:
         action, _ = await self._fire("pre_command", ctx)
         return action
 
-    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
+    async def pre_ops(
+        self, ctx: OpsContext, *, check_hidden: bool = True
+    ) -> Hide | Deny | None:
         """Fire pre_ops across the policies; first Deny wins.
+
+        The built-in hides answer before every policy, with a Hide that
+        outranks whatever a policy would say, so a refusal never tells a
+        session a hidden name exists; the built-in mount mode answers
+        after them. Both hold whether or not any policy overrides the
+        hook.
 
         Args:
             ctx (OpsContext): the op about to run.
+            check_hidden (bool): False only for a door that has already
+                answered the hides itself.
         """
+        if check_hidden:
+            hidden = await self._hidden.pre_ops(ctx)
+            if hidden is not None:
+                return hidden
         action, _ = await self._fire("pre_ops", ctx)
         return _deny_only("pre_ops", action)
 

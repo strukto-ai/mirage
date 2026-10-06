@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { NO_WRITE, planFlush } from './flush.ts'
+export { planFlush } from './flush.ts'
+export type { FlushKind, FlushStep } from './types.ts'
 export { parseMode, type OpenMode } from './mode.ts'
 export { FileHandle, writeRuns } from './file_handle.ts'
 export { FileTable } from './file_table.ts'

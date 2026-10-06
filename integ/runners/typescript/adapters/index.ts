@@ -29,6 +29,7 @@ import {
 } from '@aws-sdk/client-s3'
 import { OPFSVFS, Workspace as BrowserWorkspace } from '@struktoai/mirage-browser'
 import type { ReadSpec } from '@struktoai/mirage-node'
+import type { RedisCacheConfig } from '@struktoai/mirage-core/cache/file/config'
 import {
   AIRTABLE,
   AirtableVFS,
@@ -105,7 +106,7 @@ import { parseSessionProfile, type SessionProfile } from '@struktoai/mirage-core
 import { normalizePostgresConfig } from '@struktoai/mirage-core/vfs/postgres/config'
 import { normalizeMongoDBConfig } from '@struktoai/mirage-core/vfs/mongodb/config'
 import { normalizeTrelloConfig } from '@struktoai/mirage-core/vfs/trello/config'
-import { ScriptSource } from '@struktoai/mirage-core/runtime/routing/types'
+import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import * as lancedb from '@lancedb/lancedb'
 import { QdrantClient } from '@qdrant/js-client-rest'
 import { ChromaClient } from 'chromadb'
@@ -117,8 +118,10 @@ import {
 } from '../../../../typescript/packages/browser/src/test-utils.ts'
 import { integRoot, walkFiles } from '../harness.ts'
 import { commit as hubCommit } from '@struktoai/mirage-node/core/hf_hub/commit'
-import type { ExecWorkspace, Mount, Target } from '../harness.ts'
+import type { Mount, Target } from '../harness.ts'
+import type { ExecWorkspace } from '../execution.ts'
 import { buildSecretsEnv } from './secrets.ts'
+import { CommandService, CLI as COMMAND_CLI } from './commands.ts'
 import { start as startKitFake } from '../../../server/kit/typescript/index.ts'
 import { buildRfc822 } from '../../../server/mail/rfc822.ts'
 import type { MailEntry } from '../../../server/mail/rfc822.ts'
@@ -252,6 +255,7 @@ function installLocalClis(
   target: Target,
 ): void {
   if (target.clis?.includes('git') === true) ws.registerCli('git', GIT)
+  if (target.clis?.includes('scope-probe') === true) ws.registerCli('scope-probe', COMMAND_CLI)
 }
 
 // Where a target declares console: {type: 'redis'}, each job's console
@@ -274,6 +278,18 @@ function consoleFactoryFor(target: Target): ConsoleFactory | undefined {
         ttlSeconds: 3600,
       }),
     )
+}
+
+// Where a target declares cache: {type: 'redis'}, the file cache rides
+// REDIS_URL under this open's own key prefix. Only the ram opener
+// consults this (main.ts refuses a cache block on any other VFS).
+function cacheFor(target: Target): RedisCacheConfig | undefined {
+  if (target.cache?.type !== 'redis') return undefined
+  return {
+    type: 'redis',
+    url: process.env.REDIS_URL ?? 'redis://localhost:6379/0',
+    keyPrefix: `mirage-integ-cache-${randomBytes(4).toString('hex')}:`,
+  }
 }
 
 // The target's profiles, and which one shapes a session that names none.
@@ -330,17 +346,24 @@ async function openRam(target: Target): Promise<Open> {
     if (m.alias_of !== undefined && existing === undefined) {
       throw new Error(`alias_of names no built mount: ${m.alias_of}`)
     }
-    const vfs = existing ?? new RAMVFS()
+    const vfs =
+      existing ??
+      (['command-service', 'metadata-service'].includes(m.backend ?? '')
+        ? new CommandService(m.backend === 'metadata-service')
+        : new RAMVFS())
+    if (m.caches_reads === true) (vfs as unknown as { cachesReads: boolean }).cachesReads = true
     built[m.path] = vfs
     mounts[m.path] =
       m.mode === 'read' ? [vfs, MountMode.READ] : m.mode === 'exec' ? [vfs, MountMode.EXEC] : vfs
   }
   const secretsEnv = target.secrets !== undefined ? buildSecretsEnv(target.secrets) : null
   const consoleFactory = consoleFactoryFor(target)
+  const cache = cacheFor(target)
   const ws = new Workspace(mounts, {
     mode: MountMode.WRITE,
     ...(target.agentId !== undefined ? { agentId: target.agentId } : {}),
     ...(consoleFactory !== undefined ? { consoleFactory } : {}),
+    ...(cache !== undefined ? { cache } : {}),
     ...(secretsEnv !== null ? { env: secretsEnv.env } : {}),
     ...permissionOptions(target),
   })

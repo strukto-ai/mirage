@@ -198,7 +198,6 @@ jobs:
           run integ/truth/typescript/redis_cache.json
           run integ/truth/typescript/redis_vfs.json
           run integ/truth/typescript/redis_browser.json
-          run integ/truth/version_branching.json
           exit $bad
 
       # Moved from Pre-commit, which went diff-scoped: knip reads the

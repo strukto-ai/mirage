@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "id": "gzip_2_to_8_round_trip",
+      "seq": 15100111,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_lv && cd /data/fcA_lv && printf 'level\\n' > f && gzip -2 -c f | gunzip -c && gzip -3c f | gunzip -c && gzip -c -4 f | gunzip -c && gzip -5 f && zcat f.gz && gzip -d f.gz && gzip -6k f && gzip -7 -f f && zcat f.gz && gzip -dc f.gz | gzip -8 | gunzip && ls; rc=$?; cd / && rm -r /data/fcA_lv; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "level\nlevel\nlevel\nlevel\nlevel\nlevel\nf.gz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8"
+      ]
+    },
+    {
+      "id": "gzip_last_level_wins_and_levels_differ",
+      "seq": 16100118,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/gzlv && seq 1 3000 > /data/gzlv/f && cd /data/gzlv && gzip -1 -c f > a.gz && gzip -9 -c f > b.gz && gzip -9 -1 -c f > c.gz && gzip -1 -9 -c f > d.gz; cmp -s a.gz b.gz || echo differ; cmp -s a.gz c.gz && echo last; cmp -s b.gz d.gz && echo last; gunzip -c a.gz | cmp - f && echo same; cd / && rm -r /data/gzlv)",
+      "expect": {
+        "exit": 0,
+        "stdout": "differ\nlast\nlast\nsame\n",
+        "stderr": ""
+      },
+      "flags": [
+        "1",
+        "9",
+        "c"
+      ]
+    }
+  ]
+}

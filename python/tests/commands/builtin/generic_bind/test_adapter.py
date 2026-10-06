@@ -20,27 +20,17 @@ import pytest
 import mirage.commands.builtin.generic_bind.adapter as adapter
 from mirage.accessor.base import NOOPAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic_bind.adapter import (
-    CommandIO,
-    Operation,
-    dir_aware_stat,
-    dir_aware_stream,
-    with_dir_guard,
-)
 from mirage.commands.config import CommandOpts
 from mirage.context import (
     reset_admission,
     reset_current_session,
     reset_mount_gate,
-    reset_op_policies,
     set_admission,
     set_current_session,
     set_mount_gate,
-    set_op_policies,
 )
 from mirage.ops.types import NamespaceView
 from mirage.policy import Action, Deny, OpsContext, Policy
-from mirage.policy.policies import Policies
 from mirage.types import (
     ContentType,
     FileStat,
@@ -50,10 +40,22 @@ from mirage.types import (
     PathSpec,
     ShowEntry,
     ShownPaths,
+    Visibility,
 )
 from mirage.utils.errors import OperationNotSupportedError, format_fs_error
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
+from mirage.vfs.types import ContentSearchOps
 from mirage.workspace.session import SessionState
+
+from mirage.commands.builtin.generic_bind.adapter import (  # isort: skip
+    CommandIO,
+    Operation,
+    dir_aware_stat,
+    dir_aware_stream,
+    resolve_or_empty,
+    with_command_guards,
+    with_dir_guard,
+)
 
 TREE = {
     "/notion/pages": [
@@ -336,71 +338,19 @@ def _spec(virtual: str) -> PathSpec:
     )
 
 
-@pytest.mark.asyncio
-async def test_rule_guard_asks_the_bound_gate_and_leaves_stat_alone():
-    from mirage.commands.builtin.generic_bind.adapter import with_rule_guard
-    from mirage.context import reset_admission, set_admission
-
-    calls: list[tuple[str, ...]] = []
-
-    async def read_bytes(accessor, path, index=None):
-        calls.append(("read", path.virtual))
-        return b"x"
-
-    async def stat(accessor, path, index=None):
-        calls.append(("stat", path.virtual))
-        return FileStat(
-            name="k", type=FileType.FILE, content=ContentType.TEXT, size=1
-        )
-
-    async def readdir(accessor, path, index=None):
-        calls.append(("readdir", path.virtual))
-        return ["/data/locked/y"]
-
-    async def rename(accessor, src, dst):
-        calls.append(("rename", src.virtual, dst.virtual))
-
-    ops = with_rule_guard(
-        CommandIO(
-            readdir=readdir,
-            read_bytes=read_bytes,
-            read_stream=read_bytes,
-            stat=stat,
-            is_mounted=lambda a: True,
-            rename=rename,
-        )
-    )
-    acc = NOOPAccessor()
-    # No gate bound: every slot runs as is.
-    assert await ops.read_bytes(acc, _spec("/data/locked/y")) == b"x"
-    gate = _Gate(refused="/data/locked/y")
-    token = set_admission(gate)
-    try:
-        with pytest.raises(PermissionError):
-            await ops.read_bytes(acc, _spec("/data/locked/y"))
-        # stat is not a guarded slot: deny is present and refused.
-        assert (await ops.stat(acc, _spec("/data/locked/y"))).size == 1
-        # readdir asks about the directory, never filters its names.
-        assert await ops.readdir(acc, _spec("/data/locked")) == [
-            "/data/locked/y"
-        ]
-        # A pair op asks about both paths.
-        with pytest.raises(PermissionError):
-            await ops.rename(acc, _spec("/data/a"), _spec("/data/locked/y"))
-        await ops.rename(acc, _spec("/data/a"), _spec("/data/b"))
-    finally:
-        reset_admission(token)
-    assert gate.asked == [
-        "/data/locked/y",
-        "/data/locked",
-        "/data/a",
-        "/data/locked/y",
-        "/data/a",
-        "/data/b",
-    ]
-    assert ("read", "/data/locked/y") in calls
-    assert ("rename", "/data/a", "/data/locked/y") not in calls
-    assert ("rename", "/data/a", "/data/b") in calls
+def test_scoped_io_sets_a_content_index_aside():
+    # A content index names files under a listing a rule may refuse, so
+    # a scoped command walks the guarded readdir instead, as it does for
+    # every other native scan.
+    index = ContentSearchOps(narrow_paths=fake_readdir, enabled=lambda a: True)
+    io = make_io(content_search=index)
+    roots = [_spec("/data")]
+    free = NamespaceView(scoped=lambda _virtual: False)
+    judged = NamespaceView(scoped=lambda virtual: virtual == "/data")
+    assert adapter.scoped_io(io, free, roots, "/data/").content_search is index
+    assert adapter.scoped_io(io, None, roots, "/data/").content_search is index
+    scoped = adapter.scoped_io(io, judged, roots, "/data/")
+    assert scoped.content_search is None
 
 
 @pytest.mark.asyncio
@@ -488,124 +438,17 @@ async def _probe_chunks(calls: list[tuple[str, ...]], path: PathSpec):
 
 
 @pytest.mark.asyncio
-async def test_policy_guard_admits_slots_and_leaves_stat_alone():
-    from mirage.commands.builtin.generic_bind.adapter import with_policy_guard
-    from mirage.context import (
-        reset_mount_gate,
-        reset_op_policies,
-        set_mount_gate,
-        set_op_policies,
-    )
-    from mirage.policy.policies import Policies
-    from mirage.types import MountMode
-
+async def test_command_path_guard_admits_before_a_warm_serve(monkeypatch):
+    gate = _Gate("/data/secret")
+    monkeypatch.setattr(adapter, "get_admission", lambda: gate)
     calls: list[tuple[str, ...]] = []
-    raw = _policy_probe_ops(calls)
-    acc = NOOPAccessor()
-    # No binding: every slot runs as is, and no hook fires.
-    assert (
-        await with_policy_guard(raw).read_bytes(acc, _spec("/data/secret"))
-        == b"x"
+    ops = with_command_guards(
+        dataclasses.replace(_policy_probe_ops(calls), read_bytes=_warm_read)
     )
-    calls.clear()
-
-    policy = _SealedRead("/data/secret")
-    ptoken = set_op_policies(Policies([policy]))
-    gtoken = set_mount_gate("/data", MountMode.WRITE)
-    try:
-        ops = with_policy_guard(raw)
-        with pytest.raises(PermissionError) as excinfo:
-            await ops.read_bytes(acc, _spec("/data/secret"))
-        assert excinfo.value.errno == errno.EACCES
-        assert ("read", "/data/secret") not in calls
-        # The stream gates before its first chunk.
-        with pytest.raises(PermissionError):
-            async for _ in ops.read_stream(acc, _spec("/data/secret")):
-                pass
-        assert ("stream", "/data/secret") not in calls
-        # stat is not a guarded slot: deny is present and refused.
-        assert (await ops.stat(acc, _spec("/data/secret"))).size == 1
-        # readdir asks about the directory it lists.
-        assert await ops.readdir(acc, _spec("/data/dir")) == ["a"]
-        # A copy's source is a read; its destination is a write.
-        await ops.copy(acc, _spec("/data/src"), _spec("/data/dst"))
-        # A write slot asks with write=True.
-        await ops.unlink(acc, _spec("/data/gone"))
-    finally:
-        reset_mount_gate(gtoken)
-        reset_op_policies(ptoken)
-    assert ("read_bytes", "/data/secret", False) in policy.asked
-    assert ("read_stream", "/data/secret", False) in policy.asked
-    assert ("readdir", "/data/dir", False) in policy.asked
-    assert ("copy", "/data/src", False) in policy.asked
-    assert ("copy", "/data/dst", True) in policy.asked
-    assert ("unlink", "/data/gone", True) in policy.asked
-    assert not any(op == "stat" for op, _, _ in policy.asked)
-
-
-@pytest.mark.asyncio
-async def test_policy_guard_wrap_time_capture_covers_late_drains():
-    # head/tail/wc bind lazy readers the pipeline drains after dispatch
-    # has reset the context; the guard captured at wrap time still
-    # answers (_live_policy_scope).
-    from mirage.commands.builtin.generic_bind.adapter import with_policy_guard
-    from mirage.context import (
-        reset_mount_gate,
-        reset_op_policies,
-        set_mount_gate,
-        set_op_policies,
-    )
-    from mirage.policy.policies import Policies
-    from mirage.types import MountMode
-
-    calls: list[tuple[str, ...]] = []
-    raw = _policy_probe_ops(calls)
-    acc = NOOPAccessor()
-    policy = _SealedRead("/data/secret")
-    ptoken = set_op_policies(Policies([policy]))
-    gtoken = set_mount_gate("/data", MountMode.WRITE)
-    try:
-        ops = with_policy_guard(raw)
-    finally:
-        reset_mount_gate(gtoken)
-        reset_op_policies(ptoken)
-    # Both the slot call and the drain happen outside the window now.
     with pytest.raises(PermissionError):
-        async for _ in ops.read_stream(acc, _spec("/data/secret")):
-            pass
-    assert ("stream", "/data/secret") not in calls
-    with pytest.raises(PermissionError):
-        await ops.read_bytes(acc, _spec("/data/secret"))
-
-
-@pytest.mark.asyncio
-async def test_policy_guard_admits_before_a_warm_serve():
-    # The guard wraps outside the cache tier (`finish` in the factory),
-    # so a warm reader below it never answers a refused read.
-    from mirage.commands.builtin.generic_bind.adapter import with_policy_guard
-    from mirage.context import (
-        reset_mount_gate,
-        reset_op_policies,
-        set_mount_gate,
-        set_op_policies,
-    )
-    from mirage.policy.policies import Policies
-    from mirage.types import MountMode
-
-    calls: list[tuple[str, ...]] = []
-    warm = dataclasses.replace(_policy_probe_ops(calls), read_bytes=_warm_read)
-    acc = NOOPAccessor()
-    policy = _SealedRead("/data/secret")
-    ptoken = set_op_policies(Policies([policy]))
-    gtoken = set_mount_gate("/data", MountMode.WRITE)
-    try:
-        ops = with_policy_guard(warm)
-        with pytest.raises(PermissionError):
-            await ops.read_bytes(acc, _spec("/data/secret"))
-        assert await ops.read_bytes(acc, _spec("/data/open")) == b"warm"
-    finally:
-        reset_mount_gate(gtoken)
-        reset_op_policies(ptoken)
+        await ops.read_bytes(NOOPAccessor(), _spec("/data/secret"))
+    assert await ops.read_bytes(NOOPAccessor(), _spec("/data/open")) == b"warm"
+    assert gate.asked == ["/data/secret", "/data/open"]
 
 
 async def _warm_read(accessor, path, index=None):
@@ -857,8 +700,8 @@ async def test_guarded_rmdir_threads_the_index_to_the_fallback_listing(
         files.discard(path.virtual)
         removed.append(("unlink", path.virtual))
 
-    monkeypatch.setattr(adapter, "hidden_paths_intersect", lambda _v: True)
-    monkeypatch.setattr(adapter, "path_allowed", lambda v: v == "/m/d")
+    monkeypatch.setattr(adapter, "hidden_under", lambda _vis, _v: True)
+    monkeypatch.setattr(adapter, "path_visible", lambda _vis, v: v == "/m/d")
     spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     await adapter._guarded_rmdir(
         rmdir,
@@ -896,8 +739,8 @@ async def test_guarded_rmdir_answers_a_cascade_failure_with_the_refusal(
             errno.EROFS, "Read-only file system", path.virtual
         )
 
-    monkeypatch.setattr(adapter, "hidden_paths_intersect", lambda _v: True)
-    monkeypatch.setattr(adapter, "path_allowed", lambda v: v == "/m/d")
+    monkeypatch.setattr(adapter, "hidden_under", lambda _vis, _v: True)
+    monkeypatch.setattr(adapter, "path_visible", lambda _vis, v: v == "/m/d")
     spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     with pytest.raises(OSError) as exc:
         await adapter._guarded_rmdir(
@@ -923,8 +766,8 @@ async def test_guarded_rmdir_folds_a_non_oserror_cascade_failure(monkeypatch):
     async def unlink(_accessor, _path):
         raise RuntimeError("api exploded")
 
-    monkeypatch.setattr(adapter, "hidden_paths_intersect", lambda _v: True)
-    monkeypatch.setattr(adapter, "path_allowed", lambda v: v == "/m/d")
+    monkeypatch.setattr(adapter, "hidden_under", lambda _vis, _v: True)
+    monkeypatch.setattr(adapter, "path_visible", lambda _vis, v: v == "/m/d")
     spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     with pytest.raises(OSError) as exc:
         await adapter._guarded_rmdir(
@@ -950,8 +793,8 @@ async def test_guarded_rmdir_folds_a_failed_fallback_listing(monkeypatch):
     async def unlink(_accessor, _path):
         raise AssertionError("never reached")
 
-    monkeypatch.setattr(adapter, "hidden_paths_intersect", lambda _v: True)
-    monkeypatch.setattr(adapter, "path_allowed", lambda v: v == "/m/d")
+    monkeypatch.setattr(adapter, "hidden_under", lambda _vis, _v: True)
+    monkeypatch.setattr(adapter, "path_visible", lambda _vis, v: v == "/m/d")
     spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     with pytest.raises(OSError) as exc:
         await adapter._guarded_rmdir(
@@ -982,9 +825,9 @@ async def test_guarded_rmdir_counts_a_visible_mounted_child_as_content(
     async def unlink(_accessor, path):
         removed.append(path.virtual)
 
-    monkeypatch.setattr(adapter, "hidden_paths_intersect", lambda _v: True)
+    monkeypatch.setattr(adapter, "hidden_under", lambda _vis, _v: True)
     monkeypatch.setattr(
-        adapter, "path_allowed", lambda v: v in ("/m/d", "/m/d/m")
+        adapter, "path_visible", lambda _vis, v: v in ("/m/d", "/m/d/m")
     )
     spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     with pytest.raises(OSError) as exc:
@@ -1024,9 +867,9 @@ async def test_hidden_guard_rmdir_reads_the_stamped_children(monkeypatch):
     async def unused(*_args):
         raise AssertionError("not used")
 
-    monkeypatch.setattr(adapter, "hidden_paths_intersect", lambda _v: True)
+    monkeypatch.setattr(adapter, "hidden_under", lambda _vis, _v: True)
     monkeypatch.setattr(
-        adapter, "path_allowed", lambda v: v in ("/m/d", "/m/d/m")
+        adapter, "path_visible", lambda _vis, v: v in ("/m/d", "/m/d/m")
     )
     base = CommandIO(
         readdir=readdir,
@@ -1038,7 +881,7 @@ async def test_hidden_guard_rmdir_reads_the_stamped_children(monkeypatch):
         rmdir=rmdir,
         glob_children=lambda _v: ["m"],
     )
-    ops = adapter.with_hidden_guard(base)
+    ops = with_command_guards(base)
     assert ops.rmdir is not None
     spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     with pytest.raises(OSError) as exc:
@@ -1048,7 +891,6 @@ async def test_hidden_guard_rmdir_reads_the_stamped_children(monkeypatch):
 
 
 def _glob_ops(mounted: bool) -> CommandIO:
-
     async def readdir(_accessor, path, _index):
         return ["/a.txt", "/b.txt"]
 
@@ -1073,15 +915,13 @@ async def test_resolve_or_empty_expands_globs():
         pattern="*.txt",
         resolved=False,
     )
-    resolved = await adapter.resolve_or_empty(
-        _glob_ops(True), None, [spec], None
-    )
+    resolved = await resolve_or_empty(_glob_ops(True), None, [spec], None)
     assert [p.virtual for p in resolved] == ["/a.txt", "/b.txt"]
 
 
 @pytest.mark.asyncio
 async def test_resolve_or_empty_unmounted_means_stdin_mode():
-    resolved = await adapter.resolve_or_empty(
+    resolved = await resolve_or_empty(
         _glob_ops(False), None, [PathSpec.from_str_path("/a.txt")], None
     )
     assert resolved == []
@@ -1089,9 +929,7 @@ async def test_resolve_or_empty_unmounted_means_stdin_mode():
 
 @pytest.mark.asyncio
 async def test_resolve_or_empty_no_paths():
-    assert (
-        await adapter.resolve_or_empty(_glob_ops(True), None, [], None) == []
-    )
+    assert await resolve_or_empty(_glob_ops(True), None, [], None) == []
 
 
 @pytest.mark.asyncio
@@ -1126,9 +964,11 @@ async def test_capability_and_mode_share_path_guards(
     session = SessionState(
         session_id="guard-matrix",
         mount_modes={"/data": MountMode.READ},
-        hidden_paths=HiddenPaths(paths=("/data/hidden",)),
-        shown_paths=ShownPaths(
-            entries=(ShowEntry("/data/build", MountMode.WRITE),)
+        visibility=Visibility(
+            paths=HiddenPaths(paths=("/data/hidden",)),
+            shown=ShownPaths(
+                entries=(ShowEntry("/data/build", MountMode.WRITE),)
+            ),
         ),
     )
 
@@ -1143,12 +983,9 @@ async def test_capability_and_mode_share_path_guards(
     st = set_current_session(session)
     mt = set_mount_gate("/data", MountMode.WRITE)
     try:
-        ops = adapter.with_policy_guard(
-            adapter.with_path_guards(
-                make_io(
-                    stat=regions,
-                    **{operation.value: backend} if available else {},
-                )
+        ops = with_command_guards(
+            make_io(
+                stat=regions, **{operation.value: backend} if available else {}
             )
         )
         path = _spec(f"/data/{region}/f")
@@ -1191,17 +1028,19 @@ async def test_copy_reads_source_but_rename_mutates_source_and_subtrees(
 
     session = SessionState(
         session_id="pair-guards",
-        shown_paths=ShownPaths(
-            entries=(
-                ShowEntry("/data/src", MountMode.READ),
-                ShowEntry("/data/tree/locked", MountMode.READ),
+        visibility=Visibility(
+            shown=ShownPaths(
+                entries=(
+                    ShowEntry("/data/src", MountMode.READ),
+                    ShowEntry("/data/tree/locked", MountMode.READ),
+                )
             )
         ),
     )
     st = set_current_session(session)
     mt = set_mount_gate("/data", MountMode.WRITE)
     try:
-        ops = adapter.with_path_guards(
+        ops = with_command_guards(
             make_io(
                 **{"copy": backend, "rename": backend} if available else {}
             )
@@ -1232,36 +1071,16 @@ async def test_copy_reads_source_but_rename_mutates_source_and_subtrees(
 
 
 @pytest.mark.asyncio
-async def test_missing_capability_obeys_rule_before_mode():
-    path = _spec("/data/locked")
-    gate = _Gate(path.virtual)
-    at = set_admission(gate)
-    mt = set_mount_gate("/data", MountMode.READ)
-    try:
-        with pytest.raises(PermissionError) as error:
-            await make_io().require(Operation.WRITE)(
-                NOOPAccessor(), path, b"x"
-            )
-        assert error.value.errno is None
-        assert gate.asked == [path.virtual]
-    finally:
-        reset_mount_gate(mt)
-        reset_admission(at)
-
-
-@pytest.mark.asyncio
-async def test_missing_copy_admits_source_as_read_before_capability_failure():
-    policy = _SealedRead("/data/secret")
-    token = set_op_policies(Policies([policy]))
-    try:
-        with pytest.raises(PermissionError) as error:
-            await make_io().require(Operation.COPY)(
-                NOOPAccessor(), _spec("/data/secret"), _spec("/data/dst")
-            )
-        assert error.value.errno == errno.EACCES
-        assert policy.asked == [("copy", "/data/secret", False)]
-    finally:
-        reset_op_policies(token)
+async def test_missing_copy_checks_command_paths_before_capability_failure(
+    monkeypatch,
+):
+    gate = _Gate("/data/secret")
+    monkeypatch.setattr(adapter, "get_admission", lambda: gate)
+    with pytest.raises(PermissionError):
+        await make_io().require(Operation.COPY)(
+            NOOPAccessor(), _spec("/data/secret"), _spec("/data/dst")
+        )
+    assert gate.asked == ["/data/secret"]
 
 
 @pytest.mark.asyncio
@@ -1285,3 +1104,163 @@ async def test_dir_guard_distinguishes_empty_files_from_directory_eof(is_dir):
         assert await ops.read_bytes(None, path) == b""
         assert await _drain(ops.read_stream(None, path)) == [b""]
         assert await ops.read_range(None, path) == b""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "parents", "refused"),
+    [
+        (FileType.DIRECTORY, False, True),
+        (FileType.FILE, False, True),
+        (FileType.FILE, True, True),
+        (FileType.DIRECTORY, True, False),
+        (None, False, False),
+    ],
+)
+async def test_mode_guard_refuses_a_taken_name_on_a_writable_mount(
+    kind, parents, refused
+):
+    """mkdir(2) refuses a taken name even where the create would pass."""
+    made: list[str] = []
+
+    async def stat(accessor, path, index=None):
+        if kind is None:
+            raise FileNotFoundError(path.virtual)
+        return FileStat(name="d", type=kind)
+
+    async def mkdir(accessor, path, parents=False):
+        made.append(path.virtual)
+
+    ops = adapter.with_command_guards(make_io(stat=stat, mkdir=mkdir))
+    gtoken = set_mount_gate("/data", MountMode.WRITE)
+    try:
+        call = ops.mkdir(NOOPAccessor(), _spec("/data/d"), parents=parents)
+        if refused:
+            with pytest.raises(FileExistsError):
+                await call
+        else:
+            await call
+    finally:
+        reset_mount_gate(gtoken)
+    assert made == ([] if refused else ["/data/d"])
+
+
+@pytest.mark.asyncio
+async def test_policy_guard_admits_slots_and_leaves_stat_alone():
+    from mirage.commands.builtin.generic_bind.adapter import with_policy_guard
+    from mirage.context import (
+        reset_mount_gate,
+        reset_op_policies,
+        set_mount_gate,
+        set_op_policies,
+    )
+    from mirage.policy.policies import Policies
+    from mirage.types import MountMode
+
+    calls: list[tuple[str, ...]] = []
+    raw = _policy_probe_ops(calls)
+    acc = NOOPAccessor()
+    # No binding: every slot runs as is, and no hook fires.
+    assert (
+        await with_policy_guard(raw).read_bytes(acc, _spec("/data/secret"))
+        == b"x"
+    )
+    calls.clear()
+
+    policy = _SealedRead("/data/secret")
+    ptoken = set_op_policies(Policies([policy]))
+    gtoken = set_mount_gate("/data", MountMode.WRITE)
+    try:
+        ops = with_policy_guard(raw)
+        with pytest.raises(PermissionError) as excinfo:
+            await ops.read_bytes(acc, _spec("/data/secret"))
+        assert excinfo.value.errno == errno.EACCES
+        assert ("read", "/data/secret") not in calls
+        # The stream gates before its first chunk.
+        with pytest.raises(PermissionError):
+            async for _ in ops.read_stream(acc, _spec("/data/secret")):
+                pass
+        assert ("stream", "/data/secret") not in calls
+        # stat is not a guarded slot: deny is present and refused.
+        assert (await ops.stat(acc, _spec("/data/secret"))).size == 1
+        # readdir asks about the directory it lists.
+        assert await ops.readdir(acc, _spec("/data/dir")) == ["a"]
+        # A copy's source is a read; its destination is a write.
+        await ops.copy(acc, _spec("/data/src"), _spec("/data/dst"))
+        # A write slot asks with write=True.
+        await ops.unlink(acc, _spec("/data/gone"))
+    finally:
+        reset_mount_gate(gtoken)
+        reset_op_policies(ptoken)
+    assert ("read_bytes", "/data/secret", False) in policy.asked
+    assert ("read_stream", "/data/secret", False) in policy.asked
+    assert ("readdir", "/data/dir", False) in policy.asked
+    assert ("copy", "/data/src", False) in policy.asked
+    assert ("copy", "/data/dst", True) in policy.asked
+    assert ("unlink", "/data/gone", True) in policy.asked
+    assert not any(op == "stat" for op, _, _ in policy.asked)
+
+
+@pytest.mark.asyncio
+async def test_policy_guard_admits_before_a_warm_serve():
+    # The guard wraps outside the cache tier (`finish` in the factory),
+    # so a warm reader below it never answers a refused read.
+    from mirage.commands.builtin.generic_bind.adapter import with_policy_guard
+    from mirage.context import (
+        reset_mount_gate,
+        reset_op_policies,
+        set_mount_gate,
+        set_op_policies,
+    )
+    from mirage.policy.policies import Policies
+    from mirage.types import MountMode
+
+    calls: list[tuple[str, ...]] = []
+    warm = dataclasses.replace(_policy_probe_ops(calls), read_bytes=_warm_read)
+    acc = NOOPAccessor()
+    policy = _SealedRead("/data/secret")
+    ptoken = set_op_policies(Policies([policy]))
+    gtoken = set_mount_gate("/data", MountMode.WRITE)
+    try:
+        ops = with_policy_guard(warm)
+        with pytest.raises(PermissionError):
+            await ops.read_bytes(acc, _spec("/data/secret"))
+        assert await ops.read_bytes(acc, _spec("/data/open")) == b"warm"
+    finally:
+        reset_mount_gate(gtoken)
+        reset_op_policies(ptoken)
+
+
+@pytest.mark.asyncio
+async def test_policy_guard_wrap_time_capture_covers_late_drains():
+    # head/tail/wc bind lazy readers the pipeline drains after dispatch
+    # has reset the context; the guard captured at wrap time still
+    # answers (_live_policy_scope).
+    from mirage.commands.builtin.generic_bind.adapter import with_policy_guard
+    from mirage.context import (
+        reset_mount_gate,
+        reset_op_policies,
+        set_mount_gate,
+        set_op_policies,
+    )
+    from mirage.policy.policies import Policies
+    from mirage.types import MountMode
+
+    calls: list[tuple[str, ...]] = []
+    raw = _policy_probe_ops(calls)
+    acc = NOOPAccessor()
+    policy = _SealedRead("/data/secret")
+    ptoken = set_op_policies(Policies([policy]))
+    gtoken = set_mount_gate("/data", MountMode.WRITE)
+    try:
+        ops = with_policy_guard(raw)
+    finally:
+        reset_mount_gate(gtoken)
+        reset_op_policies(ptoken)
+    # Both the slot call and the drain happen outside the window now.
+    with pytest.raises(PermissionError):
+        async for _ in ops.read_stream(acc, _spec("/data/secret")):
+            pass
+    assert ("stream", "/data/secret") not in calls
+    with pytest.raises(PermissionError):
+        await ops.read_bytes(acc, _spec("/data/secret"))

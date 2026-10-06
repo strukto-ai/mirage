@@ -13,14 +13,25 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import signal
 import sys
-from typing import Any
+from types import FrameType
+from typing import IO, Any
 from urllib.parse import quote
 
 import typer
 
-from mirage.cli.client import make_client
-from mirage.cli.output import emit, exit_code_from_response, handle_response
+from mirage.cli.client import DaemonClient, make_client
+from mirage.cli.output import (
+    emit,
+    exit_code_from_response,
+    fail,
+    handle_response,
+)
+from mirage.execution.types import ExecutionStatus as JobStatus
+
+WAIT_SLICE_S = 30.0
+INTERRUPTED = 130
 
 app = typer.Typer(
     invoke_without_command=True, help="Run a shell line in a workspace."
@@ -56,7 +67,16 @@ def shell_cmd(
         help="Don't wait; return job_id immediately.",
     ),
 ) -> None:
-    """Run a shell line in a workspace."""
+    """Run a shell line in a workspace.
+
+    The line is a daemon job. With piped stdin it is one request that
+    streams the input to the line as it reads it, so the line starts
+    before the input ends; Ctrl-C drops the request, which cancels the
+    job, and exits 130. Without piped stdin it is submitted, then
+    waited on, and Ctrl-C, from the submit on, cancels it through
+    ``DELETE /v1/jobs/{id}``. ``--background`` returns the job id at
+    once instead, after any piped stdin has been sent.
+    """
     payload: dict[str, Any] = {"command": command}
     if session_id:
         payload["session_id"] = session_id
@@ -65,27 +85,116 @@ def shell_cmd(
     if runtime:
         payload["runtime"] = runtime
     path = f"/v1/workspaces/{quote(workspace_id, safe='')}/shell"
-    if background:
-        path += "?background=true"
+    piped = not sys.stdin.isatty()
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
-        if not sys.stdin.isatty() and not background:
-            stdin_bytes = sys.stdin.buffer.read()
-            files = {
-                "request": (
-                    "request.json",
-                    json.dumps(payload),
-                    "application/json",
-                ),
-                "stdin": (
-                    "stdin.bin",
-                    stdin_bytes,
-                    "application/octet-stream",
-                ),
-            }
-            r = client.request("POST", path, files=files)
-        else:
-            r = client.request("POST", path, json=payload)
-    response = handle_response(r)
-    emit(response)
-    raise typer.Exit(code=exit_code_from_response(response))
+        if piped and not background:
+            try:
+                r = client.request(
+                    "POST", path, files=_upload(payload), timeout=None
+                )
+            except KeyboardInterrupt:
+                raise typer.Exit(code=INTERRUPTED) from None
+            if r.status_code == 499:
+                fail("job canceled", exit_code=INTERRUPTED)
+            result = handle_response(r)
+            emit(result)
+            raise typer.Exit(code=exit_code_from_response(result))
+        interrupted = False
+
+        def interrupt(signum: int, frame: FrameType | None) -> None:
+            nonlocal interrupted
+            interrupted = True
+
+        held = None if background else signal.signal(signal.SIGINT, interrupt)
+        try:
+            if piped:
+                r = client.request(
+                    "POST",
+                    path,
+                    params={"background": "true"},
+                    files=_upload(payload),
+                )
+            else:
+                r = client.request(
+                    "POST", path, params={"background": "true"}, json=payload
+                )
+        finally:
+            if held is not None:
+                signal.signal(signal.SIGINT, held)
+        submitted = handle_response(r)
+        if not isinstance(submitted, dict):
+            fail(f"unexpected daemon response: {submitted!r}")
+        if background:
+            emit(submitted)
+            return
+        job_id = quote(str(submitted["job_id"]), safe="")
+        if not interrupted:
+            try:
+                job = wait_job(client, job_id)
+            except KeyboardInterrupt:
+                interrupted = True
+        if interrupted:
+            client.request("DELETE", f"/v1/jobs/{job_id}")
+            wait_job(client, job_id)
+            raise typer.Exit(code=INTERRUPTED)
+    if job["status"] == JobStatus.FAILED:
+        fail(f"shell failed: {job['error']}", exit_code=2)
+    if job["status"] == JobStatus.CANCELED:
+        fail("job canceled", exit_code=INTERRUPTED)
+    emit(job["result"])
+    raise typer.Exit(code=exit_code_from_response(job["result"]))
+
+
+class _Pipe:
+    """Piped stdin with no size to report.
+
+    httpx sizes a file part with ``fstat``, which on a pipe counts only
+    the bytes it holds right now; with no size it sends the part chunked.
+
+    Args:
+        stream (IO[bytes]): the stdin stream.
+    """
+
+    def __init__(self, stream: IO[bytes]) -> None:
+        self._stream = stream
+
+    def read(self, size: int = -1) -> bytes:
+        return self._stream.read(size)
+
+
+def _upload(
+    payload: dict[str, Any],
+) -> dict[str, tuple[str, str | _Pipe, str]]:
+    return {
+        "request": ("request.json", json.dumps(payload), "application/json"),
+        "stdin": (
+            "stdin.bin",
+            _Pipe(sys.stdin.buffer),
+            "application/octet-stream",
+        ),
+    }
+
+
+def wait_job(client: DaemonClient, job_id: str) -> dict[str, Any]:
+    """Wait until a daemon job settles.
+
+    Args:
+        client (DaemonClient): the daemon client.
+        job_id (str): the job, already quoted for a path.
+
+    Returns:
+        dict[str, Any]: the settled job.
+    """
+    while True:
+        job = handle_response(
+            client.request(
+                "POST",
+                f"/v1/jobs/{job_id}/wait",
+                json={"timeout_s": WAIT_SLICE_S},
+            )
+        )
+        if not isinstance(job, dict):
+            fail(f"unexpected daemon response: {job!r}")
+        if job["finished_at"] is not None:
+            return job

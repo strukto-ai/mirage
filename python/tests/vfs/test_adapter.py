@@ -187,6 +187,7 @@ async def test_search_capability_distinguishes_decline_from_no_matches(
                     "fixed_string": True,
                     "whole_word": False,
                     "syntax": "basic" if command == "grep" else "rust",
+                    **({"utf8": False} if command == "grep" else {}),
                 }
             },
         )

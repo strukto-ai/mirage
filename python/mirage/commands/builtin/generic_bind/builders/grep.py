@@ -14,8 +14,7 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.aggregators import prefix_aggregate
-from mirage.commands.builtin.generic.grep import grep as generic_grep
-from mirage.commands.builtin.generic.grep import labelled
+from mirage.commands.builtin.generic.grep import grep_generic, labelled
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
     CommandIO,
@@ -63,7 +62,7 @@ async def grep(
             return b"", IOResult(exit_code=1)
         if narrowed:
             opts = labelled(opts)
-    return await generic_grep(
+    return await grep_generic(
         resolved,
         texts,
         opts,

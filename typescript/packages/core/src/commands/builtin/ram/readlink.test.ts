@@ -50,7 +50,7 @@ describe('readlink', () => {
   it('-f prints the normalized path', async () => {
     const vfs = new RAMVFS()
     vfs.store.files.set('/f.txt', ENC.encode('x'))
-    const r = await runReadlink(vfs, [PathSpec.fromStrPath('/f.txt')], { f: true })
+    const r = await runReadlink(vfs, [PathSpec.fromStrPath('/f.txt')], { canonicalize: true })
     expect(r.exitCode).toBe(0)
     expect(r.out).toContain('/f.txt')
   })
@@ -62,7 +62,7 @@ describe('readlink', () => {
 
   it('-n omits trailing newline', async () => {
     const vfs = new RAMVFS()
-    const r = await runReadlink(vfs, [PathSpec.fromStrPath('/f.txt')], { n: true })
+    const r = await runReadlink(vfs, [PathSpec.fromStrPath('/f.txt')], { no_newline: true })
     expect(r.exitCode).toBe(0)
     expect(r.out.endsWith('\n')).toBe(false)
   })

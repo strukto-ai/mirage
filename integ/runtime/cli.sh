@@ -15,7 +15,7 @@
 # as is a case that states why it must be in `sdk_only`. Expect semantics: exit and
 # stdout are exact, stderr is a containment check (the CLI owns its
 # stderr framing), and the SDK-side expectations (ops_contain,
-# ops_absent, value) are not checked because the op ledger has no CLI
+# ops_absent, ops_count, value) are not checked because the op ledger has no CLI
 # door.
 #
 # A yaml file is any JSON document here: YAML is a superset of JSON,
@@ -49,51 +49,98 @@ requirement_met() {
 }
 
 # The runtime table run.py and run.ts keep: the guest language of each
-# runtime a case's `runtimes` may name, the line head a program runs under,
-# and per host what the runtime needs (absent: not on that host).
+# runtime a case's `runtimes` may name (null for a sandbox, which runs whole
+# lines), the line head a program runs under, per host what the runtime
+# needs (absent: not on that host; e2b is python's only, see the README),
+# the world entry it is built from, and the runtimes an unmet requirement
+# skips even under INTEG_RUNTIME_STRICT.
 RUNTIMES='{
-  "language": {"monty": "python", "wasi": "python", "pyodide": "python", "quickjs": "js"},
+  "language": {"monty": "python", "wasi": "python", "pyodide": "python", "quickjs": "js",
+    "local": "python", "sandlock": "python", "docker": null, "ssh": null, "e2b": null,
+    "smolvm": null, "apple_container": null},
   "head": {"python": "python3 -c", "js": "node -e"},
   "requires": {
-    "python": {"monty": [], "wasi": ["env:MIRAGE_WASI_HOME"], "quickjs": ["env:MIRAGE_QUICKJS_HOME"]},
-    "typescript": {"monty": [], "pyodide": [], "quickjs": []}
-  }
+    "python": {"monty": [], "wasi": ["env:MIRAGE_WASI_HOME"], "quickjs": ["env:MIRAGE_QUICKJS_HOME"],
+      "local": [], "sandlock": ["env:MIRAGE_INTEG_SANDLOCK"],
+      "docker": ["env:MIRAGE_INTEG_DOCKER_CONTAINER"], "ssh": ["env:MIRAGE_INTEG_SSH_HOST"],
+      "e2b": ["env:MIRAGE_INTEG_E2B_SANDBOX"], "smolvm": ["env:MIRAGE_INTEG_SMOLVM_MACHINE"],
+      "apple_container": ["env:MIRAGE_INTEG_APPLE_CONTAINER"]},
+    "typescript": {"monty": [], "pyodide": [], "quickjs": [],
+      "local": [], "sandlock": ["env:MIRAGE_INTEG_SANDLOCK"],
+      "docker": ["env:MIRAGE_INTEG_DOCKER_CONTAINER"], "ssh": ["env:MIRAGE_INTEG_SSH_HOST"],
+      "smolvm": ["env:MIRAGE_INTEG_SMOLVM_MACHINE"],
+      "apple_container": ["env:MIRAGE_INTEG_APPLE_CONTAINER"]}
+  },
+  "entry": {
+    "sandlock": {"captures": ["python3", "node", "@external"]},
+    "docker": {"captures": ["*"], "config": {"container": "${MIRAGE_INTEG_DOCKER_CONTAINER}"}},
+    "ssh": {"captures": ["*"], "config": {"host": "${MIRAGE_INTEG_SSH_HOST}", "port": 2222,
+      "username": "${MIRAGE_INTEG_SSH_USERNAME}", "identity_file": "${MIRAGE_INTEG_SSH_KEY}"}},
+    "e2b": {"captures": ["*"], "config": {"sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX}"}},
+    "smolvm": {"captures": ["*"], "config": {"machine": "${MIRAGE_INTEG_SMOLVM_MACHINE}"}},
+    "apple_container": {"captures": ["*"], "config": {"container": "${MIRAGE_INTEG_APPLE_CONTAINER}"}}
+  },
+  "optional": ["sandlock", "e2b", "smolvm", "apple_container"]
 }'
 
 # The case once per runtime it names on this host, one JSON per line (a case
 # without `runtimes` is printed as it is), as run.py `_for_runtime` builds
 # them: a step's `program`, `script` or `command` map picks the runtime's
-# language (a step without it is left out), and `expect_on` keyed by the
-# runtime, then by `runtime@host`, is merged over `expect`.
+# language (a step without it is left out), as does an `expect` keyed by
+# language, a parallel step keeps the branches that run there, `expect_on`
+# keyed by the runtime, then by `runtime@host`, then by `ram` and
+# `runtime@ram` (every mount here is RAM: this is a case's ram variant), is
+# merged over `expect`, and the world runs the runtime's table entry with
+# the case's `entry` laid over it.
+# INTEG_RUNTIMES (comma separated) keeps only the runtimes it names.
 runtime_variants() {
   local case_json="$1" host="$2"
-  jq -c --arg h "$host" --argjson t "$RUNTIMES" '
+  jq -c --arg h "$host" --arg only "${INTEG_RUNTIMES:-}" --argjson t "$RUNTIMES" '
+    def for_lang($lang):
+      if has("parallel") then
+        .parallel = [.parallel[] | for_lang($lang)]
+        | select(.parallel | length > 0)
+        | .guest = any(.parallel[]; .guest)
+      elif $lang == null then .
+      elif has("program") then
+        select(.program[$lang] != null)
+        | del(.program) + {command: ($t.head[$lang] + " " + (.program[$lang] | @sh)), guest: true}
+      elif (.script | type) == "object" then
+        select(.script[$lang] != null)
+        | . + {command: $t.head[$lang], script: .script[$lang], guest: true}
+      elif (.command | type) == "object" then
+        select(.command[$lang] != null)
+        | . + {command: .command[$lang], guest: true}
+      else . end
+      | if (.guest == true) and ((.expect // {}) | has("python") or has("js"))
+        then .expect = (.expect[$lang] // {}) else . end;
+    def overlay($keys):
+      .expect = ((.expect // {}) + ([$keys[] as $k | (.expect_on // {})[$k] // {}] | add // {}))
+      | if has("parallel") then .parallel |= map(overlay($keys)) else . end;
+    def unmark: del(.guest) | if has("parallel") then .parallel |= map(unmark) else . end;
     if has("runtimes") | not then . else
       . as $c
       | $c.runtimes[]
       | select($t.requires[$h][.] != null)
       | . as $r
+      | select($only == "" or (($only | split(",")) | index($r)) != null)
       | $t.language[$r] as $lang
-      | [$c.steps[]
-          | if has("program") then
-              select(.program[$lang] != null)
-              | del(.program) + {command: ($t.head[$lang] + " " + (.program[$lang] | @sh)), guest: true}
-            elif (.script | type) == "object" then
-              select(.script[$lang] != null)
-              | . + {command: $t.head[$lang], script: .script[$lang], guest: true}
-            elif (.command | type) == "object" then
-              select(.command[$lang] != null)
-              | . + {command: .command[$lang], guest: true}
-            else . end
-          | .expect = ((.expect // {}) + ((.expect_on // {})[$r] // {})
-              + ((.expect_on // {})[$r + "@" + $h] // {}))
-        ] as $steps
-      | select(any($steps[]; .guest))
+      | ($t.entry[$r] // {}) as $base
+      | ($c.entry // {}) as $over
+      | [$c.steps[] | for_lang($lang) | overlay([$r, $r + "@" + $h, "ram", $r + "@ram"])]
+        as $steps
+      | select($lang == null or any($steps[]; .guest))
+      | (if $base == {} and $over == {} then $r
+         else {name: $r} + $base + $over
+           + (if ($base | has("config")) or ($over | has("config"))
+              then {config: (($base.config // {}) + ($over.config // {}))} else {} end)
+         end) as $entry
       | $c + {
           id: ($c.id + "@" + $r),
-          world: (($c.world // {}) + {runtimes: [$r, "workspace"]}),
-          steps: ($steps | map(del(.guest))),
-          requires: (($c.requires // []) + $t.requires[$h][$r])
+          world: (($c.world // {}) + {runtimes: [$entry, "workspace"]}),
+          steps: ($steps | map(unmark)),
+          requires: (($c.requires // []) + $t.requires[$h][$r]),
+          optional: ($t.optional | index($r) != null)
         }
     end' <<<"$case_json"
 }
@@ -113,7 +160,7 @@ cli_expressible() {
     and (((.world.policies // []) | length) == 0)
     and (((.world.runtimes // []) | map(select((type == "object" and .name == "echobox") or . == "echobox")) | length) == 0)
     and (((.world.register_runtimes // {}) | length) == 0)
-    and (((.steps // []) | map(select(has("add_runtime") or has("rename") or has("s3_put") or has("read_op") or has("facade"))) | length) == 0)
+    and (([(.steps // [])[] | ., (.parallel // [])[]] | map(select(has("add_runtime") or has("rename") or has("s3_put") or has("read_op") or has("facade"))) | length) == 0)
   ' >/dev/null <<<"$case_json"
 }
 
@@ -162,14 +209,100 @@ write_world_yaml() {
     <<<"$world_json" > "$work/ws.yaml"
 }
 
+# Run one step's line through the CLI, leaving its exit code and its own
+# stdout and stderr (unwrapped from the CLI's JSON envelope) in $3.
+exec_step() {
+  local cli="$1" step="$2" dir="$3"
+  shift 3
+  local cmd script runtime
+  cmd=$(jq -r '.command' <<<"$step")
+  script=$(jq -r '.script // empty' <<<"$step")
+  if [ -n "$script" ]; then
+    cmd+=" $(jq -Rrs '@sh' "$SUITE_DIR/../fixtures/runtime/$script")"
+  fi
+  runtime=$(jq -r '.runtime // empty' <<<"$step")
+  local args=("$@" -c "$cmd")
+  [ -n "$runtime" ] && args+=(--runtime "$runtime")
+  if jq -e 'has("stdin")' >/dev/null <<<"$step"; then
+    jq -j '.stdin' <<<"$step" > "$dir/stdin.bin"
+  else
+    : > "$dir/stdin.bin"
+  fi
+  $cli "${args[@]}" < "$dir/stdin.bin" > "$dir/got.out" 2> "$dir/got.err"
+  echo $? > "$dir/exit"
+  # Both CLIs emit a JSON envelope on a non-tty stdout; unwrap the
+  # command's own streams from it (raw output stays the fallback
+  # for CLI-level errors).
+  if jq -e '.kind == "io"' "$dir/got.out" >/dev/null 2>&1; then
+    jq -j '.stdout // ""' "$dir/got.out" > "$dir/got.stdout"
+    jq -j '.stderr // ""' "$dir/got.out" > "$dir/got.stderr"
+  else
+    cp "$dir/got.out" "$dir/got.stdout"
+    cp "$dir/got.err" "$dir/got.stderr"
+  fi
+}
+
+# Check what exec_step left in $3 against an expect block, adding one
+# failure line (labelled $1) per mismatch; fails when any was added.
+check_step() {
+  local label="$1" expect="$2" dir="$3" got_exit ok=0
+  got_exit=$(cat "$dir/exit")
+  if jq -e 'has("throws_contains")' >/dev/null <<<"$expect"; then
+    local want
+    want=$(jq -r '.throws_contains' <<<"$expect")
+    if [ "$got_exit" -eq 0 ] || ! grep -qF "$want" "$dir/got.out" "$dir/got.err"; then
+      failures+=("$label: expected an error containing '$want'")
+      return 1
+    fi
+    return 0
+  fi
+  if jq -e 'has("exit")' >/dev/null <<<"$expect"; then
+    local want_exit
+    want_exit=$(jq -r '.exit' <<<"$expect")
+    if [ "$got_exit" -ne "$want_exit" ]; then
+      failures+=("$label: exit $got_exit, expected $want_exit: $(head -c 200 "$dir/got.stderr")")
+      ok=1
+    fi
+  fi
+  if jq -e 'has("stdout")' >/dev/null <<<"$expect"; then
+    jq -j '.stdout' <<<"$expect" > "$dir/want.out"
+    if ! cmp -s "$dir/want.out" "$dir/got.stdout"; then
+      failures+=("$label: stdout '$(cat "$dir/got.stdout")', expected '$(cat "$dir/want.out")'")
+      ok=1
+    fi
+  fi
+  if jq -e 'has("stdout_contains")' >/dev/null <<<"$expect"; then
+    local want_frag
+    want_frag=$(jq -r '.stdout_contains' <<<"$expect")
+    if ! grep -qF "$want_frag" "$dir/got.stdout"; then
+      failures+=("$label: stdout missing '$want_frag'")
+      ok=1
+    fi
+  fi
+  # The CLI owns its stderr framing, so exact stderr expectations
+  # degrade to containment here.
+  local want_err key
+  for key in stderr stderr_contains; do
+    if jq -e --arg k "$key" 'has($k)' >/dev/null <<<"$expect"; then
+      want_err=$(jq -r --arg k "$key" '.[$k]' <<<"$expect")
+      if [ -n "$want_err" ] && ! grep -qF "$want_err" "$dir/got.stderr"; then
+        failures+=("$label: stderr missing '$want_err': $(head -c 200 "$dir/got.stderr")")
+        ok=1
+      fi
+    fi
+  done
+  return $ok
+}
+
 run_case() {
   local cli="$1" host="$2" suite="$3" case_json="$4" work="$5"
   local case_id wsid world_json session_id
   case_id="$suite/$(jq -r '.id' <<<"$case_json")"
   # The suite is part of the id: two suites may share a case id. A
-  # runtime variant's id carries `@runtime`, which a workspace id spells
-  # with a dash.
-  wsid="rt-$(tr '_' '-' <<<"$suite")-$(jq -r '.id' <<<"$case_json" | tr '_@' '--')"
+  # workspace id takes letters, digits, dots and dashes, so the suite's
+  # folders, a mode's `+` and a variant's `@runtime` are spelled out.
+  wsid=$(printf 'rt-%s-%s' "$suite" "$(jq -r '.id' <<<"$case_json")" \
+    | sed 's/+/plus/g' | tr '/_@' '---')
   world_json=$(jq -c '.world // {}' <<<"$case_json")
   write_world_yaml "$world_json" "$work"
 
@@ -230,83 +363,37 @@ run_case() {
                   | .key as $p | (.value.files // {}) | keys[]
                   | [$p, .] | @tsv' <<<"$case_json")
 
-  local steps step cmd script runtime expect got_exit
+  local steps step index=0 branches k sid
   steps=$(jq -c '.steps[]' <<<"$case_json")
-  local index=0
   while IFS= read -r step; do
-    cmd=$(jq -r '.command' <<<"$step")
-    script=$(jq -r '.script // empty' <<<"$step")
-    if [ -n "$script" ]; then
-      cmd+=" $(jq -Rrs '@sh' "$SUITE_DIR/../fixtures/runtime/$script")"
-    fi
-    runtime=$(jq -r '.runtime // empty' <<<"$step")
-    expect=$(jq -c '.expect // {}' <<<"$step")
-    local args=("${shell_args[@]}" -c "$cmd")
-    [ -n "$runtime" ] && args+=(--runtime "$runtime")
-    if jq -e 'has("stdin")' >/dev/null <<<"$step"; then
-      jq -j '.stdin' <<<"$step" > "$work/stdin.bin"
-    else
-      : > "$work/stdin.bin"
-    fi
-    $cli "${args[@]}" < "$work/stdin.bin" \
-      > "$work/got.out" 2> "$work/got.err"
-    got_exit=$?
-    # Both CLIs emit a JSON envelope on a non-tty stdout; unwrap the
-    # command's own streams from it (raw output stays the fallback
-    # for CLI-level errors).
-    if jq -e '.kind == "io"' "$work/got.out" >/dev/null 2>&1; then
-      jq -j '.stdout // ""' "$work/got.out" > "$work/got.stdout"
-      jq -j '.stderr // ""' "$work/got.out" > "$work/got.stderr"
-    else
-      cp "$work/got.out" "$work/got.stdout"
-      cp "$work/got.err" "$work/got.stderr"
-    fi
-
-    if jq -e 'has("throws_contains")' >/dev/null <<<"$expect"; then
-      local want
-      want=$(jq -r '.throws_contains' <<<"$expect")
-      if [ "$got_exit" -eq 0 ] || ! grep -qF "$want" "$work/got.out" "$work/got.err"; then
-        failures+=("$case_id step[$index]: expected an error containing '$want'")
-        ok=1
-      fi
-      index=$((index + 1))
-      continue
-    fi
-    if jq -e 'has("exit")' >/dev/null <<<"$expect"; then
-      local want_exit
-      want_exit=$(jq -r '.exit' <<<"$expect")
-      if [ "$got_exit" -ne "$want_exit" ]; then
-        failures+=("$case_id step[$index]: exit $got_exit, expected $want_exit: $(head -c 200 "$work/got.stderr")")
-        ok=1
-      fi
-    fi
-    if jq -e 'has("stdout")' >/dev/null <<<"$expect"; then
-      jq -j '.stdout' <<<"$expect" > "$work/want.out"
-      if ! cmp -s "$work/want.out" "$work/got.stdout"; then
-        failures+=("$case_id step[$index]: stdout '$(cat "$work/got.stdout")', expected '$(cat "$work/want.out")'")
-        ok=1
-      fi
-    fi
-    if jq -e 'has("stdout_contains")' >/dev/null <<<"$expect"; then
-      local want_frag
-      want_frag=$(jq -r '.stdout_contains' <<<"$expect")
-      if ! grep -qF "$want_frag" "$work/got.stdout"; then
-        failures+=("$case_id step[$index]: stdout missing '$want_frag'")
-        ok=1
-      fi
-    fi
-    # The CLI owns its stderr framing, so exact stderr expectations
-    # degrade to containment here.
-    local want_err
-    for key in stderr stderr_contains; do
-      if jq -e --arg k "$key" 'has($k)' >/dev/null <<<"$expect"; then
-        want_err=$(jq -r --arg k "$key" '.[$k]' <<<"$expect")
-        if [ -n "$want_err" ] && ! grep -qF "$want_err" "$work/got.stderr"; then
-          failures+=("$case_id step[$index]: stderr missing '$want_err': $(head -c 200 "$work/got.stderr")")
+    if jq -e 'has("parallel")' >/dev/null <<<"$step"; then
+      # Each branch on a session of its own, all at once, as run.py's
+      # `_run_parallel` runs them; each is checked once all have ended.
+      branches=$(jq '.parallel | length' <<<"$step")
+      local pids=()
+      for ((k = 0; k < branches; k++)); do
+        sid="parallel-$index-$k"
+        if ! $cli session create "$wsid" --id "$sid" \
+            >"$work/session.out" 2>&1 </dev/null; then
+          failures+=("$case_id step[$index]: session create failed: $(head -c 300 "$work/session.out")")
           ok=1
+          continue
         fi
-      fi
-    done
+        mkdir -p "$work/parallel-$k"
+        exec_step "$cli" "$(jq -c ".parallel[$k]" <<<"$step")" "$work/parallel-$k" \
+          shell -w "$wsid" --session "$sid" &
+        pids+=($!)
+      done
+      for k in "${pids[@]}"; do wait "$k"; done
+      for ((k = 0; k < branches; k++)); do
+        [ -f "$work/parallel-$k/exit" ] || continue
+        check_step "$case_id step[$index].parallel[$k]" \
+          "$(jq -c ".parallel[$k].expect // {}" <<<"$step")" "$work/parallel-$k" || ok=1
+      done
+    else
+      exec_step "$cli" "$step" "$work" "${shell_args[@]}"
+      check_step "$case_id step[$index]" "$(jq -c '.expect // {}' <<<"$step")" "$work" || ok=1
+    fi
     index=$((index + 1))
   done <<<"$steps"
 
@@ -359,18 +446,23 @@ run_host() {
     echo "note $host lane $lane: warm-up delete failed: $(error_line "$work/warm.out")"
   fi
 
-  local file suite suite_json requires unmet
-  for file in "$SUITE_DIR"/*.json; do
-    suite_json=$(cat "$file")
-    suite=$(jq -r '.suite' <<<"$suite_json")
-    if [ "${#ONLY_SUITES[@]}" -gt 0 ] && [[ " ${ONLY_SUITES[*]} " != *" $suite "* ]]; then
-      continue
+  local file suite suite_json requires unmet only claim
+  while IFS= read -r file <&3; do
+    suite_json=$(cat "$SUITE_DIR/$file")
+    suite="${file%.json}"
+    if [ "${#ONLY_SUITES[@]}" -gt 0 ]; then
+      local picked=0
+      for only in "${ONLY_SUITES[@]}"; do
+        if [ "$suite" = "$only" ] || [[ "$suite" == "$only/"* ]]; then picked=1; fi
+      done
+      [ "$picked" = 1 ] || continue
     fi
     # Whichever of the host's lanes reaches a suite first runs it: mkdir
     # either creates the claim or fails because another lane already did.
     # Any other failure would drop the suite from both lanes, so it counts.
-    if ! mkdir "$RESULT_DIR/claims/$host-$suite" 2>/dev/null; then
-      if [ ! -d "$RESULT_DIR/claims/$host-$suite" ]; then
+    claim="$RESULT_DIR/claims/$host-${suite//\//-}"
+    if ! mkdir "$claim" 2>/dev/null; then
+      if [ ! -d "$claim" ]; then
         failures+=("$host/$suite: could not claim the suite")
         fail=$((fail + 1))
       fi
@@ -411,7 +503,8 @@ run_host() {
           requirement_met "$req" || unmet="$unmet $req"
         done
         if [ -n "$unmet" ]; then
-          if [ "$STRICT" == "1" ]; then
+          if [ "$STRICT" == "1" ] && \
+              [ "$(jq -r '.optional // false' <<<"$case_json")" != "true" ]; then
             failures+=("$host/$suite/$case_id: unmet requirements$unmet (INTEG_RUNTIME_STRICT=1)")
             fail=$((fail + 1))
           else
@@ -435,7 +528,7 @@ run_host() {
       done < <(runtime_variants "$listed" "$host")
     done < <(jq -c '.cases[]' <<<"$suite_json")
     echo "suite $host/$suite $((SECONDS - suite_t0))s"
-  done
+  done 3< <(cd "$SUITE_DIR" && find . -name '*.json' | sed 's|^\./||' | sort)
 
   $cli daemon stop >/dev/null 2>&1 </dev/null || true
   sleep 1

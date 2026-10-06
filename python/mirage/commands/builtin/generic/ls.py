@@ -74,17 +74,16 @@ class LsFlags:
     hyperlink: bool = False
 
 
-# GNU's own `sort_args`, in its own order, which is what `--sort=x`
-# lists back. `name` is deliberately absent: coreutils 9.4 refuses
-# `ls --sort=name` (name order is what no `--sort` at all means), and a
-# word mirage accepted but GNU did not was also a word missing from the
-# list GNU prints.
+# GNU's own `sort_args` (coreutils 9.7), in its own order, which is what
+# `--sort=x` lists back. 9.7 added `name`, the order no `--sort` at all
+# means, so `--sort=n` is ambiguous between it and `none`.
 _SORT_WORDS = {
     "none": LsSortBy.NONE,
-    "time": LsSortBy.TIME,
     "size": LsSortBy.SIZE,
-    "extension": LsSortBy.EXTENSION,
+    "time": LsSortBy.TIME,
     "version": LsSortBy.VERSION,
+    "extension": LsSortBy.EXTENSION,
+    "name": LsSortBy.NAME,
     "width": LsSortBy.WIDTH,
 }
 _SORT_FLAGS = {
@@ -144,6 +143,44 @@ def _grouped_argument_error(
             ``--hyperlink=zzz`` spans none and is invalid.
     """
     return argmatch_error("ls", option, value, groups, 1, kind)
+
+
+_WORD_OPTIONS: dict[str, tuple[str, tuple[tuple[str, ...], ...]]] = {
+    "sort": ("--sort", tuple((word,) for word in _SORT_WORDS)),
+    "time": ("--time", _TIME_GROUPS),
+    "hyperlink": ("--hyperlink", _WHEN_GROUPS),
+    "color": ("--color", _WHEN_GROUPS),
+    "classify": ("--classify", _WHEN_GROUPS),
+    "indicator_style": ("--indicator-style", _INDICATOR_GROUPS),
+}
+
+
+def _check_option_words(fl: FlagView) -> None:
+    """Refuse a bad option value where GNU does: while it reads the line.
+
+    GNU checks each value inside its getopt loop, so the first bad one
+    typed is the one it names, and a later good value of the same option
+    does not rescue an earlier bad one (coreutils 9.7: ``ls --sort=bogus
+    --sort=size`` and ``ls --time=x --sort=y`` both refuse, the second
+    naming ``--time``). ``--time-style`` is the exception: GNU reads only
+    its last value, after the loop.
+
+    Args:
+        fl (FlagView): the ls flag view.
+    """
+    for dest, value in fl.occurrences(*_WORD_OPTIONS, "block_size"):
+        if value is True:
+            continue
+        word = str(value)
+        if dest == "block_size":
+            parsed = formatting.parse_block_size(word)
+            if isinstance(parsed, formatting.BlockSizeRefusal):
+                raise UsageError(_block_size_error(word, parsed), 2)
+            continue
+        option, groups = _WORD_OPTIONS[dest]
+        match = argmatch(word, groups)
+        if not isinstance(match, ArgmatchMatch):
+            raise _grouped_argument_error(option, word, groups, match.kind)
 
 
 def _sort_flag(fl: FlagView) -> tuple[LsSortBy, bool]:
@@ -256,7 +293,7 @@ def _hyperlink_flag(fl: FlagView) -> bool:
     return match.word == "always"
 
 
-def _indicator_word(fl: FlagView, dest: str) -> LsIndicator:
+def _indicator_word(dest: str, raw: FlagValue) -> LsIndicator:
     """The style one indicator option asks for, checked as GNU checks it.
 
     ``-F`` and a bare ``--classify`` classify; ``--classify=WHEN`` does
@@ -264,14 +301,13 @@ def _indicator_word(fl: FlagView, dest: str) -> LsIndicator:
     terminal. A refused value is GNU's ARGMATCH refusal, exit 1.
 
     Args:
-        fl (FlagView): the ls flag view.
         dest (str): one of the indicator options' dests.
+        raw (FlagValue): the value this occurrence was typed with.
     """
     if dest == "p":
         return LsIndicator.SLASH
     if dest == "file_type":
         return LsIndicator.FILE_TYPE
-    raw = fl.raw(dest)
     if dest == "classify" and raw is True:
         return LsIndicator.CLASSIFY
     word = str(raw)
@@ -298,8 +334,8 @@ def indicator_flag(fl: FlagView) -> LsIndicator:
         fl (FlagView): the ls flag view.
     """
     style = LsIndicator.NONE
-    for dest in fl.typed_order(*_INDICATOR_DESTS):
-        style = _indicator_word(fl, dest)
+    for dest, raw in fl.occurrences(*_INDICATOR_DESTS):
+        style = _indicator_word(dest, raw)
     return style
 
 
@@ -379,6 +415,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> LsFlags:
         flags (Mapping[str, FlagValue]): flags for the shared ls spec.
     """
     fl = FlagView(flags, spec=SPECS["ls"])
+    _check_option_words(fl)
     sort_by, sorted_explicitly = _sort_flag(fl)
     time_kind = _time_flag(fl)
     no_owner = fl.as_bool("g")
@@ -795,7 +832,7 @@ def name_width(name: str) -> int:
     return sum(char_width(ch) for ch in name)
 
 
-def _extension(name: str) -> str:
+def _extension_of(name: str) -> str:
     """The key ``ls -X`` compares first: the name from its last dot,
     empty for a name without one.
 
@@ -859,7 +896,7 @@ def _order_rows(
     else:
         order = sorted(range(len(rows)), key=lambda i: rows[i].name)
         if sort_by is LsSortBy.EXTENSION:
-            order.sort(key=lambda i: _extension(rows[i].name))
+            order.sort(key=lambda i: _extension_of(rows[i].name))
         elif sort_by is LsSortBy.WIDTH:
             order.sort(
                 key=lambda i: name_width(
@@ -1450,7 +1487,7 @@ async def _operand_key(
     return s.model_copy(update={"name": operand.path.raw_path})
 
 
-async def _sorted_operands(
+async def _sort_operands(
     operands: list[Operand],
     *,
     sort_by: LsSortBy,
@@ -1723,7 +1760,7 @@ async def ls(
         warnings.extend(p_ws)
         operands.append(operand)
     if len(operands) > 1:
-        operands = await _sorted_operands(
+        operands = await _sort_operands(
             operands,
             sort_by=sort_by,
             reverse=reverse,

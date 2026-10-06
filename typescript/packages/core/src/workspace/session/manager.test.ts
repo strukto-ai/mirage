@@ -15,15 +15,31 @@
 import { seedVar } from './state.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type { AdmissionRules, Decision } from '../../policy/types.ts'
-import type { CompiledProfile } from '../../policy/profile.ts'
+import type { CompiledProfile, ProfilePolicies, ProfileSetup } from '../../policy/profile.ts'
 import { Outcome, Scope } from '../../policy/types.ts'
-import { ScriptSource } from '../../runtime/routing/types.ts'
-import { MountMode } from '../../types.ts'
+import { ScriptSource } from '../../runtime/types.ts'
+import { MountMode, type Visibility } from '../../types.ts'
 import { SessionManager } from './manager.ts'
+import { compileProfile } from './resolve.ts'
 import { RAMSessionStore } from './ram.ts'
 import { SessionState, varsFromEntries } from './session.ts'
 import type { SessionFields } from './store.ts'
 import { VarAttr, type ShellVar } from '../../shell/variable.ts'
+
+/** An empty compiled profile with the given parts filled in. */
+function compiled(
+  policies: Partial<ProfilePolicies>,
+  visibility: Partial<Visibility> = {},
+  setup: ProfileSetup = { env: null, cwd: null },
+): CompiledProfile {
+  const empty = compileProfile(null)
+  return {
+    ...empty,
+    setup,
+    visibility: { ...empty.visibility, ...visibility },
+    policies: { ...empty.policies, ...policies },
+  }
+}
 
 describe('SessionManager', () => {
   it('seeds the default session on construction', () => {
@@ -157,8 +173,8 @@ describe('SessionManager with a SessionStore', () => {
     const m = new SessionManager('def', store)
     await m.ensureLoaded()
     const dflt = m.get('def')
-    expect(dflt.hiddenPaths).toEqual({ paths: ['/s3/secrets'], patterns: ['*.key'] })
-    expect(dflt.hiddenVars).toEqual({ names: ['SLACK_TOKEN'], patterns: [] })
+    expect(dflt.visibility.paths).toEqual({ paths: ['/s3/secrets'], patterns: ['*.key'] })
+    expect(dflt.visibility.vars).toEqual({ names: ['SLACK_TOKEN'], patterns: [] })
   })
 
   it('default session adopts a stored profile script', async () => {
@@ -201,7 +217,7 @@ describe('SessionManager with a SessionStore', () => {
     const m = new SessionManager('def', store)
     await m.ensureLoaded()
     const dflt = m.get('def')
-    expect(dflt.shownPaths).toEqual({
+    expect(dflt.visibility.shown).toEqual({
       entries: [
         { path: '/repo/public', mode: MountMode.READ },
         { path: '/repo/notes', mode: null },
@@ -227,23 +243,23 @@ describe('SessionManager with a SessionStore', () => {
       mount_modes: { '/s3': 'write', '/other': 'write' },
     })
     const m = new SessionManager('def', store)
-    m.defaultProfile = {
-      mountModes: new Map([['/s3', MountMode.READ]]),
-      hiddenPaths: { paths: ['/s3/secrets'], patterns: [] },
-      hiddenVars: { names: ['SLACK_TOKEN'], patterns: [] },
-      env: { PAGER: 'cat' },
-      cwd: '/s3',
-      commands: null,
-    }
+    m.defaultProfile = compiled(
+      { mountModes: new Map([['/s3', MountMode.READ]]) },
+      {
+        paths: { paths: ['/s3/secrets'], patterns: [] },
+        vars: { names: ['SLACK_TOKEN'], patterns: [] },
+      },
+      { env: { PAGER: 'cat' }, cwd: '/s3' },
+    )
     const dflt = m.get('def')
     expect(dflt.cwd).toBe('/s3')
     expect(dflt.env.PAGER).toBe('cat')
-    expect(dflt.hiddenVars).toEqual({ names: ['SLACK_TOKEN'], patterns: [] })
+    expect(dflt.visibility.vars).toEqual({ names: ['SLACK_TOKEN'], patterns: [] })
     await m.ensureLoaded()
     expect(dflt.cwd).toBe('/w')
     expect(dflt.env.A).toBe('1')
     expect(dflt.mountModes).toEqual(new Map([['/s3', MountMode.READ]]))
-    expect(dflt.hiddenPaths).toEqual({ paths: ['/s3/secrets'], patterns: [] })
+    expect(dflt.visibility.paths).toEqual({ paths: ['/s3/secrets'], patterns: [] })
     await m.flush()
     const stored = (await store.load()).get('def') as {
       mount_modes: Record<string, string>
@@ -374,14 +390,7 @@ describe('SessionManager admission rules', () => {
     expect(early.commands).toBeNull()
     // With a default profile compiled in, an unknown id answers its rules
     // rather than nothing, so an unbound door still fails toward refusal.
-    m.defaultProfile = {
-      mountModes: null,
-      hiddenPaths: null,
-      hiddenVars: null,
-      env: null,
-      cwd: null,
-      commands: { allow: ['cat'], ask: [], deny: [] },
-    }
+    m.defaultProfile = compiled({ commands: { allow: ['cat'], ask: [], deny: [] } })
     expect(m.commandsOf('nobody')).toEqual({ allow: ['cat'], ask: [], deny: [] })
     expect(m.commandsOf('')).toEqual({ allow: ['cat'], ask: [], deny: [] })
   })
@@ -613,15 +622,17 @@ it.each([false, true])(
   async (failure) => {
     const store = new RAMSessionStore()
     const manager = new SessionManager('default', store)
-    const original: CompiledProfile = {
-      mountModes: new Map([['/data', MountMode.READ]]),
-      hiddenPaths: { paths: ['/data/secret'], patterns: [] },
-      hiddenVars: { names: ['TOKEN'], patterns: [] },
-      env: null,
-      cwd: null,
-      commands: { allow: ['cat'], ask: [], deny: [] },
-      script: { profile: 'judge', script: new ScriptSource('null', 'js'), runtime: 'quickjs' },
-    }
+    const original = compiled(
+      {
+        mountModes: new Map([['/data', MountMode.READ]]),
+        commands: { allow: ['cat'], ask: [], deny: [] },
+        script: { profile: 'judge', script: new ScriptSource('null', 'js'), runtime: 'quickjs' },
+      },
+      {
+        paths: { paths: ['/data/secret'], patterns: [] },
+        vars: { names: ['TOKEN'], patterns: [] },
+      },
+    )
     manager.defaultProfile = original
     await manager.flush()
     const session = manager.get('default')
@@ -642,14 +653,7 @@ it.each([false, true])(
       if (failure) throw new Error('store unavailable')
       return casSet(...args)
     })
-    const cleared: CompiledProfile = {
-      mountModes: null,
-      hiddenPaths: null,
-      hiddenVars: null,
-      env: null,
-      cwd: null,
-      commands: null,
-    }
+    const cleared = compileProfile(null)
     const updating = manager.setProfile('default', cleared).then(
       (value) => value,
       (error: unknown) => error,
@@ -657,20 +661,20 @@ it.each([false, true])(
     try {
       await entered
       expect(session.toJSON()).toEqual(before)
-      expect(manager.commandsOf('')).toEqual(original.commands)
-      expect(manager.scriptOf('')).toEqual(original.script)
+      expect(manager.commandsOf('')).toEqual(original.policies.commands)
+      expect(manager.scriptOf('')).toEqual(original.policies.script)
       session.cwd = '/changed-during-write'
       resume()
       if (failure) {
         expect(await updating).toEqual(new Error('store unavailable'))
         expect(session.toJSON()).toEqual({ ...before, cwd: session.cwd })
         expect(await store.load()).toEqual(persisted)
-        expect(manager.commandsOf('')).toEqual(original.commands)
-        expect(manager.scriptOf('')).toEqual(original.script)
+        expect(manager.commandsOf('')).toEqual(original.policies.commands)
+        expect(manager.scriptOf('')).toEqual(original.policies.script)
       } else {
         expect(await updating).toBe(session)
         expect(session.mountModes).toBeNull()
-        expect(session.hiddenPaths).toBeNull()
+        expect(session.visibility.paths).toBeNull()
         expect(manager.commandsOf('')).toBeNull()
         expect(manager.scriptOf('')).toBeNull()
       }
@@ -708,14 +712,7 @@ it.each([false, true])(
       return casSet(...args)
     })
     const updating = manager
-      .setProfile('agent', {
-        mountModes: null,
-        hiddenPaths: null,
-        hiddenVars: null,
-        env: null,
-        cwd: null,
-        commands: null,
-      })
+      .setProfile('agent', compileProfile(null))
       .catch((error: unknown) => error)
     let closing: Promise<void> | undefined
     try {

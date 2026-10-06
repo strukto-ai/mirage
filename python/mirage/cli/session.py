@@ -117,6 +117,36 @@ def delete_cmd(
     emit(handle_response(r))
 
 
+@app.command("cancel")
+def cancel_cmd(
+    workspace_id: str = typer.Argument(...),
+    session_id: str = typer.Argument(...),
+) -> None:
+    """Cancel the session's running and queued commands."""
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        wid = quote(workspace_id, safe="")
+        sid = quote(session_id, safe="")
+        r = client.request(
+            "POST", f"/v1/workspaces/{wid}/sessions/{sid}/cancel"
+        )
+    emit(handle_response(r))
+
+
+@app.command("kill")
+def kill_cmd(
+    workspace_id: str = typer.Argument(...),
+    session_id: str = typer.Argument(...),
+) -> None:
+    """Kill the session's background jobs; the session stays open."""
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        wid = quote(workspace_id, safe="")
+        sid = quote(session_id, safe="")
+        r = client.request("POST", f"/v1/workspaces/{wid}/sessions/{sid}/kill")
+    emit(handle_response(r))
+
+
 @app.command("update")
 def update_cmd(
     workspace_id: str = typer.Argument(...),
@@ -128,6 +158,7 @@ def update_cmd(
         False, "--default-profile", help="Use the workspace default profile."
     ),
 ) -> None:
+    """Replace the session's profile; its cwd, env and history stay."""
     if (profile is None) == (not default_profile):
         raise typer.BadParameter("choose --profile or --default-profile")
     with make_client() as client:

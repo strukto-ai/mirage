@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "rg_trim_strips_leading_whitespace",
+      "seq": 15200071,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf '  \\t lead\\n\\t\\ttab\\nnone\\n' > /data/fcB_t.txt; rg --trim -n 'lead|tab|none' /data/fcB_t.txt; rg --trim --no-trim tab /data/fcB_t.txt; rg --no-trim --trim -o 'l.ad' /data/fcB_t.txt; rg --trim -C1 tab /data/fcB_t.txt; rm -f /data/fcB_t.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:lead\n2:tab\n3:none\n\t\ttab\nlead\nlead\ntab\nnone\n",
+        "stderr": ""
+      },
+      "flags": [
+        "trim",
+        "no_trim",
+        "n",
+        "o",
+        "C"
+      ]
+    }
+  ]
+}

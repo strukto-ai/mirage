@@ -841,6 +841,123 @@
         "stdout": "",
         "stderr": ""
       }
+    },
+    {
+      "id": "sro_fcA_prep",
+      "seq": 15100901,
+      "command": "mkdir -p /res/fcA_ro && printf 'hello\\n' > /res/fcA_ro/f.txt && gzip -k /res/fcA_ro/f.txt && tar -cf /res/fcA_ro/a.tar -C /res/fcA_ro f.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sro_gzip_k_and_d_find_the_output_already_there",
+      "seq": 15100902,
+      "session": "narrowed",
+      "command": "gzip -k /res/fcA_ro/f.txt; echo rc=$?; gzip -d /res/fcA_ro/f.txt.gz; echo rc=$?; ls /res/fcA_ro",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\na.tar\nf.txt\nf.txt.gz\n",
+        "stderr": "gzip: /res/fcA_ro/f.txt.gz already exists;\tnot overwritten\ngzip: /res/fcA_ro/f.txt already exists;\tnot overwritten\n"
+      },
+      "flags": [
+        "k",
+        "d"
+      ]
+    },
+    {
+      "id": "sro_gunzip_f_writes_beside_a_link_into_a_read_only_mount",
+      "seq": 15100903,
+      "session": "narrowed",
+      "command": "ln -s /res/fcA_ro/f.txt.gz /data/fcA_rl.gz && gunzip -f /data/fcA_rl; echo rc=$?; cat /data/fcA_rl; ls /res/fcA_ro; rm /data/fcA_rl",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nhello\na.tar\nf.txt\nf.txt.gz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
+    },
+    {
+      "id": "sro_tar_reads_a_read_only_archive_into_a_writable_mount",
+      "seq": 15100904,
+      "session": "narrowed",
+      "command": "((cd /res/fcA_ro && tar tf a.tar) && tar -x --to-stdout -f /res/fcA_ro/a.tar && mkdir -p /data/fcA_rw && printf keep > /data/fcA_rw/.keep && tar -xf /res/fcA_ro/a.tar -C /data/fcA_rw && cat /data/fcA_rw/f.txt; rc=$?; rm -r /data/fcA_rw; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "f.txt\nhello\nhello\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "x",
+        "O",
+        "f",
+        "C"
+      ]
+    },
+    {
+      "id": "sro_fcA_cleanup",
+      "seq": 15100909,
+      "command": "rm -r /res/fcA_ro",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sro_crro_prep",
+      "seq": 15800101,
+      "command": "mkdir -p /res/crro && printf 'y\\n' | gzip > /res/crro/only.gz && printf 'x\\n' > /res/crro/p.txt && printf 'q\\n' | gzip > /res/crro/q.gz && printf 'old\\n' > /res/crro/q",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sro_gunzip_is_refused_at_the_write",
+      "seq": 15800102,
+      "session": "narrowed",
+      "command": "gunzip /res/crro/only.gz; echo rc=$?; gunzip -k /res/crro/only.gz; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\n",
+        "stderr": "\ngzip: /res/crro/only: Read-only file system\n\ngzip: /res/crro/only: Read-only file system\n"
+      },
+      "flags": [
+        "k"
+      ]
+    },
+    {
+      "id": "sro_gzip_k_d_and_df_are_refused_at_the_write",
+      "seq": 15800103,
+      "session": "narrowed",
+      "command": "gzip -k /res/crro/p.txt; echo rc=$?; gzip -d /res/crro/only.gz; echo rc=$?; gzip -df /res/crro/only.gz; echo rc=$?; gzip -df /res/crro/q.gz; echo rc=$?; ls /res/crro; cat /res/crro/q",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nonly.gz\np.txt\nq\nq.gz\nold\n",
+        "stderr": "\ngzip: /res/crro/p.txt.gz: Read-only file system\n\ngzip: /res/crro/only: Read-only file system\n\ngzip: /res/crro/only: Read-only file system\ngzip: /res/crro/q: Read-only file system\n"
+      },
+      "flags": [
+        "k",
+        "d",
+        "f"
+      ]
+    },
+    {
+      "id": "sro_crro_cleanup",
+      "seq": 15800104,
+      "command": "rm -r /res/crro",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
     }
   ]
 }

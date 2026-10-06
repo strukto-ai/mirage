@@ -120,6 +120,7 @@ describe('gh tree', () => {
     expect(cliSpecFor('gh')).toBe(GH)
     expect(GH.subcommands.map((c) => c.name)).toEqual([
       'auth',
+      'help',
       'version',
       'api',
       'issue',
@@ -326,6 +327,12 @@ describe('gh repo', () => {
     reset({ full_name: 'me/r' })
     await fork(inv(['o/r']))
     expect(CALLS[0]?.body).toEqual({})
+  })
+
+  it('refuses a remote for the current repository', async () => {
+    await expect(fork(inv([], { remote: 'true' }, { token: 't', repo: 'o/r' }))).rejects.toThrow(
+      '--remote is not supported',
+    )
   })
 
   // gh takes the new name as the operand and the repository to rename as

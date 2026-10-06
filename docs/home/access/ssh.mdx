@@ -1,0 +1,109 @@
+---
+title: SSH
+description: Reach a workspace with ssh, sftp, scp and sshfs.
+icon: square-terminal
+---
+
+The Mirage server can listen for SSH next to HTTP. The SSH username names the workspace. Every line runs in Mirage's shell, and every file operation goes through the workspace's mounts.
+
+```bash
+ssh -p 2222 demo@127.0.0.1                     # a shell in workspace "demo"
+ssh -p 2222 demo@127.0.0.1 'ls /data | wc -l'  # one line
+ssh -T -p 2222 demo@127.0.0.1 < setup.sh       # a script
+sftp -P 2222 demo@127.0.0.1                    # file transfer
+scp -P 2222 notes.txt demo@127.0.0.1:/data/    # copy in
+sshfs -p 2222 -o direct_io demo@127.0.0.1:/ ~/mnt/demo  # a folder, see FUSE
+```
+
+On the SSH port only public keys log in: no passwords. Nothing is forwarded: no ports, no agent, no X11. To reach a server through its HTTPS port instead, with the CLI's token and no key, see [Over HTTPS](#over-https).
+
+## Turn it on
+
+<Steps>
+  <Step title="Install the SSH library">
+    <CodeGroup>
+    ```bash Python
+    pip install 'mirage-ai[ssh]'
+    ```
+
+    ```bash TypeScript
+    npm install -g ssh2
+    ```
+    </CodeGroup>
+  </Step>
+  <Step title="Pick a port">
+    ```bash
+    mirage config set ssh_port 2222
+    ```
+    SSH stays off until a port is set.
+  </Step>
+  <Step title="Authorize your key">
+    ```bash
+    mkdir -p ~/.mirage/ssh
+    cat ~/.ssh/id_ed25519.pub >> ~/.mirage/ssh/authorized_keys
+    ```
+    The file is read on every login, so adding or removing a key needs no restart.
+  </Step>
+  <Step title="Restart and connect">
+    ```bash
+    mirage daemon restart
+    mirage workspace create workspace.yaml --id demo
+    ssh -p 2222 demo@127.0.0.1
+    ```
+    The server makes its host key on first start and keeps it, so your `known_hosts` entry stays valid.
+  </Step>
+</Steps>
+
+## Settings
+
+An environment variable wins over `~/.mirage/config.toml`, which wins over the default.
+
+| Key | Env var | Default |
+| --- | --- | --- |
+| `ssh_port` | `MIRAGE_SSH_PORT` | unset (off) |
+| `ssh_host` | `MIRAGE_SSH_HOST` | `127.0.0.1` |
+| `ssh_host_key_file` | `MIRAGE_SSH_HOST_KEY_FILE` | `~/.mirage/ssh/host_ed25519_key` |
+| `ssh_authorized_keys` | `MIRAGE_SSH_AUTHORIZED_KEYS` | `~/.mirage/ssh/authorized_keys` |
+
+## Bind a key to a profile
+
+The `mirage-profile` option runs every login of that key under a [profile](/home/permissions). A key without it gets the workspace's default.
+
+```text ~/.mirage/ssh/authorized_keys
+mirage-profile="guarded" ssh-ed25519 AAAA... agent-a
+ssh-ed25519 AAAA... me
+```
+
+The server reads the option, not the client, so a key cannot pick looser rules. Give each agent's sandbox its own key, bound to that agent's profile.
+
+## Bind a key to an account
+
+The `mirage-account` option makes the key belong to that [account](/home/access/http#accounts): it opens only the workspaces the account created. Shell, exec, `sftp` and `scp` are all held to it.
+
+```text ~/.mirage/ssh/authorized_keys
+mirage-account="alice" ssh-ed25519 AAAA... alice-laptop
+mirage-account="alice",mirage-profile="guarded" ssh-ed25519 AAAA... alice-agent
+```
+
+Another account's workspace answers like a missing one. In `jwt` mode a key without the option opens nothing; in `local` and `token` mode it opens every workspace. An option that is empty or given twice opens nothing.
+
+## Over HTTPS
+
+The server also carries SSH over its HTTP port, at `/v1/workspaces/{id}/ssh`, so a hosted server needs no second port open. `mirage ssh-proxy <id>` relays it on stdio, which makes it ssh's `ProxyCommand`:
+
+```bash
+ssh -o ProxyCommand="mirage ssh-proxy %r" demo@mirage
+```
+
+Or once, in your SSH config:
+
+```text ~/.ssh/config
+Host mirage
+  ProxyCommand mirage ssh-proxy %r
+```
+
+Then `ssh demo@mirage`, `sftp demo@mirage`, `scp notes.txt demo@mirage:/data/` and `sshfs -o direct_io demo@mirage:/ ~/mnt/demo` all work, with no key and no `ssh_port`. The CLI reaches the server its `url` names, or the one it starts on your machine, and sends its token: on a hosted server, the one [`mirage login`](/home/access/cli#log-in) keeps. The route checks that token like any HTTP request, so in `jwt` mode the login is the token's account and reaches only its workspaces. The login may only name the workspace in the route, and runs under the workspace's default profile. The server still needs the SSH library from [Turn it on](#turn-it-on).
+
+## Sessions
+
+Each channel (one `ssh`, `sftp` or `scp` run) gets a fresh session, closed when it ends, so a `cd` or `export` never leaks between them. The session's profile and the mount modes apply as in any shell: a read-only mount refuses `sftp put`. Ctrl-C cancels the running line and sets `$?` to 130, a dropped connection cancels it too, and `ssh host cmd` exits with the line's status. The server sends a keepalive every 15 seconds and closes a connection that misses three, so a half-open one cancels its line as well.

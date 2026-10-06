@@ -1,0 +1,81 @@
+{
+  "cases": [
+    {
+      "id": "du_P_lists_a_link_without_following_it",
+      "seq": 15600301,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcF_du/t /data/fcF_du/d && echo x > /data/fcF_du/t/f && echo y > /data/fcF_du/d/g && ln -s ../t /data/fcF_du/d/l && du -aP /data/fcF_du/d | cut -f2 | sort; du -aP /data/fcF_du/d/l | cut -f2; rm -r /data/fcF_du",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fcF_du/d\n/data/fcF_du/d/g\n/data/fcF_du/d/l\n/data/fcF_du/d/l\n",
+        "stderr": ""
+      },
+      "flags": [
+        "P",
+        "a"
+      ]
+    },
+    {
+      "id": "du_P_after_L_wins",
+      "seq": 15600303,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcF_du2/t /data/fcF_du2/d && echo x > /data/fcF_du2/t/f && echo y > /data/fcF_du2/d/g && ln -s ../t /data/fcF_du2/d/l && du -aLP /data/fcF_du2/d/l | cut -f2; du -aPL /data/fcF_du2/d/l | cut -f2; rm -r /data/fcF_du2",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fcF_du2/d/l\n/data/fcF_du2/d/l/f\n/data/fcF_du2/d/l\n",
+        "stderr": ""
+      },
+      "flags": [
+        "P",
+        "L",
+        "a"
+      ]
+    }
+  ]
+}

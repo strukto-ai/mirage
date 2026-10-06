@@ -58,7 +58,13 @@ from mirage.observe.context import (
     start_op,
 )
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import enoent, enotsup, listing_error
+from mirage.utils.errors import (
+    eexist,
+    enoent,
+    enotdir,
+    enotsup,
+    listing_error,
+)
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.ranges import window_for
@@ -236,15 +242,36 @@ def _move_body(src: DriveLoc, dst: DriveLoc) -> dict[str, Any]:
     return body
 
 
+@dataclass(frozen=True)
+class MovedItem:
+    """What a rename_replace moved, and what it replaced."""
+
+    moved: dict[str, Any]
+    replaced_non_file: bool
+
+
 async def rename_replace(
     config: MsGraphConfig,
     src: DriveLoc,
     dst: DriveLoc,
     session: SessionArg = None,
-) -> None:
+) -> MovedItem:
+    """Move ``src`` to ``dst``, replacing a file or an empty folder there.
+
+    Args:
+        config (MsGraphConfig): Graph credentials and endpoints.
+        src (DriveLoc): the item to move.
+        dst (DriveLoc): where it lands.
+        session (SessionArg): the shared HTTP session, if any.
+
+    Returns:
+        MovedItem: the moved driveItem and whether the move replaced
+        something at ``dst`` that was not positively a file.
+    """
     body = _move_body(src, dst)
+    replaced_non_file = False
     try:
-        await graph_patch(config, src.item(), body, session=session)
+        moved = await graph_patch(config, src.item(), body, session=session)
     except GraphError as exc:
         if exc.status != 409 and exc.code != "nameAlreadyExists":
             raise
@@ -261,15 +288,67 @@ async def rename_replace(
             if children:
                 raise
         await graph_delete(config, dst.item(), session=session)
-        await graph_patch(config, src.item(), body, session=session)
+        replaced_non_file = "file" not in dst_item
+        moved = await graph_patch(config, src.item(), body, session=session)
+    return MovedItem(
+        moved=moved if isinstance(moved, dict) else {},
+        replaced_non_file=replaced_non_file,
+    )
+
+
+async def _url_item(
+    config: MsGraphConfig, url: str, session: SessionArg
+) -> dict[str, Any] | None:
+    try:
+        return await graph_get(config, url, session=session)
+    except GraphError as exc:
+        if exc.status != 404:
+            raise
+        return None
+
+
+@dataclass(frozen=True, slots=True)
+class FolderTarget:
+    """Where a folder create stands.
+
+    Attributes:
+        item (str): the folder's own item URL.
+        parent (str): the parent's item URL.
+        virtual (str): the path a refusal names.
+    """
+
+    item: str
+    parent: str
+    virtual: str
 
 
 async def create_child_folder(
     config: MsGraphConfig,
     parent_url: str,
     name: str,
+    target: FolderTarget,
     session: SessionArg = None,
+    exist_ok: bool = True,
 ) -> None:
+    """Create one folder, naming a refusal the way mkdir(2) does.
+
+    "replace" is unreliable for folders on real Graph, so the create
+    uses "fail" and reads its 409: a folder already holding the name is
+    success when ``exist_ok`` (a level ``mkdir -p`` passes through) and
+    EEXIST otherwise, so a folder another client made after the doors
+    looked is still refused; a file holding it is EEXIST. Graph answers
+    a create under a missing parent and under a file alike with 404, so
+    the parent is looked up to tell ENOENT from ENOTDIR. Both lookups
+    run on a refusal only.
+
+    Args:
+        config (MsGraphConfig): Graph config.
+        parent_url (str): the parent's ``/children`` URL.
+        name (str): the folder's name.
+        target (FolderTarget): the folder, its parent and its name.
+        session (SessionArg): pool or live session to ride.
+        exist_ok (bool): a folder already holding the name is success.
+    """
     body = {
         "name": name,
         "folder": {},
@@ -278,11 +357,17 @@ async def create_child_folder(
     try:
         await graph_post(config, parent_url, body, session=session)
     except GraphError as exc:
-        # mkdir is idempotent on object-store-style backends (matches the
-        # s3 core); "replace" is unreliable for folders on real Graph, so
-        # create with "fail" and tolerate the existing item.
-        if exc.status != 409 and exc.code != "nameAlreadyExists":
+        if exc.status == 409 or exc.code == "nameAlreadyExists":
+            taken = await _url_item(config, target.item, session)
+            if exist_ok and (taken is None or "folder" in taken):
+                return
+            raise eexist(target.virtual) from exc
+        if exc.status != 404:
             raise
+        found = await _url_item(config, target.parent, session)
+        if found is not None and "folder" not in found:
+            raise enotdir(target.virtual) from exc
+        raise enoent(target.virtual) from exc
 
 
 async def upload_session_write(

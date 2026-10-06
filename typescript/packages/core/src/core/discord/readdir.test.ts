@@ -24,7 +24,8 @@ import {
   type DiscordResponse,
   type DiscordTransport,
 } from './client.ts'
-import { dateRangeDescending, listFiles, readdir, snowflakeToDate } from './readdir.ts'
+import { dateRangeDescending, listFiles, readdir } from './readdir.ts'
+import { snowflakeToDate } from './entry.ts'
 import { historyJsonlBytes, memberJsonBytes } from './render.ts'
 
 interface RecordedCall {

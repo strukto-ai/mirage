@@ -79,6 +79,8 @@ const GENERIC_OUT: [string, string][] = [
   ['write', '/m/m/cs01'],
 ]
 
+// echo touches no file of its own, so its redirect target is opened by the
+// one write of its output: `>` is one write, and `>>` one append.
 const SHELL_LEDGER: [string, string][] = [
   ['write', K],
   ['append', K],

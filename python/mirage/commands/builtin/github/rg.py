@@ -18,10 +18,15 @@ from mirage.commands.builtin.generic.rg import (
     needs_every_file,
     parse_flags,
     refuse_missing_pattern,
+    rg_generic,
     walk_filter,
 )
-from mirage.commands.builtin.generic.rg import rg as generic_rg
-from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.builtin.generic_bind.adapter import (
+    bound_op,
+    with_command_guards,
+    with_policy_guard,
+)
+from mirage.commands.builtin.github.io import IO
 from mirage.commands.builtin.github.pushdown import narrow_scope, scope_refusal
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.rg_scan import walk_candidates
@@ -33,6 +38,7 @@ from mirage.core.github.read import read as github_read
 from mirage.core.github.readdir import readdir as _readdir
 from mirage.core.github.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.namespace_view import paths_scoped
 from mirage.types import PathSpec
 
 
@@ -47,6 +53,11 @@ async def rg(
     pattern_str = pattern_arg(texts, fl, "regexp")
     f = parse_flags(fl)
     refuse_missing_pattern(pattern_str, fl, f)
+    # Code search and the core ops answer from the raw repository, so
+    # under a hide or a path rule the scan sets search aside and reads
+    # through the command guards, which report a refused directory where
+    # ripgrep does and never open a sealed file.
+    scoped = paths_scoped(opts.ns, paths)
 
     run_opts = opts
     if paths:
@@ -61,7 +72,7 @@ async def rg(
             # A narrowing holds only files matching the searched literal:
             # -v and --files-without-match print from the rest, and -f adds
             # patterns code search never saw.
-            exact_file_set=needs_every_file(fl, f),
+            exact_file_set=scoped or needs_every_file(fl, f),
         )
         if used_search:
             # The walk a narrowing stands in for filters what it walks
@@ -79,13 +90,22 @@ async def rg(
             return b"", IOResult(exit_code=1, stderr=msg.encode())
         paths = narrowed
 
-    return await generic_rg(
+    io = with_command_guards(with_policy_guard(IO)) if scoped else None
+    return await rg_generic(
         paths,
         texts,
         run_opts,
-        readdir=bound_op(_readdir, accessor, opts.index),
-        stat=bound_op(_stat, accessor, opts.index),
-        read_bytes=bound_op(github_read, accessor, opts.index),
+        readdir=bound_op(
+            io.readdir if io is not None else _readdir, accessor, opts.index
+        ),
+        stat=bound_op(
+            io.stat if io is not None else _stat, accessor, opts.index
+        ),
+        read_bytes=bound_op(
+            io.read_bytes if io is not None else github_read,
+            accessor,
+            opts.index,
+        ),
         read_stream=None,
         stdin=opts.stdin,
     )

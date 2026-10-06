@@ -12,12 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { PassThrough } from 'node:stream'
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '@struktoai/mirage-node'
-import { afterEach, describe, expect, it } from 'vitest'
-import { McpRelay } from './relay.ts'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { buildApp } from '../app.ts'
+import { AuthMode } from '../auth/config.ts'
+import { McpRelay, relayStdio } from './relay.ts'
 import { createMirageMcpServer } from './server.ts'
 
 const closers: (() => Promise<void>)[] = []
@@ -49,6 +55,7 @@ function firstText(content: unknown): string {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   for (const close of closers.splice(0).reverse()) await close()
 })
 
@@ -72,5 +79,86 @@ describe('McpRelay', () => {
       code: -32602,
       message: 'Tool nope not found',
     })
+  })
+})
+
+describe('McpRelay cancel', () => {
+  it("passes a client's cancel on, so the session's next line runs at once", async () => {
+    const { client } = await relayed()
+    const stop = new AbortController()
+    const running = client.callTool(
+      { name: 'shell', arguments: { command: 'sleep 20' } },
+      { signal: stop.signal },
+    )
+    setTimeout(() => {
+      stop.abort()
+    }, 300)
+    await expect(running).rejects.toThrow()
+    const started = Date.now()
+    const after = await client.callTool({ name: 'shell', arguments: { command: 'echo after' } })
+    expect(firstText(after.content)).toBe('after\n')
+    expect(Date.now() - started).toBeLessThan(5000)
+  })
+})
+
+describe('relayStdio', () => {
+  it('asks for the token on every request', async () => {
+    const app = buildApp({
+      allowedHosts: ['*'],
+      pidFile: join(mkdtempSync(join(tmpdir(), 'mirage-mcp-relay-')), 'daemon.pid'),
+      authConfig: { mode: AuthMode.Token, bearerToken: 'secret' },
+    })
+    closers.push(() => app.close())
+    await app.listen({ host: '127.0.0.1', port: 0 })
+    const address = app.server.address()
+    if (address === null || typeof address === 'string') throw new Error('no port')
+    const base = `http://127.0.0.1:${String(address.port)}`
+    const created = await fetch(`${base}/v1/workspaces`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer secret', 'content-type': 'application/json' },
+      body: JSON.stringify({ config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } }),
+    })
+    const { id } = (await created.json()) as { id: string }
+    const stdin = new PassThrough()
+    vi.spyOn(process, 'stdin', 'get').mockReturnValue(stdin as unknown as typeof process.stdin)
+    const answers = new Map<number, { result: { tools: { name: string }[] } }>()
+    let pending = ''
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      pending += String(chunk)
+      const lines = pending.split('\n')
+      pending = lines.pop() ?? ''
+      for (const line of lines) {
+        const answer = JSON.parse(line) as { id?: number; result: { tools: { name: string }[] } }
+        if (answer.id !== undefined) answers.set(answer.id, answer)
+      }
+      if (answers.has(3)) stdin.end()
+      return true
+    })
+    for (const message of [
+      {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-06-18',
+          capabilities: {},
+          clientInfo: { name: 'test', version: '1' },
+        },
+      },
+      { jsonrpc: '2.0', method: 'notifications/initialized' },
+      { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+      { jsonrpc: '2.0', id: 3, method: 'tools/list' },
+    ]) {
+      stdin.write(JSON.stringify(message) + '\n')
+    }
+    let asked = 0
+    await relayStdio(`${base}/v1/workspaces/${id}/mcp`, () => {
+      asked += 1
+      return Promise.resolve('secret')
+    })
+    for (const n of [2, 3]) {
+      expect(answers.get(n)?.result.tools.map((tool) => tool.name)).toContain('shell')
+    }
+    expect(asked).toBeGreaterThanOrEqual(3)
   })
 })

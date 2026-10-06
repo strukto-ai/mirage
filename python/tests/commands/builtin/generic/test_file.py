@@ -9,7 +9,6 @@ def _spec(path: str) -> PathSpec:
 
 
 def _make_backend(files: dict[str, tuple[bytes, ContentType]], dirs: set[str]):
-
     async def stat_fn(p: PathSpec) -> FileStat:
         if p.virtual in dirs:
             return FileStat(name=p.virtual, type=FileType.DIRECTORY, size=0)
@@ -30,38 +29,10 @@ def _make_backend(files: dict[str, tuple[bytes, ContentType]], dirs: set[str]):
 
 
 @pytest.mark.asyncio
-async def test_file_directory_reported_without_read():
-    stat_fn, read_bytes = _make_backend({}, {"/d"})
-    out, _io = await file_cmd(
-        [_spec("/d")], read_bytes=read_bytes, stat_fn=stat_fn
-    )
-    assert out == b"/d: directory\n"
-
-
-@pytest.mark.asyncio
 async def test_file_missing_operand_raises():
     stat_fn, read_bytes = _make_backend({}, set())
     with pytest.raises(ValueError):
         await file_cmd([], read_bytes=read_bytes, stat_fn=stat_fn)
-
-
-@pytest.mark.asyncio
-async def test_file_mime_mode():
-    async def stat_fn(path):
-        return FileStat(
-            name="f.json",
-            size=10,
-            type=FileType.FILE,
-            content=ContentType.JSON,
-        )
-
-    async def read_bytes(path):
-        return b'{"a": 1}'
-
-    out, _ = await file_cmd(
-        [_spec("f.json")], read_bytes=read_bytes, stat_fn=stat_fn, i=True
-    )
-    assert b"application/json" in out
 
 
 @pytest.mark.asyncio

@@ -21,6 +21,7 @@ pytest.importorskip("wasmtime")
 
 import wasmtime
 
+from mirage.runtime.handles import FileHandle
 from mirage.runtime.wasm import fs
 from mirage.runtime.wasm.constants import (
     FST_ATIM,
@@ -31,6 +32,7 @@ from mirage.runtime.wasm.constants import (
 from mirage.runtime.wasm.errors import EINVAL, EIO, ENOENT
 from mirage.runtime.wasm.execution import epoch_engine
 from mirage.runtime.wasm.fs import (
+    FdEntry,
     WasiFs,
     _call_guarded,
     _spec,
@@ -134,3 +136,19 @@ def test_install_wasi_fs_locks_the_callback_slab_before_its_funcs(monkeypatch):
 def test_unpack_iovs_decodes_pointer_length_pairs():
     raw = struct.pack("<IIII", 16, 128, 4096, 64)
     assert unpack_iovs(raw, 2) == [(16, 128), (4096, 64)]
+
+
+def _refuse_flush(path, steps):
+    raise NotImplementedError("truncate is not supported")
+
+
+def test_close_all_reports_a_flush_the_mount_cannot_take(monkeypatch):
+    view = WasmView()
+    monkeypatch.setattr(view, "flush", _refuse_flush)
+    wasi_fs = WasiFs(view, b"")
+    handle = FileHandle.opened(
+        "/data/f.txt", None, size=0, writable=True, append=False
+    )
+    handle.write(b"kept")
+    wasi_fs._fds.add(FdEntry(kind="file", handle=handle, path="/data/f.txt"))
+    assert wasi_fs.close_all() == ["/data/f.txt: truncate is not supported"]

@@ -13,12 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import {
-  DatabricksVolumeApiError,
-  isNotFound,
-  notADirectoryError,
-  notFoundError,
-} from './errors.ts'
+import { DatabricksVolumeApiError, isNotFound } from './errors.ts'
 
 describe('isNotFound', () => {
   it('matches 404 status codes', () => {
@@ -38,18 +33,5 @@ describe('isNotFound', () => {
   it('rejects other errors and non-errors', () => {
     expect(isNotFound(new DatabricksVolumeApiError('denied', 403, 'PERMISSION_DENIED'))).toBe(false)
     expect(isNotFound('not an error')).toBe(false)
-  })
-})
-
-describe('error constructors', () => {
-  it('builds ENOENT errors', () => {
-    const e = notFoundError('/a.txt') as Error & { code: string }
-    expect(e.code).toBe('ENOENT')
-    expect(e.message).toContain('/a.txt')
-  })
-
-  it('builds ENOTDIR errors', () => {
-    const e = notADirectoryError('/a.txt') as Error & { code: string }
-    expect(e.code).toBe('ENOTDIR')
   })
 })

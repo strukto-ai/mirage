@@ -1,0 +1,340 @@
+{
+  "cases": [
+    {
+      "id": "whole_line_star",
+      "world": {
+        "runtimes": [
+          {
+            "name": "echobox",
+            "captures": [
+              "*"
+            ],
+            "script": "'keep-out' not in ctx['line']"
+          },
+          {
+            "name": "monty",
+            "captures": []
+          },
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "ls /ram && echo done",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:ls /ram && echo done\n"
+          }
+        },
+        {
+          "command": "echo keep-out",
+          "expect": {
+            "exit": 0,
+            "stdout": "keep-out\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "whole_line_literal_words",
+      "note": "A whole-line runtime expands the line itself, so the gate reads it as typed: a word only the runtime could expand is refused where a rule in force would have read it (the command name under any rule, an argument where a rule reads that command's arguments), the lines a word runs (eval, sh -c, xargs, timeout) are admitted in turn, and a line the gate cannot see into (a sourced file) is refused. Literal words, and dynamic ones no rule reads, reach the runtime.",
+      "world": {
+        "runtimes": [
+          {
+            "name": "echobox",
+            "captures": [
+              "*"
+            ]
+          },
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "default": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "no deletes",
+                  "commands": [
+                    "rm"
+                  ]
+                },
+                {
+                  "reason": "sealed",
+                  "commands": {
+                    "cat": [
+                      "/ram/secret*"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "rm /ram/x",
+          "expect": {
+            "exit": 126,
+            "stderr": "rm: Permission denied\n"
+          }
+        },
+        {
+          "command": "$cmd /ram/x",
+          "expect": {
+            "exit": 126,
+            "stderr": "$cmd: Permission denied\n"
+          }
+        },
+        {
+          "command": "PAYLOAD='rm /ram/x'; eval \"$PAYLOAD\"",
+          "expect": {
+            "exit": 126,
+            "stderr": "\"$PAYLOAD\": Permission denied\n"
+          }
+        },
+        {
+          "command": "eval 'rm /ram/x'",
+          "expect": {
+            "exit": 126,
+            "stderr": "rm: Permission denied\n"
+          }
+        },
+        {
+          "command": "cat \"$f\"",
+          "expect": {
+            "exit": 126,
+            "stderr": "cat: Permission denied\n"
+          }
+        },
+        {
+          "command": "'cat' \"/ram/secret\"",
+          "expect": {
+            "exit": 1,
+            "stderr": "cat: /ram/secret: Permission denied\n"
+          }
+        },
+        {
+          "command": "ls /ram | xargs rm",
+          "expect": {
+            "exit": 126,
+            "stderr": "rm: Permission denied\n"
+          }
+        },
+        {
+          "command": "ls /ram | xargs cat",
+          "expect": {
+            "exit": 126,
+            "stderr": "cat: Permission denied\n"
+          }
+        },
+        {
+          "command": "sh -c 'timeout 5 rm /ram/x'",
+          "expect": {
+            "exit": 126,
+            "stderr": "rm: Permission denied\n"
+          }
+        },
+        {
+          "command": "source /ram/env.sh",
+          "expect": {
+            "exit": 126,
+            "stderr": "source: Permission denied\n"
+          }
+        },
+        {
+          "command": "echo \"$HOME\" $(date)",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:echo \"$HOME\" $(date)\n"
+          }
+        },
+        {
+          "command": "ls /ram | xargs echo",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:ls /ram | xargs echo\n"
+          }
+        },
+        {
+          "command": "cat /ram/a",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:cat /ram/a\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "whole_line_interpreter_script",
+      "note": "A whole-line runtime runs the interpreter itself, where no op door follows the script read, so the gate reads the script slot from the interpreter's spec exactly as it reads a mount command's: a bare script name under the working directory is the file it names, and a payload's operands are not paths. A lone dash selects stdin and carries no path, while ./-, absolute dash filenames and stdin redirects still name protected files.",
+      "world": {
+        "runtimes": [
+          {
+            "name": "echobox",
+            "captures": [
+              "*"
+            ],
+            "script": "'cd ' not in ctx['line']"
+          },
+          {
+            "name": "monty",
+            "captures": []
+          },
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "default": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "sealed",
+                  "paths": [
+                    "/ram/*"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /ram",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 secret.py",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "python3: secret.py: Permission denied\n"
+          }
+        },
+        {
+          "command": "node secret.js",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "node: secret.js: Permission denied\n"
+          }
+        },
+        {
+          "command": "python3 -u /ram/secret.py",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "python3: /ram/secret.py: Permission denied\n"
+          }
+        },
+        {
+          "command": "python3 -c 'print(1)' secret.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:python3 -c 'print(1)' secret.py\n"
+          }
+        },
+        {
+          "command": "node -e 1 secret.js",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:node -e 1 secret.js\n"
+          }
+        },
+        {
+          "command": "python - /ram/arg",
+          "stdin": "print(1)\n",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:python - /ram/arg\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -u -- - -c x",
+          "stdin": "print(1)\n",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:python3 -u -- - -c x\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "js -- - /ram/arg",
+          "stdin": "print(1)\n",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:js -- - /ram/arg\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node - -e x",
+          "stdin": "print(1)\n",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:node - -e x\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python -- ./-",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "python: ./-: Permission denied\n"
+          }
+        },
+        {
+          "command": "python3 -- /ram/-",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "python3: /ram/-: Permission denied\n"
+          }
+        },
+        {
+          "command": "js -- ./-",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "js: ./-: Permission denied\n"
+          }
+        },
+        {
+          "command": "node -- /ram/-",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "node: /ram/-: Permission denied\n"
+          }
+        },
+        {
+          "command": "python3 - < /ram/secret.py",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "python3: /ram/secret.py: Permission denied\n"
+          }
+        }
+      ]
+    }
+  ]
+}

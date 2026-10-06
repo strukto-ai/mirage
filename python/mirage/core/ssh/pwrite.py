@@ -14,8 +14,7 @@
 
 from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.context import invalidate_after_write
-from mirage.core.ssh.constants import FXF_CREAT, FXF_WRITE
-from mirage.core.ssh.utils import join_root
+from mirage.core.ssh.utils import join_root, open_for_write
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
@@ -27,7 +26,7 @@ async def pwrite(
     timer = start_op()
     sftp = await accessor.sftp()
     remote = join_root(config.root, path.mount_path)
-    async with sftp.open(remote, FXF_WRITE | FXF_CREAT, encoding=None) as f:
+    async with await open_for_write(sftp, remote, path) as f:
         await f.write(data, offset)
     record("pwrite", path.virtual, "ssh", len(data), timer)
     await invalidate_after_write(path)

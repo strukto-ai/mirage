@@ -2456,7 +2456,8 @@
           "op": "checkout",
           "expect": {
             "errno": "EACCES",
-            "error_contains": "no secrets in the shell"
+            "error_contains": "SECRET: permission denied",
+            "reason": "no secrets in the shell"
           }
         },
         {
@@ -3154,6 +3155,447 @@
               }
             ]
           }
+        }
+      ]
+    },
+    {
+      "id": "per_call_env_and_cwd_stay_with_the_call",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "mode": "write"
+          }
+        },
+        "runtimes": []
+      },
+      "steps": [
+        {
+          "op": "concurrent",
+          "steps": [
+            {
+              "op": "exec",
+              "command": "sleep 0.01; eval 'echo $LABEL'; echo $(echo $LABEL)",
+              "env": {
+                "LABEL": "left"
+              }
+            },
+            {
+              "op": "exec",
+              "command": "eval 'echo $LABEL'; sleep 0.02; echo $(echo $LABEL)",
+              "env": {
+                "LABEL": "right"
+              }
+            }
+          ],
+          "expect": {
+            "value": [
+              {
+                "exit_code": 0,
+                "stdout": "left\nleft\n",
+                "stderr": ""
+              },
+              {
+                "exit_code": 0,
+                "stdout": "right\nright\n",
+                "stderr": ""
+              }
+            ]
+          }
+        },
+        {
+          "op": "exec",
+          "command": "echo ${LABEL-unset}",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "unset\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "mkdir -p /data/async-a /data/async-b",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "concurrent",
+          "steps": [
+            {
+              "op": "exec",
+              "command": "sleep 0.01; eval 'pwd'; printf 'left\\n' > value; cat value",
+              "cwd": "/data/async-a"
+            },
+            {
+              "op": "exec",
+              "command": "eval 'pwd'; printf 'right\\n' > value; sleep 0.02; cat value",
+              "cwd": "/data/async-b"
+            }
+          ],
+          "expect": {
+            "value": [
+              {
+                "exit_code": 0,
+                "stdout": "/data/async-a\nleft\n",
+                "stderr": ""
+              },
+              {
+                "exit_code": 0,
+                "stdout": "/data/async-b\nright\n",
+                "stderr": ""
+              }
+            ]
+          }
+        },
+        {
+          "op": "exec",
+          "command": "cat /data/async-a/value /data/async-b/value; pwd",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "left\nright\n/\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "concurrent_lines_keep_their_writes_and_failures",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "mode": "write"
+          }
+        },
+        "runtimes": []
+      },
+      "steps": [
+        {
+          "op": "concurrent",
+          "steps": [
+            {
+              "op": "exec",
+              "command": "printf 'left\\n' > /data/async-left; cat /data/async-left"
+            },
+            {
+              "op": "exec",
+              "command": "printf 'right\\n' > /data/async-right; cat /data/async-right"
+            }
+          ],
+          "expect": {
+            "value": [
+              {
+                "exit_code": 0,
+                "stdout": "left\n",
+                "stderr": ""
+              },
+              {
+                "exit_code": 0,
+                "stdout": "right\n",
+                "stderr": ""
+              }
+            ]
+          }
+        },
+        {
+          "op": "exec",
+          "command": "cat /data/async-left /data/async-right",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "left\nright\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "concurrent",
+          "steps": [
+            {
+              "op": "exec",
+              "command": "sleep 0.01; echo left; exit 7"
+            },
+            {
+              "op": "exec",
+              "command": "sleep 0.02; echo right"
+            }
+          ],
+          "expect": {
+            "value": [
+              {
+                "exit_code": 7,
+                "stdout": "left\n",
+                "stderr": ""
+              },
+              {
+                "exit_code": 0,
+                "stdout": "right\n",
+                "stderr": ""
+              }
+            ]
+          }
+        },
+        {
+          "op": "exec",
+          "command": "echo alive",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "alive\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sessions_meet_and_run_their_own_exit_traps",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "mode": "write"
+          }
+        },
+        "runtimes": []
+      },
+      "steps": [
+        {
+          "op": "session",
+          "id": "peer"
+        },
+        {
+          "op": "concurrent",
+          "steps": [
+            {
+              "op": "exec",
+              "command": "echo left > /data/rendezvous-left; for i in $(seq 500); do [ -f /data/rendezvous-right ] && break; sleep 0.01; done; cat /data/rendezvous-right"
+            },
+            {
+              "op": "exec",
+              "command": "echo right > /data/rendezvous-right; for i in $(seq 500); do [ -f /data/rendezvous-left ] && break; sleep 0.01; done; cat /data/rendezvous-left",
+              "session": "peer"
+            }
+          ],
+          "expect": {
+            "value": [
+              {
+                "exit_code": 0,
+                "stdout": "right\n",
+                "stderr": ""
+              },
+              {
+                "exit_code": 0,
+                "stdout": "left\n",
+                "stderr": ""
+              }
+            ]
+          }
+        },
+        {
+          "op": "concurrent",
+          "steps": [
+            {
+              "op": "exec",
+              "command": "bash -c 'trap \"sleep .01; echo $LABEL > /data/trap-left\" EXIT; echo body:$LABEL'",
+              "env": {
+                "LABEL": "left"
+              }
+            },
+            {
+              "op": "exec",
+              "command": "bash -c 'trap \"sleep .01; echo $LABEL > /data/trap-right\" EXIT; echo body:$LABEL'",
+              "env": {
+                "LABEL": "right"
+              },
+              "session": "peer"
+            }
+          ],
+          "expect": {
+            "value": [
+              {
+                "exit_code": 0,
+                "stdout": "body:left\n",
+                "stderr": ""
+              },
+              {
+                "exit_code": 0,
+                "stdout": "body:right\n",
+                "stderr": ""
+              }
+            ]
+          }
+        },
+        {
+          "op": "exec",
+          "command": "cat /data/trap-left /data/trap-right; trap -p",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "left\nright\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "job_output_after_a_line_comes_first_in_the_next",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "mode": "write"
+          }
+        },
+        "runtimes": []
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "(sleep 0.05; echo late) & echo now",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "now\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "sleep 0.2; echo next",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "late\nnext\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "wait; echo done",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "done\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "aborted_redirect_still_takes_its_jobs_output",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "mode": "write"
+          }
+        },
+        "runtimes": []
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "true",
+          "expect": {
+            "value": {
+              "exit_code": 0
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "{ { sleep 0.3; echo late; } & sleep 5; } > /data/out",
+          "cancel_after_ms": 100,
+          "expect": {
+            "value": {
+              "aborted": true
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "exec",
+          "command": "cat /data/out",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "late\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "noisy_job_does_not_hold_back_a_streamed_line",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "mode": "write"
+          }
+        },
+        "runtimes": []
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "for i in $(seq 1 5000); do echo x; sleep 0.001; done &",
+          "expect": {
+            "value": {
+              "exit_code": 0
+            }
+          }
+        },
+        {
+          "op": "session",
+          "id": "other"
+        },
+        {
+          "op": "exec",
+          "session": "other",
+          "command": "sleep 0.2",
+          "expect": {
+            "value": {
+              "exit_code": 0
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "kill %1 && echo killed",
+          "sink_delay_ms": 5,
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "streamed_contains": "killed\n"
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
         }
       ]
     }

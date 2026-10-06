@@ -12,46 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.gdocs import GDocsAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.core.gdocs.constants import MIME
 from mirage.core.gdocs.readdir import readdir
 from mirage.core.gdocs.scope import detect_scope
-from mirage.core.google.entry import resolve_app_entry
-from mirage.core.hierarchy.scope import ScopeMatch
-from mirage.core.hierarchy.stat import make_stat
-from mirage.types import ContentType, FileStat, FileType, PathSpec
+from mirage.core.google.stat import make_app_stat
 from mirage.vfs.gdocs.doc_entry import make_filename
 
-
-async def _file_stat(
-    accessor: GDocsAccessor,
-    match: ScopeMatch,
-    path: PathSpec,
-    index: IndexCacheStore,
-) -> FileStat:
-    entry = await resolve_app_entry(
-        accessor.token_manager,
-        match,
-        path,
-        index,
-        MIME,
-        "gdocs/file",
-        make_filename,
-    )
-    return FileStat(
-        name=entry.vfs_name,
-        type=FileType.FILE,
-        content=ContentType.JSON,
-        modified=entry.remote_time,
-        size=entry.size,
-        fingerprint=entry.remote_time or None,
-        extra={
-            "doc_id": entry.id,
-            "doc_name": entry.name,
-            **entry.extra,
-        },
-    )
-
-
-stat = make_stat(detect_scope, readdir, overrides={"file": _file_stat})
+stat = make_app_stat(MIME, detect_scope, readdir, "gdocs/file", make_filename)

@@ -71,7 +71,6 @@ def _workspace() -> Workspace:
 
 
 def test_instructions_list_each_mount_with_its_mode():
-
     async def _run():
         session = await MirageSandboxClient(_workspace()).create()
         capability = MirageCapability()
@@ -90,7 +89,6 @@ def test_bind_refuses_a_session_from_another_backend():
 
 
 def test_mirage_session_unwraps_the_sdk_wrapper():
-
     async def _run():
         client = MirageSandboxClient(_workspace())
         wrapped = await client.create()
@@ -100,7 +98,6 @@ def test_mirage_session_unwraps_the_sdk_wrapper():
 
 
 def test_the_agent_prompt_carries_the_mounts(scripted_model):
-
     async def _run():
         model = scripted_model([])
         agent = SandboxAgent(

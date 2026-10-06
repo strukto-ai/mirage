@@ -1359,6 +1359,40 @@
         "stdout": "-a-b-d-\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "sed_sub_print_flag_and_literal_bre_plus",
+      "seq": 15300004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'hi\\nbye\\n' | sed 's/hi/HI/p'; printf 'a+b\\n' | sed 's/a+/X/'",
+      "expect": {
+        "exit": 0,
+        "stdout": "HI\nHI\nbye\nXb\n",
+        "stderr": ""
+      }
     }
   ]
 }

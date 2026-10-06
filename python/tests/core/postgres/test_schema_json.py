@@ -19,7 +19,7 @@ import pytest
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.core.postgres._schema_json import (
-    _db_name_from_dsn,
+    _database_name_from_dsn,
     build_database_json,
     build_entity_schema_json,
 )
@@ -232,22 +232,25 @@ async def test_build_entity_schema_json_multi_column_fk():
 
 
 def test_db_name_from_dsn_simple():
-    assert _db_name_from_dsn("postgres://localhost/acme_prod") == "acme_prod"
+    assert (
+        _database_name_from_dsn("postgres://localhost/acme_prod")
+        == "acme_prod"
+    )
 
 
 def test_db_name_from_dsn_with_query():
     assert (
-        _db_name_from_dsn("postgres://localhost/acme?sslmode=require")
+        _database_name_from_dsn("postgres://localhost/acme?sslmode=require")
         == "acme"
     )
 
 
 def test_db_name_from_dsn_with_user_pass():
     assert (
-        _db_name_from_dsn("postgres://u:p@db.example.com:5432/myapp")
+        _database_name_from_dsn("postgres://u:p@db.example.com:5432/myapp")
         == "myapp"
     )
 
 
 def test_db_name_from_dsn_no_db_returns_default():
-    assert _db_name_from_dsn("postgres://localhost") == "localhost"
+    assert _database_name_from_dsn("postgres://localhost") == "localhost"

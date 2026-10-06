@@ -1,0 +1,179 @@
+{
+  "cases": [
+    {
+      "id": "cwd_relative_write_obeys_policy",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "in.txt": "hello"
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "lock_writes",
+            "prefix": "/data/blocked"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "cd /data && python3 -c \"print(open('in.txt').read())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello\n"
+          }
+        },
+        {
+          "command": "python3 -c \"from pathlib import Path; Path('blocked').write_text('changed')\"",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "PermissionError"
+          }
+        },
+        {
+          "command": "python3 -c \"from pathlib import Path; print(Path('blocked').exists())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "False\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "script_operand_obeys_policy",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "secret.py": "print('secret')\n",
+              "s.py": "print(argv[1:])\n"
+            }
+          }
+        },
+        "profiles": {
+          "default": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "protected",
+                  "commands": {
+                    "python3": [
+                      "/ram/secret.py"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /ram",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 secret.py",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "python3: secret.py: Permission denied\n"
+          }
+        },
+        {
+          "command": "python3 -u -- secret.py",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "python3: secret.py: Permission denied\n"
+          }
+        },
+        {
+          "command": "python3 s.py secret.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "['secret.py']\n"
+          }
+        },
+        {
+          "command": "echo 'print(argv[1:])' | python3 - secret.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "['secret.py']\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "script_rule_reads_the_operand_as_typed",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "secret.py": "print('secret')\n"
+            }
+          }
+        },
+        "profiles": {
+          "default": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "protected",
+                  "commands": {
+                    "python3": [
+                      "/ram/secret.py"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /ram",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 ./secret.py",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "python3: ./secret.py: Permission denied\n"
+          }
+        },
+        {
+          "command": "python3 -c 'print(argv[1:])' secret.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "['secret.py']\n",
+            "stderr": ""
+          }
+        }
+      ]
+    }
+  ]
+}

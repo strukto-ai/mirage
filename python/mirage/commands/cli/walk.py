@@ -15,7 +15,8 @@
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 
-from mirage.commands.cli.constants import CLAP_EXIT, USAGE_EXIT
+from mirage.commands.cli.constants import CLAP_EXIT, GIT_SYNOPSES, USAGE_EXIT
+from mirage.commands.cli.refusal import HELP_SWITCH, git_option_refusal
 from mirage.commands.cli.types import CLISpec, WalkFlagBag, WalkResult
 from mirage.commands.spec.compile import (
     CompiledSpec,
@@ -30,6 +31,7 @@ from mirage.commands.spec.help import (
     render_help,
 )
 from mirage.commands.spec.types import UsageStyle
+from mirage.shell.bytes import encode_text
 from mirage.utils.path import resolve_path
 
 
@@ -362,12 +364,13 @@ def _usage_error(
 ) -> WalkResult:
     """Group-level option refusal, in the dialect the CLI declares.
 
-    git answers with the message and the whole usage listing and exits
-    129. clap answers with the message, the one usage line and a footer
-    pointing at --help, and exits 2, at every level of the tree; the
-    exit code is the group's just as much as the leaf's, so reading the
-    style here is what keeps `ntn --bogus` and `ntn pages get --bogus`
-    from disagreeing.
+    git answers an unknown option in parse-options' words and its usage
+    block (on stdout for ``-h``), and the bare ``git`` with its one
+    synopsis; both exit 129. The bare ``git -h`` prints the help. clap
+    answers with the message, the one usage line and a footer pointing at
+    --help, and exits 2, at every level of the tree; the exit code is the
+    group's just as much as the leaf's, so reading the style here is what
+    keeps `ntn --bogus` and `ntn pages get --bogus` from disagreeing.
 
     Args:
         name (str): display path walked so far, e.g. "gws gmail".
@@ -376,8 +379,8 @@ def _usage_error(
             dialect; clap rewords the cases it words differently.
         style (UsageStyle): the root's dialect.
         token (str | None): the offending token when the refusal is an
-            unrecognized option, which clap words its own way. None for
-            the refusals whose wording both dialects share.
+            unrecognized option, which clap and git word their own way.
+            None for the refusals whose wording the dialects share.
     """
     if style is UsageStyle.CLAP:
         first = (
@@ -390,9 +393,25 @@ def _usage_error(
             stream="stderr",
             exit_code=CLAP_EXIT,
         )
+    if style is UsageStyle.GIT and token is not None:
+        path = name.partition(" ")[2]
+        # `git -h` is git's own help, as `git --help` is, and exits 0.
+        if not path and token == HELP_SWITCH:
+            return WalkResult(output=encode_text(node_help(name, node, style)))
+        if not path:
+            text = f"unknown option: {token}\nusage: {GIT_SYNOPSES[''][0]}\n"
+            return WalkResult(
+                output=encode_text(text), stream="stderr", exit_code=USAGE_EXIT
+            )
+        shown, refused = git_option_refusal(token, path, node)
+        return WalkResult(
+            output=encode_text(shown or refused),
+            stream="stdout" if shown else "stderr",
+            exit_code=USAGE_EXIT,
+        )
     text = f"{message}\n\n{node_help(name, node, style)}"
     return WalkResult(
-        output=text.encode(), stream="stderr", exit_code=USAGE_EXIT
+        output=encode_text(text), stream="stderr", exit_code=USAGE_EXIT
     )
 
 
@@ -405,7 +424,7 @@ def _unknown_verb(head: str, name: str, word: str) -> WalkResult:
         word (str): the word that matched no subcommand.
     """
     text = f"{head}: '{word}' is not a {name} command. See '{name} --help'.\n"
-    return WalkResult(output=text.encode(), stream="stderr", exit_code=1)
+    return WalkResult(output=encode_text(text), stream="stderr", exit_code=1)
 
 
 def _record_bool(flags: WalkFlagBag, cs: CompiledSpec, spelling: str) -> None:
@@ -736,21 +755,23 @@ def walk(
                 and "-h" not in cs.dest
             ):
                 return WalkResult(
-                    output=node_help(
-                        name,
-                        node,
-                        style,
-                        visible=lambda child: (
-                            visible(path + (child,))
-                            if visible is not None
-                            else True
-                        ),
-                    ).encode()
+                    output=encode_text(
+                        node_help(
+                            name,
+                            node,
+                            style,
+                            visible=lambda child: (
+                                visible(path + (child,))
+                                if visible is not None
+                                else True
+                            ),
+                        )
+                    )
                 )
             if not options_ended and token == "--":
                 if style is UsageStyle.GIT and not path:
                     return _usage_error(
-                        name, node, "unknown option: --", style
+                        name, node, "unknown option: --", style, token
                     )
                 options_ended = True
                 i += 1
@@ -812,16 +833,18 @@ def walk(
                             style,
                         )
                     return WalkResult(
-                        output=node_help(
-                            name,
-                            node,
-                            style,
-                            visible=lambda child: (
-                                visible(path + (child,))
-                                if visible is not None
-                                else True
-                            ),
-                        ).encode()
+                        output=encode_text(
+                            node_help(
+                                name,
+                                node,
+                                style,
+                                visible=lambda child: (
+                                    visible(path + (child,))
+                                    if visible is not None
+                                    else True
+                                ),
+                            )
+                        )
                     )
                 else:
                     return _usage_error(
@@ -829,7 +852,7 @@ def walk(
                         node,
                         f"unknown option: {spelling}",
                         style,
-                        token=spelling,
+                        token=token if style is UsageStyle.GIT else spelling,
                     )
                 i += 1
                 continue
@@ -902,14 +925,18 @@ def walk(
         if refused is not None:
             return refused
         return WalkResult(
-            output=node_help(
-                name,
-                node,
-                style,
-                visible=lambda child: (
-                    visible(path + (child,)) if visible is not None else True
-                ),
-            ).encode(),
+            output=encode_text(
+                node_help(
+                    name,
+                    node,
+                    style,
+                    visible=lambda child: (
+                        visible(path + (child,))
+                        if visible is not None
+                        else True
+                    ),
+                )
+            ),
             stream="stdout",
             exit_code=1,
         )

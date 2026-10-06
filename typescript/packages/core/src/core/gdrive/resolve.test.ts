@@ -36,6 +36,7 @@ import {
   queryCandidates,
   resolveDir,
   resolveKey,
+  resolveParent,
 } from './resolve.ts'
 
 const FOLDER_MIME_TEST = 'application/vnd.google-apps.folder'
@@ -150,3 +151,15 @@ describe('eaccesOnDenied', () => {
     await expect(serverError(null, spec)).rejects.toBeInstanceOf(GoogleApiError)
   })
 })
+
+it.each(['missing', 'file', 'file/sub'])(
+  'resolveParent names the full operand for %s parents',
+  async (parent) => {
+    fake.add('file', 'root', undefined, ENC.encode('x'))
+    const path = PathSpec.fromStrPath(`/drive/${parent}/child`, `${parent}/child`)
+    await expect(resolveParent(accessor, path)).rejects.toMatchObject({
+      code: parent === 'missing' ? 'ENOENT' : 'ENOTDIR',
+      virtualPath: path.virtual,
+    })
+  },
+)

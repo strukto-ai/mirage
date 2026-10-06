@@ -18,8 +18,6 @@ from mirage.commands.builtin.generic.crossmount.utils import (
 )
 from mirage.commands.builtin.generic.unzip import unzip_generic
 from mirage.commands.config import CommandOpts
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
@@ -42,18 +40,12 @@ async def run_unzip(
     Args:
         scopes (list[PathSpec]): Path operands; the archive is first.
         text_args (list[str]): Info-ZIP member filespecs, as typed.
-        flag_kwargs (dict): Flags parsed against the shared unzip spec,
-            with path-valued flags as resolved virtual strings.
+        flag_kwargs (dict): Flags parsed against the shared unzip spec.
         dispatch (DispatchFn): Workspace operation dispatcher.
     """
-    fl = FlagView(flag_kwargs, spec=SPECS["unzip"])
     prim = transfer_primitives(dispatch)
-    # Scopes arrive in line order and include the -d flag's value, so
-    # the archive is the first scope that is not the destination.
-    dest = fl.as_str("d")
-    operands = [s for s in scopes if s.virtual != dest]
     return await unzip_generic(
-        operands or scopes,
+        scopes,
         list(text_args),
         CommandOpts(flags=flag_kwargs),
         read_bytes=prim["read_bytes"],

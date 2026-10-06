@@ -67,7 +67,9 @@ function makeDispatch(files: Map<string, Uint8Array>, dirs: Set<string>): Dispat
 }
 
 describe('crossmount cp relay', () => {
-  it('records the source as a read so the cache is populated', async () => {
+  // The dispatcher's read keeps what the file cache may hold, so the relay
+  // lists none of its reads again.
+  it('records the source as a read and lists nothing for the cache', async () => {
     const files = new Map([['/src/a.txt', new Uint8Array([1, 2, 3])]])
     // Both mount roots exist, like every real mount: cp probes the
     // destination's parent before creating anything under it.
@@ -75,7 +77,7 @@ describe('crossmount cp relay', () => {
     const [, io] = await runCp([spec('/src/a.txt'), spec('/dst/a.txt')], {}, dispatch)
     expect(files.get('/dst/a.txt')).toEqual(new Uint8Array([1, 2, 3]))
     expect(Object.keys(io.reads)).toEqual(['/src/a.txt'])
-    expect(io.cache).toEqual(['/src/a.txt'])
+    expect(io.cache).toEqual([])
   })
 
   it('records reads for every file of a recursive copy', async () => {

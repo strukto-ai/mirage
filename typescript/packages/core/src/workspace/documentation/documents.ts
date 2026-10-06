@@ -13,12 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { KeyLock } from '../../cache/lock.ts'
-import { pathAllowed, runWithSession } from '../../context/session_context.ts'
+import { runWithSession } from '../../context/session_context.ts'
 import type { OpsRegistry } from '../../ops/registry.ts'
 import type { Ops } from '../../ops/ops.ts'
 import type { CompiledProfile } from '../../policy/profile.ts'
 import { DEFAULT_READ_SPEC, FileType, MountMode, PathSpec } from '../../types.ts'
 import { eexist, enoent, enotdir, isFsError } from '../../utils/errors.ts'
+import { pathVisible } from '../../utils/hidden.ts'
 import { norm, parent } from '../../utils/path.ts'
 import { DocumentVFS } from '../../vfs/document/document.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -40,10 +41,18 @@ export class Documents {
     private readonly profile: (name: string) => CompiledProfile,
     private readonly ensureLoaded: () => Promise<void>,
     private readonly unmount: (path: string) => Promise<void>,
+    private readonly followParent: (path: string) => string,
   ) {}
 
   render(kind: 'vfs' | 'skill'): string {
     return (kind === 'vfs' ? render.vfsMd : render.skillMd)(this.registry, this.session())
+  }
+
+  /** Drop every binding; a snapshot load restores none. */
+  async clear(): Promise<void> {
+    await this.lock.withLock('documents', async () => {
+      for (const path of [...this.views.keys()]) await this.unmount(path)
+    })
   }
 
   async releaseSession(sessionId: string): Promise<void> {
@@ -87,9 +96,13 @@ export class Documents {
           ) {
             throw new Error('document path must be an absolute, normalized file path')
           }
-          if (!pathAllowed(virtual)) throw enoent(virtual)
+          // Bound where a later read lands: every link above the name is
+          // followed, as the read's own walk follows it.
+          const bound = this.followParent(virtual)
+          if (![virtual, bound].every((p) => pathVisible(session.visibility, p)))
+            throw enoent(virtual)
           await this.lock.withLock('documents', () =>
-            this.expose(kind, virtual, sessionId === undefined ? null : session),
+            this.expose(kind, bound, sessionId === undefined ? null : session),
           )
         }
         return this.render(kind)
@@ -102,9 +115,8 @@ export class Documents {
     const directory = await this.ops.stat(parent(path))
     if (directory.type !== FileType.DIRECTORY) throw enotdir(parent(path))
     let view = this.views.get(path)
-    if (view !== undefined) {
-      if (view.kind !== kind) throw eexist(path)
-    } else {
+    if (view !== undefined && view.kind !== kind) throw eexist(path)
+    if (view === undefined) {
       await runWithSession(
         new SessionState({ sessionId: '' }),
         async () => {
@@ -124,6 +136,8 @@ export class Documents {
         },
         this.manager,
       )
+    }
+    if (view === undefined) {
       view = new DocumentVFS(path.slice(path.lastIndexOf('/') + 1), () => this.render(kind), kind)
       this.opsRegistry.registerVfs(view)
       const document = view

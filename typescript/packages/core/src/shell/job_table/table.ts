@@ -17,6 +17,7 @@ import { PathSpec } from '../../types.ts'
 import { Channel, JobConsole, KILLED_OUTCOME, exitOutcome } from '../console/index.ts'
 import { KILLED_EXIT_CODE } from './constants.ts'
 import { type ConsoleFactory, Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
+import { encodeText } from '../bytes.ts'
 
 function isAbortError(err: unknown): boolean {
   if (err instanceof Error && err.name === 'AbortError') return true
@@ -46,7 +47,7 @@ async function settle(run: JobRunner, job: Job): Promise<number> {
     if (isAbortError(err)) {
       job.status = JobStatus.KILLED
       job.exitCode = KILLED_EXIT_CODE
-      await job.console.emit(Channel.STDERR, new TextEncoder().encode('Killed'))
+      await job.console.emit(Channel.STDERR, encodeText('Killed'))
       await job.console.finish(KILLED_OUTCOME)
       return KILLED_EXIT_CODE
     }
@@ -56,7 +57,7 @@ async function settle(run: JobRunner, job: Job): Promise<number> {
     job.status = JobStatus.COMPLETED
     job.exitCode = 1
     const msg = err instanceof Error ? err.message : String(err)
-    await job.console.emit(Channel.STDERR, new TextEncoder().encode(msg))
+    await job.console.emit(Channel.STDERR, encodeText(msg))
     await job.console.finish(exitOutcome(1))
     return 1
   }
@@ -95,6 +96,9 @@ export class JobTable {
   private readonly nextIds = new Map<string, number>()
   private readonly consoleFactory: ConsoleFactory | null
   private factoryConsoles: JobConsole[] = []
+  // The table whose closeConsoles() releases what the factory builds for
+  // this one: itself, or the table a child came from.
+  private consoleOwner: JobTable = this
   // Jobs `disown` removed while still running: the shell forgets them,
   // the workspace still owns their tasks so teardown can stop them.
   private disowned: Job[] = []
@@ -114,8 +118,23 @@ export class JobTable {
   constructor(
     consoleFactory: ConsoleFactory | null = null,
     readonly processes = new ProcessSupervisor(),
+    // The table of the shell a `$( )` is part of, whose jobs `jobs` still
+    // lists there, as bash's does; its `wait` and `kill` reach none of them.
+    readonly parent: JobTable | null = null,
   ) {
     this.consoleFactory = consoleFactory
+  }
+
+  /**
+   * A table for a child shell (`bash -c`, a script, `( )`, `$( )`): a job
+   * list of its own on the same processes, whose jobs get their consoles
+   * from this table's factory, released at teardown with this table's.
+   * `parent` is the table a `$( )` still lists in `jobs`.
+   */
+  child(parent: JobTable | null = null): JobTable {
+    const table = new JobTable(this.consoleFactory, this.processes, parent)
+    table.consoleOwner = this.consoleOwner
+    return table
   }
 
   private sessionJobs(sessionId: string): Map<number, Job> {
@@ -174,7 +193,7 @@ export class JobTable {
         jobConsole = new JobConsole()
       } else {
         jobConsole = this.consoleFactory(jobId)
-        this.factoryConsoles.push(jobConsole)
+        this.consoleOwner.factoryConsoles.push(jobConsole)
       }
       job = new Job({
         id: jobId,
@@ -219,6 +238,11 @@ export class JobTable {
     return [...(this.jobs.get(sessionId)?.values() ?? [])]
   }
 
+  /** The jobs `jobs` shows: a `$( )`'s caller's, then its own. */
+  listing(sessionId = ''): Job[] {
+    return [...(this.parent?.listing(sessionId) ?? []), ...this.listJobs(sessionId)]
+  }
+
   runningJobs(sessionId = ''): Job[] {
     return this.listJobs(sessionId).filter((j) => j.status === JobStatus.RUNNING)
   }
@@ -258,7 +282,7 @@ export class JobTable {
     else job.abort?.abort()
     job.status = JobStatus.KILLED
     job.exitCode = KILLED_EXIT_CODE
-    await job.console.emit(Channel.STDERR, new TextEncoder().encode('Killed'))
+    await job.console.emit(Channel.STDERR, encodeText('Killed'))
     await job.console.finish(KILLED_OUTCOME)
     return true
   }
@@ -312,7 +336,7 @@ export class JobTable {
         else job.abort?.abort()
         job.status = JobStatus.KILLED
         job.exitCode = KILLED_EXIT_CODE
-        await job.console.emit(Channel.STDERR, new TextEncoder().encode('Killed'))
+        await job.console.emit(Channel.STDERR, encodeText('Killed'))
         await job.console.finish(KILLED_OUTCOME)
       }
     }
@@ -378,10 +402,9 @@ export class JobTable {
   /**
    * Remove one job from its session's list.
    *
-   * What a targeted `wait`/`fg` does after adopting the job's output,
-   * matching GNU bash, where a job waited on by id is deleted from the
-   * job list. Leaving it would let a later bare `wait` snapshot the
-   * same console and print the output twice.
+   * What a targeted `wait`/`fg` does once the job has ended, matching
+   * GNU bash, where a job waited on by id is deleted from the job list,
+   * so a later `jobs` or `wait %N` no longer finds it.
    */
   reap(jobId: number, sessionId = ''): void {
     this.jobs.get(sessionId)?.delete(jobId)

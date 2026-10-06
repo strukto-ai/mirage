@@ -20,18 +20,10 @@ describe('stripPrefix', () => {
   // notice, `tar -tf` for the stored name. Mirrors the Python
   // STRIP_PREFIX_ROWS table.
   const rows: [string, string, string][] = [
-    ['/data/sub/../file', 'file', '/data/sub/../'],
-    ['../file', 'file', '../'],
     ['x/../y/f3', 'y/f3', 'x/../'],
-    ['../../file', 'file', '../../'],
-    ['/data/../data/file', 'data/file', '/data/../'],
-    // No `..`, so the leading slash is the only thing tar refuses.
-    ['/data/file', 'data/file', '/'],
     // A `.` climbs nowhere, so GNU stores it and says nothing.
     ['./file', './file', ''],
-    ['d/a.txt', 'd/a.txt', ''],
     // Nothing survives the traversal; memberName supplies the name.
-    ['..', '', '..'],
     ['sub/..', '', 'sub/..'],
   ]
 

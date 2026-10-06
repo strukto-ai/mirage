@@ -111,6 +111,9 @@ async function ledger(vfs: BaseVFS, setup: string | null): Promise<[string, stri
   }
 }
 
+// echo touches no file of its own, so its redirect target is opened by the
+// one write of its output: `>` is one write, and `>>` on a backend with a
+// native append one append.
 const NATIVE_APPEND: [string, string][] = [
   ['write', K],
   ['append', K],
@@ -136,10 +139,9 @@ describe('record paths name the virtual path (node backends)', () => {
     const root = mkdtempSync(join(tmpdir(), 'mirage-record-paths-'))
     mkdirSync(join(root, 'm'))
     try {
-      // TS disk create records `write` (python records `create`).
       expect(await ledger(new DiskVFS({ root }), null)).toEqual([
         ...NATIVE_APPEND,
-        ['write', C],
+        ['create', C],
         ['append', C],
       ])
     } finally {
@@ -194,16 +196,20 @@ describe('record paths name the virtual path (node backends)', () => {
     }
     const vfs = new SSHVFS({ host: 'example.com', username: 'alice', password: 'secret' })
     ;(vfs as { accessor: SSHAccessor }).accessor = makeFakeAccessor(state, '/')
-    // TS ssh records `write` only (python also records read, create, truncate),
-    // so `>>`, which reaches its native append, records nothing.
+    // ssh caches reads, so only cat's read of k.txt reaches the server; the
+    // later reads, the in-mount cp's included, are served from the cache.
     expect(await ledger(vfs, null)).toEqual([
       ['write', K],
+      ['append', K],
+      ['append', K],
       ['write', NEW],
-      ['write', NEW],
+      ['truncate', NEW],
+      ['read', K],
       ['write', '/m/m/k2.txt'],
       ['write', '/m/m/d/f'],
       ...GENERIC_OUT.filter(([op]) => op === 'write'),
-      ['write', C],
+      ['create', C],
+      ['append', C],
     ])
   })
 })

@@ -82,7 +82,6 @@ def spec(mount_path: str) -> PathSpec:
 def make_driver(
     store: FakeStore, find_narrowing: bool = False
 ) -> ObjectStoreDriver[FakeAccessor, FakeStore]:
-
     def key_prefix_of(accessor: FakeAccessor) -> str:
         return accessor.key_prefix
 

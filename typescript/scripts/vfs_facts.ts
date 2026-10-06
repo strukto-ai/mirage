@@ -130,6 +130,31 @@ function heritageName(decl: ts.ClassDeclaration): string | undefined {
 }
 
 /**
+ * Every registry name's capability values for one variant, read from the
+ * class the entry constructs; null for a name whose entry builds none. A
+ * name whose class cannot be resolved is a hard error: a missing row would
+ * read as "no divergence here" in the parity gate. `scripts/gen-specs.ts`
+ * dumps this, and the capability tests read it live.
+ *
+ * Args:
+ *   packagesRoot: absolute path to `typescript/packages`.
+ *   pkgs: the packages the variant scans, its own package last.
+ */
+export function registryCapabilities(
+  packagesRoot: string,
+  pkgs: readonly string[],
+): Record<string, Capabilities | null> {
+  const classes = collectClasses(packagesRoot, pkgs)
+  const variant = pkgs[pkgs.length - 1] as string
+  const names = registryClasses(resolve(packagesRoot, variant, 'src', 'vfs', 'registry.ts'))
+  const out: Record<string, Capabilities | null> = {}
+  for (const [vfs, className] of names) {
+    out[vfs] = className === null ? null : capabilitiesOf(className, classes)
+  }
+  return out
+}
+
+/**
  * Every VFS class a variant can reach, keyed by class name.
  *
  * Duplicate names across the scanned packages would make the extends walk

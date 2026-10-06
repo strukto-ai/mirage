@@ -29,28 +29,6 @@ from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 
 
-def _operands(scopes: list[PathSpec], taken: list[str]) -> list[PathSpec]:
-    """The positional operands among a line's path words.
-
-    The scopes are every path word in line order, an option's value
-    among them. The parser gives each option its word first (POSIX
-    order, and the order -C needs), so the same words go here and what
-    is left are the operands, each with its own spelling.
-
-    Args:
-        scopes (list[PathSpec]): Every path word, in line order.
-        taken (list[str]): The resolved values the options consumed.
-    """
-    rest = list(scopes)
-    for value in taken:
-        key = value.rstrip("/") or "/"
-        for index, scope in enumerate(rest):
-            if (scope.virtual.rstrip("/") or "/") == key:
-                del rest[index]
-                break
-    return rest
-
-
 async def run_tar(
     scopes: list[PathSpec],
     text_args: list[str],
@@ -68,7 +46,7 @@ async def run_tar(
     nested under an operand, exactly as it does on one mount.
 
     Args:
-        scopes (list[PathSpec]): Path words in command-line order.
+        scopes (list[PathSpec]): Path operands in command-line order.
         text_args (list[str]): The -t/-x member selectors, as typed.
         flag_kwargs (dict): Flags parsed against the shared tar spec,
             with path-valued flags retaining their PathSpec metadata.
@@ -81,11 +59,7 @@ async def run_tar(
     prim = transfer_primitives(dispatch)
     archive = parsed.archive
     directories = list(parsed.directories)
-    operands = (
-        _operands(scopes, [archive.virtual, *[d.virtual for d in directories]])
-        if parsed.create and archive
-        else []
-    )
+    operands = scopes if parsed.create and archive else []
     return await tar(
         flat_scopes(operands),
         read_bytes=prim["read_bytes"],

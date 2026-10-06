@@ -342,6 +342,60 @@
       "flags": [
         "n"
       ]
+    },
+    {
+      "id": "split_n_names_the_component_gnu_names",
+      "seq": 15300304,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "for v in xé l/xé 2/xé l/1/xé +l/2 r/xé/4 l/2/xé/4 l/xé/yé xé/2 l/2/3/4 l//4 2/l/4 / l r l/ '' l/2/4/ l/abc l/0 0; do split -n \"$v\" /data/a.txt /data/fcC_n 2>&1; echo rc=$?; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "split: invalid number of chunks: 'x\\303\\251'\nrc=1\nsplit: invalid number of chunks: 'x\\303\\251'\nrc=1\nsplit: invalid number of chunks: 'x\\303\\251'\nrc=1\nsplit: invalid number of chunks: 'x\\303\\251'\nrc=1\nsplit: invalid number of chunks: '+l/2'\nrc=1\nsplit: invalid number of chunks: 'x\\303\\251/4'\nrc=1\nsplit: invalid number of chunks: 'x\\303\\251/4'\nrc=1\nsplit: invalid number of chunks: 'x\\303\\251/y\\303\\251'\nrc=1\nsplit: invalid number of chunks: 'x\\303\\251/2'\nrc=1\nsplit: invalid number of chunks: '3/4'\nrc=1\nsplit: invalid number of chunks: '/4'\nrc=1\nsplit: invalid number of chunks: 'l/4'\nrc=1\nsplit: invalid number of chunks: '/'\nrc=1\nsplit: invalid number of chunks: 'l'\nrc=1\nsplit: invalid number of chunks: 'r'\nrc=1\nsplit: invalid number of chunks: ''\nrc=1\nsplit: invalid number of chunks: ''\nrc=1\nsplit: invalid number of chunks: '4/'\nrc=1\nsplit: invalid number of chunks: 'abc'\nrc=1\nsplit: invalid number of chunks: '0'\nrc=1\nsplit: invalid number of chunks: '0'\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "split_n_signed_heads_read_chunk_k",
+      "seq": 15300305,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "split -n +2/3 /data/a.txt; echo rc=$?; split -n l/+2/3 /data/a.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rld\nfoo\nrc=0\nfoo\nrc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "split_n_line_chunks_and_short_inputs",
+      "seq": 15300306,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/fcC_sn && (cd /data/fcC_sn && printf 'line1\\nline2\\nline3\\nline4\\nline5\\n' > f && split -n l/2 f A && split -n l/4 f B && printf 'aaaaaa\\nb\\n' > g && split -n l/3 g C && printf 'aaaaa\\nbb\\n' > h && split -n l/3 h D && printf 'aaaa\\nb\\nc\\nd\\n' > i && split -n l/2 i E && printf 'aa\\nbb\\ncc' > j && split -n l/2 j F && printf 'ab' > k && split -n l/3 k G && printf '' > m && split -n 3 m H && for x in A?? B?? C?? D?? E?? F?? G?? H??; do printf '%s=' $x; cat $x | tr '\\n' '~'; echo; done; printf 'abc\\ndef\\n' | split -n l/5/1000000000; printf 'abc\\ndef\\n' | split -n r/3/1000000000; echo end); rm -r /data/fcC_sn",
+      "expect": {
+        "exit": 0,
+        "stdout": "Aaa=line1~line2~line3~\nAab=line4~line5~\nBaa=line1~line2~\nBab=line3~\nBac=line4~\nBad=line5~\nCaa=aaaaaa~\nCab=\nCac=b~\nDaa=aaaaa~\nDab=\nDac=bb~\nEaa=aaaa~b~\nEab=c~d~\nFaa=aa~bb~\nFab=cc\nGaa=ab\nGab=\nGac=\nHaa=\nHab=\nHac=\ndef\nend\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
     }
   ]
 }

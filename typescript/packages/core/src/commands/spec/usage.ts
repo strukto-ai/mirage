@@ -29,6 +29,7 @@ import {
   USAGE_HINT_PREFIX,
 } from './constants.ts'
 import { CommandName } from './types.ts'
+import { decodeText, encodeText } from '../../shell/bytes.ts'
 
 /** GNU usage-error exit code for a command. */
 export function usageExitCode(cmdName: string): number {
@@ -140,7 +141,7 @@ export function readFailExitCodeFromLine(cmdName: string, rendered: string): num
  * registered command serves `--help`.
  */
 function pythonOptionError(cmdName: string, line: string): [Uint8Array, number] {
-  return [new TextEncoder().encode(line + pythonUsage(cmdName)), usageExitCode(cmdName)]
+  return [encodeText(line + pythonUsage(cmdName)), usageExitCode(cmdName)]
 }
 
 /**
@@ -152,7 +153,7 @@ function pythonOptionError(cmdName: string, line: string): [Uint8Array, number] 
  */
 export function curlOptionError(line: string): [Uint8Array, number] {
   const hint = "curl: try 'curl --help' or 'curl --manual' for more information\n"
-  return [new TextEncoder().encode(line + hint), usageExitCode('curl')]
+  return [encodeText(line + hint), usageExitCode('curl')]
 }
 
 export function unknownOptionError(cmdName: string, token: string): [Uint8Array, number] {
@@ -162,19 +163,12 @@ export function unknownOptionError(cmdName: string, token: string): [Uint8Array,
   }
   if (cmdName === (CommandName.FIND as string)) {
     const dashed = token.startsWith('-') ? token : `-${token}`
-    return [
-      new TextEncoder().encode(`find: unknown predicate \`${dashed}'\n`),
-      usageExitCode(cmdName),
-    ]
+    return [encodeText(`find: unknown predicate \`${dashed}'\n`), usageExitCode(cmdName)]
   }
   if (cmdName === 'rg') return rgUnknownFlag(token)
   if (PYTHON_NAMES.has(cmdName)) {
-    // CPython's own two shapes, which do not match each other: the short
-    // form capitalizes and takes a colon, the long form does neither.
-    // Both pinned on 3.12.13.
-    if (token.startsWith('--')) {
-      return pythonOptionError(cmdName, `unknown option ${token}\n`)
-    }
+    // CPython names the whole typed token, long or short (pinned on 3.14.7;
+    // 3.12 still spelled a long one `unknown option`).
     const dashed = token.startsWith('-') ? token : `-${token}`
     return pythonOptionError(cmdName, `Unknown option: ${dashed}\n`)
   }
@@ -182,7 +176,7 @@ export function unknownOptionError(cmdName: string, token: string): [Uint8Array,
     ? `${cmdName}: unrecognized option '${token}'\n`
     : `${cmdName}: invalid option -- '${token}'\n`
   const hint = usageHint(cmdName) + '\n'
-  return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+  return [encodeText(line + hint), usageExitCode(cmdName)]
 }
 
 // ripgrep's `find_similar_names` threshold: the share of 3-grams a flag name
@@ -205,7 +199,7 @@ export function rgUnknownFlag(token: string): [Uint8Array, number] {
       line += `\nsimilar flags that are available: ${similar.map((n) => `--${n}`).join(', ')}\n`
     }
   }
-  return [new TextEncoder().encode(line), usageExitCode('rg')]
+  return [encodeText(line), usageExitCode('rg')]
 }
 
 // ripgrep's `find_similar_names`: its flags whose 3-grams overlap enough.
@@ -231,7 +225,7 @@ function trigrams(name: string): Set<string> {
 // they will not take by naming the whole typed token as unknown rather than by
 // naming the option. Each one is measured: `curl --silent=2` is
 // `curl: option --silent=2: is unknown`, `python3 --version=2` is
-// `unknown option --version=2`, `jq --tab=2` is `jq: Unknown option --tab=2`,
+// `Unknown option: --version=2`, `jq --tab=2` is `jq: Unknown option --tab=2`,
 // and find reads the word as a predicate. Every other command here is a GNU
 // tool whose getopt_long words the refusal the other way, so the set is the
 // exception list and not the rule.
@@ -263,7 +257,7 @@ export function unexpectedValueError(cmdName: string, token: string): [Uint8Arra
   const option = token.split('=', 1)[0] ?? token
   const line = `${cmdName}: option '${option}' doesn't allow an argument\n`
   const hint = usageHint(cmdName) + '\n'
-  return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+  return [encodeText(line + hint), usageExitCode(cmdName)]
 }
 
 /**
@@ -282,7 +276,7 @@ export function ambiguousOptionError(
   const listed = candidates.map((c) => `'${c}'`).join(' ')
   const line = `${cmdName}: option '${token}' is ambiguous; possibilities: ${listed}\n`
   const hint = usageHint(cmdName) + '\n'
-  return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+  return [encodeText(line + hint), usageExitCode(cmdName)]
 }
 
 /**
@@ -300,7 +294,7 @@ export function invalidIntError(
 ): [Uint8Array, number] {
   const line = `${cmdName}: invalid int value: '${value}' for '${option}'\n`
   const hint = usageHint(cmdName) + '\n'
-  return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+  return [encodeText(line + hint), usageExitCode(cmdName)]
 }
 
 /**
@@ -318,7 +312,7 @@ export function invalidFloatError(
   }
   const line = `${cmdName}: invalid float value: '${value}' for '${option}'\n`
   const hint = usageHint(cmdName) + '\n'
-  return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+  return [encodeText(line + hint), usageExitCode(cmdName)]
 }
 
 /** GNU-shaped error for a declared value flag with no argument left. */
@@ -335,7 +329,7 @@ export function missingValueError(cmdName: string, token: string): [Uint8Array, 
     ? `${cmdName}: option '${token}' requires an argument\n`
     : `${cmdName}: option requires an argument -- '${token}'\n`
   const hint = usageHint(cmdName) + '\n'
-  return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+  return [encodeText(line + hint), usageExitCode(cmdName)]
 }
 
 /**
@@ -356,7 +350,7 @@ export function missingValueError(cmdName: string, token: string): [Uint8Array, 
 export function oldOptionError(cmdName: string, letter: string): [Uint8Array, number] {
   const line = `${cmdName}: Old option '${letter}' requires an argument.\n`
   const hint = usageHint(cmdName) + '\n'
-  return [new TextEncoder().encode(line + hint), OLD_OPTION_EXIT]
+  return [encodeText(line + hint), OLD_OPTION_EXIT]
 }
 
 /**
@@ -425,7 +419,7 @@ export function invalidArgumentError(
   const line = `${argmatchLine(cmdName, option, value, kind)}\n${argmatchValidBlock(choices)}\n`
   const hint = usageHint(cmdName) + '\n'
   const code = exitCode ?? usageExitCode(cmdName)
-  return [new TextEncoder().encode(line + hint), code]
+  return [encodeText(line + hint), code]
 }
 
 /**
@@ -447,7 +441,7 @@ export function argmatchError(
   kind: ArgmatchKind = 'invalid',
 ): UsageError {
   const [message, code] = invalidArgumentError(cmdName, option, value, choices, exitCode, kind)
-  return new UsageError(new TextDecoder().decode(message).replace(/\n+$/, ''), code)
+  return new UsageError(decodeText(message).replace(/\n+$/, ''), code)
 }
 
 /**
@@ -460,7 +454,7 @@ export function argmatchError(
 export function missingRequiredError(cmdName: string, option: string): [Uint8Array, number] {
   const line = `${cmdName}: option '${option}' is required\n`
   const hint = usageHint(cmdName) + '\n'
-  return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+  return [encodeText(line + hint), usageExitCode(cmdName)]
 }
 
 /**

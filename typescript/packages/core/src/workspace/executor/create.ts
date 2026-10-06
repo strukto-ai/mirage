@@ -15,12 +15,13 @@ import type { FileDescription } from '../../shell/descriptors.ts'
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DEFAULT_UMASK } from '../../context/session_context.ts'
+import { DEFAULT_UMASK, getCurrentSession } from '../../context/session_context.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { PathSpec } from '../../types.ts'
 import { isFsError } from '../../utils/errors.ts'
 import { spliceWindow } from '../../utils/ranges.ts'
 import type { SessionState } from '../session/session.ts'
+import { hasAborted, makeAbortError } from '../abort.ts'
 
 /**
  * Write or append, giving a newly created file the umask's mode.
@@ -69,7 +70,13 @@ export async function createFile(
  * needs no read of the file, as a write to a write-only descriptor needs none
  * (`exec 3>f; echo a >&3`). A read-write one (`<>`) still reads it: that
  * description was opened to read, and its own reader resumes over what the
- * write left.
+ * write left. Writes through one description take turns, the first one
+ * (which opens the file) included, as the kernel orders writes to an open
+ * file: a background job writing alongside the shell neither reopens the
+ * file nor lands on an offset another write has not advanced yet. A writer
+ * killed while it waits for its turn writes nothing: a promise cannot be
+ * cancelled, so the turn checks the writer's session (a job's own), as
+ * Python's cancelled task leaves the queue.
  */
 export async function writeDescription(
   dispatch: DispatchFn,
@@ -81,6 +88,25 @@ export async function writeDescription(
     if (data.byteLength > 0) await file.emit(data)
     return
   }
+  const turn = file.writing
+  let done = (): void => undefined
+  file.writing = new Promise((resolve) => (done = resolve))
+  try {
+    await turn
+    const writer = getCurrentSession()?.abortSignal ?? undefined
+    if (hasAborted(writer)) throw makeAbortError(writer)
+    await writeThrough(dispatch, session, file, data)
+  } finally {
+    done()
+  }
+}
+
+async function writeThrough(
+  dispatch: DispatchFn,
+  session: SessionState,
+  file: FileDescription,
+  data: Uint8Array,
+): Promise<void> {
   if (!file.opened) {
     await createFile(
       dispatch,

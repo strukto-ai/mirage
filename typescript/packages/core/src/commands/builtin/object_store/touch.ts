@@ -41,7 +41,7 @@ export function makeTouch<A extends Accessor>(vfs: string, io: CommandIO<A>): Re
     }
     const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
     const fl = new FlagView(opts.flags, specOf('touch'))
-    const createOnly = fl.asBool('c')
+    const createOnly = fl.asBool('no_create')
     const writes: Record<string, Uint8Array> = {}
     for (const p of resolved) {
       if (createOnly) continue

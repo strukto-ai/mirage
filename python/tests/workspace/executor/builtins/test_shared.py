@@ -35,9 +35,9 @@ from mirage.workspace.executor.builtins.shared import (
     ok,
     operand_text,
     readonly_refusal,
+    record_delimiter,
     refusal,
     require_view,
-    split_flags,
     split_value_flags,
 )
 from mirage.workspace.session import SessionState
@@ -88,24 +88,6 @@ def test_abs_path():
     spec = PathSpec.from_str_path("/data/f.txt")
     assert abs_path(spec, "/tmp") == "/data/f.txt"
     assert abs_path("f.txt", "/data") == "/data/f.txt"
-
-
-def test_split_flags_collects_known():
-    flags, operands = split_flags(["-sf", "a", "b"], "sfnv")
-    assert flags == {"s", "f"}
-    assert operands == ["a", "b"]
-
-
-def test_split_flags_unknown_becomes_operand():
-    flags, operands = split_flags(["-q", "a"], "sfnv")
-    assert flags == set()
-    assert operands == ["-q", "a"]
-
-
-def test_split_flags_double_dash_ends_parsing():
-    flags, operands = split_flags(["-s", "--", "-f"], "sfnv")
-    assert flags == {"s"}
-    assert operands == ["-f"]
 
 
 def test_split_value_flags_detached_value():
@@ -196,3 +178,20 @@ def test_is_count_word():
     assert is_count_word("+3")
     assert not is_count_word("x")
     assert not is_count_word("-")
+
+
+# bash 5.2 stops `read -d` and `mapfile -d` at the first byte of the
+# argument, not its first character. Mirrored in shared.test.ts.
+@pytest.mark.parametrize(
+    "text,delimiter",
+    [
+        (None, b"\n"),
+        ("", b"\0"),
+        (":", b":"),
+        ("ab", b"a"),
+        (chr(0xDCFF), b"\xff"),
+        ("\u00e9", b"\xc3"),
+    ],
+)
+def test_record_delimiter_is_the_first_byte(text, delimiter):
+    assert record_delimiter(text) == delimiter

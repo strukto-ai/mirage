@@ -20,7 +20,7 @@ import { errorVirtualPath } from '../../utils/errors.ts'
 import type { ObjectStoreDriver } from './driver.ts'
 import type { FakeStore as Store } from './fakes.ts'
 import { FakeAccessor, FakeManager, FakeStore, makeDriver, spec } from './fakes.ts'
-import { makeCreate, makeMkdir, makeTruncate, makeWriteBytes } from './write.ts'
+import { makeCreate, makeMkdir, makeTruncate, makeWrite } from './write.ts'
 
 const accessor = new FakeAccessor()
 const ENC = new TextEncoder()
@@ -55,7 +55,7 @@ describe('object_store write', () => {
   it('write puts and invalidates every ancestor listing', async () => {
     const store = new FakeStore()
     const manager = await managed(() =>
-      makeWriteBytes(makeDriver(store))(accessor, spec('/a/b/c.txt'), ENC.encode('hi')),
+      makeWrite(makeDriver(store))(accessor, spec('/a/b/c.txt'), ENC.encode('hi')),
     )
     expect(store.contents()).toEqual({ 'a/b/c.txt': 'hi' })
     expect(manager.writes).toEqual(['/a/b/c.txt'])
@@ -65,7 +65,7 @@ describe('object_store write', () => {
   it('write at the mount root invalidates only itself', async () => {
     const store = new FakeStore()
     const manager = await managed(() =>
-      makeWriteBytes(makeDriver(store))(accessor, spec('/c.txt'), ENC.encode('x')),
+      makeWrite(makeDriver(store))(accessor, spec('/c.txt'), ENC.encode('x')),
     )
     expect(manager.writes).toEqual(['/c.txt'])
   })
@@ -95,9 +95,9 @@ describe('object_store write', () => {
   })
 
   it('mkdir writes a marker and parents gate ancestors', async () => {
-    const store = new FakeStore()
+    const store = new FakeStore({ 'a/': '' })
     const manager = await managed(() => makeMkdir(makeDriver(store))(accessor, spec('/a/b')))
-    expect(store.contents()).toEqual({ 'a/b/': '' })
+    expect(store.contents()).toEqual({ 'a/': '', 'a/b/': '' })
     expect(manager.writes).toEqual(['/a/b'])
     const deep = await managed(() => makeMkdir(makeDriver(store))(accessor, spec('/x/y'), true))
     expect(deep.writes).toEqual(['/x/y'])
@@ -110,7 +110,7 @@ describe('object_store write', () => {
     // typed, which is the only spelling allowed in a message.
     const driver = missingContainer()
     const err = await caught(() =>
-      makeWriteBytes(driver)(accessor, spec('/a/b/c.txt'), ENC.encode('hi')),
+      makeWrite(driver)(accessor, spec('/a/b/c.txt'), ENC.encode('hi')),
     )
     expect((err as { code?: string }).code).toBe('ENOENT')
     expect(errorVirtualPath(err)).toBe('/mnt/a/b/c.txt')
@@ -130,9 +130,7 @@ describe('object_store write', () => {
       ...makeDriver(new FakeStore()),
       put: () => Promise.reject(new Error('bucket on fire')),
     }
-    const err = await caught(() =>
-      makeWriteBytes(driver)(accessor, spec('/a.txt'), ENC.encode('hi')),
-    )
+    const err = await caught(() => makeWrite(driver)(accessor, spec('/a.txt'), ENC.encode('hi')))
     expect((err as Error).message).toBe('bucket on fire')
     expect((err as { code?: string }).code).toBeUndefined()
   })
@@ -156,6 +154,27 @@ describe('object_store write', () => {
     expect(store.puts).toEqual([])
   })
 
+  // A rewrite replaces the marker's metadata and, in a versioned bucket,
+  // adds a version; a directory only a key implies still gets a marker.
+  it('mkdir -p keeps an existing marker', async () => {
+    const store = new FakeStore({ 'a/': '', 'imp/x.txt': 'x' })
+    const mkdir = makeMkdir(makeDriver(store))
+    await managed(() => mkdir(accessor, spec('/a'), true))
+    expect(store.puts).toEqual([])
+    await managed(() => mkdir(accessor, spec('/imp'), true))
+    expect(store.puts.map(([key]) => key)).toEqual(['imp/'])
+  })
+
+  it('mkdir refuses a missing parent without parents', async () => {
+    // mkdir(2) makes one directory under one that exists; only `-p` makes
+    // the chain, so a guest's os.mkdir under a missing parent is ENOENT
+    // and puts nothing.
+    const store = new FakeStore()
+    const err = await caught(() => makeMkdir(makeDriver(store))(accessor, spec('/a/b')))
+    expect((err as { code?: string }).code).toBe('ENOENT')
+    expect(store.puts).toEqual([])
+  })
+
   it('mkdir refuses a directory under a file', async () => {
     // A marker below a file put a directory under it. mkdir(2) blames the
     // operand; the walk `mkdir -p` makes names the file it stops at.
@@ -173,13 +192,18 @@ describe('object_store write', () => {
     expect(store.puts).toEqual([])
   })
 
-  it('mkdir without marker support is a no-op', async () => {
-    const store = new FakeStore()
-    const driver = { ...makeDriver(store), markersSupported: false }
-    const manager = await managed(() => makeMkdir(driver)(accessor, spec('/a/b'), true))
-    expect(store.contents()).toEqual({})
-    expect(manager.writes).toEqual([])
-  })
+  // Without markers a parent made a moment ago has no row, so even a
+  // plain mkdir under it cannot be checked and stays a no-op.
+  it.each([true, false])(
+    'mkdir without marker support is a no-op (parents %s)',
+    async (parents) => {
+      const store = new FakeStore()
+      const driver = { ...makeDriver(store), markersSupported: false }
+      const manager = await managed(() => makeMkdir(driver)(accessor, spec('/a/b'), parents))
+      expect(store.contents()).toEqual({})
+      expect(manager.writes).toEqual([])
+    },
+  )
 })
 
 // ── the backend token the put answered reaches the op record ───────────
@@ -195,7 +219,7 @@ describe('object store write records the put token', () => {
   it('write carries the token the put returned', async () => {
     const store = new FakeStore()
     const records = await recorded(() =>
-      makeWriteBytes(makeDriver(store))(accessor, spec('/a/b/c.txt'), ENC.encode('hi')),
+      makeWrite(makeDriver(store))(accessor, spec('/a/b/c.txt'), ENC.encode('hi')),
     )
     expect(records.map((r) => [r.op, r.path, r.fingerprint])).toEqual([
       ['write', '/mnt/a/b/c.txt', 'fp-a/b/c.txt'],
@@ -227,7 +251,7 @@ describe('object store write records the put token', () => {
       put: () => Promise.resolve(null),
     }
     const records = await recorded(() =>
-      makeWriteBytes(driver)(accessor, spec('/a/c.txt'), ENC.encode('hi')),
+      makeWrite(driver)(accessor, spec('/a/c.txt'), ENC.encode('hi')),
     )
     expect(records.map((r) => r.fingerprint)).toEqual([null])
   })

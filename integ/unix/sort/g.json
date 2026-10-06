@@ -75,7 +75,7 @@
       ]
     },
     {
-      "id": "sort_g_hex_not_numeric",
+      "id": "sort_g_reads_a_leading_number_like_strtold",
       "seq": 610189,
       "targets": [
         "ram",
@@ -101,10 +101,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf '0x10\\n5\\n' | sort -g",
+      "command": "printf '0x10\\n5\\n12abc\\n7\\n 3\\n-0x1p2\\nabc\\n1e1\\n0x\\ninf\\nnan\\n-inf\\n.5\\n0x.8\\n1e\\n+2\\n0x1p99999\\n' | sort -g",
       "expect": {
         "exit": 0,
-        "stdout": "0x10\n5\n",
+        "stdout": "abc\nnan\n-inf\n-0x1p2\n0x\n.5\n0x.8\n1e\n+2\n 3\n5\n7\n1e1\n12abc\n0x10\n0x1p99999\ninf\n",
         "stderr": ""
       },
       "flags": [
@@ -147,6 +147,85 @@
       "flags": [
         "g",
         "n"
+      ]
+    },
+    {
+      "id": "sort_g_option_loop_outranks_incompatible_orderings",
+      "seq": 15300104,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\n' | sort -n -g -k0 2>&1; echo rc=$?; printf 'a\\n' | sort -n -g -c -C 2>&1; echo rc=$?; sort -n -g -c -o /data/fcC_o /data/a.txt 2>&1; echo rc=$?; rm -f /data/fcC_o",
+      "expect": {
+        "exit": 0,
+        "stdout": "sort: field number is zero: invalid field specification '0'\nrc=2\nsort: options '-cC' are incompatible\nrc=2\nsort: options '-gn' are incompatible\nrc=2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "n",
+        "k",
+        "c",
+        "C",
+        "o"
+      ]
+    },
+    {
+      "id": "sort_g_reads_a_long_hex_mantissa_exactly",
+      "seq": 15700008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "z=$(printf '%0300d' 0); printf \"0x1${z}p-1200\\n0\\n2\\n0.5\\n0x1${z}p-1240\\n-0x1${z}p-1240\\n\" | sort -g | cut -c1-12",
+      "expect": {
+        "exit": 0,
+        "stdout": "-0x100000000\n0\n0x1000000000\n0.5\n0x1000000000\n2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g"
       ]
     }
   ]

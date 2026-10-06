@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "xm_tee_output_error_exit_opens_every_output_first",
+      "seq": 15000095,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf x | tee --output-error=exit /data/fc0a /data2/nope/b /data/fc0c; echo rc=$?; ls /data/fc0a /data/fc0c; wc -c < /data/fc0a; printf y | tee /data/fc0a /data2/fc0b; echo; cat /data/fc0a /data2/fc0b; echo; printf z | tee -a /data/fc0a /data2/fc0b > /dev/null; cat /data/fc0a /data2/fc0b; echo; rm -f /data/fc0a /data2/fc0b",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n/data/fc0a\n0\ny\nyy\nyzyz\n",
+        "stderr": "tee: /data2/nope/b: No such file or directory\nls: cannot access '/data/fc0c': No such file or directory\n"
+      },
+      "flags": [
+        "output-error"
+      ]
+    }
+  ]
+}

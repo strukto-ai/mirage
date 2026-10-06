@@ -1,0 +1,322 @@
+---
+title: In-app
+description: The Python classes your app calls to run a workspace, each with an example.
+icon: cube
+---
+
+Call these when your agent runs in the same process as the workspace. Every other way in ends in the same calls.
+
+## Workspace
+
+```python
+from mirage import Workspace
+```
+
+```python
+class Workspace(
+    mounts: dict[str, VFS],
+    mode: MountMode = MountMode.READ,
+    ...,
+)
+```
+
+One terminal over the backends mounted at each prefix.
+
+<ResponseField name="mounts" type="dict[str, VFS]" required>
+  The backend at each prefix, such as `{"/": RAMVFS(), "/s3": S3VFS(config)}`.
+</ResponseField>
+<ResponseField name="mode" type="MountMode" default="MountMode.READ">
+  The mode a mount gets when it sets none: `READ`, `WRITE` or `EXEC`.
+</ResponseField>
+<ResponseField name="profiles" type="dict[str, SessionProfile]">
+  Named [profiles](/home/permissions) a session can be created under.
+</ResponseField>
+<ResponseField name="profile" type="str">
+  The profile a session gets when it names none.
+</ResponseField>
+<ResponseField name="policies" type="list[Policy]">
+  [Policies](/home/policy-engine) every line passes through.
+</ResponseField>
+<ResponseField name="on_ask" type="AskHandler">
+  Answers an ask while the line waits. Without one, asks wait in [`ws.decisions`](#ws-decisions).
+</ResponseField>
+
+The other parameters (`cache`, `index`, `store`, `runtimes`, `clis`, `env`, `secrets`, `command_limits`, ...) are the [top-level YAML keys](/home/yaml#top-level).
+
+```python
+from mirage import MountMode, Workspace
+from mirage.vfs.ram import RAMVFS
+
+ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+```
+
+### ws.session
+
+```python
+await ws.session(
+    session_id, mounts=None, *, profile=None
+) -> Session
+```
+
+The [`Session`](#session) every call below runs as. It creates the session when the id is new and adopts it when it exists. `profile` and `mounts` apply only on create, and raise `ValueError` for an existing session. `ws.create_session` is the same call without the handle.
+
+```python
+session = await ws.session("agent")
+```
+
+### ws.list_sessions, ws.close_session
+
+```python
+ws.list_sessions() -> list[SessionState]
+await ws.close_session(session_id) -> None
+```
+
+List the sessions, or close one: its lines are cancelled and its jobs end. The default session cannot be closed.
+
+<Expandable title="SessionState">
+  <ResponseField name="session_id" type="str" />
+  <ResponseField name="cwd" type="str">The working directory.</ResponseField>
+  <ResponseField name="env" type="Mapping[str, str]">The exported variables.</ResponseField>
+  <ResponseField name="profile" type="str | None">The profile it was created under.</ResponseField>
+  <ResponseField name="mount_modes" type="dict[str, MountMode] | None">Its mount modes, when narrower than the workspace's.</ResponseField>
+  <ResponseField name="last_exit_code" type="int">`$?`.</ResponseField>
+  <ResponseField name="created_at" type="float">Unix time.</ResponseField>
+</Expandable>
+
+```python
+print([s.session_id for s in ws.list_sessions()])
+await ws.close_session("agent")
+```
+
+### ws.cancel, ws.kill
+
+```python
+await ws.cancel(session_id=None) -> int
+await ws.kill(session_id=None) -> int
+```
+
+Stop a session's work, or every session's with no id, and leave the sessions open. `cancel` cancels the running and queued lines, whichever way they came in, and returns once they have ended; each ends with `MirageAbortError`. `kill` kills the background jobs (`cmd &`) and the processes runtimes started. Each answers how many it stopped.
+
+```python
+await ws.cancel("agent")
+await ws.kill()
+```
+
+### ws.snapshot, Workspace.load
+
+```python
+await ws.snapshot(target, *, compress=None, s3=None) -> int
+await Workspace.load(source, *, s3=None, ...) -> Workspace
+```
+
+Save the workspace to a tar and rebuild it from one. `target` and `source` are a path or a file object, or an object key with `s3=`. `snapshot` answers the tar's size in bytes. While it captures, new lines and file writes wait, and running ones get 30 seconds to end, else it raises `OSError` (`EBUSY`); disk mount files are streamed, never held whole. See [Snapshots](/home/snapshot) for what a tar holds.
+
+```python
+await ws.snapshot("run.tar")
+restored = await Workspace.load("run.tar")
+```
+
+### ws.copy
+
+```python
+await ws.copy() -> Workspace
+```
+
+A deep copy, without a tar in between. RAM and disk mounts are copied, so a write in the copy never reaches the original; a disk mount's copy lives in a new temporary directory. Sessions, history and profiles come along. Remote backends such as S3 or Redis are shared, so a write through the copy reaches the same bucket. Policies are not copied.
+
+```python
+fork = await ws.copy()
+```
+
+### ws.decisions
+
+```python
+ws.decisions.pending(session_id="") -> tuple[Decision, ...]
+await ws.decisions.answer(
+    decision_id, outcome, scope=Scope.ONCE, note=""
+) -> None
+```
+
+The [asks](/home/permissions#asks) waiting for a host. Each one belongs to the session that ran the line: `pending()` lists every session's, `pending("agent")` one session's, and an answer never reaches another session. `outcome` is `Outcome.ALLOW` or `Outcome.DENY`. `Scope.ONCE` answers the one line, so its retry runs or is refused; `Scope.SESSION` allows every line the rule covers for the rest of that session.
+
+<Expandable title="Decision">
+  <ResponseField name="id" type="str">The id to answer it by.</ResponseField>
+  <ResponseField name="session_id" type="str">The session that ran the line.</ResponseField>
+  <ResponseField name="agent_id" type="str" />
+  <ResponseField name="command" type="str">The command name.</ResponseField>
+  <ResponseField name="argv" type="tuple[str, ...]">The words after the name, expanded.</ResponseField>
+  <ResponseField name="cwd" type="str" />
+  <ResponseField name="paths" type="tuple[str, ...]">The paths the line names.</ResponseField>
+  <ResponseField name="reason" type="str">The rule's reason.</ResponseField>
+  <ResponseField name="outcome" type="Outcome | None">The answer; `None` while it waits.</ResponseField>
+  <ResponseField name="scope" type="Scope" />
+  <ResponseField name="note" type="str">What the host said when answering.</ResponseField>
+</Expandable>
+
+```python
+from mirage import Outcome
+
+for ask in ws.decisions.pending():
+    await ws.decisions.answer(ask.id, Outcome.ALLOW)
+```
+
+### ws.close
+
+```python
+await ws.close() -> None
+```
+
+Stops its jobs and closes its mounts. Sessions and history stay in the workspace's store.
+
+## Session
+
+```python
+from mirage import Session
+```
+
+```python
+class Session(workspace: Workspace, session_id: str)
+```
+
+One session's handle, from [`ws.session`](#ws-session). Every call on it answers under the session's [profile](/home/permissions), working directory and environment. `ws.shell`, `ws.glob`, `ws.vfs` and `ws.tools` are the same calls as the workspace's default session.
+
+<ResponseField name="session_id" type="str" />
+<ResponseField name="state" type="SessionState">The session's record, as [`ws.list_sessions`](#ws-list_sessions-ws-close_session) answers it.</ResponseField>
+<ResponseField name="vfs" type="Ops">The file API, below.</ResponseField>
+<ResponseField name="tools" type="MirageToolOperations">The agent tools, below.</ResponseField>
+
+### session.shell
+
+```python
+await session.shell(
+    command, stdin=None, cwd=None, env=None,
+    cancel=None, record=True,
+) -> IOResult
+```
+
+Runs a shell line as the session. A non-zero exit is a result, not an exception.
+
+<ResponseField name="stdin" type="bytes | AsyncIterator[bytes]">
+  The line's stdin. An async iterator streams it.
+</ResponseField>
+<ResponseField name="cwd" type="str">
+  A working directory for this line only. A `cd` in the line does not leak.
+</ResponseField>
+<ResponseField name="env" type="dict[str, str]">
+  Variables for this line only.
+</ResponseField>
+<ResponseField name="cancel" type="asyncio.Event">
+  Setting it stops the line and raises `MirageAbortError`.
+</ResponseField>
+<ResponseField name="record" type="bool" default="True">
+  `False` keeps the line out of history.
+</ResponseField>
+
+<Expandable title="IOResult">
+  <ResponseField name="exit_code" type="int" />
+  <ResponseField name="stdout_str()" type="async -> str">The output as text. `materialize_stdout()` answers the bytes.</ResponseField>
+  <ResponseField name="stderr_str()" type="async -> str">The error output as text. `materialize_stderr()` answers the bytes.</ResponseField>
+  <ResponseField name="refusal" type="Refusal | None">
+    Why the line did not run, or `None`.
+    <Expandable title="Refusal">
+      <ResponseField name="kind" type="str">`deny` for a refusal, `pending` for an ask nobody answered, `failed` for a policy that raised.</ResponseField>
+      <ResponseField name="reason" type="str">The rule's or the policy's words.</ResponseField>
+      <ResponseField name="policy" type="str">The policy class that refused; empty for an ask.</ResponseField>
+      <ResponseField name="scope" type="str">`command` or `operand`.</ResponseField>
+      <ResponseField name="ask_id" type="str | None">The ask's id, for `pending`.</ResponseField>
+    </Expandable>
+  </ResponseField>
+</Expandable>
+
+```python
+result = await session.shell("wc -l", stdin=b"a\nb\n")
+print(result.exit_code, await result.stdout_str())
+```
+
+### session.glob
+
+```python
+await session.glob(pattern) -> list[str]
+```
+
+The paths a pattern matches, as the session sees them.
+
+```python
+paths = await session.glob("/src/**/*.py")
+```
+
+### session.vfs
+
+The file API, run as the session. Paths are absolute, bytes are `bytes`. A missing path raises `FileNotFoundError` and a refused one `PermissionError`.
+
+| Call | Answers |
+| --- | --- |
+| `read(path, offset=0, size=None)` | The bytes, whole or a range. |
+| `write(path, data)`, `append(path, data)` | `None` |
+| `stat(path, nofollow=False)` | A `FileStat`. |
+| `readdir(path)` | The full path of each entry. |
+| `exists(path)` | `True` or `False`. |
+| `mkdir(path)`, `rmdir(path)`, `unlink(path)` | `None` |
+| `rename(src, dst)` | `None` |
+| `truncate(path, length)` | `None` |
+
+<Expandable title="FileStat">
+  <ResponseField name="name" type="str" />
+  <ResponseField name="type" type="FileType">`FILE`, `DIRECTORY`, `SYMLINK` or `CHAR_DEVICE`.</ResponseField>
+  <ResponseField name="size" type="int | None">The bytes a read answers; `None` when unknown.</ResponseField>
+  <ResponseField name="modified" type="str | None">ISO 8601.</ResponseField>
+  <ResponseField name="content" type="ContentType | None">A file's content shape, such as `text`.</ResponseField>
+  <ResponseField name="mode" type="int | None">The permission bits.</ResponseField>
+  <ResponseField name="uid, gid" type="int | str | None" />
+  <ResponseField name="atime, ctime, birthtime" type="str | None" />
+  <ResponseField name="fingerprint, revision" type="str | None">The backend's ETag and version, when it has them.</ResponseField>
+  <ResponseField name="extra" type="dict">Backend-specific fields.</ResponseField>
+</Expandable>
+
+```python
+await session.vfs.write("/notes.txt", b"hello\n")
+print(await session.vfs.read("/notes.txt"))
+```
+
+### session.tools
+
+```python
+await session.tools.shell(command) -> ToolResult
+await session.tools.read(path, offset=0, limit=2000) -> ToolResult
+await session.tools.write(path, content) -> ToolResult
+await session.tools.edit(
+    path, old_string, new_string, replace_all=False
+) -> ToolResult
+await session.tools.ls(path) -> ToolResult
+await session.tools.grep(pattern, path, ignore_case=False, ...)
+await session.tools.glob(pattern, path="/") -> ToolResult
+await session.tools.call(name, arguments) -> ToolResult
+```
+
+The seven agent tools, for a model rather than a program: every answer is text, and a failure is `is_error`, never an exception. `call` takes a tool's name and its JSON input, the form an agent loop gets from the model. The session has one table, shared by every caller, so `write` and `edit` refuse a file the agent has not read in full, or one that changed since it read it.
+
+| Tool | Answers |
+| --- | --- |
+| `shell` | The line's stdout, stderr and exit status as one text. |
+| `read` | Numbered lines, `limit` of them from `offset`. |
+| `write` | Writes a new file; an existing one only after a full `read`. |
+| `edit` | Replaces `old_string` once, or everywhere with `replace_all`. |
+| `ls`, `grep` | `ls` and `grep -rn`, as text. |
+| `glob` | The files a pattern matches, one per line. |
+
+<Expandable title="ToolResult">
+  <ResponseField name="text" type="str">The text handed back to the agent.</ResponseField>
+  <ResponseField name="is_error" type="bool">`True` when the call failed.</ResponseField>
+</Expandable>
+
+`mirage.workspace.tools.tool_descriptions` has each tool's description and JSON schema to hand the model, and the [agent adapters](/python/agents/index) wire the tools into each framework. `MirageToolOperations(session, stale_write_protection=False)`, from `mirage.workspace.tools.tool_operations`, is a table without the read guard.
+
+```python
+await session.tools.call("read", {"path": "/notes.txt"})
+result = await session.tools.call("edit", {
+    "path": "/notes.txt",
+    "old_string": "hello",
+    "new_string": "hi",
+})
+print(result.text, result.is_error)
+```

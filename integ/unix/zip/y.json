@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "zip_y_stores_a_link_with_link_mode",
+      "seq": 15100631,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "(mkdir -p /data/fcA_zy/d && cd /data/fcA_zy && printf 'alpha\\n' > d/a.txt && ln -s a.txt d/link.txt && zip -q -r -y s.zip d && unzip -Z s.zip d/link.txt | cut -c1-10 && unzip -p s.zip d/link.txt; echo; cd / && rm -r /data/fcA_zy)",
+      "expect": {
+        "exit": 0,
+        "stdout": "lrwxrwxrwx\na.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "q",
+        "r",
+        "y"
+      ]
+    }
+  ]
+}

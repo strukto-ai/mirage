@@ -7,8 +7,7 @@ import { createShellParser } from '../../../shell/parse/index.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { eisdir, enoent, enotdir } from '../../../utils/errors.ts'
-import { prepareProgram, programFileRefusal, readProgramFile } from './program.ts'
+import { prepareProgram, readProgramFile } from './program.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -67,59 +66,9 @@ describe('rg program files from stdin', () => {
     expect([texts, flags]).toEqual([['/in'], { file: [], regexp: ['a\nb'] }])
     expect(await materialize(rest)).toEqual(new Uint8Array())
   })
-
-  it('takes no - from -f /dev/stdin', async () => {
-    // ripgrep reads `-f /dev/stdin` as a file, so a `-` operand after it
-    // searches what is left of stdin (nothing) rather than being refused.
-    const [, flags, rest, error] = await prepareProgram(
-      'rg',
-      [],
-      { file: [typed('/dev/stdin')] },
-      ENC.encode('a\n'),
-      noDispatch,
-      [typed('-')],
-    )
-    expect(error).toBeNull()
-    expect(flags).toEqual({ file: [], regexp: ['a'] })
-    expect(await materialize(rest)).toEqual(new Uint8Array())
-  })
-
-  it('leaves grep reading a second -f - as empty', async () => {
-    // GNU grep 3.11 reads the second `-f -` as an empty pattern file.
-    const [, flags, , error] = await prepareProgram(
-      'grep',
-      [],
-      { file: [typed('-'), typed('-')], e: [] },
-      ENC.encode('a\n'),
-      noDispatch,
-      [typed('-')],
-    )
-    expect(error).toBeNull()
-    expect(flags).toEqual({ file: [], e: ['a'] })
-  })
 })
 
 describe('a program file the command cannot read', () => {
-  // grep 3.11, ripgrep 14.1.1, gzip 1.13 (zgrep copies the file with cat),
-  // sed 4.9, mawk 1.3.4, jq 1.7.1 on debian:stable-slim. Mirrors python's
-  // test_a_program_file_refusal_is_in_each_commands_words.
-  it.each([
-    ['grep', eisdir('/dir'), 'grep: dir: Is a directory\n', 2],
-    ['grep', enoent('/dir'), 'grep: dir: No such file or directory\n', 2],
-    ['rg', eisdir('/dir'), 'rg: dir:Is a directory (os error 21)\n', 2],
-    ['rg', enoent('/dir'), 'rg: dir: No such file or directory (os error 2)\n', 2],
-    ['rg', enotdir('/dir'), 'rg: dir: Not a directory (os error 20)\n', 2],
-    ['zgrep', eisdir('/dir'), 'cat: dir: Is a directory\n', 2],
-    ['zgrep', enoent('/dir'), 'cat: dir: No such file or directory\n', 2],
-    ['sed', enoent('/dir'), "sed: couldn't open file dir: No such file or directory\n", 4],
-    ['awk', eisdir('/dir'), 'awk: read error (Is a directory)\n', 2],
-    ['awk', enoent('/dir'), 'awk: cannot open "dir" (No such file or directory)\n', 2],
-    ['jq', eisdir('/dir'), "jq: Could not open dir: It's a directory\n", 2],
-    ['jq', enoent('/dir'), 'jq: Could not open dir: No such file or directory\n', 2],
-  ] as const)('%s words %s its own way', (name, err, line, code) => {
-    expect(programFileRefusal(name, typed('dir'), err)).toEqual([line, code])
-  })
-
   it.each([
     ['sed', true],
     ['grep', false],

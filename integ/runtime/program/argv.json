@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "id": "sys_argv",
+      "runtimes": [
+        "wasi",
+        "local",
+        "sandlock"
+      ],
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": {
+            "python": "python3 -c \"import sys; print(sys.argv[1:])\" alpha beta"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "['alpha', 'beta']\n"
+          }
+        }
+      ]
+    }
+  ]
+}

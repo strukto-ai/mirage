@@ -785,6 +785,58 @@
         "stdout": "/mail/INBOX/2026-01-05/Standup_notes__2.email.json\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "em_find_type_f_in_a_day",
+      "seq": 540219,
+      "targets": [
+        "email"
+      ],
+      "command": "find /mail/INBOX/2026-01-05 -type f | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json\n/mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv\n/mail/INBOX/2026-01-05/Q2_Budget_Review__1/notes.txt\n/mail/INBOX/2026-01-05/Standup_notes__2.email.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "em_rg_several_patterns_scan",
+      "seq": 540220,
+      "targets": [
+        "email"
+      ],
+      "command": "rg -l -e parser -e percent /mail/INBOX | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Standup_notes__2.email.json\n/mail/INBOX/2026-01-07/Server_alert_worker-3__3.email.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "em_rg_message_file_scans_that_file",
+      "seq": 540221,
+      "targets": [
+        "email"
+      ],
+      "command": "rg forecast /mail/INBOX/2026-01-05/Standup_notes__2.email.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"from\":{\"name\":\"\",\"email\":\"marcus@example.com\"},\"reply_to\":[],\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[],\"subject\":\"Standup notes\",\"date\":\"Mon, 05 Jan 2026 14:00:00 +0000\",\"body_text\":\"yesterday shipped the parser\\ntoday reviewing the budget forecast\",\"body_html\":\"\",\"snippet\":\"yesterday shipped the parser\\ntoday reviewing the budget forecast\",\"message_id\":\"\",\"in_reply_to\":null,\"references\":[],\"has_attachments\":false,\"attachments\":[],\"uid\":\"2\",\"flags\":[\"\\\\Seen\"]}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "em_rg_dotted_pattern_is_a_regex",
+      "seq": 540222,
+      "targets": [
+        "email"
+      ],
+      "command": "rg -l 'worker.3' /mail/INBOX",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-07/Server_alert_worker-3__3.email.json\n",
+        "stderr": ""
+      }
     }
   ]
 }

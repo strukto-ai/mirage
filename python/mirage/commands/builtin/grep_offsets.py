@@ -16,35 +16,8 @@ import re
 from collections.abc import Sequence
 
 from mirage.commands.builtin.utils.pcre import match_start, match_text
+from mirage.shell.bytes import encode_text
 from mirage.shell.helpers import byte_offset
-
-
-def decode_line(raw: bytes) -> str:
-    """The input's bytes as text a byte offset can be counted back out of.
-
-    The whole family holds a line as text, so every byte offset it prints
-    is a character index converted back. That only answers GNU's number
-    when the conversion round-trips, which ``errors="replace"`` does not:
-    one invalid byte becomes U+FFFD, three bytes wide, so a `-b` offset
-    past it ran ahead (`rg -b a` over `\\xff\\na\\n` answered 4 where GNU
-    says 2) and a `-bo` match offset inside such a line ran ahead too. A
-    surrogate escape stands for exactly one byte, which is the convention
-    ``byte_offset`` in ``shell/helpers.py`` already assumes and the twin
-    of ``decodeLine`` in ``grep_offsets.ts``.
-
-    Args:
-        raw (bytes): the bytes to read as text.
-    """
-    return raw.decode("utf-8", errors="surrogateescape")
-
-
-def encode_line(text: str) -> bytes:
-    """Text back to the bytes ``decode_line`` read it from.
-
-    Args:
-        text (str): text that may carry surrogate-escaped bytes.
-    """
-    return text.encode("utf-8", errors="surrogateescape")
 
 
 def line_offsets(lines: Sequence[str]) -> list[int]:
@@ -54,7 +27,7 @@ def line_offsets(lines: Sequence[str]) -> list[int]:
     one more than the line's own length. The extra byte past the last line
     is never read, which is why a file with no final newline still reports
     a correct offset for every line it does have. The lines must have come
-    from ``decode_line``; a lossily decoded one cannot be counted back.
+    from ``decode_text``; a lossily decoded one cannot be counted back.
 
     Args:
         lines (Sequence[str]): the input's lines, terminators stripped.
@@ -63,23 +36,8 @@ def line_offsets(lines: Sequence[str]) -> list[int]:
     position = 0
     for line in lines:
         offsets.append(position)
-        position += len(encode_line(line)) + 1
+        position += len(encode_text(line)) + 1
     return offsets
-
-
-def match_offset(line_start: int, line: str, index: int) -> int:
-    """Where a match begins in bytes, given its character index.
-
-    The pattern engine reports a character index because both hosts hold a
-    line as text; GNU reports a byte count and reports the same number
-    under C and C.utf8, so the index is converted rather than printed.
-
-    Args:
-        line_start (int): the line's own byte offset.
-        line (str): the line the index is into.
-        index (int): a character index into that line.
-    """
-    return line_start + byte_offset(line, index)
 
 
 def rust_matches(pat: re.Pattern[str], line: str) -> list[tuple[int, str]]:

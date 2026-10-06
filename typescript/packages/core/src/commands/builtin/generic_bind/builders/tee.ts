@@ -13,26 +13,28 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { teeGeneric } from '../../generic/tee.ts'
-import { type Builder, requireOp, resolveGlobOf } from '../adapter.ts'
+import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+
+const tee: BuilderFn = async (ops, accessor, paths, texts, opts) => {
+  const idx = opts.index ?? undefined
+  const { append } = ops
+  const write = requireOp(ops.write, 'write')
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  // A backend that can append natively does; the rest fall back to the
+  // read-modify-write inside the generic.
+  return teeGeneric(
+    resolved,
+    texts,
+    opts,
+    (p) => ops.readStream(accessor, p, idx),
+    (p, d) => write(accessor, p, d),
+    append === undefined ? undefined : (p, d) => append(accessor, p, d),
+    (p) => ops.stat(accessor, p, idx),
+  )
+}
 
 export const BUILDER: Builder = {
   name: 'tee',
   write: true,
-  fn: async (ops, accessor, paths, texts, opts) => {
-    const idx = opts.index ?? undefined
-    const { append } = ops
-    const write = requireOp(ops.write, 'write')
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    // A backend that can append natively does; the rest fall back to the
-    // read-modify-write inside the generic.
-    return teeGeneric(
-      resolved,
-      texts,
-      opts,
-      (p) => ops.readStream(accessor, p, idx),
-      (p, d) => write(accessor, p, d),
-      append === undefined ? undefined : (p, d) => append(accessor, p, d),
-      (p) => ops.stat(accessor, p, idx),
-    )
-  },
+  fn: tee,
 }

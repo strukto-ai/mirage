@@ -101,6 +101,41 @@
         "stdout": "",
         "stderr": ""
       }
+    },
+    {
+      "id": "tr_pads_set2_with_its_last_character",
+      "seq": 15500401,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abcde' | tr abcde xy",
+      "expect": {
+        "exit": 0,
+        "stdout": "xyyyy",
+        "stderr": ""
+      },
+      "flags": []
     }
   ]
 }

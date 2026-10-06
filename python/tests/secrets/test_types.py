@@ -31,7 +31,6 @@ def test_resolved_secret_is_frozen():
 
 
 def test_resolved_source_pairs_a_config_with_a_fetch():
-
     async def fetch(config, ref):
         return ResolvedSecret(fields={})
 
@@ -42,7 +41,6 @@ def test_resolved_source_pairs_a_config_with_a_fetch():
 
 
 def test_resolved_source_is_frozen():
-
     async def fetch(config, ref):
         return ResolvedSecret(fields={})
 

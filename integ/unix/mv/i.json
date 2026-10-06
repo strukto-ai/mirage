@@ -1,0 +1,77 @@
+{
+  "cases": [
+    {
+      "id": "mv_i_asks_and_reads_the_answer_from_stdin",
+      "seq": 15000083,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && printf x > fc0s && printf y > fc0d && mv -i fc0s fc0d; echo rc=$?; cat fc0s fc0d; echo; printf 'y\\n' | mv -i fc0s fc0d; echo rc=$?; cat fc0d; echo; ls fc0s; printf x > fc0s; printf 'n\\n' | mv --interactive fc0s fc0d; echo rc=$?; mv -i fc0s fc0new; echo rc=$?; rm -f fc0s fc0d fc0new)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nxy\nrc=0\nx\nrc=1\nrc=0\n",
+        "stderr": "mv: overwrite 'fc0d'? mv: overwrite 'fc0d'? ls: cannot access 'fc0s': No such file or directory\nmv: overwrite 'fc0d'? "
+      },
+      "flags": [
+        "i",
+        "interactive"
+      ]
+    },
+    {
+      "id": "mv_i_f_and_n_the_last_wins",
+      "seq": 15000084,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && printf x > fc0s && printf y > fc0d && mv -in fc0s fc0d; echo rc=$?; mv -ni fc0s fc0d; echo rc=$?; mv -fi fc0s fc0d; echo rc=$?; mv -if fc0s fc0d; echo rc=$?; cat fc0d; echo; ls fc0s; rm -f fc0s fc0d)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrc=1\nrc=1\nrc=0\nx\n",
+        "stderr": "mv: overwrite 'fc0d'? mv: overwrite 'fc0d'? ls: cannot access 'fc0s': No such file or directory\n"
+      },
+      "flags": [
+        "i",
+        "f",
+        "n"
+      ]
+    }
+  ]
+}

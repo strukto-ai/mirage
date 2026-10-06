@@ -100,7 +100,8 @@
         "exit": 0,
         "stdout": "rc=1\nrc=1\n",
         "stderr": ""
-      }
+      },
+      "flags": ["quiet", "silent"]
     },
     {
       "id": "cmp_l_with_s_is_refused",

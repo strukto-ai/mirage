@@ -2,6 +2,8 @@ import pytest
 
 from mirage.io import IOResult
 from mirage.io.stream import materialize
+from mirage.io.types import ByteSource
+from mirage.shell.call_stack import CallStack
 from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.executor.builtins.command import handle_command_builtin
 from mirage.workspace.session.session import SessionState
@@ -21,15 +23,21 @@ class FakeRegistry:
 class FakeShell:
     def __init__(self, exit_code: int = 0, stdout: bytes = b""):
         self.lines: list[str] = []
-        self.stdins: list[object] = []
+        self.stdins: list[ByteSource | None] = []
+        self.stacks: list[CallStack | None] = []
         self.exit_code = exit_code
         self.stdout = stdout
 
     async def __call__(
-        self, line: str, session_id: str, stdin: object = None
+        self,
+        line: str,
+        session_id: str,
+        stdin: ByteSource | None = None,
+        call_stack: CallStack | None = None,
     ) -> IOResult:
         self.lines.append(line)
         self.stdins.append(stdin)
+        self.stacks.append(call_stack)
         return IOResult(stdout=self.stdout, exit_code=self.exit_code)
 
 
@@ -189,6 +197,21 @@ async def test_run_mode_joins_and_runs():
 
 
 @pytest.mark.asyncio
+async def test_run_mode_runs_in_the_callers_frames():
+    shell = FakeShell()
+    frames = CallStack()
+    await handle_command_builtin(
+        shell,
+        ["eval", "exit 7"],
+        make_session(),
+        make_registry(),
+        None,
+        frames,
+    )
+    assert shell.stacks == [frames]
+
+
+@pytest.mark.asyncio
 async def test_run_mode_shlex_quotes_operands():
     shell = FakeShell()
     await handle_command_builtin(
@@ -214,7 +237,10 @@ async def test_run_mode_masks_function_then_restores():
     seen: dict[str, bool] = {}
 
     async def shell(
-        line: str, session_id: str, stdin: object = None
+        line: str,
+        session_id: str,
+        stdin: ByteSource | None = None,
+        call_stack: CallStack | None = None,
     ) -> IOResult:
         seen["masked"] = "cat" not in session.functions
         return IOResult(exit_code=0)

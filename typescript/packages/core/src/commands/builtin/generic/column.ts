@@ -14,6 +14,7 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -105,15 +106,27 @@ function tableFormat(text: string, separator: string | null, outputSep: string):
   )
 }
 
+interface ColumnFlags {
+  readonly table: boolean
+  readonly separator: string | null
+  readonly outputSeparator: string | null
+}
+
+function parseFlags(bag: Record<string, FlagValue>): ColumnFlags {
+  const fl = new FlagView(bag, specOf('column'))
+  return {
+    table: fl.asBool('t'),
+    separator: fl.asStr('s') ?? null,
+    outputSeparator: fl.asStr('o') ?? null,
+  }
+}
+
 export async function columnGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('column'))
-  const tMode = fl.asBool('t')
-  const sFlag = fl.asStr('s') ?? null
-  const oFlag = fl.asStr('o') ?? '  '
+  const parsed = parseFlags(opts.flags)
   let raw: Uint8Array
   if (paths.length > 0) {
     // Every operand is read, as one run of lines in which a file's last line
@@ -126,7 +139,9 @@ export async function columnGeneric(
     raw = stdinData ?? new Uint8Array(0)
   }
   const text = DEC.decode(raw)
-  const output = tMode ? tableFormat(text, sFlag, oFlag) : fillColumns(text, outputWidth(opts.env))
+  const output = parsed.table
+    ? tableFormat(text, parsed.separator, parsed.outputSeparator ?? '  ')
+    : fillColumns(text, outputWidth(opts.env))
   const result: ByteSource = ENC.encode(output)
   return [result, new IOResult()]
 }

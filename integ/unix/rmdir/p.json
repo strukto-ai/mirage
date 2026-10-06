@@ -1,0 +1,102 @@
+{
+  "cases": [
+    {
+      "id": "rmdir_p_removes_each_parent_it_can",
+      "seq": 15000060,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fc0p/a/b && (cd /data && rmdir -p fc0p/a/b); echo rc=$?; ls -d /data/fc0p; mkdir -p /data/fc0p/a/b && printf x > /data/fc0p/f && (cd /data && rmdir -p -v fc0p/a//b/); echo rc=$?; ls /data/fc0p; rm -rf /data/fc0p",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrmdir: removing directory, 'fc0p/a//b/'\nrmdir: removing directory, 'fc0p/a'\nrmdir: removing directory, 'fc0p'\nrc=1\nf\n",
+        "stderr": "ls: cannot access '/data/fc0p': No such file or directory\nrmdir: failed to remove directory 'fc0p': Directory not empty\n"
+      },
+      "flags": [
+        "p",
+        "v"
+      ]
+    },
+    {
+      "id": "rmdir_p_stops_at_the_mount_point",
+      "seq": 15000063,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fc0m/a && rmdir -p /data/fc0m/a; echo rc=$?; ls -d /data/fc0m",
+      "expect": {
+        "exit": 2,
+        "stdout": "rc=1\n",
+        "stderr": "rmdir: failed to remove directory '/data': Device or resource busy\nls: cannot access '/data/fc0m': No such file or directory\n"
+      },
+      "flags": [
+        "p"
+      ]
+    },
+    {
+      "id": "rmdir_p_reaches_each_parent_through_a_link",
+      "seq": 15700005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcR_rl/real/nested/leaf && printf k > /data/fcR_rl/real/keep && ln -s real /data/fcR_rl/link && (cd /data/fcR_rl && rmdir -pv link/nested/leaf); echo rc=$?; ls -A /data/fcR_rl/real; rm -rf /data/fcR_rl",
+      "expect": {
+        "exit": 0,
+        "stdout": "rmdir: removing directory, 'link/nested/leaf'\nrmdir: removing directory, 'link/nested'\nrmdir: removing directory, 'link'\nrc=1\nkeep\n",
+        "stderr": "rmdir: failed to remove 'link': Not a directory\n"
+      },
+      "flags": [
+        "p",
+        "v"
+      ]
+    }
+  ]
+}

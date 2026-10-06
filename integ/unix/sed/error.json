@@ -577,6 +577,40 @@
         "stdout": "",
         "stderr": "sed: -e expression #1, char 1: \":\" lacks a label\n"
       }
+    },
+    {
+      "id": "sed_error_y_strings_differ_in_length",
+      "seq": 15300005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\n' | sed 'y/ab/x/'; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "sed: -e expression #1, char 7: strings for `y' command are different lengths\n"
+      }
     }
   ]
 }

@@ -4,15 +4,13 @@ description: Give Agno agents shell-based filesystem access to any Mirage worksp
 icon: /images/agno-logo.svg
 ---
 
-[Agno](https://github.com/agno-agi/agno) is an agent framework that groups related tools into `Toolkit` classes. Mirage ships `MirageToolkit`, a toolkit backed by a `Workspace` instead of the host machine. The agent gets Mirage's seven tools (`shell`, `read`, `write`, `edit`, `ls`, `grep`, `glob`), the same table MCP serves; mount RAM, S3, GDrive, Slack, etc. and the agent uses them through the same Agno API.
+[Agno](https://github.com/agno-agi/agno) is an agent framework that groups related tools into `Toolkit` classes. Mirage ships `MirageToolkit`, a toolkit that runs Mirage's seven tools in a workspace instead of on the host.
 
 ## Install
 
 ```bash
 uv add 'mirage-ai[agno]'
 ```
-
-Requires `agno>=2.7.4`. The toolkit registers both sync and async variants through Agno's `tools` and `async_tools` parameters.
 
 ## Usage
 
@@ -47,17 +45,7 @@ asyncio.run(main())
 
 ## Tools
 
-Every tool is registered as a sync + async pair under one name; Agno picks the async variant in `arun`/`aprint_response` and the sync variant otherwise.
-
-| Tool | Answers as the MCP tool does |
-| --- | --- |
-| `shell(command)` | the line's output, through `ws.shell` |
-| `read(path, offset=0, limit=2000)` | numbered lines |
-| `write(path, content)` | creates parents; an existing file must be read in full first |
-| `edit(path, old_string, new_string, replace_all=False)` | refuses a file changed since it was read |
-| `ls(path)` | one entry per line |
-| `grep(pattern, path, ignore_case, fixed_strings, include, context, files_with_matches, count, max_count)` | `grep -rn` output, with GNU grep's options |
-| `glob(pattern, path="/")` | matching files, sorted |
+The toolkit serves the session's seven tools, [`session.tools`](/python/access/in-app#session-tools), each as a sync and async pair under one name: Agno calls the async one in `arun` and `aprint_response`, and the sync one otherwise.
 
 ## Exports
 

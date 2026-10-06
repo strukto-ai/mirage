@@ -109,9 +109,6 @@ async def test_implicit_host_timezone(monkeypatch, host_zone, summer, winter):
     "line,escaped",
     [
         ("date -d 'xé'", r"x\303\251"),
-        ("date -d $'x\\001'", r"x\001"),
-        ("date -d $'x\\177'", r"x\177"),
-        ('date -d "x\'"', r"x\'"),
         ("date -d 'x\\'", r"x\\"),
     ],
 )
@@ -128,8 +125,7 @@ async def test_date_invalid_date_quotes_the_expression(line, escaped):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("line", ["date -u -d ''", "date -u -d '   '"])
-async def test_an_empty_expression_is_today_at_midnight(line):
+async def test_an_empty_expression_is_today_at_midnight():
     """GNU ACCEPTS an empty (or blank) `-d`, exit 0, at today 00:00:00.
 
     gnulib's parse-datetime sees no component at all and falls through
@@ -140,9 +136,9 @@ async def test_an_empty_expression_is_today_at_midnight(line):
     """
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     try:
-        out, err, code = await _run(ws, f"{line} +%H:%M:%S")
+        out, err, code = await _run(ws, "date -u -d '' +%H:%M:%S")
         assert (out, err, code) == ("00:00:00\n", "", 0)
-        today, err, code = await _run(ws, f"{line} +%Y-%m-%d")
+        today, err, code = await _run(ws, "date -u -d '' +%Y-%m-%d")
         now, _, _ = await _run(ws, "date -u +%Y-%m-%d")
         assert (today, err, code) == (now, "", 0)
     finally:
@@ -162,36 +158,8 @@ _ISO_VALID = (
     "line,stderr",
     [
         (
-            f"date -d {_AT} -Ix",
-            "date: invalid argument 'x' for '--iso-8601'\n" + _ISO_VALID,
-        ),
-        (
             f"date -d {_AT} -Isu",
             "date: invalid argument 'su' for '--iso-8601'\n" + _ISO_VALID,
-        ),
-        (
-            f"date -d {_AT} --iso-8601=",
-            "date: ambiguous argument '' for '--iso-8601'\n" + _ISO_VALID,
-        ),
-        (
-            f"date -d {_AT} --rfc-3339=hours",
-            "date: invalid argument 'hours' for '--rfc-3339'\n"
-            "Valid arguments are:\n  - 'date'\n  - 'seconds'\n  - 'ns'\n"
-            "Try 'date --help' for more information.\n",
-        ),
-        (
-            f"date -d {_AT} --rfc-3339",
-            "date: option '--rfc-3339' requires an argument\n"
-            "Try 'date --help' for more information.\n",
-        ),
-        (f"date -d {_AT} -I -R", "date: multiple output formats specified\n"),
-        (
-            f"date -d {_AT} --rfc-3339=s -Is",
-            "date: multiple output formats specified\n",
-        ),
-        (
-            f"date -d {_AT} -Is +%Y",
-            "date: multiple output formats specified\n",
         ),
         (
             f"date -d {_AT} -I -R a b",

@@ -21,14 +21,7 @@ from fastapi import APIRouter, HTTPException, Request
 from mcp.server.transport_security import DEFAULT_MAX_REQUEST_BODY_SIZE
 from pydantic import BaseModel
 
-from mirage.agents.tool_descriptions import (
-    EDIT_INPUT,
-    GLOB_INPUT,
-    GREP_INPUT,
-    LS_INPUT,
-    READ_INPUT,
-    WRITE_INPUT,
-)
+from mirage.server.mcp.server import TOOLS
 from mirage.types import JsonValue
 
 logger = logging.getLogger(__name__)
@@ -36,12 +29,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}")
 
 INPUTS: dict[str, dict[str, JsonValue]] = {
-    "read": READ_INPUT,
-    "write": WRITE_INPUT,
-    "edit": EDIT_INPUT,
-    "ls": LS_INPUT,
-    "grep": GREP_INPUT,
-    "glob": GLOB_INPUT,
+    tool.name: tool.input_schema for tool in TOOLS if tool.name != "shell"
 }
 
 
@@ -74,9 +62,13 @@ async def call_tool(
     Returns:
         ToolResponse: the tool's text and whether it failed.
     """
-    body = await request.body()
-    if len(body) > DEFAULT_MAX_REQUEST_BODY_SIZE:
-        raise HTTPException(status_code=413, detail="request body too large")
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > DEFAULT_MAX_REQUEST_BODY_SIZE:
+            raise HTTPException(
+                status_code=413, detail="request body too large"
+            )
     try:
         arguments = json.loads(body)
     except ValueError as exc:
@@ -91,7 +83,9 @@ async def call_tool(
             detail=f"Invalid arguments for tool {name}: {exc.message}",
         ) from exc
     try:
-        tools = await request.app.state.mcp.tools(workspace_id, session_id)
+        tools = await request.app.state.mcp.tools(
+            workspace_id, session_id, request.state.account
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=exc.args[0]) from exc
     try:

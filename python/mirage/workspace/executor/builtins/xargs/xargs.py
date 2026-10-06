@@ -17,7 +17,6 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from mirage.commands.builtin.grep_offsets import decode_line
 from mirage.commands.quote import quote_text
 from mirage.commands.spec.help import render_help
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
@@ -34,7 +33,7 @@ from mirage.io import IOResult
 from mirage.io.stream import SharedStdin, async_chain, materialize, yield_bytes
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.join import shell_join
 from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.quote import shell_quote
@@ -96,7 +95,7 @@ class _Fatal(Exception):
 def _refuse(
     stderr: str | bytes, exit_code: int = 1
 ) -> tuple[None, IOResult, ExecutionNode]:
-    data = stderr.encode() if isinstance(stderr, str) else stderr
+    data = encode_text(stderr) if isinstance(stderr, str) else stderr
     return (
         None,
         IOResult(exit_code=exit_code, stderr=data),
@@ -136,13 +135,15 @@ def _standard_response(
         warnings (str): the option warnings printed before it.
     """
     text = (
-        render_help("xargs", SHELL_SPECS["xargs"], synopsis=_SYNOPSIS).encode()
+        encode_text(
+            render_help("xargs", SHELL_SPECS["xargs"], synopsis=_SYNOPSIS)
+        )
         if option == "help"
         else version_line("xargs")
     )
     return (
         yield_bytes(text),
-        IOResult(stderr=warnings.encode() or None),
+        IOResult(stderr=encode_text(warnings) or None),
         ExecutionNode(command="xargs", exit_code=0),
     )
 
@@ -164,7 +165,7 @@ def _delimiter(spec: str) -> tuple[int, str]:
     Args:
         spec (str): the -d value as typed.
     """
-    raw = spec.encode()
+    raw = encode_text(spec)
     if len(raw) == 1:
         return raw[0], ""
     if not spec.startswith("\\"):
@@ -503,7 +504,7 @@ class _Builder:
                 "No such device or address\n"
             )
         if self.open_tty:
-            name = line[0].decode(errors="replace")
+            name = decode_text(line[0])
             raise _Fatal(
                 "xargs: '/dev/tty': No such device or address\n"
                 "xargs: xargs.c:1648: wait_for_proc_all: Assertion "
@@ -518,10 +519,7 @@ class _Builder:
 
 
 def _trace(line: list[bytes]) -> str:
-    return (
-        " ".join(shell_quote(word.decode(errors="replace")) for word in line)
-        + "\n"
-    )
+    return " ".join(shell_quote(decode_text(word)) for word in line) + "\n"
 
 
 def xargs_missing(name: str) -> str:
@@ -616,11 +614,13 @@ async def _run_lines(
                 return
             event = events[index]
             if isinstance(event, str):
-                results[index].append(IOResult(stderr=event.encode()))
+                results[index].append(IOResult(stderr=encode_text(event)))
                 continue
-            words = [decode_line(word) for word in event]
+            words = [decode_text(word) for word in event]
             if trace:
-                results[index].append(IOResult(stderr=_trace(event).encode()))
+                results[index].append(
+                    IOResult(stderr=encode_text(_trace(event)))
+                )
             if registry is not None and not execs(words[0], session, registry):
                 results[index].append(
                     IOResult(
@@ -691,7 +691,7 @@ async def handle_xargs(
     """
     parse = parse_shell_options(SHELL_SPECS["xargs"], args or [])
     env_size = sum(
-        len(f"{name}={value}".encode()) + 1
+        len(encode_text(f"{name}={value}")) + 1
         for name, value in env_snapshot(session).items()
     )
     posix_max = _ARG_MAX - env_size - _HEADROOM
@@ -798,13 +798,13 @@ async def handle_xargs(
             if parse.candidates
             else unknown_option_error("xargs", parse.invalid)
         )
-        return _refuse(warnings.encode() + stderr, code)
+        return _refuse(encode_text(warnings) + stderr, code)
     if parse.unexpected_value is not None:
         stderr, code = unexpected_value_error("xargs", parse.unexpected_value)
-        return _refuse(warnings.encode() + stderr, code)
+        return _refuse(encode_text(warnings) + stderr, code)
     if parse.needs_value is not None:
         stderr, code = missing_value_error("xargs", parse.needs_value)
-        return _refuse(warnings.encode() + stderr, code)
+        return _refuse(encode_text(warnings) + stderr, code)
     if eof is not None and delim is not None:
         warnings += (
             "xargs: warning: the -E option has no effect if -0 or -d "
@@ -832,10 +832,10 @@ async def handle_xargs(
 
     builder = _Builder(
         data,
-        [word.encode() for word in parse.operands or ["echo"]],
+        [encode_text(word) for word in parse.operands or ["echo"]],
         delim=delim,
-        eof=eof.encode() if eof is not None else None,
-        replace=replace.encode() if replace is not None else None,
+        eof=encode_text(eof) if eof is not None else None,
+        replace=encode_text(replace) if replace is not None else None,
         max_args=max_args,
         max_lines=max_lines,
         arg_max=arg_max,
@@ -862,7 +862,7 @@ async def handle_xargs(
         stdin=child_stdin,
     )
     stdouts: list[ByteSource] = []
-    merged = IOResult(stderr=warnings.encode() or None)
+    merged = IOResult(stderr=encode_text(warnings) or None)
     for io in ios:
         if io.stdout is not None:
             stdouts.append(io.stdout)
@@ -870,7 +870,9 @@ async def handle_xargs(
     if stop is not None:
         exit_code = stop
     elif fatal is not None:
-        merged = await merged.merge(IOResult(stderr=fatal.message.encode()))
+        merged = await merged.merge(
+            IOResult(stderr=encode_text(fatal.message))
+        )
         exit_code = fatal.code
     else:
         exit_code = 123 if any(io.exit_code != 0 for io in ios) else 0

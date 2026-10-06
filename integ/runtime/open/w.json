@@ -1,0 +1,207 @@
+{
+  "cases": [
+    {
+      "id": "w_refuses_a_directory",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "in\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "try:\n    open('/data/sub', 'w').close()\n    print('opened')\nexcept OSError as e:\n    print(type(e).__name__)",
+            "js": "const f = std.open('/data/sub', 'w')\nif (f !== null) f.close()\nconsole.log(f === null ? 'refused' : 'opened')"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "IsADirectoryError\n",
+              "ops_absent": [
+                "create /data/sub",
+                "truncate /data/sub"
+              ]
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "refused\n",
+              "ops_absent": [
+                "create /data/sub",
+                "truncate /data/sub"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "w_creates_a_missing_file",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "in\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "try:\n    open('/data/new.txt', 'w').close()\n    print('opened')\nexcept OSError as e:\n    print(type(e).__name__)",
+            "js": "const f = std.open('/data/new.txt', 'w')\nif (f !== null) f.close()\nconsole.log(f === null ? 'refused' : 'opened')"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "opened\n",
+            "ops_contain": [
+              "create /data/new.txt"
+            ],
+            "ops_absent": [
+              "write /data/new.txt",
+              "append /data/new.txt"
+            ]
+          }
+        },
+        {
+          "command": "cat /data/new.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "w_truncates_an_existing_file",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "in\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "try:\n    open('/data/seed.txt', 'w').close()\n    print('opened')\nexcept OSError as e:\n    print(type(e).__name__)",
+            "js": "const f = std.open('/data/seed.txt', 'w')\nif (f !== null) f.close()\nconsole.log(f === null ? 'refused' : 'opened')"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "opened\n",
+            "ops_contain": [
+              "truncate /data/seed.txt"
+            ],
+            "ops_absent": [
+              "create /data/seed.txt"
+            ]
+          }
+        },
+        {
+          "command": "cat /data/seed.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "w_handle_stats",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "in\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nf = open('/data/seed.txt', 'w')\nprint(os.fstat(f.fileno()).st_mtime > 0)"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "True\n"
+          },
+          "expect_on": {
+            "monty": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "'_io.TextIOWrapper' object has no attribute 'fileno'"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

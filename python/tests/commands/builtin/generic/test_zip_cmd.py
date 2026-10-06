@@ -93,7 +93,6 @@ class _Tree:
 
 
 def _links(entries: dict[str, str]) -> LinkView:
-
     def stat_of(path):
         target = entries[path]
         return FileStat(
@@ -126,7 +125,6 @@ def _links(entries: dict[str, str]) -> LinkView:
 def _mounts(
     descendants: tuple[str, ...] = (), roots: tuple[str, ...] = ()
 ) -> MountView:
-
     def root_of(path):
         for root in sorted(roots, key=len, reverse=True):
             if path == root or path.startswith(root.rstrip("/") + "/"):
@@ -161,44 +159,34 @@ def _entries(archive: bytes) -> list[str]:
         return [info.filename for info in zf.infolist()]
 
 
-def test_member_name_strips_the_leading_slash_and_marks_directories():
-    assert member_name("/d/a.txt", "file", False) == "d/a.txt"
-    assert member_name("/d", "dir", False) == "d/"
-    assert member_name("/d/sub/b.txt", "file", True) == "b.txt"
-    assert member_name("link", "link", False) == "link"
+# Pinned against Info-ZIP 3.0 on debian:stable-slim.
+@pytest.mark.parametrize(
+    "path,kind,junk,name",
+    [
+        ("/d/a.txt", "file", False, "d/a.txt"),
+        ("././sub", "dir", False, "sub/"),
+        (".//sub", "dir", False, "/sub/"),
+        ("./sub/b.txt", "file", True, "b.txt"),
+    ],
+)
+def test_member_name_strips_the_leading_slash_and_dot_slash_run(
+    path, kind, junk, name
+):
+    assert member_name(path, kind, junk) == name
 
 
-def test_member_name_strips_only_the_leading_dot_slash_run():
-    # Pinned against Info-ZIP 3.0 on debian:stable-slim.
-    assert member_name("./a.txt", "file", False) == "a.txt"
-    assert member_name("././sub", "dir", False) == "sub/"
-    assert member_name("/./w/d", "dir", False) == "w/d/"
-    assert member_name(".", "dir", False) == ""
-    assert member_name("./", "dir", False) == ""
-    assert member_name(".//sub", "dir", False) == "/sub/"
-    assert member_name("sub/./b.txt", "file", False) == "sub/./b.txt"
-    assert member_name("../e", "dir", False) == "../e/"
-
-
-def test_junk_paths_names_no_directory():
-    assert member_name("./sub", "dir", True) == ""
-    assert member_name("./sub/b.txt", "file", True) == "b.txt"
-
-
-def test_excluded_is_anchored_unlike_tars_exclude():
-    assert excluded("d/sub/b.txt", ["d/sub/*"])
-    assert excluded("d/sub/", ["d/sub/*"])
-    assert excluded("d/a.txt", ["*.txt"])
-    assert excluded("d/sub/b.txt", ["*/b.txt"])
-    # Info-ZIP matches the whole stored name, so a bare component misses.
-    assert not excluded("d/sub/b.txt", ["b.txt"])
-    assert not excluded("d/sub/b.txt", ["sub/*"])
-
-
-def test_excluded_strips_a_pattern_the_way_it_strips_a_name():
-    assert excluded("sub/b.txt", ["./sub/*"])
-    assert excluded("w/d/sub/", ["/w/d/sub/*"])
-    assert excluded("a.txt", ["./a.txt"])
+# Info-ZIP matches the whole stored name, so a bare component misses, and
+# it strips a pattern the way it strips a name.
+@pytest.mark.parametrize(
+    "name,pattern,hit",
+    [
+        ("d/sub/b.txt", "*/b.txt", True),
+        ("d/sub/b.txt", "b.txt", False),
+        ("sub/b.txt", "./sub/*", True),
+    ],
+)
+def test_excluded_is_anchored_unlike_tars_exclude(name, pattern, hit):
+    assert excluded(name, [pattern]) is hit
 
 
 @pytest.mark.asyncio

@@ -63,6 +63,7 @@ def test_tree_shape():
         "remote",
         "config",
         "show-ref",
+        "symbolic-ref",
         "shortlog",
         "rev-parse",
         "rev-list",

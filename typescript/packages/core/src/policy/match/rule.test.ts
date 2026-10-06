@@ -18,6 +18,7 @@ import { PathSpec } from '../../types.ts'
 import { classifyPaths } from '../../utils/hidden.ts'
 import type { CommandContext, CommandRule, AdmissionRules, OpsContext } from '../types.ts'
 import {
+  ioReach,
   ioRefusal,
   matchIo,
   matchOp,
@@ -25,6 +26,7 @@ import {
   matchRule,
   ruleReach,
   ruleScope,
+  skippedAtOpDoors,
   subjects,
   type Subject,
 } from './rule.ts'
@@ -387,5 +389,45 @@ describe('rules', () => {
     expect(ioRefusal(rules, tokens, '/repo/sealed/secret', [])).toBe('sealed')
     // Outside the carve-out the broad deny is what is left.
     expect(ioRefusal(rules, tokens, '/repo/other/x', [ask])).toBe('ro repo')
+  })
+
+  it('ioReach reads each start point on its own', () => {
+    // A native walk asks per operand whether a rule could reach anything
+    // under it: a rule on /repo/.env holds the walk of /repo, and leaves
+    // the walk of /s3 its native op.
+    const env: CommandRule = { reason: 'secrets', paths: ['/repo/.env'] }
+    const rmOnly: CommandRule = { reason: 'no deletes', commands: ['rm'], paths: ['/data/*'] }
+    const rules: AdmissionRules = { allow: null, deny: [env], ask: [rmOnly] }
+    const find = ['find', '/repo', '/s3', '/data']
+    expect(ioReach(rules, find, '/repo')).toBe(true)
+    expect(ioReach(rules, find, '/repo/.env')).toBe(true)
+    expect(ioReach(rules, find, '/s3')).toBe(false)
+    // A rule naming another command does not reach this line's walk.
+    expect(ioReach(rules, find, '/data')).toBe(false)
+    expect(ioReach(rules, ['rm', '-r', '/data'], '/data')).toBe(true)
+    // A whole-line rule has no paths to reach an entry with.
+    const whole: AdmissionRules = {
+      allow: null,
+      ask: [],
+      deny: [{ reason: 'no', commands: ['rm'] }],
+    }
+    expect(ioReach(whole, ['rm', '-r', '/data'], '/data')).toBe(false)
+    expect(ioReach(null, find, '/repo')).toBe(false)
+  })
+
+  it('skippedAtOpDoors names the command-level rules', () => {
+    const keys: CommandRule = { reason: 'keys', paths: ['/k/*'] }
+    const rules: AdmissionRules = {
+      allow: ['ls'],
+      deny: [keys, { reason: 'no rm', commands: ['rm'] }],
+      ask: [{ reason: 'nod', commands: ['cp'], paths: ['/x/*'] }],
+    }
+    expect(skippedAtOpDoors(rules)).toEqual([
+      'commands.allow',
+      'commands.deny: no rm',
+      'commands.ask: nod',
+    ])
+    expect(skippedAtOpDoors({ allow: null, ask: [], deny: [keys] })).toEqual([])
+    expect(skippedAtOpDoors(null)).toEqual([])
   })
 })

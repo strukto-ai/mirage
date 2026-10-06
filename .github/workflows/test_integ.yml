@@ -346,11 +346,6 @@ jobs:
           MIRAGE_QUICKJS_HOME: /tmp/quickjs
         run: ./python/.venv/bin/python integ/lifecycle/run.py
 
-      # The tool corpus in-app: integ/doors.py runs the same cases through
-      # the daemon's HTTP, CLI, MCP and SSH doors.
-      - name: Run the tool corpus in-app (Python)
-        run: ./python/.venv/bin/python integ/tools/run.py
-
   integ-ts:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ts == 'true') }}
@@ -480,9 +475,12 @@ jobs:
         working-directory: integ
         run: pnpm exec tsx lifecycle/run.ts
 
-      - name: Run the tool corpus in-app (TypeScript)
+      # The browser wrapper again, in a real Chrome page: there is no
+      # task-local async context there, so every session shares the
+      # fallback slot that Node never exercises.
+      - name: Run shell cases and session concurrency in Chrome
         working-directory: integ
-        run: pnpm exec tsx tools/run.ts
+        run: pnpm exec tsx browser/run.ts
 
       - name: Generate integ Prisma clients
         working-directory: integ
@@ -551,7 +549,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1]
+        shard: [0, 1, 2]
     services:
       redis:
         image: redis:7
@@ -608,12 +606,13 @@ jobs:
       # One runner process per target, four at a time: a runner's
       # --target-jobs lanes share one core, and the battery is CPU-bound
       # there. shard.py splits the targets this host runs across the shard
-      # jobs by case count, leaving out the services --allow-skip names
-      # (other jobs provision and run those), and prints each target's time
-      # at the end, which is what to read before changing --procs or the
-      # shard count. The http facet rides the same split: its fixture server
-      # is a TypeScript kit fake the adapter starts, and this python-host job
-      # already has node for it.
+      # jobs by measured seconds (integ/ci/shard_seconds.json), leaving out
+      # the services --allow-skip names (other jobs provision and run
+      # those), and prints each target's time at the end, which is what to
+      # read before changing --procs, the shard count or that table. The
+      # http facet rides the same split: its fixture server is a TypeScript
+      # kit fake the adapter starts, and this python-host job already has
+      # node for it.
       - name: Run declarative battery (python hosts)
         env:
           SHARD_INDEX: ${{ matrix.shard }}
@@ -655,6 +654,9 @@ jobs:
       # another, and the Airtable replay pages every table through its fake.
       # Neither binds a fixed port. Each is collected, output and status, by
       # the step that bears its name at the end of the job.
+      - name: Check cross-mount command coverage
+        run: ./python/.venv/bin/python integ/runners/tools/check_crossmount_coverage.py --selftest
+
       - name: Start the runner gates and the Airtable replay (background)
         run: |
           integ/scripts/background.sh start gates \
@@ -782,7 +784,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1]
+        shard: [0, 1, 2]
     services:
       redis:
         image: redis:7
@@ -843,8 +845,8 @@ jobs:
   # disk, redis) — the credentialed targets stay in their own jobs.
   # The battery jobs keep every target's raw outputs, so parity is a diff of
   # those files rather than both hosts running these targets a second time.
-  # The targets stay pinned to the ones it has always compared; widening the
-  # list costs nothing now but a run's worth of divergences to triage.
+  # Include nested mounts and the search-only command service so native
+  # delegation and dispatcher-backed composition are checked across hosts.
   integ-shared-parity:
     needs: [changes, integ-shared-py, integ-shared-ts]
     if: ${{ !cancelled() && needs.integ-shared-py.result == 'success' && needs.integ-shared-ts.result == 'success' }}
@@ -864,7 +866,7 @@ jobs:
       - name: Diff python and typescript battery output
         run: >-
           python3 integ/runners/parity.py --from emit
-          ram disk disk-host-links redis ram-history
+          ram disk disk-host-links redis ram-history ram-nested command-service
 
   # One job per backend family with both hosts inside it. The postgres, chroma,
   # qdrant and mongodb fleet is the expensive part and was being started twice,
@@ -1515,8 +1517,9 @@ jobs:
 
   # The suite battery is split in two: the runner, both in-process hosts and
   # the CLI driver all take the same suite-name filter, so one leg's list
-  # drives every step that costs time. Leg A is named and leg B is whatever
-  # is left, so a new integ/runtime/*.json joins a leg instead of leaving CI.
+  # drives every step that costs time. Leg A's folders are named and leg B
+  # is whatever is left, so a new folder under integ/runtime joins a leg
+  # instead of leaving CI.
   integ-runtime:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.runtime == 'true') }}
@@ -1556,8 +1559,8 @@ jobs:
       MIRAGE_QUICKJS_HOME: /tmp/quickjs
       MIRAGE_WASI_HOME: /tmp/cpython-wasi
       MIRAGE_INTEG_DOCKER_CONTAINER: mirage-integ-runtime-box
-      # The ssh suite's sshd container publishes port 2222 (the suite
-      # json pins the port; env placeholders expand as strings only).
+      # The ssh box publishes port 2222, which the ssh runtime's entry and
+      # the ssh backend both pin (env placeholders expand as strings only).
       MIRAGE_INTEG_SSH_HOST: 127.0.0.1
       MIRAGE_INTEG_SSH_USERNAME: root
       MIRAGE_INTEG_SSH_KEY: /tmp/mirage-integ-ssh-key
@@ -1567,13 +1570,13 @@ jobs:
       INTEG_RUNTIME_STRICT: "1"
       # cli.sh runs both hosts at once, each over two lanes that take the
       # next suite nobody has claimed, so a leg costs about half of
-      # max(python, typescript) rather than their sum. This list was
-      # picked off measured per-suite wall clock to halve BOTH hosts (python
-      # 50/50, typescript 48/52), so the balance holds whichever one binds on
-      # a given runner. Re-read the `suite <host>/<name> <n>s` lines cli.sh
-      # prints before moving a suite across; that step is 89% of the job's
-      # test time, and it is the only one timed per suite.
-      LEG_A_SUITES: "defaults facade glob limits lines link open policy pread quickjs read registry script_cli xattr"
+      # max(python, typescript) rather than their sum. Legs split by
+      # top-level folder of integ/runtime, picked off measured per-suite
+      # wall clock to halve both hosts. Re-read the `suite <host>/<name>
+      # <n>s` lines cli.sh prints before moving a folder across; that step
+      # is most of the job's test time, and it is the only one timed per
+      # suite.
+      LEG_A_FOLDERS: "dir facade open policy quickjs read routing"
     steps:
       - uses: actions/checkout@v7
 
@@ -1584,48 +1587,57 @@ jobs:
           set -euo pipefail
           # Collation for sort/comm, and for the name pattern below.
           export LC_ALL=C
-          # Every suite json has to yield exactly one usable name here. A
-          # file this step drops or repairs instead of refusing is a file
-          # whose name reaches neither leg, so all three drivers skip it
-          # and CI passes without running any of its cases. Both halves
-          # are checked per file, verbatim, naming the file that failed:
-          # `jq -r` renders a missing key as the string "null", which is
-          # itself a legal name shape, so the emptiness check cannot be
-          # folded into the pattern check.
+          # A suite is named by its path under integ/runtime, without
+          # `.json`; a leg takes whole top-level folders. A name outside the
+          # pattern is refused rather than dropped: a dropped name reaches
+          # neither leg, so all three drivers would skip its cases and CI
+          # would pass without running them.
           names=()
-          s3_suites=()
+          minio_suites=()
           wasi_suites=()
-          for f in integ/runtime/*.json; do
-            n=$(jq -r '.suite // empty' "$f")
-            if [ -z "$n" ]; then
-              echo "$f declares no .suite" >&2
-              exit 1
-            fi
+          box_suites=()
+          ssh_suites=()
+          while IFS= read -r f; do
+            n="${f#integ/runtime/}"
+            n="${n%.json}"
             case "$n" in
-              *[!a-z0-9_]*)
-                echo "$f: .suite '$n' is not [a-z0-9_]+" >&2
+              */*/*|*[!a-z0-9_/+]*|/*|*/)
+                echo "$f: suite name '$n' is not <folder>/<name> in [a-z0-9_+]" >&2
+                exit 1 ;;
+              */*) ;;
+              *)
+                echo "$f: a suite lives in a folder, not at the top of integ/runtime" >&2
                 exit 1 ;;
             esac
             names+=("$n")
-            # A case's `backends` runs it once per backend, so a suite
-            # with an s3 one needs MinIO wherever it lands.
-            if jq -e 'any(.cases[]?; any((.backends // [])[]; . == "s3"))' "$f" >/dev/null; then
-              s3_suites+=("$n")
+            # A case's `backends` runs it once per backend, and the backend
+            # folder reads real S3, so either needs MinIO wherever it lands.
+            if [[ "$n" == backend/* ]] || \
+                jq -e 'any(.cases[]?; any((.backends // [])[]; . == "s3"))' "$f" >/dev/null; then
+              minio_suites+=("$n")
             fi
-            # Any case naming the wasi runtime, through a `runtimes` matrix
-            # or its world, needs the CPython WASI build wherever it lands.
-            if jq -e 'any(.cases[]?; any(((.runtimes // []) + (.world.runtimes // []))[];
-                (if type == "object" then .name else . end) == "wasi"))' "$f" >/dev/null; then
-              wasi_suites+=("$n")
+            # A case naming a runtime, through a `runtimes` matrix or its
+            # world, needs what that runtime runs on wherever it lands.
+            named() {
+              jq -e --arg r "$1" 'any(.cases[]?; any(((.runtimes // []) + (.world.runtimes // []))[];
+                (if type == "object" then .name else . end) == $r))' "$f" >/dev/null
+            }
+            if named wasi; then wasi_suites+=("$n"); fi
+            if named docker || named ssh; then box_suites+=("$n"); fi
+            # The ssh backend mounts the ssh runtime's box over SFTP.
+            if jq -e 'any(.cases[]?; any((.backends // [])[]; . == "ssh"))' "$f" >/dev/null; then
+              ssh_suites+=("$n")
             fi
-          done
+          done < <(find integ/runtime -name '*.json' | sort)
           all=$(printf '%s\n' "${names[@]}" | sort -u)
-          a=$(printf '%s' "$LEG_A_SUITES" | tr ' ' '\n' | grep -v '^$' | sort -u)
-          unknown=$(comm -13 <(printf '%s\n' "$all") <(printf '%s\n' "$a"))
+          folders=$(printf '%s\n' "${names[@]}" | cut -d/ -f1 | sort -u)
+          wanted=$(printf '%s' "$LEG_A_FOLDERS" | tr ' ' '\n' | grep -v '^$' | sort -u)
+          unknown=$(comm -13 <(printf '%s\n' "$folders") <(printf '%s\n' "$wanted"))
           if [ -n "$unknown" ]; then
-            echo "LEG_A_SUITES names suites with no json: $unknown" >&2
+            echo "LEG_A_FOLDERS names folders with no suite: $unknown" >&2
             exit 1
           fi
+          a=$(grep -E "^($(printf '%s' "$wanted" | paste -sd'|' -))/" <<<"$all" || true)
           b=$(comm -23 <(printf '%s\n' "$all") <(printf '%s\n' "$a"))
           if [ -z "$a" ] || [ -z "$b" ]; then
             echo "a leg is empty: every suite would run twice or not at all" >&2
@@ -1640,21 +1652,34 @@ jobs:
           esac
           echo "SUITES=$(printf '%s' "$suites" | tr '\n' ' ')" >> "$GITHUB_ENV"
           # Provision only what this leg's suites ask for, keyed on the
-          # resolved list rather than the leg letter, so moving a suite
+          # resolved list rather than the leg letter, so moving a folder
           # across moves its service with it.
           in_leg() { grep -qx "$1" <<<"$suites"; }
           for s in "${wasi_suites[@]}"; do
             if in_leg "$s"; then echo "NEEDS_WASI=1" >> "$GITHUB_ENV"; break; fi
           done
-          if in_leg bridge; then echo "NEEDS_MINIO=1" >> "$GITHUB_ENV"; fi
-          for s in "${s3_suites[@]}"; do
+          for s in "${minio_suites[@]}"; do
             if in_leg "$s"; then echo "NEEDS_MINIO=1" >> "$GITHUB_ENV"; break; fi
           done
-          if in_leg docker; then echo "NEEDS_DOCKER=1" >> "$GITHUB_ENV"; fi
-          if in_leg ssh; then echo "NEEDS_SSH=1" >> "$GITHUB_ENV"; fi
-          if in_leg docker || in_leg ssh; then
-            echo "NEEDS_SANDBOX_IMAGE=1" >> "$GITHUB_ENV"
-          fi
+          for s in "${box_suites[@]}"; do
+            if in_leg "$s"; then
+              {
+                echo "NEEDS_DOCKER=1"
+                echo "NEEDS_SSH=1"
+                echo "NEEDS_SANDBOX_IMAGE=1"
+              } >> "$GITHUB_ENV"
+              break
+            fi
+          done
+          for s in "${ssh_suites[@]}"; do
+            if in_leg "$s"; then
+              {
+                echo "NEEDS_SSH=1"
+                echo "NEEDS_SANDBOX_IMAGE=1"
+              } >> "$GITHUB_ENV"
+              break
+            fi
+          done
           printf 'leg %s runs:\n%s\n' "$LEG" "$suites"
 
       - name: Set up Python
@@ -1791,10 +1816,11 @@ jobs:
         timeout-minutes: 10
         run: integ/scripts/background.sh wait json
 
-  # The e2b suite runs against E2B Embed, E2B's own stack (API, orchestrator,
-  # Firecracker sandboxes) on this runner: hosted Linux runners expose
-  # /dev/kvm and the nbd module. The stack starts in the background while the
-  # dependencies install; it takes two to three minutes to come up.
+  # The sandbox suites run on e2b against E2B Embed, E2B's own stack (API,
+  # orchestrator, Firecracker sandboxes) on this runner: hosted Linux
+  # runners expose /dev/kvm and the nbd module. The stack starts in the
+  # background while the dependencies install; it takes two to three
+  # minutes to come up.
   integ-e2b:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.runtime == 'true') }}
@@ -1804,6 +1830,8 @@ jobs:
       E2B_RUNTIME_COMMIT: 92197909dce5a1bef33e764ae4af76f0732fd7a8
       HUGEPAGES: "1024"
       INTEG_RUNTIME_STRICT: "1"
+      # The shared sandbox cases, run through the e2b runtime only.
+      INTEG_RUNTIMES: e2b
     steps:
       - uses: actions/checkout@v7
 
@@ -1880,21 +1908,16 @@ jobs:
           asyncio.run(main())
           EOF
 
-      - name: Run the e2b suite (python)
-        run: ./python/.venv/bin/python integ/runtime/run.py e2b
+      - name: Run the sandbox suites on e2b (python)
+        run: ./python/.venv/bin/python integ/runtime/run.py sandbox
 
-      - name: Run the e2b suite (typescript)
-        if: ${{ !cancelled() && env.MIRAGE_INTEG_E2B_SANDBOX != '' }}
-        working-directory: integ
-        run: pnpm exec tsx runtime/run.ts e2b
-
-      - name: Run the e2b suite through the CLI and both daemons
+      - name: Run the sandbox suites on e2b through the CLI and both daemons
         if: ${{ !cancelled() && env.MIRAGE_INTEG_E2B_SANDBOX != '' }}
         run: |
           bash integ/runtime/cli.sh \
             "python/.venv/bin/mirage" \
             "node typescript/packages/cli/dist/bin/mirage.js" \
-            e2b
+            sandbox
 
       - name: E2B logs
         if: ${{ failure() }}

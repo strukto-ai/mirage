@@ -126,6 +126,12 @@ const DEREFERENCE_FLAGS: Record<string, [string, string[]]> = {
   du: ['L', ['dereference']],
 }
 
+// The options that take a dereference back, the last of the two winning
+// (GNU du: `du -LP` does not follow, `du -PL` does).
+const NO_DEREFERENCE_FLAGS: Record<string, [string, string[]]> = {
+  du: ['P', ['no-dereference']],
+}
+
 // find states its link policy as a leading option rather than a flag,
 // and the last one wins: `find -L -P x` does not follow, `find -P -L x`
 // does. -P (no follow) is the default; -H dereferences the start point
@@ -164,6 +170,33 @@ function hasOption(
   return false
 }
 
+// Whether the last of a command's link options asks it to follow: `follow`
+// names the short letters and long names that dereference, `noFollow` the
+// ones that take it back.
+function followsLast(
+  words: readonly (string | PathSpec)[],
+  follow: [string, string[]],
+  noFollow: [string, string[]],
+): boolean {
+  let follows = false
+  for (const word of words.slice(1)) {
+    if (typeof word !== 'string' || word === '-') continue
+    if (word === '--') break
+    if (word.startsWith('--')) {
+      if (follow[1].includes(word.slice(2))) follows = true
+      else if (noFollow[1].includes(word.slice(2))) follows = false
+      continue
+    }
+    if (word.startsWith('-')) {
+      for (const letter of word.slice(1)) {
+        if (follow[0].includes(letter)) follows = true
+        else if (noFollow[0].includes(letter)) follows = false
+      }
+    }
+  }
+  return follows
+}
+
 // Resolve a leading run of link options to its last one's mode. The
 // lookup doubles as the loop's stop condition, so the first word that is
 // not a link option ends the run without a second membership test.
@@ -186,7 +219,8 @@ export function dereferences(name: string, words: readonly (string | PathSpec)[]
   const policy = LAST_WINS_LINK_OPTIONS[name]
   if (policy !== undefined) return lastLinkOption(words, policy)
   const spec = DEREFERENCE_FLAGS[name]
-  return spec !== undefined && hasOption(words, spec[0], spec[1])
+  if (spec === undefined) return false
+  return followsLast(words, spec, NO_DEREFERENCE_FLAGS[name] ?? ['', []])
 }
 
 /**

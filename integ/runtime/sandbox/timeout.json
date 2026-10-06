@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "id": "line_timeout",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "smolvm",
+        "apple_container"
+      ],
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "limits": {
+              "sleep": {
+                "timeout_seconds": 1
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "sleep 5",
+          "expect": {
+            "exit": 124
+          }
+        }
+      ]
+    }
+  ]
+}

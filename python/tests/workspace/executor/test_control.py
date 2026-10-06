@@ -93,7 +93,6 @@ async def test_if_runs_the_first_matching_branch_and_skips_the_rest():
 
 @pytest.mark.asyncio
 async def test_if_runs_the_else_body_when_no_branch_matches():
-
     async def execute(n, *_args):
         if n.text == "c":
             return result(exit_code=1)
@@ -108,7 +107,6 @@ async def test_if_runs_the_else_body_when_no_branch_matches():
 
 @pytest.mark.asyncio
 async def test_if_without_an_else_body_succeeds_silently():
-
     async def execute(_n, *_args):
         return result(exit_code=1)
 
@@ -256,7 +254,6 @@ async def test_until_runs_the_body_while_the_condition_fails():
 
 @pytest.mark.asyncio
 async def test_while_caps_runaway_loops_and_says_so_on_stderr():
-
     async def execute(n, *_args):
         return result(exit_code=0) if n.text == "cond" else result()
 
@@ -375,7 +372,6 @@ async def test_cfor_runs_init_once_then_condition_and_update_per_iteration():
 
 @pytest.mark.asyncio
 async def test_cfor_aborts_with_status_1_on_a_bad_expression():
-
     async def execute(_n, *_args):
         return result(b"ran\n")
 
@@ -507,7 +503,6 @@ async def test_for_body_ampersand_launches_one_job_per_iteration():
 
 @pytest.mark.asyncio
 async def test_body_ampersand_without_a_job_table_fails_loud():
-
     async def execute(n, *_args, **_kw):
         return result()
 

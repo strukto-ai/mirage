@@ -14,6 +14,7 @@
 
 import { IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
+import type { CallStack } from '../../../../shell/call_stack.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import { singleQuote } from '../../../../utils/quote.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
@@ -24,6 +25,7 @@ import { classify, describe, programFile } from '../lookup/index.ts'
 import { NameKind } from '../lookup/types.ts'
 import { sessionEntry } from '../../../session/session.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 const USAGE = 'command: usage: command [-pVv] command [arg ...]\n'
 
@@ -65,9 +67,8 @@ function probe(
             : name
     outLines.push(line)
   }
-  const enc = new TextEncoder()
-  const out = outLines.length > 0 ? enc.encode(`${outLines.join('\n')}\n`) : null
-  const err = errLines.length > 0 ? enc.encode(`${errLines.join('\n')}\n`) : new Uint8Array()
+  const out = outLines.length > 0 ? encodeText(`${outLines.join('\n')}\n`) : null
+  const err = errLines.length > 0 ? encodeText(`${errLines.join('\n')}\n`) : new Uint8Array()
   const code = rest.length === 0 || anyFound ? 0 : 1
   return [
     out,
@@ -94,10 +95,14 @@ export async function handleCommandBuiltin(
   session: SessionState,
   registry: MountRegistry,
   stdin: ByteSource | null = null,
+  // The caller's frames: the target runs in them, as a builtin does in
+  // bash, so an `exit` in it ends the shell and a `return` the function.
+  // Null runs the target as a line of its own.
+  callStack: CallStack | null = null,
 ): Promise<Result> {
   const scan = scanOptions(args, 'pvV')
   if (scan.bad !== null) {
-    const err = new TextEncoder().encode(`bash: command: ${scan.bad}: invalid option\n${USAGE}`)
+    const err = encodeText(`bash: command: ${scan.bad}: invalid option\n${USAGE}`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),
@@ -125,7 +130,11 @@ export async function handleCommandBuiltin(
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
   delete session.aliases[innerName]
   try {
-    const io = await executeFn(inner, { sessionId: session.sessionId, stdin })
+    const io = await executeFn(inner, {
+      sessionId: session.sessionId,
+      stdin,
+      ...(callStack !== null ? { callStack } : {}),
+    })
     return [io.stdout, io, new ExecutionNode({ command: 'command', exitCode: io.exitCode })]
   } finally {
     if (savedFn !== undefined) session.functions[innerName] = savedFn
@@ -141,5 +150,6 @@ export async function commandBuiltin(call: BuiltinCall): Promise<Result> {
     call.session,
     call.registry,
     call.stdin,
+    call.callStack,
   )
 }

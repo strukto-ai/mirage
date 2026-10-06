@@ -1,0 +1,283 @@
+{
+  "cases": [
+    {
+      "id": "probes_answer_through_the_door",
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "in\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "exists",
+            "path": "/data/seed.txt"
+          },
+          "expect": {
+            "value": true
+          }
+        },
+        {
+          "facade": {
+            "method": "exists",
+            "path": "/data/nope.txt"
+          },
+          "expect": {
+            "value": false
+          }
+        },
+        {
+          "facade": {
+            "method": "is_dir",
+            "path": "/data/sub"
+          },
+          "expect": {
+            "value": true
+          }
+        },
+        {
+          "facade": {
+            "method": "is_file",
+            "path": "/data/seed.txt"
+          },
+          "expect": {
+            "value": true
+          }
+        },
+        {
+          "facade": {
+            "method": "is_file",
+            "path": "/data/sub"
+          },
+          "expect": {
+            "value": false
+          }
+        },
+        {
+          "facade": {
+            "method": "cat",
+            "path": "/data/seed.txt"
+          },
+          "expect": {
+            "value": "seed\n",
+            "ops_contain": [
+              "read /data/seed.txt"
+            ]
+          }
+        },
+        {
+          "facade": {
+            "method": "list_files",
+            "path": "/data"
+          },
+          "expect": {
+            "value": [
+              "seed.txt"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "append_lands_on_the_one_ledger",
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "append",
+            "path": "/data/seed.txt",
+            "data": "more\n"
+          },
+          "expect": {
+            "ops_contain": [
+              "append /data/seed.txt"
+            ]
+          }
+        },
+        {
+          "command": "cat /data/seed.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "seed\nmore\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "append_creates_a_missing_file",
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "append",
+            "path": "/data/new.txt",
+            "data": "one\n"
+          },
+          "expect": {
+            "ops_contain": [
+              "append /data/new.txt"
+            ]
+          }
+        },
+        {
+          "facade": {
+            "method": "append",
+            "path": "/data/new.txt",
+            "data": "two\n"
+          },
+          "expect": {}
+        },
+        {
+          "facade": {
+            "method": "cat",
+            "path": "/data/new.txt"
+          },
+          "expect": {
+            "value": "one\ntwo\n"
+          }
+        }
+      ]
+    },
+    {
+      "note": "rmdir(2) refuses a non-empty directory, and the refusal has to come from the op, not from the command builder. The shell battery cannot see this: `rmdir` the builtin checks emptiness itself before it calls the op, so it passes on a backend whose op deletes the whole subtree. The facade is the surface FUSE, ws.vfs and the sandbox runtimes share, and it calls the op directly.",
+      "id": "rmdir_refuses_a_nonempty_directory",
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "mkdir -p /data/qrmdop && echo keep > /data/qrmdop/keep.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "rmdir",
+            "path": "/data/qrmdop"
+          },
+          "expect": {
+            "errno": "ENOTEMPTY"
+          }
+        },
+        {
+          "command": "cat /data/qrmdop/keep.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "keep\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "rmdir_removes_an_empty_directory",
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "mkdir -p /data/qrmdhollow",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "rmdir",
+            "path": "/data/qrmdhollow"
+          },
+          "expect": {}
+        },
+        {
+          "facade": {
+            "method": "is_dir",
+            "path": "/data/qrmdhollow"
+          },
+          "expect": {
+            "value": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "rmdir_on_a_missing_directory_is_enoent",
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "rmdir",
+            "path": "/data/qrmdnever"
+          },
+          "expect": {
+            "errno": "ENOENT"
+          }
+        }
+      ]
+    }
+  ]
+}

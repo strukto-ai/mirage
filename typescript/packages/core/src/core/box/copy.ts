@@ -53,6 +53,9 @@ async function copyInto(accessor: BoxAccessor, item: BoxItem, dst: PathSpec): Pr
   }
   if (item.type === 'folder') await copyFolder(tm, item.id, dstParent, newName)
   else await copyFile(tm, item.id, dstParent, newName)
+  // Each landing, not only the operand: a merge adds children to a folder
+  // whose listing an earlier stat may already hold.
+  await invalidateAfterWrite(dst)
 }
 
 export async function copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {

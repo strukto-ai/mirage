@@ -21,7 +21,7 @@ import { stripSlash } from '../../utils/slash.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { MountSpec } from './types.ts'
 import { Mount } from '../mount/spec.ts'
-import type { IndexConfig } from '../../cache/index/config.ts'
+import { normalizeIndexConfig, type IndexConfig } from '../../cache/index/config.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
@@ -63,7 +63,8 @@ export function normalizeMounts(
       if (spec.options.vfsRef !== undefined && spec.options.vfsRef !== null) {
         refs[prefix] = spec.options.vfsRef
       }
-      if (spec.options.index !== undefined) indexes[prefix] = spec.options.index
+      if (spec.options.index !== undefined)
+        indexes[prefix] = normalizeIndexConfig(spec.options.index)
       if (spec.options.read !== undefined) read[prefix] = spec.options.read
     } else if (Array.isArray(spec)) {
       const [vfs, mode, mountCommandLimits] = spec as readonly [

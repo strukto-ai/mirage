@@ -152,7 +152,7 @@ The pinned Monty 1.0.0 lacks `dir()`, `json.load()` and `json.dump()`.
 Use `hasattr(value, 'name')` to check a specific attribute, `json.loads(f.read())` to read JSON, and
 `f.write(json.dumps(value))` to write it. Mirage does not automatically
 switch interpreters when an API is missing. The shared
-`integ/runtime/monty.json` suite records these gaps and the working forms
+`integ/runtime/monty/surface.json` suite records these gaps and the working forms
 so a dependency update can revisit them.
 
 - The importable stdlib is `asyncio`, `base64`, `binascii`, `collections`, `copy`, `dataclasses`,

@@ -15,7 +15,7 @@
 import { IOResult } from '../../../../io/types.ts'
 import type { LinkView, MountView, StatPath } from '../../../../ops/types.ts'
 import { FileType, type FileStat } from '../../../../types.ts'
-import { isMissingPath } from '../../../../utils/errors.ts'
+import { isEisdir, isEnotdir, isMissingPath } from '../../../../utils/errors.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
@@ -23,18 +23,17 @@ import {
   GitError,
   MoveOverlapError,
   MoveRefusedError,
-  MoveUsageError,
   NotADirectoryDestinationError,
   NoWorkspaceError,
   RenameFailedError,
-  UnknownSwitchError,
+  UsageError,
 } from './errors.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
 import { basename, removeFile, renamePath, under } from './io.ts'
 import { repoRelative, under as inside } from './pathspec.ts'
 import { opened } from './session.ts'
 import type { Dispatch, IndexEntry, RepoLocation } from './types.ts'
-import { checkOperands, escaped, fatal, startPoint, switches } from './util.ts'
+import { checkSwitches, fatal, startPoint, verbUsage } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
@@ -350,7 +349,8 @@ async function apply(
   try {
     await renamePath(dispatch, source, destination)
   } catch (err) {
-    if (isMissingPath(err)) throw new RenameFailedError(move.source)
+    if (isMissingPath(err) || isEnotdir(err) || isEisdir(err))
+      throw new RenameFailedError(move.source)
     throw err
   }
 }
@@ -373,9 +373,9 @@ export async function mv(inv: CLIInvocation): Promise<CommandFnResult> {
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
-    checkOperands(texts, UnknownSwitchError, escaped(inv.argv), switches(inv))
+    checkSwitches(inv, texts)
     const flags = parseFlags(fl)
-    if (texts.length < 2) throw new MoveUsageError()
+    if (texts.length < 2) throw new UsageError('', verbUsage(inv))
     const repo = await opened(fl, doors, true)
     const state = await readIndex(repo, dispatch)
     const conflicted = new Set(state.conflicts.keys())

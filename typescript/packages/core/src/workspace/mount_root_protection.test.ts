@@ -68,11 +68,12 @@ async function singleMountWs(): Promise<Workspace> {
 
 describe('mount-root protection — rm', () => {
   it('rm refuses a mount root', async () => {
+    // Without -r a mount root is a directory first, as GNU says of a mount
+    // point (coreutils 9.7).
     const ws = await twoMountWs()
     const r = await ws.shell('rm /r2')
     expect(r.exitCode).toBe(1)
-    expect(r.stderrText).toMatch(/Device or resource busy/)
-    expect(r.stderrText).toMatch(/\/r2/)
+    expect(r.stderrText).toBe("rm: cannot remove '/r2': Is a directory\n")
     await ws.close()
   })
 
@@ -368,12 +369,19 @@ describe('rm safety flags', () => {
   })
 
   it('--preserve-root and --no-preserve-root cannot remove a mount root', async () => {
-    // mirage protection is structural: --no-preserve-root does not disable it.
+    // mirage protection is structural: --no-preserve-root does not disable
+    // it, and / gets GNU's own failsafe first (coreutils 9.7).
     const ws = await twoMountWs()
-    for (const cmd of ['rm --preserve-root -rf /', 'rm --no-preserve-root -rf /r2']) {
+    for (const [cmd, refusal] of [
+      [
+        'rm --preserve-root -rf /',
+        "rm: it is dangerous to operate recursively on '/'\n" +
+          'rm: use --no-preserve-root to override this failsafe\n',
+      ],
+      ['rm --no-preserve-root -rf /r2', "rm: cannot remove '/r2': Device or resource busy\n"],
+    ] as const) {
       const r = await ws.shell(cmd)
-      expect(r.exitCode).toBe(1)
-      expect(r.stderrText).toContain('Device or resource busy')
+      expect([r.exitCode, r.stderrText]).toEqual([1, refusal])
     }
     await ws.close()
   })

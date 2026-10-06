@@ -1,0 +1,208 @@
+{
+  "cases": [
+    {
+      "id": "argv_global",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(argv[1:])\" alpha beta",
+          "expect": {
+            "exit": 0,
+            "stdout": "['alpha', 'beta']\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "script_argv",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "data.txt": "hello from ram\n",
+              "analyze.py": "from pathlib import Path\nprint('ram:', Path('/ram/data.txt').read_text().strip())\nprint('argv sum:', int(argv[1]) + int(argv[2]))\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/analyze.py 40 2",
+          "expect": {
+            "exit": 0,
+            "stdout": "ram: hello from ram\nargv sum: 42\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "program_argv_is_typed_and_names_no_mount",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/w": {
+            "vfs": "ram",
+            "files": {
+              "s.py": "print(argv[1:])\n",
+              "read.py": "from pathlib import Path\nprint(Path(argv[1]).read_text(), end='')\n",
+              "f.py": "print(__file__)\n",
+              "data/in.csv": "x\n"
+            }
+          },
+          "/t": {
+            "vfs": "ram",
+            "files": {
+              "q.txt": "from-t\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /w",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 s.py data/in.csv data/in ./data/in.csv /w/data/",
+          "expect": {
+            "exit": 0,
+            "stdout": "['data/in.csv', 'data/in', './data/in.csv', '/w/data/']\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 s.py data/*.csv 'data/*.csv'",
+          "expect": {
+            "exit": 0,
+            "stdout": "['data/in.csv', 'data/*.csv']\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 /w/s.py /t/q.txt /t/new.csv",
+          "expect": {
+            "exit": 0,
+            "stdout": "['/t/q.txt', '/t/new.csv']\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c 'print(argv[1:])' /t/q.txt /w/data/in.csv",
+          "expect": {
+            "exit": 0,
+            "stdout": "['/t/q.txt', '/w/data/in.csv']\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 s.py --input /t/q.txt --out=/t/o.csv",
+          "expect": {
+            "exit": 0,
+            "stdout": "['--input', '/t/q.txt', '--out=/t/o.csv']\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 read.py /t/q.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "from-t\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 f.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "/w/f.py\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "script_operand_flags_and_argv",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "n.py": "print(42)\n",
+              "a0.py": "print(argv[0])\n",
+              "a1.py": "print(argv[1])\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -u /ram/n.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 /ram/a0.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "/ram/a0.py\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 /ram/a1.py --not-my-flag",
+          "expect": {
+            "exit": 0,
+            "stdout": "--not-my-flag\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "echo 'print(7)' | python3 -",
+          "expect": {
+            "exit": 0,
+            "stdout": "7\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -u -q -c 'print(1)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -O -c 'print(1)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n",
+            "stderr": "python3: warning: -O is ignored by the 'monty' runtime\n"
+          }
+        }
+      ]
+    }
+  ]
+}

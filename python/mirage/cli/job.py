@@ -33,12 +33,10 @@ def list_cmd(
         help="Filter to one workspace.",
     ),
 ) -> None:
-    path = "/v1/jobs"
-    if workspace_id:
-        path += f"?workspace_id={workspace_id}"
+    params = {"workspace_id": workspace_id} if workspace_id else None
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
-        r = client.request("GET", path)
+        r = client.request("GET", "/v1/jobs", params=params)
     emit(handle_response(r))
 
 

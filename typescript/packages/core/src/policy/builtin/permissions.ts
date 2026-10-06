@@ -15,12 +15,14 @@
 import { getAdmission, redirectTargetJudged } from '../../context/session_context.ts'
 import type { Policy } from '../base.ts'
 import { decide } from '../match/decide.ts'
-import { opRefusal } from '../match/rule.ts'
+import { opRefusal, posixLevel } from '../match/rule.ts'
+import { SESSION_SCOPED, type SessionScoped } from '../mixin.ts'
 import {
   Outcome,
   type Action,
   type CommandContext,
   type OpsContext,
+  type PolicyHook,
   type SessionCommandsQuery,
 } from '../types.ts'
 
@@ -45,7 +47,8 @@ import {
  * profile protects; there is no ask at the op door, which cannot wait on a
  * host.
  */
-export class PermissionsPolicy implements Policy {
+export class PermissionsPolicy implements Policy, SessionScoped {
+  readonly [SESSION_SCOPED] = true as const
   private readonly sessions: SessionCommandsQuery
 
   constructor(sessions: SessionCommandsQuery) {
@@ -66,7 +69,7 @@ export class PermissionsPolicy implements Policy {
       return { kind: 'ask', reason: rule.reason, rule, rules: decision.asks }
     }
     if (decision.matchedPath === null) return { kind: 'deny', reason: rule.reason }
-    return { kind: 'deny', reason: `${decision.matchedPath}: ${rule.reason}`, scope: 'operand' }
+    return { kind: 'deny', reason: rule.reason, scope: 'operand', path: decision.matchedPath }
   }
 
   preOps(ctx: OpsContext): Action | null {
@@ -78,5 +81,17 @@ export class PermissionsPolicy implements Policy {
     const granted = getAdmission()?.granted ?? []
     const reason = opRefusal(this.sessions.commandsOf(ctx.sessionId ?? ''), ctx, granted)
     return reason === null ? null : { kind: 'deny', reason }
+  }
+
+  /**
+   * Whether this session's rules speak at `hook`: always at the command
+   * door, and at the op door only through a pure path rule, the one kind
+   * an op can meet (`opReach`).
+   */
+  wantsFor(hook: PolicyHook, sessionId: string): Promise<boolean> {
+    if (hook !== 'preOps') return Promise.resolve(true)
+    const rules = this.sessions.commandsOf(sessionId)
+    if (rules === null) return Promise.resolve(false)
+    return Promise.resolve([...rules.deny, ...rules.ask].some(posixLevel))
   }
 }

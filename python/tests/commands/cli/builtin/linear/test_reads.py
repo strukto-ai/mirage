@@ -32,7 +32,6 @@ async def _json(out):
 
 @pytest.mark.asyncio
 async def test_team_list_filters_config_team_ids(monkeypatch):
-
     async def fake_list_teams(config):
         return [{"id": "team-1"}, {"id": "team-2"}]
 

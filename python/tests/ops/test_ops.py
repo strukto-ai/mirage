@@ -28,7 +28,7 @@ from mirage.policy import (
     Policy,
     PolicyDenied,
 )
-from mirage.types import FileType, HiddenPaths, MountMode
+from mirage.types import FileType, HiddenPaths, MountMode, Visibility
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Session
 from mirage.workspace.session import SessionState
@@ -175,7 +175,7 @@ class TestRename:
             run(ops.read("/data/dir/old.txt"))
 
     def test_rename_across_mounts_refuses_exdev(self):
-        # A mount is a filesystem boundary; the facade refuses before
+        # A mount is a filesystem boundary; the door refuses before
         # any backend is touched, so a kernel-facing caller (a
         # whole-workspace FUSE mount) falls back to copy+unlink instead
         # of writing one backend's path into another's key space.
@@ -186,12 +186,14 @@ class TestRename:
         assert exc.value.errno == errno.EXDEV
         assert run(ops.read("/a/x.txt")) == b"body"
 
-    def test_rename_to_an_unmounted_path_refuses_exdev(self):
+    def test_rename_into_a_missing_directory_is_enoent(self):
+        # rename(2) resolves the destination's directory before it
+        # compares filesystems, so a missing one is ENOENT, not EXDEV.
         ops = _two_mount_ops()
         run(ops.write("/a/x.txt", b"body"))
         with pytest.raises(OSError) as exc:
             run(ops.rename("/a/x.txt", "/elsewhere/x.txt"))
-        assert exc.value.errno == errno.EXDEV
+        assert exc.value.errno == errno.ENOENT
 
 
 class UngrantedRemote(RAMVFS):
@@ -209,7 +211,8 @@ class UngrantedRemote(RAMVFS):
 def deep_only_session():
     """Bind a session whose role hides the parent mount's own content."""
     session = SessionState(
-        session_id="agent", hidden_paths=HiddenPaths(patterns=("/m/*.txt",))
+        session_id="agent",
+        visibility=Visibility(paths=HiddenPaths(patterns=("/m/*.txt",))),
     )
     token = set_current_session(session)
     yield session
@@ -432,7 +435,9 @@ def deep_scoped_session():
     leaving the nested mount below it reachable."""
     session = SessionState(
         session_id="agent",
-        hidden_paths=HiddenPaths(paths=("/data/other", "/data/f.txt")),
+        visibility=Visibility(
+            paths=HiddenPaths(paths=("/data/other", "/data/f.txt"))
+        ),
     )
     token = set_current_session(session)
     yield session
@@ -677,7 +682,9 @@ class TestPerCallSession:
         ws = self._split_ws()
         session = SessionState(
             session_id="blind",
-            hidden_paths=HiddenPaths(paths=("/data/secret.txt",)),
+            visibility=Visibility(
+                paths=HiddenPaths(paths=("/data/secret.txt",))
+            ),
         )
         token = set_current_session(session)
         try:

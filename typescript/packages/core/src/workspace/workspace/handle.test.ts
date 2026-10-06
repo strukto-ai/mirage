@@ -17,6 +17,7 @@ import { runWithSession } from '../../context/session_context.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { RAMSessionStore } from '../session/ram.ts'
+import { applyStateDict, toStateDict } from '../snapshot/state.ts'
 import { MountMode } from '../../types.ts'
 import { getTestParser, stdoutStr } from '../fixtures/workspace_fixture.ts'
 import { Session, type SessionExecuteOptions } from './handle.ts'
@@ -100,11 +101,11 @@ describe('Session', () => {
     }
     const first = build()
     const created = await first.session('reviewer', { profile: 'reviewer' })
-    expect(created.state.hiddenPaths).not.toBeNull()
+    expect(created.state.visibility.paths).not.toBeNull()
     await first.flushSessions()
     const second = build()
     const adopted = await second.session('reviewer')
-    expect(adopted.state.hiddenPaths).not.toBeNull()
+    expect(adopted.state.visibility.paths).not.toBeNull()
     await expect(second.session('reviewer', { profile: 'reviewer' })).rejects.toThrow(/exists/)
   })
 
@@ -137,5 +138,145 @@ describe('handle parity with the workspace door', () => {
     const parity: Forwarded = {} as SessionExecuteOptions
     expect(parity).toBeDefined()
     expectTypeOf<SessionExecuteOptions>().toEqualTypeOf<Omit<ExecuteOptions, 'sessionId'>>()
+  })
+})
+
+describe('session tools', () => {
+  async function plain(): Promise<Workspace> {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    open.push(ws)
+    await ws.shell('echo one > /a.txt')
+    return ws
+  }
+
+  it('has one table per session that every caller shares', async () => {
+    const ws = await plain()
+    const agent = await ws.session('agent')
+    const other = await ws.session('other')
+    expect(agent.tools).toBe(new Session(ws, 'agent').tools)
+    expect(ws.tools).toBe(new Session(ws, null).tools)
+    await agent.tools.call('read', { path: '/a.txt' })
+    const written = await new Session(ws, 'agent').tools.call('write', {
+      path: '/a.txt',
+      content: 'two\n',
+    })
+    const refused = await other.tools.call('write', { path: '/a.txt', content: 'three\n' })
+    expect(written.isError).toBeUndefined()
+    expect(refused.isError).toBe(true)
+    expect(refused.content[0]?.text).toContain('read all of it')
+  })
+
+  it('drops a closed session table', async () => {
+    const ws = await plain()
+    const agent = await ws.session('agent')
+    await agent.tools.call('read', { path: '/a.txt' })
+    await ws.closeSession('agent')
+    const again = await ws.session('agent')
+    const refused = await again.tools.call('write', { path: '/a.txt', content: 'two\n' })
+    expect(refused.isError).toBe(true)
+  })
+
+  it('drops the tables of every session closed at once', async () => {
+    const ws = await plain()
+    const agent = await ws.session('agent')
+    await agent.tools.call('read', { path: '/a.txt' })
+    await ws.closeAllSessions()
+    const again = await ws.session('agent')
+    const refused = await again.tools.call('write', { path: '/a.txt', content: 'two\n' })
+    expect(refused.isError).toBe(true)
+  })
+
+  it('follows the default session a snapshot restores', async () => {
+    const source = await plain()
+    const state = await toStateDict(source)
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    open.push(ws)
+    const tools = ws.tools
+    await applyStateDict(ws, state)
+    const read = await tools.call('read', { path: '/a.txt' })
+    expect(ws.defaultSessionId).toBe(source.defaultSessionId)
+    expect(read.isError, read.content[0]?.text).toBeUndefined()
+    expect(ws.tools).toBe(tools)
+  })
+
+  it('keeps an explicit default id on its session after a restore', async () => {
+    const source = await plain()
+    const state = await toStateDict(source)
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    open.push(ws)
+    const pinned = new Session(ws, ws.defaultSessionId).tools
+    expect(pinned).not.toBe(ws.tools)
+    await applyStateDict(ws, state)
+    await expect(pinned.call('read', { path: '/a.txt' })).rejects.toThrow('unknown session')
+  })
+
+  it('starts a restored default with no read history', async () => {
+    const source = await plain()
+    const state = await toStateDict(source)
+    const ws = await plain()
+    const tools = ws.tools
+    await tools.call('read', { path: '/a.txt' })
+    await applyStateDict(ws, state)
+    const refused = await tools.call('write', { path: '/a.txt', content: 'two\n' })
+    expect(refused.isError).toBe(true)
+    expect(refused.content[0]?.text).toContain('read all of it')
+  })
+
+  it('shares one read history between the default tables', async () => {
+    const ws = await plain()
+    await ws.tools.call('read', { path: '/a.txt' })
+    const written = await new Session(ws, ws.defaultSessionId).tools.call('write', {
+      path: '/a.txt',
+      content: 'two\n',
+    })
+    expect(written.isError, written.content[0]?.text).toBeUndefined()
+  })
+
+  it('starts a restored session with no read history', async () => {
+    const source = await plain()
+    await source.session('agent')
+    const state = await toStateDict(source)
+    const ws = await plain()
+    const agent = (await ws.session('agent')).tools
+    await agent.call('read', { path: '/a.txt' })
+    await applyStateDict(ws, state)
+    const refused = await agent.call('write', { path: '/a.txt', content: 'two\n' })
+    expect(refused.isError).toBe(true)
+    expect(refused.content[0]?.text).toContain('read all of it')
+  })
+
+  it('counts a read in flight during a restore for no one', async () => {
+    const source = await plain()
+    const state = await toStateDict(source)
+    const ws = await plain()
+    const reads = await ws.sessionReads(null)
+    const real = reads.read.bind(reads)
+    let entered!: () => void
+    let release!: () => void
+    const inside = new Promise<void>((resolve) => (entered = resolve))
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    reads.read = async (path: string) => {
+      const data = await real(path)
+      entered()
+      await gate
+      return data
+    }
+    const pending = ws.tools.call('read', { path: '/a.txt' })
+    await inside
+    await applyStateDict(ws, state)
+    release()
+    await pending
+    const refused = await ws.tools.call('write', { path: '/a.txt', content: 'two\n' })
+    expect(refused.isError).toBe(true)
+    expect(refused.content[0]?.text).toContain('read all of it')
   })
 })

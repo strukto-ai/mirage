@@ -65,6 +65,39 @@
         "stdout": "rm: cannot remove '/data': Device or resource busy\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "rm_preserve_root_refuses_a_recursive_root",
+      "seq": 15600502,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rm -r --preserve-root /; echo rc=$?; rm --preserve-root /; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\n",
+        "stderr": "rm: it is dangerous to operate recursively on '/'\nrm: use --no-preserve-root to override this failsafe\nrm: cannot remove '/': Is a directory\n"
+      },
+      "flags": [
+        "preserve-root",
+        "r"
+      ]
     }
   ]
 }

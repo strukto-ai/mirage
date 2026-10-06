@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {
+      "id": "touch_time_word_selects_one_stamp",
+      "seq": 15000040,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf x > /data/fc0t.txt; touch -d 2020-01-01 /data/fc0t.txt; touch --time=atime -d 2021-01-01 /data/fc0t.txt; stat -c %Y /data/fc0t.txt; touch --time=mod -d 2022-01-01 /data/fc0t.txt; stat -c %Y /data/fc0t.txt; touch --time=bogus /data/fc0t.txt; echo rc=$?; touch --time=m -d 2023-01-01 /data/fc0t.txt; stat -c %Y /data/fc0t.txt; rm -f /data/fc0t.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1577836800\n1640995200\nrc=1\n1672531200\n",
+        "stderr": "touch: invalid argument 'bogus' for '--time'\nValid arguments are:\n  - 'atime', 'access', 'use'\n  - 'mtime', 'modify'\nTry 'touch --help' for more information.\n"
+      },
+      "flags": [
+        "time",
+        "d"
+      ]
+    }
+  ]
+}

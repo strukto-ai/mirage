@@ -15,7 +15,8 @@
 import { describe, expect, it } from 'vitest'
 
 import { IOResult } from '../../io/types.ts'
-import { SessionState, newStatusWriter } from '../session/session.ts'
+import { SessionState } from '../session/session.ts'
+import { newStatusWriter } from '../abort.ts'
 import { assignmentStatus, finishStatement, restoreStatus, snapshotStatus } from './statement.ts'
 
 const decode = (b: Uint8Array | null): string => new TextDecoder().decode(b ?? new Uint8Array())

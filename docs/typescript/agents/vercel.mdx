@@ -2,9 +2,10 @@
 title: Vercel AI SDK
 description: Wire mirage tools into the Vercel AI SDK via the @struktoai/mirage-agents/vercel adapter.
 icon: triangle
+iconType: solid
 ---
 
-The [Vercel AI SDK](https://sdk.vercel.ai) (`ai`) drives tool-calling agents around any provider in its registry. Mirage ships an AI SDK 7 tool factory that exposes a `Workspace` as Mirage's seven tools (`shell`, `read`, `write`, `edit`, `ls`, `grep`, `glob`), the same table MCP serves, for `generateText` / `streamText` / agent loops.
+The [Vercel AI SDK](https://sdk.vercel.ai) (`ai`) drives tool-calling agents around any provider in its registry. Mirage ships an AI SDK 7 tool factory that gives `generateText`, `streamText` and agent loops a session's seven tools.
 
 ## Install
 
@@ -22,16 +23,13 @@ pnpm add @struktoai/mirage-agents @struktoai/mirage-browser ai @ai-sdk/openai
 ## Usage
 
 ```ts
-import { MountMode, OpsRegistry, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { generateText, stepCountIs } from 'ai'
 import { openai } from '@ai-sdk/openai'
 import { mirageTools } from '@struktoai/mirage-agents/vercel'
 import { buildSystemPrompt } from '@struktoai/mirage-agents/openai'
 
-const ram = new RAMVFS()
-const ops = new OpsRegistry()
-for (const op of ram.ops()) ops.register(op)
-const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
 
 const { text } = await generateText({
   model: openai('gpt-5.4-mini'),
@@ -52,19 +50,7 @@ console.log(text)
 
 | Symbol | Purpose |
 | --- | --- |
-| `mirageTools(ws, options?)` | Returns `{ shell, read, write, edit, ls, grep, glob }`, each a `tool()` from `ai` ready to spread into `tools: { ... }`. Each answers `{ text, isError }` as the MCP tool of the same name does. |
-
-### Tool reference
-
-| Tool | Input | Answer |
-| --- | --- | --- |
-| `shell` | `{ command }` | the line's output; `isError` when it exits nonzero |
-| `read` | `{ path, offset?, limit? }` | numbered lines; images and PDFs become file content parts |
-| `write` | `{ path, content }` | creates parents; an existing file must be read in full first |
-| `edit` | `{ path, old_string, new_string, replace_all? }` | refuses a file changed since it was read |
-| `ls` | `{ path }` | one entry per line |
-| `grep` | `{ pattern, path, ignore_case?, fixed_strings?, include?, context?, files_with_matches?, count?, max_count? }` | `grep -rn` output |
-| `glob` | `{ pattern, path? }` | matching files, sorted |
+| `mirageTools(ws, options?)` | `{ shell, read, write, edit, ls, grep, glob }`, each an `ai` `tool()` to spread into `tools`. They answer as the session's [`session.tools`](/typescript/access/in-app#session-tools) do; `options` takes `sessionId` and `staleWriteProtection`. |
 
 `read` uses AI SDK 7's `toModelOutput`: text files come back as numbered lines, PDFs and supported images become file content parts, and other binary formats return a metadata note.
 

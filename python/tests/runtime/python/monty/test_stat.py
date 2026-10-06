@@ -57,7 +57,7 @@ def test_the_sequence_half_is_this_host_s_alone() -> None:
     # The python binding builds a real namedtuple, so a guest may
     # subscript, iterate and len the answer. The TypeScript twin sends
     # a class instance (the JS wire has no namedtuple shape), where
-    # only the attributes cross; `integ/runtime/stat.json` pins both
+    # only the attributes cross; `integ/runtime/path/stat.json` pins both
     # sides of that divergence.
     st = stat_result(VFSStat(size=5, is_dir=False, mtime_ns=0, mode=0o644))
     assert len(st) == 10

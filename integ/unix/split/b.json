@@ -1,0 +1,40 @@
+{
+  "cases": [
+    {
+      "id": "split_b_size_suffixes_and_signs",
+      "seq": 15300301,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/fcC_sb && (cd /data/fcC_sb && printf '%01500d' 0 > in && split -b 1k in k && split -b 1kB in m && split -b 1KiB in i && split -b 2b in b && wc -c ka? ma? ia? ba?; printf abcdefghijkl > s && split -b 010 s z && split -b +10 s p && split -b ' 10' s w && wc -c za? pa? wa?); rm -r /data/fcC_sb",
+      "expect": {
+        "exit": 0,
+        "stdout": "1024 kaa\n 476 kab\n1000 maa\n 500 mab\n1024 iaa\n 476 iab\n1024 baa\n 476 bab\n6000 total\n10 zaa\n 2 zab\n10 paa\n 2 pab\n10 waa\n 2 wab\n36 total\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "split_b_refused_counts_write_nothing",
+      "seq": 15300302,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "for v in +0 ++10 -10 '+ 10' '10 ' abc '' 1x1b 0x10 0 0K 1g 5c ١٢; do split -b \"$v\" /data/a.txt /data/fcC_x 2>&1; echo rc=$?; done; ls /data | grep fcC_x | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "split: invalid number of bytes: '+0'\nrc=1\nsplit: invalid number of bytes: '++10'\nrc=1\nsplit: invalid number of bytes: '-10'\nrc=1\nsplit: invalid number of bytes: '+ 10'\nrc=1\nsplit: invalid number of bytes: '10 '\nrc=1\nsplit: invalid number of bytes: 'abc'\nrc=1\nsplit: invalid number of bytes: ''\nrc=1\nsplit: invalid number of bytes: '1x1b'\nrc=1\nsplit: invalid number of bytes: '0x10'\nrc=1\nsplit: invalid number of bytes: '0'\nrc=1\nsplit: invalid number of bytes: '0K'\nrc=1\nsplit: invalid number of bytes: '1g'\nrc=1\nsplit: invalid number of bytes: '5c'\nrc=1\nsplit: invalid number of bytes: '\\331\\241\\331\\242'\nrc=1\n0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b"
+      ]
+    }
+  ]
+}

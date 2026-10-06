@@ -109,6 +109,47 @@
       "flags": [
         "n"
       ]
+    },
+    {
+      "id": "split_count_clauses_quote_the_refused_word",
+      "seq": 15300313,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "for f in -b -l -n -a; do for v in $'1\\303\\251' $'1\\r' $'1\\001' $'1\\177' \"1'\" '1\\' ''; do split $f \"$v\" /data/a.txt /data/fcC_q 2>&1; done; done; for v in $'1\\303\\251' $'1\\r' $'1\\001' $'1\\177' \"1'\" '1\\' ''; do split -n \"l/$v\" /data/a.txt /data/fcC_q 2>&1; done; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "split: invalid number of bytes: '1\\303\\251'\nsplit: invalid number of bytes: '1\\r'\nsplit: invalid number of bytes: '1\\001'\nsplit: invalid number of bytes: '1\\177'\nsplit: invalid number of bytes: '1\\''\nsplit: invalid number of bytes: '1\\\\'\nsplit: invalid number of bytes: ''\nsplit: invalid number of lines: '1\\303\\251'\nsplit: invalid number of lines: '1\\r'\nsplit: invalid number of lines: '1\\001'\nsplit: invalid number of lines: '1\\177'\nsplit: invalid number of lines: '1\\''\nsplit: invalid number of lines: '1\\\\'\nsplit: invalid number of lines: ''\nsplit: invalid number of chunks: '1\\303\\251'\nsplit: invalid number of chunks: '1\\r'\nsplit: invalid number of chunks: '1\\001'\nsplit: invalid number of chunks: '1\\177'\nsplit: invalid number of chunks: '1\\''\nsplit: invalid number of chunks: '1\\\\'\nsplit: invalid number of chunks: ''\nsplit: invalid suffix length: '1\\303\\251'\nsplit: invalid suffix length: '1\\r'\nsplit: invalid suffix length: '1\\001'\nsplit: invalid suffix length: '1\\177'\nsplit: invalid suffix length: '1\\''\nsplit: invalid suffix length: '1\\\\'\nsplit: invalid suffix length: ''\nsplit: invalid number of chunks: '1\\303\\251'\nsplit: invalid number of chunks: '1\\r'\nsplit: invalid number of chunks: '1\\001'\nsplit: invalid number of chunks: '1\\177'\nsplit: invalid number of chunks: '1\\''\nsplit: invalid number of chunks: '1\\\\'\nsplit: invalid number of chunks: ''\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b",
+        "l",
+        "n",
+        "a"
+      ]
+    },
+    {
+      "id": "split_start_values_quote_the_refused_word",
+      "seq": 15300314,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "for v in $'1\\303\\251' $'1\\r' $'1\\001' $'1\\177' \"1'\" '1\\'; do split --numeric-suffixes=\"$v\" /data/a.txt /data/fcC_q 2>&1 | head -n 1; split --hex-suffixes=\"$v\" /data/a.txt /data/fcC_q 2>&1 | head -n 1; done; split -a $'\\r18446744073709551616' /data/a.txt /data/fcC_q 2>&1; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "split: '1\\303\\251': invalid start value for numerical suffix\nsplit: '1\\303\\251': invalid start value for hexadecimal suffix\nsplit: '1\\r': invalid start value for numerical suffix\nsplit: '1\\r': invalid start value for hexadecimal suffix\nsplit: '1\\001': invalid start value for numerical suffix\nsplit: '1\\001': invalid start value for hexadecimal suffix\nsplit: '1\\177': invalid start value for numerical suffix\nsplit: '1\\177': invalid start value for hexadecimal suffix\nsplit: '1\\'': invalid start value for numerical suffix\nsplit: '1\\'': invalid start value for hexadecimal suffix\nsplit: '1\\\\': invalid start value for numerical suffix\nsplit: '1\\\\': invalid start value for hexadecimal suffix\nsplit: invalid suffix length: '\\r18446744073709551616': Value too large for defined data type\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "numeric-suffixes",
+        "hex-suffixes",
+        "a"
+      ]
     }
   ]
 }

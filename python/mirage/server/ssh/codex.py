@@ -36,10 +36,19 @@ from mirage.errors.classify import failure_text
 from mirage.fuse.core import MountCore
 from mirage.io.types import ByteSource
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
+from mirage.server.rpc.constants import (
+    RPC_INTERNAL_ERROR,
+    RPC_INVALID_PARAMS,
+    RPC_INVALID_REQUEST,
+    RPC_METHOD_NOT_FOUND,
+    RPC_NOT_FOUND,
+    RPC_PARSE_ERROR,
+)
 from mirage.server.ssh import constants
 from mirage.server.ssh.errors import CodexRPCError
 from mirage.server.ssh.session import (
     key_profile,
+    login_entry,
     login_env,
     new_session_id,
     open_session,
@@ -78,14 +87,10 @@ def to_path(uri: JsonValue) -> str:
         CodexRPCError: not an absolute ``file:`` URI.
     """
     if not isinstance(uri, str):
-        raise CodexRPCError(
-            constants.RPC_INVALID_PARAMS, "a path must be a file: URI"
-        )
+        raise CodexRPCError(RPC_INVALID_PARAMS, "a path must be a file: URI")
     parts = urlsplit(uri)
     if parts.scheme != "file" or not parts.path.startswith("/"):
-        raise CodexRPCError(
-            constants.RPC_INVALID_PARAMS, f"invalid URI: {uri}"
-        )
+        raise CodexRPCError(RPC_INVALID_PARAMS, f"invalid URI: {uri}")
     return posixpath.normpath("/" + unquote(parts.path).lstrip("/"))
 
 
@@ -111,14 +116,12 @@ def arg(
     given = params.get(name)
     value = default if given is None else given
     if value is None:
-        raise CodexRPCError(
-            constants.RPC_INVALID_PARAMS, f"missing field `{name}`"
-        )
+        raise CodexRPCError(RPC_INVALID_PARAMS, f"missing field `{name}`")
     if not isinstance(value, kind) or (
         kind is int and isinstance(value, bool)
     ):
         raise CodexRPCError(
-            constants.RPC_INVALID_PARAMS, f"invalid type for field `{name}`"
+            RPC_INVALID_PARAMS, f"invalid type for field `{name}`"
         )
     return value
 
@@ -136,7 +139,7 @@ def strings(value: JsonValue, name: str) -> dict[str, str]:
         isinstance(v, str) for v in value.values()
     ):
         raise CodexRPCError(
-            constants.RPC_INVALID_PARAMS, f"`{name}` must map names to strings"
+            RPC_INVALID_PARAMS, f"`{name}` must map names to strings"
         )
     return {k: v for k, v in value.items() if isinstance(v, str)}
 
@@ -193,17 +196,15 @@ def rpc_error(err: Exception) -> CodexRPCError:
     if condition is None and not isinstance(err, OSError):
         logger.warning("codex: unclassified error: %r", err)
     rpc = (
-        constants.RPC_NOT_FOUND
+        RPC_NOT_FOUND
         if condition is FsCondition.ENOENT
-        else constants.RPC_INTERNAL_ERROR
+        else RPC_INTERNAL_ERROR
     )
     return CodexRPCError(rpc, failure_text(err))
 
 
 def not_a_file(path: str) -> CodexRPCError:
-    return CodexRPCError(
-        constants.RPC_INVALID_REQUEST, f"path `{path}` is not a file"
-    )
+    return CodexRPCError(RPC_INVALID_REQUEST, f"path `{path}` is not a file")
 
 
 def lookup(core: MountCore, path: str) -> dict[str, Any] | None:
@@ -358,7 +359,7 @@ def walk(core: MountCore, root: str, options: Message) -> Message:
     follow = arg(options, "followDirectorySymlinks", bool)
     if max_directories <= 0 or max_entries <= 0:
         raise CodexRPCError(
-            constants.RPC_INVALID_REQUEST,
+            RPC_INVALID_REQUEST,
             "filesystem walk limits must be greater than zero",
         )
     entries: list[JsonValue] = []
@@ -402,7 +403,7 @@ def unb64(text: str, name: str) -> bytes:
         return base64.b64decode(text, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise CodexRPCError(
-            constants.RPC_INVALID_PARAMS, f"`{name}` is not base64: {exc}"
+            RPC_INVALID_PARAMS, f"`{name}` is not base64: {exc}"
         ) from exc
 
 
@@ -523,7 +524,7 @@ async def run_process(
         cwd=cwd,
         env=env or None,
     )
-    await deliver(io.stdout, io.stderr, send)
+    await deliver(io, send)
     return io.exit_code
 
 
@@ -676,7 +677,7 @@ class CodexChannel:
                 {
                     "id": None,
                     "error": {
-                        "code": constants.RPC_PARSE_ERROR,
+                        "code": RPC_PARSE_ERROR,
                         "message": str(exc),
                     },
                 }
@@ -726,15 +727,13 @@ class CodexChannel:
         handler = self._methods.get(method)
         if handler is None:
             raise CodexRPCError(
-                constants.RPC_METHOD_NOT_FOUND,
+                RPC_METHOD_NOT_FOUND,
                 f"unsupported method `{method}`",
             )
         if params is None:
             params = {}
         if not isinstance(params, dict):
-            raise CodexRPCError(
-                constants.RPC_INVALID_PARAMS, "params must be an object"
-            )
+            raise CodexRPCError(RPC_INVALID_PARAMS, "params must be an object")
         try:
             return await handler(params)
         except CodexRPCError:
@@ -763,7 +762,7 @@ class CodexChannel:
         )
         if code != 0:
             raise CodexRPCError(
-                constants.RPC_INTERNAL_ERROR, err.strip() or f"exit {code}"
+                RPC_INTERNAL_ERROR, err.strip() or f"exit {code}"
             )
 
     async def _initialize(self, params: Message) -> JsonValue:
@@ -785,7 +784,7 @@ class CodexChannel:
         argv = arg(params, "argv", list)
         if not argv or not all(isinstance(a, str) for a in argv):
             raise CodexRPCError(
-                constants.RPC_INVALID_PARAMS,
+                RPC_INVALID_PARAMS,
                 "`argv` must be a non-empty list of strings",
             )
         cwd = to_path(arg(params, "cwd", str))
@@ -794,7 +793,7 @@ class CodexChannel:
         pipe = arg(params, "pipeStdin", bool, False)
         if process_id in self._processes:
             raise CodexRPCError(
-                constants.RPC_INVALID_REQUEST,
+                RPC_INVALID_REQUEST,
                 f"process {process_id} already exists",
             )
         stdin = ProcessInput(self._entry.runner.loop) if tty or pipe else None
@@ -891,7 +890,7 @@ class CodexChannel:
         proc = self._processes.get(process_id)
         if proc is None:
             raise CodexRPCError(
-                constants.RPC_INVALID_REQUEST,
+                RPC_INVALID_REQUEST,
                 f"unknown process id {process_id}",
             )
         return proc
@@ -952,7 +951,7 @@ class CodexChannel:
         signal = arg(params, "signal", str)
         if signal != constants.CODEX_INTERRUPT_SIGNAL:
             raise CodexRPCError(
-                constants.RPC_INVALID_PARAMS,
+                RPC_INVALID_PARAMS,
                 f"unknown variant `{signal}`, expected "
                 f"`{constants.CODEX_INTERRUPT_SIGNAL}`",
             )
@@ -1040,7 +1039,7 @@ class CodexChannel:
         tree = stat.S_ISDIR(st["st_mode"])
         if tree and not arg(params, "recursive", bool, False):
             raise CodexRPCError(
-                constants.RPC_INVALID_REQUEST,
+                RPC_INVALID_REQUEST,
                 "fs/copy requires recursive: true when sourcePath is a "
                 "directory",
             )
@@ -1055,7 +1054,7 @@ class CodexChannel:
         handle_id = arg(params, "handleId", str)
         if handle_id in self._handles:
             raise CodexRPCError(
-                constants.RPC_INVALID_REQUEST,
+                RPC_INVALID_REQUEST,
                 f"file read handle `{handle_id}` already exists",
             )
         fh = await self._fs(lambda core: open_file(core, path))
@@ -1068,7 +1067,7 @@ class CodexChannel:
         length = arg(params, "len", int)
         if handle_id not in self._handles:
             raise CodexRPCError(
-                constants.RPC_NOT_FOUND,
+                RPC_NOT_FOUND,
                 f"unknown file read handle `{handle_id}`",
             )
         path, fh = self._handles[handle_id]
@@ -1098,11 +1097,13 @@ async def serve_codex(
         process (asyncssh.SSHServerProcess[str]): the channel's process.
     """
     workspace_id = process.get_extra_info("username")
-    if workspace_id not in registry:
+    entry = login_entry(
+        registry, process.channel.get_connection(), workspace_id
+    )
+    if entry is None:
         process.stderr.write(f"mirage: no such workspace: {workspace_id}\n")
         process.exit(1)
         return
-    entry = registry.get(workspace_id)
     session_id = new_session_id()
     runner = entry.runner
     try:

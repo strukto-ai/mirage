@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { byteView, utf8Locale } from '../../../shell/bytes.ts'
 import { isStdin, operandLabel } from '../utils/stream.ts'
 import { stdinStream, stdinStat } from '../utils/stream.ts'
 import { guardInput } from '../utils/limit.ts'
@@ -21,7 +22,7 @@ import { fsStrerror, isWalkError, walkRefusal } from '../../../utils/errors.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { respellOne } from '../../../utils/path.ts'
 import { cacheAwareStream } from '../../../cache/read_through.ts'
-import { mountParentReaddir, mountParentStat } from '../utils/operands.ts'
+import { mountParentReaddir, mountParentStat } from '../utils/wrap.ts'
 import { IOResult } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -209,11 +210,19 @@ export async function grepGeneric(
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(error.message + '\n') })]
   }
   if (resolution.neverMatch) f.fixedString = false
+  const utf8 = utf8Locale(opts.env)
   let pat: RegExp
   try {
     pat = resolution.neverMatch
       ? new RegExp(NEVER_MATCH)
-      : compilePattern(resolution.pattern, f.ignoreCase, f.fixedString, f.wholeWord, f.syntax)
+      : compilePattern(
+          byteView(resolution.pattern, utf8),
+          f.ignoreCase,
+          f.fixedString,
+          f.wholeWord,
+          f.syntax,
+          utf8,
+        )
   } catch (error) {
     if (!(error instanceof UsageError)) throw error
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(error.message + '\n') })]
@@ -238,6 +247,7 @@ export async function grepGeneric(
           io,
           false,
           opts.signal,
+          utf8,
         ),
         io,
       ]
@@ -276,6 +286,7 @@ export async function grepGeneric(
           singleIO,
           false,
           opts.signal,
+          utf8,
         ),
         singleIO,
       ]
@@ -352,6 +363,7 @@ export async function grepGeneric(
         fileIO,
         printed,
         opts.signal,
+        utf8,
       )) {
         printed = true
         yield chunk

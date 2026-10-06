@@ -1,0 +1,58 @@
+{
+  "cases": [
+    {
+      "id": "a_plus_writes_at_the_end_after_a_seek",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "log.txt": "one\ntwo\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "f = open('/data/log.txt', 'a+')\nf.seek(0)\nprint(f.read(), end='')\nf.write('three\\n')\nf.seek(0)\nprint(f.read(), end='')\nf.close()",
+            "js": "const f = std.open('/data/log.txt', 'a+')\nf.seek(0, 0)\nstd.out.puts(f.readAsString())\nf.puts('three\\n')\nf.seek(0, 0)\nstd.out.puts(f.readAsString())\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "one\ntwo\none\ntwo\nthree\n",
+            "ops_contain": [
+              "append /data/log.txt"
+            ]
+          },
+          "expect_on": {
+            "s3": {
+              "ops_contain": [
+                "write /data/log.txt"
+              ]
+            }
+          }
+        },
+        {
+          "command": "cat /data/log.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "one\ntwo\nthree\n"
+          }
+        }
+      ]
+    }
+  ]
+}

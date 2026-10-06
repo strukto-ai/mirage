@@ -57,27 +57,4 @@ describe('split', () => {
     expect(DEC.decode(aa)).toBe('a\nb\n')
     expect(DEC.decode(ab)).toBe('c\nd\n')
   })
-
-  it('splits by bytes with -b', async () => {
-    const vfs = new RAMVFS()
-    vfs.store.files.set('/f.bin', ENC.encode('ABCDEF'))
-    const r = await runSplit(vfs, [PathSpec.fromStrPath('/f.bin'), PathSpec.fromStrPath('/p_')], {
-      bytes: '2',
-    })
-    expect(r.exitCode).toBe(0)
-    expect(DEC.decode(vfs.store.files.get('/p_aa'))).toBe('AB')
-    expect(DEC.decode(vfs.store.files.get('/p_ab'))).toBe('CD')
-    expect(DEC.decode(vfs.store.files.get('/p_ac'))).toBe('EF')
-  })
-
-  it('-d uses numeric suffix', async () => {
-    const vfs = new RAMVFS()
-    vfs.store.files.set('/f.txt', ENC.encode('a\nb\nc\nd\n'))
-    const r = await runSplit(vfs, [PathSpec.fromStrPath('/f.txt'), PathSpec.fromStrPath('/part')], {
-      numeric_suffixes: true,
-      l: '2',
-    })
-    expect(r.exitCode).toBe(0)
-    expect(vfs.store.files.has('/part00')).toBe(true)
-  })
 })

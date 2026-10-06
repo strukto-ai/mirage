@@ -80,6 +80,20 @@ def test_routable_scopes_drop_awk_assignment_operands():
     assert routable_scopes("cat", [a, assign, b]) == [a, assign, b]
 
 
+def test_routable_scopes_keep_a_dash_that_names_an_output():
+    src = _path("/m/in")
+    dash = PathSpec(
+        virtual="/m/-",
+        directory="/m",
+        vfs_path="",
+        resolved=True,
+        raw_path="-",
+    )
+    assert routable_scopes("split", [src, dash]) == [src, dash]
+    assert routable_scopes("split", [dash, src]) == [src]
+    assert routable_scopes("cat", [src, dash]) == [src]
+
+
 @pytest.mark.asyncio
 async def test_awk_assignment_operand_keeps_the_line_on_one_mount():
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)

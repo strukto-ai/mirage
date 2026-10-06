@@ -29,7 +29,6 @@ async def _run_single(
 
 
 def _pick(strategy: Strategy):
-
     def strategy_for(cmd_name: str) -> Strategy:
         return strategy
 
@@ -37,7 +36,6 @@ def _pick(strategy: Strategy):
 
 
 def _runner(label: str):
-
     async def run(cmd_name: str, *args: object, **kwargs: object):
         CALLS.append((label, cmd_name))
         return None, IOResult(exit_code=0)
@@ -72,7 +70,6 @@ async def test_each_strategy_reaches_its_runner(monkeypatch, strategy, runner):
 
 
 def _broken(strategy_exc: Exception):
-
     def strategy_for(cmd_name: str) -> Strategy:
         raise strategy_exc
 

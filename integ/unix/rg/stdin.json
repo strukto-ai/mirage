@@ -1172,6 +1172,210 @@
         "stdout": "/data/rnul1.txt:a\u0000/data/rnul1.txt-b\u0000--\n/data/rnul2.txt:a\u0000/data/rnul2.txt-b\u0000",
         "stderr": ""
       }
+    },
+    {
+      "id": "rg_dash_listing_without_a_hit_exits_1",
+      "seq": 15200001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'b\\n' | rg -l z -; echo rc=$?; printf 'b\\n' | rg --files-without-match b -; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l",
+        "files_without_match"
+      ]
+    },
+    {
+      "id": "rg_dash_twice_lists_stdin_once_per_operand",
+      "seq": 15200002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'b\\n' | rg --files-without-match z - -; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "<stdin>\n<stdin>\nrc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "files_without_match"
+      ]
+    },
+    {
+      "id": "rg_dev_stdin_beside_a_file_keeps_its_name",
+      "seq": 15200003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'world\\n' | rg -j1 world /dev/stdin /data/a.txt; printf 'world\\n' | rg -j1 -c world /data/a.txt /dev/stdin",
+      "expect": {
+        "exit": 0,
+        "stdout": "/dev/stdin:world\n/data/a.txt:world\n/data/a.txt:1\n/dev/stdin:1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "j",
+        "c"
+      ]
+    },
+    {
+      "id": "rg_implicit_stdin_empty_pipe_is_searched",
+      "seq": 15200004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "(cd /data/sub && printf '' | rg content; echo rc=$?; printf '' | rg -c content; echo rc=$?)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "rg_no_operand_searches_the_cwd_by_relative_name",
+      "seq": 15200005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "(cd /data/sub && rg content; echo rc=$?; rg -c content; rg zqxjv; echo rc=$?)",
+      "expect": {
+        "exit": 0,
+        "stdout": "nested.txt:content\nrc=0\nnested.txt:1\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "rg_f_dev_stdin_takes_no_dash",
+      "seq": 15800040,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\n' | rg -f /dev/stdin -; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
     }
   ]
 }

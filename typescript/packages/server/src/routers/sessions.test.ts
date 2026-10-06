@@ -30,12 +30,12 @@ describe('sessions router', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/v1/workspaces/sw/sessions',
-      payload: { sessionId: 'agent_a' },
+      payload: { session_id: 'agent_a' },
     })
     expect(created.statusCode).toBe(201)
     const list = await app.inject({ method: 'GET', url: '/v1/workspaces/sw/sessions' })
-    const sessions = list.json<{ sessionId: string; cwd: string }[]>()
-    expect(sessions.some((s) => s.sessionId === 'agent_a')).toBe(true)
+    const sessions = list.json<{ session_id: string; cwd: string }[]>()
+    expect(sessions.some((s) => s.session_id === 'agent_a')).toBe(true)
     const del = await app.inject({
       method: 'DELETE',
       url: '/v1/workspaces/sw/sessions/agent_a',
@@ -54,25 +54,25 @@ describe('sessions router', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/v1/workspaces/grants-ws/sessions',
-      payload: { sessionId: 'agent_r', mounts: { '/': 'read' } },
+      payload: { session_id: 'agent_r', mounts: { '/': 'read' } },
     })
     expect(created.statusCode).toBe(201)
     const listForm = await app.inject({
       method: 'POST',
       url: '/v1/workspaces/grants-ws/sessions',
-      payload: { sessionId: 'agent_l', mounts: ['/'] },
+      payload: { session_id: 'agent_l', mounts: ['/'] },
     })
     expect(listForm.statusCode).toBe(422)
     const bad = await app.inject({
       method: 'POST',
       url: '/v1/workspaces/grants-ws/sessions',
-      payload: { sessionId: 'agent_x', mounts: { '/': 'admin' } },
+      payload: { session_id: 'agent_x', mounts: { '/': 'admin' } },
     })
     expect(bad.statusCode).toBe(422)
     const unknownRole = await app.inject({
       method: 'POST',
       url: '/v1/workspaces/grants-ws/sessions',
-      payload: { sessionId: 'agent_p', profile: 'nope' },
+      payload: { session_id: 'agent_p', profile: 'nope' },
     })
     expect(unknownRole.statusCode).toBe(422)
     await app.close()
@@ -84,12 +84,12 @@ describe('sessions router', () => {
     await app.inject({
       method: 'POST',
       url: '/v1/workspaces/dup-ws/sessions',
-      payload: { sessionId: 'dup' },
+      payload: { session_id: 'dup' },
     })
     const res = await app.inject({
       method: 'POST',
       url: '/v1/workspaces/dup-ws/sessions',
-      payload: { sessionId: 'dup' },
+      payload: { session_id: 'dup' },
     })
     expect(res.statusCode).toBe(409)
     await app.close()
@@ -104,5 +104,86 @@ describe('sessions router', () => {
     })
     expect(res.statusCode).toBe(404)
     await app.close()
+  })
+})
+
+describe('session cancel and kill', () => {
+  async function waitStatus(
+    app: ReturnType<typeof buildApp>,
+    jobId: string,
+    status: string,
+  ): Promise<void> {
+    for (let i = 0; i < 500; i += 1) {
+      const job = (await app.inject({ method: 'GET', url: `/v1/jobs/${jobId}` })).json<{
+        status: string
+      }>()
+      if (job.status === status) return
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    throw new Error(`job ${jobId} never reached ${status}`)
+  }
+
+  it('cancel stops the jobs of the session and spares the others', async () => {
+    const app = buildApp()
+    try {
+      await createWs(app, 'cw')
+      const jobs: Record<string, string> = {}
+      for (const sid of ['a', 'b']) {
+        await app.inject({
+          method: 'POST',
+          url: '/v1/workspaces/cw/sessions',
+          payload: { session_id: sid },
+        })
+        const r = await app.inject({
+          method: 'POST',
+          url: '/v1/workspaces/cw/shell?background=true',
+          payload: { command: 'sleep 30', session_id: sid },
+        })
+        jobs[sid] = r.json<{ job_id: string }>().job_id
+        await waitStatus(app, jobs[sid], 'running')
+      }
+      const r = await app.inject({ method: 'POST', url: '/v1/workspaces/cw/sessions/a/cancel' })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toEqual({ canceled: 1 })
+      await waitStatus(app, jobs.a ?? '', 'canceled')
+      const b = (await app.inject({ method: 'GET', url: `/v1/jobs/${jobs.b ?? ''}` })).json<{
+        status: string
+      }>()
+      expect(b.status).toBe('running')
+      const missing = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/cw/sessions/nope/cancel',
+      })
+      expect(missing.statusCode).toBe(404)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('kill stops background jobs and keeps the session', async () => {
+    const app = buildApp()
+    try {
+      await createWs(app, 'kw')
+      await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/kw/sessions',
+        payload: { session_id: 'a' },
+      })
+      await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/kw/shell',
+        payload: { command: 'sleep 30 &', session_id: 'a' },
+      })
+      const r = await app.inject({ method: 'POST', url: '/v1/workspaces/kw/sessions/a/kill' })
+      expect(r.json()).toEqual({ killed: 1 })
+      const after = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/kw/shell',
+        payload: { command: 'jobs; echo alive', session_id: 'a' },
+      })
+      expect(after.json<{ stdout: string }>().stdout).toContain('alive')
+    } finally {
+      await app.close()
+    }
   })
 })

@@ -29,9 +29,7 @@
         "stdout": "alpha\nalpha\nalpha\nrc=2\n",
         "stderr": "rg: error parsing flag --color: choice 'hello' is unrecognized\n"
       },
-      "flags": [
-        "color"
-      ]
+      "flags": ["color", "j", "no_config", "no_ignore", "no_mmap", "line_buffered"]
     }
   ]
 }

@@ -37,7 +37,7 @@ import type { RunResult } from '../runtime/types.ts'
 import { MountMode, PathSpec, VFSName } from '../types.ts'
 import { cliSpecFor } from '../commands/cli/specs.ts'
 import { parseSessionProfile, type SessionProfile } from '../policy/profile.ts'
-import { getTestParser, stdoutStr, voicedStderr } from './fixtures/workspace_fixture.ts'
+import { getTestParser, stderrStr, stdoutStr, voicedStderr } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const ENC = new TextEncoder()
@@ -660,7 +660,9 @@ describe('op hooks bind at the op doors and the command tier', () => {
 
     // The doors hold: the op facade, and a dispatcher-routed redirect
     // write.
-    await expect(ws.vfs.read('/a/secret.txt')).rejects.toThrow('secret is sealed')
+    await expect(ws.vfs.read('/a/secret.txt')).rejects.toMatchObject({
+      refusal: { reason: 'secret is sealed' },
+    })
     const redirect = await ws.shell('echo hi > /a/prod/new.txt')
     expect(redirect.exitCode).not.toBe(0)
 
@@ -769,7 +771,7 @@ async function makeHiddenVarsWs(): Promise<Workspace> {
   const sess = ws.createSession('agent', { mounts: { '/a': MountMode.WRITE } })
   seedVar(sess, 'SLACK_TOKEN', 'xoxb-real')
   seedVar(sess, 'PUBLIC', 'ok')
-  sess.hiddenVars = { names: ['SLACK_TOKEN'] }
+  sess.visibility = { ...sess.visibility, vars: { names: ['SLACK_TOKEN'] } }
   return ws
 }
 
@@ -851,7 +853,7 @@ describe('hidden vars across the shell tier', () => {
     const ws = await makeHiddenVarsWs()
     const sess = ws.getSession('agent')
     seedVar(sess, 'HOME', '/a/homedir')
-    sess.hiddenVars = { names: ['SLACK_TOKEN', 'HOME'] }
+    sess.visibility = { ...sess.visibility, vars: { names: ['SLACK_TOKEN', 'HOME'] } }
     const home = await ws.shell('echo "[$HOME]"', { sessionId: 'agent' })
     expect(stdoutStr(home)).toBe('[]\n')
     const tilde = await ws.shell('echo ~', { sessionId: 'agent' })
@@ -938,7 +940,7 @@ describe('hidden vars across the shell tier', () => {
     const ws = await makeWs()
     const sess = ws.createSession('agent', { mounts: { '/a': MountMode.WRITE } })
     seedVar(sess, 'SECRET_IDX', '1')
-    sess.hiddenVars = { names: ['SECRET_IDX'] }
+    sess.visibility = { ...sess.visibility, vars: { names: ['SECRET_IDX'] } }
     await ws.shell('b=(x y)', { sessionId: 'agent' })
     const io = await ws.shell('b[SECRET_IDX]=z', { sessionId: 'agent' })
     expect(io.exitCode).toBe(0)
@@ -951,7 +953,7 @@ async function makeHiddenArrayWs(): Promise<Workspace> {
   const sess = ws.createSession('agent', { mounts: { '/a': MountMode.WRITE } })
   seedVar(sess, 'SLACK_TOKEN', ['xoxb-real', 'xoxb-two'])
   seedVar(sess, 'PUBLIC', 'ok')
-  sess.hiddenVars = { names: ['SLACK_TOKEN'] }
+  sess.visibility = { ...sess.visibility, vars: { names: ['SLACK_TOKEN'] } }
   return ws
 }
 
@@ -965,7 +967,7 @@ async function makeHiddenPathsWs(): Promise<Workspace> {
   const ws = new Workspace({ '/a': a }, { mode: MountMode.WRITE, shellParser: parser })
   open.push(ws)
   const sess = ws.createSession('agent')
-  sess.hiddenPaths = { paths: ['/a/secrets'], patterns: ['*.key'] }
+  sess.visibility = { ...sess.visibility, paths: { paths: ['/a/secrets'], patterns: ['*.key'] } }
   return ws
 }
 
@@ -1008,7 +1010,7 @@ describe('hidden paths across the tiers', () => {
     const ws = new Workspace({ '/a': a }, { mode: MountMode.WRITE, shellParser: parser })
     open.push(ws)
     const sess = ws.createSession('agent')
-    sess.hiddenPaths = { patterns: ['*.key'] }
+    sess.visibility = { ...sess.visibility, paths: { patterns: ['*.key'] } }
     const io = await ws.shell('find /a -empty', { sessionId: 'agent' })
     const out = stdoutStr(io)
     expect(out).toContain('/a/vault')
@@ -1095,9 +1097,9 @@ describe('session profiles', () => {
     const s1 = ws.createSession('agent1', { profile: analyst })
     const s2 = ws.createSession('agent2', { profile: analyst })
     expect(s1.mountModes?.get('/a')).toBe(MountMode.WRITE)
-    expect(s1.hiddenPaths).toEqual({ paths: ['/a/secrets'], patterns: [] })
-    expect(s2.hiddenPaths).toEqual(s1.hiddenPaths)
-    expect(s1.hiddenVars).toEqual({ names: ['SLACK_TOKEN'], patterns: [] })
+    expect(s1.visibility.paths).toEqual({ paths: ['/a/secrets'], patterns: [] })
+    expect(s2.visibility.paths).toEqual(s1.visibility.paths)
+    expect(s1.visibility.vars).toEqual({ names: ['SLACK_TOKEN'], patterns: [] })
     expect(s1.env.ROLE).toBe('analyst')
     const listing = await ws.shell('ls /a', { sessionId: 'agent1' })
     expect(stdoutStr(listing)).not.toContain('secrets')
@@ -1125,7 +1127,7 @@ describe('session profiles', () => {
     })
     expect(sess.mountModes?.get('/a')).toBe(MountMode.READ)
     expect(sess.mountModes?.get('/b')).toBe(MountMode.READ)
-    expect(sess.hiddenPaths).toEqual({ paths: ['/a/secrets'], patterns: [] })
+    expect(sess.visibility.paths).toEqual({ paths: ['/a/secrets'], patterns: [] })
     const raised = ws.createSession('wider', { mounts: { '/a': 'rwx' }, profile: profile })
     expect(raised.mountModes?.get('/a')).toBe(MountMode.WRITE)
   })
@@ -1157,12 +1159,12 @@ describe('session profiles', () => {
     open.push(ws)
     const reviewer = ws.createSession('r', { profile: 'reviewer' })
     expect(reviewer.mountModes?.get('/a')).toBe(MountMode.READ)
-    expect(reviewer.hiddenPaths).toEqual({ paths: ['/a/secrets'], patterns: [] })
+    expect(reviewer.visibility.paths).toEqual({ paths: ['/a/secrets'], patterns: [] })
     expect(reviewer.cwd).toBe('/b')
     expect(reviewer.env.PAGER).toBe('cat')
     const dflt = ws.createSession('d')
     expect(dflt.mountModes?.get('/a')).toBe(MountMode.WRITE)
-    expect(dflt.hiddenPaths).toBeNull()
+    expect(dflt.visibility.paths).toBeNull()
     expect(dflt.cwd).toBe('/b')
     expect(() => ws.createSession('x', { profile: 'nope' })).toThrow('unknown profile "nope"')
     // An inline document adds to the named profile: the weaker mode wins,
@@ -1178,14 +1180,14 @@ describe('session profiles', () => {
     })
     expect(inline.mountModes?.get('/a')).toBe(MountMode.READ)
     expect(inline.mountModes?.get('/b')).toBe(MountMode.EXEC)
-    expect(inline.hiddenPaths).toEqual({ paths: ['/a/secrets'], patterns: ['*.key'] })
+    expect(inline.visibility.paths).toEqual({ paths: ['/a/secrets'], patterns: ['*.key'] })
     expect(() =>
       ws.createSession('wide', {
         profile: 'reviewer',
         permissions: parseSessionProfile({ commands: { allow: ['ls'] } }),
       }),
     ).toThrow('not an allow list')
-    expect(inline.hiddenVars).toEqual({ names: [], patterns: ['AWS_*'] })
+    expect(inline.visibility.vars).toEqual({ names: [], patterns: ['AWS_*'] })
     expect(inline.cwd).toBe('/a')
     const pwd = await ws.shell('pwd', { sessionId: 'r' })
     expect(stdoutStr(pwd)).toBe('/b\n')
@@ -1264,7 +1266,7 @@ describe('session profiles', () => {
     const dflt = ws.getSession(ws.defaultSessionId)
     expect(dflt.mountModes?.get('/b')).toBe(MountMode.EXEC)
     expect(dflt.mountModes?.has('/a')).toBe(false)
-    expect(dflt.hiddenPaths).toEqual({ paths: ['/b/vault'], patterns: [] })
+    expect(dflt.visibility.paths).toEqual({ paths: ['/b/vault'], patterns: [] })
     expect(dflt.cwd).toBe('/b')
     expect(stdoutStr(await ws.shell('pwd'))).toBe('/b\n')
     expect(stdoutStr(await ws.shell('echo "$PAGER"'))).toBe('cat\n')
@@ -1276,7 +1278,7 @@ describe('session profiles', () => {
     open.push(plain)
     const own = plain.getSession(plain.defaultSessionId)
     expect(own.mountModes).toBeNull()
-    expect(own.hiddenPaths).toBeNull()
+    expect(own.visibility.paths).toBeNull()
   })
 
   it("a default profile's hides, its own and its mount sections', bind every session", async () => {
@@ -1321,7 +1323,7 @@ describe('session profiles', () => {
     expect((await ws.shell('cat /other/pub/b.key', { sessionId: 'late' })).exitCode).not.toBe(0)
     // The profile is the session's own document now, so its hides are on
     // the session rather than bound beside it.
-    expect(late.hiddenPaths?.paths).toContain('/other/finance')
+    expect(late.visibility.paths?.paths).toContain('/other/finance')
   })
 })
 
@@ -1492,11 +1494,19 @@ describe('command permissions end to end', () => {
     const ws = await commandsWs()
     await ws.shell('mkdir -p /repo/d && touch /repo/d/x /scratch/z')
     // Operand-scoped: the GNU voice at 1, the operand as typed.
-    expect(await line(ws, 'cd /repo/d && rm x')).toEqual([1, '', 'rm: x: no deletes in the repo\n'])
+    expect(await line(ws, 'cd /repo/d && rm x')).toEqual([
+      1,
+      '',
+      "rm: cannot remove 'x': Permission denied\npolicy denied: no deletes in the repo\n",
+    ])
     expect((await line(ws, 'rm /scratch/z'))[0]).toBe(0)
     // A pure path rule holds at the command plane for any command and
     // at the op door for every op, whatever door.
-    expect(await line(ws, 'cat /repo/locked/y')).toEqual([1, '', 'cat: /repo/locked/y: frozen\n'])
+    expect(await line(ws, 'cat /repo/locked/y')).toEqual([
+      1,
+      '',
+      'cat: /repo/locked/y: Permission denied\npolicy denied: frozen\n',
+    ])
     await expect(ws.vfs.write('/repo/locked/y', 'changed')).rejects.toThrow()
     await expect(ws.vfs.read('/repo/locked/y')).rejects.toThrow()
     // A mount section's rule applies when the line works inside the
@@ -1528,7 +1538,7 @@ describe('command permissions end to end', () => {
     expect(await line(ws, 'find /repo/locked -name y -delete')).toEqual([
       1,
       '',
-      "find: cannot delete '/repo/locked/y': frozen\n",
+      "find: cannot delete '/repo/locked/y': Permission denied\npolicy denied: frozen\n",
     ])
     expect((await line(ws, 'cat /repo/locked/y'))[0]).toBe(1)
   })
@@ -1560,14 +1570,30 @@ describe('command permissions end to end', () => {
     await ws.shell(
       'echo top > /data/secret && ln -s /data/secret /data/link && ln -s /data/secret /data/other',
     )
-    expect(await line(ws, 'cat /data/secret')).toEqual([1, '', 'cat: /data/secret: sealed\n'])
+    expect(await line(ws, 'cat /data/secret')).toEqual([
+      1,
+      '',
+      'cat: /data/secret: Permission denied\npolicy denied: sealed\n',
+    ])
     // Through the link: refused, the operand named as typed.
-    expect(await line(ws, 'cat /data/link')).toEqual([1, '', 'cat: /data/link: sealed\n'])
-    expect(await line(ws, 'head -n 1 /data/other')).toEqual([1, '', 'head: /data/other: sealed\n'])
+    expect(await line(ws, 'cat /data/link')).toEqual([
+      1,
+      '',
+      'cat: /data/link: Permission denied\npolicy denied: sealed\n',
+    ])
+    expect(await line(ws, 'head -n 1 /data/other')).toEqual([
+      1,
+      '',
+      "head: cannot open '/data/other' for reading: Permission denied\npolicy denied: sealed\n",
+    ])
     // rm removes the link, not the target: the target's rule does not
     // apply, the link's own does.
     expect(await line(ws, 'rm /data/other')).toEqual([0, '', ''])
-    expect(await line(ws, 'rm /data/link')).toEqual([1, '', 'rm: /data/link: keep the link\n'])
+    expect(await line(ws, 'rm /data/link')).toEqual([
+      1,
+      '',
+      "rm: cannot remove '/data/link': Permission denied\npolicy denied: keep the link\n",
+    ])
     expect((await line(ws, 'cat /data/link'))[0]).toBe(1)
   })
 
@@ -1596,11 +1622,15 @@ describe('command permissions end to end', () => {
     )
     open.push(ws)
     await ws.shell("echo top > /data/secret && printf 'one\\n' > /data/audit.log")
-    expect(await line(ws, 'cat < /data/secret')).toEqual([1, '', 'cat: /data/secret: sealed\n'])
+    expect(await line(ws, 'cat < /data/secret')).toEqual([
+      1,
+      '',
+      'cat: /data/secret: Permission denied\npolicy denied: sealed\n',
+    ])
     expect(await line(ws, 'echo two > /data/audit.log')).toEqual([
       1,
       '',
-      'echo: /data/audit.log: audit is append-only\n',
+      'echo: /data/audit.log: Permission denied\npolicy denied: audit is append-only\n',
     ])
     // The refused write did not truncate, and clean redirects run.
     expect(await line(ws, 'cat /data/audit.log')).toEqual([0, 'one\n', ''])
@@ -1675,11 +1705,15 @@ describe('command permissions end to end', () => {
     ws.registerCli('git', cliSpecFor('git'))
     expect(await line(ws, 'sort /repo/x')).toEqual([127, '', 'sort: command not found\n'])
     expect(await line(ws, 'cat /repo/a | sort')).toEqual([127, '', 'sort: command not found\n'])
-    expect(await line(ws, 'rm /repo/x')).toEqual([1, '', 'rm: /repo/x: no deletes in the repo\n'])
+    expect(await line(ws, 'rm /repo/x')).toEqual([
+      1,
+      '',
+      "rm: cannot remove '/repo/x': Permission denied\npolicy denied: no deletes in the repo\n",
+    ])
     expect(await line(ws, 'cat /repo/a; rm -f /repo/x')).toEqual([
       1,
       '',
-      'rm: /repo/x: no deletes in the repo\n',
+      "rm: cannot remove '/repo/x': Permission denied\npolicy denied: no deletes in the repo\n",
     ])
     expect(box.lines).toEqual([])
     expect(await line(ws, 'cat /repo/a | wc -l')).toEqual([0, 'box:cat /repo/a | wc -l', ''])
@@ -1810,13 +1844,25 @@ describe('command permissions end to end', () => {
     )
     open.push(ws)
     await ws.shell('mkdir -p /repo/sealed && echo x > /repo/sealed/f')
-    expect(await line(ws, 'ls /repo/sealed')).toEqual([1, '', 'ls: /repo/sealed: sealed\n'])
-    expect(await line(ws, 'cd /repo/sealed && ls')).toEqual([1, '', 'ls: .: sealed\n'])
-    expect(await line(ws, 'cd /repo/sealed && find -name f')).toEqual([1, '', 'find: .: sealed\n'])
+    expect(await line(ws, 'ls /repo/sealed')).toEqual([
+      1,
+      '',
+      "ls: cannot access '/repo/sealed': Permission denied\npolicy denied: sealed\n",
+    ])
+    expect(await line(ws, 'cd /repo/sealed && ls')).toEqual([
+      1,
+      '',
+      "ls: cannot access '.': Permission denied\npolicy denied: sealed\n",
+    ])
+    expect(await line(ws, 'cd /repo/sealed && find -name f')).toEqual([
+      1,
+      '',
+      "find: '.': Permission denied\npolicy denied: sealed\n",
+    ])
     expect(await line(ws, 'cd /repo/sealed && grep -r x')).toEqual([
       1,
       '',
-      'grep: /repo/sealed: sealed\n',
+      'grep: /repo/sealed: Permission denied\npolicy denied: sealed\n',
     ])
     // With an operand, or without the recursion that reads the
     // directory, nothing is implied.
@@ -1863,14 +1909,18 @@ describe('command permissions end to end', () => {
     expect(await line(ws, 'cat /repo/private/k')).toEqual([
       1,
       '',
-      'cat: /repo/private/k: private\n',
+      'cat: /repo/private/k: Permission denied\npolicy denied: private\n',
     ])
     expect(await line(ws, 'cat /repo/private/k', 'veiled')).toEqual([
       1,
       '',
       'cat: /repo/private/k: No such file or directory\n',
     ])
-    expect(await line(ws, 'cat /repo/sealed/x')).toEqual([1, '', 'cat: /repo/sealed/x: sealed\n'])
+    expect(await line(ws, 'cat /repo/sealed/x')).toEqual([
+      1,
+      '',
+      'cat: /repo/sealed/x: Permission denied\npolicy denied: sealed\n',
+    ])
     expect(await line(ws, 'cat /repo/sealed/x', 'veiled')).toEqual([
       1,
       '',
@@ -2061,7 +2111,11 @@ describe('ask end to end', () => {
     // ask arm, so no grant can re-open it, and the denied line raises no
     // request (nothing for the host to answer; the battery cannot see
     // this, so it is pinned here).
-    expect(await line(ws, 'cd /repo/d && rm x')).toEqual([1, '', 'rm: x: no deletes in the repo\n'])
+    expect(await line(ws, 'cd /repo/d && rm x')).toEqual([
+      1,
+      '',
+      "rm: cannot remove 'x': Permission denied\npolicy denied: no deletes in the repo\n",
+    ])
     expect(ws.decisions.pending()).toEqual([])
     // The grant is session state: on the record, and not another
     // session's.
@@ -2192,7 +2246,8 @@ describe('a walk below the operand meets the rule guard', () => {
       'grep: /data/t/asked/a: Permission denied\n' +
         'grep: /data/t/locked/y: Permission denied\n' +
         'grep: /data/t/private: Permission denied\n' +
-        'grep: /data/t/sealed: Permission denied\n',
+        'grep: /data/t/sealed: Permission denied\n' +
+        'policy denied: sealed\n',
     )
     const [lsCode, lsOut, lsErr] = await line(ws, 'ls -R /data/t')
     expect(lsCode).toBe(1)
@@ -2200,26 +2255,30 @@ describe('a walk below the operand meets the rule guard', () => {
     expect(lsOut).not.toContain('ghost')
     expect(lsErr).toBe(
       "ls: cannot open directory '/data/t/private': Permission denied\n" +
-        "ls: cannot open directory '/data/t/sealed': Permission denied\n",
+        "ls: cannot open directory '/data/t/sealed': Permission denied\n" +
+        'policy denied: sealed\n',
     )
     const [findCode, findOut, findErr] = await line(ws, "find /data/t -name '*'")
     expect(findCode).toBe(1)
     expect(findOut).toContain('/data/t/sealed\n')
     expect(findOut).not.toContain('/data/t/sealed/s')
     expect(findOut).toContain('/data/t/locked/y\n')
-    expect(findErr).toBe("find: '/data/t/sealed': Permission denied\n")
+    expect(findErr).toBe("find: '/data/t/sealed': Permission denied\npolicy denied: sealed\n")
     const [duCode, duOut, duErr] = await line(ws, 'du -a /data/t')
     expect(duCode).toBe(1)
     expect(duOut).toContain('2\t/data/t/locked/y\n')
     // GNU still prints the row of a directory it may not open, at 0.
     expect(duOut).toContain('0\t/data/t/sealed\n')
     expect(duOut).not.toContain('/data/t/sealed/')
-    expect(duErr).toBe("du: cannot read directory '/data/t/sealed': Permission denied\n")
+    expect(duErr).toBe(
+      "du: cannot read directory '/data/t/sealed': Permission denied\npolicy denied: sealed\n",
+    )
     const [cpCode, , cpErr] = await line(ws, 'cp -r /data/t /data/copy')
     expect(cpCode).toBe(1)
     expect(cpErr).toBe(
       "cp: cannot access '/data/t/sealed': Permission denied\n" +
-        "cp: cannot open '/data/t/locked/y' for reading: Permission denied\n",
+        "cp: cannot open '/data/t/locked/y' for reading: Permission denied\n" +
+        'policy denied: frozen\n',
     )
     expect((await line(ws, 'cat /data/copy/private/k'))[1]).toBe('k\n')
     expect((await line(ws, 'test -d /data/copy/sealed'))[0]).toBe(0)
@@ -2230,7 +2289,8 @@ describe('a walk below the operand meets the rule guard', () => {
       "tar: Removing leading `/' from member names\n" +
         'tar: /data/t/sealed: Cannot open: Permission denied\n' +
         'tar: /data/t/locked/y: Cannot open: Permission denied\n' +
-        'tar: Exiting with failure status due to previous errors\n',
+        'tar: Exiting with failure status due to previous errors\n' +
+        'policy denied: frozen\n',
     )
     const [, listOut] = await line(ws, 'tar -tf /data/a.tar')
     expect(listOut).toContain('data/t/sealed/\n')
@@ -2239,7 +2299,7 @@ describe('a walk below the operand meets the rule guard', () => {
     expect(listOut).not.toContain('ghost')
     const [treeCode, treeOut, treeErr] = await line(ws, 'tree /data/t')
     expect(treeCode).toBe(2)
-    expect(treeErr).toBe('')
+    expect(treeErr).toBe('policy denied: sealed\n')
     expect(treeOut).toContain('`-- sealed  [error opening dir]\n')
   })
 
@@ -2248,7 +2308,7 @@ describe('a walk below the operand meets the rule guard', () => {
     expect(await line(ws, 'grep -r a /data/t/asked')).toEqual([
       2,
       '',
-      'grep: /data/t/asked/a: Permission denied\n',
+      'grep: /data/t/asked/a: Permission denied\npolicy denied: nod\n',
     ])
     expect(ws.decisions.pending()).toEqual([])
     const [code, , err] = await line(ws, 'grep a /data/t/asked/a')
@@ -2272,7 +2332,9 @@ describe('a walk below the operand meets the rule guard', () => {
     await runWithSession(sess, async () => {
       const st = (await ws.dispatch('stat', '/data/t/locked/y')) as { size?: number }
       expect(st.size).toBe(2)
-      await expect(ws.dispatch('read', '/data/t/locked/y')).rejects.toThrow('frozen')
+      await expect(ws.dispatch('read', '/data/t/locked/y')).rejects.toMatchObject({
+        code: 'EACCES',
+      })
       await expect(ws.dispatch('stat', '/data/t/ghost/g')).rejects.toThrow()
     })
   })
@@ -2301,7 +2363,8 @@ describe('a relayed walk meets the command rules', () => {
   const TAR_SEC_REFUSED =
     "tar: Removing leading `/' from member names\n" +
     'tar: /data/r/sec: Cannot open: Permission denied\n' +
-    'tar: Exiting with failure status due to previous errors\n'
+    'tar: Exiting with failure status due to previous errors\n' +
+    'policy denied: tarred\n'
 
   async function relayWs(): Promise<Workspace> {
     const parser = await getTestParser()
@@ -2340,13 +2403,13 @@ describe('a relayed walk meets the command rules', () => {
     expect(await line(ws, 'cp -r /data/r /other/r')).toEqual([
       1,
       '',
-      "cp: cannot open '/data/r/sec' for reading: Permission denied\n",
+      "cp: cannot open '/data/r/sec' for reading: Permission denied\npolicy denied: copied\n",
     ])
     expect((await line(ws, 'find /other/r'))[1]).toBe('/other/r\n/other/r/open\n')
     expect(await line(ws, 'cp -r /other/src /data/dst')).toEqual([
       1,
       '',
-      "cp: cannot create regular file '/data/dst/sec': Permission denied\n",
+      "cp: cannot create regular file '/data/dst/sec': Permission denied\npolicy denied: copied\n",
     ])
     expect((await line(ws, 'find /data/dst'))[1]).toBe('/data/dst\n/data/dst/open\n')
   })
@@ -2362,17 +2425,17 @@ describe('a relayed walk meets the command rules', () => {
     expect(await line(ws, 'split -l 1 /data/f /data/out/x')).toEqual([
       1,
       '',
-      'split: /data/out/xab: Permission denied\n',
+      'split: /data/out/xab: Permission denied\npolicy denied: cut\n',
     ])
     expect(await line(ws, 'csplit -f /data/out/xx /data/f 2')).toEqual([
       1,
       '2\n',
-      'csplit: /data/out/xx01: Permission denied\n',
+      'csplit: /data/out/xx01: Permission denied\npolicy denied: cut\n',
     ])
     expect(await line(ws, `awk '{print > "/data/out/locked"}' /data/f`)).toEqual([
       2,
       '',
-      'awk: cannot open "/data/out/locked" for output (Permission denied)\n',
+      'awk: cannot open "/data/out/locked" for output (Permission denied)\npolicy denied: cut\n',
     ])
     const listed = (await line(ws, 'ls /data/out'))[1].split('\n')
     expect(listed).toContain('xaa')
@@ -2391,22 +2454,23 @@ describe('a relayed walk meets the command rules', () => {
     expect(await line(ws, 'mktemp -d -p /data/tmpd')).toEqual([
       1,
       '',
-      "mktemp: failed to create directory via template '/data/tmpd/tmp.XXXXXXXXXX': Permission denied\n",
+      "mktemp: failed to create directory via template '/data/tmpd/tmp.XXXXXXXXXX': Permission denied\npolicy denied: cut\n",
     ])
     expect(await line(ws, 'mktemp -p /data/tmpd')).toEqual([
       1,
       '',
-      "mktemp: failed to create file via template '/data/tmpd/tmp.XXXXXXXXXX': Permission denied\n",
+      "mktemp: failed to create file via template '/data/tmpd/tmp.XXXXXXXXXX': Permission denied\npolicy denied: cut\n",
     ])
-    const refused = ['', 'open', 'sec']
-      .map(
-        (name) =>
-          'checkdir error:  cannot create /data/uz/src\n' +
-          '                 Permission denied\n' +
-          `                 unable to process src/${name}.\n`,
-      )
-      .join('')
-    expect(await line(ws, 'unzip -q -d /data/uz /other/z.zip')).toEqual([50, '', refused])
+    const refused =
+      ['', 'open', 'sec']
+        .map(
+          (name) =>
+            'checkdir error:  cannot create /data/uz/src\n' +
+            '                 Permission denied\n' +
+            `                 unable to process src/${name}.\n`,
+        )
+        .join('') + 'policy denied: cut\n'
+    expect(await line(ws, 'unzip -q -d /data/uz /other/z.zip')).toEqual([2, '', refused])
     expect((await line(ws, 'find /data/tmpd /data/uz'))[1]).toBe('/data/tmpd\n/data/uz\n')
   })
 })
@@ -2480,7 +2544,7 @@ describe('a warm walk is refused as the cold walk is', () => {
     expect(await line(ws, 'grep -r secret /data/w')).toEqual([
       2,
       '/data/w/b.txt:secret open\n',
-      'grep: /data/w/a.txt: Permission denied\ngrep: /data/w/p.txt: Permission denied\n',
+      'grep: /data/w/a.txt: Permission denied\ngrep: /data/w/p.txt: Permission denied\npolicy denied: walled\n',
     ])
   })
 
@@ -2529,9 +2593,13 @@ describe('a dispatched read through a link meets the target rule', () => {
       expect(await line(`awk 'BEGIN { getline x < "/data/${name}"; print x }'`)).toEqual([
         0,
         '\n',
-        '',
+        'policy denied: sealed\n',
       ])
-      expect(await line(`sed -n 'r /data/${name}' /data/f`)).toEqual([0, '', ''])
+      expect(await line(`sed -n 'r /data/${name}' /data/f`)).toEqual([
+        0,
+        '',
+        'policy denied: sealed\n',
+      ])
     }
     expect(await line(`awk 'BEGIN { getline x < "/data/okalias"; print x }'`)).toEqual([
       0,
@@ -2631,12 +2699,12 @@ describe('a dispatched op meets the rule on the path the door reaches', () => {
     expect(await line(ws, "sed -n 'w /data/dalias/secret' /data/f")).toEqual([
       4,
       '',
-      "sed: couldn't open file /data/dalias/secret: Permission denied\n",
+      "sed: couldn't open file /data/dalias/secret: Permission denied\npolicy denied: sealed\n",
     ])
     expect(await line(ws, 'cat /data/dalias/secret')).toEqual([
       1,
       '',
-      'cat: /data/dalias/secret: sealed\n',
+      'cat: /data/dalias/secret: Permission denied\npolicy denied: sealed\n',
     ])
     expect(stdoutStr(await ws.shell('cat /data/real/secret'))).toBe('s\n')
   })
@@ -2682,7 +2750,7 @@ describe('a walk the executor fans out meets the command rules', () => {
     const expected = [
       2,
       '/data/w/b.txt:secret b\n',
-      'rg: /data/w/a.txt: Permission denied (os error 13)\n',
+      'rg: /data/w/a.txt: Permission denied (os error 13)\npolicy denied: sealed\n',
     ]
     expect(await line(ws, 'rg secret /data')).toEqual(expected)
     expect(await line(ws, 'rg --sort path secret /data')).toEqual(expected)
@@ -2697,7 +2765,7 @@ describe('a walk the executor fans out meets the command rules', () => {
       2,
       '/data\n|-- sub\n|   `-- x  [error opening dir]\n`-- w\n' +
         '    |-- a.txt\n    `-- b.txt\n\n4 directories, 2 files\n',
-      '',
+      'policy denied: sealed\n',
     ])
   })
 
@@ -2709,7 +2777,7 @@ describe('a walk the executor fans out meets the command rules', () => {
     expect(await line(ws, 'find /data/w -name a.txt -delete')).toEqual([
       1,
       '',
-      "find: cannot delete '/data/w/a.txt': sealed\n",
+      "find: cannot delete '/data/w/a.txt': Permission denied\npolicy denied: sealed\n",
     ])
     expect((await line(ws, 'ls /data/w'))[1]).toBe('a.txt\nb.txt\n')
   })
@@ -2769,7 +2837,7 @@ describe('a dispatched op is judged by the gate of the command that issued it', 
     expect(sealed).toEqual([
       4,
       '',
-      "sed: couldn't open file /data/real/secret: Permission denied\n",
+      "sed: couldn't open file /data/real/secret: Permission denied\npolicy denied: sealed\n",
     ])
     expect(opened).toEqual([0, '', ''])
     expect(stdoutStr(await ws.shell('cat /data/real/other'))).toBe('o\n')
@@ -2804,5 +2872,64 @@ describe('a dispatched op is judged by the gate of the command that issued it', 
     expect(await handle.vfs.cat('/data/real/secret')).toBe('s\n')
     await expect(handle.vfs.read('/data/real/walled')).rejects.toThrow()
     expect((await handle.shell('cat /data/real/secret')).exitCode).toBe(1)
+  })
+})
+
+describe('admitted path rules on recursive commands', () => {
+  it.each([
+    ['find /data/src', 1],
+    ['du -a /data/src', 1],
+    ['du -s /data/src', 1],
+    ['grep -r PRIVATE_SENTINEL /data/src', 2],
+    ['rg PRIVATE_SENTINEL /data/src', 2],
+  ])('recursive commands enforce admitted path rules: %s', async (command, exitCode) => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    open.push(ws)
+    await ws.shell('mkdir -p /data/src/cache')
+    await ws.vfs.write('/data/src/cache/private.txt', ENC.encode('PRIVATE_SENTINEL\n'))
+    await ws.vfs.write('/data/src/public.txt', ENC.encode('public\n'))
+    ws.createSession('restricted', {
+      profile: { commands: { deny: [{ paths: ['/data/src/cache'], reason: 'sealed' }] } },
+    })
+
+    const result = await ws.shell(command, { sessionId: 'restricted' })
+
+    expect(result.exitCode).toBe(exitCode)
+    expect(stdoutStr(result)).not.toContain('private.txt')
+    expect(stdoutStr(result)).not.toContain('PRIVATE_SENTINEL')
+    expect(voicedStderr(result)).toContain('/data/src/cache')
+    expect(voicedStderr(result)).toContain('Permission denied')
+  })
+})
+
+describe('coded preOps on native walks', () => {
+  // Refuses listing /data/sec, as a mode 0300 directory does.
+  const sealedSubtree: Policy = {
+    preOps: (ctx: OpsContext) =>
+      ctx.op === 'readdir' && ctx.path.virtual.startsWith('/data/sec')
+        ? { kind: 'deny', reason: 'sealed' }
+        : null,
+  }
+
+  it.each([
+    ['find /data', "find: '/data/sec': Permission denied\n"],
+    ['find /data/sec', "find: '/data/sec': Permission denied\n"],
+    ['du -a /data', "du: cannot read directory '/data/sec': Permission denied\n"],
+    ['du -a /data/sec', "du: cannot read directory '/data/sec': Permission denied\n"],
+  ])('%s walks through the deny', async (command, refusal) => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    open.push(ws)
+    await ws.shell('mkdir -p /data/sec && echo SECRET > /data/sec/k.txt')
+    ws.policies.add(sealedSubtree)
+    const result = await ws.shell(command)
+    expect(result.exitCode).toBe(1)
+    expect(stdoutStr(result)).not.toContain('/data/sec/k.txt')
+    expect(stderrStr(result)).toBe(refusal)
   })
 })

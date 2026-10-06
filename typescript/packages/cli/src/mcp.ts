@@ -15,6 +15,7 @@
 import { resolveWorkspaceConfig } from '@struktoai/mirage-server/workspace_config'
 import type { Command } from 'commander'
 import { makeClient, type DaemonClient } from './client.ts'
+import { LoginError } from './credentials.ts'
 import { fail, handleResponse } from './output.ts'
 import { loadDaemonSettings } from './settings.ts'
 
@@ -56,7 +57,7 @@ async function hasSession(
   const rows: unknown = await r.json()
   return (
     Array.isArray(rows) &&
-    rows.some((row) => (row as { sessionId?: unknown }).sessionId === sessionId)
+    rows.some((row) => (row as { session_id?: unknown }).session_id === sessionId)
   )
 }
 
@@ -84,6 +85,55 @@ async function runMcp(config: string | undefined, options: McpCommandOptions): P
       fail(error instanceof Error ? error.message : String(error), 2)
     }
   }
+  const { relayStdio } = await import('@struktoai/mirage-server/mcp')
+  await relayWorkspace(path, options.workspace, options.session, 'mcp', relayStdio)
+}
+
+/**
+ * Delete a relay's temporary workspace on the relay's own server. Sends the
+ * token the relay last used, so it works after the login ended or changed
+ * and without a refresh; only when the server refuses that token does it
+ * ask the login for a fresh one and try once more. A delete that still
+ * fails is reported on stderr.
+ */
+async function deleteWorkspace(client: DaemonClient, workspaceId: string): Promise<void> {
+  const path = `/v1/workspaces/${encodeURIComponent(workspaceId)}`
+  const { url, idleGraceSeconds } = client.settings
+  const attempt = (bearer: string): Promise<Response> =>
+    makeClient({ url, idleGraceSeconds, authToken: bearer }).request('DELETE', path)
+  let done = await attempt(client.held)
+  if (done.status === 401 && client.settings.login !== undefined) {
+    let fresh: string
+    try {
+      fresh = await client.token()
+    } catch (error) {
+      if (!(error instanceof LoginError)) throw error
+      process.stderr.write(`could not delete workspace ${workspaceId}: ${error.message}\n`)
+      return
+    }
+    done = await attempt(fresh)
+  }
+  if (!done.ok) {
+    process.stderr.write(
+      `could not delete workspace ${workspaceId}: daemon error ${String(done.status)}\n`,
+    )
+  }
+}
+
+/**
+ * Relay this process's stdio to one of a workspace's endpoints. The
+ * workspace is created from `path`, or `workspace` names one the daemon
+ * holds; a created workspace with no `workspace_id` in its config is
+ * deleted when the relay ends (see `deleteWorkspace`). A named session
+ * must exist.
+ */
+export async function relayWorkspace(
+  path: string | undefined,
+  workspace: string | undefined,
+  session: string | undefined,
+  endpoint: 'mcp' | 'rpc',
+  relay: (url: string, token: () => Promise<string>) => Promise<void>,
+): Promise<void> {
   const client = makeClient(loadDaemonSettings())
   try {
     await client.ensureRunning({ allowSpawn: true })
@@ -100,19 +150,14 @@ async function runMcp(config: string | undefined, options: McpCommandOptions): P
     workspaceId = (created as { id: string }).id
     minted = typeof loaded.workspace_id !== 'string' || loaded.workspace_id === ''
   } else {
-    workspaceId = options.workspace ?? ''
+    workspaceId = workspace ?? ''
     await handleResponse(
       await client.request('GET', `/v1/workspaces/${encodeURIComponent(workspaceId)}`),
     )
   }
   const workspacePath = `/v1/workspaces/${encodeURIComponent(workspaceId)}`
-  const query =
-    options.session === undefined ? '' : `?sessionId=${encodeURIComponent(options.session)}`
-  const url = `${client.settings.url}${workspacePath}/mcp${query}`
-  const token = client.settings.authToken
-  const headers: Record<string, string> = token === '' ? {} : { Authorization: `Bearer ${token}` }
-  const { relayStdio } = await import('@struktoai/mirage-server/mcp')
-  const session = options.session
+  const query = session === undefined ? '' : `?session_id=${encodeURIComponent(session)}`
+  const url = `${client.settings.url}${workspacePath}/${endpoint}${query}`
   let refusal: string | undefined
   try {
     if (session !== undefined) {
@@ -121,9 +166,9 @@ async function runMcp(config: string | undefined, options: McpCommandOptions): P
         (error: unknown) => (error instanceof Error ? error.message : String(error)),
       )
     }
-    if (refusal === undefined) await relayStdio(url, headers)
+    if (refusal === undefined) await relay(url, () => client.token())
   } finally {
-    if (minted) await client.request('DELETE', workspacePath)
+    if (minted) await deleteWorkspace(client, workspaceId)
   }
   if (refusal !== undefined) fail(refusal, 2)
 }

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from mirage.runtime.constants import ABSENT_PATH
+from mirage.runtime.handles import FlushStep
 from mirage.runtime.types import VFSEntry, VFSStat
 from mirage.runtime.vfs import RuntimeVFS
 from mirage.runtime.wasm.build import BuildDir
@@ -365,19 +366,15 @@ class WasmView:
             path, atime=atime, mtime=mtime, nofollow=nofollow
         )
 
-    def flush(
-        self, path: str, base_len: int, low_write: int, buf: bytes | bytearray
-    ) -> None:
-        """Send a closing handle's buffer, as a delta when it can be one.
+    def flush(self, path: str, steps: list[FlushStep]) -> None:
+        """Send what a closing handle owes the mount.
 
         Args:
             path (str): guest-absolute path.
-            base_len (int): length the file had when the handle opened.
-            low_write (int): lowest offset this handle wrote at.
-            buf (bytes | bytearray): the handle's whole buffer.
+            steps (list[FlushStep]): the handle's ``flush_plan()``.
         """
         self._deny_build(path)
-        self._content_core(path).flush(path, base_len, low_write, buf)
+        self._content_core(path).flush(path, steps)
 
     def readdir(self, path: str) -> list[tuple[str, int]]:
         """List a guest directory as (name, preview1 filetype) pairs.

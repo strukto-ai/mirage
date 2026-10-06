@@ -1,0 +1,123 @@
+{
+  "cases": [
+    {
+      "id": "sha256sum_c_modifiers_ignore_missing_status_quiet_warn_strict",
+      "seq": 15600731,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcF_k3 && echo one > /data/fcF_k3/ok && (cd /data/fcF_k3 && sha256sum ok > L1 && sha256sum ok | sed 's/ok$/gone/' >> L1 && sha256sum ok > L2 && echo junk >> L2 && sha256sum -c --ignore-missing L1; echo rc=$?; sha256sum -c --status L1; echo rc=$?; sha256sum --check --quiet L1; echo rc=$?; sha256sum -c -w L2; echo rc=$?; sha256sum -c --strict L2; echo rc=$?); rm -r /data/fcF_k3",
+      "expect": {
+        "exit": 0,
+        "stdout": "ok: OK\nrc=0\nrc=1\ngone: FAILED open or read\nrc=1\nok: OK\nrc=0\nok: OK\nrc=1\n",
+        "stderr": "sha256sum: gone: No such file or directory\nsha256sum: gone: No such file or directory\nsha256sum: WARNING: 1 listed file could not be read\nsha256sum: L2: 2: improperly formatted SHA256 checksum line\nsha256sum: WARNING: 1 line is improperly formatted\nsha256sum: WARNING: 1 line is improperly formatted\n"
+      },
+      "flags": [
+        "c",
+        "ignore-missing",
+        "status",
+        "quiet",
+        "w",
+        "strict"
+      ]
+    },
+    {
+      "id": "sha256sum_c_refuses_t_b_and_z",
+      "seq": 15600732,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha256sum -c -t /data/b.txt; echo rc=$?; sha256sum --check --binary /data/b.txt; echo rc=$?; sha256sum -c -z /data/b.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\n",
+        "stderr": "sha256sum: the --binary and --text options are meaningless when verifying checksums\nTry 'sha256sum --help' for more information.\nsha256sum: the --binary and --text options are meaningless when verifying checksums\nTry 'sha256sum --help' for more information.\nsha256sum: the --zero option is not supported when verifying checksums\nTry 'sha256sum --help' for more information.\n"
+      },
+      "flags": [
+        "c",
+        "t",
+        "b",
+        "z"
+      ]
+    },
+    {
+      "id": "sha256sum_c_reads_a_stdin_entry_from_the_pipe",
+      "seq": 15700004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf x | sha256sum /dev/stdin > /data/fcR_k1; printf x | sha256sum - > /data/fcR_k2; cat /data/fcR_k1 /data/fcR_k2; printf x | sha256sum -c /data/fcR_k1; echo rc=$?; printf x | sha256sum -c /data/fcR_k2; echo rc=$?; printf y | sha256sum -c /data/fcR_k1; echo rc=$?; rm /data/fcR_k1 /data/fcR_k2",
+      "expect": {
+        "exit": 0,
+        "stdout": "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881  /dev/stdin\n2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881  -\n/dev/stdin: OK\nrc=0\n-: OK\nrc=0\n/dev/stdin: FAILED\nrc=1\n",
+        "stderr": "sha256sum: WARNING: 1 computed checksum did NOT match\n"
+      },
+      "flags": [
+        "c"
+      ]
+    }
+  ]
+}

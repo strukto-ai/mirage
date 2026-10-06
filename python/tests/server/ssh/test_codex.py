@@ -23,16 +23,15 @@ from typing import Any
 import asyncssh
 import pytest
 
-from mirage.server.ssh.codex import argv_line, process_env, to_path, to_uri
-from mirage.server.ssh.constants import (
-    CODEX_RETAINED_OUTPUT,
-    CODEX_SUBSYSTEM,
+from mirage.server.rpc.constants import (
     RPC_INTERNAL_ERROR,
     RPC_INVALID_PARAMS,
     RPC_INVALID_REQUEST,
     RPC_METHOD_NOT_FOUND,
     RPC_NOT_FOUND,
 )
+from mirage.server.ssh.codex import argv_line, process_env, to_path, to_uri
+from mirage.server.ssh.constants import CODEX_RETAINED_OUTPUT, CODEX_SUBSYSTEM
 from mirage.server.ssh.errors import CodexRPCError
 from tests.server.ssh.conftest import (
     SSHHarness,

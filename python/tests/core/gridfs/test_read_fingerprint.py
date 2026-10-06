@@ -16,7 +16,7 @@ import pytest
 from bson import ObjectId
 
 from mirage.core.gridfs import driver
-from mirage.core.gridfs.read import read_bytes
+from mirage.core.gridfs.read import read
 
 FILE_ID = ObjectId("0123456789ab0123456789ab")
 DOC = {"_id": FILE_ID, "length": 5, "uploadDate": None, "filename": "a.txt"}
@@ -53,14 +53,12 @@ async def test_stat_and_read_stamp_the_same_token(monkeypatch):
     assert meta is not None
 
     records = []
+    monkeypatch.setitem(read.__globals__, "latest_file", fake_latest_file)
     monkeypatch.setitem(
-        read_bytes.__globals__, "latest_file", fake_latest_file
+        read.__globals__, "bucket", lambda _a, _c=None: _Bucket()
     )
     monkeypatch.setitem(
-        read_bytes.__globals__, "bucket", lambda _a, _c=None: _Bucket()
-    )
-    monkeypatch.setitem(
-        read_bytes.__globals__,
+        read.__globals__,
         "record",
         lambda *a, **kw: records.append(kw.get("fingerprint")),
     )
@@ -71,7 +69,7 @@ async def test_stat_and_read_stamp_the_same_token(monkeypatch):
     accessor = type(
         "A", (), {"config": GridFSConfig(uri="mongodb://h", database="d")}
     )()
-    data = await read_bytes(accessor, PathSpec.from_str_path("/a.txt"))
+    data = await read(accessor, PathSpec.from_str_path("/a.txt"))
 
     assert data == b"hello"
     assert records == [str(FILE_ID)]

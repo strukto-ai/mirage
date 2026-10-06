@@ -1,0 +1,99 @@
+{
+  "cases": [
+    {
+      "id": "truncate_s_operation_sizes_and_mode_whitespace",
+      "seq": 15500101,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/fcE_ts && for s in 10 +2 -4 '<4' '>4' %4 /4 ' 4' ' +4' ' -4' ' <4' '<  4' '/ 2' '> 4' $'\\t<\\t4' '< 10K'; do printf 0123456789 > /data/fcE_ts/f; truncate -s \"$s\" /data/fcE_ts/f; wc -c < /data/fcE_ts/f; done; for s in '  8' $'\\t2k'; do printf '' > /data/fcE_ts/f; truncate -s \"$s\" /data/fcE_ts/f; wc -c < /data/fcE_ts/f; done; rm -rf /data/fcE_ts",
+      "expect": {
+        "exit": 0,
+        "stdout": "10\n12\n6\n4\n10\n12\n8\n4\n14\n6\n4\n4\n10\n10\n4\n10\n8\n2048\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "truncate_s_sign_after_mode_is_multiple_relative_modifiers",
+      "seq": 15500102,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "for s in '< +4' '<-4' '%+4' '>-4' $'<\\t+4'; do truncate -s \"$s\" /data/fcE_tm; echo rc=$?; done 2>&1; test -e /data/fcE_tm; echo created=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "truncate: multiple relative modifiers specified\nTry 'truncate --help' for more information.\nrc=1\ntruncate: multiple relative modifiers specified\nTry 'truncate --help' for more information.\nrc=1\ntruncate: multiple relative modifiers specified\nTry 'truncate --help' for more information.\nrc=1\ntruncate: multiple relative modifiers specified\nTry 'truncate --help' for more information.\nrc=1\ntruncate: multiple relative modifiers specified\nTry 'truncate --help' for more information.\nrc=1\ncreated=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "truncate_s_junk_is_an_invalid_number_and_leaves_the_file",
+      "seq": 15500103,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf abcdef > /data/fcE_tj; for s in abc '' 1x1K 2b 5c 1e '+ 4' '++4' '+4 ' '4 ' '10 K' ' ' ' abc' '<' '< ' '<4 ' 4B 4iB 0x10; do truncate -s \"$s\" /data/fcE_tj; echo rc=$?; done 2>&1; wc -c < /data/fcE_tj; rm -f /data/fcE_tj",
+      "expect": {
+        "exit": 0,
+        "stdout": "truncate: Invalid number: 'abc'\nrc=1\ntruncate: Invalid number: ''\nrc=1\ntruncate: Invalid number: '1x1K'\nrc=1\ntruncate: Invalid number: '2b'\nrc=1\ntruncate: Invalid number: '5c'\nrc=1\ntruncate: Invalid number: '1e'\nrc=1\ntruncate: Invalid number: '+ 4'\nrc=1\ntruncate: Invalid number: '++4'\nrc=1\ntruncate: Invalid number: '+4 '\nrc=1\ntruncate: Invalid number: '4 '\nrc=1\ntruncate: Invalid number: '10 K'\nrc=1\ntruncate: Invalid number: ''\nrc=1\ntruncate: Invalid number: 'abc'\nrc=1\ntruncate: Invalid number: ''\nrc=1\ntruncate: Invalid number: ''\nrc=1\ntruncate: Invalid number: '4 '\nrc=1\ntruncate: Invalid number: '4B'\nrc=1\ntruncate: Invalid number: '4iB'\nrc=1\ntruncate: Invalid number: '0x10'\nrc=1\n6\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "truncate_s_off_t_bounds_and_division_by_zero",
+      "seq": 15500104,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf 0123456789 > /data/fcE_tb; truncate -s -8E /data/fcE_tb; wc -c < /data/fcE_tb; printf 0123456789 > /data/fcE_tb; truncate -s -9223372036854775808 /data/fcE_tb; wc -c < /data/fcE_tb; printf 0123456789 > /data/fcE_tb; for s in 1Z 8E 9223372036854775808 /0; do truncate -s \"$s\" /data/fcE_tb; echo rc=$?; done 2>&1; wc -c < /data/fcE_tb; rm -f /data/fcE_tb",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n0\ntruncate: Invalid number: '1Z': Value too large for defined data type\nrc=1\ntruncate: Invalid number: '8E': Value too large for defined data type\nrc=1\ntruncate: Invalid number: '9223372036854775808': Value too large for defined data type\nrc=1\ntruncate: division by zero\nrc=1\n10\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "truncate_s_quotes_a_tab_in_the_number",
+      "seq": 15500105,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "truncate -s $'4\\t' /data/fcE_tq; echo rc=$?; test -e /data/fcE_tq; echo created=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\ncreated=1\n",
+        "stderr": "truncate: Invalid number: '4\\t'\n"
+      },
+      "flags": [
+        "s"
+      ]
+    }
+  ]
+}

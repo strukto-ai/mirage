@@ -22,7 +22,7 @@ describe('ioResultToDict', () => {
   it('carries a null refusal on an ordinary run', () => {
     expect(ioResultToDict(new ExecuteResult(enc('hi\n'), enc(''), 0))).toEqual({
       kind: 'io',
-      exitCode: 0,
+      exit_code: 0,
       stdout: 'hi\n',
       stderr: '',
       refusal: null,
@@ -39,7 +39,7 @@ describe('ioResultToDict', () => {
     })
     expect(ioResultToDict(refused)).toEqual({
       kind: 'io',
-      exitCode: 126,
+      exit_code: 126,
       stdout: '',
       stderr: 'rm: Permission denied\n',
       refusal: {
@@ -47,7 +47,7 @@ describe('ioResultToDict', () => {
         reason: 'sign-off',
         policy: '',
         scope: 'command',
-        askId: 'abc123',
+        ask_id: 'abc123',
       },
     })
   })

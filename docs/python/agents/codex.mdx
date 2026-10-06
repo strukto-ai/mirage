@@ -1,69 +1,82 @@
 ---
 title: OpenAI Codex
-description: Run OpenAI's Codex against any Mirage workspace, through a FUSE mount or as a remote environment over SSH.
+description: Connect Codex to a Mirage workspace through the CLI, SSH or a FUSE mount.
 icon: /images/openai-logo.svg
 ---
 
-[OpenAI Codex](https://github.com/openai/codex) can use Mirage through an installable [TypeScript plugin](/typescript/agents/codex), a FUSE mount, or a [remote environment over SSH](#run-codexs-own-tools-over-ssh). The Python integration [FUSE-mounts](/python/setup/fuse) a workspace as a normal host directory, so Codex's built-in filesystem and shell tools operate on Mirage without a separate tool server.
+| Way | Codex gets | Needs |
+| --- | --- | --- |
+| [CLI](#cli) | Mirage's seven tools, beside its own | the `mirage` CLI |
+| [SSH](#ssh) | its own tools, run in the workspace | the daemon's [SSH server](/home/access/ssh) |
+| [FUSE](#fuse) | its own tools, on the workspace as a folder | a [FUSE driver](/home/setup/fuse) |
 
 ## Install
 
 ```bash
-uv add 'mirage-ai[fuse]'
+uv tool install 'mirage-ai[fuse]'
 ```
 
-Then install [OpenAI Codex](https://github.com/openai/codex) separately.
+Install [Codex](https://github.com/openai/codex) separately.
 
-## Usage
+## Workspace
 
-```python
-from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.vfs.ram import RAMVFS
-
-with Workspace(
-    {"/": Mount(RAMVFS(), mode=MountMode.WRITE, backend=MountBackend.FUSE)}) as ws:
-    print(f"cd {ws.fuse_mountpoint} && codex")
-    input("Press Enter when done...")
+```yaml workspace.yaml
+mode: write
+mounts:
+  /:
+    vfs: ram
+    backend: fuse                 # FUSE only
+    mountpoint: /tmp/mirage-demo  # FUSE only
+  /s3:
+    vfs: s3
+    mode: read
+    config:
+      bucket: my-bucket
 ```
 
-The mountpoint behaves like a regular directory. Codex's built-in file and shell tools all dispatch through Mirage's ops layer. For the Codex app, open the mountpoint as the project folder instead of starting `codex` from it.
+```bash
+mirage workspace create workspace.yaml --id demo
+```
 
-## Run Codex's own tools over SSH
+## CLI
 
-Codex can keep its agent on your machine and run every tool call (shell
-commands, file reads, `apply_patch`) in a remote environment. The Mirage
-daemon serves that environment on its [SSH door](/home/ssh#run-codex-in-a-workspace)
-as the `codex-exec` subsystem, so Codex's built-in tools work on the
-workspace with no FUSE driver and no plugin.
+```bash
+codex mcp add mirage -- mirage mcp -w demo
+```
 
-1. Turn on the SSH door and create a workspace, as in [SSH Access](/home/ssh#turn-it-on).
-2. Name the environment in `~/.codex/environments.toml`:
+Codex gets `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob` from the workspace's [MCP server](/home/access/mcp).
 
-   ```toml
-   default = "mirage"
-   include_local = false
+Or install the Mirage plugin, which adds a skill and reads `.mirage/workspace.yaml` from your project instead:
 
-   [[environments]]
-   id = "mirage"
-   program = "ssh"
-   args = ["-T", "-p", "2222", "demo@127.0.0.1", "-s", "codex-exec"]
-   ```
+```bash
+codex plugin marketplace add strukto-ai/mirage
+codex plugin add mirage@mirage
+```
 
-3. Start Codex from a directory that exists on your machine, and use absolute workspace paths:
+## SSH
 
-   ```bash
-   codex -C /
-   ```
+Turn on the daemon's [SSH server](/home/access/ssh#turn-it-on), then add it as a Codex environment:
 
-Codex keeps its UI, sessions, model, approvals and login. Each command runs
-in the login's Mirage session under its key's profile, and file calls follow
-the mounts' modes. This route is for the Codex CLI; the Codex app's SSH
-connections run the agent on the host, so they need Codex installed there.
+```toml ~/.codex/environments.toml
+default = "mirage"
+include_local = false
 
-## Which route?
+[[environments]]
+id = "mirage"
+program = "ssh"
+args = ["-T", "-p", "2222", "demo@127.0.0.1", "-s", "codex-exec"]
+```
 
-Use Python FUSE when you want Codex's built-in filesystem tools to see Mirage as an ordinary directory. This works in the CLI and app, but requires an OS FUSE driver and does not add Mirage's agent-level stale-write check.
+```bash
+codex -C /
+```
 
-Use the SSH environment when Codex's built-in tools should run in a workspace the daemon serves, with no driver on your machine. It works in the CLI and runs under the SSH key's profile; like FUSE, it adds no stale-write check.
+Codex's shell commands, file reads and patches run in the workspace, under the SSH key's profile. This works in the Codex CLI, not the app. The protocol is experimental and follows Codex 0.147.
 
-Use the [TypeScript plugin](/typescript/agents/codex) when you want named Mirage tools, Pi-style stale-write protection, and plugin installation through Codex. The plugin uses Mirage's standard MCP adapter internally.
+## FUSE
+
+```bash
+cd /tmp/mirage-demo && codex
+```
+
+Every file and shell call Codex makes goes through Mirage: `/tmp/mirage-demo/s3` is the bucket. In the Codex app, open the mountpoint as the project folder. `mirage workspace delete demo` unmounts it. On macOS the daemon holds one FUSE mount at a time.

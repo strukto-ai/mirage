@@ -1,0 +1,40 @@
+{
+  "cases": [
+    {
+      "id": "lockdown_script",
+      "world": {
+        "runtimes": [
+          {
+            "name": "workspace",
+            "script": "'secret' not in ctx['line']"
+          },
+          {
+            "name": "monty",
+            "captures": []
+          }
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "echo fine",
+          "expect": {
+            "exit": 0,
+            "stdout": "fine\n"
+          }
+        },
+        {
+          "command": "cat /ram/secret.txt",
+          "expect": {
+            "exit": 126,
+            "stderr_contains": "no runtime accepted this line"
+          }
+        }
+      ]
+    }
+  ]
+}

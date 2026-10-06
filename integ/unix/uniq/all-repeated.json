@@ -73,6 +73,80 @@
       "flags": [
         "all-repeated"
       ]
+    },
+    {
+      "id": "uniq_all_repeated_refusals_list_and_escape",
+      "seq": 15500207,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nb\\n' | uniq --all-repeated=x; echo rc=$?; printf 'a\\n' | uniq --all-repeated=; echo rc=$?; for t in é $'\\r' $'\\001' $'\\177' \"'\" '\\'; do printf 'a\\n' | uniq --all-repeated=\"x$t\" 2>&1 | head -n 1; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nuniq: invalid argument 'x\\303\\251' for '--all-repeated'\nuniq: invalid argument 'x\\r' for '--all-repeated'\nuniq: invalid argument 'x\\001' for '--all-repeated'\nuniq: invalid argument 'x\\177' for '--all-repeated'\nuniq: invalid argument 'x\\'' for '--all-repeated'\nuniq: invalid argument 'x\\\\' for '--all-repeated'\n",
+        "stderr": "uniq: invalid argument 'x' for '--all-repeated'\nValid arguments are:\n  - 'none'\n  - 'prepend'\n  - 'separate'\nTry 'uniq --help' for more information.\nuniq: ambiguous argument '' for '--all-repeated'\nValid arguments are:\n  - 'none'\n  - 'prepend'\n  - 'separate'\nTry 'uniq --help' for more information.\n"
+      },
+      "flags": [
+        "all-repeated"
+      ]
+    },
+    {
+      "id": "uniq_all_repeated_accepts_an_unambiguous_prefix",
+      "seq": 15500208,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for w in n p se; do echo \"-- $w\"; printf 'a\\na\\nb\\n' | uniq --all-repeated=$w; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "-- n\na\na\n-- p\n\na\na\n-- se\na\na\n",
+        "stderr": ""
+      },
+      "flags": [
+        "all-repeated"
+      ]
     }
   ]
 }

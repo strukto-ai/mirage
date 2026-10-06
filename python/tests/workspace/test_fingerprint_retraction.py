@@ -303,7 +303,8 @@ def test_moving_one_object_spares_an_independent_descendant_pin():
     The end-to-end case the unit tests could not see: both rename paths
     used to record the same op name, so capture treated a one-object
     move as a prefix move and dropped a pin for an object that had not
-    moved.
+    moved. tee will not write under a file, so `a` lands out of band
+    after `a/child`.
     """
     store: dict[str, bytes] = {}
     with _mounted(store):
@@ -311,12 +312,10 @@ def test_moving_one_object_spares_an_independent_descendant_pin():
         async def run() -> tuple[list[str], list[str]]:
             ws = _ws()
             try:
-                await (
-                    await ws.shell("tee /s3/a", stdin=b"A\n")
-                ).materialize_stdout()
-                await (
-                    await ws.shell("tee /s3/a/child", stdin=b"C\n")
-                ).materialize_stdout()
+                child = await ws.shell("tee /s3/a/child", stdin=b"C\n")
+                await child.materialize_stdout()
+                assert child.exit_code == 0
+                store["a"] = b"A\n"
                 await ws.shell("mv /s3/a /s3/b")
                 state = await to_state_dict(ws)
                 return sorted(store), sorted(

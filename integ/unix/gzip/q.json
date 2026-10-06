@@ -1,0 +1,40 @@
+{
+  "cases": [
+    {
+      "id": "gzip_q_drops_warnings_and_keeps_errors",
+      "seq": 15100101,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_gq/d && printf 'x\\n' > /data/fcA_gq/d/f && printf 'hi\\n' | gzip > /data/fcA_gq/y.gz && printf 'a\\n' > /data/fcA_gq/e && printf 'b\\n' > /data/fcA_gq/e.gz && gzip -q /data/fcA_gq/d; echo rc=$?; gzip -cq /data/fcA_gq/d; echo rc=$?; gzip -q /data/fcA_gq/y.gz; echo rc=$?; (printf hello | gzip; printf junk) | gzip -dq; echo \" rc=$?\"; gzip -q /data/fcA_gq/e; echo rc=$?; gzip -q /data/fcA_gq/nope; echo rc=$?; ls /data/fcA_gq; rm -r /data/fcA_gq)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\nrc=0\nhello rc=2\nrc=2\nrc=1\nd\ne\ne.gz\ny.gz\n",
+        "stderr": "gzip: /data/fcA_gq/e.gz already exists;\tnot overwritten\ngzip: /data/fcA_gq/nope: No such file or directory\n"
+      },
+      "flags": [
+        "q"
+      ]
+    }
+  ]
+}

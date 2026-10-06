@@ -94,7 +94,8 @@
         "exit": 0,
         "stdout": "/data/disptree/al1311\n/data/disptree/d/y.txt\n/data/disptree/x.txt\n/data/disptree/d/y.txt\n/data/disptree/x.txt\n",
         "stderr": ""
-      }
+      },
+      "flags": ["follow", "no_follow", "L", "l", "sort"]
     },
     {
       "id": "rg_L_descends_a_directory_link",
@@ -153,7 +154,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(ln -s nowhere /data/disptree/dang1311 && rg -L -l --sort path . /data/disptree; echo rc=$?; rg -L -l -g '*.md' . /data/disptree; rc=$?; rm /data/disptree/dang1311; exit $rc)",
+      "command": "(ln -s nowhere /data/disptree/dang1311 && rg -j1 -L -l --sort path . /data/disptree; echo rc=$?; rg -j1 -L -l -g '*.md' . /data/disptree; rc=$?; rm /data/disptree/dang1311; exit $rc)",
       "expect": {
         "exit": 2,
         "stdout": "/data/disptree/d/y.txt\n/data/disptree/x.txt\nrc=2\n",
@@ -287,6 +288,151 @@
         "stdout": "/data/dtl1311/d/y.txt\n/data/dtl1311/x.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "rg_L_after_no_follow_follows_file_and_directory_links",
+      "seq": 15200031,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcB_L/s /data/fcB_L/t && printf 'hello\\nworld\\n' > /data/fcB_L/a.txt && printf o > /data/fcB_L/s/f && printf o > /data/fcB_L/t/g && (cd /data/fcB_L && ln -s ../a.txt s/al && rg --no-follow -L --sort path o s; rg -L --files --sort path s; rm s/al && ln -s ../t s/tl && rg --sort path o s; rg -L --sort path o s); rm -rf /data/fcB_L",
+      "expect": {
+        "exit": 0,
+        "stdout": "s/al:hello\ns/al:world\ns/f:o\ns/al\ns/f\ns/f:o\ns/f:o\ns/tl/g:o\n",
+        "stderr": ""
+      },
+      "flags": [
+        "L",
+        "no_follow",
+        "files",
+        "sort"
+      ]
+    },
+    {
+      "id": "rg_L_reports_unfollowable_links_before_any_filter",
+      "seq": 15200032,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcB_L2/s /data/fcB_L2/t && printf o > /data/fcB_L2/s/f && printf o > /data/fcB_L2/t/g && (cd /data/fcB_L2 && ln -s nowhere s/.dang && rg -L --sort path -g '*.txt' o s; echo rc=$?; rm s/.dang && ln -s . s/.self && rg -L --sort path o s; echo rc=$?; rm s/.self && ln -s ../t s/tl && ln -s ../s t/sl && rg -L --sort path o s; echo rc=$?; rm s/tl t/sl && mkdir s/sub && printf o > s/sub/h && ln -s .. s/sub/up && (cd s && rg -L --files --sort path); echo rc=$?); rm -rf /data/fcB_L2",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\ns/f:o\nrc=2\ns/f:o\ns/tl/g:o\nrc=2\nf\nsub/h\nrc=2\n",
+        "stderr": "rg: s/.dang: IO error for operation on s/.dang: No such file or directory (os error 2)\nrg: File system loop found: s/.self points to an ancestor s\nrg: File system loop found: s/tl/sl points to an ancestor s\nrg: File system loop found: ./sub/up points to an ancestor ./\n"
+      },
+      "flags": [
+        "L",
+        "g",
+        "files",
+        "sort"
+      ]
+    },
+    {
+      "id": "rg_L_q_exits_0_past_a_dangling_link",
+      "seq": 15200033,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcB_L3 && printf o > /data/fcB_L3/f && ln -s nowhere /data/fcB_L3/dang && rg -L -q --sort path o /data/fcB_L3; echo rc=$?; rg -L -q --sort path zzz /data/fcB_L3; echo rc=$?; rm -rf /data/fcB_L3",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrc=2\n",
+        "stderr": "rg: /data/fcB_L3/dang: IO error for operation on /data/fcB_L3/dang: No such file or directory (os error 2)\nrg: /data/fcB_L3/dang: IO error for operation on /data/fcB_L3/dang: No such file or directory (os error 2)\n"
+      },
+      "flags": [
+        "L",
+        "q",
+        "sort"
+      ]
+    },
+    {
+      "id": "rg_L_parallel_walk_names_a_dangling_link_once",
+      "seq": 15800045,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/crw/s && echo x > /data/crw/f && ln -s nowhere /data/crw/dang && rg -L x /data/crw; echo rc=$?; rg -j1 -L x /data/crw; echo rc=$?; rg --sort path -L x /data/crw; echo rc=$?; rg -L --files /data/crw; echo rc=$?; (cd /data/crw && rg -L x; echo rc=$?); rm -r /data/crw",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/crw/f:x\nrc=2\n/data/crw/f:x\nrc=2\n/data/crw/f:x\nrc=2\n/data/crw/f\nrc=2\nf:x\nrc=2\n",
+        "stderr": "rg: /data/crw/dang: No such file or directory (os error 2)\nrg: /data/crw/dang: IO error for operation on /data/crw/dang: No such file or directory (os error 2)\nrg: /data/crw/dang: IO error for operation on /data/crw/dang: No such file or directory (os error 2)\nrg: /data/crw/dang: No such file or directory (os error 2)\nrg: ./dang: No such file or directory (os error 2)\n"
+      },
+      "flags": [
+        "L",
+        "j",
+        "sort",
+        "files"
+      ]
     }
   ]
 }

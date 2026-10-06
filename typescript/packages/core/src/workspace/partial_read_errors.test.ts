@@ -283,11 +283,12 @@ describe('rest of the read family keeps partial output past missing', () => {
     ['fold /a/f.txt /a/missing.txt', '1\n2\n', 'fold'],
     ['fmt /a/f.txt /a/missing.txt', '1 2\n', 'fmt'],
   ]
-  // tac and fmt name the open that failed (FAILURE_WORDING); the rest
+  // tac, fmt and rev name the open that failed (FAILURE_WORDING); the rest
   // print the plain line.
   const WORDED: Record<string, string> = {
     tac: "tac: failed to open '/a/missing.txt' for reading: No such file or directory\n",
     fmt: "fmt: cannot open '/a/missing.txt' for reading: No such file or directory\n",
+    rev: 'rev: cannot open /a/missing.txt: No such file or directory\n',
   }
   for (const [cmd, expected, name] of CASES) {
     it(`${name} keeps partial output`, async () => {

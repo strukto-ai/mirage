@@ -1,0 +1,138 @@
+{
+  "cases": [
+    {
+      "id": "rmdir_refuses_a_nonempty_directory",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "d/a.txt": "xy\n",
+              "e/keep.txt": "k\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "mkdir /data/d1",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "import os\nos.rmdir('/data/d1')",
+            "js": "console.log(os.remove('/data/d1'))"
+          },
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\ntry:\n    Path('/data/d').rmdir()\nexcept OSError as e:\n    print(type(e).__name__)",
+            "js": "console.log(os.remove('/data/d') !== 0)"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "OSError\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "true\n"
+            }
+          }
+        },
+        {
+          "command": "cat /data/d/a.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "xy\n"
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\nPath('/data/d/a.txt').unlink()\nPath('/data/d').rmdir()\nprint(Path('/data/d').exists())",
+            "js": "console.log(os.remove('/data/d/a.txt'), os.remove('/data/d'), os.stat('/data/d')[1])"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "False\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "0 0 44\n"
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\ntry:\n    Path('/data/gone').rmdir()\nexcept OSError as e:\n    print(type(e).__name__)",
+            "js": "console.log(os.remove('/data/gone'))"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "-44\n"
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "import os, shutil\nshutil.rmtree('/data/e')\nprint(os.path.exists('/data/e'))",
+            "js": "for (const name of os.readdir('/data/e')[0]) {\n  if (name !== '.' && name !== '..') os.remove('/data/e/' + name)\n}\nconsole.log(os.remove('/data/e'), os.stat('/data/e')[1])"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "False\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "0 44\n"
+            }
+          },
+          "expect_on": {
+            "monty": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "No module named 'shutil'"
+            }
+          }
+        },
+        {
+          "command": "ls /data",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          },
+          "expect_on": {
+            "monty": {
+              "stdout": "e\n"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

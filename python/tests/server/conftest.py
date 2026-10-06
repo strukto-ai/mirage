@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pytest
+from sse_starlette.sse import AppStatus
 
 
 @pytest.fixture(autouse=True)
@@ -47,3 +48,12 @@ def _disable_auth_for_legacy_tests(monkeypatch, request, tmp_path_factory):
     monkeypatch.setenv(
         "MIRAGE_HOME", str(tmp_path_factory.mktemp("mirage_home"))
     )
+
+
+@pytest.fixture(autouse=True)
+def _fresh_sse_exit_flag():
+    # sse_starlette keeps one process-wide "server is exiting" flag and
+    # sets it when it sees any uvicorn server in the process shut down,
+    # so an earlier test's server would end every later test's SSE
+    # answer at once (the MCP route's streamed tool calls).
+    AppStatus.should_exit = False

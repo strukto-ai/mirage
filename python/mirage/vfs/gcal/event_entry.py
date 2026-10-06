@@ -17,7 +17,7 @@ import re
 from mirage.utils.naming import make_id_name
 from mirage.utils.sanitize import (
     NAME_MAX_BYTES,
-    byte_len,
+    byte_length,
     sanitize_name,
     truncate_bytes,
 )
@@ -78,7 +78,7 @@ def make_event_filename(
     """
     label = hhmm if day is None else f"{day}_{hhmm}"
     fixed = (
-        byte_len(event_id)
+        byte_length(event_id)
         + len("__")
         + len(label)
         + len("_")

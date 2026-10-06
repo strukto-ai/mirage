@@ -17,7 +17,7 @@ import { recordStatus } from '@struktoai/mirage-core/workspace/executor/statemen
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { ServerChannel } from 'ssh2'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
-import { PROFILE_OPTION } from './constants.ts'
+import { ACCOUNT_OPTION, PROFILE_OPTION } from './constants.ts'
 import { ChannelInput, ChannelOutput, Mark, channelStdin, deliver } from './stream.ts'
 
 const AGENT_ID = 'ssh'
@@ -60,6 +60,8 @@ export interface ChannelRequest {
   username: string
   /** The login key's `mirage-profile` values; empty when it has none. */
   profile: readonly string[]
+  /** The login key's `mirage-account` values; empty when it has none. */
+  account: readonly string[]
   command: string | null
   term: string | null
   peer: Endpoint | null
@@ -96,13 +98,48 @@ function shellQuote(value: string): string {
  * runs under the workspace's default profile. A bare, empty or repeated
  * option is refused.
  */
-export function keyProfile(values: readonly string[]): string | null {
+function keyOption(values: readonly string[], option: string, what: string): string | null {
   if (values.length === 0) return null
   const [name] = values
   if (values.length !== 1 || name === undefined || name === '') {
-    throw new Error(`${PROFILE_OPTION} must name exactly one profile`)
+    throw new Error(`${option} must name exactly one ${what}`)
   }
   return name
+}
+
+export function keyProfile(values: readonly string[]): string | null {
+  return keyOption(values, PROFILE_OPTION, 'profile')
+}
+
+/**
+ * The account the login's key belongs to, if any: its line's
+ * `mirage-account="<name>"`. The account may open only the workspaces it
+ * owns; a key without the option has no account.
+ */
+function keyAccount(values: readonly string[]): string | null {
+  return keyOption(values, ACCOUNT_OPTION, 'account')
+}
+
+/**
+ * The workspace a login may open, else null. One rule for every channel
+ * kind: the key's account must be allowed the workspace its username
+ * names. A key whose account option is malformed opens nothing.
+ */
+export function loginEntry(
+  registry: WorkspaceRegistry,
+  workspaceId: string,
+  account: readonly string[],
+): WorkspaceEntry | null {
+  let name: string | null
+  try {
+    name = keyAccount(account)
+  } catch (err) {
+    console.warn(
+      `ssh: refusing ${workspaceId}: ${err instanceof Error ? err.message : String(err)}`,
+    )
+    return null
+  }
+  return registry.visible(workspaceId, name)
 }
 
 /**
@@ -165,7 +202,7 @@ export class ShellChannel {
     private readonly channel: ServerChannel,
     private readonly request: ChannelRequest,
   ) {
-    this.tty = request.term !== null && request.term !== ''
+    this.tty = request.term !== null
     this.input = new ChannelInput(channel, this.tty)
     this.output = new ChannelOutput(channel, this.tty)
   }
@@ -296,11 +333,11 @@ export async function handleChannel(
   request: ChannelRequest,
   started: (shell: ShellChannel) => void,
 ): Promise<void> {
-  if (!registry.has(request.username)) {
+  const entry = loginEntry(registry, request.username, request.account)
+  if (entry === null) {
     refuse(channel, `no such workspace: ${request.username}`)
     return
   }
-  const entry = registry.get(request.username)
   const sessionId = newSessionId()
   try {
     await openSession(entry.runner.ws, sessionId, loginEnv(request), keyProfile(request.profile))

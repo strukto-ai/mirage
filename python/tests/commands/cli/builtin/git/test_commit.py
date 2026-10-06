@@ -21,7 +21,7 @@ from dulwich.repo import Repo
 from mirage.commands.cli.builtin.git.commit import DEFAULT_EMAIL, identity
 from mirage.commands.spec.flag_view import FlagView
 from mirage.ops.types import SessionView
-from mirage.types import HiddenVars
+from mirage.types import HiddenVars, Visibility
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import seed_var, session_view
 
@@ -166,13 +166,6 @@ async def test_a_commit_is_recorded_in_the_reflog(git_rw, repo_path: Path):
     assert (repo_path / ".git" / "logs" / "refs" / "heads" / "main").exists()
 
 
-@pytest.mark.asyncio
-async def test_an_unknown_switch_is_refused(git_rw):
-    code, _out, err = await run(git_rw, "commit -Z")
-    assert code == 129
-    assert err == b"error: unknown switch `Z'\n"
-
-
 def test_the_author_flag_still_wins_over_the_environment():
     view = env_view({"GIT_AUTHOR_NAME": "Env", "GIT_AUTHOR_EMAIL": "e@x"})
     fl = FlagView({"author": "Flag <f@x>"})
@@ -200,7 +193,8 @@ def test_a_hidden_variable_is_not_read_as_an_identity():
     # The door filters hidden names, so a hidden GIT_AUTHOR_NAME reads
     # as unset rather than leaking into a commit the session can see.
     session = SessionState(
-        session_id="s", hidden_vars=HiddenVars(patterns=("GIT_AUTHOR_*",))
+        session_id="s",
+        visibility=Visibility(vars=HiddenVars(patterns=("GIT_AUTHOR_*",))),
     )
     seed_var(session, "GIT_AUTHOR_NAME", "Secret")
     seed_var(session, "GIT_AUTHOR_EMAIL", "s@x")

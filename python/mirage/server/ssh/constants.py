@@ -23,8 +23,19 @@ HOST_KEY_NAME = "host_ed25519_key"
 AUTHORIZED_KEYS_NAME = "authorized_keys"
 
 # The module that serves the door. It imports asyncssh, which is the
-# `ssh` extra, so the daemon loads it by path only once a port is set.
+# `ssh` extra, so the daemon loads it by path only once a port is set or
+# the HTTPS route carries a connection.
 SERVER_MODULE = "mirage.server.ssh.server:start_ssh_server"
+TUNNEL_MODULE = "mirage.server.ssh.server:serve_tunnel"
+
+# How many bytes the HTTPS route relays at a time.
+TUNNEL_CHUNK = 64 * 1024
+
+# How much of each stream's start and end the door keeps to tell whether
+# a refusal already says why: the refused command's own diagnostic sits
+# near the start of a line refused early and near the end of one refused
+# late, so both ends hold it without the whole output.
+REFUSAL_WINDOW = 4096
 
 # The most entry stats one listing keeps in flight. Each is a hop to the
 # workspace loop and, on a mount that keeps no listing index, a backend
@@ -36,11 +47,21 @@ LISTING_CONCURRENCY = 16
 # reads it, never the client, so a key cannot pick a looser profile.
 PROFILE_OPTION = "mirage-profile"
 
+# The authorized_keys option naming the account a key belongs to
+# (`mirage-account="alice" ssh-ed25519 AAAA...`). The account opens only
+# the workspaces it owns; in jwt mode a key without one opens nothing.
+ACCOUNT_OPTION = "mirage-account"
+
+# A client that answers no keepalive for this many intervals is gone,
+# so its connection closes and the line it was running is cancelled
+# rather than left behind a half-open socket.
+KEEPALIVE_INTERVAL_SECONDS = 15
+KEEPALIVE_COUNT_MAX = 3
+
 # The subsystem Codex opens (`ssh ... -s codex-exec`) to run its tools in
 # a workspace. It speaks Codex's exec-server protocol: one JSON-RPC
 # message per line, without the `jsonrpc` member.
 CODEX_SUBSYSTEM = "codex-exec"
-MCP_SUBSYSTEM = "mcp"
 CODEX_AGENT_ID = "codex"
 CODEX_SHELL_NAME = "bash"
 CODEX_SHELL_PATH = "/bin/bash"
@@ -59,13 +80,6 @@ CODEX_CTRL_D = b"\x04"
 # interrupt reads as 128 + SIGINT, a terminated process as no status.
 CODEX_INTERRUPTED = 130
 CODEX_TERMINATED = -1
-
-RPC_PARSE_ERROR = -32700
-RPC_INVALID_REQUEST = -32600
-RPC_METHOD_NOT_FOUND = -32601
-RPC_INVALID_PARAMS = -32602
-RPC_INTERNAL_ERROR = -32603
-RPC_NOT_FOUND = -32004
 
 SSH_ENV_KEYS = {
     "ssh_port": ENV_SSH_PORT,

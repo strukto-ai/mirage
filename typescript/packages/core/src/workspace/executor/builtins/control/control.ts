@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { concat } from '../../../../io/cachable_iterator.ts'
-import { IOResult } from '../../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CallStack } from '../../../../shell/call_stack.ts'
 import { ExitSignal } from '../../../../shell/errors.ts'
 import type { SessionState } from '../../../session/session.ts'
@@ -22,6 +22,8 @@ import { ReturnSignal } from '../../../../shell/errors.ts'
 import { builtinError, isCountWord, numericOperands, statusOf } from '../shared.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { BreakSignal, ContinueSignal } from '../../control.ts'
+import { runExitTrap } from '../../traps.ts'
+import type { ExecuteFn } from '../../../expand/node.ts'
 
 /** `true`: succeed and print nothing. */
 export function handleTrue(): Result {
@@ -78,19 +80,43 @@ export function handleReturn(
   throw new ReturnSignal(status, err)
 }
 
-/** Exit the shell, with bash's argument checks. */
-export function handleExit(args: readonly string[], session: SessionState): Result {
+/**
+ * Exit the shell, with bash's argument checks, running its EXIT action
+ * first, where `exit` was called: a function's locals and `$1` are still in
+ * scope, as they are for bash's. `stdin` is the shell's input, which the
+ * action reads; `callStack` holds the frames `exit` was called in.
+ */
+export async function handleExit(
+  args: readonly string[],
+  session: SessionState,
+  executeFn: ExecuteFn | null = null,
+  stdin: ByteSource | null = null,
+  callStack: CallStack | null = null,
+): Promise<Result> {
   const words = numericOperands(args)
   const first = words[0]
+  let code: number
+  let err: Uint8Array = new Uint8Array()
   if (first !== undefined && !isCountWord(first)) {
     // bash exits with 2 after the diagnostic.
-    throw new ExitSignal(2, builtinError('exit', `${first}: numeric argument required`))
-  }
-  if (words.length > 1) {
+    code = 2
+    err = builtinError('exit', `${first}: numeric argument required`)
+  } else if (words.length > 1) {
     // bash abandons everything still to run, and exits nowhere.
-    throw new ExitSignal(1, builtinError('exit', 'too many arguments'))
+    code = 1
+    err = builtinError('exit', 'too many arguments')
+  } else if (first !== undefined) {
+    code = statusOf(first)
+  } else {
+    code = (session.trapStatus ?? session.lastExitCode) % 256
   }
-  throw new ExitSignal(first !== undefined ? statusOf(first) : session.lastExitCode % 256)
+  const cleanup = await runExitTrap(executeFn, session, code, stdin, callStack)
+  if (cleanup === null) throw new ExitSignal(code, err)
+  throw new ExitSignal(
+    cleanup.exitCode,
+    concat([err, await cleanup.materializeStderr()]),
+    await cleanup.materializeStdout(),
+  )
 }
 
 /**
@@ -153,7 +179,7 @@ export function returnBuiltin(call: BuiltinCall): Promise<Result> {
 
 /** The `exit` arm. */
 export function exitBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(handleExit([...call.argv.args], call.session))
+  return handleExit([...call.argv.args], call.session, call.executeFn, call.stdin, call.callStack)
 }
 
 /** The `break` arm: unwinds the enclosing loops by throwing. */

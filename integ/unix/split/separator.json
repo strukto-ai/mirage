@@ -38,6 +38,43 @@
         "stderr": ""
       },
       "flags": ["separator", "lines"]
+    },
+    {
+      "id": "split_t_single_bytes_split_literally",
+      "seq": 15300309,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/fcC_st && (cd /data/fcC_st && printf 'a0b0c0' > z && split -t 0 -l 2 z d && printf 'a\\\\b\\\\c\\\\' > s && split -t '\\' -l 2 s b && cat daa; echo '|'; cat dab; echo '|'; cat baa; echo '|'; cat bab; echo); rm -r /data/fcC_st",
+      "expect": {
+        "exit": 0,
+        "stdout": "a0b0|\nc0|\na\\b\\|\nc\\\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "l"
+      ]
+    },
+    {
+      "id": "split_t_multi_byte_values_are_refused",
+      "seq": 15300310,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "for v in abc '\\n' '\\t' é; do split -t \"$v\" /data/a.txt /data/fcC_t 2>&1; echo rc=$?; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "split: multi-character separator 'abc'\nrc=1\nsplit: multi-character separator '\\\\n'\nrc=1\nsplit: multi-character separator '\\\\t'\nrc=1\nsplit: multi-character separator '\\303\\251'\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
     }
   ]
 }

@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {
+      "id": "od_N_refusals_name_the_argument",
+      "seq": 15500301,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "for v in abc '' x10 ++10 -10 '+ 10' 1Q; do od -N \"$v\" /data/a.txt; echo rc=$?; done 2>&1; od -An -c -N 18446744073709551615 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "od: invalid -N argument 'abc'\nrc=1\nod: invalid -N argument ''\nrc=1\nod: invalid -N argument 'x10'\nrc=1\nod: invalid -N argument '++10'\nrc=1\nod: invalid -N argument '-10'\nrc=1\nod: invalid -N argument '+ 10'\nrc=1\nod: -N argument '1Q' too large\nrc=1\n   h   e   l   l   o  \\n   w   o   r   l   d  \\n   f   o   o  \\n\n   b   a   r  \\n   b   a   z  \\n\n",
+        "stderr": ""
+      },
+      "flags": [
+        "N",
+        "A",
+        "c"
+      ]
+    }
+  ]
+}

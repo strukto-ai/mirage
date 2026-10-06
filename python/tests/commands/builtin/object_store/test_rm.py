@@ -5,7 +5,7 @@ import pytest
 
 from mirage.commands.builtin.generic_bind.adapter import (
     CommandIO,
-    with_path_guards,
+    with_command_guards,
 )
 from mirage.commands.builtin.object_store.rm import make_rm
 from mirage.commands.config import CommandOpts
@@ -13,20 +13,26 @@ from mirage.types import FileStat, FileType, PathSpec
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("force", [False, True])
 @pytest.mark.parametrize(
-    "refusal,raw,message",
+    "force,refusal,raw,code,stderr",
     [
-        ("ENOENT", "", "No such file or directory"),
-        ("ELOOP", "loop/child", "Too many levels of symbolic links"),
+        (
+            False,
+            "ELOOP",
+            "loop/child",
+            1,
+            b"rm: cannot remove 'loop/child': "
+            b"Too many levels of symbolic links\n",
+        ),
+        (True, "ENOENT", "", 0, None),
     ],
 )
 async def test_rm_refused_operand_keeps_spelling_and_continues(
-    force, refusal, raw, message
+    force, refusal, raw, code, stderr
 ):
     stat = AsyncMock(return_value=FileStat(name="ok", type=FileType.FILE))
     unlink = AsyncMock()
-    io = with_path_guards(
+    io = with_command_guards(
         CommandIO(
             readdir=AsyncMock(return_value=[]),
             read_bytes=AsyncMock(),
@@ -45,10 +51,6 @@ async def test_rm_refused_operand_keeps_spelling_and_continues(
     _, result = await make_rm("s3", io)(
         None, [refused, valid], [], CommandOpts(flags={"f": force})
     )
-    ignored = force and refusal == "ENOENT"
-    assert result.exit_code == (0 if ignored else 1)
-    assert result.stderr == (
-        None if ignored else f"rm: cannot remove '{raw}': {message}\n".encode()
-    )
+    assert (result.exit_code, result.stderr) == (code, stderr)
     assert stat.await_count == 1
     assert unlink.await_args.args[1] == valid

@@ -1,7 +1,7 @@
 import pytest
 
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.core.nextcloud.read import read_bytes
+from mirage.core.nextcloud.read import read
 from mirage.core.nextcloud.readdir import readdir
 from mirage.core.nextcloud.stat import stat
 from mirage.types import FileType, PathSpec
@@ -23,6 +23,25 @@ async def test_stat_directory_via_dir_probe(make_acc):
     s = await stat(acc, PathSpec.from_str_path("/data"))
     assert s.type == FileType.DIRECTORY
     assert s.name == "data"
+
+
+@pytest.mark.asyncio
+async def test_stat_asks_the_server_once(make_acc):
+    acc = make_acc({"data/file.txt": b"x"})
+    fake = acc._fake
+    asked: list[str] = []
+    real_stat = fake.stat
+
+    async def _counted(key):
+        asked.append(key)
+        return await real_stat(key)
+
+    fake.stat = _counted
+    s = await stat(acc, PathSpec.from_str_path("/data"))
+    assert s.type == FileType.DIRECTORY
+    with pytest.raises(FileNotFoundError):
+        await stat(acc, PathSpec.from_str_path("/missing.txt"))
+    assert asked == ["data", "missing.txt"]
 
 
 @pytest.mark.asyncio
@@ -103,9 +122,7 @@ async def test_stat_size_matches_read_for_every_file(make_acc):
                 stack.append(trimmed)
                 continue
             assert info.size is not None, trimmed
-            body = await read_bytes(
-                acc, PathSpec.from_str_path(trimmed), index
-            )
+            body = await read(acc, PathSpec.from_str_path(trimmed), index)
             assert info.size == len(body), trimmed
             files.append(trimmed)
     assert sorted(files) == ["/a.txt", "/docs/b.bin", "/empty.txt"]

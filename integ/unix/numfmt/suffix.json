@@ -1,0 +1,22 @@
+{
+  "cases": [
+    {
+      "id": "numfmt_suffix_is_kept_on_output",
+      "seq": 15500015,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "numfmt --suffix=B 1234B; numfmt --to=si --suffix=B 1500; numfmt --from=si --suffix=B 2KB; numfmt --suffix=B 12 34B",
+      "expect": {
+        "exit": 0,
+        "stdout": "1234B\n1.5kB\n2000B\n12B\n34B\n",
+        "stderr": ""
+      },
+      "flags": [
+        "suffix"
+      ]
+    }
+  ]
+}

@@ -422,6 +422,42 @@
       "flags": [
         "update"
       ]
+    },
+    {
+      "id": "cp_u_skips_equal_mtimes_and_update_none_is_silent",
+      "seq": 15600003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/fcF_u1 && echo new > /data/fcF_u1/s && echo old > /data/fcF_u1/d && touch -d '2024-01-01T00:00:00' /data/fcF_u1/s && touch -d '2024-01-01T00:00:00' /data/fcF_u1/d && cp -u /data/fcF_u1/s /data/fcF_u1/d; echo rc=$?; cat /data/fcF_u1/d; cp --update=none /data/fcF_u1/s /data/fcF_u1/d; echo rc=$?; cat /data/fcF_u1/d; rm -r /data/fcF_u1",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nold\nrc=0\nold\n",
+        "stderr": ""
+      },
+      "flags": [
+        "u",
+        "update"
+      ]
     }
   ]
 }

@@ -1,0 +1,290 @@
+{
+  "cases": [
+    {
+      "id": "curl_data_at_file_strips_line_ends",
+      "seq": 330100,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "printf '{\"q\":1}\\r\\n' > /data/payload.json && curl -s -d @/data/payload.json {http}/request",
+      "expect": {
+        "exit": 0,
+        "stdout": "method=POST\naccept=*/*\nauthorization=-\ncontent-type=application/x-www-form-urlencoded\nbody={\"q\":1}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_data_repeated_joins_with_amp",
+      "seq": 330101,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -d a=1 -d b=2 {http}/request",
+      "expect": {
+        "exit": 0,
+        "stdout": "method=POST\naccept=*/*\nauthorization=-\ncontent-type=application/x-www-form-urlencoded\nbody=a=1&b=2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_data_empty_piece_adds_no_separator",
+      "seq": 330102,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -d '' -d b {http}/request | tail -n 1; curl -s -d a -d '' -d c {http}/request | tail -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "body=b\nbody=a&&c\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_data_at_stdin",
+      "seq": 330103,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "echo 'from stdin' | curl -s -d @- {http}/request",
+      "expect": {
+        "exit": 0,
+        "stdout": "method=POST\naccept=*/*\nauthorization=-\ncontent-type=application/x-www-form-urlencoded\nbody=from stdin\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_data_binary_keeps_the_file",
+      "seq": 330104,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "printf 'a\\r\\nb\\n' > /data/bin.txt && curl -s --data-binary @/data/bin.txt {http}/request | tail -n 3",
+      "expect": {
+        "exit": 0,
+        "stdout": "body=a\r\nb\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_data_raw_keeps_the_at",
+      "seq": 330105,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s --data-raw @x {http}/request",
+      "expect": {
+        "exit": 0,
+        "stdout": "method=POST\naccept=*/*\nauthorization=-\ncontent-type=application/x-www-form-urlencoded\nbody=@x\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_data_options_join_in_line_order",
+      "seq": 330106,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -d a=1 --data-binary b=2 --data-raw @c {http}/request | tail -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "body=a=1&b=2&@c\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_data_urlencode_forms",
+      "seq": 330107,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s --data-urlencode 'q=a b&c' --data-urlencode '=x=y' --data-urlencode 'plain text' --data-urlencode 'a b=c' {http}/request | tail -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "body=q=a+b%26c&x%3Dy&plain+text&a b=c\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_data_urlencode_file",
+      "seq": 330108,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "printf 'a b\\n' > /data/u.txt && curl -s --data-urlencode n@/data/u.txt {http}/request | tail -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "body=n=a+b%0A\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_json_sets_both_headers",
+      "seq": 330109,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s --json '{\"q\":1}' {http}/request",
+      "expect": {
+        "exit": 0,
+        "stdout": "method=POST\naccept=application/json\nauthorization=-\ncontent-type=application/json\nbody={\"q\":1}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_json_pieces_concatenate",
+      "seq": 330110,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s --json '{\"a\":' --json '1}' {http}/request | tail -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "body={\"a\":1}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_json_after_data_adds_no_separator",
+      "seq": 330111,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -d a=1 --json b {http}/request | tail -n 1; curl -s --json a -d b {http}/request | tail -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "body=a=1b\nbody=a&b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_json_header_replaces_its_own",
+      "seq": 330112,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s --json a -H 'Accept: text/x' {http}/request",
+      "expect": {
+        "exit": 0,
+        "stdout": "method=POST\naccept=text/x\nauthorization=-\ncontent-type=application/json\nbody=a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_header_repeated_all_sent",
+      "seq": 330113,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -H 'X-A: 1' -H 'X-B: 2' {http}/request",
+      "expect": {
+        "exit": 0,
+        "stdout": "method=GET\naccept=*/*\nauthorization=-\ncontent-type=-\nx-a=1\nx-b=2\nbody=\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_header_empty_value_drops_curls_own",
+      "seq": 330114,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -H 'Content-Type:' -d a {http}/request",
+      "expect": {
+        "exit": 0,
+        "stdout": "method=POST\naccept=*/*\nauthorization=-\ncontent-type=-\nbody=a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_header_semicolon_sends_it_empty",
+      "seq": 330115,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -H 'X-Empty;' -H 'X-NoColon' {http}/request",
+      "expect": {
+        "exit": 0,
+        "stdout": "method=GET\naccept=*/*\nauthorization=-\ncontent-type=-\nx-empty=-\nbody=\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_user_sends_basic_auth",
+      "seq": 330116,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -u alice:secret {http}/request",
+      "expect": {
+        "exit": 0,
+        "stdout": "method=GET\naccept=*/*\nauthorization=Basic YWxpY2U6c2VjcmV0\ncontent-type=-\nbody=\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_user_without_password_prompts",
+      "seq": 330117,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -u alice {http}/request < /dev/null",
+      "expect": {
+        "exit": 0,
+        "stdout": "method=GET\naccept=*/*\nauthorization=Basic YWxpY2U6\ncontent-type=-\nbody=\n",
+        "stderr": "Enter host password for user 'alice':\n"
+      }
+    },
+    {
+      "id": "curl_user_header_authorization_wins",
+      "seq": 330118,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -u a:b -H 'Authorization: Bearer t' {http}/request",
+      "expect": {
+        "exit": 0,
+        "stdout": "method=GET\naccept=*/*\nauthorization=Bearer t\ncontent-type=-\nbody=\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_data_at_missing_file_exit_26",
+      "seq": 330119,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -sS -d @/data/nope {http}/request",
+      "expect": {
+        "exit": 26,
+        "stdout": "",
+        "stderr": "curl: option -d: error encountered when reading a file\ncurl: try 'curl --help' or 'curl --manual' for more information\n"
+      }
+    },
+    {
+      "id": "curl_data_binary_missing_file_names_it",
+      "seq": 330120,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl --data-binary @/data/nope {http}/request",
+      "expect": {
+        "exit": 26,
+        "stdout": "",
+        "stderr": "curl: Failed to open /data/nope\ncurl: option --data-binary: error encountered when reading a file\ncurl: try 'curl --help' or 'curl --manual' for more information\n"
+      }
+    },
+    {
+      "id": "curl_verbose_traces_auth_and_json_headers",
+      "seq": 330121,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -sv -u a:b --json '{}' {http}/request 2>&1 >/dev/null | grep -E '^> (Authorization|User-Agent|Accept|Content)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "> Authorization: Basic YTpi\r\n> User-Agent: Mozilla/5.0 (compatible; mirage/1.0)\r\n> Content-Type: application/json\r\n> Accept: application/json\r\n> Content-Length: 2\r\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

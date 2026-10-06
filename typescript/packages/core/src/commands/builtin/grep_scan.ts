@@ -27,7 +27,7 @@ export interface GrepLinesOptions {
   // -b: prefix each printed line with the byte offset of its own start, or of
   // the match itself under -o. Derived from the lines because this scan is
   // handed text rather than bytes, which is exact only for text that came
-  // through `decodeLine`.
+  // through `decodeText`.
   byteOffsets?: boolean
   // Given an IOResult, receives exit status 0 as soon as a line is selected.
   // Selection cannot be read off the returned list under -o, because GNU

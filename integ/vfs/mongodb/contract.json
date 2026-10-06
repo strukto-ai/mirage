@@ -415,6 +415,19 @@
         "stdout": "-\n-\n-\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "mongodb_tail_follow_cannot_open_a_collection_it_cannot_see",
+      "seq": 621013,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "tail -f /mongodb/mirage_integ/collections/missing/documents.jsonl; echo rc=$?; tail -f /mongo-denied/mirage_integ/collections/books/documents.jsonl; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\n",
+        "stderr": "tail: cannot open '/mongodb/mirage_integ/collections/missing/documents.jsonl' for reading: No such file or directory\ntail: no files remaining\ntail: cannot open '/mongo-denied/mirage_integ/collections/books/documents.jsonl' for reading: No such file or directory\ntail: no files remaining\n"
+      }
     }
   ]
 }

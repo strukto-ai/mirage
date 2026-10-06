@@ -67,6 +67,40 @@
         "stdout": "rc=4\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "job_wait_shows_output_only_once",
+      "seq": 513030,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(echo once & j=$!; wait \"$j\"; wait; echo done)",
+      "expect": {
+        "exit": 0,
+        "stdout": "once\ndone\n",
+        "stderr": ""
+      }
     }
   ]
 }

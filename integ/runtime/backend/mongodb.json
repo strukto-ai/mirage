@@ -1,0 +1,44 @@
+{
+  "requires": [
+    "env:MONGODB_URI"
+  ],
+  "cases": [
+    {
+      "id": "mongodb_read",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/mongodb": {
+            "vfs": "mongodb"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import json; from pathlib import Path; meta = json.loads(Path('/mongodb/mirage_integ_runtime/database.json').read_text()); print(meta['database'], len(meta['collections']))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "mirage_integ_runtime 2\n"
+          }
+        },
+        {
+          "command": "python3 -c \"import json; from pathlib import Path; s = json.loads(Path('/mongodb/mirage_integ_runtime/collections/books/schema.json').read_text()); print(s['name'], s['kind'], 'document_count' in s, [f['path'] for f in s['fields']])\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "books collection False ['title']\n"
+          }
+        },
+        {
+          "command": "python3 -c \"from pathlib import Path; lines = Path('/mongodb/mirage_integ_runtime/collections/books/documents.jsonl').read_text().splitlines(); print('books:', len(lines))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "books: 2\n"
+          }
+        }
+      ]
+    }
+  ]
+}

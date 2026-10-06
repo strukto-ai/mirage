@@ -1,0 +1,184 @@
+{
+  "cases": [
+    {
+      "id": "numfmt_from_scaled_values_print_every_digit",
+      "seq": 15500001,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "numfmt --from=si 1Q 1.5Y; numfmt --from=iec 1Y 1Q 1.5Y; numfmt 12345678901234567890123456789",
+      "expect": {
+        "exit": 0,
+        "stdout": "1000000000000000000000000000000\n1500000000000000000000000\n1208925819614629174706176\n1267650600228229401496703205376\n1813388729421943762059264\n12345678901234567890123456789\n",
+        "stderr": ""
+      },
+      "flags": [
+        "from"
+      ]
+    },
+    {
+      "id": "numfmt_from_si_rounds_a_scaled_value_away_from_zero",
+      "seq": 15500002,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "numfmt --from=si -- 1.5K 1.500K .5K 1.0005K 1.0000005K 0.0015K 1.23456789K -1.5K -0.0015K",
+      "expect": {
+        "exit": 0,
+        "stdout": "1500\n1500\n500\n1001\n1001\n2\n1235\n-1500\n-2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "from"
+      ]
+    },
+    {
+      "id": "numfmt_from_each_mode_spells_its_units",
+      "seq": 15500003,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "numfmt --from=si 1K 1k; numfmt --from=iec 1K 1k; numfmt --from=iec-i 1Ki; numfmt --from=auto 1K 1Ki 1ki 1M 1Mi",
+      "expect": {
+        "exit": 0,
+        "stdout": "1000\n1000\n1024\n1024\n1024\n1000\n1024\n1024\n1000000\n1048576\n",
+        "stderr": ""
+      },
+      "flags": [
+        "from"
+      ]
+    },
+    {
+      "id": "numfmt_from_junk_after_a_unit_is_named",
+      "seq": 15500004,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "for a in 'iec 1KB' 'si 1kB' 'si 1Z9' 'si 1Kx' 'si 1KK' 'auto 1KiB' 'auto 1kI' 'iec-i 1KiB'; do set -- $a; numfmt --from=\"$1\" \"$2\"; echo rc=$?; done 2>&1",
+      "expect": {
+        "exit": 0,
+        "stdout": "numfmt: invalid suffix in input '1KB': 'B'\nrc=2\nnumfmt: invalid suffix in input '1kB': 'B'\nrc=2\nnumfmt: invalid suffix in input '1Z9': '9'\nrc=2\nnumfmt: invalid suffix in input '1Kx': 'x'\nrc=2\nnumfmt: invalid suffix in input '1KK': 'K'\nrc=2\nnumfmt: invalid suffix in input '1KiB': 'B'\nrc=2\nnumfmt: invalid suffix in input '1kI': 'I'\nrc=2\nnumfmt: invalid suffix in input '1KiB': 'B'\nrc=2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "from"
+      ]
+    },
+    {
+      "id": "numfmt_from_an_unusable_first_character_names_only_the_field",
+      "seq": 15500005,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "for a in 'si 1g' 'si 1J' 'auto 1i' 'none 1e3' 'none 0x10' 'si 1.5.5'; do set -- $a; numfmt --from=\"$1\" \"$2\"; echo rc=$?; done 2>&1",
+      "expect": {
+        "exit": 0,
+        "stdout": "numfmt: invalid suffix in input: '1g'\nrc=2\nnumfmt: invalid suffix in input: '1J'\nrc=2\nnumfmt: invalid suffix in input: '1i'\nrc=2\nnumfmt: invalid suffix in input: '1e3'\nrc=2\nnumfmt: invalid suffix in input: '0x10'\nrc=2\nnumfmt: invalid suffix in input: '1.5.5'\nrc=2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "from"
+      ]
+    },
+    {
+      "id": "numfmt_from_iec_i_demands_its_i_after_any_unit",
+      "seq": 15500006,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "for v in 1KB 1KI 1KII 1M; do numfmt --from=iec-i \"$v\"; echo rc=$?; done 2>&1",
+      "expect": {
+        "exit": 0,
+        "stdout": "numfmt: missing 'i' suffix in input: '1KB' (e.g Ki/Mi/Gi)\nrc=2\nnumfmt: missing 'i' suffix in input: '1KI' (e.g Ki/Mi/Gi)\nrc=2\nnumfmt: missing 'i' suffix in input: '1KII' (e.g Ki/Mi/Gi)\nrc=2\nnumfmt: missing 'i' suffix in input: '1M' (e.g Ki/Mi/Gi)\nrc=2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "from"
+      ]
+    },
+    {
+      "id": "numfmt_from_iec_i_names_what_follows_its_i",
+      "seq": 15500008,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "for v in 1KiB 1Kié 1iK 1iB x ''; do numfmt --from=iec-i \"$v\"; echo rc=$?; done 2>&1",
+      "expect": {
+        "exit": 0,
+        "stdout": "numfmt: invalid suffix in input '1KiB': 'B'\nrc=2\nnumfmt: invalid suffix in input '1Ki\\303\\251': '\\303\\251'\nrc=2\nnumfmt: invalid suffix in input: '1iK'\nrc=2\nnumfmt: invalid suffix in input: '1iB'\nrc=2\nnumfmt: invalid number: 'x'\nrc=2\nnumfmt: invalid number: ''\nrc=2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "from"
+      ]
+    },
+    {
+      "id": "numfmt_from_bad_numbers_are_named",
+      "seq": 15500009,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "for a in 'si +1' 'none 1.' 'si 1.x'; do set -- $a; numfmt --from=\"$1\" \"$2\"; echo rc=$?; done 2>&1",
+      "expect": {
+        "exit": 0,
+        "stdout": "numfmt: invalid number: '+1'\nrc=2\nnumfmt: invalid number: '1.'\nrc=2\nnumfmt: invalid number: '1.x'\nrc=2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "from"
+      ]
+    },
+    {
+      "id": "numfmt_from_every_clause_escapes_the_field",
+      "seq": 15500010,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "for t in é $'\\r' $'\\001' $'\\177' \"'\" '\\'; do numfmt --from=si \"1$t\"; numfmt --from=si \"1K$t\"; numfmt \"x$t\"; numfmt \"1K$t\"; echo rc=$?; done 2>&1",
+      "expect": {
+        "exit": 0,
+        "stdout": "numfmt: invalid suffix in input: '1\\303\\251'\nnumfmt: invalid suffix in input '1K\\303\\251': '\\303\\251'\nnumfmt: invalid number: 'x\\303\\251'\nnumfmt: rejecting suffix in input: '1K\\303\\251' (consider using --from)\nrc=2\nnumfmt: invalid suffix in input: '1\\r'\nnumfmt: invalid suffix in input '1K\\r': '\\r'\nnumfmt: invalid number: 'x\\r'\nnumfmt: rejecting suffix in input: '1K\\r' (consider using --from)\nrc=2\nnumfmt: invalid suffix in input: '1\\001'\nnumfmt: invalid suffix in input '1K\\001': '\\001'\nnumfmt: invalid number: 'x\\001'\nnumfmt: rejecting suffix in input: '1K\\001' (consider using --from)\nrc=2\nnumfmt: invalid suffix in input: '1\\177'\nnumfmt: invalid suffix in input '1K\\177': '\\177'\nnumfmt: invalid number: 'x\\177'\nnumfmt: rejecting suffix in input: '1K\\177' (consider using --from)\nrc=2\nnumfmt: invalid suffix in input: '1\\''\nnumfmt: invalid suffix in input '1K\\'': '\\''\nnumfmt: invalid number: 'x\\''\nnumfmt: rejecting suffix in input: '1K\\'' (consider using --from)\nrc=2\nnumfmt: invalid suffix in input: '1\\\\'\nnumfmt: invalid suffix in input '1K\\\\': '\\\\'\nnumfmt: invalid number: 'x\\\\'\nnumfmt: rejecting suffix in input: '1K\\\\' (consider using --from)\nrc=2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "from"
+      ]
+    },
+    {
+      "id": "numfmt_from_iec_i_reads_a_bare_number",
+      "seq": 15500007,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "numfmt --from=iec-i 1 1.5 0 1000; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n1.5\n0\n1000\nrc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "from"
+      ]
+    }
+  ]
+}

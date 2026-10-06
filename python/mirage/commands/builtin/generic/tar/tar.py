@@ -25,6 +25,7 @@ from mirage.commands.builtin.generic.tar.constants import (
     EMPTY_PIPE,
     ERROR_TRAILER,
     FATAL_TRAILER,
+    FOREIGN_INPUT,
     INVALID_ARCHIVE,
     MODE_CONFLICT,
     MULTIPLE_ARCHIVES,
@@ -32,6 +33,7 @@ from mirage.commands.builtin.generic.tar.constants import (
     READ_MODES,
     STRIP_COUNT,
     TAPE_START,
+    UNEXPECTED_EOF,
     USAGE_HINT,
     WRITE_MODES,
 )
@@ -80,8 +82,23 @@ def _read_mode(suffix: CompressionSuffix) -> ReadMode:
     return READ_MODES[suffix]
 
 
-def _stderr(lines: list[str]) -> bytes:
+def _stderr_of(lines: list[str]) -> bytes:
     return ("\n".join(lines) + "\n").encode() if lines else b""
+
+
+class ZeroTail(io.BytesIO):
+    """An archive's whole blocks, then zeros for as far as tar reads.
+
+    GNU tar drops a partial last block and meets the end of the archive
+    where the data stops, so a member whose data ran out reads as zeros
+    and the header after it as the end-of-archive marker.
+    """
+
+    def read(self, size: int | None = -1) -> bytes:
+        got = super().read(size)
+        if size is None or size < 0:
+            return got
+        return got + bytes(size - len(got))
 
 
 @contextmanager
@@ -90,10 +107,10 @@ def _open_archive(
 ) -> Iterator[ReadResult]:
     """Open tar's input while preserving its gzip child's failure.
 
-    GNU tar 1.35 reads complete decoded members even when their gzip
-    trailer is damaged or missing. A tar parsing error must not mask the
-    child's diagnostic and exit status. Mirage still discards data when
-    gzip stops inside a deflate body; GNU can recover partial tar entries.
+    GNU tar 1.35 reads whatever gzip decoded before it stopped, whole
+    blocks only, and a tar parsing error must not mask the child's
+    diagnostic and exit status. A member whose data blocks ran out is
+    the ``cut``: GNU reaches it and stops there.
 
     Args:
         data (bytes): the archive file's bytes.
@@ -101,20 +118,51 @@ def _open_archive(
     """
     failure = None
     mode = _read_mode(suffix)
+    foreign = FOREIGN_INPUT.get(suffix)
+    if (
+        foreign is not None
+        and not data.startswith(foreign[0])
+        and (data or foreign[3])
+    ):
+        # The child refuses the input before tar reads a block.
+        yield ReadResult(
+            None,
+            GzipDataError((foreign[1],), fatal=True, exit_code=foreign[2]),
+        )
+        return
     if suffix == ":gz" or (suffix == "" and data.startswith(GZIP_MAGIC)):
         data, failure = gunzip_partial(data)
         mode = "r:"
-    if failure is not None and (not failure.keeps_output or not data):
+    if failure is not None and not data:
         yield ReadResult(None, failure)
         return
     notices: tuple[str, ...] = ()
+    cut: int | None = None
+    tail = b""
     with ExitStack() as stack:
         tf: tarfile.TarFile | None
         try:
             tf = stack.enter_context(
                 tarfile.open(fileobj=io.BytesIO(data), mode=mode)
             )
-            tf.getmembers()
+            if isinstance(tf.fileobj, io.BytesIO):
+                whole = len(data) // tarfile.BLOCKSIZE * tarfile.BLOCKSIZE
+                tf = stack.enter_context(
+                    tarfile.open(fileobj=ZeroTail(data[:whole]), mode="r:")
+                )
+                cut = next(
+                    (
+                        idx
+                        for idx, member in enumerate(tf.getmembers())
+                        if member.offset_data + member.size > whole
+                    ),
+                    None,
+                )
+                if cut is not None:
+                    member = tf.getmembers()[cut]
+                    tail = data[member.offset_data : whole]
+            else:
+                tf.getmembers()
         except tarfile.TarError as exc:
             logger.debug("tar: failed to parse archive: %s", exc)
             tf = None
@@ -125,7 +173,21 @@ def _open_archive(
                 if failure is None
                 else ()
             )
-        yield ReadResult(tf, failure, notices)
+        yield ReadResult(tf, failure, notices, cut, tail)
+
+
+def _cut_short(failure: GzipDataError | None, lines: list[str]) -> bytes:
+    """tar's stderr when a member's data runs out: gzip's own lines
+    first, if gzip stopped too, then tar's lines and its two fatal ones.
+    tar exits before it waits for its child, so no child status is
+    reported.
+
+    Args:
+        failure (GzipDataError | None): why gzip stopped, if it did.
+        lines (list[str]): tar's own stderr lines from the run.
+    """
+    lead = failure.render("stdin").encode() if failure is not None else b""
+    return lead + _stderr_of(lines + [UNEXPECTED_EOF, FATAL_TRAILER])
 
 
 def _child_failure(failure: GzipDataError, lines: list[str]) -> bytes:
@@ -137,7 +199,7 @@ def _child_failure(failure: GzipDataError, lines: list[str]) -> bytes:
         failure (GzipDataError): why gzip stopped.
         lines (list[str]): tar's own stderr lines from the run.
     """
-    return failure.render("stdin").encode() + _stderr(
+    return failure.render("stdin").encode() + _stderr_of(
         lines + [CHILD_STATUS.format(failure.exit_code), FATAL_TRAILER]
     )
 
@@ -145,7 +207,7 @@ def _child_failure(failure: GzipDataError, lines: list[str]) -> bytes:
 DOTDOT_NOTICE = "tar: Removing leading `../' from member names"
 
 
-def _matches(name: str, selector: str) -> bool:
+def _matches_selector(name: str, selector: str) -> bool:
     """Whether one -t/-x member selector keeps an archive member.
 
     GNU matches the stored spelling exactly (``memory/x`` does not find
@@ -161,7 +223,7 @@ def _matches(name: str, selector: str) -> bool:
     return trimmed == base or trimmed.startswith(base + "/")
 
 
-def _selected(
+def _selected_members(
     names: list[str], selectors: list[str]
 ) -> tuple[set[int], list[str]]:
     """Member indices the selectors keep, and the misses they report.
@@ -181,7 +243,7 @@ def _selected(
     for sel in selectors:
         hit = False
         for idx, name in enumerate(names):
-            if _matches(name, sel):
+            if _matches_selector(name, sel):
                 keep.add(idx)
                 hit = True
         if not hit:
@@ -234,7 +296,7 @@ def _info(member: Member, size: int) -> tarfile.TarInfo:
     return info
 
 
-async def _create_archive(
+async def _write_archive(
     plan: CreateResult,
     archive_path: PathSpec,
     mode_suffix: CompressionSuffix,
@@ -271,7 +333,7 @@ async def _create_archive(
     archive = buf.getvalue()
     if archive_path.raw_path == "-":
         return archive, IOResult(
-            stderr=_stderr(notices + (names if verbose else [])),
+            stderr=_stderr_of(notices + (names if verbose else [])),
             exit_code=exit_code,
         )
     try:
@@ -285,7 +347,7 @@ async def _create_archive(
     stdout = ("\n".join(names) + "\n").encode() if verbose and names else None
     return stdout, IOResult(
         writes={archive_path.mount_path: archive},
-        stderr=_stderr(notices),
+        stderr=_stderr_of(notices),
         exit_code=exit_code,
     )
 
@@ -334,7 +396,7 @@ def _open_failure(
         if reading and not isinstance(exc, FileNotFoundError):
             lines.extend(EMPTY_PIPE.get(suffix, ()))
         lines += [CHILD_STATUS.format(CREATE_ERROR_EXIT), FATAL_TRAILER]
-    return IOResult(exit_code=CREATE_ERROR_EXIT, stderr=_stderr(lines))
+    return IOResult(exit_code=CREATE_ERROR_EXIT, stderr=_stderr_of(lines))
 
 
 async def _read_archive(
@@ -418,13 +480,21 @@ async def _list_archive(
                 _long_member(member, name) if verbose else name
                 for member, name in zip(tf.getmembers(), names)
             ]
-    keep, misses = _selected(names, selectors)
+    keep, misses = _selected_members(names, selectors)
     if keep:
         errors = await check_directories(directories, is_dir, stat)
         if errors:
-            return None, IOResult(exit_code=2, stderr=_stderr(errors))
-    shown = [row for idx, row in enumerate(rows) if idx in keep]
+            return None, IOResult(exit_code=2, stderr=_stderr_of(errors))
+    shown = [
+        row
+        for idx, row in enumerate(rows)
+        if idx in keep and (result.cut is None or idx <= result.cut)
+    ]
     stdout = ("\n".join(shown) + "\n").encode() if shown else None
+    if result.cut is not None:
+        return stdout, IOResult(
+            exit_code=2, stderr=_cut_short(failure, list(result.notices))
+        )
     if failure is not None:
         return stdout, IOResult(
             exit_code=2, stderr=_child_failure(failure, list(result.notices))
@@ -432,7 +502,7 @@ async def _list_archive(
     if result.notices or misses:
         return stdout, IOResult(
             exit_code=2,
-            stderr=_stderr(list(result.notices) + misses + [ERROR_TRAILER]),
+            stderr=_stderr_of(list(result.notices) + misses + [ERROR_TRAILER]),
         )
     return stdout, IOResult()
 
@@ -474,12 +544,16 @@ async def _extract_archive(
                 member.name + "/" if member.isdir() else member.name
                 for member in members
             ]
-            keep, misses = _selected(listed, selectors)
+            keep, misses = _selected_members(listed, selectors)
             if keep:
                 errors = await check_directories(directories, is_dir, stat)
                 if errors:
-                    return None, IOResult(exit_code=2, stderr=_stderr(errors))
+                    return None, IOResult(
+                        exit_code=2, stderr=_stderr_of(errors)
+                    )
             for idx, member in enumerate(members):
+                if result.cut is not None and idx > result.cut:
+                    break
                 if idx not in keep:
                     continue
                 # A symlink member has no bytes to write and no namespace to
@@ -511,10 +585,15 @@ async def _extract_archive(
                                 continue
                             names.append(member.name.rstrip("/") + "/")
                     continue
-                extracted = tf.extractfile(member)
-                if not extracted:
-                    continue
-                content = extracted.read()
+                if idx == result.cut:
+                    # Only the whole blocks that arrived are written.
+                    content = result.tail
+                    notices.append(UNEXPECTED_EOF)
+                else:
+                    extracted = tf.extractfile(member)
+                    if not extracted:
+                        continue
+                    content = extracted.read()
                 if to_stdout:
                     extracted_bytes.append(content)
                     names.append(member.name)
@@ -570,6 +649,12 @@ async def _extract_archive(
         )
         stdout = listing
         stderr_lines = list(notices)
+    if result.cut is not None:
+        return stdout, IOResult(
+            exit_code=2,
+            stderr=_cut_short(failure, stderr_lines),
+            writes=writes,
+        )
     if failure is not None:
         return stdout, IOResult(
             exit_code=2,
@@ -580,7 +665,7 @@ async def _extract_archive(
         stderr_lines = stderr_lines + misses + [ERROR_TRAILER]
     return stdout, IOResult(
         exit_code=2 if misses or failed else 0,
-        stderr=_stderr(stderr_lines),
+        stderr=_stderr_of(stderr_lines),
         writes=writes,
     )
 
@@ -615,7 +700,9 @@ async def tar(
     relay: bool = False,
     stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    archive = f if f else None
+    # With no -f the archive is standard input or output, which is GNU
+    # tar's compiled-in default (no TAPE in the environment).
+    archive = f or replace(PathSpec.from_str_path("/dev/stdin"), raw_path="-")
     if relay and archive is not None:
         # Relay doors address by full virtual path (flat_scopes'
         # convention), not by the mount-relative key the wrapper's
@@ -627,8 +714,6 @@ async def tar(
     mode_suffix = _compression_suffix(z, j, J)
     strip_n = strip_components
     if c:
-        if archive is None:
-            raise ValueError("tar: -f is required")
         plan = await plan_create(
             paths,
             archive=archive,
@@ -644,14 +729,12 @@ async def tar(
         )
         if not plan.write:
             return None, IOResult(
-                exit_code=plan.exit_code, stderr=_stderr(list(plan.notices))
+                exit_code=plan.exit_code, stderr=_stderr_of(list(plan.notices))
             )
-        return await _create_archive(
+        return await _write_archive(
             plan, archive, mode_suffix, v, read_bytes, write_bytes
         )
     if t:
-        if archive is None:
-            raise ValueError("tar: -f is required")
         return await _list_archive(
             archive,
             mode_suffix,
@@ -663,8 +746,6 @@ async def tar(
             is_dir,
         )
     if x:
-        if archive is None:
-            raise ValueError("tar: -f is required")
         return await _extract_archive(
             archive,
             dest_path,
@@ -706,7 +787,7 @@ class TarFlags:
 
 
 _MODES = ("create", "extract", "list")
-_STRIP_COUNT = re.compile(rf"^{C_SPACE}\+?([0-9]+)$")
+_STRIP_COUNT_PATTERN = re.compile(rf"^{C_SPACE}\+?([0-9]+)$")
 
 
 def strip_count(raw: str) -> int:
@@ -722,7 +803,7 @@ def strip_count(raw: str) -> int:
     Raises:
         UsageError: the value is no count.
     """
-    match = _STRIP_COUNT.match(raw)
+    match = _STRIP_COUNT_PATTERN.match(raw)
     if match is None or int(match.group(1)) > UINTMAX:
         raise UsageError(
             f"{STRIP_COUNT.format(raw)}\n{USAGE_HINT}", CREATE_ERROR_EXIT

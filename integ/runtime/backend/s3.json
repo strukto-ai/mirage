@@ -1,0 +1,235 @@
+{
+  "requires": {
+    "python": [],
+    "typescript": [
+      "env:S3_ENDPOINT"
+    ]
+  },
+  "cases": [
+    {
+      "id": "s3_read",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/s3": {
+            "vfs": "s3"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"from pathlib import Path; print(Path('/s3/greeting.txt').read_text().strip())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello from s3\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s3_cache_invalidate",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/s3": {
+            "vfs": "s3"
+          }
+        }
+      },
+      "steps": [
+        {
+          "s3_put": {
+            "key": "cache_inval.txt",
+            "body": "seeded-cold\n"
+          }
+        },
+        {
+          "command": "cat /s3/cache_inval.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "seeded-cold\n"
+          }
+        },
+        {
+          "command": "python3 -c \"from pathlib import Path; Path('/s3/cache_inval.txt').write_text('updated-by-sandbox')\" && cat /s3/cache_inval.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "updated-by-sandbox"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s3_warm_read",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/s3": {
+            "vfs": "s3"
+          }
+        }
+      },
+      "steps": [
+        {
+          "s3_put": {
+            "key": "warm.txt",
+            "body": "cold-bytes\n"
+          }
+        },
+        {
+          "command": "cat /s3/warm.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "cold-bytes\n"
+          }
+        },
+        {
+          "s3_put": {
+            "key": "warm.txt",
+            "body": "hot-bytes\n"
+          }
+        },
+        {
+          "command": "python3 -c \"from pathlib import Path; print(Path('/s3/warm.txt').read_text().strip())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "cold-bytes\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s3_guest_open_w",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/s3": {
+            "vfs": "s3"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "rm -f /s3/report.txt"
+        },
+        {
+          "command": "python3 -c \"f = open('/s3/report.txt', 'w'); f.write('r1'); f.close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": [
+              "create /s3/report.txt"
+            ]
+          }
+        },
+        {
+          "command": "cat /s3/report.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "r1"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s3_guest_open_w_js",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/s3": {
+            "vfs": "s3"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "rm -f /s3/report.txt"
+        },
+        {
+          "command": "js -e \"const f = std.open('/s3/report.txt', 'w'); f.puts('r1'); f.close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": [
+              "create /s3/report.txt"
+            ]
+          }
+        },
+        {
+          "command": "cat /s3/report.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "r1"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s3_facade_probes",
+      "world": {
+        "mounts": {
+          "/s3": {
+            "vfs": "s3"
+          }
+        }
+      },
+      "steps": [
+        {
+          "s3_put": {
+            "key": "probe/x.txt",
+            "body": "payload"
+          }
+        },
+        {
+          "facade": {
+            "method": "is_dir",
+            "path": "/s3/probe"
+          },
+          "expect": {
+            "value": true
+          }
+        },
+        {
+          "facade": {
+            "method": "exists",
+            "path": "/s3/nope.txt"
+          },
+          "expect": {
+            "value": false
+          }
+        },
+        {
+          "facade": {
+            "method": "cat",
+            "path": "/s3/greeting.txt"
+          },
+          "expect": {
+            "value": "hello from s3\n",
+            "ops_contain": [
+              "read /s3/greeting.txt"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

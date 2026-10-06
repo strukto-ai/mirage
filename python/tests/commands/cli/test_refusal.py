@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.commands.cli.refusal import (
     ARGPARSE_EXIT,
     clap_missing_operands,
     clap_supplied,
-    git_unknown_option,
+    git_option_refusal,
+    git_usage,
     leaf_refusal,
 )
 from mirage.commands.spec.types import CommandSpec, Operand, Option, UsageStyle
@@ -49,66 +52,148 @@ def _parsed(invalid: list[str]) -> ParsedCommand:
     )
 
 
+SPEC = CommandSpec(
+    options=(
+        Option(short="-q", long="--quiet", description="be quiet"),
+        Option(long="--no-quiet", description="be loud"),
+        Option(short="-m", type="str", metavar="msg", description="message"),
+        Option(long="--count", type="int", description="how many"),
+        Option(
+            long="--abbrev",
+            type="int",
+            value_optional=True,
+            description="abbreviate",
+        ),
+        Option(long="--ignore-unmatch", description="exit zero"),
+        Option(long="--no-ignore-unmatch", description="fail"),
+        Option(short="-i", long="--interactive-mode", description="too long"),
+    )
+)
+USAGE = (
+    "usage: git rm [-f | --force] [-r] [--cached] [--ignore-unmatch]\n"
+    "              [--quiet] [--] [<pathspec>...]\n"
+    "\n"
+    "    -q, --[no-]quiet      be quiet\n"
+    "    -m <msg>              message\n"
+    "    --count <count>       how many\n"
+    "    --abbrev[=<abbrev>]   abbreviate\n"
+    "    --[no-]ignore-unmatch exit zero\n"
+    "    -i, --interactive-mode\n"
+    "                          too long\n"
+    "\n"
+)
+
+
+def _parsed_with(**fields) -> ParsedCommand:
+    """A parse result with the given fields set over an empty one.
+
+    Args:
+        **fields: the ParsedCommand fields to set.
+    """
+    return _parsed([])._replace(**fields)
+
+
+# parse-options' layout, pinned against git 2.47.3: synopsis lines, then
+# the rows with help from column 26, a 25-wide spelling one space short
+# of it and a wider one on a line of its own, and `--[no-]` where git's
+# own table spells the long so.
+def test_git_usage_lays_rows_out_as_parse_options_does():
+    assert git_usage("rm", SPEC) == USAGE
+
+
+# log has no table, and git lists a `--no-` filter like `--no-merges`
+# apart from the option it looks like a negation of.
+def test_git_usage_keeps_a_negation_apart_where_git_does():
+    rows = git_usage("log", SPEC)
+    assert "    -q, --quiet           be quiet\n" in rows
+    assert "    --no-quiet            be loud\n" in rows
+
+
+def test_git_usage_closes_a_verb_without_options_with_a_blank_line():
+    assert git_usage("version", CommandSpec()) == "usage: git version\n\n"
+
+
+# Pinned against git 2.50.1: a long option is named without its dashes
+# and a short one is a switch, both before the usage block; `-h` puts the
+# usage on stdout; a boolean handed a value is refused on one line.
+@pytest.mark.parametrize(
+    ("word", "streams"),
+    [
+        ("--nosuch", ("", f"error: unknown option `nosuch'\n{USAGE}")),
+        ("-Z", ("", f"error: unknown switch `Z'\n{USAGE}")),
+        ("-h", (USAGE, "")),
+        ("--quiet=1", ("", "error: option `quiet' takes no value\n")),
+    ],
+)
+def test_git_option_refusal_words_it_as_parse_options_does(word, streams):
+    assert git_option_refusal(word, "rm", SPEC) == streams
+
+
 # parse-options names the last two options an abbreviation matched, each
-# with the `no-` it was matched under, and exits 129 (git 2.50.1).
+# with the `no-` it was matched under, puts the usage on stdout and exits
+# 129 (git 2.50.1).
 def test_git_words_an_ambiguous_abbreviation_its_own_way():
-    parsed = _parsed([])._replace(
+    parsed = _parsed_with(
         ambiguous_options=[("--no-m=x", ("--no-merged", "--no-move"))],
         option_error_kinds=["ambiguous"],
     )
-    msg, code = leaf_refusal(UsageStyle.GIT, ARGPARSE_MESSAGE, parsed)
-    assert msg == (
+    assert leaf_refusal(
+        UsageStyle.GIT, ARGPARSE_MESSAGE, parsed, "rm", SPEC
+    ) == (
         b"error: ambiguous option: no-m=x "
-        b"(could be --no-merged or --no-move)\n"
-    )
-    assert code == 129
-
-
-# Pinned against git 2.50.1: `git status --nosuch` and `git status -Z`.
-def test_git_names_a_long_option_without_its_dashes():
-    assert (
-        git_unknown_option("--nosuch") == b"error: unknown option `nosuch'\n"
+        b"(could be --no-merged or --no-move)\n",
+        129,
+        USAGE.encode(),
     )
 
 
-def test_git_calls_a_short_option_a_switch():
-    assert git_unknown_option("Z") == b"error: unknown switch `Z'\n"
-
-
-def test_a_dashed_short_token_is_stripped_too():
-    assert git_unknown_option("-Z") == b"error: unknown switch `Z'\n"
-
-
-def test_the_git_style_exits_129():
-    _msg, code = leaf_refusal(
-        UsageStyle.GIT, ARGPARSE_MESSAGE, _parsed(["--nosuch"])
+def test_git_names_a_short_cluster_letter_the_parser_reports_bare():
+    parsed = _parsed_with(
+        invalid_options=["Z"], option_error_kinds=["invalid"]
     )
-    assert code == 129
-
-
-def test_the_git_style_replaces_the_argparse_wording():
-    msg, _code = leaf_refusal(
-        UsageStyle.GIT, ARGPARSE_MESSAGE, _parsed(["--nosuch"])
+    msg, code, shown = leaf_refusal(
+        UsageStyle.GIT, ARGPARSE_MESSAGE, parsed, "rm", SPEC
     )
-    assert msg == b"error: unknown option `nosuch'\n"
+    assert (msg, code, shown) == (
+        f"error: unknown switch `Z'\n{USAGE}".encode(),
+        129,
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("needy", "line"),
+    [
+        ("--count", b"error: option `count' requires a value\n"),
+        ("m", b"error: switch `m' requires a value\n"),
+    ],
+)
+def test_git_words_a_missing_value_on_one_line(needy, line):
+    parsed = _parsed_with(
+        needs_value_options=[needy], option_error_kinds=["needs_value"]
+    )
+    assert leaf_refusal(
+        UsageStyle.GIT, ARGPARSE_MESSAGE, parsed, "rm", SPEC
+    ) == (line, 129, None)
 
 
 def test_the_default_style_is_left_exactly_as_it_was():
     # Every other installed CLI has to keep argparse's shape and its
     # exit 2: an installed name is not a GNU tool with a pinned exit.
-    msg, code = leaf_refusal(
-        UsageStyle.ARGPARSE, ARGPARSE_MESSAGE, _parsed(["--nosuch"])
+    parsed = _parsed_with(
+        invalid_options=["--nosuch"], option_error_kinds=["invalid"]
     )
-    assert msg == ARGPARSE_MESSAGE
-    assert code == ARGPARSE_EXIT
+    assert leaf_refusal(
+        UsageStyle.ARGPARSE, ARGPARSE_MESSAGE, parsed, "rm", SPEC
+    ) == (ARGPARSE_MESSAGE, ARGPARSE_EXIT, None)
 
 
 def test_git_keeps_the_argparse_wording_for_errors_it_shares():
-    # A missing value on a flag git does declare is not the unknown
-    # option case, so only the exit code moves.
-    msg, code = leaf_refusal(UsageStyle.GIT, ARGPARSE_MESSAGE, _parsed([]))
-    assert msg == ARGPARSE_MESSAGE
-    assert code == 129
+    # A refusal git has no wording of its own for keeps the spec
+    # machinery's message, and only the exit code moves.
+    assert leaf_refusal(
+        UsageStyle.GIT, ARGPARSE_MESSAGE, _parsed([]), "rm", SPEC
+    ) == (ARGPARSE_MESSAGE, 129, None)
 
 
 def test_clap_names_the_empty_slot_and_echoes_what_was_supplied():
@@ -189,6 +274,6 @@ def test_clap_usage_omits_a_merely_defaulted_option():
 
 
 def test_clap_exits_two_like_argparse_but_for_its_own_reason():
-    msg, code = leaf_refusal(UsageStyle.CLAP, ARGPARSE_MESSAGE, _parsed([]))
-    assert msg == ARGPARSE_MESSAGE
-    assert code == 2
+    assert leaf_refusal(
+        UsageStyle.CLAP, ARGPARSE_MESSAGE, _parsed([]), "rm", SPEC
+    ) == (ARGPARSE_MESSAGE, 2, None)

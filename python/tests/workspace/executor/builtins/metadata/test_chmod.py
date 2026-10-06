@@ -1,3 +1,5 @@
+import sys
+
 import pytest
 
 from mirage.types import MountMode, PathSpec
@@ -152,4 +154,16 @@ async def test_chmod_recursive_reports_a_missing_operand():
     assert code == 1
     assert err == (
         "chmod: cannot access '/data/nope': No such file or directory\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_chmod_r_walks_a_tree_deeper_than_the_recursion_limit():
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    deep = "/data" + "/d" * (sys.getrecursionlimit() + 100)
+    await ws.shell(f"mkdir -p {deep} && touch {deep}/f")
+    assert await _run(ws, f"chmod -R 700 /data/d && stat -c %a {deep}/f") == (
+        0,
+        "700\n",
+        "",
     )

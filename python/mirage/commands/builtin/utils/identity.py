@@ -44,9 +44,6 @@ class Identity:
     profile: str | None = None
 
 
-NO_IDENTITY = Identity()
-
-
 def identity_from(
     ns: NamespaceView | None, session_view: SessionView | None
 ) -> Identity:

@@ -1,0 +1,99 @@
+{
+  "optional": true,
+  "optional_reason": "Apple's container runs each container as a VM on Apple silicon with macOS 26 or later; GitHub-hosted macOS runners are themselves VMs without nested virtualization, so the container cannot run in CI. Run locally against `container run -d --name mirage-integ-apple debian:trixie-slim sleep infinity` with MIRAGE_INTEG_APPLE_CONTAINER=mirage-integ-apple (the unserved-cwd case pins dash's wording); drop this flag once the gate has such a host.",
+  "requires": [
+    "env:MIRAGE_INTEG_APPLE_CONTAINER"
+  ],
+  "cases": [
+    {
+      "id": "session_env_replaces_image_env",
+      "world": {
+        "runtimes": [
+          {
+            "name": "apple_container",
+            "captures": [
+              "printenv"
+            ],
+            "config": {
+              "container": "${MIRAGE_INTEG_APPLE_CONTAINER}"
+            }
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "export PATH=/usr/bin:/bin",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "printenv PATH",
+          "expect": {
+            "exit": 0,
+            "stdout": "/usr/bin:/bin\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "unlisted_session_falls_back",
+      "world": {
+        "runtimes": [
+          {
+            "name": "apple_container",
+            "captures": [
+              "*"
+            ],
+            "config": {
+              "container": "${MIRAGE_INTEG_APPLE_CONTAINER}",
+              "containers": {
+                "some_agent": "no-such-container"
+              }
+            }
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "uname -s",
+          "expect": {
+            "exit": 0,
+            "stdout": "Linux\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "unlisted_session_without_fallback_fails_loud",
+      "world": {
+        "runtimes": [
+          {
+            "name": "apple_container",
+            "captures": [
+              "*"
+            ],
+            "config": {
+              "containers": {
+                "some_agent": "${MIRAGE_INTEG_APPLE_CONTAINER}"
+              }
+            }
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "uname -s",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "apple_container has no container for session"
+          }
+        }
+      ]
+    }
+  ]
+}

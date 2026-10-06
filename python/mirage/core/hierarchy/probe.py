@@ -153,3 +153,29 @@ async def resolve_entry(
             index=index,
         )
     return await entry_or_warm(index, virtual_key, warm)
+
+
+async def ancestor_entry(
+    readdir: ReaddirFn[A],
+    accessor: A,
+    path: PathSpec,
+    index: IndexCacheStore,
+    up: int,
+) -> IndexEntry | None:
+    """Resolve the index entry ``up`` levels above the path.
+
+    Args:
+        readdir (ReaddirFn): the backend's readdir.
+        accessor (Accessor): backend accessor.
+        path (PathSpec): the path to climb from.
+        index (IndexCacheStore): index cache.
+        up (int): how many levels to climb.
+    """
+    virtual = path.virtual.rstrip("/")
+    for _ in range(up):
+        virtual = virtual.rsplit("/", 1)[0]
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
+    spec = PathSpec(
+        virtual=virtual, directory=virtual, vfs_path=mount_key(virtual, prefix)
+    )
+    return await resolve_entry(readdir, accessor, spec, index)

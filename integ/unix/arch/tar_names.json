@@ -183,6 +183,26 @@
         "stdout": "",
         "stderr": "tar (child): /data/sub: Cannot read: Is a directory\ntar (child): At beginning of tape, quitting now\ntar (child): Error is not recoverable: exiting now\n\ngzip: stdin: unexpected end of file\ntar: Child returned status 2\ntar: Error is not recoverable: exiting now\n"
       }
+    },
+    {
+      "id": "arch_tar_cz_into_a_directory_is_the_childs_refusal",
+      "seq": 15100511,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(mkdir -p /data/fcA_tc/d && cd /data/fcA_tc && printf a > a && tar -czf d a; rc=$?; cd / && rm -r /data/fcA_tc; exit $rc)",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "tar (child): d: Cannot open: Is a directory\ntar (child): Error is not recoverable: exiting now\ntar: Child returned status 2\ntar: Error is not recoverable: exiting now\n"
+      },
+      "flags": [
+        "c",
+        "z"
+      ]
     }
   ]
 }

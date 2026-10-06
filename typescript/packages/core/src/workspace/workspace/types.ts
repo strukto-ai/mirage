@@ -25,7 +25,7 @@ import type { IndexConfig } from '../../cache/index/config.ts'
 import type { Mount } from '../mount/spec.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
-import type { ConsoleFactory } from '../../shell/job_table/index.ts'
+import type { ConsoleFactory, JobTable } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
 import type { Limit, DriftPolicy, MountMode, ReadSpec, Refusal } from '../../types.ts'
 import type { AskHandler, Policy } from '../../policy/index.ts'
@@ -294,4 +294,10 @@ export interface ExecuteOptions {
    * into the caller instead of ending the line.
    */
   callStack?: CallStack
+  /**
+   * @internal The jobs of a child shell (`$( )`, `bash -c`) that the line
+   * starts its own in, where its caller's `jobs` and `wait` never see
+   * them; the session's when absent.
+   */
+  jobTable?: JobTable
 }

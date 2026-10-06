@@ -18,38 +18,42 @@ import os
 import posixpath
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from mirage.cache.file import io as cache_io
+from mirage.cache.lock import KeyLock
 from mirage.cache.manager import CacheManager
-from mirage.commands.builtin.utils.limit import apply_op_limit
 from mirage.commands.builtin.utils.paths import dot_refusal, walk_spelling
+from mirage.commands.resolve import get_extension
 from mirage.context import (
     get_current_session,
-    hidden_paths_intersect,
     hidden_refusal,
-    path_allowed,
+    session_visibility,
 )
-from mirage.errors import POSIX, FsCondition
 from mirage.io import IOResult, OpReport
 from mirage.observe.context import record, start_op
 from mirage.observe.record import OpRecord
+from mirage.ops.boundary import OpBoundary
 from mirage.ops.config import NO_FOLLOW_OPS, STAMP_WRITE_OPS
 from mirage.ops.namespace_view import (
     merge_readdir,
     namespace_listing,
     namespace_stat,
 )
-from mirage.policy import post_ops_gate, pre_ops_gate
 from mirage.policy.errors import PolicyDenied, PolicyError
+from mirage.shell.bytes import encode_text
 from mirage.types import (
     DEFAULT_READ_TTL,
     CacheFacts,
+    CapacityResult,
+    CapacityState,
     EntryGate,
     FileStat,
     FileType,
+    MountMode,
     PathSpec,
     VFSName,
 )
@@ -58,10 +62,12 @@ from mirage.utils.errors import (
     eisdir,
     eloop,
     enoent,
+    exdev,
     no_mount,
+    no_xattr,
     walk_refusal,
 )
-from mirage.utils.hidden import move_reveals
+from mirage.utils.hidden import hidden_under, move_reveals, path_visible
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import CycleError, norm, norm_dir, owner_prefix, parent
 from mirage.utils.ranges import slice_window
@@ -75,10 +81,10 @@ from mirage.workspace.dispatcher.constants import (
     LINK_ENTRY_OPS,
     NAMESPACE_TABLE_OPS,
     POLICY_WRITE_OPS,
+    SERIAL_WRITE_OPS,
     SETATTR_KEYS,
     XATTR_OPS,
 )
-from mirage.workspace.dispatcher.lineage import require_turf_writable
 from mirage.workspace.mount import MountEntry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
@@ -108,13 +114,36 @@ def _memory_answered(
         report.served(VFSName.RAM.value, moved)
 
 
-def _no_xattr(path: PathSpec) -> OSError:
-    condition = POSIX[FsCondition.NO_XATTR]
-    return OSError(condition.errno, condition.phrase, path.virtual)
+def _served(report: OpReport | None, result: Any) -> None:
+    """Stamp the caller's report: the owning mount answered.
+
+    Args:
+        report (OpReport | None): the caller's report, None when the
+            caller does not observe ops.
+        result (Any): the op's answer; bytes are the measure moved.
+    """
+    if report is not None:
+        report.served(
+            None,
+            len(result) if isinstance(result, (bytes, bytearray)) else None,
+        )
+
+
+def _appends_nothing(op: str, kwargs: dict[str, Any]) -> bool:
+    """Whether a completed write op was an append of no bytes.
+
+    That is an open for appending (``true >> f``): it may create the
+    file, but it leaves an existing one's times as they were.
+
+    Args:
+        op (str): the write op that ran.
+        kwargs (dict[str, Any]): its kwargs; an append's ``data``.
+    """
+    return op == "append" and not kwargs.get("data")
 
 
 def _visible_entries(entries: list[str], parent: str) -> list[str]:
-    """Drop listing entries the current session's spec hides.
+    """Drop listing entries the bound session hides.
 
     Entry shapes vary by backend (bare names, trailing-slash names,
     full paths), so each is keyed by its final segment against the
@@ -126,10 +155,11 @@ def _visible_entries(entries: list[str], parent: str) -> list[str]:
         parent (str): the directory that was listed, as a virtual path.
     """
     base = parent.rstrip("/")
+    vis = session_visibility()
     return [
         e
         for e in entries
-        if path_allowed(f"{base}/{e.rstrip('/').rsplit('/', 1)[-1]}")
+        if path_visible(vis, f"{base}/{e.rstrip('/').rsplit('/', 1)[-1]}")
     ]
 
 
@@ -206,14 +236,16 @@ class _MountChannel:
 
     Args:
         mount (MountEntry): the mount owning the subtree.
-        admit (Callable): the dispatcher's pre-ops gate, bound to that
-            mount; raises to refuse a deletion.
+        boundary (OpBoundary): the dispatcher's op boundary for that
+            mount; its admit raises to refuse a deletion. A deletion is
+            not completed through post_ops, which could only refuse
+            after the entry is gone and strand the cascade.
         invalidate (Callable): the dispatcher's write invalidation,
             bound to that mount.
     """
 
     mount: MountEntry
-    admit: Callable[[str, PathSpec], Awaitable[None]]
+    boundary: OpBoundary
     invalidate: Callable[[PathSpec], Awaitable[None]]
 
     async def readdir(self, spec: PathSpec) -> list[str]:
@@ -223,14 +255,14 @@ class _MountChannel:
         return await self.mount.execute_op("stat", spec.virtual)
 
     async def unlink(self, spec: PathSpec) -> None:
-        await self.admit("unlink", spec)
+        await self.boundary.admit("unlink", spec, True, check_hidden=False)
         try:
             await self.mount.execute_op("unlink", spec.virtual)
         finally:
             await self.invalidate(spec)
 
     async def rmdir(self, spec: PathSpec) -> None:
-        await self.admit("rmdir", spec)
+        await self.boundary.admit("rmdir", spec, True, check_hidden=False)
         try:
             await self.mount.execute_op("rmdir", spec.virtual)
         finally:
@@ -262,16 +294,43 @@ class Dispatcher:
     workspace state. The snapshot drift queue rides along because this
     is the one door: a strict restore's pending fingerprint checks must
     run before ANY op can touch a mount, and FUSE and the ops facade
-    reach here without passing Workspace.dispatch.
+    reach here without passing Workspace.dispatch. So does the
+    workspace's write admission, which holds a write while a capture
+    reads.
     """
 
     def __init__(
-        self, namespace: Namespace, cache, drift: DriftQueue | None = None
+        self,
+        namespace: Namespace,
+        cache,
+        drift: DriftQueue | None = None,
+        admit_write: Callable[[], AbstractAsyncContextManager[None]]
+        | None = None,
     ) -> None:
         self._namespace = namespace
         self._cache = cache
         self._reconciler = Reconciler(cache, namespace)
         self._drift = drift
+        self._admit_write = admit_write
+        self._writers = KeyLock()
+
+    def _boundary(self, mount: MountEntry | None) -> OpBoundary:
+        """The policy boundary for an op on a path ``mount`` owns.
+
+        The mount's prefix and mode, or for a path above every mount an
+        empty prefix and full write, governed by ``/``
+        (``MountModePolicy``).
+
+        Args:
+            mount (MountEntry | None): the mount owning the path, None
+                when no mount does.
+        """
+        return OpBoundary(
+            self._namespace.registry.policies,
+            mount.prefix if mount is not None else "",
+            mount.mode if mount is not None else MountMode.WRITE,
+            _session_id(),
+        )
 
     @property
     def reconciler(self) -> Reconciler:
@@ -294,10 +353,11 @@ class Dispatcher:
         prefixes = [
             m.prefix for m in self._namespace.registry.visible_mounts()
         ]
+        vis = session_visibility()
         if op == "readdir":
-            return namespace_listing(prefixes, self._namespace, virtual)
+            return namespace_listing(vis, prefixes, self._namespace, virtual)
         if op == "stat":
-            return namespace_stat(prefixes, self._namespace, virtual)
+            return namespace_stat(vis, prefixes, self._namespace, virtual)
         return None
 
     async def _gated_namespace(
@@ -320,20 +380,30 @@ class Dispatcher:
             report (OpReport | None): the caller's report, stamped when
                 the answer is in hand.
         """
-        policies = self._namespace.registry.policies
+        boundary = self._boundary(None)
         write = op in POLICY_WRITE_OPS
         # A pre gate refuses before the answer exists, so it is not a
         # completed op and stays before the stamp.
-        await pre_ops_gate(policies, op, path, write, "", _session_id())
+        await boundary.admit(op, path, write)
         _memory_answered(report)
         if op == "readdir" and isinstance(fallback, list):
             fallback = _visible_entries(fallback, path.virtual)
-        bound = await post_ops_gate(policies, op, path, write, "", fallback)
-        if bound is not None:
-            return await apply_op_limit(fallback, bound)
-        return fallback
+        return await boundary.complete(op, path, write, fallback)
 
     async def dispatch(
+        self,
+        op: str,
+        path: PathSpec,
+        *,
+        report: OpReport | None = None,
+        **kwargs: Any,
+    ) -> tuple[Any, IOResult]:
+        if self._admit_write is None or op not in POLICY_WRITE_OPS:
+            return await self._dispatch(op, path, report=report, **kwargs)
+        async with self._admit_write():
+            return await self._dispatch(op, path, report=report, **kwargs)
+
+    async def _dispatch(
         self,
         op: str,
         path: PathSpec,
@@ -356,15 +426,16 @@ class Dispatcher:
         # is checked so a link inside hidden space cannot be followed
         # out of it, the followed path is re-checked so a visible link
         # cannot lead in, and a rename destination is a create.
-        if not path_allowed(path.virtual):
-            raise hidden_refusal(path.virtual, op in HIDDEN_CREATE_OPS)
+        vis = session_visibility()
+        if not path_visible(vis, path.virtual):
+            raise hidden_refusal(vis, path.virtual, op in HIDDEN_CREATE_OPS)
         dst = kwargs.get("dst")
         if (
             op == "rename"
             and isinstance(dst, PathSpec)
-            and not path_allowed(dst.virtual)
+            and not path_visible(vis, dst.virtual)
         ):
-            raise hidden_refusal(dst.virtual, True)
+            raise hidden_refusal(vis, dst.virtual, True)
         # An operand the walk already refused (the empty name, a link
         # loop) names nothing an op can reach, whatever `virtual` says.
         for walked in (path, dst):
@@ -411,17 +482,9 @@ class Dispatcher:
             # content is silent (rm_r, the remnant rmdir below);
             # relocating it into view is refused. Only a directory has
             # anything below it to re-anchor, so a file source passes.
-            sess = get_current_session()
-            if (
-                sess is not None
-                and move_reveals(
-                    sess.hidden_paths,
-                    sess.shown_paths,
-                    path.virtual,
-                    dst.virtual,
-                )
-                and await self._moved_source_is_dir(path)
-            ):
+            if move_reveals(
+                vis, path.virtual, dst.virtual
+            ) and await self._moved_source_is_dir(path):
                 raise PermissionError(
                     errno.EACCES, os.strerror(errno.EACCES), path.virtual
                 )
@@ -456,12 +519,16 @@ class Dispatcher:
                 raise eloop(path) from None
             if followed != path.virtual:
                 path = PathSpec.from_str_path(followed)
-                if not path_allowed(path.virtual):
-                    raise hidden_refusal(path.virtual, op in HIDDEN_CREATE_OPS)
+                if not path_visible(vis, path.virtual):
+                    raise hidden_refusal(
+                        vis, path.virtual, op in HIDDEN_CREATE_OPS
+                    )
         if rule_gate is not None and not no_follow:
             _judge(rule_gate, typed, walked, path)
         if op in XATTR_OPS:
             return await self._xattr_op(op, path, kwargs, report), IOResult()
+        if op == "statfs":
+            return await self._statfs(path), IOResult()
         mount = self._namespace.try_mount_for(path.virtual)
         if mount is None:
             # No mount serves the path, but the namespace may still know
@@ -471,12 +538,11 @@ class Dispatcher:
             # overlay (a link above every mount still takes chown -h),
             # gated exactly like the mounted overlay write.
             if op == "setattr":
-                policies = self._namespace.registry.policies
-                await pre_ops_gate(policies, op, path, True, "", _session_id())
-                require_turf_writable(None, path)
+                boundary = self._boundary(None)
+                await boundary.admit(op, path, True)
                 applied = await self._overlay_setattr(path, kwargs)
                 _memory_answered(report)
-                await post_ops_gate(policies, op, path, True, "", applied)
+                await boundary.complete(op, path, True, applied)
                 return applied, IOResult()
             fallback = self._namespace_result(op, path.virtual)
             if fallback is None:
@@ -485,30 +551,43 @@ class Dispatcher:
                 await self._gated_namespace(op, path, fallback, report),
                 IOResult(),
             )
+        # A mount is a filesystem boundary: rename(2) moves a name within
+        # one and answers EXDEV across two, before any permission is
+        # weighed, so `mv` falls back to copy and unlink instead of the
+        # source's backend taking the destination for one of its keys. It
+        # resolves both parent directories first, so a missing one is
+        # ENOENT (ENOTDIR through a file) ahead of EXDEV.
+        if (
+            op == "rename"
+            and isinstance(dst, PathSpec)
+            and self._namespace.try_mount_for(dst.virtual) is not mount
+        ):
+            refusal = await self._parent_refusal(path)
+            refusal = refusal or await self._parent_refusal(dst)
+            raise refusal or exdev(path)
         # Admission policies fire at the door, before the warm-cache
         # early return below: a cached read must be refused exactly
         # like a cold one, or the cache becomes a policy bypass.
-        policies = self._namespace.registry.policies
         write = op in POLICY_WRITE_OPS
-        await pre_ops_gate(
-            policies, op, path, write, mount.prefix, _session_id()
+        boundary = self._boundary(mount)
+        await boundary.admit(
+            op,
+            path,
+            write,
+            create=op in HIDDEN_CREATE_OPS,
+            subtree=op == "rename",
         )
         # A rename's destination is a create there: it passes the same
         # gate as the source, so a path rule holds against moving into
         # a protected scope (or onto the directory that holds one) the
-        # way it holds against writing there.
+        # way it holds against writing there, under the mode of the
+        # mount that owns it.
         if op == "rename" and isinstance(dst, PathSpec):
-            await pre_ops_gate(
-                policies, op, dst, True, mount.prefix, _session_id()
-            )
-        if write:
-            require_turf_writable(mount, path)
-            if op == "rename" and isinstance(dst, PathSpec):
-                require_turf_writable(
-                    self._namespace.try_mount_for(dst.virtual), dst
-                )
+            await self._boundary(
+                self._namespace.try_mount_for(dst.virtual)
+            ).admit(op, dst, True, create=True, subtree=True)
         if op == "rmdir" and any(
-            path_allowed(link)
+            path_visible(vis, link)
             for link, _ in self._namespace.link_stats_below(path.virtual)
         ):
             raise OSError(
@@ -516,29 +595,26 @@ class Dispatcher:
             )
         await mount.ensure_ready()
         caches_reads = mount.vfs.caches_reads
-        # The file cache is keyed on the path alone, and what it holds is
-        # the rendered read. A raw read asks for a different value under
-        # the same key, so it is neither served from that cache nor kept
-        # in it.
+        # The file cache holds what commands read, keyed on the path
+        # alone. A raw read, or a read through a filetype renderer
+        # (whoever registered it), asks for a different value under the
+        # same key, so it is neither served from that cache nor kept in
+        # it. The renderer read still gets the freshness check, so a path
+        # the backend reports gone fails.
         raw = "filetype" in kwargs and kwargs["filetype"] is None
-        # A cold read keeps the whole file it fetched for the next reader,
-        # through the mount's own manager, the one a command's read
-        # fills: a write racing the fetch retires its generation, so the
-        # bytes it read are not kept. A ranged read comes from the store
-        # only where the store can serve one; elsewhere the read op would
-        # fetch the whole file and slice it for every range, so the whole
-        # file is read once, kept, and each range sliced from it.
+        filetype = (
+            kwargs["filetype"]
+            if "filetype" in kwargs
+            else get_extension(path.virtual)
+        )
+
+        def renders_read() -> bool:
+            return filetype is not None and mount.has_filetype_op(
+                "read", filetype
+            )
+
         offset, size = _window(kwargs)
         whole = (offset, size) == (0, None)
-        filler = (
-            mount.cache_manager
-            if caches_reads
-            and not raw
-            and op in DISPATCH_READ_OPS
-            and size != 0
-            and (whole or not mount.reads_ranges(path.virtual))
-            else None
-        )
 
         if caches_reads and not raw and op in DISPATCH_READ_OPS:
             cached = await self._cache.get(path.virtual)
@@ -547,6 +623,7 @@ class Dispatcher:
                 and await self._reconciler.may_serve_cached(
                     mount, path.virtual
                 )
+                and not renders_read()
                 and not mount.retiring
                 and self._namespace.try_mount_for(path.virtual) is mount
             ):
@@ -562,12 +639,28 @@ class Dispatcher:
                 # stamp a refused warm read is recorded against the
                 # backend and counted as traffic that never happened.
                 _memory_answered(report, len(served))
-                bound = await post_ops_gate(
-                    policies, op, path, write, mount.prefix, served
-                )
-                if bound is not None:
-                    served = await apply_op_limit(served, bound)
+                served = await boundary.complete(op, path, write, served)
                 return served, IOResult(reads={path.virtual: served})
+
+        # A cold read keeps the whole file it fetched for the next reader,
+        # through the mount's own manager, the one a command's read
+        # fills: a write racing the fetch retires its generation, so the
+        # bytes it read are not kept. A ranged read comes from the store
+        # only where the store can serve one; elsewhere the read op would
+        # fetch the whole file and slice it for every range, so the whole
+        # file is read once, kept, and each range sliced from it. The op
+        # is resolved only once the mount is ready, so a renderer can land
+        # after this check; the fill asks again before it keeps anything.
+        filler = (
+            mount.cache_manager
+            if caches_reads
+            and not raw
+            and op in DISPATCH_READ_OPS
+            and size != 0
+            and (whole or not mount.reads_ranges(path.virtual))
+            and not renders_read()
+            else None
+        )
 
         if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
             # Ops.rename addresses both endpoints against the source's
@@ -595,8 +688,34 @@ class Dispatcher:
                         path.virtual,
                         **_whole_read(kwargs),
                     ),
+                    keep=lambda: not renders_read(),
                 )
                 result = kept if whole else slice_window(kept, offset, size)
+            elif op in SERIAL_WRITE_OPS:
+                # Held by the store's own object, so one store mounted
+                # twice is one file, and a rename holds both of its
+                # names, taken in one order so two renames between the
+                # same pair cannot deadlock. What the write changes beside
+                # the store (caches, the node table's links and attributes)
+                # changes under the same hold: a chain of renames finishing
+                # out of order would move one name's attributes onto
+                # another.
+                names = {path.virtual}
+                if isinstance(kwargs.get("dst"), PathSpec):
+                    names.add(kwargs["dst"].virtual)
+                prefix = mount.prefix.rstrip("/")
+                keys = {
+                    f"{id(mount.vfs)}:{mount_key(name, prefix)}"
+                    for name in names
+                }
+                async with AsyncExitStack() as held:
+                    for key in sorted(keys):
+                        await held.enter_async_context(
+                            self._writers.with_lock(key)
+                        )
+                    result = await mount.execute_op(op, path.virtual, **kwargs)
+                    _served(report, result)
+                    await self._settle_write(mount, op, path, kwargs)
             else:
                 result = await mount.execute_op(op, path.virtual, **kwargs)
         except (FileNotFoundError, NotADirectoryError):
@@ -619,16 +738,11 @@ class Dispatcher:
             # The op ran, whatever invalidation, the post gate, or an
             # output cap do next: stamped here so a failure in any of
             # them cannot erase a transfer the backend already made.
-            if report is not None:
-                report.served(
-                    None,
-                    len(result)
-                    if isinstance(result, (bytes, bytearray))
-                    else None,
-                )
+            _served(report, result)
         if op == "readdir":
             result = _visible_entries(
                 merge_readdir(
+                    vis,
                     result,
                     [
                         m.prefix
@@ -643,71 +757,85 @@ class Dispatcher:
             result = merge_overlay_stat(
                 self._namespace.meta_for(path.virtual), result
             )
-        if op in DISPATCH_WRITE_OPS:
-            observed = time.time() if op in STAMP_WRITE_OPS else None
-            await self.invalidate_after_write(mount, path, observed=observed)
-            if op in ("unlink", "rmdir"):
-                # The name no longer holds that file, so what was set on
-                # it (overlay mode and owner, extended attributes) goes
-                # with it, as the shell's rm already drops it: a file
-                # created there next starts bare on every surface.
-                await self._namespace.drop_overlay(path.virtual)
-                if op == "rmdir":
-                    # The link check ran before the backend was asked, so
-                    # a visible link below now was created since: it is
-                    # younger than this rmdir, lands after it in the
-                    # serial order (a link synthesizes its parents), and
-                    # the purge taking the directory's hidden nodes must
-                    # not take it too.
-                    arrived = frozenset(
-                        link
-                        for link, _ in self._namespace.link_stats_below(
-                            path.virtual
-                        )
-                        if path_allowed(link)
-                    )
-                    await self._namespace.purge_under(
-                        path.virtual, keep=arrived
-                    )
-            if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
-                await self.invalidate_after_rename(mount, path, kwargs["dst"])
-                # rename(2) replaces the destination, so a node the
-                # table holds at that name does not survive the move.
-                # A link left there shadowed the file that had just
-                # landed: the listing showed the new file, every read
-                # followed the old link, and the moved content was
-                # reachable under no name at all.
-                await self._namespace.unlink(kwargs["dst"].virtual)
-                # The subtree moves with it, and only the node table can
-                # move the part of it no backend holds: a link or an
-                # attr overlay below the source is addressed by absolute
-                # path, so it would otherwise stay behind at a name the
-                # rename has emptied. The destination's own subtree is
-                # replaced first, as rename(2) replaces what it lands on.
-                await self._namespace.purge_under(kwargs["dst"].virtual)
-                # The node at the source itself is not part of the
-                # subtree below it, so re-anchoring that subtree leaves
-                # it behind: the mode or ownership a chmod recorded
-                # stayed at the emptied name, never reached the
-                # landing, and was inherited by whatever was created at
-                # the old name next. Shell mv compensates for this in
-                # its own prepare step; a verb reaching the dispatcher
-                # directly, as git mv does, had nothing to.
-                await self._namespace.rename(
-                    path.virtual, kwargs["dst"].virtual
-                )
-                await self._namespace.rename_under(
-                    path.virtual, kwargs["dst"].virtual
-                )
-        bound = await post_ops_gate(
-            policies, op, path, write, mount.prefix, result
-        )
-        if bound is not None:
-            # The transfer already happened, so the limit changes what
-            # the caller receives, not what the backend moved; the
-            # report above already carries the moved count.
-            result = await apply_op_limit(result, bound)
+        if op in DISPATCH_WRITE_OPS and op not in SERIAL_WRITE_OPS:
+            await self._settle_write(mount, op, path, kwargs)
+        result = await boundary.complete(op, path, write, result)
         return result, IOResult()
+
+    async def _settle_write(
+        self,
+        mount: MountEntry,
+        op: str,
+        path: PathSpec,
+        kwargs: dict[str, Any],
+    ) -> None:
+        """What a write changes beside the store: the caches above the
+        path, and the node table's links and attributes at its names.
+
+        Args:
+            mount (MountEntry): the mount the write ran on.
+            op (str): the write op that ran.
+            path (PathSpec): the path it wrote, after any follow.
+            kwargs (dict[str, Any]): the op's kwargs; a rename's ``dst``
+                is the moved name.
+        """
+        opened = _appends_nothing(op, kwargs)
+        observed = (
+            time.time() if op in STAMP_WRITE_OPS and not opened else None
+        )
+        await self.invalidate_after_write(
+            mount, path, observed=observed, times=not opened
+        )
+        if op in ("unlink", "rmdir"):
+            # The name no longer holds that file, so what was set on
+            # it (overlay mode and owner, extended attributes) goes
+            # with it, as the shell's rm already drops it: a file
+            # created there next starts bare on every surface.
+            await self._namespace.drop_overlay(path.virtual)
+            if op == "rmdir":
+                # The link check ran before the backend was asked, so
+                # a visible link below now was created since: it is
+                # younger than this rmdir, lands after it in the
+                # serial order (a link synthesizes its parents), and
+                # the purge taking the directory's hidden nodes must
+                # not take it too.
+                vis = session_visibility()
+                arrived = frozenset(
+                    link
+                    for link, _ in self._namespace.link_stats_below(
+                        path.virtual
+                    )
+                    if path_visible(vis, link)
+                )
+                await self._namespace.purge_under(path.virtual, keep=arrived)
+        if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
+            await self.invalidate_after_rename(mount, path, kwargs["dst"])
+            # rename(2) replaces the destination, so a node the
+            # table holds at that name does not survive the move.
+            # A link left there shadowed the file that had just
+            # landed: the listing showed the new file, every read
+            # followed the old link, and the moved content was
+            # reachable under no name at all.
+            await self._namespace.unlink(kwargs["dst"].virtual)
+            # The subtree moves with it, and only the node table can
+            # move the part of it no backend holds: a link or an
+            # attr overlay below the source is addressed by absolute
+            # path, so it would otherwise stay behind at a name the
+            # rename has emptied. The destination's own subtree is
+            # replaced first, as rename(2) replaces what it lands on.
+            await self._namespace.purge_under(kwargs["dst"].virtual)
+            # The node at the source itself is not part of the
+            # subtree below it, so re-anchoring that subtree leaves
+            # it behind: the mode or ownership a chmod recorded
+            # stayed at the emptied name, never reached the
+            # landing, and was inherited by whatever was created at
+            # the old name next. Shell mv compensates for this in
+            # its own prepare step; a verb reaching the dispatcher
+            # directly, as git mv does, had nothing to.
+            await self._namespace.rename(path.virtual, kwargs["dst"].virtual)
+            await self._namespace.rename_under(
+                path.virtual, kwargs["dst"].virtual
+            )
 
     async def _moved_source_is_dir(self, path: PathSpec) -> bool:
         """Whether a rename's source stats as a directory.
@@ -756,7 +884,8 @@ class Dispatcher:
             path (PathSpec): the directory being removed.
             refusal (OSError): the backend's not-empty error.
         """
-        if not hidden_paths_intersect(path.virtual):
+        vis = session_visibility()
+        if not hidden_under(vis, path.virtual):
             raise refusal
         try:
             entries = await mount.execute_op("readdir", path.virtual)
@@ -771,20 +900,22 @@ class Dispatcher:
         # see keeps the refusal instead of reporting a successful rmdir
         # while the mounted child remains.
         merged = merge_readdir(
+            vis,
             entries,
             [m.prefix for m in self._namespace.registry.visible_mounts()],
             self._namespace,
             path.virtual,
         )
-        if not entries or visible_below(path.virtual, merged, path_allowed):
+        visible = functools.partial(path_visible, vis)
+        if not entries or visible_below(path.virtual, merged, visible):
             raise refusal
         channel = _MountChannel(
             mount,
-            functools.partial(self._admit_cascade, mount),
+            self._boundary(mount),
             functools.partial(self.invalidate_after_write, mount),
         )
         try:
-            await remove_remnants(channel, path_allowed, path)
+            await remove_remnants(channel, visible, path)
         except Exception as exc:
             raise refusal from exc
         # The namespace's own nodes under the subtree go with it: a
@@ -802,34 +933,9 @@ class Dispatcher:
         links_below = [
             p for p in self._namespace.symlink_targets() if p.startswith(base)
         ]
-        if any(path_allowed(p) for p in links_below):
+        if any(path_visible(vis, p) for p in links_below):
             raise refusal
         await self._namespace.purge_under(path.virtual)
-
-    async def _admit_cascade(
-        self, mount: MountEntry, op: str, path: PathSpec
-    ) -> None:
-        """Hold one cascade deletion to the pre-ops admission a
-        dispatched op answers.
-
-        The gate that admitted the rmdir judged the directory; each
-        deletion below it names its own path here, so a policy that
-        denies ``unlink`` of a protected file refuses it even when the
-        rmdir above was allowed.
-
-        Args:
-            mount (MountEntry): the mount owning the subtree.
-            op (str): the deletion op ("unlink" or "rmdir").
-            path (PathSpec): the child being removed.
-        """
-        await pre_ops_gate(
-            self._namespace.registry.policies,
-            op,
-            path,
-            True,
-            mount.prefix,
-            _session_id(),
-        )
 
     async def _walk_stat(self, path: PathSpec) -> FileStat:
         """The door's own stat in the shape a chain walk reads.
@@ -871,8 +977,9 @@ class Dispatcher:
             walked = posixpath.normpath(walked)
         if walked == path.virtual:
             return path
-        if not path_allowed(walked):
-            raise hidden_refusal(walked, create)
+        vis = session_visibility()
+        if not path_visible(vis, walked):
+            raise hidden_refusal(vis, walked, create)
         return PathSpec.from_str_path(walked)
 
     def _table_answers(
@@ -919,10 +1026,10 @@ class Dispatcher:
         reads for), session grants and both gates run, and the write
         leaves an OpRecord — a scoped kernel mount refuses exactly like
         a scoped shell. The turf's mode gates the write too
-        (``require_turf_writable``), so a read-only mount or grant
-        answers EROFS for a link exactly as for a file; a link above
-        every mount is bare namespace structure, gated with an empty
-        prefix and governed by ``/`` (see ``lineage``). A rename's
+        (``MountModePolicy`` at the ``OpBoundary``), so a read-only
+        mount or grant answers EROFS for a link exactly as for a file;
+        a link above every mount is bare namespace structure, gated
+        with an empty prefix and governed by ``/``. A rename's
         destination is judged on its own turf, since the endpoints need
         not share one.
 
@@ -938,14 +1045,9 @@ class Dispatcher:
         """
         timer = start_op()
         mount = self._namespace.try_mount_for(path.virtual)
-        owner = mount.prefix if mount is not None else None
-        policies = self._namespace.registry.policies
+        boundary = self._boundary(mount)
         write = op in POLICY_WRITE_OPS
-        await pre_ops_gate(
-            policies, op, path, write, owner or "", _session_id()
-        )
-        if write:
-            require_turf_writable(mount, path)
+        await boundary.admit(op, path, write, create=op in HIDDEN_CREATE_OPS)
         result: str | FileStat | None = None
         if op == "unlink":
             target = self._namespace.readlink(path.virtual) or ""
@@ -959,11 +1061,7 @@ class Dispatcher:
             # replaces it: any node the table holds at that name (a
             # link, an attr overlay) goes.
             dst_mount = self._namespace.try_mount_for(dst.virtual)
-            dst_owner = dst_mount.prefix if dst_mount is not None else ""
-            await pre_ops_gate(
-                policies, op, dst, True, dst_owner, _session_id()
-            )
-            require_turf_writable(dst_mount, dst)
+            await self._boundary(dst_mount).admit(op, dst, True, create=True)
             # The name the link moves to must have a directory above it,
             # as for a new link: the table alone would file it under an
             # absent parent and synthesize the directories above it.
@@ -1012,16 +1110,11 @@ class Dispatcher:
             op,
             path.virtual,
             VFSName.RAM.value,
-            len(target.encode("utf-8")),
+            len(encode_text(target)),
             timer,
         )
         _memory_answered(report)
-        bound = await post_ops_gate(
-            policies, op, path, write, owner or "", result
-        )
-        if bound is not None:
-            return await apply_op_limit(result, bound)
-        return result
+        return await boundary.complete(op, path, write, result)
 
     async def _readlink_miss(self, path: PathSpec) -> OSError:
         """The error a readlink of something that is not a link answers.
@@ -1080,7 +1173,12 @@ class Dispatcher:
         prefixes = [
             m.prefix for m in self._namespace.registry.visible_mounts()
         ]
-        if namespace_stat(prefixes, self._namespace, path.virtual) is not None:
+        if (
+            namespace_stat(
+                session_visibility(), prefixes, self._namespace, path.virtual
+            )
+            is not None
+        ):
             return True, None
         mount = self._namespace.try_mount_for(path.virtual)
         if mount is None:
@@ -1181,7 +1279,12 @@ class Dispatcher:
         prefixes = [
             m.prefix for m in self._namespace.registry.visible_mounts()
         ]
-        if namespace_stat(prefixes, self._namespace, virtual) is not None:
+        if (
+            namespace_stat(
+                session_visibility(), prefixes, self._namespace, virtual
+            )
+            is not None
+        ):
             return FileType.DIRECTORY
         mount = self._namespace.try_mount_for(virtual)
         if mount is None:
@@ -1232,16 +1335,11 @@ class Dispatcher:
         """
         if not mount.supports_op(op, path.virtual):
             return None
-        await pre_ops_gate(
-            self._namespace.registry.policies,
-            op,
-            path,
-            False,
-            mount.prefix,
-            _session_id(),
-        )
+        boundary = self._boundary(mount)
+        await boundary.admit(op, path, False)
         try:
-            return await mount.execute_op(op, path.virtual)
+            result = await mount.execute_op(op, path.virtual)
+            return await boundary.complete(op, path, False, result)
         except NotADirectoryError:
             # Final on every channel: a plain file above the path means
             # nothing can be at it or under it, and symlink(2) and
@@ -1280,12 +1378,9 @@ class Dispatcher:
         """
         timer = start_op()
         mount = self._namespace.try_mount_for(path.virtual)
-        owner = mount.prefix if mount is not None else ""
-        policies = self._namespace.registry.policies
+        boundary = self._boundary(mount)
         write = op in POLICY_WRITE_OPS
-        await pre_ops_gate(policies, op, path, write, owner, _session_id())
-        if write:
-            require_turf_writable(mount, path)
+        await boundary.admit(op, path, write)
         await self._xattr_target(mount, path)
         stored = self._namespace.xattrs(path.virtual)
         name = str(kwargs.get("name", ""))
@@ -1295,7 +1390,7 @@ class Dispatcher:
         elif op == "getxattr":
             found = stored.get(name)
             if found is None:
-                raise _no_xattr(path)
+                raise no_xattr(path)
             result = found
         elif op == "setxattr":
             if kwargs.get("create") and name in stored:
@@ -1303,13 +1398,13 @@ class Dispatcher:
                     errno.EEXIST, os.strerror(errno.EEXIST), path.virtual
                 )
             if kwargs.get("replace") and name not in stored:
-                raise _no_xattr(path)
+                raise no_xattr(path)
             await self._namespace.set_xattr(
                 path.virtual, name, bytes(kwargs.get("value") or b"")
             )
         else:
             if name not in stored:
-                raise _no_xattr(path)
+                raise no_xattr(path)
             await self._namespace.remove_xattr(path.virtual, name)
         record(
             op,
@@ -1320,10 +1415,33 @@ class Dispatcher:
         )
         if report is not None:
             report.served(None, None)
-        bound = await post_ops_gate(policies, op, path, write, owner, result)
-        if bound is not None:
-            return await apply_op_limit(result, bound)
-        return result
+        return await boundary.complete(op, path, write, result)
+
+    async def _statfs(self, path: PathSpec) -> tuple[str, CapacityResult]:
+        """Answer statfs(2) for a path: the type name and the capacity of
+        the mount that holds it, which is what df reports for that mount.
+
+        The path must exist, as statfs's own walk requires. The namespace
+        above every mount has no file system behind it, so its type is
+        ``-`` and its capacity unknown.
+
+        Args:
+            path (PathSpec): the path, already followed.
+        """
+        mount = self._namespace.try_mount_for(path.virtual)
+        boundary = self._boundary(mount)
+        await boundary.admit("statfs", path, False)
+        await self._xattr_target(mount, path)
+        answer: tuple[str, CapacityResult]
+        if mount is None:
+            answer = "-", CapacityResult(state=CapacityState.UNKNOWN)
+        else:
+            async with mount.use():
+                answer = mount.vfs.name, await mount.vfs.capacity()
+        # A policy may deny the reply as it may any op's; a capacity is
+        # no bytes, so a bound has nothing to cap.
+        await boundary.complete("statfs", path, False, answer)
+        return answer
 
     async def _xattr_target(
         self, mount: MountEntry | None, path: PathSpec
@@ -1535,9 +1653,24 @@ class Dispatcher:
         return manager
 
     async def invalidate_after_write(
-        self, mount: MountEntry, path: PathSpec, observed: float | None = None
+        self,
+        mount: MountEntry,
+        path: PathSpec,
+        observed: float | None = None,
+        times: bool = True,
     ) -> None:
-        await self._namespace.clear_times(path.virtual, observed=observed)
+        """Drop what a write to ``path`` made stale above the store.
+
+        Args:
+            mount (MountEntry): the mount the write ran on.
+            path (PathSpec): the path it wrote.
+            observed (float | None): epoch seconds of a content write to
+                record, None for a removal.
+            times (bool): drop the overlay times a content write moves;
+                False for an open that wrote nothing.
+        """
+        if times:
+            await self._namespace.clear_times(path.virtual, observed=observed)
         manager = self._manager_for(mount)
         await manager.invalidate_after_write(path)
         await manager.invalidate_ancestors(path)

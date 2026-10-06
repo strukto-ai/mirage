@@ -20,6 +20,7 @@ from mirage.commands.config import CommandOpts, command
 from mirage.commands.quote import quote_word
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import byte_view, from_byte_view, utf8_locale
 from mirage.types import PathSpec
 
 # GNU expr's operand grammar, which is narrower than either language's
@@ -61,48 +62,6 @@ NESTING_TOO_DEEP = f"expr: expression nesting too deep (limit {MAX_NESTING})"
 
 class ExprError(Exception):
     """An operand or operation GNU expr refuses, worded as GNU words it."""
-
-
-def to_byte_view(text: str) -> str:
-    """One argv word as GNU sees it: one character per byte.
-
-    Every expr string operator counts bytes, not characters, because
-    GNU runs in the C locale: `expr length ee` with two two-byte `e`
-    acutes is 4, `substr` will split one character in half and print
-    the half (`expr substr <e-acute><e-acute> 2 2` is the bytes
-    `a9 c3`), `index` searches a set of bytes so a byte shared with
-    another character matches, and the BRE's `.` matches one byte. All
-    of that follows from one representation change rather than four
-    special cases, so the whole parser runs on a string whose every
-    character is one byte and the conversion happens only at the
-    command boundary.
-
-    Args:
-        text (str): the word as the shell handed it over, a raw byte
-            riding as its surrogate escape.
-
-    Returns:
-        str: the same bytes, one per character, every code point below
-            256.
-    """
-    return text.encode("utf-8", "surrogateescape").decode("latin-1")
-
-
-def from_byte_view(view: str) -> bytes:
-    """The bytes a byte-view string stands for.
-
-    Args:
-        view (str): a value or a diagnostic built from byte-view words
-            and this module's ASCII wording, so every code point is
-            below 256.
-
-    Returns:
-        bytes: the bytes to write. GNU writes the raw bytes of the
-            operand it was handed, so a `substr` that split a character
-            prints the invalid half rather than a replacement
-            character.
-    """
-    return view.encode("latin-1")
 
 
 # How many decimal digits to convert in one go. CPython caps a base-10
@@ -183,7 +142,7 @@ def digits_of_int(value: int) -> str:
     return ("-" if negative else "") + "".join(chunks)
 
 
-def missing_argument_after(word: str) -> str:
+def missing_argument_after(word: str, utf8: bool = False) -> str:
     """GNU's wording for an operator with nothing to its right.
 
     Args:
@@ -192,26 +151,30 @@ def missing_argument_after(word: str) -> str:
             `expr substr abc 1` reports `1`, not `substr`. It outranks an
             unclosed parenthesis: `expr '(' 1 +` reports this, not
             `expecting ')'`.
+        utf8 (bool): the word is text, under a UTF-8 locale.
 
     Returns:
         str: the full diagnostic line, without its newline.
     """
-    return f"expr: syntax error: missing argument after '{quote_word(word)}'"
+    quoted = quote_word(word, utf8)
+    return f"expr: syntax error: missing argument after '{quoted}'"
 
 
-def unexpected_argument(word: str) -> str:
+def unexpected_argument(word: str, utf8: bool = False) -> str:
     """GNU's wording for a leftover word the grammar had no slot for.
 
     Args:
         word (str): the offending argument.
+        utf8 (bool): the word is text, under a UTF-8 locale.
 
     Returns:
         str: the full diagnostic line, without its newline.
     """
-    return f"expr: syntax error: unexpected argument '{quote_word(word)}'"
+    quoted = quote_word(word, utf8)
+    return f"expr: syntax error: unexpected argument '{quoted}'"
 
 
-def expecting_close(current: str | None, prev: str) -> str:
+def expecting_close(current: str | None, prev: str, utf8: bool = False) -> str:
     """GNU's wording for a parenthesis that was never closed.
 
     GNU has two clauses here and picks between them on one fact: whether
@@ -226,15 +189,16 @@ def expecting_close(current: str | None, prev: str) -> str:
         current (str | None): the word sitting where the `)` was
             expected, or None when the line ran out.
         prev (str): the last word the parser consumed.
+        utf8 (bool): the words are text, under a UTF-8 locale.
 
     Returns:
         str: the full diagnostic line, without its newline.
     """
     if current is None:
-        return f"expr: syntax error: expecting ')' after '{quote_word(prev)}'"
-    return (
-        f"expr: syntax error: expecting ')' instead of '{quote_word(current)}'"
-    )
+        quoted = quote_word(prev, utf8)
+        return f"expr: syntax error: expecting ')' after '{quoted}'"
+    quoted = quote_word(current, utf8)
+    return f"expr: syntax error: expecting ')' instead of '{quoted}'"
 
 
 # The one detail clause with no `argument` noun in it, for a `)` where a
@@ -397,7 +361,7 @@ def compare(left: str, op: str, right: str) -> str:
     return "1" if held else "0"
 
 
-def docolon(subject: str, pattern: str) -> str:
+def docolon(subject: str, pattern: str, utf8: bool = False) -> str:
     """The `:` operator, which `match` is the prefix spelling of.
 
     The pattern is a POSIX BRE anchored at the start of the subject. A
@@ -410,11 +374,13 @@ def docolon(subject: str, pattern: str) -> str:
     Args:
         subject (str): the string being matched.
         pattern (str): the BRE, in GNU's dialect.
+        utf8 (bool): both are text under a UTF-8 locale.
 
     Both the subject and the pattern are byte views, so `.` matches one
     byte and the length this answers with is a byte count: GNU reads
     `expr <e-acute> : '.'` as 1 and `expr <e-acute> : '\\(.\\)'` as the
-    single byte `c3`.
+    single byte `c3`. Under a UTF-8 locale both are text, and the same
+    two answer the whole character.
 
     Returns:
         str: group 1's text, the match length, or a null value.
@@ -423,7 +389,7 @@ def docolon(subject: str, pattern: str) -> str:
         ExprError: the pattern is one glibc's regex compiler refuses.
     """
     try:
-        regex, groups = compile_bre(pattern)
+        regex, groups = compile_bre(pattern, utf8)
     except BreError as exc:
         raise ExprError(f"expr: {exc}") from exc
     matched = regex.match(subject)
@@ -504,14 +470,17 @@ class ExprParser:
     `expr 1 '|' 1 '/' 0` is 1 rather than a division by zero.
 
     Every word in `args`, every value it produces and every word it
-    quotes in a diagnostic is a byte view (`to_byte_view`), which is
+    quotes in a diagnostic is a byte view (`byte_view`), which is
     what makes `length`, `index`, `substr` and `:` count bytes as GNU
     does and makes a string comparison the `strcmp` byte order GNU
-    uses. The conversion is the command's, not the parser's.
+    uses. The conversion is the command's, not the parser's. Under a
+    UTF-8 locale (``utf8``) every word is text instead, and the same
+    operators count characters.
     """
 
-    def __init__(self, args: list[str]) -> None:
+    def __init__(self, args: list[str], utf8: bool = False) -> None:
         self.args = args
+        self.utf8 = utf8
         self.pos = 0
         self.depth = 0
 
@@ -570,7 +539,7 @@ class ExprParser:
             ExprError: the line is exhausted.
         """
         if self.at_end():
-            raise ExprError(missing_argument_after(self.prev()))
+            raise ExprError(missing_argument_after(self.prev(), self.utf8))
 
     def eval_or(self, evaluate: bool) -> str:
         """Level 1: `|`, which short-circuits on a truthy left operand.
@@ -700,7 +669,7 @@ class ExprParser:
         while self.nextarg(":"):
             right = self.eval_keyword(evaluate)
             if evaluate:
-                left = docolon(left, right)
+                left = docolon(left, right, self.utf8)
         return left
 
     def eval_keyword(self, evaluate: bool) -> str:
@@ -734,7 +703,7 @@ class ExprParser:
         if self.nextarg("match"):
             left = self.eval_keyword(evaluate)
             right = self.eval_keyword(evaluate)
-            return docolon(left, right) if evaluate else left
+            return docolon(left, right, self.utf8) if evaluate else left
         if self.nextarg("index"):
             left = self.eval_keyword(evaluate)
             right = self.eval_keyword(evaluate)
@@ -769,19 +738,22 @@ class ExprParser:
             value = self.eval_or(evaluate)
             self.depth -= 1
             if not self.nextarg(")"):
-                raise ExprError(expecting_close(self.peek(), self.prev()))
+                raise ExprError(
+                    expecting_close(self.peek(), self.prev(), self.utf8)
+                )
             return value
         if self.peek() == ")":
             raise ExprError(UNEXPECTED_CLOSE)
         return self.take()
 
 
-def _expr_eval(args: list[str]) -> tuple[str, int]:
+def _expr_eval(args: list[str], utf8: bool = False) -> tuple[str, int]:
     """Evaluate a whole expr line.
 
     Args:
         args (list[str]): the expression words as byte views, `--`
             already consumed by the option parser.
+        utf8 (bool): the words are text, under a UTF-8 locale.
 
     Returns:
         tuple[str, int]: the value to print, as a byte view, and the
@@ -792,10 +764,10 @@ def _expr_eval(args: list[str]) -> tuple[str, int]:
     Raises:
         ExprError: anything GNU refuses.
     """
-    parser = ExprParser(args)
+    parser = ExprParser(args, utf8)
     value = parser.eval_or(True)
     if not parser.at_end():
-        raise ExprError(unexpected_argument(parser.args[parser.pos]))
+        raise ExprError(unexpected_argument(parser.args[parser.pos], utf8))
     return value, 1 if is_null(value) else 0
 
 
@@ -810,12 +782,17 @@ async def expr(
         return None, IOResult(
             exit_code=2, stderr=from_byte_view(MISSING_OPERAND)
         )
+    utf8 = utf8_locale(opts.env)
     try:
-        result, exit_code = _expr_eval([to_byte_view(t) for t in texts])
+        result, exit_code = _expr_eval(
+            [byte_view(t, utf8) for t in texts], utf8
+        )
     except ExprError as exc:
         # GNU writes the refusal to stderr, nothing to stdout, and exits
         # 2; exit 1 is reserved for a zero-valued success. The
         # diagnostic quotes a byte view of the offending word, so it
         # leaves through the same door the value does.
-        return None, IOResult(exit_code=2, stderr=from_byte_view(f"{exc}\n"))
-    return from_byte_view(result + "\n"), IOResult(exit_code=exit_code)
+        return None, IOResult(
+            exit_code=2, stderr=from_byte_view(f"{exc}\n", utf8)
+        )
+    return from_byte_view(result + "\n", utf8), IOResult(exit_code=exit_code)

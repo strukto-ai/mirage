@@ -65,7 +65,7 @@ def grep_lines(
             offset of its own start, or of the match itself under -o.
             The offsets are derived from the lines because this scan is
             handed text rather than bytes, which is exact only for text
-            that came through ``decode_line``.
+            that came through ``decode_text``.
         pieces (bool): ripgrep's -o, which prints a line with no match
             whole (an inverted selection), prints empty matches, and
             counts matches under -c; see ``rg_pieces``.

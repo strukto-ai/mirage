@@ -27,10 +27,10 @@ const DEC = new TextDecoder()
 
 describe('LocalRuntime', () => {
   it.each([
-    ['list', 'seed.txt\nsub\n'],
-    ['stat', 'file 5 32768\ndir 16384\nmissing\n'],
-    ['glob', 'seed.txt\nsub/inner.txt\n'],
-  ])('runs the shared %s filesystem fixture', async (operation, expected) => {
+    ['dir/py/list.py', 'seed.txt\nsub\n'],
+    ['path/py/stat.py', 'file 5 32768\ndir 16384\nmissing\n'],
+    ['dir/py/glob.py', 'seed.txt\nsub/inner.txt\n'],
+  ])('runs the shared %s filesystem fixture', async (fixture, expected) => {
     const dir = await mkdtemp(join(tmpdir(), 'mirage-local-fs-'))
     const rt = new LocalRuntime()
     try {
@@ -38,10 +38,7 @@ describe('LocalRuntime', () => {
       await mkdir(join(dir, 'sub'))
       await writeFile(join(dir, 'sub/inner.txt'), 'inner\n')
       const code = await readFile(
-        new URL(
-          `../../../../../../../integ/fixtures/runtime/fs/py/${operation}.py`,
-          import.meta.url,
-        ),
+        new URL(`../../../../../../../integ/fixtures/runtime/${fixture}`, import.meta.url),
         'utf8',
       )
       const result = await rt.run({ code, args: [], env: { MIRAGE_TEST_ROOT: dir }, stdin: null })

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { childMountNames, namespaceNames } from '../../ops/namespace_view.ts'
+import { sessionVisibility } from '../../context/session_context.ts'
 import type { NamespaceLinks } from '../../ops/config.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
@@ -33,6 +34,7 @@ import { compareCodePoints } from '../../utils/sort.ts'
 import { DiscardSignal, ExitSignal } from '../../shell/errors.ts'
 import { SHOPT_DEFAULTS } from '../../shell/constants.ts'
 import type { SessionState } from '../session/session.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 // How deep a `**` descends. bash has no cap, but every level here is
 // one listing per directory, so an accidental `**` over a large tree is
@@ -67,9 +69,9 @@ export function globOptions(session: SessionState): GlobOptions {
 // glob that stops at one backend misses both: a nested mount's keys live
 // in another VFS, and no VFS stores a link. This is the union
 // mergeReaddir already applies to a listing, filtered by the glob segment
-// with the same matcher backends use, and session-filtered by
-// namespaceNames so a scoped session never learns an ungranted mount's
-// name from an expansion.
+// with the same matcher backends use, and filtered by the bound session's
+// visibility, as the backend's own matches are, so a scoped session never
+// learns an ungranted mount's name from an expansion.
 function namespaceChildren(
   registry: MountRegistry,
   links: NamespaceLinks | null,
@@ -78,7 +80,7 @@ function namespaceChildren(
 ): string[] {
   const base = rstripSlash(directory)
   const matcher = globPattern(pattern)
-  return namespaceNames(registry.mountPrefixes(), links, directory)
+  return namespaceNames(sessionVisibility(), registry.mountPrefixes(), links, directory)
     .filter((name) => globNameMatches(name, matcher))
     .map((name) => `${base}/${name}`)
 }
@@ -510,7 +512,7 @@ export async function resolveGlobs(
           // reads it as no entity name.
           if (opts.failglob) {
             const word = unmarkGlobs(typed.rawPath)
-            throw new DiscardSignal(new TextEncoder().encode(`bash: no match: ${word}\n`))
+            throw new DiscardSignal(encodeText(`bash: no match: ${word}\n`))
           }
           if (!opts.nullglob) {
             result.push(
@@ -576,8 +578,11 @@ export async function expandBoundaryGlobs(
   links: NamespaceLinks | null,
 ): Promise<(string | PathSpec)[]> {
   const prefixes = registry.mountPrefixes()
+  const vis = sessionVisibility()
   const spans = (p: string | PathSpec): boolean =>
-    p instanceof PathSpec && p.pattern !== null && childMountNames(prefixes, globHead(p)).length > 0
+    p instanceof PathSpec &&
+    p.pattern !== null &&
+    childMountNames(vis, prefixes, globHead(p)).length > 0
   if (!parts.some(spans)) return [...parts]
   const out: (string | PathSpec)[] = []
   for (const item of parts) {

@@ -92,7 +92,13 @@ async def write_description(
     it needs no read of the file, as a write to a write-only descriptor
     needs none (``exec 3>f; echo a >&3``). A read-write one (``<>``)
     still reads it: that description was opened to read, and its own
-    reader resumes over what the write left.
+    reader resumes over what the write left. Writes through one
+    description take turns, the first one (which opens the file)
+    included, as the kernel orders writes to an open file: a background
+    job writing alongside the shell neither reopens the file nor lands on
+    an offset another write has not advanced yet. A writer killed while it
+    waits for its turn writes nothing: its cancelled task leaves the
+    queue.
 
     Args:
         dispatch (DispatchFn): operation dispatcher.
@@ -104,6 +110,24 @@ async def write_description(
         if data:
             await file.emit(data)
         return
+    async with file.writing:
+        await _write_through(dispatch, session, file, data)
+
+
+async def _write_through(
+    dispatch: DispatchFn,
+    session: SessionState,
+    file: FileDescription,
+    data: bytes,
+) -> None:
+    """One write through a description, once it is this write's turn.
+
+    Args:
+        dispatch (DispatchFn): operation dispatcher.
+        session (SessionState): file creation mode.
+        file (FileDescription): shared open description.
+        data (bytes): bytes emitted by the command.
+    """
     if not file.opened:
         await create_file(
             dispatch,

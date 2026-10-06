@@ -4,6 +4,7 @@ import re
 from io import BytesIO
 
 from dulwich.config import ConfigFile
+from dulwich.refs import DictRefsContainer
 from dulwich.repo import BaseRepo
 
 from mirage.commands.builtin.utils.bre import (
@@ -11,7 +12,17 @@ from mirage.commands.builtin.utils.bre import (
     PosixSyntax,
     translate_ere,
 )
-from mirage.commands.cli.builtin.git.errors import GitError, NoWorkspaceError
+from mirage.commands.cli.builtin.git.constants import GIT_DIR
+from mirage.commands.cli.builtin.git.discover import is_bare
+from mirage.commands.cli.builtin.git.errors import (
+    AbbrevModeError,
+    GitError,
+    NotAWorkTreeError,
+    NoWorkspaceError,
+    SingleRevisionError,
+    UnknownSubcommandError,
+    UsageError,
+)
 from mirage.commands.cli.builtin.git.history import (
     LogFlags,
     parse_flags,
@@ -19,25 +30,44 @@ from mirage.commands.cli.builtin.git.history import (
     select,
 )
 from mirage.commands.cli.builtin.git.io import read_file, read_optional
-from mirage.commands.cli.builtin.git.refs import read_head
+from mirage.commands.cli.builtin.git.objects import abbrev_for
+from mirage.commands.cli.builtin.git.ref_fields import shorten_ref
+from mirage.commands.cli.builtin.git.ref_list import unique_abbreviations
+from mirage.commands.cli.builtin.git.refs import load_refs, resolve_symbolic
+from mirage.commands.cli.builtin.git.repo import Repo, config_bool
 from mirage.commands.cli.builtin.git.revparse import (
+    refs_named,
     resolve_object,
     split_revisions,
 )
 from mirage.commands.cli.builtin.git.session import opened
+from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
+    STDERR,
+    STDOUT,
     check_operands,
+    check_switches,
     escaped,
     fatal,
+    option_operand,
     start_point,
+    verb_usage,
 )
+from mirage.commands.cli.refusal import HELP_SWITCH
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
+from mirage.runtime.types import DispatchFn
 from mirage.utils.posix import compile_posix_regex
 from mirage.version import __version__
 
 SHOW_TOPLEVEL = "--show-toplevel"
+# git's own global spells `--git-dir` too, so rev-parse cannot declare it:
+# it arrives as an operand, and is answered from there.
+GIT_DIR_OPTION = "--git-dir"
+MIN_ABBREV = 4
+HEX_LENGTH = 40
 
 
 async def repo_config(inv: CLIInvocation[None], fl: FlagView) -> ConfigFile:
@@ -56,7 +86,9 @@ async def remote(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(inv.flags)
     try:
-        check_operands(inv.texts, marked=escaped(inv.argv))
+        check_operands(inv, inv.texts)
+        if inv.texts:
+            raise UnknownSubcommandError(inv.texts[0], verb_usage(inv))
         cfg = await repo_config(inv, fl)
         lines = []
         for section in sorted(cfg.sections()):
@@ -202,6 +234,7 @@ async def show_ref(
     inv: CLIInvocation[None],
 ) -> tuple[ByteSource | None, IOResult]:
     try:
+        check_switches(inv, inv.texts)
         repo, _ = await opened(FlagView(inv.flags), inv.doors or CLIDoors())
         out = await asyncio.to_thread(_show_refs, repo, tuple(inv.texts))
         return out, IOResult(exit_code=0 if out else 1)
@@ -223,14 +256,13 @@ async def rev_list(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(inv.flags)
     try:
-        check_operands(inv.texts, marked=escaped(inv.argv))
+        sole = inv.argv[-2:] == ("rev-list", HELP_SWITCH)
+        if option_operand(inv, inv.texts, STDOUT if sole else STDERR):
+            raise UsageError("", verb_usage(inv))
         repo, _ = await opened(fl, inv.doors or CLIDoors())
         flags = parse_flags(fl)
         if not inv.texts and not flags.all_refs:
-            return None, IOResult(
-                exit_code=129,
-                stderr=b"usage: git rev-list [<options>] <commit>...\n",
-            )
+            raise UsageError("", verb_usage(inv))
         commits = await asyncio.to_thread(
             _revisions, repo, tuple(inv.texts), flags
         )
@@ -256,57 +288,129 @@ def config_key(key: str) -> str:
     return ".".join(parts)
 
 
-def _parse_revision(
-    repo: BaseRepo, revision: str, abbrev: bool, head_ref: str | None
-) -> bytes:
-    """Resolve an object or its abbreviated symbolic name.
+async def _abbreviated(
+    dispatch: DispatchFn,
+    gitdir: str,
+    table: DictRefsContainer,
+    revision: str,
+    strict: bool,
+    warn: bool,
+) -> tuple[bytes, bytes]:
+    """``--abbrev-ref``: the ref a revision names, shortened as git
+    shortens it, and the error git prints in its place.
+
+    The name is found by git's rev-parse rules and followed through
+    symbolic refs, so HEAD reads as its branch and ``origin/HEAD`` as
+    what it points at; then the shortest unambiguous spelling is kept,
+    by every other rule under ``strict`` and by the earlier ones
+    otherwise. A name two refs answer to prints nothing and an error
+    instead, while ``core.warnAmbiguousRefs`` is on; a revision that
+    names no ref prints nothing. Pinned against git 2.47.3.
 
     Args:
-        repo (BaseRepo): repository to read.
-        revision (str): the requested revision.
-        abbrev (bool): emit a ref name instead of an object id.
-        head_ref (str | None): symbolic HEAD target, if any.
+        dispatch (DispatchFn): workspace op dispatcher.
+        gitdir (str): this checkout's git directory.
+        table (DictRefsContainer): every ref, as load_refs reads them.
+        revision (str): the revision as typed.
+        strict (bool): ``=strict``, or ``core.warnAmbiguousRefs`` when no
+            mode is given.
+        warn (bool): ``core.warnAmbiguousRefs``.
     """
-    oid = resolve_object(repo, revision).id
-    if not abbrev:
-        return oid + b"\n"
-    if revision == "HEAD":
-        return (
-            (head_ref.removeprefix("refs/heads/") if head_ref else "HEAD")
-            + "\n"
-        ).encode()
-    refs = repo.refs.allkeys()
-    for name in (
-        revision,
-        "refs/" + revision,
-        "refs/tags/" + revision,
-        "refs/heads/" + revision,
-        "refs/remotes/" + revision,
-    ):
-        if name.encode() in refs:
-            for prefix in ("refs/heads/", "refs/tags/", "refs/remotes/"):
-                if name.startswith(prefix):
-                    return (name.removeprefix(prefix) + "\n").encode()
-            return (name + "\n").encode()
-    return b""
+    known = frozenset(ref.decode(errors="replace") for ref in table.allkeys())
+    named = refs_named(known, revision)
+    if warn and len(named) > 1:
+        return b"", f"error: refname '{revision}' is ambiguous\n".encode()
+    if not named:
+        return b"", b""
+    found = await resolve_symbolic(dispatch, gitdir, table, named[0], True)
+    if found is None:
+        return b"", b""
+    return f"{shorten_ref(found.name, known, strict)}\n".encode(), b""
 
 
-def _revisions_before(argv: tuple[str, ...], count: int, option: str) -> int:
-    """How many revisions rev-parse prints ahead of one of its options.
+def _abbrev_strict(mode: FlagValue, warn: bool) -> bool:
+    """How strictly ``--abbrev-ref`` shortens.
 
-    rev-parse answers its arguments in line order, so ``HEAD
-    --show-toplevel`` prints the id first. Every word after the option
-    that is not a dash word is one of the later revisions.
+    ``strict`` against every other rule, ``loose`` against the earlier
+    ones, and with no mode as ``core.warnAmbiguousRefs`` says.
 
     Args:
-        argv (tuple[str, ...]): the line's verbatim tokens.
-        count (int): how many revisions the line names.
-        option (str): the option's spelling.
+        mode (FlagValue): the option's value, True when it has none.
+        warn (bool): ``core.warnAmbiguousRefs``.
+
+    Raises:
+        AbbrevModeError: any other mode.
     """
-    if option not in argv:
-        return 0
-    after = argv[argv.index(option) + 1 :]
-    return count - sum(1 for word in after if not word.startswith("-"))
+    if mode == "strict":
+        return True
+    if mode == "loose":
+        return False
+    if isinstance(mode, str):
+        raise AbbrevModeError(mode)
+    return warn
+
+
+def _in_git_dir(start: str, location: RepoLocation) -> bool:
+    return start == location.gitdir or start.startswith(location.gitdir + "/")
+
+
+async def _place_answers(
+    dispatch: DispatchFn, location: RepoLocation, start: str
+) -> dict[str, bytes]:
+    """The answers to the options that report where the line runs.
+
+    Pinned against git 2.47: ``--git-dir`` is ``.git`` at the top of a
+    work tree, ``.`` inside the git directory itself, and absolute
+    elsewhere (a subdirectory, a linked worktree); inside the git
+    directory there is no work tree, so ``--show-prefix`` is empty and
+    ``--show-toplevel`` is refused.
+
+    Args:
+        dispatch (DispatchFn): the workspace dispatcher.
+        location (RepoLocation): where the repository was found.
+        start (str): the directory the line runs in.
+    """
+    in_git_dir = _in_git_dir(start, location)
+    top = "/" if location.worktree == "/" else location.worktree + "/"
+    in_work_tree = (
+        not in_git_dir
+        and not await is_bare(dispatch, location)
+        and (start == location.worktree or start.startswith(top))
+    )
+    prefix = (
+        start[len(top) :] + "/"
+        if in_work_tree and start != location.worktree
+        else ""
+    )
+    if start == location.gitdir:
+        git_dir = "."
+    elif start == location.worktree and location.gitdir == top + GIT_DIR:
+        git_dir = GIT_DIR
+    else:
+        git_dir = location.gitdir
+    return {
+        SHOW_TOPLEVEL: f"{location.worktree}\n".encode(),
+        GIT_DIR_OPTION: f"{git_dir}\n".encode(),
+        "--show-prefix": f"{prefix}\n".encode(),
+        "--is-inside-work-tree": f"{str(in_work_tree).lower()}\n".encode(),
+    }
+
+
+def _short_width(value: FlagValue, fallback: int) -> int:
+    """How many hex digits ``--short`` keeps.
+
+    The repository's own width bare, and otherwise the number given,
+    read as strtoul reads it, between git's four and the whole id.
+
+    Args:
+        value (FlagValue): the option's value.
+        fallback (int): the repository's own width.
+    """
+    if not isinstance(value, str):
+        return fallback
+    digits = re.match(r"\s*\d+", value)
+    width = int(digits.group()) if digits else 0
+    return min(max(width, MIN_ABBREV), HEX_LENGTH)
 
 
 async def rev_parse(
@@ -314,32 +418,120 @@ async def rev_parse(
 ) -> tuple[ByteSource | None, IOResult]:
     """Resolve revisions supplied to rev-parse.
 
+    Each revision's object id, and the answers to the options that report
+    where the line runs, in the order the line gives them. With
+    ``--verify`` (or ``--short``, which implies it) there must be exactly
+    one revision, printed after everything else, and ``-q`` turns the
+    refusal into a bare exit 1.
+
     Args:
         inv (CLIInvocation[None]): the parsed invocation.
     """
     fl = FlagView(inv.flags)
+    quiet = fl.as_bool("quiet")
+    repo: BaseRepo | None = None
     try:
-        check_operands(inv.texts, marked=escaped(inv.argv))
+        marked = escaped(inv.argv)
+        revisions = tuple(
+            text
+            for text in inv.texts
+            if text != GIT_DIR_OPTION or text in marked
+        )
+        check_operands(inv, revisions)
+        verb = inv.argv.index("rev-parse") if "rev-parse" in inv.argv else -1
+        words = inv.argv[verb + 1 :]
+        end = words.index("--") if "--" in words else -1
+        named = words if end == -1 else words[:end]
+        toplevel = SHOW_TOPLEVEL in named
+        mode = fl.raw("abbrev_ref")
+        if isinstance(mode, str):
+            _abbrev_strict(mode, True)
         doors = inv.doors or CLIDoors()
-        toplevel = fl.as_bool("show_toplevel")
         repo, location = await opened(fl, doors, work_tree=toplevel)
         assert doors.dispatch is not None
-        head = await read_head(doors.dispatch, location.gitdir)
-        rows = [
-            await asyncio.to_thread(
-                _parse_revision,
-                repo,
-                revision,
-                fl.as_bool("abbrev_ref"),
-                head.ref,
+        start = start_point(fl)
+        if toplevel and _in_git_dir(start, location):
+            raise NotAWorkTreeError()
+        answers = await _place_answers(doors.dispatch, location, start)
+        short = fl.raw("short")
+        verify = fl.as_bool("verify") or short is not None
+        width = (
+            None if short is None else _short_width(short, abbrev_for(repo))
+        )
+        table = await load_refs(
+            doors.dispatch, location.gitdir, location.commondir
+        )
+        warn = await config_bool(
+            doors.dispatch, location, b"core", b"warnambiguousrefs", True
+        )
+        strict = warn if mode is None else _abbrev_strict(mode, warn)
+        shown: list[bytes] = []
+        errors: list[bytes] = []
+        # What stops the line: git prints what it answered before it,
+        # then the revision it could not read as one, then the refusal.
+        failed: GitError | None = None
+        for revision in revisions:
+            try:
+                oid = (
+                    await asyncio.to_thread(resolve_object, repo, revision)
+                ).id
+            except GitError as exc:
+                if verify:
+                    raise SingleRevisionError() from exc
+                shown.append(f"{revision}\n".encode())
+                failed = exc
+                break
+            if mode is None:
+                hexid = oid.decode()
+                length = len(hexid)
+                if width is not None:
+                    unique = await asyncio.to_thread(
+                        unique_abbreviations, repo, {hexid: width}
+                    )
+                    length = unique[hexid]
+                shown.append(f"{hexid[:length]}\n".encode())
+                continue
+            line, error = await _abbreviated(
+                doors.dispatch, location.gitdir, table, revision, strict, warn
             )
-            for revision in inv.texts
-        ]
-        if toplevel:
-            rows.insert(
-                _revisions_before(inv.argv, len(rows), SHOW_TOPLEVEL),
-                f"{location.worktree}\n".encode(),
-            )
-        return b"".join(rows), IOResult()
+            shown.append(line)
+            # git prints each name's error right after its warning, so the
+            # error joins the warnings' list; -q keeps it while it drops them.
+            if not error:
+                continue
+            if quiet or not isinstance(repo, Repo) or repo.ambiguous is None:
+                errors.append(error)
+            else:
+                repo.ambiguous.append(error.decode())
+        if verify and len(shown) != 1:
+            raise SingleRevisionError()
+        rows: list[bytes] = []
+        next_at = 0
+        for at, word in enumerate(words):
+            if failed is not None and next_at == len(shown):
+                break
+            ended = end != -1 and at > end
+            answer = None if ended else answers.get(word)
+            if answer is not None:
+                rows.append(answer)
+            elif (
+                not verify
+                and (ended or not word.startswith("-"))
+                and next_at < len(shown)
+            ):
+                rows.append(shown[next_at])
+                next_at += 1
+        rows.extend(shown[next_at:])
+        if failed is not None:
+            _, refused = fatal(failed)
+            return b"".join(rows), refused
+        return b"".join(rows), IOResult(stderr=b"".join(errors) or None)
+    except SingleRevisionError as exc:
+        if quiet:
+            return None, IOResult(exit_code=1)
+        return fatal(exc)
     except GitError as exc:
         return fatal(exc)
+    finally:
+        if quiet and isinstance(repo, Repo) and repo.ambiguous:
+            repo.ambiguous.clear()

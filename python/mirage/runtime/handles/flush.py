@@ -12,37 +12,49 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Literal
+from collections.abc import Sequence
 
-FlushKind = Literal["append", "write"]
-
-# The lowest offset a handle has written at, before it writes anything.
-# A sentinel rather than None because every write takes the minimum of
-# it and the new offset, and "nothing yet" has to lose that comparison.
-NO_WRITE = 2**63 - 1
+from mirage.runtime.handles.types import FlushStep
 
 
 def plan_flush(
-    base_len: int, low_write: int, buf: bytes | bytearray
-) -> tuple[FlushKind, bytes]:
-    """Decide what a closing whole-file buffer owes the mount.
+    *,
+    base_len: int,
+    runs: Sequence[tuple[int, bytes | bytearray]],
+    cut: int | None,
+    size: int,
+    appending: bool,
+) -> list[FlushStep]:
+    """The ops that leave the mount holding what a closing handle holds.
 
-    Every encoder buffers a whole file and has to answer the same
-    question at close: did this handle only add to the end, or did it
-    rewrite what was already there? Only the first can travel as a
-    delta, and answering "write" always is what makes an append loop
-    quadratic.
+    A handle keeps what it wrote as byte ranges, so it owes the mount
+    those ranges and nothing it only read: another writer's bytes
+    between them stay, a file the open created or emptied included. A
+    cut goes first, then the ranges, then any growth past them; a lone
+    range that starts where the file ended, or anything an append-mode
+    handle wrote, goes as an append, which lands at the mount's own end.
 
     Args:
-        base_len (int): length the file had when the handle opened.
-        low_write (int): lowest offset this handle wrote at, or the
-            NO_WRITE sentinel when it never wrote.
-        buf (bytes | bytearray): the handle's whole buffer.
-
-    Returns:
-        tuple[FlushKind, bytes]: ("append", tail) when the handle only
-        extended the file, else ("write", whole buffer).
+        base_len (int): the file's length when the handle opened it.
+        runs (Sequence[tuple[int, bytes | bytearray]]): the written ranges as
+            (offset, bytes), sorted and disjoint.
+        cut (int | None): the shortest length a truncate left the
+            stored bytes at, or None when nothing was truncated away.
+        size (int): the file's length as the handle holds it.
+        appending (bool): the handle was opened in append mode.
     """
-    if base_len > 0 and low_write >= base_len and len(buf) >= base_len:
-        return "append", bytes(buf[base_len:])
-    return "write", bytes(buf)
+    steps: list[FlushStep] = []
+    end = base_len
+    if cut is not None:
+        steps.append(FlushStep("truncate", length=cut))
+        end = cut
+    if len(runs) == 1 and runs[0][0] == end and (end > 0 or appending):
+        steps.append(FlushStep("append", data=bytes(runs[0][1])))
+        end += len(runs[0][1])
+    else:
+        for offset, data in runs:
+            steps.append(FlushStep("pwrite", data=bytes(data), offset=offset))
+            end = max(end, offset + len(data))
+    if size > end:
+        steps.append(FlushStep("truncate", length=size))
+    return steps

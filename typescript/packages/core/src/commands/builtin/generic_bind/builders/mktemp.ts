@@ -16,36 +16,38 @@ import { PathSpec } from '../../../../types.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
 import { mktempGeneric } from '../../generic/mktemp.ts'
 import { pathExists } from '../../utils/copy.ts'
-import { requireOp, type Builder } from '../adapter.ts'
+import { requireOp, type Builder, type BuilderFn } from '../adapter.ts'
+
+const mktemp: BuilderFn = (ops, accessor, _paths, texts, opts) => {
+  // The name a pathless mktemp creates is under $TMPDIR or /tmp, which the
+  // working directory's mount rarely owns, so the create goes through the
+  // dispatcher to whichever mount does. Only a generic run outside a
+  // workspace, with no dispatcher and no other mount, writes through this
+  // mount's own ops. Mirrors Python's builder.
+  const mkdir = requireOp(ops.mkdir, 'mkdir')
+  const write = requireOp(ops.write, 'write')
+  const local = (p: PathSpec): PathSpec =>
+    PathSpec.fromStrPath(p.virtual, mountKey(p.virtual, opts.mountPrefix ?? ''))
+  return mktempGeneric(
+    texts,
+    opts,
+    async (p) => {
+      if (opts.dispatch !== undefined) await opts.dispatch('mkdir', p, [], { parents: false })
+      else await mkdir(accessor, local(p))
+    },
+    async (p, d) => {
+      if (opts.dispatch !== undefined) await opts.dispatch('write', p, [d])
+      else await write(accessor, local(p), d)
+    },
+    async (p) => {
+      if (opts.statPath !== undefined) return (await opts.statPath(p.virtual)) !== null
+      return pathExists((at) => ops.stat(accessor, at), local(p))
+    },
+  )
+}
 
 export const BUILDER: Builder = {
   name: 'mktemp',
   write: true,
-  fn: (ops, accessor, _paths, texts, opts) => {
-    // The name a pathless mktemp creates is under $TMPDIR or /tmp, which the
-    // working directory's mount rarely owns, so the create goes through the
-    // dispatcher to whichever mount does. Only a generic run outside a
-    // workspace, with no dispatcher and no other mount, writes through this
-    // mount's own ops. Mirrors Python's builder.
-    const mkdir = requireOp(ops.mkdir, 'mkdir')
-    const write = requireOp(ops.write, 'write')
-    const local = (p: PathSpec): PathSpec =>
-      PathSpec.fromStrPath(p.virtual, mountKey(p.virtual, opts.mountPrefix ?? ''))
-    return mktempGeneric(
-      texts,
-      opts,
-      async (p) => {
-        if (opts.dispatch !== undefined) await opts.dispatch('mkdir', p, [], { parents: false })
-        else await mkdir(accessor, local(p))
-      },
-      async (p, d) => {
-        if (opts.dispatch !== undefined) await opts.dispatch('write', p, [d])
-        else await write(accessor, local(p), d)
-      },
-      async (p) => {
-        if (opts.statPath !== undefined) return (await opts.statPath(p.virtual)) !== null
-        return pathExists((at) => ops.stat(accessor, at), local(p))
-      },
-    )
-  },
+  fn: mktemp,
 }

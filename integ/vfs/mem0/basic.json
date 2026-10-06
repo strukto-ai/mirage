@@ -246,6 +246,32 @@
         "stdout": "",
         "stderr": "/memories/mem-beta.json: Read-only file system\n"
       }
+    },
+    {
+      "id": "mem0_grep_rg_recurse_and_refuse_a_bare_directory",
+      "seq": 590019,
+      "targets": [
+        "mem0"
+      ],
+      "command": "grep -r 'dark mode' /memories; echo rc=$?; grep 'dark mode' /memories; echo rc=$?; rg 'dark mode' /memories; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "/memories/mem-beta.json:  \"memory\": \"The user prefers dark mode.\",\nrc=0\nrc=2\n/memories/mem-beta.json:  \"memory\": \"The user prefers dark mode.\",\nrc=0\n",
+        "stderr": "grep: /memories: Is a directory\n"
+      }
+    },
+    {
+      "id": "mem0_search_refusals_are_usage_errors",
+      "seq": 590020,
+      "targets": [
+        "mem0"
+      ],
+      "command": "search; echo rc=$?; search '' /memories; echo rc=$?; search --method keyword planning /memories; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\nrc=2\n",
+        "stderr": "search: query is required\nsearch: query is required\nsearch: only the 'semantic' method is supported\n"
+      }
     }
   ]
 }

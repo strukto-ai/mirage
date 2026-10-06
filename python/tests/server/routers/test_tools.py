@@ -95,3 +95,16 @@ async def test_bad_arguments_and_unknown_targets_are_refused():
     assert workspace.json() == {"detail": "workspace not found"}
     assert session.status_code == 404
     assert session.json() == {"detail": "session not found"}
+
+
+@pytest.mark.asyncio
+async def test_a_body_over_the_limit_is_refused():
+    app = build_app(idle_grace_seconds=10.0)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        wid = await _create_workspace(client)
+        r = await client.post(
+            f"/v1/workspaces/{wid}/read", content=b" " * (4 * 1024 * 1024 + 1)
+        )
+        assert r.status_code == 413

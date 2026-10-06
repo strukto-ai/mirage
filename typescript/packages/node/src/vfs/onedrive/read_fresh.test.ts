@@ -14,7 +14,7 @@
 
 import type { OneDriveAccessor } from '@struktoai/mirage-core/accessor/onedrive'
 import { read } from '@struktoai/mirage-core/core/onedrive/read'
-import { stream } from '@struktoai/mirage-core/core/onedrive/stream'
+import { readStream } from '@struktoai/mirage-core/core/onedrive/stream'
 import { runWithRecording, runWithRevisions } from '@struktoai/mirage-core/observe/context'
 import {
   DEFAULT_READ_TTL,
@@ -126,7 +126,7 @@ describe('onedrive under read: fresh', () => {
       const [data, records] = await runWithRecording(async () => {
         if (slot === 'bytes') return read(accessor, SPEC)
         const parts: Uint8Array[] = []
-        for await (const chunk of stream(accessor, SPEC)) parts.push(chunk)
+        for await (const chunk of readStream(accessor, SPEC)) parts.push(chunk)
         return Buffer.concat(parts)
       })
       expect(DEC.decode(data)).toBe(DEC.decode(NEW))

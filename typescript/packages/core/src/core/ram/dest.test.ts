@@ -24,7 +24,7 @@ import { rename } from './rename.ts'
 import { rmdir } from './rmdir.ts'
 import { setAttrs } from './set_attrs.ts'
 import { stat } from './stat.ts'
-import { stream } from './stream.ts'
+import { readStream } from './stream.ts'
 import { unlink } from './unlink.ts'
 
 function mkPath(virtual: string): PathSpec {
@@ -41,7 +41,7 @@ function mkAccessor(): RAMAccessor {
 }
 
 async function drain(accessor: RAMAccessor, path: PathSpec): Promise<void> {
-  for await (const chunk of stream(accessor, path)) void chunk
+  for await (const chunk of readStream(accessor, path)) void chunk
 }
 
 async function codeOf(fn: () => Promise<unknown>): Promise<string | undefined> {

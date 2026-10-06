@@ -51,10 +51,11 @@ class MockSFTPFile:
     def __init__(self, store, path, mode):
         self._store = store
         self._path = path
-        self._mode = mode
+        # SFTP open flags (write, create) open the file for update.
+        self._mode = "r+b" if isinstance(mode, int) else mode
         self._pos = 0
         self._buf = io.BytesIO()
-        if "r" in mode and path in store:
+        if "r" in self._mode and path in store:
             self._buf = io.BytesIO(store[path])
 
     async def read(self, size=-1):
@@ -63,12 +64,18 @@ class MockSFTPFile:
         self._pos = self._buf.tell()
         return data
 
-    async def write(self, data):
+    async def write(self, data, offset=None):
         if self._mode == "ab":
             existing = self._store.get(self._path, b"")
             self._store[self._path] = existing + data
         else:
+            if offset is not None:
+                self._buf.seek(offset)
             self._buf.write(data)
+
+    async def truncate(self, size):
+        held = self._buf.getvalue()[:size]
+        self._buf = io.BytesIO(held.ljust(size, b"\0"))
 
     async def seek(self, offset):
         self._pos = offset
@@ -77,8 +84,14 @@ class MockSFTPFile:
         return self
 
     async def __aexit__(self, *args):
-        if "w" in self._mode:
+        if "w" in self._mode or "+" in self._mode:
             self._store[self._path] = self._buf.getvalue()
+
+    def __await__(self):
+        return self._opened().__await__()
+
+    async def _opened(self):
+        return self
 
 
 class MockSFTPClient:
@@ -137,7 +150,7 @@ class MockSFTPClient:
                 entry.filename = entry.filename.encode("utf-8")
         return entries
 
-    def open(self, path, mode):
+    def open(self, path, mode="r", encoding="utf-8"):
         return MockSFTPFile(self.files, path, mode)
 
     async def remove(self, path):

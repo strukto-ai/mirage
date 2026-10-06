@@ -19,15 +19,16 @@ from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import (
     flat_scopes,
     relay,
-    transfer_links,
+    transfer_links_of,
     transfer_primitives,
 )
-from mirage.commands.builtin.generic.mv import mv as generic_mv
+from mirage.commands.builtin.generic.mv import mv_generic as generic_mv
 from mirage.commands.builtin.generic.mv import parse_flags
 from mirage.commands.builtin.generic_bind.adapter import refuse_reveal
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.io.types import ByteSource
 from mirage.ops.types import NamespaceView
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec, PrimitiveMove
@@ -39,6 +40,7 @@ async def run_mv(
     dispatch: DispatchFn,
     storage_key: Callable[[PathSpec], str] | None = None,
     ns: NamespaceView | None = None,
+    stdin: ByteSource | None = None,
 ) -> CrossResult:
     """Move operands that span mounts via the shared generic mv.
 
@@ -54,6 +56,7 @@ async def run_mv(
             store would copy the object onto itself and then unlink the
             source, destroying it.
         ns (NamespaceView | None): Namespace facts for link operands.
+        stdin (ByteSource | None): where ``-i`` reads its answers.
     """
     p = functools.partial
     fl = FlagView(flag_kwargs, spec=SPECS["mv"])
@@ -73,8 +76,9 @@ async def run_mv(
         backend_key=storage_key,
         guard=refuse_reveal,
         copies=(
-            transfer_links(ns.links, dispatch, "/")
+            transfer_links_of(ns.links, dispatch, "/", ns.visibility)
             if ns is not None and ns.links is not None
             else None
         ),
+        stdin=stdin,
     )

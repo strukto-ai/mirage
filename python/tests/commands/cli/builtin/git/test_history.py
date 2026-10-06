@@ -19,7 +19,12 @@ from dulwich.repo import Repo
 from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.errors import BadDateError, GitError
 from mirage.commands.cli.builtin.git.format import subject
-from mirage.commands.cli.builtin.git.history import parse_flags, select
+from mirage.commands.cli.builtin.git.history import (
+    decoration_style,
+    parse_flags,
+    select,
+)
+from mirage.commands.cli.builtin.git.types import Decoration
 from mirage.commands.spec import parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
 from tests.commands.cli.builtin.git.conftest import commit_file
@@ -271,3 +276,22 @@ def test_a_refused_pattern_names_where_it_came_from(argv, message):
 def test_perl_punctuation_escapes_are_literal(pattern, line):
     flags = parse_flags(FlagView({"perl_regexp": True, "grep": [pattern]}))
     assert flags.greps[0].search(line)
+
+
+@pytest.mark.parametrize(
+    ("value", "style"),
+    [
+        (b"short", Decoration.SHORT),
+        (b"full", Decoration.FULL),
+        (b"no", Decoration.NONE),
+        (b"", Decoration.NONE),
+        (b"1", Decoration.SHORT),
+        (b"auto", Decoration.NONE),
+        (b"bogus", None),
+        (b"Full", None),
+    ],
+)
+def test_decoration_style_names_git_styles(
+    value: bytes, style: Decoration | None
+):
+    assert decoration_style(value) is style

@@ -22,7 +22,7 @@ from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
-async def write_bytes(
+async def write(
     accessor: DiskAccessor, path_spec: PathSpec, data: bytes
 ) -> None:
     root = accessor.root

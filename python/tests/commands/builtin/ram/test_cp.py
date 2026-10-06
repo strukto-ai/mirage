@@ -23,14 +23,22 @@ def workspace():
 
 
 @pytest.mark.asyncio
-async def test_cp_deep_under_a_file_reports_not_a_directory(workspace):
+@pytest.mark.parametrize(
+    "operands,deep",
+    [
+        ("/a.txt /plain/s/x.txt", "/plain/s/x.txt"),
+        ("/plain/a/b /d", "/plain/a/b"),
+    ],
+)
+async def test_cp_deep_under_a_file_reports_not_a_directory(
+    workspace, operands, deep
+):
     await workspace.vfs.write("/a.txt", b"hi")
     await workspace.vfs.write("/plain", b"y")
-    io = await workspace.shell("cp /a.txt /plain/s/x.txt")
+    await workspace.vfs.mkdir("/d")
+    io = await workspace.shell(f"cp {operands}")
     assert io.exit_code == 1
-    assert io.stderr == (
-        b"cp: cannot stat '/plain/s/x.txt': Not a directory\n"
-    )
+    assert io.stderr == f"cp: cannot stat '{deep}': Not a directory\n".encode()
 
 
 @pytest.mark.asyncio
@@ -51,12 +59,3 @@ async def test_cp_recursive_verbose_lists_directories(workspace):
     assert lines.index("'/dir/sub' -> '/newdir/sub'") < lines.index(
         "'/dir/sub/g.txt' -> '/newdir/sub/g.txt'"
     )
-
-
-@pytest.mark.asyncio
-async def test_cp_source_deep_under_a_plain_file_is_not_a_directory(workspace):
-    await workspace.vfs.write("/plain", b"x")
-    await workspace.vfs.mkdir("/d")
-    io = await workspace.shell("cp /plain/a/b /d")
-    assert io.exit_code == 1
-    assert io.stderr == (b"cp: cannot stat '/plain/a/b': Not a directory\n")

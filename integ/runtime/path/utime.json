@@ -1,0 +1,137 @@
+{
+  "cases": [
+    {
+      "id": "utime_reaches_the_mount",
+      "note": "monty has no os.utime.",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "t.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nos.utime('/data/t.txt', (100.0, 200.0))\ntry:\n    os.utime('/data/nope.txt', (1, 2))\nexcept OSError as e:\n    print(type(e).__name__)",
+            "js": "console.log(os.utimes('/data/t.txt', 100000, 200000), os.utimes('/data/nope.txt', 1, 2))"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "0 -44\n"
+            }
+          }
+        },
+        {
+          "command": "stat -c %Y /data/t.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "200\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_links_own_time_reaches_the_guest",
+      "note": "monty has no lstat and quickjs no os.lstat, so only wasi and pyodide can read a link's own time.",
+      "runtimes": [
+        "wasi",
+        "pyodide"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "t.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "ln -s t.txt /data/lk",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "import os\nos.utime('/data/lk', (1000000000, 1000000000), follow_symlinks=False)\nst = os.lstat('/data/lk')\nprint(int(st.st_mtime))\nprint(os.path.islink('/data/lk'))\nprint(int(os.stat('/data/t.txt').st_mtime) != 1000000000)"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "1000000000\nTrue\nTrue\n"
+          },
+          "expect_on": {
+            "pyodide": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "NotImplementedError: utime: follow_symlinks unavailable on this platform"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "chmod_reaches_the_mount",
+      "note": "monty has no os.chmod and quickjs no os.chmod; WASI preview1 has no call that sets a mode, so CPython on wasi accepts os.chmod and nothing reaches the mount.",
+      "runtimes": [
+        "wasi",
+        "pyodide"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "t.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nos.chmod('/data/t.txt', 0o600)"
+          },
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "stat -c %a /data/t.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "600\n"
+          },
+          "expect_on": {
+            "wasi": {
+              "stdout": "644\n"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

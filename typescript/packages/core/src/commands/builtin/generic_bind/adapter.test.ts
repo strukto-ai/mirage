@@ -12,39 +12,40 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
 import type { Accessor } from '../../../accessor/base.ts'
-import type { CommandOpts } from '../../config.ts'
-import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
-import { eacces, eisdir, enoent, formatFsError } from '../../../utils/errors.ts'
-import {
-  dirAwareStat,
-  dirAwareStream,
-  makeResolveGlob,
-  resolveGlobOf,
-  withDirGuard,
-  withHiddenGuard,
-  withAbortGuard,
-  withPolicyGuard,
-  withRuleGuard,
-  withDispatchRuleGuard,
-  withPathGuards,
-  requireOp,
-  type CommandIO,
-} from './adapter.ts'
 import {
   runWithAdmission,
   runWithMountGate,
   runWithOpPolicies,
   runWithSession,
 } from '../../../context/session_context.ts'
+import { IOResult } from '../../../io/types.ts'
 import type { Policy } from '../../../policy/base.ts'
 import { Policies } from '../../../policy/policies.ts'
 import type { Action, OpsContext } from '../../../policy/types.ts'
-import { SessionState } from '../../../workspace/session/session.ts'
-import { IOResult } from '../../../io/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
+import {
+  requireOp,
+  withAbortGuard,
+  withCommandGuards,
+  withDispatchRuleGuard,
+  withPolicyGuard,
+} from './adapter.ts'
+import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
+import { eacces, eisdir, enoent, formatFsError } from '../../../utils/errors.ts'
+import { stripSlash } from '../../../utils/slash.ts'
+import { SessionState } from '../../../workspace/session/session.ts'
+import type { CommandOpts } from '../../config.ts'
+import {
+  dirAwareStat,
+  dirAwareStream,
+  resolveGlobOf,
+  scopedIo,
+  withDirGuard,
+  type CommandIO,
+} from './adapter.ts'
+import { makeResolveGlob } from '../../../utils/glob_walk.ts'
 
 const accessor = {} as never
 // No namespace facts, which is what a command bound outside a workspace
@@ -273,142 +274,7 @@ describe('dirAwareStream', () => {
   })
 })
 
-describe('withRuleGuard', () => {
-  const spec = (virtual: string): PathSpec =>
-    new PathSpec({
-      virtual,
-      directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
-      vfsPath: virtual,
-      resolved: true,
-    })
-
-  it('asks the bound gate and leaves stat alone', async () => {
-    const calls: string[][] = []
-    async function* stream(_a: Accessor, path: PathSpec): AsyncGenerator<Uint8Array> {
-      calls.push(['stream', path.virtual])
-      yield await Promise.resolve(new Uint8Array([1]))
-    }
-    const ops: CommandIO = {
-      readdir: (_a, path) => {
-        calls.push(['readdir', path.virtual])
-        return Promise.resolve(['/data/locked/y'])
-      },
-      readBytes: (_a, path) => {
-        calls.push(['read', path.virtual])
-        return Promise.resolve(new Uint8Array([1]))
-      },
-      readStream: stream,
-      stat: (_a, path) => {
-        calls.push(['stat', path.virtual])
-        return Promise.resolve(
-          new FileStat({ name: 'k', type: FileType.FILE, content: ContentType.TEXT, size: 1 }),
-        )
-      },
-      isMounted: () => true,
-      rename: (_a, src, dst) => {
-        calls.push(['rename', src.virtual, dst.virtual])
-        return Promise.resolve()
-      },
-    }
-    const guarded = withRuleGuard(ops)
-    // No gate bound: every slot runs as is.
-    expect(await guarded.readBytes(accessor, spec('/data/locked/y'))).toEqual(new Uint8Array([1]))
-    const asked: string[] = []
-    const gate = {
-      scoped: true,
-      granted: [],
-      check: (virtual: string) => {
-        asked.push(virtual)
-        if (virtual === '/data/locked/y') throw new Error(`refused ${virtual}`)
-      },
-      refuses: (virtual: string) => virtual === '/data/locked/y',
-    }
-    await runWithAdmission(gate, async () => {
-      // The gate throws at call time, like the hidden guard, so a caller's
-      // `await` inside a try sees it the same way as a rejection.
-      expect(() => guarded.readBytes(accessor, spec('/data/locked/y'))).toThrow('refused')
-      // stat is not a guarded slot: deny is present and refused.
-      expect((await guarded.stat(accessor, spec('/data/locked/y'))).size).toBe(1)
-      // readdir asks about the directory, never filters its names.
-      expect(await guarded.readdir(accessor, spec('/data/locked'))).toEqual(['/data/locked/y'])
-      // A pair op asks about both paths.
-      const rename = guarded.rename
-      if (rename === undefined) throw new Error('rename slot missing')
-      expect(() => rename(accessor, spec('/data/a'), spec('/data/locked/y'))).toThrow('refused')
-      await rename(accessor, spec('/data/a'), spec('/data/b'))
-    })
-    expect(asked).toEqual([
-      '/data/locked/y',
-      '/data/locked',
-      '/data/a',
-      '/data/locked/y',
-      '/data/a',
-      '/data/b',
-    ])
-    expect(calls).not.toContainEqual(['rename', '/data/a', '/data/locked/y'])
-    expect(calls).toContainEqual(['rename', '/data/a', '/data/b'])
-  })
-})
-
-describe('withDispatchRuleGuard', () => {
-  const spec = (virtual: string): PathSpec =>
-    new PathSpec({
-      virtual,
-      directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
-      vfsPath: virtual,
-      resolved: true,
-    })
-
-  it('marks an op with the bound gate for the door to judge', async () => {
-    const seen: [string, unknown][] = []
-    const door: DispatchFn = (op, _path, _args, kwargs) => {
-      seen.push([op, kwargs?.ruleGate])
-      return Promise.resolve([null, new IOResult()])
-    }
-    const dispatch = withDispatchRuleGuard(door)
-    // No gate bound: the op goes to the door unmarked.
-    await dispatch('read', spec('/data/f'))
-    const asked: string[] = []
-    const gate = {
-      scoped: true,
-      granted: [],
-      check: (virtual: string) => {
-        asked.push(virtual)
-      },
-      refuses: () => false,
-    }
-    await runWithAdmission(gate, async () => {
-      await dispatch('read', spec('/data/f'), [spec('/data/g')])
-      // A metadata op is never judged: deny is present and refused.
-      await dispatch('stat', spec('/data/f'))
-    })
-    expect(seen).toEqual([
-      ['read', undefined],
-      ['read', gate],
-      ['stat', undefined],
-    ])
-    // The wrapper judges nothing itself: the door does, on its own paths.
-    expect(asked).toEqual([])
-  })
-})
-
-/** Refuse reads of one path; record every op asked. */
-class SealedRead implements Policy {
-  readonly asked: [string, string, boolean][] = []
-  private readonly sealed: string
-  constructor(sealed: string) {
-    this.sealed = sealed
-  }
-  preOps(ctx: OpsContext): Action | null {
-    this.asked.push([ctx.op, ctx.path.virtual, ctx.write])
-    if (!ctx.write && ctx.path.virtual === this.sealed) {
-      return { kind: 'deny', reason: 'sealed' }
-    }
-    return null
-  }
-}
-
-describe('withPolicyGuard', () => {
+describe('withCommandGuards', () => {
   const spec = (virtual: string): PathSpec =>
     new PathSpec({
       virtual,
@@ -450,81 +316,29 @@ describe('withPolicyGuard', () => {
     }
   }
 
-  it('admits slots and leaves stat alone', async () => {
+  it('command path restrictions apply before a warm serve', async () => {
     const calls: string[][] = []
-    const raw = probeOps(calls)
-    // No binding: every slot runs as is, and no hook fires.
-    expect(await withPolicyGuard(raw).readBytes(accessor, spec('/data/secret'))).toEqual(
-      new Uint8Array([1]),
-    )
-    calls.length = 0
-
-    const policy = new SealedRead('/data/secret')
-    await runWithOpPolicies(new Policies([policy]), () =>
-      runWithMountGate('/data', MountMode.WRITE, async () => {
-        const ops = withPolicyGuard(raw)
-        await expect(ops.readBytes(accessor, spec('/data/secret'))).rejects.toThrow('sealed')
-        expect(calls).not.toContainEqual(['read', '/data/secret'])
-        // The stream gates before its first chunk.
-        await expect(drain(ops.readStream(accessor, spec('/data/secret')))).rejects.toThrow(
-          'sealed',
-        )
-        expect(calls).not.toContainEqual(['stream', '/data/secret'])
-        // stat is not a guarded slot: deny is present and refused.
-        expect((await ops.stat(accessor, spec('/data/secret'))).size).toBe(1)
-        // readdir asks about the directory it lists.
-        expect(await ops.readdir(accessor, spec('/data/dir'))).toEqual(['a'])
-        // A copy's source is a read; its destination is a write.
-        const copy = ops.copy
-        if (copy === undefined) throw new Error('copy slot missing')
-        await copy(accessor, spec('/data/src'), spec('/data/dst'))
-        // A write slot asks with write=true.
-        const unlink = ops.unlink
-        if (unlink === undefined) throw new Error('unlink slot missing')
-        await unlink(accessor, spec('/data/gone'))
-      }),
-    )
-    expect(policy.asked).toContainEqual(['read_bytes', '/data/secret', false])
-    expect(policy.asked).toContainEqual(['read_stream', '/data/secret', false])
-    expect(policy.asked).toContainEqual(['readdir', '/data/dir', false])
-    expect(policy.asked).toContainEqual(['copy', '/data/src', false])
-    expect(policy.asked).toContainEqual(['copy', '/data/dst', true])
-    expect(policy.asked).toContainEqual(['unlink', '/data/gone', true])
-    expect(policy.asked.some(([op]) => op === 'stat')).toBe(false)
-  })
-
-  it('wrap-time capture covers late drains', async () => {
-    // head/tail/wc bind lazy readers the pipeline drains after dispatch
-    // has reset the context; the guard captured at wrap time still
-    // answers (livePolicyScope).
-    const calls: string[][] = []
-    const raw = probeOps(calls)
-    const policy = new SealedRead('/data/secret')
-    const ops = await runWithOpPolicies(new Policies([policy]), () =>
-      Promise.resolve(withPolicyGuard(raw)),
-    )
-    // Both the slot call and the drain happen outside the window now.
-    await expect(drain(ops.readStream(accessor, spec('/data/secret')))).rejects.toThrow('sealed')
-    expect(calls).not.toContainEqual(['stream', '/data/secret'])
-    await expect(ops.readBytes(accessor, spec('/data/secret'))).rejects.toThrow('sealed')
-  })
-
-  it('admits before a warm serve', async () => {
-    // The guard wraps outside the cache tier (`finish` in the factory),
-    // so a warm reader below it never answers a refused read.
-    const calls: string[][] = []
-    const warm: CommandIO = {
+    const ops = withCommandGuards({
       ...probeOps(calls),
       readBytes: () => Promise.resolve(new TextEncoder().encode('warm')),
-    }
-    const policy = new SealedRead('/data/secret')
-    await runWithOpPolicies(new Policies([policy]), async () => {
-      const ops = withPolicyGuard(warm)
-      await expect(ops.readBytes(accessor, spec('/data/secret'))).rejects.toThrow('sealed')
-      expect(await ops.readBytes(accessor, spec('/data/open'))).toEqual(
-        new TextEncoder().encode('warm'),
-      )
     })
+    await runWithAdmission(
+      {
+        scoped: true,
+        scopes: () => true,
+        granted: [],
+        check: (path) => {
+          if (path === '/data/secret') throw new Error('sealed')
+        },
+        refuses: (path) => path === '/data/secret',
+      },
+      async () => {
+        await expect(ops.readBytes(accessor, spec('/data/secret'))).rejects.toThrow('sealed')
+        expect(await ops.readBytes(accessor, spec('/data/open'))).toEqual(
+          new TextEncoder().encode('warm'),
+        )
+      },
+    )
   })
 })
 
@@ -600,6 +414,204 @@ async function drain(stream: AsyncIterable<Uint8Array>): Promise<Uint8Array[]> {
   for await (const chunk of stream) out.push(chunk)
   return out
 }
+
+describe('withDispatchRuleGuard', () => {
+  const spec = (virtual: string): PathSpec =>
+    new PathSpec({
+      virtual,
+      directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
+      vfsPath: virtual,
+      resolved: true,
+    })
+
+  it('marks an op with the bound gate for the door to judge', async () => {
+    const seen: [string, unknown][] = []
+    const door: DispatchFn = (op, _path, _args, kwargs) => {
+      seen.push([op, kwargs?.ruleGate])
+      return Promise.resolve([null, new IOResult()])
+    }
+    const dispatch = withDispatchRuleGuard(door)
+    // No gate bound: the op goes to the door unmarked.
+    await dispatch('read', spec('/data/f'))
+    const asked: string[] = []
+    const gate = {
+      scoped: true,
+      scopes: () => true,
+      granted: [],
+      check: (virtual: string) => {
+        asked.push(virtual)
+      },
+      refuses: () => false,
+    }
+    await runWithAdmission(gate, async () => {
+      await dispatch('read', spec('/data/f'), [spec('/data/g')])
+      // A metadata op is never judged: deny is present and refused.
+      await dispatch('stat', spec('/data/f'))
+    })
+    expect(seen).toEqual([
+      ['read', undefined],
+      ['read', gate],
+      ['stat', undefined],
+    ])
+    // The wrapper judges nothing itself: the door does, on its own paths.
+    expect(asked).toEqual([])
+  })
+})
+
+describe('scopedIo', () => {
+  it('sets a content index aside', () => {
+    // A content index names files under a listing a rule may refuse, so a
+    // scoped command walks the guarded readdir instead, as it does for
+    // every other native scan.
+    const index = { narrowPaths: () => Promise.resolve([]), enabled: () => true }
+    const io: CommandIO = { ...dirOps([]), contentSearch: index }
+    const roots = [PathSpec.fromStrPath('/data')]
+    const free = { scoped: () => false }
+    const judged = { scoped: (virtual: string) => virtual === '/data' }
+    expect(scopedIo(io, free, roots, '/data/').contentSearch).toBe(index)
+    expect(scopedIo(io, undefined, roots, '/data/').contentSearch).toBe(index)
+    expect(scopedIo(io, judged, roots, '/data/').contentSearch).toBeUndefined()
+  })
+})
+
+const SEALED = { message: 'Permission denied', refusal: { reason: 'sealed' } }
+
+class SealedRead implements Policy {
+  readonly asked: [string, string, boolean][] = []
+  private readonly sealed: string
+  constructor(sealed: string) {
+    this.sealed = sealed
+  }
+  preOps(ctx: OpsContext): Action | null {
+    this.asked.push([ctx.op, ctx.path.virtual, ctx.write])
+    if (!ctx.write && ctx.path.virtual === this.sealed) {
+      return { kind: 'deny', reason: 'sealed' }
+    }
+    return null
+  }
+}
+
+describe('withPolicyGuard', () => {
+  const spec = (virtual: string): PathSpec =>
+    new PathSpec({
+      virtual,
+      directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
+      vfsPath: virtual,
+      resolved: true,
+    })
+
+  function probeOps(calls: string[][]): CommandIO {
+    async function* stream(_a: Accessor, path: PathSpec): AsyncGenerator<Uint8Array> {
+      calls.push(['stream', path.virtual])
+      yield await Promise.resolve(new Uint8Array([1]))
+    }
+    return {
+      readdir: (_a, path) => {
+        calls.push(['readdir', path.virtual])
+        return Promise.resolve(['a'])
+      },
+      readBytes: (_a, path) => {
+        calls.push(['read', path.virtual])
+        return Promise.resolve(new Uint8Array([1]))
+      },
+      readStream: stream,
+      stat: (_a, path) => {
+        calls.push(['stat', path.virtual])
+        return Promise.resolve(
+          new FileStat({ name: 'k', type: FileType.FILE, content: ContentType.TEXT, size: 1 }),
+        )
+      },
+      isMounted: () => true,
+      copy: (_a, src, dst) => {
+        calls.push(['copy', src.virtual, dst.virtual])
+        return Promise.resolve()
+      },
+      unlink: (_a, path) => {
+        calls.push(['unlink', path.virtual])
+        return Promise.resolve()
+      },
+    }
+  }
+
+  it('admits slots and leaves stat alone', async () => {
+    const calls: string[][] = []
+    const raw = probeOps(calls)
+    // No binding: every slot runs as is, and no hook fires.
+    expect(await withPolicyGuard(raw).readBytes(accessor, spec('/data/secret'))).toEqual(
+      new Uint8Array([1]),
+    )
+    calls.length = 0
+
+    const policy = new SealedRead('/data/secret')
+    await runWithOpPolicies(new Policies([policy]), () =>
+      runWithMountGate('/data', MountMode.WRITE, async () => {
+        const ops = withPolicyGuard(raw)
+        await expect(ops.readBytes(accessor, spec('/data/secret'))).rejects.toMatchObject(SEALED)
+        expect(calls).not.toContainEqual(['read', '/data/secret'])
+        // The stream gates before its first chunk.
+        await expect(drain(ops.readStream(accessor, spec('/data/secret')))).rejects.toMatchObject(
+          SEALED,
+        )
+        expect(calls).not.toContainEqual(['stream', '/data/secret'])
+        // stat is not a guarded slot: deny is present and refused.
+        expect((await ops.stat(accessor, spec('/data/secret'))).size).toBe(1)
+        // readdir asks about the directory it lists.
+        expect(await ops.readdir(accessor, spec('/data/dir'))).toEqual(['a'])
+        // A copy's source is a read; its destination is a write.
+        const copy = ops.copy
+        if (copy === undefined) throw new Error('copy slot missing')
+        await copy(accessor, spec('/data/src'), spec('/data/dst'))
+        // A write slot asks with write=true.
+        const unlink = ops.unlink
+        if (unlink === undefined) throw new Error('unlink slot missing')
+        await unlink(accessor, spec('/data/gone'))
+      }),
+    )
+    expect(policy.asked).toContainEqual(['read_bytes', '/data/secret', false])
+    expect(policy.asked).toContainEqual(['read_stream', '/data/secret', false])
+    expect(policy.asked).toContainEqual(['readdir', '/data/dir', false])
+    expect(policy.asked).toContainEqual(['copy', '/data/src', false])
+    expect(policy.asked).toContainEqual(['copy', '/data/dst', true])
+    expect(policy.asked).toContainEqual(['unlink', '/data/gone', true])
+    expect(policy.asked.some(([op]) => op === 'stat')).toBe(false)
+  })
+
+  it('wrap-time capture covers late drains', async () => {
+    // head/tail/wc bind lazy readers the pipeline drains after dispatch
+    // has reset the context; the guard captured at wrap time still
+    // answers (livePolicyScope).
+    const calls: string[][] = []
+    const raw = probeOps(calls)
+    const policy = new SealedRead('/data/secret')
+    const ops = await runWithOpPolicies(new Policies([policy]), () =>
+      Promise.resolve(withPolicyGuard(raw)),
+    )
+    // Both the slot call and the drain happen outside the window now.
+    await expect(drain(ops.readStream(accessor, spec('/data/secret')))).rejects.toMatchObject(
+      SEALED,
+    )
+    expect(calls).not.toContainEqual(['stream', '/data/secret'])
+    await expect(ops.readBytes(accessor, spec('/data/secret'))).rejects.toMatchObject(SEALED)
+  })
+
+  it('admits before a warm serve', async () => {
+    // The guard wraps outside the cache tier (`finish` in the factory),
+    // so a warm reader below it never answers a refused read.
+    const calls: string[][] = []
+    const warm: CommandIO = {
+      ...probeOps(calls),
+      readBytes: () => Promise.resolve(new TextEncoder().encode('warm')),
+    }
+    const policy = new SealedRead('/data/secret')
+    await runWithOpPolicies(new Policies([policy]), async () => {
+      const ops = withPolicyGuard(warm)
+      await expect(ops.readBytes(accessor, spec('/data/secret'))).rejects.toMatchObject(SEALED)
+      expect(await ops.readBytes(accessor, spec('/data/open'))).toEqual(
+        new TextEncoder().encode('warm'),
+      )
+    })
+  })
+})
 
 describe('withDirGuard', () => {
   it('refuses an explicit directory on every read slot', async () => {
@@ -697,7 +709,7 @@ describe('withDirGuard', () => {
   })
 })
 
-describe('withHiddenGuard rmdir under namespace children', () => {
+describe('withCommandGuards rmdir under namespace children', () => {
   it('a visible mounted child keeps the rmdir refusal', async () => {
     // The guard is applied over an adapter already stamped with the
     // invocation's globChildren (the factory's per-invocation order),
@@ -727,11 +739,11 @@ describe('withHiddenGuard rmdir under namespace children', () => {
       rmdir: () => Promise.reject(notEmpty()),
       globChildren: (parent: string) => (parent === '/m/d' ? ['m'] : []),
     }
-    const ops = withHiddenGuard(base)
+    const ops = withCommandGuards(base)
     const rmdir = ops.rmdir
     if (rmdir === undefined) throw new Error('rmdir slot missing')
     const sess = new SessionState({ sessionId: 'narrowed' })
-    sess.hiddenPaths = { paths: ['/m/d/h'] }
+    sess.visibility = { ...sess.visibility, paths: { paths: ['/m/d/h'] } }
     const spec = new PathSpec({ virtual: '/m/d', directory: '/m', vfsPath: 'd' })
     await runWithSession(sess, async () => {
       await expect(rmdir(accessor, spec)).rejects.toMatchObject({ code: 'ENOTEMPTY' })
@@ -763,11 +775,11 @@ describe('withHiddenGuard rmdir under namespace children', () => {
       unlink: () => Promise.reject(new Error('never reached')),
       rmdir: () => Promise.reject(notEmpty()),
     }
-    const ops = withHiddenGuard(base)
+    const ops = withCommandGuards(base)
     const rmdir = ops.rmdir
     if (rmdir === undefined) throw new Error('rmdir slot missing')
     const sess = new SessionState({ sessionId: 'narrowed' })
-    sess.hiddenPaths = { paths: ['/m/d/h'] }
+    sess.visibility = { ...sess.visibility, paths: { paths: ['/m/d/h'] } }
     const spec = new PathSpec({ virtual: '/m/d', directory: '/m', vfsPath: 'd' })
     await runWithSession(sess, async () => {
       await expect(rmdir(accessor, spec)).rejects.toMatchObject({ code: 'ENOTEMPTY' })
@@ -939,12 +951,14 @@ it.each(capabilityCases)(
     const session = new SessionState({
       sessionId: 'guard-matrix',
       mountModes: new Map([['/data', MountMode.READ]]),
-      hiddenPaths: { paths: ['/data/hidden'] },
-      shownPaths: { entries: [{ path: '/data/build', mode: MountMode.WRITE }] },
+      visibility: {
+        paths: { paths: ['/data/hidden'] },
+        shown: { entries: [{ path: '/data/build', mode: MountMode.WRITE }] },
+      },
     })
     await runWithSession(session, () =>
       runWithMountGate('/data', MountMode.WRITE, async () => {
-        const ops = withPolicyGuard(withPathGuards(capabilityOps(available ? backend : undefined)))
+        const ops = withCommandGuards(capabilityOps(available ? backend : undefined))
         const path = PathSpec.fromStrPath(`/data/${region}/f`)
         const invoke = () => {
           if (operation === 'copy' || operation === 'rename') {
@@ -990,16 +1004,18 @@ it.each([false, true])(
     }
     const session = new SessionState({
       sessionId: 'pair-guards',
-      shownPaths: {
-        entries: [
-          { path: '/data/src', mode: MountMode.READ },
-          { path: '/data/tree/locked', mode: MountMode.READ },
-        ],
+      visibility: {
+        shown: {
+          entries: [
+            { path: '/data/src', mode: MountMode.READ },
+            { path: '/data/tree/locked', mode: MountMode.READ },
+          ],
+        },
       },
     })
     await runWithSession(session, () =>
       runWithMountGate('/data', MountMode.WRITE, async () => {
-        const ops = withPathGuards(capabilityOps(available ? backend : undefined))
+        const ops = withCommandGuards(capabilityOps(available ? backend : undefined))
         const src = PathSpec.fromStrPath('/data/src'),
           dst = PathSpec.fromStrPath('/data/dst')
         const copy = requireOp(ops.copy, 'copy')
@@ -1023,43 +1039,63 @@ it.each([false, true])(
   },
 )
 
-it('a missing capability obeys the rule before the mode', async () => {
-  const asked: string[] = []
-  const gate = {
-    scoped: true,
-    granted: [],
-    check: (path: string) => {
-      asked.push(path)
-      throw eacces(path)
-    },
-    refuses: () => true,
-  }
-  await runWithAdmission(gate, () =>
-    runWithMountGate('/data', MountMode.READ, async () => {
-      await expect(
-        requireOp(capabilityOps().write, 'write')(
-          accessor,
-          PathSpec.fromStrPath('/data/locked'),
-          new Uint8Array(),
-        ),
-      ).rejects.toMatchObject({ code: 'EACCES' })
-    }),
-  )
-  expect(asked).toEqual(['/data/locked'])
-})
+it.each([
+  [FileType.DIRECTORY, false, true],
+  [FileType.FILE, false, true],
+  [FileType.FILE, true, true],
+  [FileType.DIRECTORY, true, false],
+  [null, false, false],
+])(
+  'the command guards refuse a taken %s (parents=%s) on a writable mount: %s',
+  async (kind, parents, refused) => {
+    const made: string[] = []
+    const ops = withCommandGuards({
+      readdir: () => Promise.resolve([]),
+      readBytes: () => Promise.resolve(new Uint8Array()),
+      readStream: () => oneChunkStream(new Uint8Array()),
+      stat: (_accessor, path) =>
+        kind === null
+          ? Promise.reject(enoent(path.virtual))
+          : Promise.resolve(new FileStat({ name: 'd', type: kind })),
+      isMounted: () => true,
+      mkdir: (_accessor, path) => {
+        made.push(path.virtual)
+        return Promise.resolve()
+      },
+    })
+    await runWithMountGate('/data', MountMode.WRITE, async () => {
+      const call = ops.mkdir?.(accessor, PathSpec.fromStrPath('/data/d', 'd'), parents)
+      if (refused) await expect(call).rejects.toMatchObject({ code: 'EEXIST' })
+      else await call
+    })
+    expect(made).toEqual(refused ? [] : ['/data/d'])
+  },
+)
 
-it('a missing copy admits its source as a read before capability failure', async () => {
-  const policy = new SealedRead('/data/secret')
-  await runWithOpPolicies(new Policies([policy]), async () => {
-    await expect(
-      requireOp(capabilityOps().copy, 'copy')(
-        accessor,
-        PathSpec.fromStrPath('/data/secret'),
-        PathSpec.fromStrPath('/data/dst'),
-      ),
-    ).rejects.toMatchObject({ code: 'EACCES' })
-  })
-  expect(policy.asked).toEqual([['copy', '/data/secret', false]])
+it('a missing copy checks command paths before capability failure', async () => {
+  const checked: string[] = []
+  await runWithAdmission(
+    {
+      scoped: true,
+      scopes: () => true,
+      granted: [],
+      check: (path) => {
+        checked.push(path)
+        throw new Error('sealed')
+      },
+      refuses: () => true,
+    },
+    async () => {
+      await expect(
+        requireOp<NonNullable<CommandIO['copy']>>(undefined, 'copy')(
+          accessor,
+          PathSpec.fromStrPath('/data/secret'),
+          PathSpec.fromStrPath('/data/dst'),
+        ),
+      ).rejects.toThrow('sealed')
+    },
+  )
+  expect(checked).toEqual(['/data/secret'])
 })
 
 describe('directory EOF', () => {

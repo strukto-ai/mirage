@@ -50,13 +50,12 @@ function suffixError(value: string, junk: string): UsageError {
   )
 }
 
-// GNU's --from=iec-i complaint that the `i` is absent, exit 2. The `i` test
-// sits OUTSIDE the suffix branch in GNU's simple_strtod_human, so it
-// answers for every field whose unit letter is not followed by an `i` -- a
-// field with no unit at all included. Measured on coreutils 9.4: `1`,
-// `1.5`, `1K`, `1Kx`, `1KB` and `1KII` all get this clause, while `1Kii`
-// and `1KiB` consume the `i` and report their leftover as an invalid suffix
-// instead, and `1i` never reaches it because `i` is not a unit letter.
+// GNU's --from=iec-i complaint that the `i` is absent, exit 2. It answers
+// for every field whose unit letter is not followed by an `i`: `1K`, `1Kx`,
+// `1KB` and `1KII` all get this clause, while `1Kii` and `1KiB` consume the
+// `i` and report their leftover as an invalid suffix instead, `1i` never
+// reaches it because `i` is not a unit letter, and a field with no unit at
+// all is read as it stands (coreutils 9.7; 9.4 refused that one too).
 function missingISuffixError(value: string): UsageError {
   return new UsageError(
     `numfmt: missing 'i' suffix in input: '${quoteText(value)}' (e.g Ki/Mi/Gi)`,
@@ -109,10 +108,7 @@ function parseNumber(value: string, fromMode: string): Parsed {
   const dot = head.indexOf('.')
   const fraction = dot < 0 ? '' : head.slice(dot + 1)
   const digits = BigInt(dot < 0 ? head : head.slice(0, dot) + fraction)
-  if (rest === '') {
-    if (fromMode === 'iec-i') throw missingISuffixError(value)
-    return { digits, scale: fraction.length, decimals: fraction.length }
-  }
+  if (rest === '') return { digits, scale: fraction.length, decimals: fraction.length }
   if (UNIT_EXPONENTS[rest[0] ?? ''] === undefined) throw suffixError(value, '')
   if (fromMode === 'none') {
     throw new UsageError(
@@ -139,13 +135,12 @@ function roundAway(digits: bigint, scale: number, places: number): bigint {
   return digits < 0n ? quotient - 1n : quotient + 1n
 }
 
-function fixed(scaled: bigint, places: number, grouping: boolean): string {
+function fixed(scaled: bigint, places: number): string {
   const negative = scaled < 0n
   const text = (negative ? -scaled : scaled).toString().padStart(places + 1, '0')
   const whole = text.slice(0, text.length - places)
-  const grouped = grouping ? whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : whole
   const fraction = places > 0 ? `.${text.slice(text.length - places)}` : ''
-  return (negative ? '-' : '') + grouped + fraction
+  return (negative ? '-' : '') + whole + fraction
 }
 
 // Round away from zero at `places` decimals. Snapping to 15 significant digits
@@ -181,9 +176,9 @@ function toFixedHalfEven(value: number, places: number): string {
 // long double first, so a value it cannot hold exactly rounds up on the way
 // out (`1.10` prints as `1.11` while `1.20` and `1.30` do not); mirage
 // keeps the value exact, as it already does for printf.
-function formatNumber(parsed: Parsed, toMode: string, grouping: boolean): string {
+function formatNumber(parsed: Parsed, toMode: string): string {
   if (toMode === 'none') {
-    return fixed(roundAway(parsed.digits, parsed.scale, parsed.decimals), parsed.decimals, grouping)
+    return fixed(roundAway(parsed.digits, parsed.scale, parsed.decimals), parsed.decimals)
   }
   const base = toMode === 'si' ? 1000 : 1024
   const display = toMode === 'si' ? SI_DISPLAY : SUFFIXES
@@ -199,38 +194,22 @@ function formatNumber(parsed: Parsed, toMode: string, grouping: boolean): string
     power += 1
   }
   const places = power > 0 && Math.abs(number) < 10 ? 1 : 0
-  const body = toFixedHalfEven(number, places)
-  const grouped = grouping
-    ? Number(body).toLocaleString('en-US', { minimumFractionDigits: places })
-    : body
   const suffix = `${display[power] ?? ''}${toMode === 'iec-i' && power > 0 ? 'i' : ''}`
-  return grouped + suffix
+  return toFixedHalfEven(number, places) + suffix
 }
 
-function convertField(
-  value: string,
-  toMode: string,
-  fromMode: string,
-  suffix: string,
-  grouping: boolean,
-): string {
+function convertField(value: string, toMode: string, fromMode: string, suffix: string): string {
   const stripped = suffix !== '' && value.endsWith(suffix) ? value.slice(0, -suffix.length) : value
-  return formatNumber(parseNumber(stripped, fromMode), toMode, grouping) + suffix
+  return formatNumber(parseNumber(stripped, fromMode), toMode) + suffix
 }
 
 // GNU numfmt converts only --field (1 by default) and copies the remaining
 // fields and their separating whitespace through untouched.
-function convertLine(
-  line: string,
-  toMode: string,
-  fromMode: string,
-  suffix: string,
-  grouping: boolean,
-): string {
+function convertLine(line: string, toMode: string, fromMode: string, suffix: string): string {
   const match = /^(\s*)(\S+)([\s\S]*)$/.exec(line)
   if (match === null) return line
   const [, lead = '', field = '', rest = ''] = match
-  return lead + convertField(field, toMode, fromMode, suffix, grouping) + rest
+  return lead + convertField(field, toMode, fromMode, suffix) + rest
 }
 
 function splitLinesNoEnds(text: string): string[] {
@@ -246,7 +225,17 @@ export async function numfmtGeneric(
   const toMode = fl.asStr('to') ?? 'none'
   const fromMode = fl.asStr('from') ?? 'none'
   const suffix = fl.asStr('suffix') ?? ''
-  const grouping = fl.asBool('grouping')
+  // mirage's one locale is C, whose thousands separator is empty, so
+  // --grouping groups nothing; GNU still refuses it beside a --to scale.
+  if (fl.asBool('grouping') && toMode !== 'none') {
+    return [
+      null,
+      new IOResult({
+        exitCode: 1,
+        stderr: ENC.encode('numfmt: grouping cannot be combined with --to\n'),
+      }),
+    ]
+  }
   const [fields, convert] =
     texts.length > 0
       ? [texts, convertField]
@@ -254,7 +243,7 @@ export async function numfmtGeneric(
   let printed = ''
   for (const value of fields) {
     try {
-      printed += convert(value, toMode, fromMode, suffix, grouping)
+      printed += convert(value, toMode, fromMode, suffix)
     } catch (err) {
       if (!(err instanceof UsageError)) throw err
       // GNU aborts at the first invalid number, after printing the ones

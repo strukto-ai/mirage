@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "id": "sha1sum_t_and_b_set_the_mode_marker",
+      "seq": 15600723,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha1sum -t /data/b.txt; sha1sum --binary /data/b.txt; sha1sum --text /data/b.txt; sha1sum -tb /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "dae780eee1cb1f231a937e7e475c90f5d62ac594  /data/b.txt\ndae780eee1cb1f231a937e7e475c90f5d62ac594 */data/b.txt\ndae780eee1cb1f231a937e7e475c90f5d62ac594  /data/b.txt\ndae780eee1cb1f231a937e7e475c90f5d62ac594 */data/b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "b",
+        "binary",
+        "text"
+      ]
+    },
+    {
+      "id": "sha1sum_t_and_b_the_last_one_wins",
+      "seq": 15600724,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha1sum -bt /data/b.txt; sha1sum --binary --text /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "dae780eee1cb1f231a937e7e475c90f5d62ac594  /data/b.txt\ndae780eee1cb1f231a937e7e475c90f5d62ac594  /data/b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "b"
+      ]
+    }
+  ]
+}

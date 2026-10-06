@@ -21,7 +21,10 @@ describe('Pyodide captured streams', { timeout: 120_000 }, () => {
     ['disk', 'memory_growth_output'],
   ])('runs %s mount stream integration: %s', async (kind, id) => {
     const suite = JSON.parse(
-      await readFile(new URL('../../../../../integ/runtime/pyodide.json', import.meta.url), 'utf8'),
+      await readFile(
+        new URL('../../../../../integ/runtime/pyodide/streams.json', import.meta.url),
+        'utf8',
+      ),
     ) as { cases: StreamCase[] }
     const fixture = suite.cases.find((testCase) => testCase.id === id)
     if (fixture === undefined) throw new Error(`Missing stream integration fixture: ${id}`)

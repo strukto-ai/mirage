@@ -1,0 +1,79 @@
+{
+  "cases": [
+    {
+      "id": "sed_i_transliterates_and_rewrites_under_n",
+      "seq": 15300006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'one\\ntwo\\n' > /data/fcC_i; sed -i 'y/o/0/' /data/fcC_i; cat /data/fcC_i; sed -i -n p /data/fcC_i; cat /data/fcC_i; rm /data/fcC_i",
+      "expect": {
+        "exit": 0,
+        "stdout": "0ne\ntw0\n0ne\ntw0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "i",
+        "n"
+      ]
+    },
+    {
+      "id": "sed_i_without_operands_is_refused",
+      "seq": 15300007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sed -i s/a/b/; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=4\n",
+        "stderr": "sed: no input files\n"
+      },
+      "flags": [
+        "i"
+      ]
+    }
+  ]
+}

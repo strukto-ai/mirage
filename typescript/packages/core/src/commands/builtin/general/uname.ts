@@ -45,7 +45,7 @@ const UNKNOWN = 'unknown'
 // No option is `-s`. `-a` prints every field except an `unknown` processor or
 // hardware platform, which only `-p` and `-i` without `-a` print, as GNU
 // does. Pinned against coreutils 9.7.
-function unameCommand(
+function uname(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
@@ -65,5 +65,5 @@ export const GENERAL_UNAME = command({
   name: 'uname',
   vfs: null,
   spec: specOf('uname'),
-  fn: unameCommand,
+  fn: uname,
 })

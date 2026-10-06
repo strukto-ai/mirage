@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { decodeLine } from '../../../../commands/builtin/grep_offsets.ts'
 import { versionLine } from '../../../../commands/spec/standard.ts'
 import { quoteText } from '../../../../commands/quote.ts'
 import { runAsProgram, runWithSession } from '../../../../context/session_context.ts'
@@ -29,7 +28,7 @@ import { IOResult, materialize } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { SharedStdin, asyncChain, yieldBytes } from '../../../../io/stream.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
+import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import { asyncContextIsolatesTasks } from '../../../../utils/async_context.ts'
 import { fsStrerror } from '../../../../utils/errors.ts'
@@ -69,7 +68,6 @@ const ESCAPES: Readonly<Record<string, number>> = Object.freeze({
 })
 const NUL_WARNING =
   'xargs: WARNING: a NUL character occurred in the input.  It cannot be passed through in the argument list.  Did you mean to use the --null option?\n'
-const ENCODER = new TextEncoder()
 
 const enum ReadState {
   NORM,
@@ -91,7 +89,7 @@ class Fatal extends Error {
 }
 
 function refuse(stderr: string | Uint8Array, exitCode = 1): Result {
-  const data = typeof stderr === 'string' ? ENCODER.encode(stderr) : stderr
+  const data = typeof stderr === 'string' ? encodeText(stderr) : stderr
   return [
     null,
     new IOResult({ exitCode, stderr: data }),
@@ -123,8 +121,8 @@ function standardResponse(option: string, warnings: string): Result {
       ? renderHelp('xargs', SHELL_SPECS.xargs, [], undefined, SYNOPSIS)
       : versionLine('xargs')
   return [
-    yieldBytes(ENCODER.encode(text)),
-    new IOResult(warnings === '' ? {} : { stderr: ENCODER.encode(warnings) }),
+    yieldBytes(encodeText(text)),
+    new IOResult(warnings === '' ? {} : { stderr: encodeText(warnings) }),
     new ExecutionNode({ command: 'xargs', exitCode: 0 }),
   ]
 }
@@ -141,7 +139,7 @@ function exclusive(option: string, offending: string): string {
  * empty value included.
  */
 function delimiter(spec: string): [number, string] {
-  const raw = ENCODER.encode(spec)
+  const raw = encodeText(spec)
   if (raw.length === 1) return [raw[0] ?? 0, '']
   if (!spec.startsWith('\\')) {
     return [
@@ -211,7 +209,7 @@ function limits(envSize: number, posixMax: number, argMax: number): string {
 }
 
 function decode(word: Uint8Array): string {
-  return new TextDecoder().decode(word)
+  return decodeText(word)
 }
 
 function trace(line: readonly Uint8Array[]): string {
@@ -594,12 +592,12 @@ async function runLines(
       const event = events[index] ?? ''
       const slot = results[index] ?? []
       if (typeof event === 'string') {
-        slot.push(new IOResult({ stderr: ENCODER.encode(event) }))
+        slot.push(new IOResult({ stderr: encodeText(event) }))
         continue
       }
-      const words = event.map(decodeLine)
+      const words = event.map(decodeText)
       const name = words[0] ?? ''
-      if (opts.trace === true) slot.push(new IOResult({ stderr: ENCODER.encode(trace(event)) }))
+      if (opts.trace === true) slot.push(new IOResult({ stderr: encodeText(trace(event)) }))
       if (registry !== null && !execs(name, session, registry)) {
         slot.push(new IOResult({ stderr: encodeText(xargsMissing(name)), exitCode: 127 }))
         stop = 127
@@ -668,7 +666,7 @@ export async function handleXargs(
   const parse = parseShellOptions(SHELL_SPECS.xargs, args)
   let envSize = 0
   for (const [name, value] of Object.entries(envSnapshot(session))) {
-    envSize += ENCODER.encode(`${name}=${value}`).length + 1
+    envSize += encodeText(`${name}=${value}`).length + 1
   }
   const posixMax = ARG_MAX - envSize - HEADROOM
   const oversized = HEADROOM + envSize >= ARG_MAX
@@ -760,15 +758,15 @@ export async function handleXargs(
       parse.candidates.length > 0
         ? ambiguousOptionError('xargs', parse.invalid, parse.candidates)
         : unknownOptionError('xargs', parse.invalid)
-    return refuse(concat([ENCODER.encode(warnings), stderr]), code)
+    return refuse(concat([encodeText(warnings), stderr]), code)
   }
   if (parse.unexpectedValue !== null) {
     const [stderr, code] = unexpectedValueError('xargs', parse.unexpectedValue)
-    return refuse(concat([ENCODER.encode(warnings), stderr]), code)
+    return refuse(concat([encodeText(warnings), stderr]), code)
   }
   if (parse.needsValue !== null) {
     const [stderr, code] = missingValueError('xargs', parse.needsValue)
-    return refuse(concat([ENCODER.encode(warnings), stderr]), code)
+    return refuse(concat([encodeText(warnings), stderr]), code)
   }
   if (eof !== null && delim !== null) {
     warnings += 'xargs: warning: the -E option has no effect if -0 or -d is used.\n\n'
@@ -799,11 +797,11 @@ export async function handleXargs(
   const command = parse.operands.length > 0 ? parse.operands : ['echo']
   const builder = new Builder(
     data,
-    command.map((word) => ENCODER.encode(word)),
+    command.map((word) => encodeText(word)),
     {
       delim,
-      eof: eof !== null ? ENCODER.encode(eof) : null,
-      replace: replace !== null ? ENCODER.encode(replace) : null,
+      eof: eof !== null ? encodeText(eof) : null,
+      replace: replace !== null ? encodeText(replace) : null,
       maxArgs,
       maxLines,
       argMax,
@@ -829,7 +827,7 @@ export async function handleXargs(
     stdin: childStdin,
   })
   const stdouts: ByteSource[] = []
-  let merged = new IOResult(warnings === '' ? {} : { stderr: ENCODER.encode(warnings) })
+  let merged = new IOResult(warnings === '' ? {} : { stderr: encodeText(warnings) })
   for (const io of ios) {
     if (io.stdout !== null) stdouts.push(io.stdout)
     merged = await merged.merge(io)
@@ -838,7 +836,7 @@ export async function handleXargs(
   if (stop !== null) {
     exitCode = stop
   } else if (fatal !== null) {
-    merged = await merged.merge(new IOResult({ stderr: ENCODER.encode(fatal.text) }))
+    merged = await merged.merge(new IOResult({ stderr: encodeText(fatal.text) }))
     exitCode = fatal.code
   } else {
     exitCode = ios.some((io) => io.exitCode !== 0) ? 123 : 0

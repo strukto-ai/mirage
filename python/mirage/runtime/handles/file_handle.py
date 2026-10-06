@@ -13,61 +13,182 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from mirage.runtime.handles.flush import NO_WRITE, FlushKind, plan_flush
+from mirage.runtime.handles.chunked import ChunkedHandle
+from mirage.runtime.handles.constants import READ_CHUNK
+from mirage.runtime.handles.flush import plan_flush
+from mirage.runtime.handles.types import FileFetch, FlushStep
 
 
 @dataclass(slots=True)
 class FileHandle:
-    """One buffered whole-file handle.
+    """One open file: its stored bytes fetched as read, its writes kept.
 
-    The shape every encoder used to hand-roll: open snapshots the file
-    into a growable buffer, byte-level calls touch only that buffer,
-    and close asks ``flush_plan`` whether the mount is owed a tail or
-    the whole file. ``low_write`` and ``dirty`` exist purely to answer
-    that closing question.
+    Nothing moves at open. A read fetches the chunk it lands in through
+    ``base`` (a ``ChunkedHandle`` over the door's ranged read), and what
+    the handle wrote is kept as byte ranges laid over those stored
+    bytes. A close owes the mount only those ranges (``flush_plan``),
+    so another writer's bytes between them survive, which a copy of the
+    whole file taken at open and written back at close would undo. An
+    append-mode handle writes at the end every time, wherever it read.
 
     Args:
         path (str): guest-absolute virtual path the handle is over.
-        buf (bytearray): the whole file, mutated in place.
-        pos (int): the read/write position.
+        base (ChunkedHandle | None): the stored bytes, or None when the
+            open created or emptied the file.
         writable (bool): whether writes are accepted at all; the
             dialect decides how a refusal is spelled.
-        base_len (int): length the file had when the handle opened.
-        low_write (int): lowest offset written at, NO_WRITE until then.
-        dirty (bool): whether anything was written since open.
+        append (bool): every write lands at the end (O_APPEND).
+        pos (int): the read/write position.
+        base_len (int): the file's length when the handle opened it.
+        runs (list[tuple[int, bytearray]]): the written ranges, sorted
+            and disjoint.
+        cut (int | None): the shortest length a truncate left the stored
+            bytes at.
+        extent (int): the length the last truncate set, the floor under
+            what the stored bytes and the ranges reach.
+        truncated (bool): whether a truncate ran since open.
     """
 
     path: str
-    buf: bytearray
-    pos: int = 0
+    base: ChunkedHandle | None = None
     writable: bool = False
+    append: bool = False
+    pos: int = 0
     base_len: int = 0
-    low_write: int = NO_WRITE
-    dirty: bool = False
+    runs: list[tuple[int, bytearray]] = field(default_factory=list)
+    cut: int | None = None
+    extent: int = 0
+    truncated: bool = False
 
     @classmethod
     def opened(
-        cls, path: str, data: bytes, *, writable: bool, append: bool
+        cls,
+        path: str,
+        fetch: FileFetch | None,
+        *,
+        size: int,
+        writable: bool,
+        append: bool,
     ) -> "FileHandle":
-        """A handle over `data`, positioned by the open mode.
+        """A handle over a file, positioned by the open mode.
+
+        A file that fits in one chunk is fetched whole on its first
+        read, since whole is what the file cache keeps; a larger one a
+        chunk at a time.
 
         Args:
             path (str): guest-absolute virtual path.
-            data (bytes): the file's content at open (empty when the
-                open created or truncated it).
+            fetch (FileFetch | None): the door's
+                read of ``(offset, size)``, a None size reading to the
+                end; None when the open created or emptied the file.
+            size (int): the file's length as the open saw it.
             writable (bool): whether writes are accepted.
-            append (bool): start positioned at the end.
+            append (bool): every write lands at the end, and the position
+                starts there.
         """
-        buf = bytearray(data)
-        return cls(
+        base = None
+        if fetch is not None:
+            door = fetch
+
+            def ranged(offset: int, asked: int) -> bytes:
+                if offset == 0 and size <= READ_CHUNK:
+                    return door(0, None)
+                return door(offset, asked)
+
+            base = ChunkedHandle(path=path, size=size, fetch=ranged)
+        handle = cls(
             path=path,
-            buf=buf,
-            pos=len(buf) if append else 0,
+            base=base,
             writable=writable,
-            base_len=len(buf),
+            append=append,
+            base_len=0 if base is None else size,
         )
+        if append:
+            handle.pos = handle.size
+        return handle
+
+    @classmethod
+    def of_bytes(cls, path: str, data: bytes) -> "FileHandle":
+        """A read-only handle over bytes already in hand (a stdin).
+
+        Args:
+            path (str): the name the handle answers to.
+            data (bytes): the whole content.
+        """
+        return cls.opened(
+            path,
+            lambda offset, size: (
+                data[offset:] if size is None else data[offset : offset + size]
+            ),
+            size=len(data),
+            writable=False,
+            append=False,
+        )
+
+    @property
+    def size(self) -> int:
+        """The file's length as this handle holds it."""
+        return max(self._stored_end(), self._runs_end(), self.extent)
+
+    @property
+    def eof(self) -> bool:
+        """True when the position sits at or past the end.
+
+        At the end the open saw, one byte is asked for: a backend that
+        reports no size answers 0, and only a read finds its real end.
+        """
+        if self.pos < self.size:
+            return False
+        return not self.pread(self.pos, 1)
+
+    @property
+    def dirty(self) -> bool:
+        """Whether the handle owes the mount anything at close."""
+        return bool(self.runs) or self.truncated
+
+    def _stored_end(self) -> int:
+        if self.base is None:
+            return 0
+        end = self.base.size
+        return end if self.cut is None else min(end, self.cut)
+
+    def _runs_end(self) -> int:
+        if not self.runs:
+            return 0
+        start, data = self.runs[-1]
+        return start + len(data)
+
+    def pread(self, offset: int, size: int) -> bytes:
+        """Read at an explicit offset without moving the position.
+
+        The stored bytes come first, as far as they reach (a truncate
+        hides what lies past its cut); the handle's own ranges are laid
+        over them, and a gap the handle grew the file across reads as
+        zeros.
+
+        Args:
+            offset (int): byte offset to read from.
+            size (int): byte budget.
+        """
+        if size <= 0:
+            return b""
+        out = bytearray()
+        if self.base is not None and (self.cut is None or offset < self.cut):
+            want = size if self.cut is None else min(size, self.cut - offset)
+            out += self.base.pread(offset, want)
+        reach = min(offset + size, max(self._runs_end(), self.extent))
+        if offset + len(out) < reach:
+            out += bytes(reach - offset - len(out))
+        for start, data in self.runs:
+            low = max(start, offset)
+            high = min(start + len(data), offset + len(out))
+            if low < high:
+                out[low - offset : high - offset] = data[
+                    low - start : high - start
+                ]
+        return bytes(out)
 
     def read(self, size: int | None = None) -> bytes:
         """Read from the position, advancing it by what was read.
@@ -76,46 +197,64 @@ class FileHandle:
             size (int | None): byte budget; None or negative reads to
                 the end. A position past the end reads empty and stays.
         """
-        if size is None or size < 0:
-            end = len(self.buf)
-        else:
-            end = min(len(self.buf), self.pos + size)
-        chunk = bytes(self.buf[self.pos : end])
-        self.pos += len(chunk)
-        return chunk
-
-    def pread(self, offset: int, size: int) -> bytes:
-        """Read at an explicit offset without moving the position.
-
-        Args:
-            offset (int): byte offset to read from.
-            size (int): byte budget.
-        """
-        return bytes(self.buf[offset : offset + size])
+        if size is not None and size >= 0:
+            chunk = self.pread(self.pos, size)
+            self.pos += len(chunk)
+            return chunk
+        out = bytearray()
+        while True:
+            chunk = self.pread(self.pos, READ_CHUNK)
+            out += chunk
+            self.pos += len(chunk)
+            if len(chunk) < READ_CHUNK:
+                return bytes(out)
 
     def pwrite(self, offset: int, data: bytes) -> None:
-        """Splice bytes in at an offset without moving the position.
+        """Write bytes at an offset without moving the position.
 
-        Grows the buffer through a zero fill when the offset lies past
-        the end, and keeps the two facts the closing flush plan reads:
-        the lowest offset written and that anything was written at all.
+        The write joins the ranges it overlaps or touches, so a stream of
+        writes stays one range and a later write wins where it overlaps.
 
         Args:
             offset (int): byte offset to write at.
             data (bytes): the payload.
         """
-        if offset > len(self.buf):
-            self.buf += b"\0" * (offset - len(self.buf))
-        self.low_write = min(self.low_write, offset)
-        self.buf[offset : offset + len(data)] = data
-        self.dirty = True
+        if not data:
+            return
+        end = offset + len(data)
+        if self.runs:
+            start, last = self.runs[-1]
+            if start <= offset <= start + len(last):
+                last[offset - start : end - start] = data
+                return
+        merged_start, merged_end = offset, end
+        keep: list[tuple[int, bytearray]] = []
+        joined: list[tuple[int, bytearray]] = []
+        for start, run in self.runs:
+            if start + len(run) < offset or start > end:
+                keep.append((start, run))
+            else:
+                joined.append((start, run))
+                merged_start = min(merged_start, start)
+                merged_end = max(merged_end, start + len(run))
+        merged = bytearray(merged_end - merged_start)
+        for start, run in joined:
+            merged[start - merged_start : start - merged_start + len(run)] = (
+                run
+            )
+        merged[offset - merged_start : end - merged_start] = data
+        keep.append((merged_start, merged))
+        keep.sort(key=lambda run: run[0])
+        self.runs = keep
 
     def write(self, data: bytes) -> None:
-        """Write at the position, advancing it past the payload.
+        """Write at the position (the end, in append mode), advancing it.
 
         Args:
             data (bytes): the payload.
         """
+        if self.append:
+            self.pos = self.size
         self.pwrite(self.pos, data)
         self.pos += len(data)
 
@@ -132,42 +271,59 @@ class FileHandle:
             unknown or the target would be negative (the position is
             then untouched).
         """
-        base = {0: 0, 1: self.pos, 2: len(self.buf)}.get(whence)
+        base = {0: 0, 1: self.pos, 2: self.size}.get(whence)
         if base is None or base + offset < 0:
             return None
         self.pos = base + offset
         return self.pos
 
     def truncate(self, size: int) -> None:
-        """Resize the buffer, zero-filling growth.
-
-        Either direction rewrites what the file already held (a shrink
-        drops bytes, a zero-fill fabricates them), which no tail can
-        express, so the close ships the whole buffer.
+        """Set the file's length: a shrink drops bytes, growth reads zeros.
 
         Args:
             size (int): the new length.
         """
-        if size < len(self.buf):
-            del self.buf[size:]
-        else:
-            self.buf += b"\0" * (size - len(self.buf))
-        self.dirty = True
-        self.low_write = 0
+        if size < self.size:
+            if self.base is not None:
+                self.cut = size if self.cut is None else min(self.cut, size)
+            kept: list[tuple[int, bytearray]] = []
+            for start, run in self.runs:
+                if start < size:
+                    kept.append((start, run[: size - start]))
+            self.runs = kept
+        self.extent = size
+        self.truncated = True
 
-    @property
-    def eof(self) -> bool:
-        """True when the position sits at or past the end."""
-        return self.pos >= len(self.buf)
+    def settle(self, fetch: FileFetch) -> None:
+        """Take what was just flushed as the stored bytes, owing nothing.
 
-    @property
-    def size(self) -> int:
-        """The file's length as this handle holds it."""
-        return len(self.buf)
+        After a flush the mount holds what the handle held, so the
+        handle reads it back from there and keeps writing over it; a
+        second flush then owes only what came after the first.
 
-    def flush_plan(self) -> tuple[FlushKind, bytes]:
-        """What this handle owes the mount at close."""
-        return plan_flush(self.base_len, self.low_write, self.buf)
+        Args:
+            fetch (FileFetch): the door's read
+                of the stored bytes, as ``opened`` takes it.
+        """
+        size = self.size
+        self.base = ChunkedHandle(path=self.path, size=size, fetch=fetch)
+        self.base_len = size
+        self.runs = []
+        self.cut = None
+        self.extent = 0
+        self.truncated = False
+
+    def flush_plan(self) -> list[FlushStep]:
+        """The ops this handle owes the mount at close."""
+        if not self.dirty:
+            return []
+        return plan_flush(
+            base_len=self.base_len,
+            runs=self.runs,
+            cut=self.cut,
+            size=self.size,
+            appending=self.append,
+        )
 
 
 def write_runs(

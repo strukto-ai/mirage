@@ -1,0 +1,455 @@
+{
+  "cases": [
+    {
+      "id": "script_file_names_the_program",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/w": {
+            "vfs": "ram",
+            "files": {
+              "app/file.py": "print(__file__)\n",
+              "app/err.py": "x = 1\nprint(x / 0)\n",
+              "app/imp.py": "import sys\nprint(repr(sys.path[0]))\nimport helper\n",
+              "app/helper.py": "print('helper imported')\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /w/app/file.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "/w/app/file.py\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cd /w",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 ./app/file.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "/w/./app/file.py\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 app/err.py",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "Traceback (most recent call last):\n  File \"/w/app/err.py\", line 2, in <module>\n    print(x / 0)\n          ~~^~~\nZeroDivisionError: division by zero\n"
+          }
+        },
+        {
+          "command": "python3 -P app/imp.py",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "ModuleNotFoundError: No module named 'helper'"
+          }
+        },
+        {
+          "command": "python3 app/imp.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "'/w/app'\nhelper imported\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat app/file.py | python3 -",
+          "expect": {
+            "exit": 0,
+            "stdout": "<stdin>\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c 'print(__file__)'",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "NameError: name '__file__' is not defined"
+          }
+        }
+      ]
+    },
+    {
+      "id": "invocation_flags_and_import_paths_are_scoped",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          {
+            "name": "pyodide",
+            "config": {
+              "sys_path": [
+                "/w/vendor"
+              ]
+            }
+          },
+          "workspace"
+        ],
+        "mounts": {
+          "/w": {
+            "vfs": "ram",
+            "files": {
+              "app/probe.py": "import sys\nprint(sys.flags.safe_path, repr(sys.path[0]))\nsys.modules.pop('flag_import_probe', None)\nimport flag_import_probe\nprint(flag_import_probe.value)\n",
+              "app/flag_import_probe.py": "value = 'script module'\n",
+              "vendor/flag_import_probe.py": "value = 'vendor module'\n",
+              "app/fail.py": "import sys\nprint(sys.flags.safe_path)\nraise ValueError('flagged failure')\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /w",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -P app/probe.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "True '/w/vendor'\nvendor module\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 app/probe.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "False '/w/app'\nscript module\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -P -c \"import sys; print(sys.flags.safe_path, repr(sys.path[0]))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "True '/w/vendor'\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print(sys.flags.safe_path, repr(sys.path[0]))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "False ''\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -P - <<'PY'\nimport sys; print(sys.flags.safe_path, repr(sys.path[0]))\nPY",
+          "expect": {
+            "exit": 0,
+            "stdout": "True '/w/vendor'\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 - <<'PY'\nimport sys; print(sys.flags.safe_path, repr(sys.path[0]))\nPY",
+          "expect": {
+            "exit": 0,
+            "stdout": "False ''\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -P -OO -B -c \"import sys; print(sys.flags.safe_path, sys.flags.optimize, __debug__, sys.flags.dont_write_bytecode == sys.dont_write_bytecode)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "True 2 False True\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print(sys.flags.safe_path, sys.flags.optimize, __debug__, sys.flags.dont_write_bytecode == sys.dont_write_bytecode)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "False 0 True True\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -P app/fail.py",
+          "expect": {
+            "exit": 1,
+            "stdout": "True\n",
+            "stderr_contains": "ValueError: flagged failure"
+          }
+        },
+        {
+          "command": "python3 app/probe.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "False '/w/app'\nscript module\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -E -c \"import sys; print(sys.flags.ignore_environment)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\n",
+            "stderr": "python3: warning: -E is ignored by the 'pyodide' runtime\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "optimize_reaches_imported_modules",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/w": {
+            "vfs": "ram",
+            "files": {
+              "app/main.py": "import sys\nsys.modules.pop('optimize_helper', None)\nimport optimize_helper\nprint(sys.flags.optimize, __debug__, optimize_helper.debug)\n",
+              "app/optimize_helper.py": "debug = __debug__\nassert False, 'helper assert ran'\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -O /w/app/main.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "1 False False\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -OO /w/app/main.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "2 False False\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 /w/app/main.py",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "AssertionError: helper assert ran"
+          }
+        }
+      ]
+    },
+    {
+      "id": "version_names_the_pyodide_guest",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "version.py": "import sys; print(sys.argv[-1])\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "v=$(python3 -c 'import sys; print(sys.version.split()[0])'); for n in python python3; do for f in --version -V -VV; do test \"$($n $f 2>&1)\" = \"Python $v (pyodide)\" && echo ok; done; done",
+          "expect": {
+            "exit": 0,
+            "stdout": "ok\nok\nok\nok\nok\nok\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c 'import sys; print(sys.argv[-1])' --version",
+          "expect": {
+            "exit": 0,
+            "stdout": "--version\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 /ram/version.py --version",
+          "expect": {
+            "exit": 0,
+            "stdout": "--version\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "echo 'import sys; print(sys.argv[-1])' | python3 - --version",
+          "expect": {
+            "exit": 0,
+            "stdout": "--version\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "no_input_and_missing_scripts",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "no input"
+          }
+        },
+        {
+          "command": "cd /ram && python3 missing.py",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "No such file"
+          }
+        },
+        {
+          "command": "python /missing-script",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "python: /missing-script: No such file\n"
+          }
+        },
+        {
+          "command": "python3 /missing-script",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "python3: /missing-script: No such file\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "warning_and_x_options",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "python3 -W nonsense -c 'print(42)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n",
+            "stderr": "Invalid -W option ignored: invalid action: 'nonsense'\n"
+          }
+        },
+        {
+          "command": "python3 -X nosuchopt -c 'import sys; print(sys._xoptions)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "{'nosuchopt': True}\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -X dev -c 'print(7)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "7\n",
+            "stderr": "python3: warning: -X dev is ignored by the 'pyodide' runtime\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "shadowing_function_and_the_handoff",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "python3() { echo \"$@\"; }",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 -c payload -u x",
+          "expect": {
+            "exit": 0,
+            "stdout": "-c payload -u x\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "command python3 -c \"import sys; print(sys.argv)\" -u x",
+          "expect": {
+            "exit": 0,
+            "stdout": "['-c', '-u', 'x']\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "unset -f python3",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print(sys.argv)\" -u x",
+          "expect": {
+            "exit": 0,
+            "stdout": "['-c', '-u', 'x']\n",
+            "stderr": ""
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -13,10 +13,21 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
+import signal
 
 from mirage.server.app import build_app
 from mirage.server.env import ENV_IDLE_GRACE_SECONDS
+from mirage.server.paths import pid_file_path
 
 _idle_grace = float(os.environ.get(ENV_IDLE_GRACE_SECONDS, "30"))
 
-app = build_app(idle_grace_seconds=_idle_grace)
+
+def _exit() -> None:
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
+app = build_app(
+    idle_grace_seconds=_idle_grace,
+    on_idle_exit=_exit,
+    pid_file=pid_file_path(),
+)

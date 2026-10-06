@@ -1,0 +1,86 @@
+{
+  "cases": [
+    {
+      "id": "sha512sum_c_modifiers_ignore_missing_status_quiet_warn_strict",
+      "seq": 15600751,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcF_k5 && echo one > /data/fcF_k5/ok && (cd /data/fcF_k5 && sha512sum ok > L1 && sha512sum ok | sed 's/ok$/gone/' >> L1 && sha512sum ok > L2 && echo junk >> L2 && sha512sum -c --ignore-missing L1; echo rc=$?; sha512sum -c --status L1; echo rc=$?; sha512sum --check --quiet L1; echo rc=$?; sha512sum -c -w L2; echo rc=$?; sha512sum -c --strict L2; echo rc=$?); rm -r /data/fcF_k5",
+      "expect": {
+        "exit": 0,
+        "stdout": "ok: OK\nrc=0\nrc=1\ngone: FAILED open or read\nrc=1\nok: OK\nrc=0\nok: OK\nrc=1\n",
+        "stderr": "sha512sum: gone: No such file or directory\nsha512sum: gone: No such file or directory\nsha512sum: WARNING: 1 listed file could not be read\nsha512sum: L2: 2: improperly formatted SHA512 checksum line\nsha512sum: WARNING: 1 line is improperly formatted\nsha512sum: WARNING: 1 line is improperly formatted\n"
+      },
+      "flags": [
+        "c",
+        "ignore-missing",
+        "status",
+        "quiet",
+        "w",
+        "strict"
+      ]
+    },
+    {
+      "id": "sha512sum_c_refuses_t_b_and_z",
+      "seq": 15600752,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha512sum -c -t /data/b.txt; echo rc=$?; sha512sum --check --binary /data/b.txt; echo rc=$?; sha512sum -c -z /data/b.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\n",
+        "stderr": "sha512sum: the --binary and --text options are meaningless when verifying checksums\nTry 'sha512sum --help' for more information.\nsha512sum: the --binary and --text options are meaningless when verifying checksums\nTry 'sha512sum --help' for more information.\nsha512sum: the --zero option is not supported when verifying checksums\nTry 'sha512sum --help' for more information.\n"
+      },
+      "flags": [
+        "c",
+        "t",
+        "b",
+        "z"
+      ]
+    }
+  ]
+}

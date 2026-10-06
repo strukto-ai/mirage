@@ -27,6 +27,13 @@ export type ByteSource = Uint8Array | AsyncIterable<Uint8Array>
  */
 export class DeviceInput extends Uint8Array {}
 
+/** Whether a read is over: bytes, or a stream drained to its end. Mirrors
+ * Python's settled. */
+export function settled(source: ByteSource): boolean {
+  if (source instanceof CachableAsyncIterator) return source.exhausted
+  return source instanceof Uint8Array
+}
+
 export async function materialize(source: ByteSource | null | undefined): Promise<Uint8Array> {
   if (source === null || source === undefined) return new Uint8Array()
   if (source instanceof Uint8Array) return source
@@ -71,6 +78,33 @@ export class OpReport {
   }
 }
 
+/**
+ * One `du` operand as measured, before its rows are rendered.
+ *
+ * du derives every row from the files it counted, so a line spanning mounts
+ * renders each mount's own measurement as one tree, the way find's actions
+ * run over every mount's `matchedRuns`. `leaves` are every file counted, as
+ * (virtual path, bytes); `directories` the directories the walk met, which
+ * keep a row though no counted file lies under them.
+ */
+export interface SizedRun {
+  readonly leaves: readonly (readonly [string, number])[]
+  readonly directories: readonly string[]
+}
+
+/**
+ * One `wc` operand as counted, before its row is rendered.
+ *
+ * A line spanning mounts lays every mount's own counts out as one report,
+ * with one column width and one total, the way du renders every mount's
+ * `sizedRuns` as one tree. `values` are the counts the row shows, in GNU's
+ * column order; `label` the name it prints, null for none.
+ */
+export interface CountedRun {
+  readonly values: readonly number[]
+  readonly label: string | null
+}
+
 export interface IOResultInit {
   stdout?: ByteSource | null
   stderr?: ByteSource | null
@@ -82,6 +116,8 @@ export interface IOResultInit {
   cache?: string[]
   producer?: Producer | null
   matchedRuns?: PathSpec[][] | null
+  sizedRuns?: SizedRun[] | null
+  countedRuns?: CountedRun[] | null
   refusal?: Refusal | null
 }
 
@@ -91,6 +127,12 @@ export class IOResult {
   // repeated start point stays its own traversal (GNU walks each to
   // completion before the next).
   matchedRuns: PathSpec[][] | null
+  // du's measurement before rendering, one run per operand it could read, in
+  // operand order; null when the command supplied none.
+  sizedRuns: SizedRun[] | null
+  // wc's counts before rendering, one run per row it prints, in operand order
+  // and without the total; null when the command supplied none.
+  countedRuns: CountedRun[] | null
   stdout: ByteSource | null
   stderr: ByteSource | null
   private _exitCode: number
@@ -115,6 +157,8 @@ export class IOResult {
 
   constructor(init: IOResultInit = {}) {
     this.matchedRuns = init.matchedRuns ?? null
+    this.sizedRuns = init.sizedRuns ?? null
+    this.countedRuns = init.countedRuns ?? null
     this.stdout = init.stdout ?? null
     this.stderr = init.stderr ?? null
     this._exitCode = init.exitCode ?? 0
@@ -177,10 +221,19 @@ export class IOResult {
     const result = new IOResult({
       stdout: other.stdout,
       matchedRuns: other.matchedRuns,
+      sizedRuns: other.sizedRuns,
+      countedRuns: other.countedRuns,
       stderr: mergedStderr,
-      reads: { ...this.reads, ...other.reads },
+      // A later write voids earlier claims on its path, and a read that is
+      // over; a running one stays for the drain to close.
+      reads: {
+        ...Object.fromEntries(
+          Object.entries(this.reads).filter(([p, v]) => !(p in other.writes) || !settled(v)),
+        ),
+        ...other.reads,
+      },
       writes: { ...this.writes, ...other.writes },
-      cache: [...this.cache, ...other.cache],
+      cache: [...this.cache.filter((p) => !(p in other.writes)), ...other.cache],
       renames: [...this.renames, ...other.renames],
       producer: other.producer,
       refusal: other.refusal ?? this.refusal,

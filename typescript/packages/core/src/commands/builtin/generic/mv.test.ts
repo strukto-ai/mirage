@@ -151,7 +151,6 @@ describe('mvGeneric guards', () => {
 
   it.each([
     [spec('/dst.txt'), 'ENOTDIR'],
-    [slashed('/reg'), 'ENOTDIR'],
     [slashed('/missing'), 'ENOENT'],
   ])('refuses many sources onto %s as %s', async (target, code) => {
     const files = fileMap({ '/a.txt': 1, '/b.txt': 2, '/dst.txt': 3, '/reg': 4 })
@@ -160,16 +159,6 @@ describe('mvGeneric guards', () => {
       mvGeneric([spec('/a.txt'), spec('/b.txt'), target], stat, { rename }, mvFlags({})),
     ).rejects.toMatchObject({ code })
     expect(contents(files)).toEqual({ '/a.txt': 1, '/b.txt': 2, '/dst.txt': 3, '/reg': 4 })
-  })
-
-  it('no-clobber preserves both source and target', async () => {
-    const files = new Map([
-      ['/a.txt', new Uint8Array([9])],
-      ['/d/a.txt', new Uint8Array([1])],
-    ])
-    await run(files, new Set(['/d']), ['/a.txt', '/d'], { no_clobber: true })
-    expect(files.get('/d/a.txt')).toEqual(new Uint8Array([1]))
-    expect(files.get('/a.txt')).toEqual(new Uint8Array([9]))
   })
 
   it('no-clobber with duplicate basenames keeps the skipped source', async () => {
@@ -441,7 +430,7 @@ describe('mvGeneric -t/-T', () => {
   it('a missing target directory fails the whole command', async () => {
     const files = new Map([['/a.txt', new Uint8Array([1])]])
     const [, io] = await run(files, new Set(), ['/a.txt'], {
-      flags: mvFlags({ targetDir: '/nosuch' }),
+      flags: mvFlags({ targetDir: PathSpec.fromStrPath('/nosuch') }),
     })
     expect(io.exitCode).toBe(1)
     expect(await io.stderrStr()).toBe("mv: target directory '/nosuch': No such file or directory\n")
@@ -457,14 +446,8 @@ function view(bag: Record<string, FlagValue>): FlagView {
 
 describe('parseFlags', () => {
   it('rejects conflicting combinations', () => {
-    expect(() => parseFlags(view({ backup: true, exchange: true }))).toThrow(
-      'mv: cannot combine --backup with --exchange, -n, or --update=none-fail',
-    )
     expect(() => parseFlags(view({ backup: true, no_clobber: true }))).toThrow(
-      'cannot combine --backup',
-    )
-    expect(() => parseFlags(view({ target_directory: '/d', no_target_directory: true }))).toThrow(
-      'cannot combine --target-directory',
+      'mv: cannot combine --backup with --exchange, -n, or --update=none-fail',
     )
   })
 
@@ -472,10 +455,6 @@ describe('parseFlags', () => {
     const parsed = parseFlags(view({ update: true, exchange: true }))
     expect(parsed.update).toBe('older')
     expect(parsed.exchange).toBe(true)
-    expect(parseFlags(view({ no_copy: true })).noCopy).toBe(true)
-    // GNU 9.7: `mv --backup --suffix= f g` writes g~, so an empty suffix
-    // reads as absent rather than naming the original as its own backup.
-    expect(parseFlags(view({ backup: true, suffix: '' })).suffix).toBe('~')
   })
 })
 

@@ -102,7 +102,8 @@ describe('find actions', () => {
         { sessionId: 's' },
       )
       expect(r.stdoutText).toBe('rc=0\nrc=1\n0\n')
-      expect(r.stderrText).toContain("find: cannot delete '/data/rd/e': no rmdir")
+      expect(r.stderrText).toContain("find: cannot delete '/data/rd/e': Permission denied")
+      expect(r.refusal?.reason).toBe('no rmdir')
     } finally {
       await ws.close()
     }

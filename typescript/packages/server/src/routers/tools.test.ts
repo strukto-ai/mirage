@@ -38,7 +38,7 @@ async function tool(
   id: string,
   name: string,
   payload: Record<string, unknown>,
-): Promise<{ text: string; isError: boolean }> {
+): Promise<{ text: string; is_error: boolean }> {
   const res = await app.inject({ method: 'POST', url: `/v1/workspaces/${id}/${name}`, payload })
   expect(res.statusCode).toBe(200)
   return res.json()
@@ -57,12 +57,12 @@ describe('the tool routes', () => {
     const listed = await tool(app, id, 'ls', { path: '/src' })
     const found = await tool(app, id, 'grep', { pattern: 'PIN', path: '/src', ignore_case: true })
     const globbed = await tool(app, id, 'glob', { pattern: '**/*.py' })
-    expect(written).toEqual({ text: 'Written: /src/a.py', isError: false })
-    expect(read).toEqual({ text: '     1\tNeedle\n', isError: false })
-    expect(edited.isError).toBe(false)
+    expect(written).toEqual({ text: 'Written: /src/a.py', is_error: false })
+    expect(read).toEqual({ text: '     1\tNeedle\n', is_error: false })
+    expect(edited.is_error).toBe(false)
     expect(listed.text).toBe('a.py\n')
-    expect(found).toEqual({ text: '/src/a.py:1:pin\n', isError: false })
-    expect(globbed).toEqual({ text: '/src/a.py\n', isError: false })
+    expect(found).toEqual({ text: '/src/a.py:1:pin\n', is_error: false })
+    expect(globbed).toEqual({ text: '/src/a.py\n', is_error: false })
   })
 
   it('keep the session stamps across requests', async () => {
@@ -75,8 +75,8 @@ describe('the tool routes', () => {
     const refused = await tool(app, id, 'write', { path: '/a', content: 'x' })
     await tool(app, id, 'read', { path: '/a' })
     const written = await tool(app, id, 'write', { path: '/a', content: 'x' })
-    expect(refused.isError).toBe(true)
-    expect(written.isError).toBe(false)
+    expect(refused.is_error).toBe(true)
+    expect(written.is_error).toBe(false)
   })
 
   it('refuse bad arguments and unknown targets', async () => {
@@ -89,7 +89,7 @@ describe('the tool routes', () => {
     })
     const session = await app.inject({
       method: 'POST',
-      url: `/v1/workspaces/${id}/read?sessionId=nope`,
+      url: `/v1/workspaces/${id}/read?session_id=nope`,
       payload: { path: '/a' },
     })
     expect(bad.statusCode).toBe(400)

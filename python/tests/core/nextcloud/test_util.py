@@ -4,13 +4,13 @@ import pytest
 
 from mirage.core.nextcloud.copy import copy
 from mirage.core.nextcloud.create import create
-from mirage.core.nextcloud.read import read_bytes
+from mirage.core.nextcloud.read import read
 from mirage.core.nextcloud.rename import rename
 from mirage.core.nextcloud.stream import read_stream
 from mirage.core.nextcloud.truncate import truncate
 from mirage.core.nextcloud.unlink import unlink
 from mirage.core.nextcloud.util import nextcloud_key, raw_path_of
-from mirage.core.nextcloud.write import write_bytes
+from mirage.core.nextcloud.write import write
 from mirage.types import PathSpec
 
 
@@ -68,7 +68,7 @@ _OTHER = _mounted("/nc/b.txt", "b.txt")
             [("copy", "docs/a.txt/", "b.txt")],
         ),
         (lambda acc: create(acc, _SLASHED), [("write", "docs/a.txt/")]),
-        (lambda acc: read_bytes(acc, _SLASHED), [("read", "docs/a.txt/")]),
+        (lambda acc: read(acc, _SLASHED), [("read", "docs/a.txt/")]),
         (
             lambda acc: rename(acc, _SLASHED, _OTHER),
             [("rename", "docs/a.txt/", "b.txt")],
@@ -83,7 +83,7 @@ _OTHER = _mounted("/nc/b.txt", "b.txt")
         ),
         (lambda acc: unlink(acc, _SLASHED), [("delete", "docs/a.txt/")]),
         (
-            lambda acc: write_bytes(acc, _SLASHED, b"x"),
+            lambda acc: write(acc, _SLASHED, b"x"),
             [("write", "docs/a.txt/")],
         ),
     ],

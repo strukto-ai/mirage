@@ -57,6 +57,12 @@ export interface Repo {
   readonly abbrev: number
   /** Blobs this invocation hashed from the working tree and never wrote. */
   readonly held: Map<string, Uint8Array>
+  /**
+   * Where resolving a name two refs answer to puts git's `refname is
+   * ambiguous` warning, for the verb to print ahead of its own stderr; null
+   * when `core.warnAmbiguousRefs` is off or nothing collects them.
+   */
+  readonly ambiguous: string[] | null
 }
 
 /** The argument bag every isomorphic-git call in this package shares. */
@@ -190,7 +196,11 @@ export async function storePack(repo: Repo, data: Uint8Array): Promise<void> {
  * @param dispatch workspace op dispatcher
  * @param location the discovered repository
  */
-export async function openRepo(dispatch: Dispatch, location: RepoLocation): Promise<Repo> {
+export async function openRepo(
+  dispatch: Dispatch,
+  location: RepoLocation,
+  ambiguous: string[] | null = null,
+): Promise<Repo> {
   return {
     fs: gitFs(dispatch, location),
     dispatch,
@@ -198,6 +208,7 @@ export async function openRepo(dispatch: Dispatch, location: RepoLocation): Prom
     cache: {},
     abbrev: abbrevLength(await packedCount(dispatch, location.commondir)),
     held: new Map(),
+    ambiguous,
   }
 }
 

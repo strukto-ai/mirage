@@ -1,0 +1,120 @@
+{
+  "cases": [
+    {
+      "id": "no_mount_preload",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/cold": {
+            "vfs": "ram",
+            "files": {
+              "one.txt": "one",
+              "unused.txt": "unused"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(42)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n",
+            "stderr": "",
+            "ops_absent": [
+              "read"
+            ]
+          }
+        },
+        {
+          "command": "python3 -c \"print(open('/cold/one.txt').read())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "one\n",
+            "stderr": "",
+            "ops_absent": [
+              "read /cold/unused.txt"
+            ],
+            "ops_contain": [
+              "read /cold/one.txt"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "root_mount_cwd_fallback",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/": {
+            "vfs": "ram",
+            "files": {
+              "work/program.py": "print('root script')\n"
+            }
+          },
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "sub/value.txt": "nested\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /work",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 -c 'print(1)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n"
+          }
+        },
+        {
+          "command": "python3 program.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "root script\n"
+          }
+        },
+        {
+          "command": "pwd",
+          "expect": {
+            "exit": 0,
+            "stdout": "/work\n"
+          }
+        },
+        {
+          "command": "cd /data/sub",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 -c \"from pathlib import Path; print(Path.cwd()); print(Path('value.txt').read_text(), end='')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "/data/sub\nnested\n"
+          }
+        }
+      ]
+    }
+  ]
+}

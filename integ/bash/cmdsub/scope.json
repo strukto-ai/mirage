@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "cmdsub_restores_function_variable_and_positionals",
+      "seq": 1346050,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'X=parent; f() { echo parent; }; echo \"$(X=child; f() { echo child; }; set -- inner; f)\"; echo \"$X\"; f; echo \"$#\"'",
+      "expect": {
+        "exit": 0,
+        "stdout": "child\nparent\nparent\n0\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

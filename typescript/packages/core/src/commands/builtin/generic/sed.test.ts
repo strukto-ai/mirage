@@ -93,15 +93,12 @@ describe('sed operands after a directory (GNU sed 4.9)', () => {
     return { out, code: result[1].exitCode, reads }
   }
 
-  it('reads nothing past the directory under -s, whose lookahead stays in the file', async () => {
-    expect(await run('n;p', { separate: true })).toEqual({
-      out: 'two\n',
-      code: 4,
-      reads: ['/f', '/d'],
-    })
-  })
-
-  it('reads nothing past the directory without a lookahead', async () => {
-    expect(await run('p')).toEqual({ out: 'one\ntwo\nthree\n', code: 4, reads: ['/f', '/d'] })
+  // Under -s the lookahead stays in the file; without one nothing past the
+  // directory is read either way.
+  it.each([
+    ['n;p', { separate: true }, 'two\n'],
+    ['p', {}, 'one\ntwo\nthree\n'],
+  ])('reads nothing past the directory for %s', async (script, flags, out) => {
+    expect(await run(script, flags)).toEqual({ out, code: 4, reads: ['/f', '/d'] })
   })
 })

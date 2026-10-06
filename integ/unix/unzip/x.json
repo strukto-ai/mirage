@@ -1,0 +1,109 @@
+{
+  "cases": [
+    {
+      "id": "unzip_x_filters_before_the_mode_runs",
+      "seq": 15100731,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_ux/o && cd /data/fcA_ux && echo k > o/.keep && printf %s 'UEsDBBQAAAAIAC48NF0AAAAAAgAAAAAAAAAEAAAAZGlyLwMAUEsDBBQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAZGlyL2EudHh0S0wcHgAAUEsDBBQAAAAIAC48NF35775xAwAAAAEAAAAFAAAAYi50eHRLAgBQSwECFAMUAAAACAAuPDRdAAAAAAIAAAAAAAAABAAAAAAAAAAAABAA/UEAAAAAZGlyL1BLAQIUAxQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAAAAAAAAAAACAASQAAABkaXIvYS50eHRQSwECFAMUAAAACAAuPDRd+e++cQMAAAABAAAABQAAAAAAAAAAAAAAgAFRAAAAYi50eHRQSwUGAAAAAAMAAwCcAAAAdwAAAAAA' | base64 -d > m.zip && unzip -Z1 m.zip -x '*'; echo rc=$?; unzip -p m.zip -x '*'; echo rc=$?; (cd o && unzip ../m.zip -x '*'); echo rc=$?; ls o; unzip -Z1 m.zip 'dir/*' -x dir/a.txt; echo rc=$?; unzip -p m.zip -x 'dir/*'; echo \" rc=$?\"; cd / && rm -r /data/fcA_ux)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=11\nrc=11\nArchive:  ../m.zip\nrc=11\ndir/\nrc=0\nb rc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "x",
+        "Z",
+        "1",
+        "p"
+      ]
+    },
+    {
+      "id": "unzip_t_x_cautions_follow_the_archive_line",
+      "seq": 15100732,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_ut && printf %s 'UEsDBBQAAAAIAC48NF0AAAAAAgAAAAAAAAAEAAAAZGlyLwMAUEsDBBQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAZGlyL2EudHh0S0wcHgAAUEsDBBQAAAAIAC48NF35775xAwAAAAEAAAAFAAAAYi50eHRLAgBQSwECFAMUAAAACAAuPDRdAAAAAAIAAAAAAAAABAAAAAAAAAAAABAA/UEAAAAAZGlyL1BLAQIUAxQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAAAAAAAAAAACAASQAAABkaXIvYS50eHRQSwECFAMUAAAACAAuPDRd+e++cQMAAAABAAAABQAAAAAAAAAAAAAAgAFRAAAAYi50eHRQSwUGAAAAAAMAAwCcAAAAdwAAAAAA' | base64 -d > /data/fcA_ut/m.zip && unzip -t /data/fcA_ut/m.zip -x '*'; echo rc=$?; unzip -t /data/fcA_ut/m.zip nomatch -x b.txt; echo rc=$?; rm -r /data/fcA_ut)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/fcA_ut/m.zip\nCaution:  zero files tested in /data/fcA_ut/m.zip.\nrc=11\nArchive:  /data/fcA_ut/m.zip\ncaution: filename not matched:  nomatch\ncaution: excluded filename not matched:  b.txt\nAt least one error was detected in /data/fcA_ut/m.zip.\nrc=11\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "x"
+      ]
+    },
+    {
+      "id": "unzip_x_takes_every_following_operand",
+      "seq": 15100733,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_uy && printf %s 'UEsDBBQAAAAIAC48NF0AAAAAAgAAAAAAAAAEAAAAZGlyLwMAUEsDBBQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAZGlyL2EudHh0S0wcHgAAUEsDBBQAAAAIAC48NF35775xAwAAAAEAAAAFAAAAYi50eHRLAgBQSwECFAMUAAAACAAuPDRdAAAAAAIAAAAAAAAABAAAAAAAAAAAABAA/UEAAAAAZGlyL1BLAQIUAxQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAAAAAAAAAAACAASQAAABkaXIvYS50eHRQSwECFAMUAAAACAAuPDRd+e++cQMAAAABAAAABQAAAAAAAAAAAAAAgAFRAAAAYi50eHRQSwUGAAAAAAMAAwCcAAAAdwAAAAAA' | base64 -d > /data/fcA_uy/m.zip && unzip -p /data/fcA_uy/m.zip -x 'dir/*' nomatch; echo \" rc=$?\"; rm -r /data/fcA_uy)",
+      "expect": {
+        "exit": 0,
+        "stdout": "b rc=0\n",
+        "stderr": "caution: excluded filename not matched:  nomatch\n"
+      },
+      "flags": [
+        "p",
+        "x"
+      ]
+    }
+  ]
+}

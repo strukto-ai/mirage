@@ -1,0 +1,110 @@
+{
+  "cases": [
+    {
+      "id": "ls_lists_past_a_failing_record",
+      "world": {
+        "runtimes": [
+          "workspace"
+        ],
+        "mounts": {
+          "/api": {
+            "vfs": "ram",
+            "files": {
+              "items/0.json": "{\"id\": 0}\n",
+              "items/1.json": "{\"id\": 1}\n",
+              "items/2.json": "{\"id\": 2}\n",
+              "items/3.json": "{\"id\": 3}\n",
+              "items/sub/4.json": "{\"id\": 4}\n"
+            },
+            "failing": [
+              "items/2.json"
+            ]
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "ls /api/items; echo \"rc=$?\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "0.json\n1.json\n2.json\n3.json\nsub\nrc=0\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "ls -l /api/items | grep -F 2.json",
+          "expect": {
+            "exit": 0,
+            "stdout": "?????????? ? ? ?    ?            ? 2.json\n",
+            "stderr": "ls: cannot access '/api/items/2.json': upstream 502 Bad Gateway\n"
+          }
+        },
+        {
+          "command": "ls -l /api/items > /dev/null; echo \"rc=$?\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=1\n",
+            "stderr": "ls: cannot access '/api/items/2.json': upstream 502 Bad Gateway\n"
+          }
+        },
+        {
+          "command": "ls -F /api/items; echo \"rc=$?\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "0.json\n1.json\n2.json\n3.json\nsub/\nrc=1\n",
+            "stderr": "ls: cannot access '/api/items/2.json': upstream 502 Bad Gateway\n"
+          }
+        },
+        {
+          "command": "ls -R /api/items; echo \"rc=$?\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "/api/items:\n0.json\n1.json\n2.json\n3.json\nsub\n\n/api/items/sub:\n4.json\nrc=1\n",
+            "stderr": "ls: cannot access '/api/items/2.json': upstream 502 Bad Gateway\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "find_walks_past_a_failing_record",
+      "world": {
+        "runtimes": [
+          "workspace"
+        ],
+        "mounts": {
+          "/api": {
+            "vfs": "ram",
+            "files": {
+              "items/0.json": "{\"id\": 0}\n",
+              "items/1.json": "{\"id\": 1}\n",
+              "items/2.json": "{\"id\": 2}\n",
+              "items/3.json": "{\"id\": 3}\n",
+              "items/sub/4.json": "{\"id\": 4}\n"
+            },
+            "failing": [
+              "items/2.json"
+            ]
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "find /api/items -type f; echo \"rc=$?\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "/api/items/0.json\n/api/items/1.json\n/api/items/2.json\n/api/items/3.json\n/api/items/sub/4.json\nrc=1\n",
+            "stderr": "find: '/api/items/2.json': upstream 502 Bad Gateway\n"
+          }
+        },
+        {
+          "command": "find /api/items -type f -size -2k; echo \"rc=$?\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "/api/items/0.json\n/api/items/1.json\n/api/items/3.json\n/api/items/sub/4.json\nrc=1\n",
+            "stderr": "find: '/api/items/2.json': upstream 502 Bad Gateway\n"
+          }
+        }
+      ]
+    }
+  ]
+}

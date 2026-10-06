@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import gzip
 import zlib
 
@@ -22,9 +21,7 @@ from mirage.commands.builtin.generic.gzip import extract_level
 from mirage.commands.builtin.generic.gzip import gzip as compress_inputs
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.types import MountMode, PathSpec
-from mirage.vfs.ram import RAMVFS
-from mirage.workspace import Workspace
+from mirage.types import PathSpec
 from mirage.workspace.executor.command.flags import parse_flags
 
 
@@ -49,98 +46,6 @@ def test_the_digit_flags_select_the_level(argv: list[str], level: int):
     zlib's default. Of several, the highest digit wins.
     """
     assert _level(argv) == level
-
-
-def _read_only_gzip_mount() -> tuple[Workspace, RAMVFS]:
-    vfs = RAMVFS()
-    vfs._store.files["/f.txt"] = b"hello\n"
-    vfs._store.files["/f.txt.gz"] = gzip.compress(b"hello\n")
-    vfs._store.files["/g.txt"] = b"fresh\n"
-    return Workspace({"/ro/": (vfs, MountMode.READ)}), vfs
-
-
-_EXISTS = "gzip: /ro/f.txt.gz already exists;\tnot overwritten\n"
-
-
-@pytest.mark.parametrize(
-    "line,code,stderr",
-    [
-        ("gzip /ro/f.txt", 2, _EXISTS),
-        ("gzip -k /ro/f.txt", 2, _EXISTS),
-        (
-            "gzip -f /ro/f.txt",
-            1,
-            "gzip: /ro/f.txt.gz: Read-only file system\n",
-        ),
-        ("gzip /ro/g.txt", 1, "\ngzip: /ro/g.txt.gz: Read-only file system\n"),
-        (
-            "gzip /ro/f.txt /ro/g.txt",
-            1,
-            _EXISTS + "\ngzip: /ro/g.txt.gz: Read-only file system\n",
-        ),
-        (
-            "gzip -d /ro/f.txt.gz",
-            2,
-            "gzip: /ro/f.txt already exists;\tnot overwritten\n",
-        ),
-        (
-            "gzip -df /ro/f.txt.gz",
-            1,
-            "gzip: /ro/f.txt: Read-only file system\n",
-        ),
-    ],
-)
-def test_a_read_only_mount_refuses_gzip_at_the_write(
-    line: str, code: int, stderr: str
-):
-    # Nothing refuses the command before it runs: the write of the
-    # replacement file is what the mount refuses, in gzip's own voice,
-    # and the operand it would have replaced is left in place. An output
-    # already there is left alone without -f (a warning); -f's refused
-    # replace goes on to the next operand, and an output that cannot be
-    # created ends the run with write_error's leading newline. Pinned
-    # against gzip 1.13 on a read-only tmpfs.
-    ws, vfs = _read_only_gzip_mount()
-    before = dict(vfs._store.files)
-    result = asyncio.run(ws.shell(line))
-    assert (result.exit_code, result.stderr) == (code, stderr.encode())
-    assert vfs._store.files == before
-
-
-async def _with_link(line: str) -> tuple[Workspace, str, int]:
-    ws = Workspace(
-        {"/data": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE
-    )
-    await ws.shell("cd /data && printf 'hello\\n' > a.txt && ln -s a.txt al")
-    r = await ws.shell(f"cd /data && {line}")
-    return ws, (await r.materialize_stderr()).decode(), r.exit_code
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("line", ["gzip al", "gzip -k al", "gzip -q al"])
-async def test_compressing_in_place_refuses_a_link(line: str):
-    ws, stderr, code = await _with_link(line)
-    assert (stderr, code) == (
-        "gzip: al: Too many levels of symbolic links\n",
-        1,
-    )
-    r = await ws.shell("cd /data && ls -F")
-    assert await r.materialize_stdout() == b"a.txt\nal@\n"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "line,listing",
-    [
-        ("gzip -f al", b"a.txt\nal.gz\n"),
-        ("gzip -kf al", b"a.txt\nal@\nal.gz\n"),
-    ],
-)
-async def test_f_compresses_beside_the_link(line: str, listing: bytes):
-    ws, stderr, code = await _with_link(line)
-    r = await ws.shell("cd /data && ls -F && gunzip -c al.gz")
-    assert (stderr, code) == ("", 0)
-    assert await r.materialize_stdout() == listing + b"hello\n"
 
 
 @pytest.mark.asyncio

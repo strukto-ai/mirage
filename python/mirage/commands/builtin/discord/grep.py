@@ -16,7 +16,7 @@ import logging
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.builtin.discord.io import resolve_glob
-from mirage.commands.builtin.generic.grep import grep as generic_grep
+from mirage.commands.builtin.generic.grep import grep_generic
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import (
@@ -125,7 +125,7 @@ async def grep(
     resolved = (
         await resolve_glob(accessor, paths, index=opts.index) if paths else []
     )
-    out, io = await generic_grep(
+    out, io = await grep_generic(
         resolved,
         texts,
         opts,

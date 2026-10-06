@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { byteChar, encodeText } from '../../shell/bytes.ts'
+import { byteChar, byteView, encodeText, textView } from '../../shell/bytes.ts'
 import { compilePosixRegex } from '../../utils/posix.ts'
 import { BreError, PosixSyntax, translateBre, translateEre } from './utils/bre.ts'
 
@@ -108,6 +108,19 @@ export interface SedScriptPiece {
   text: string
   // The script file's name as given, for `file NAME line N:`.
   name?: string
+}
+
+/**
+ * What a piece of script text is, as GNU's `text_types`. It decides what an
+ * escape spells: a regex and a replacement keep an unknown escape's
+ * backslash for their own reader, and a replacement quotes the `\` or `&` a
+ * numeric escape spells, so it stays a literal byte rather than a
+ * backreference.
+ */
+enum SedText {
+  BUFFER = 'buffer',
+  REPLACEMENT = 'replacement',
+  REGEX = 'regex',
 }
 
 /**
@@ -247,7 +260,10 @@ class Compiler {
   private readonly rfiles: string[] = []
   private readonly readerFiles: string[] = []
 
-  constructor(private readonly extended: boolean) {}
+  constructor(
+    private readonly extended: boolean,
+    private readonly utf8 = false,
+  ) {}
 
   compile(pieces: readonly SedScriptPiece[]): SedProgram {
     for (const piece of pieces) {
@@ -430,7 +446,7 @@ class Compiler {
       if (icase || multiline) this.bad(BAD_MODIF)
       return null
     }
-    const normalized = this.normalizeText(pattern, true)
+    const normalized = this.normalizeText(pattern, SedText.REGEX)
     let source: string
     let groups: number
     try {
@@ -451,7 +467,7 @@ class Compiler {
     }
     const re: SedRegex = { pattern, source, groups, icase, multiline }
     try {
-      compilePosixRegex(source, sedRegexFlags(re, false))
+      compilePosixRegex(source, sedRegexFlags(re, false), this.utf8)
     } catch (err) {
       if (!(err instanceof SyntaxError)) throw err
       this.bad(INVALID_PATTERN)
@@ -465,13 +481,15 @@ class Compiler {
     return re
   }
 
-  // GNU's normalize_text: C escapes, `\dNNN`, `\oNNN` and `\xHH` bytes
-  // (one above ASCII carried as its surrogate escape, written back as that
-  // raw byte), `\cX` control characters. In a text buffer (a/i/c and y) a
-  // backslash before any other character is dropped; in a regex it stays
-  // for regcomp, and what an escape produced is read as regex syntax, so
-  // `\x2e` is any character and `\x5c` a trailing backslash.
-  private normalizeText(buf: string, regex = false): string {
+  // GNU's normalize_text, over the text's byte view: C escapes, `\dNNN`,
+  // `\oNNN` and `\xHH` bytes and `\cX` control characters. In a text buffer
+  // (a/i/c and y) a backslash before any other character is dropped; in a
+  // regex it stays for regcomp, and what an escape produced is read as regex
+  // syntax, so `\x2e` is any character and `\x5c` a trailing backslash. Under a
+  // UTF-8 locale the result is read back as text, so `\xc3\xa9` is the one
+  // character it spells.
+  private normalizeText(text: string, kind = SedText.BUFFER): string {
+    const buf = byteView(text)
     let out = ''
     let i = 0
     while (i < buf.length) {
@@ -499,17 +517,22 @@ class Compiler {
           digits += 1
           i += 1
         }
-        out += digits === 0 ? nx : byteChar(value)
+        const char = digits === 0 ? nx : String.fromCharCode(value & 0xff)
+        if (kind === SedText.REPLACEMENT && digits !== 0 && (char === '\\' || char === '&'))
+          out += '\\'
+        out += char
         continue
       }
       if (nx === 'c') {
         if (i >= buf.length) {
-          if (regex) out += '\\'
+          if (kind === SedText.REGEX) out += '\\'
           continue
         }
         const x = buf.charAt(i)
         const upper = x >= 'a' && x <= 'z' ? x.toUpperCase() : x
-        out += String.fromCharCode(upper.charCodeAt(0) ^ 0x40)
+        const char = String.fromCharCode(upper.charCodeAt(0) ^ 0x40)
+        if (kind === SedText.REPLACEMENT && (char === '\\' || char === '&')) out += '\\'
+        out += char
         i += 1
         if (x === '\\') {
           if (buf.charAt(i) !== '\\') this.bad(RECURSIVE_ESCAPE_C)
@@ -517,9 +540,9 @@ class Compiler {
         }
         continue
       }
-      out += regex ? '\\' + nx : nx
+      out += kind === SedText.BUFFER ? nx : '\\' + nx
     }
-    return out
+    return this.utf8 ? textView(out) : out
   }
 
   // GNU's read_text. `leadin` is the text's first character, or a newline
@@ -800,7 +823,7 @@ class Compiler {
         if (replacement === null) this.bad(UNTERM_S_CMD)
         const sub: SedSubst = {
           re: null,
-          replacement,
+          replacement: this.normalizeText(replacement, SedText.REPLACEMENT),
           global: false,
           print: false,
           numb: 0,
@@ -843,7 +866,7 @@ class Compiler {
       throw new SedError(`sed: ${open.where}: ${EXCESS_OPEN_BRACE}`, 1, [...this.wfiles])
     }
     if (this.pendingText !== null && this.oldTextCmd !== null) {
-      this.oldTextCmd.text = this.pendingText === '' ? null : this.pendingText
+      this.oldTextCmd.text = this.pendingText === '' ? null : byteView(this.pendingText, this.utf8)
       this.pendingText = null
     }
     for (const [index, label] of this.jumps) {
@@ -864,8 +887,17 @@ class Compiler {
  * Throws SedError with GNU's wording, `sed: -e expression #N, char M:` or
  * `sed: file F line L:` before the reason.
  */
-export function compileScript(pieces: readonly SedScriptPiece[], extended = false): SedProgram {
-  return new Compiler(extended).compile(pieces)
+/**
+ * Compile a sed script given as its -e and -f pieces, as GNU 4.9 does. `utf8`
+ * is a UTF-8 locale, so the script's texts and regexes are characters rather
+ * than bytes.
+ */
+export function compileScript(
+  pieces: readonly SedScriptPiece[],
+  extended = false,
+  utf8 = false,
+): SedProgram {
+  return new Compiler(extended, utf8).compile(pieces)
 }
 
 /**

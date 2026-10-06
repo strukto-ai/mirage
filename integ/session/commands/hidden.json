@@ -23,7 +23,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cat: /scratch/private/k: private\n"
+        "stderr": "cat: /scratch/private/k: Permission denied\n"
       }
     },
     {
@@ -537,6 +537,46 @@
       "expect": {
         "exit": 0,
         "stdout": "k\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hidden_top_link_prep",
+      "seq": 15600901,
+      "targets": [
+        "ram-commands"
+      ],
+      "command": "mkdir -p /scratch/fcF_hs && echo v > /scratch/fcF_hs/a.txt && ln -s a.txt /scratch/fcF_hs/public && ln -s /private/key /scratch/fcF_hs/secret.tkn",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hidden_top_link_is_left_out_of_a_recursive_copy",
+      "seq": 15600902,
+      "targets": [
+        "ram-commands"
+      ],
+      "command": "cp -r /scratch/fcF_hs /scratch/fcF_hd; echo rc=$?; cp -rL /scratch/fcF_hs /scratch/fcF_hl; echo rc=$?; cp -r /scratch/fcF_hs /vault/fcF_hd; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrc=0\nrc=0\n",
+        "stderr": ""
+      },
+      "session": "tagged"
+    },
+    {
+      "id": "hidden_top_link_copies_hold_only_the_visible_names",
+      "seq": 15600903,
+      "targets": [
+        "ram-commands"
+      ],
+      "command": "ls -A /scratch/fcF_hd /scratch/fcF_hl /vault/fcF_hd; test -L /scratch/fcF_hd/public && test -L /vault/fcF_hd/public && echo links; cat /scratch/fcF_hl/public; rm -r /scratch/fcF_hs /scratch/fcF_hd /scratch/fcF_hl /vault/fcF_hd",
+      "expect": {
+        "exit": 0,
+        "stdout": "/scratch/fcF_hd:\na.txt\npublic\n\n/scratch/fcF_hl:\na.txt\npublic\n\n/vault/fcF_hd:\na.txt\npublic\nlinks\nv\n",
         "stderr": ""
       }
     }

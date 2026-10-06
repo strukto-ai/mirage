@@ -149,6 +149,21 @@ async def test_close_consoles_releases_factory_stores():
 
 
 @pytest.mark.asyncio
+async def test_a_child_table_builds_consoles_its_owner_releases():
+    stores: list[RAMConsoleStore] = []
+    table = JobTable(console_factory=partial(_tracked_ram_console, stores))
+    child = table.child().child(table)
+    job = child.submit(command="deaf", run=_run_forever, cwd="/")
+    assert child.processes is table.processes
+    assert child.parent is table
+    assert table.list_jobs() == []
+    await child.kill(job.id)
+    await table.close_consoles()
+    assert len(stores) == 1
+    assert all(s.closed for s in stores)
+
+
+@pytest.mark.asyncio
 async def test_close_consoles_leaves_default_consoles_alone():
     table = JobTable()
     job = table.submit(command="deaf", run=_run_forever, cwd="/")
@@ -370,3 +385,13 @@ async def test_factory_failure_never_enters_job_runner():
     assert table.list_jobs() == []
     assert table.processes.live() == ()
     assert entered == [1]
+
+
+@pytest.mark.asyncio
+async def test_a_substitution_lists_its_callers_jobs_before_its_own():
+    caller = JobTable()
+    outer = caller.submit("outer", _run_forever, cwd="/")
+    inner_table = JobTable(processes=caller.processes, parent=caller)
+    inner = inner_table.submit("inner", _run_forever, cwd="/")
+    assert inner_table.listing() == [outer, inner]
+    assert inner_table.list_jobs() == [inner]

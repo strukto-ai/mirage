@@ -47,6 +47,7 @@ from mirage.accessor.github import GitHubAccessor
 from mirage.accessor.hf_hub import HfHubAccessor
 from mirage.accessor.onedrive import OneDriveConfig
 from mirage.accessor.sharepoint import SharePointConfig
+from mirage.cache.file.config import RedisCacheConfig
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.cli.types import CLISpec
 from mirage.core.databricks_volume.path import configured_root
@@ -124,6 +125,8 @@ from mirage.vfs.wasabi import WasabiConfig, WasabiVFS
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.workspace.types import VFSMount
 
+from .commands import CLI as COMMAND_CLI
+from .commands import CommandService
 from .secrets import build_secrets_env
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
@@ -2403,7 +2406,26 @@ Service = (
 def build_ram(
     mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
-    return RAMVFS(), _noop
+    return (
+        CommandService(
+            metadata_only=mount.get("backend") == "metadata-service"
+        )
+        if mount.get("backend") in ("command-service", "metadata-service")
+        else _ram(mount)
+    ), _noop
+
+
+def _ram(mount: dict) -> RAMVFS:
+    """A RAM mount, caching its reads when the target asks.
+
+    Args:
+        mount (dict): the mount's manifest entry; ``caches_reads`` lets
+            the target's file cache see its reads.
+    """
+    vfs = RAMVFS()
+    if mount.get("caches_reads"):
+        vfs.caches_reads = True
+    return vfs
 
 
 def build_disk(
@@ -2961,6 +2983,8 @@ def cli_install(
             target that needs none.
         cli_name (str): the head word the target declared.
     """
+    if cli_name == "scope-probe":
+        return COMMAND_CLI, None
     if service is None:
         return cli_spec_for(cli_name), None
     # Widen the assert when another service grows a CLI.
@@ -3198,6 +3222,24 @@ def console_factory(target: dict, run_id: str) -> ConsoleFactory | None:
     )
 
 
+def cache_config(target: dict, run_id: str) -> RedisCacheConfig | None:
+    """Build the target's file cache config, or None for in-memory.
+
+    A target opts in with ``"cache": {"type": "redis"}``; the entries
+    ride REDIS_URL under a per-run key prefix.
+
+    Args:
+        target (dict): the target manifest entry.
+        run_id (str): this open's unique id.
+    """
+    if (target.get("cache") or {}).get("type") != "redis":
+        return None
+    return RedisCacheConfig(
+        url=os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
+        key_prefix=f"mirage-integ-cache-{run_id}:",
+    )
+
+
 async def open_target(
     target: dict, read: ReadSpec | None = None
 ) -> tuple[Workspace, Callable[[], Awaitable[None]]]:
@@ -3210,6 +3252,7 @@ async def open_target(
         cleanups.append(secrets_cleanup)
     agent_id = target.get("agentId")
     factory = console_factory(target, run_id)
+    cache = cache_config(target, run_id)
     # The target's profiles, and which one shapes a session that names
     # none. A profile is the whole permission document, so this is every
     # permission the target states; the models are the ones the YAML
@@ -3223,6 +3266,7 @@ async def open_target(
             read=read,
             agent_id=agent_id,
             console_factory=factory,
+            cache=cache,
             profiles=profiles,
             profile=default_profile,
             env=env_block,
@@ -3233,6 +3277,7 @@ async def open_target(
             mode=MountMode.WRITE,
             agent_id=agent_id,
             console_factory=factory,
+            cache=cache,
             profiles=profiles,
             profile=default_profile,
             env=env_block,

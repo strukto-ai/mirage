@@ -21,14 +21,12 @@ DEFAULT_TEMPLATE = "tmp.XXXXXXXXXX"
 ATTEMPTS = 100
 
 
-def _rand_suffix(length: int) -> str:
+def _random_suffix(length: int) -> str:
     return "".join(random.choices(_ALPHABET, k=length))
 
 
-def _typed(value: str | PathSpec | None) -> str:
-    if isinstance(value, PathSpec):
-        return value.raw_path
-    return value or ""
+def _typed(value: PathSpec | None) -> str:
+    return value.raw_path if value is not None else ""
 
 
 def plan_template(
@@ -114,7 +112,7 @@ async def mktemp(
     mkdir_fn: Callable[..., Awaitable[None]],
     write_bytes_fn: Callable[..., Awaitable[None]],
     d: bool = False,
-    p: str | PathSpec | None = None,
+    p: PathSpec | None = None,
     use_dest_dir: bool = False,
     t: bool = False,
     dry_run: bool = False,
@@ -142,7 +140,7 @@ async def mktemp(
         mkdir_fn (Callable[..., Awaitable[None]]): creates one directory.
         write_bytes_fn (Callable[..., Awaitable[None]]): creates one file.
         d (bool): create a directory (``-d``).
-        p (str | PathSpec | None): the ``-p``/``--tmpdir`` directory.
+        p (PathSpec | None): the ``-p``/``--tmpdir`` directory.
         use_dest_dir (bool): whether ``-p``/``--tmpdir``/``-t`` was given.
         t (bool): ``-t``.
         dry_run (bool): ``-u``: print the name only.
@@ -172,7 +170,9 @@ async def mktemp(
 
     def draw() -> str:
         return (
-            template[: end - x_count] + _rand_suffix(x_count) + template[end:]
+            template[: end - x_count]
+            + _random_suffix(x_count)
+            + template[end:]
         )
 
     async def create(path: PathSpec) -> None:
@@ -220,7 +220,7 @@ __all__ = ["mktemp"]
 @dataclass(frozen=True, slots=True)
 class MktempFlags:
     directory: bool = False
-    tmpdir: "str | PathSpec | None" = None
+    tmpdir: PathSpec | None = None
     use_dest_dir: bool = False
     template_mode: bool = False
     dry_run: bool = False
@@ -232,10 +232,10 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> MktempFlags:
     fl = FlagView(flags, spec=SPECS["mktemp"])
     tmpdir_flag = fl.raw("tmpdir")
     p_flag = fl.raw("p")
-    tmpdir: str | PathSpec | None
-    if isinstance(tmpdir_flag, (str, PathSpec)):
+    tmpdir: PathSpec | None
+    if isinstance(tmpdir_flag, PathSpec):
         tmpdir = tmpdir_flag
-    elif isinstance(p_flag, (str, PathSpec)):
+    elif isinstance(p_flag, PathSpec):
         tmpdir = p_flag
     else:
         tmpdir = None

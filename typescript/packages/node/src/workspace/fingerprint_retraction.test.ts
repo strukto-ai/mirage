@@ -220,11 +220,12 @@ describe('fingerprint retraction (mocked S3)', () => {
     // `mv a b` moves the single object at `a` and never touches
     // `a/child`. Both rename paths used to record the same op name, so
     // capture treated a one-object move as a prefix move and dropped a
-    // pin for an object that had not moved.
+    // pin for an object that had not moved. tee will not write under a
+    // file, so `a` lands out of band after `a/child`.
     const ws = makeWorkspace()
     try {
-      await ws.shell('tee /s3/a <<< A')
-      await ws.shell('tee /s3/a/child <<< C')
+      expect((await ws.shell('tee /s3/a/child <<< C')).exitCode).toBe(0)
+      mock.store.set(BUCKET, 'a', ENC.encode('A\n'))
       await ws.shell('mv /s3/a /s3/b')
       const state = await toStateDict(ws)
       expect([...mock.store.objects(BUCKET).keys()].sort()).toEqual(['a/child', 'b'])

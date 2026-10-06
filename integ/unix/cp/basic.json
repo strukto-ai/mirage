@@ -95,6 +95,38 @@
         "stdout": "1\n2\n3\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "cp_one_source_into_a_directory_keeps_the_source",
+      "seq": 15600001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/fcF_c1/d && echo A > /data/fcF_c1/a.txt && cp /data/fcF_c1/a.txt /data/fcF_c1/d; echo rc=$?; cat /data/fcF_c1/d/a.txt /data/fcF_c1/a.txt; rm -r /data/fcF_c1",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nA\nA\n",
+        "stderr": ""
+      }
     }
   ]
 }

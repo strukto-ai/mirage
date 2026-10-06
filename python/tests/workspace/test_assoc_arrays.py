@@ -822,7 +822,7 @@ FUNC_JOB_CASES = [
     (
         "jobs_r_running_only",
         "sleep 5 & echo hi & sleep 0.3; jobs -r",
-        "[1] running sleep 5\n",
+        "hi\n[1] running sleep 5\n",
         "",
         0,
     ),
@@ -845,7 +845,7 @@ FUNC_JOB_CASES = [
     (
         "jobs_n_changed_then_none",
         "sleep 5 & echo hi & sleep 0.3; jobs -n; echo ---; jobs -n",
-        "[2] completed echo hi\n---\n",
+        "hi\n[2] completed echo hi\n---\n",
         "",
         0,
     ),
@@ -1068,7 +1068,6 @@ ALL_CASES = CASES + ATTR_CASES + FUNC_JOB_CASES + REVIEW_CASES
     "case_id,cmd,out,err,code", ALL_CASES, ids=[c[0] for c in ALL_CASES]
 )
 def test_assoc_case(case_id, cmd, out, err, code):
-
     async def run():
         ws = Workspace({"data": RAMVFS()})
         try:

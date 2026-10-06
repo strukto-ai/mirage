@@ -17,7 +17,9 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
+from mirage.cli.credentials import Login, read_login
 from mirage.cli.env import ENV_DAEMON_URL, ENV_TOKEN
 from mirage.server.auth import storage as auth_storage
 from mirage.server.auth.config import (
@@ -27,7 +29,9 @@ from mirage.server.auth.config import (
     ENV_JWT_AUTHORIZED_PARTIES,
     ENV_JWT_CLOCK_SKEW,
     ENV_JWT_ISSUER,
+    ENV_JWT_JWKS_URL,
     ENV_JWT_PUBKEY_FILE,
+    ENV_LOGIN_CLIENT_ID,
 )
 from mirage.server.daemon_config import (
     ALLOWED_KEYS,
@@ -60,13 +64,30 @@ _ENV_FOR_KEY = {
     "jwt_issuer": ENV_JWT_ISSUER,
     "jwt_audience": ENV_JWT_AUDIENCE,
     "jwt_pubkey_file": ENV_JWT_PUBKEY_FILE,
+    "jwt_jwks_url": ENV_JWT_JWKS_URL,
     "jwt_clock_skew": ENV_JWT_CLOCK_SKEW,
     "jwt_authorized_parties": ENV_JWT_AUTHORIZED_PARTIES,
+    "login_client_id": ENV_LOGIN_CLIENT_ID,
     "auth_token": ENV_TOKEN,
     "idle_grace_seconds": ENV_IDLE_GRACE_SECONDS,
     "port": ENV_DAEMON_PORT,
     **SSH_ENV_KEYS,
 }
+
+
+def is_local_url(url: str) -> bool:
+    """Whether a daemon URL points at this machine.
+
+    Only such a URL may use the local token file or start a daemon,
+    so neither the file's token nor a spawn ever goes to a remote host.
+
+    Args:
+        url (str): the daemon URL.
+
+    Returns:
+        bool: True when its host is a loopback name.
+    """
+    return (urlsplit(url).hostname or "") in DEFAULT_ALLOWED_HOSTS
 
 
 @dataclass
@@ -75,6 +96,7 @@ class DaemonSettings:
     socket: str = ""
     auth_token: str = ""
     idle_grace_seconds: float = 30.0
+    login: Login | None = None
 
 
 def config_path() -> Path:
@@ -90,6 +112,9 @@ def load_daemon_settings(path: Path | None = None) -> DaemonSettings:
         3. values in ``$MIRAGE_HOME/config.toml`` (default
            ``~/.mirage/config.toml``) ``[daemon]`` table
         4. defaults
+
+    With no token from those, a ``mirage login`` made for this URL
+    gives one, and then a local URL takes the token file's.
 
     Args:
         path (Path | None): config file location. Defaults to
@@ -120,6 +145,11 @@ def load_daemon_settings(path: Path | None = None) -> DaemonSettings:
     if env_token:
         settings.auth_token = env_token
     if not settings.auth_token:
+        login = read_login()
+        if login is not None and login.url == settings.url.rstrip("/"):
+            settings.login = login
+            return settings
+    if not settings.auth_token and is_local_url(settings.url):
         file_token = auth_storage.read_token_file(
             auth_storage.default_token_file()
         )
@@ -137,8 +167,10 @@ def _default_for_key(key: str) -> str:
         "jwt_issuer": "",
         "jwt_audience": "",
         "jwt_pubkey_file": "",
+        "jwt_jwks_url": "",
         "jwt_clock_skew": "5",
         "jwt_authorized_parties": "",
+        "login_client_id": "",
         "socket": "",
         "auth_token": "",
         "idle_grace_seconds": "30",

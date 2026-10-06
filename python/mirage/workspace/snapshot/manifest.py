@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from pathlib import Path
 from typing import Any
 
 from mirage.types import VFSName
@@ -34,7 +35,7 @@ class _BlobAllocator:
     """
 
     def __init__(self) -> None:
-        self.blobs: dict[str, bytes] = {}
+        self.blobs: dict[str, bytes | Path] = {}
         self._counters: dict[str, int] = {}
 
     def alloc(self, category: str) -> str:
@@ -45,8 +46,11 @@ class _BlobAllocator:
 
 def split_manifest_and_blobs(
     state: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, bytes]]:
+) -> tuple[dict[str, Any], dict[str, bytes | Path]]:
     """The state as a JSON-safe manifest plus the bytes it referenced.
+
+    A disk mount's files ride as host paths, read only when the tar is
+    written.
 
     The manifest IS the state, minus the four keys that hold bytes:
     those are rewritten with blob references and everything else rides

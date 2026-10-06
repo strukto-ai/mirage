@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { classify, type FsCondition } from '../../../errors/index.ts'
+import { POSIX } from '../../../errors/posix.ts'
 
 export class MontyUnavailableError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -37,34 +38,24 @@ export interface CPythonError {
   phrase: string
 }
 
-// The monty encoders' view, mirroring python's monty/errors.py. The
-// table is total over the vocabulary; errors.test.ts fails a
-// half-added member.
-export const CPYTHON: Record<FsCondition, CPythonError> = {
-  ENOENT: { exception: 'FileNotFoundError', errno: 2, phrase: 'No such file or directory' },
-  ENOTDIR: { exception: 'NotADirectoryError', errno: 20, phrase: 'Not a directory' },
-  EISDIR: { exception: 'IsADirectoryError', errno: 21, phrase: 'Is a directory' },
-  EEXIST: { exception: 'FileExistsError', errno: 17, phrase: 'File exists' },
-  EACCES: { exception: 'PermissionError', errno: 13, phrase: 'Permission denied' },
-  EPERM: { exception: 'PermissionError', errno: 1, phrase: 'Operation not permitted' },
-  ENOTEMPTY: { exception: 'OSError', errno: 39, phrase: 'Directory not empty' },
-  EXDEV: { exception: 'OSError', errno: 18, phrase: 'Invalid cross-device link' },
-  // pathlib's answer for a cross-mount rename: monty ships no shutil,
-  // so guest code writes the copy-and-delete fallback by hand and the
-  // errno is what tells it to.
-  CROSS_MOUNT: { exception: 'OSError', errno: 18, phrase: 'Invalid cross-device link' },
-  ENOTSUP: { exception: 'OSError', errno: 95, phrase: 'Operation not supported' },
-  ELOOP: { exception: 'OSError', errno: 40, phrase: 'Too many levels of symbolic links' },
-  EINVAL: { exception: 'OSError', errno: 22, phrase: 'Invalid argument' },
-  EIO: { exception: 'OSError', errno: 5, phrase: 'Input/output error' },
-  EBUSY: { exception: 'OSError', errno: 16, phrase: 'Device or resource busy' },
-  EROFS: { exception: 'OSError', errno: 30, phrase: 'Read-only file system' },
-  NO_XATTR: { exception: 'OSError', errno: 61, phrase: 'No data available' },
+// The builtin a guest `except`s for a condition, where CPython raises a
+// subclass for its errno; every other condition is a plain OSError.
+const EXCEPTIONS: Partial<Record<FsCondition, string>> = {
+  ENOENT: 'FileNotFoundError',
+  ENOTDIR: 'NotADirectoryError',
+  EISDIR: 'IsADirectoryError',
+  EEXIST: 'FileExistsError',
+  EACCES: 'PermissionError',
+  EPERM: 'PermissionError',
 }
 
-/** The guest-python rendering for a condition. */
+/**
+ * The guest-python rendering for a condition: CPython on Linux, whose
+ * number and phrase are the shared POSIX table's (that table is Linux's
+ * numbering already).
+ */
 export function cpythonError(condition: FsCondition): CPythonError {
-  return CPYTHON[condition]
+  return { exception: EXCEPTIONS[condition] ?? 'OSError', ...POSIX[condition] }
 }
 
 // The naming lives in the shared classifier; this module renders the
@@ -91,7 +82,9 @@ export function displayError(err: unknown): string {
 export function guestError(code: GuestCode, path: string, target?: string): Error {
   const row = cpythonError(code)
   const where = target === undefined ? `'${path}'` : `'${path}' -> '${target}'`
-  const guest = new Error(`[Errno ${String(row.errno)}] ${row.phrase}: ${where}`)
+  const guest = Object.assign(new Error(`[Errno ${String(row.errno)}] ${row.phrase}: ${where}`), {
+    guestCondition: code,
+  })
   guest.name = row.exception
   return guest
 }
@@ -102,8 +95,10 @@ export function guestError(code: GuestCode, path: string, target?: string): Erro
  * (PYTHON_EXC_NAMES), so agent code can `except FileNotFoundError`
  * exactly as it does on the python host. Every named condition
  * converts (a non-empty rmdir is an OSError with errno 39, not a raw
- * JS error); a failure the vocabulary does not name passes through
- * untouched.
+ * JS error), and a failure the vocabulary does not name is EIO, as a
+ * kernel reports a device that failed (the engine knows only builtin
+ * types, so a backend's own error would reach the guest as
+ * RuntimeError).
  *
  * Args:
  *   err: whatever the mount op rejected with.
@@ -112,7 +107,10 @@ export function guestError(code: GuestCode, path: string, target?: string): Erro
  *     source.
  */
 export function asGuestError(err: unknown, path: string, target?: string): unknown {
-  const condition = classify(err)
-  if (condition === null) return err
-  return guestError(condition, path, target)
+  // A guest exception this door already built (a refusal before any
+  // mount op) is CPython's shape already, and keeps its own condition. A
+  // backend error that merely shares a CPython name is classified like
+  // any other.
+  if ((err as { guestCondition?: unknown }).guestCondition !== undefined) return err
+  return guestError(classify(err) ?? 'EIO', path, target)
 }

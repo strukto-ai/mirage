@@ -253,7 +253,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "rev: {mount}/__nf_missing__: No such file or directory\n"
+        "stderr": "rev: cannot open {mount}/__nf_missing__: No such file or directory\n"
       }
     },
     {

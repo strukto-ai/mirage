@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "own_guest_kernel",
+      "runtimes": [
+        "smolvm",
+        "apple_container"
+      ],
+      "steps": [
+        {
+          "command": "uname -s",
+          "expect": {
+            "exit": 0,
+            "stdout": "Linux\n"
+          }
+        }
+      ]
+    }
+  ]
+}

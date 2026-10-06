@@ -26,7 +26,12 @@ import { buildVfs } from '@struktoai/mirage-node'
 const HOST = 'typescript'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SUITE = join(HERE, 'cases.json')
-const SPEC = join(HERE, '..', '..', 'spec', 'typescript', 'node', 'vfs.json')
+const SPEC = join(
+  process.env.MIRAGE_SPEC_DIR ?? join(HERE, '..', '..', '.cache', 'spec'),
+  'typescript',
+  'node',
+  'vfs.json',
+)
 
 interface Case {
   id: string

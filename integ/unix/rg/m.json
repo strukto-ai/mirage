@@ -29,9 +29,7 @@
         "stdout": "error: disk full\nerror: disk full\nerror: disk full\na1\na2\n",
         "stderr": ""
       },
-      "flags": [
-        "m"
-      ]
+      "flags": ["m", "stop_on_nonmatch"]
     },
     {
       "id": "rg_m_zero_selects_nothing",
@@ -157,7 +155,7 @@
         "nextcloud",
         "box"
       ],
-      "command": "mkdir -p /data/rmw && printf 'a1\\na2\\n' > /data/rmw/x.txt && printf 'a3\\na4\\n' > /data/rmw/y.txt && rg -m1 a /data/rmw",
+      "command": "mkdir -p /data/rmw && printf 'a1\\na2\\n' > /data/rmw/x.txt && printf 'a3\\na4\\n' > /data/rmw/y.txt && rg --sort path -m1 a /data/rmw",
       "expect": {
         "exit": 0,
         "stdout": "/data/rmw/x.txt:a1\n/data/rmw/y.txt:a3\n",
@@ -190,7 +188,7 @@
         "nextcloud",
         "box"
       ],
-      "command": "mkdir -p /data/rmw && printf 'a1\\na2\\n' > /data/rmw/x.txt && printf 'a3\\na4\\n' > /data/rmw/y.txt && rg -m2 a /data/rmw",
+      "command": "mkdir -p /data/rmw && printf 'a1\\na2\\n' > /data/rmw/x.txt && printf 'a3\\na4\\n' > /data/rmw/y.txt && rg --sort path -m2 a /data/rmw",
       "expect": {
         "exit": 0,
         "stdout": "/data/rmw/x.txt:a1\n/data/rmw/x.txt:a2\n/data/rmw/y.txt:a3\n/data/rmw/y.txt:a4\n",

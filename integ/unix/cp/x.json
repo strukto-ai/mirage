@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "cp_x_copies_a_tree_with_no_mount_below_it",
+      "seq": 15600009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/fcF_cx/t/s && echo f > /data/fcF_cx/t/s/f && cp -rx /data/fcF_cx/t /data/fcF_cx/c && cp -r --one-file-system /data/fcF_cx/t /data/fcF_cx/d && cp -x /data/fcF_cx/t/s/f /data/fcF_cx/g && find /data/fcF_cx/c /data/fcF_cx/d /data/fcF_cx/g | sort; rm -r /data/fcF_cx",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fcF_cx/c\n/data/fcF_cx/c/s\n/data/fcF_cx/c/s/f\n/data/fcF_cx/d\n/data/fcF_cx/d/s\n/data/fcF_cx/d/s/f\n/data/fcF_cx/g\n",
+        "stderr": ""
+      },
+      "flags": [
+        "x",
+        "one-file-system",
+        "r"
+      ]
+    }
+  ]
+}

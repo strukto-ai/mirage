@@ -29,9 +29,7 @@
         "stdout": "1:alpha\nalpha\n1:1:alpha\n/data/r4/notes.txt:1:1:alpha\n/data/r4/notes.txt:1:alpha\n",
         "stderr": ""
       },
-      "flags": [
-        "n"
-      ]
+      "flags": ["n", "N", "column", "no_column", "vimgrep"]
     },
     {
       "id": "rg_nA1_dash_context",

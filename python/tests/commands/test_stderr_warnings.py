@@ -16,7 +16,7 @@ import asyncio
 
 import pytest
 
-from mirage.commands.builtin.generic.rg import rg as generic_rg
+from mirage.commands.builtin.generic.rg import rg_generic
 from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
@@ -25,7 +25,6 @@ from mirage.workspace import Workspace
 
 
 def _make_readdir(tree):
-
     def readdir(path):
         if path in tree:
             return tree[path]
@@ -35,7 +34,6 @@ def _make_readdir(tree):
 
 
 def _make_stat(files):
-
     def stat_fn(path):
         if path in files:
             return files[path]
@@ -46,7 +44,6 @@ def _make_stat(files):
 
 @pytest.mark.anyio
 async def test_rg_scan_collects_warnings_on_unreadable_file():
-
     async def read_bytes(path):
         if path.virtual == "/good.py":
             return b"hello world\n"
@@ -79,7 +76,7 @@ async def test_rg_scan_collects_warnings_on_unreadable_file():
         return stat_fn(path.virtual)
 
     # The scan reports the file it could not read and keeps searching.
-    out, io = await generic_rg(
+    out, io = await rg_generic(
         [PathSpec.from_str_path("/")],
         ["hello"],
         CommandOpts(),

@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "id": "sha512sum_t_and_b_set_the_mode_marker",
+      "seq": 15600753,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha512sum -t /data/b.txt; sha512sum --binary /data/b.txt; sha512sum --text /data/b.txt; sha512sum -tb /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "6a8e8f13f75c3dead6c5b542d2282b182d94619292e7c31c551b719a65af7093a621b008868d47d2e85973ae3fa1df5c8ca23f2bcb27919229ad0c5b9a59c8cc  /data/b.txt\n6a8e8f13f75c3dead6c5b542d2282b182d94619292e7c31c551b719a65af7093a621b008868d47d2e85973ae3fa1df5c8ca23f2bcb27919229ad0c5b9a59c8cc */data/b.txt\n6a8e8f13f75c3dead6c5b542d2282b182d94619292e7c31c551b719a65af7093a621b008868d47d2e85973ae3fa1df5c8ca23f2bcb27919229ad0c5b9a59c8cc  /data/b.txt\n6a8e8f13f75c3dead6c5b542d2282b182d94619292e7c31c551b719a65af7093a621b008868d47d2e85973ae3fa1df5c8ca23f2bcb27919229ad0c5b9a59c8cc */data/b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "b",
+        "binary",
+        "text"
+      ]
+    },
+    {
+      "id": "sha512sum_t_and_b_the_last_one_wins",
+      "seq": 15600754,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha512sum -bt /data/b.txt; sha512sum --binary --text /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "6a8e8f13f75c3dead6c5b542d2282b182d94619292e7c31c551b719a65af7093a621b008868d47d2e85973ae3fa1df5c8ca23f2bcb27919229ad0c5b9a59c8cc  /data/b.txt\n6a8e8f13f75c3dead6c5b542d2282b182d94619292e7c31c551b719a65af7093a621b008868d47d2e85973ae3fa1df5c8ca23f2bcb27919229ad0c5b9a59c8cc  /data/b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "b"
+      ]
+    }
+  ]
+}

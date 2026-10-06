@@ -17,7 +17,8 @@ from mirage.context.session_context import (
     redirect_target_judged,
 )
 from mirage.policy.base import Policy
-from mirage.policy.match import Outcome, decide, op_refusal
+from mirage.policy.match import Outcome, decide, op_refusal, posix_level
+from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.types import (
     Action,
     Ask,
@@ -29,7 +30,7 @@ from mirage.policy.types import (
 )
 
 
-class PermissionsPolicy(Policy):
+class PermissionsPolicy(Policy, SessionScopedMixin):
     """The profile's ``commands`` rules, enforced.
 
     Seeded by the workspace after ``MountRootPolicy`` (POSIX messages
@@ -71,9 +72,7 @@ class PermissionsPolicy(Policy):
             return Ask(rule.reason, rule, decision.asks)
         if decision.matched_path is None:
             return Deny(rule.reason)
-        return Deny(
-            f"{decision.matched_path}: {rule.reason}", DenyScope.OPERAND
-        )
+        return Deny(rule.reason, DenyScope.OPERAND, path=decision.matched_path)
 
     async def pre_ops(self, ctx: OpsContext) -> Action | None:
         if redirect_target_judged(ctx.path.virtual):
@@ -88,3 +87,19 @@ class PermissionsPolicy(Policy):
             self._sessions.commands_of(ctx.session_id), ctx, granted
         )
         return Deny(reason) if reason is not None else None
+
+    async def wants_for(self, hook: str, session_id: str) -> bool:
+        """Whether this session's rules speak at ``hook``: always at the
+        command door, and at the op door only through a pure path rule,
+        the one kind an op can meet (``op_reach``).
+
+        Args:
+            hook (str): the hook in python spelling.
+            session_id (str): the session the door serves.
+        """
+        if hook != "pre_ops":
+            return True
+        rules = self._sessions.commands_of(session_id)
+        if rules is None:
+            return False
+        return any(posix_level(rule) for rule in (*rules.deny, *rules.ask))

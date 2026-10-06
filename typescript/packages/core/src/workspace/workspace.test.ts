@@ -1065,11 +1065,14 @@ describe('rm/rmdir on a mount prefix is refused (Unix-like)', () => {
     await ws.close()
   })
 
-  it('rm -r / refuses (cache root is a mount)', async () => {
+  it("rm -r / refuses with GNU's failsafe", async () => {
     const ws = await makeWs()
     const result = await ws.shell('rm -r /')
-    expect(result.exitCode).not.toBe(0)
-    expect(new TextDecoder().decode(result.stderr)).toMatch(/Device or resource busy/)
+    expect(result.exitCode).toBe(1)
+    expect(new TextDecoder().decode(result.stderr)).toBe(
+      "rm: it is dangerous to operate recursively on '/'\n" +
+        'rm: use --no-preserve-root to override this failsafe\n',
+    )
     await ws.close()
   })
 

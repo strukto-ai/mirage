@@ -58,7 +58,7 @@ async function* tailSource(
   yield* readStream(accessor, p, index)
 }
 
-async function tailCommand(
+async function tail(
   accessor: PostgresAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -93,5 +93,5 @@ export const POSTGRES_TAIL = command({
   name: 'tail',
   vfs: VFSName.POSTGRES,
   spec: specOf('tail'),
-  fn: tailCommand,
+  fn: tail,
 })

@@ -1,5 +1,7 @@
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.numfmt import numfmt as generic_numfmt
+from mirage.commands.builtin.generic.numfmt import (
+    numfmt_generic as generic_numfmt,
+)
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS

@@ -23,7 +23,6 @@ from tests.fixtures.github_mock import MOCK_BLOBS
 
 @pytest.fixture(autouse=True)
 def _patch_read(monkeypatch):
-
     async def _read_bytes(config, owner, repo, sha):
         return MOCK_BLOBS[sha]
 

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Awaitable
 from dataclasses import dataclass, replace
 from functools import partial
 from typing import Callable
@@ -35,9 +36,8 @@ from mirage.commands.builtin.utils.paths import (
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import argmatch_error, extra_operand_error
-from mirage.context import path_allowed
+from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView
 from mirage.runtime.types import DispatchFn
@@ -54,6 +54,7 @@ from mirage.types import (
     PrimitiveMove,
     ReaddirFn,
     StatFn,
+    Visibility,
 )
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.errors import (
@@ -63,8 +64,10 @@ from mirage.utils.errors import (
     DotWalkMissing,
     fs_strerror,
 )
-from mirage.utils.key_prefix import mounted_path, rekey
+from mirage.utils.hidden import path_visible
+from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import CycleError, resolve_path
+from mirage.utils.quote import shell_quote_always
 
 UPDATE_MODES = ("all", "none", "none-fail", "older")
 
@@ -73,13 +76,12 @@ UPDATE_MODES = ("all", "none", "none-fail", "older")
 class CpFlags:
     recursive: bool = False
     no_clobber: bool = False
+    interactive: bool = False
     verbose: bool = False
     update: str | None = None
     backup: str | None = None
     suffix: str = DEFAULT_BACKUP_SUFFIX
-    # Single-mount dispatch delivers the -t value as PathSpec; the
-    # cross-mount relay's string view is wrapped against the first source.
-    target_dir: PathSpec | str | None = None
+    target_dir: PathSpec | None = None
     no_target_dir: bool = False
     dereference: CopyDeref = CopyDeref.ALWAYS
 
@@ -97,6 +99,8 @@ class TransferLinks:
         relay (PrimitiveCopy): the door's own transfer primitives, which
             copy what a followed link leads to on whatever mount it lives.
         relay_stat (StatFn): the door's stat, for the same walk.
+        visibility (Visibility | None): the session's visibility; a link
+            it hides is not copied.
     """
 
     links: LinkView
@@ -104,6 +108,7 @@ class TransferLinks:
     cwd: str
     relay: PrimitiveCopy
     relay_stat: StatFn
+    visibility: Visibility | None = None
 
 
 # Each option of cp's link policy, and what it asks for; the last typed
@@ -128,6 +133,8 @@ class TransferPolicy:
             ``none-fail``/``older``), or None.
         backup (str | None): Canonical backup control, or None.
         suffix (str): Simple-backup suffix.
+        ask (Callable | None): ``-i``'s question for one target, None
+            when the command does not ask.
     """
 
     cmd_name: str
@@ -135,6 +142,53 @@ class TransferPolicy:
     update: str | None = None
     backup: str | None = None
     suffix: str = DEFAULT_BACKUP_SUFFIX
+    ask: Callable[[PathSpec], Awaitable[bool]] | None = None
+
+
+def prompter(
+    cmd_name: str,
+    stdin: ByteSource | None,
+    errors: list[str],
+    accepted: list[str],
+) -> Callable[[PathSpec], Awaitable[bool]]:
+    """GNU's ``-i``: ask on stderr before replacing a target and read one
+    line of stdin as the answer. Only a line starting with ``y`` or ``Y``
+    is yes (rpmatch in the C locale); the end of input is no.
+
+    Args:
+        cmd_name (str): ``cp`` or ``mv``.
+        stdin (ByteSource | None): the command's standard input.
+        errors (list[str]): the stderr record the question joins.
+        accepted (list[str]): the targets answered yes, which are no
+            failure.
+    """
+    replies = AsyncLineIterator(stdin) if stdin is not None else None
+
+    async def ask(target: PathSpec) -> bool:
+        errors.append(
+            f"{cmd_name}: overwrite {shell_quote_always(target.raw_path)}? "
+        )
+        reply = await replies.readline() if replies is not None else None
+        if reply is None or reply[:1] not in (b"y", b"Y"):
+            return False
+        accepted.append(target.virtual)
+        return True
+
+    return ask
+
+
+def stderr_of(errors: list[str]) -> bytes | None:
+    """The collected messages as stderr: one per line, except that a
+    question leaves the cursor after it, as a terminal prompt does.
+
+    Args:
+        errors (list[str]): the messages, in order.
+    """
+    if not errors:
+        return None
+    return "".join(
+        line if line.endswith("? ") else f"{line}\n" for line in errors
+    ).encode()
 
 
 def update_gates(mode: str | None) -> bool:
@@ -208,18 +262,15 @@ def suffix_flag(fl: FlagView) -> str | None:
     return fl.as_str("suffix") or None
 
 
-def target_flags(
-    cmd_name: str, fl: FlagView
-) -> tuple[PathSpec | str | None, bool]:
+def target_flags(cmd_name: str, fl: FlagView) -> tuple[PathSpec | None, bool]:
     """Resolve ``-t``/``--target-directory`` and ``-T``, rejecting both.
 
     Args:
         cmd_name (str): Command name for the conflict error.
         fl (FlagView): Parsed flag view.
     """
-    target_dir: FlagValue | None = fl.raw("target_directory")
-    if not isinstance(target_dir, (PathSpec, str)):
-        target_dir = None
+    raw = fl.raw("target_directory")
+    target_dir = raw if isinstance(raw, PathSpec) else None
     no_target = fl.as_bool("no_target_directory")
     if target_dir is not None and no_target:
         raise UsageError(
@@ -233,8 +284,7 @@ def target_flags(
 def parse_flags(fl: FlagView) -> CpFlags:
     """Parse the cp flag bag once into a frozen struct.
 
-    ``-f``/``-i`` are accepted no-ops (non-interactive control plane:
-    overwrite always proceeds unless ``-n``/``--update`` say otherwise),
+    ``-f`` is an accepted no-op, ``-i`` asks before each overwrite,
     and ``--strip-trailing-slashes`` is a no-op because PathSpec already
     normalizes trailing slashes.
 
@@ -244,7 +294,9 @@ def parse_flags(fl: FlagView) -> CpFlags:
     update = update_mode("cp", fl)
     suffix = suffix_flag(fl)
     control = backup_control("cp", backup_raw(fl), suffix)
-    no_clobber = fl.as_bool("no_clobber")
+    # -i and -n set one answer, so the later of the two wins.
+    asking = fl.typed_order("interactive", "no_clobber")
+    no_clobber = bool(asking) and asking[-1] == "no_clobber"
     if (
         control is not None
         and control != "none"
@@ -272,6 +324,7 @@ def parse_flags(fl: FlagView) -> CpFlags:
     return CpFlags(
         recursive=recursive,
         no_clobber=no_clobber,
+        interactive=bool(asking) and asking[-1] == "interactive",
         verbose=fl.as_bool("verbose"),
         update=update,
         backup=control,
@@ -431,7 +484,7 @@ async def copy_tree_links(
     shown_dst = target.raw_path.rstrip("/") or target.raw_path
     below = sorted(copies.links.subtree(base), key=lambda row: row[0])
     for virtual, row in below:
-        if not path_allowed(virtual):
+        if not path_visible(copies.visibility, virtual):
             continue
         rel = virtual[len(base.rstrip("/")) + 1 :]
         landing = f"{dst_base}/{rel}"
@@ -527,26 +580,25 @@ async def copy_tree_links(
 def split_operands(
     cmd_name: str,
     paths: list[PathSpec],
-    target_dir: PathSpec | str | None,
+    target_dir: PathSpec | None,
     no_target_dir: bool,
-) -> tuple[list[PathSpec], PathSpec | None]:
+) -> tuple[list[PathSpec], PathSpec]:
     """Split operands into sources and destination, GNU arity errors.
 
-    With ``-t`` every operand is a source and the returned destination is
-    None (the caller wraps the target-directory string itself). ``-T``
-    requires exactly two operands.
+    With ``-t`` every operand is a source and the target directory is
+    the destination. ``-T`` requires exactly two operands.
 
     Args:
         cmd_name (str): Command name for the usage errors.
         paths (list[PathSpec]): Positional path operands.
-        target_dir (str | None): ``--target-directory`` value.
+        target_dir (PathSpec | None): ``--target-directory`` value.
         no_target_dir (bool): ``-T``.
     """
     hint = f"Try '{cmd_name} --help' for more information."
     if not paths:
         raise UsageError(f"{cmd_name}: missing file operand\n{hint}", 1)
     if target_dir is not None:
-        return list(paths), None
+        return list(paths), target_dir
     if len(paths) == 1:
         raise UsageError(
             f"{cmd_name}: missing destination file operand after "
@@ -556,18 +608,6 @@ def split_operands(
     if no_target_dir and len(paths) > 2:
         raise extra_operand_error(cmd_name, paths[2].raw_path)
     return list(paths[:-1]), paths[-1]
-
-
-def wrap_target_dir(ref: PathSpec, virtual: str) -> PathSpec:
-    """Build the ``-t`` directory PathSpec from a same-mount reference.
-
-    Args:
-        ref (PathSpec): Any operand on the destination's mount.
-        virtual (str): Resolved virtual path of the target directory.
-    """
-    return PathSpec.from_str_path(
-        virtual, rekey(ref.virtual, ref.vfs_path, virtual)
-    )
 
 
 async def target_dir_error(
@@ -765,7 +805,8 @@ async def overwrite_gate(
     ``-n`` and ``--update=none`` skip silently; ``--update=none-fail``
     records GNU's ``not replacing`` error; ``--update=older`` replaces
     only when the source is strictly newer. A source or target with no
-    usable mtime always replaces (freshness cannot be proven).
+    usable mtime always replaces (freshness cannot be proven). ``-i``
+    asks last, once the target survived the update checks.
 
     Args:
         policy (TransferPolicy): Overwrite policy for this command.
@@ -777,7 +818,11 @@ async def overwrite_gate(
     Returns:
         bool: True when the transfer should proceed.
     """
-    if not policy.no_clobber and not update_gates(policy.update):
+    if (
+        not policy.no_clobber
+        and not update_gates(policy.update)
+        and policy.ask is None
+    ):
         # No gating flag: skip the target probe entirely so API-backed
         # mounts pay no extra stat per entry.
         return True
@@ -803,6 +848,8 @@ async def overwrite_gate(
             and src_ts <= target_ts
         ):
             return False
+    if policy.ask is not None:
+        return await policy.ask(target)
     return True
 
 
@@ -991,38 +1038,55 @@ def transfer_line(
 
 async def _tree_lines(
     strategy: NativeCopy,
+    stat: StatFn,
     src: PathSpec,
     target: PathSpec,
     src_base: str,
     dst_base: str,
 ) -> list[str]:
-    """GNU ``-v`` lines for a natively copied tree, parents first.
+    """GNU ``-v`` lines for a tree about to be copied natively, parents first.
 
-    GNU ``cp -rv`` reports directories as well as files, including the
-    source root itself. Deliberate divergence: GNU's sibling order follows
-    readdir, which no backend can reproduce, so entries are sorted
-    lexicographically instead. That keeps every parent ahead of its
-    children (GNU's only load-bearing ordering guarantee) and is stable
-    across backends.
+    GNU ``cp -rv`` reports every file and every directory it creates,
+    including the source root itself; a directory already at the
+    destination is merged into without a line. Read before the copy, so
+    the destination still shows which directories exist. Deliberate
+    divergence: GNU's sibling order follows readdir, which no backend can
+    reproduce, so entries are sorted lexicographically instead. That keeps
+    every parent ahead of its children (GNU's only load-bearing ordering
+    guarantee) and is stable across backends.
 
     Args:
         strategy (NativeCopy): Native copy capability.
+        stat (StatFn): Stats a destination directory.
         src (PathSpec): Source root.
         target (PathSpec): Destination root.
         src_base (str): Source root's mount path, no trailing slash.
         dst_base (str): Destination root's mount path, no trailing slash.
     """
-    dirs = await strategy.find(src, type="d")
+    dirs = {src_base, *await strategy.find(src, type="d")}
     files = await strategy.find(src, type="f")
     lines: list[str] = []
-    for entry_mount in sorted({src_base, *dirs, *files}):
+    for entry_mount in sorted({*dirs, *files}):
         entry = spelled_from(mounted_path(src, entry_mount), src)
         entry_dst = spelled_from(
             mounted_path(target, dst_base + entry_mount[len(src_base) :]),
             target,
         )
+        if entry_mount in dirs and await is_directory(stat, entry_dst):
+            continue
         lines.append(f"'{entry.raw_path}' -> '{entry_dst.raw_path}'")
     return lines
+
+
+def within(path: str, root: str) -> bool:
+    """Whether ``path`` is ``root`` or below it.
+
+    Args:
+        path (str): the path to place.
+        root (str): the subtree's root.
+    """
+    base = root.rstrip("/")
+    return path.rstrip("/") == base or path.startswith(f"{base}/")
 
 
 async def _mirror_dirs(
@@ -1034,6 +1098,7 @@ async def _mirror_dirs(
     dst_base: str,
     writes: dict[str, ByteSource],
     errors: list[str],
+    into_itself: bool,
     lines: list[str] | None = None,
 ) -> bool:
     """Recreate a source tree's directories under the destination root.
@@ -1059,8 +1124,11 @@ async def _mirror_dirs(
         dst_base (str): Destination root's mount path, no trailing slash.
         writes (dict[str, ByteSource]): Recorded writes, updated in place.
         errors (list[str]): Collected stderr lines, appended in place.
-        lines (list[str] | None): Verbose sink for the directory entries
-            GNU also reports; None keeps them silent.
+        into_itself (bool): Whether the destination lies inside the
+            source; its subtree is then left out, as the file pass does.
+        lines (list[str] | None): Verbose sink for the directories this
+            creates, which GNU also reports; one already at the
+            destination is merged into silently. None keeps them silent.
 
     Returns:
         bool: False when a directory could not be created, so the caller
@@ -1068,7 +1136,11 @@ async def _mirror_dirs(
     """
     if strategy.mkdir is None:
         return True
-    mounts = [src_base, *await strategy.find(src, type="d")]
+    mounts = [
+        found
+        for found in [src_base, *await strategy.find(src, type="d")]
+        if not (into_itself and within(found, dst_base))
+    ]
     # Shortest first so a parent is created before its children. The name is
     # the tiebreak because `sorted` is stable and set iteration over strings
     # is PYTHONHASHSEED-dependent, so sibling directories of equal length
@@ -1079,9 +1151,6 @@ async def _mirror_dirs(
             mounted_path(target, dst_base + entry_mount[len(src_base) :]),
             target,
         )
-        if lines is not None:
-            entry = spelled_from(mounted_path(src, entry_mount), src)
-            lines.append(f"'{entry.raw_path}' -> '{entry_dst.raw_path}'")
         if await is_directory(stat, entry_dst):
             continue
         try:
@@ -1093,6 +1162,9 @@ async def _mirror_dirs(
             )
             return False
         writes[entry_dst.mount_path] = b""
+        if lines is not None:
+            entry = spelled_from(mounted_path(src, entry_mount), src)
+            lines.append(f"'{entry.raw_path}' -> '{entry_dst.raw_path}'")
     return True
 
 
@@ -1303,7 +1375,7 @@ async def copy_entries(
             continue
         wrote_any = True
         if reads is not None:
-            reads[entry.virtual] = data
+            reads[entry.mount_path] = data
         if writes is not None:
             writes[entry_dst.mount_path] = b""
         if lines is not None:
@@ -1311,7 +1383,7 @@ async def copy_entries(
     return copied_all, wrote_any
 
 
-async def cp(
+async def cp_generic(
     paths: list[PathSpec],
     *,
     stat: StatFn,
@@ -1321,6 +1393,7 @@ async def cp(
     readdir: ReaddirFn | None = None,
     link_at: Callable[[PathSpec], FileStat | None] | None = None,
     copies: TransferLinks | None = None,
+    stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Copy sources to a destination, fanning out into a directory.
 
@@ -1350,6 +1423,7 @@ async def cp(
             that makes them, so a link is copied as a link where the
             policy says to; None outside a workspace, where no link can
             stand.
+        stdin (ByteSource | None): where ``-i`` reads its answers.
 
     Returns:
         tuple[ByteSource | None, IOResult]: Verbose output and recorded
@@ -1360,12 +1434,7 @@ async def cp(
     sources, dst = split_operands(
         "cp", paths, flags.target_dir, flags.no_target_dir
     )
-    if dst is None:
-        dst = (
-            flags.target_dir
-            if isinstance(flags.target_dir, PathSpec)
-            else wrap_target_dir(sources[0], str(flags.target_dir))
-        )
+    if flags.target_dir is not None:
         err = await target_dir_error("cp", stat, dst)
         if err is not None:
             return None, IOResult(stderr=f"{err}\n".encode(), exit_code=1)
@@ -1380,22 +1449,29 @@ async def cp(
         dst_exists, dst_is_dir, dst_err = await dest_kind(stat, dst)
     if readdir is None and isinstance(strategy, PrimitiveCopy):
         readdir = strategy.readdir
+    errors: list[str] = []
+    accepted: list[str] = []
     policy = TransferPolicy(
         cmd_name="cp",
         no_clobber=flags.no_clobber,
         update=flags.update,
         backup=flags.backup,
         suffix=flags.suffix,
+        ask=(
+            prompter("cp", stdin, errors, accepted)
+            if flags.interactive
+            else None
+        ),
     )
     per_entry_native = (
         flags.no_clobber
+        or flags.interactive
         or update_gates(flags.update)
         or backup_displaces(flags.backup)
     )
     writes: dict[str, ByteSource] = {}
     reads: dict[str, ByteSource] = {}
     lines: list[str] = []
-    errors: list[str] = []
     warned = 0
     seen: set[str] = set()
     created: set[str] = set()
@@ -1442,6 +1518,8 @@ async def cp(
                 )
                 continue
             if guards_created and key_of(target) in created:
+                if policy.ask is not None and not await policy.ask(target):
+                    continue
                 errors.append(
                     f"cp: will not overwrite just-created '{target.raw_path}' "
                     f"with '{src.raw_path}'"
@@ -1486,12 +1564,11 @@ async def cp(
                 f"cp: '{src.raw_path}' and '{target.raw_path}' are the same file"
             )
             continue
-        if flags.recursive and key_of(target).startswith(key_of(src) + "/"):
-            errors.append(
-                f"cp: cannot copy a directory, '{src.raw_path}', "
-                f"into itself, '{target.raw_path}'"
-            )
-            continue
+        # GNU copies a directory into its own subtree too: everything but
+        # the new copy itself, before it says it could not (cp -r d d).
+        into_itself = flags.recursive and key_of(target).startswith(
+            key_of(src) + "/"
+        )
         if not flags.recursive and src_is_dir:
             errors.append(
                 f"cp: -r not specified; omitting directory '{src.raw_path}'"
@@ -1547,6 +1624,11 @@ async def cp(
                 f"cp: not writing through dangling symlink '{target.raw_path}'"
             )
             continue
+        if into_itself:
+            errors.append(
+                f"cp: cannot copy a directory, '{src.raw_path}', "
+                f"into itself, '{target.raw_path}'"
+            )
         if flags.recursive and src_is_dir:
             src_base = src.mount_path.rstrip("/")
             dst_base = target.mount_path.rstrip("/")
@@ -1559,6 +1641,12 @@ async def cp(
                     errors,
                     copies.links if copies is not None else None,
                 )
+                if into_itself:
+                    entries = [
+                        (path, is_dir)
+                        for path, is_dir in entries
+                        if not within(path.virtual, target.virtual)
+                    ]
                 await copy_entries(
                     "cp",
                     strategy,
@@ -1586,19 +1674,23 @@ async def cp(
                         reads,
                     )
                 continue
-            if strategy.dir_copy is not None and not per_entry_native:
+            if (
+                strategy.dir_copy is not None
+                and not per_entry_native
+                and not into_itself
+            ):
+                if flags.verbose:
+                    lines.extend(
+                        await _tree_lines(
+                            strategy, stat, src, target, src_base, dst_base
+                        )
+                    )
                 await strategy.dir_copy(src, target)
                 for entry_mount in await strategy.find(src, type="f"):
                     entry_dst = mounted_path(
                         target, dst_base + entry_mount[len(src_base) :]
                     )
                     writes[entry_dst.mount_path] = b""
-                if flags.verbose:
-                    lines.extend(
-                        await _tree_lines(
-                            strategy, src, target, src_base, dst_base
-                        )
-                    )
                 if copies is not None:
                     await copy_tree_links(
                         copies,
@@ -1624,10 +1716,13 @@ async def cp(
                 dst_base,
                 writes,
                 errors,
+                into_itself,
                 lines if flags.verbose else None,
             ):
                 continue
             for entry_mount in await strategy.find(src, type="f"):
+                if into_itself and within(entry_mount, dst_base):
+                    continue
                 entry = spelled_from(mounted_path(src, entry_mount), src)
                 entry_dst = spelled_from(
                     mounted_path(
@@ -1669,6 +1764,10 @@ async def cp(
                 )
             continue
         if guards_created and key_of(target) in created:
+            # -i asks first: GNU only meets the just-created rule once
+            # the answer says to replace.
+            if policy.ask is not None and not await policy.ask(target):
+                continue
             errors.append(
                 f"cp: will not overwrite just-created '{target.raw_path}' "
                 f"with '{src.raw_path}'"
@@ -1700,7 +1799,7 @@ async def cp(
                     f"'{target.raw_path}': {fs_strerror(exc)}"
                 )
                 continue
-            reads[src.virtual] = data
+            reads[src.mount_path] = data
         else:
             try:
                 await strategy.copy(src, target)
@@ -1715,13 +1814,12 @@ async def cp(
         if flags.verbose:
             lines.append(transfer_line(src, target, backup))
     output = "\n".join(lines) + "\n" if lines else None
-    stderr = ("\n".join(errors) + "\n").encode() if errors else None
     # Sources that streamed through the client are recorded as reads so
     # apply_io can populate the file cache: a cp is also a full read.
     return output.encode() if output else None, IOResult(
         writes=writes,
         reads=dict(reads),
         cache=list(reads),
-        stderr=stderr,
-        exit_code=1 if len(errors) > warned else 0,
+        stderr=stderr_of(errors),
+        exit_code=1 if len(errors) > warned + len(accepted) else 0,
     )

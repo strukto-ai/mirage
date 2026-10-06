@@ -13,4 +13,5 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export { JobTable } from './table.ts'
+export { JobWaits } from './waits.ts'
 export { type ConsoleFactory, Job, type JobResult, type JobRunner, JobStatus } from './types.ts'

@@ -20,7 +20,7 @@ import { CLISpec, type CLIVerbFn } from '../../commands/cli/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { WorkspaceRuntime } from '../../runtime/table.ts'
-import { ScriptSource } from '../../runtime/routing/types.ts'
+import { ScriptSource } from '../../runtime/types.ts'
 import { registerSecrets } from '../../secrets/registry.ts'
 import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
 import type { ResolvedSecret } from '../../secrets/types.ts'
@@ -389,7 +389,7 @@ describe('fillEnv through execute', () => {
     const ws = await makeWs({ TOKEN: { from: 'fake-hidden', ref: 'r', fetch: 'eager' } })
     try {
       const session = ws.getSession(ws.defaultSessionId)
-      session.hiddenVars = { names: ['TOKEN'] }
+      session.visibility = { ...session.visibility, vars: { names: ['TOKEN'] } }
       const io = await ws.shell('env')
       expect(io.exitCode).toBe(0)
       expect(stdoutStr(io)).not.toContain('TOKEN')

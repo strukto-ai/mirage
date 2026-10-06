@@ -51,7 +51,10 @@ def test_rename_moves_a_file(accessor):
         _rename_for(store)(accessor, spec("/a/src.txt"), spec("/b/dst.txt"))
     )
     assert store.objects == {"b/dst.txt": b"hi"}
-    assert manager.subtrees == ["/b/dst.txt", "/a/src.txt"]
+    # A file has nothing beneath it, so neither end walks the caches for
+    # a subtree: both take the unlink flavor.
+    assert manager.subtrees == []
+    assert manager.unlinks == ["/b/dst.txt", "/a/src.txt"]
     assert manager.writes == []
     assert manager.ancestors == ["/mnt/b/dst.txt", "/mnt/a/src.txt"]
 

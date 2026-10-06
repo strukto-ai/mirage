@@ -15,17 +15,16 @@
 import { appendFileSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { PassThrough } from 'node:stream'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '@struktoai/mirage-node'
-import ssh2, { type Client, type ClientChannel } from 'ssh2'
+import ssh2, { type Client, type ClientChannel, type ServerChannel } from 'ssh2'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { JobTable } from '../jobs.ts'
-import { McpDoor } from '../mcp/http.ts'
 import { WorkspaceRegistry, type WorkspaceEntry } from '../registry.ts'
 import { mintKeyPair } from './keys.ts'
 import { startSSHServer } from './server.ts'
-import { endsShell, loginEnv } from './session.ts'
+import { endsShell, handleChannel, loginEnv } from './session.ts'
 import type { SSHListener } from './types.ts'
 
 interface Harness {
@@ -54,17 +53,12 @@ async function startHarness(ws?: Workspace): Promise<Harness> {
     ws ?? new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE }),
     'demo',
   )
-  const door = new McpDoor(registry, new JobTable())
-  const listener = await startSSHServer(
-    registry,
-    {
-      port: 0,
-      host: '127.0.0.1',
-      hostKeyFile: join(dir, 'host_key'),
-      authorizedKeysFile: join(dir, 'authorized_keys'),
-    },
-    door,
-  )
+  const listener = await startSSHServer(registry, {
+    port: 0,
+    host: '127.0.0.1',
+    hostKeyFile: join(dir, 'host_key'),
+    authorizedKeysFile: join(dir, 'authorized_keys'),
+  })
   const harness = {
     registry,
     entry,
@@ -203,6 +197,7 @@ describe('loginEnv', () => {
     const request = {
       username: 'demo',
       profile: [],
+      account: [],
       command: null,
       term: 'xterm-256color',
       peer: { address: '10.0.0.5', port: 40000 },
@@ -363,10 +358,81 @@ describe('shell channels', () => {
     const client = await connect(h)
     const stream = await shell(client, null)
     const done = collect(stream)
+    stream.write('echo ready\n')
+    await readUntil(stream, 'ready\n')
     await h.registry.remove('demo')
     stream.write('echo hi\n')
     const run = await done
     expect(run.stderr).toContain('the workspace is gone')
+  })
+})
+
+/**
+ * A server channel double for a pty ssh2's client cannot ask for: input
+ * goes in with `send`, and what the server writes collects in `seen`.
+ */
+class FakeTerminal extends PassThrough {
+  seen = ''
+  code: number | null = null
+  readonly stderr = new PassThrough()
+  private shown = 0
+
+  send(text: string): void {
+    this.emit('data', Buffer.from(text))
+  }
+
+  override write(chunk: Uint8Array | string): boolean {
+    this.seen += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString()
+    return true
+  }
+
+  exit(code: number): void {
+    this.code = code
+  }
+
+  async until(needle: string): Promise<string> {
+    for (let i = 0; i < 500; i++) {
+      const fresh = this.seen.slice(this.shown)
+      if (fresh.includes(needle)) {
+        this.shown = this.seen.length
+        return fresh
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    throw new Error(`never saw ${JSON.stringify(needle)} in ${JSON.stringify(this.seen)}`)
+  }
+
+  asChannel(): ServerChannel {
+    return this as unknown as ServerChannel
+  }
+}
+
+describe('a pty without a terminal type', () => {
+  it('prompts, echoes and takes Ctrl-C like any terminal', async () => {
+    const registry = new WorkspaceRegistry({ idleGraceSeconds: 0 })
+    registry.add(new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE }), 'demo')
+    const term = new FakeTerminal()
+    const request = {
+      username: 'demo',
+      profile: [],
+      account: [],
+      command: null,
+      term: '',
+      peer: null,
+      local: null,
+    }
+    const served = handleChannel(registry, term.asChannel(), request, () => undefined)
+    await term.until('mirage:/$ ')
+    term.send('sleep 30\r')
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    term.send('\x03')
+    await term.until('^C')
+    term.send('echo status=$?\r')
+    const seen = await term.until('status=130\r\n')
+    term.send('exit\r')
+    await served
+    expect(seen).toContain('echo status=$?\r\n')
+    expect(term.code).toBe(0)
   })
 })
 
@@ -437,5 +503,47 @@ describe('key profiles', () => {
     expect(run.stdout).toBe('')
     expect(run.stderr).toContain('cannot open a session')
     expect(run.stderr).toContain(reason)
+  })
+})
+
+describe('key accounts', () => {
+  /** The error a fresh SFTP channel answers its first listing with. */
+  function sftpListError(client: Client): Promise<{ code?: number }> {
+    return new Promise((resolve, reject) => {
+      client.sftp((err, sftp) => {
+        if (err !== undefined) {
+          reject(err)
+          return
+        }
+        sftp.readdir('/', (listErr) => {
+          resolve((listErr ?? {}) as { code?: number })
+        })
+      })
+    })
+  }
+
+  it('open only the workspaces the account owns', async () => {
+    const h = await startHarness()
+    h.registry.add(new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE }), 'mine', 'alice')
+    const alice = bindKey(h, 'mirage-account="alice"')
+    const own = await exec(await connect(h, 'mine', alice), 'echo mine')
+    const otherClient = await connect(h, 'demo', alice)
+    const other = await exec(otherClient, 'echo never')
+    const listing = await sftpListError(otherClient)
+    const admin = await exec(await connect(h, 'mine'), 'echo admin')
+    expect(own.stdout).toBe('mine\n')
+    expect(other).toEqual({ stdout: '', stderr: 'mirage: no such workspace: demo\n', code: 1 })
+    expect(listing.code).toBe(2)
+    expect(admin.stdout).toBe('admin\n')
+  })
+
+  it('refuse a key without one when accounts are required', async () => {
+    const h = await startHarness()
+    h.registry.accountsRequired = true
+    expect(await exec(await connect(h), 'echo never')).toEqual({
+      stdout: '',
+      stderr: 'mirage: no such workspace: demo\n',
+      code: 1,
+    })
   })
 })

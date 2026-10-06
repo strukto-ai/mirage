@@ -29,9 +29,7 @@
         "stdout": "/data/r4/.hidden.txt:secret alpha\n/data/r4/notes.txt:alpha\n/data/r4/sub/inner.txt:alpha inner\n/data/r4/.hidden.txt:secret alpha\n/data/r4/notes.txt:alpha\n/data/r4/sub/inner.txt:alpha inner\n/data/r4/.hidden.txt\n/data/r4/notes.txt\n/data/r4/sub/inner.txt\n/data/r4/.hidden.txt:secret alpha\n/data/r4/notes.txt:ALPHA\n/data/r4/notes.txt:alpha\n/data/r4/sub/inner.txt:alpha inner\n/data/r4/notes.txt:alpha\n/data/r4/sub/inner.txt:alpha inner\n/data/r4/.hidden.txt\n/data/r4/notes.txt\n/data/r4/sub/inner.txt\nrc=1\n",
         "stderr": ""
       },
-      "flags": [
-        "hidden"
-      ]
+      "flags": ["hidden", "l", "i", "no_hidden", "u"]
     },
     {
       "id": "rg_named_dot_file_is_searched",

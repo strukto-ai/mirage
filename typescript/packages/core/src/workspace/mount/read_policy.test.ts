@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_READ_SPEC, DEFAULT_READ_TTL, ReadPolicy, type ReadSpec } from '../../types.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
@@ -32,6 +34,78 @@ function stub(
   indexTtl = 0,
 ): BaseVFS {
   return { name, cachesReads, readRevalidatable, indexTtl } as unknown as BaseVFS
+}
+
+const REVALIDATABLE = [
+  'aliyun',
+  'backblaze',
+  'ceph',
+  'digitalocean',
+  'dropbox',
+  'gcs',
+  'gdocs',
+  'gdrive',
+  'github',
+  'gridfs',
+  'gsheets',
+  'gslides',
+  'hf_buckets',
+  'hf_datasets',
+  'hf_models',
+  'hf_spaces',
+  'minio',
+  'oci',
+  'onedrive',
+  'qingstor',
+  'r2',
+  's3',
+  'scaleway',
+  'seaweedfs',
+  'sharepoint',
+  'supabase',
+  'tencent',
+  'wasabi',
+]
+
+interface SpecCaps {
+  caches_reads?: boolean | string
+  read_revalidatable?: boolean
+  index_ttl?: number
+}
+
+// The capability facts scripts/gen-specs.ts dumps for the parity gate, read
+// live from source the same way. Imported by URL: the scripts package sits
+// outside this package's rootDir.
+const FACTS = resolve(fileURLToPath(import.meta.url), '../../../../../../scripts/vfs_facts.ts')
+const { registryCapabilities } = (await import(pathToFileURL(FACTS).href)) as {
+  registryCapabilities: (root: string, pkgs: readonly string[]) => Record<string, SpecCaps | null>
+}
+const CAPABILITIES: Record<string, Record<string, SpecCaps | null>> = Object.fromEntries(
+  ['node', 'browser'].map((host) => [
+    host,
+    registryCapabilities(resolve(FACTS, '../../packages'), ['core', host]),
+  ]),
+)
+
+// The real verdict over each backend's capability facts, so the roster is
+// judged by the function that judges a mount.
+function freshRoster(host: string): string[] {
+  return Object.entries(CAPABILITIES[host] ?? {})
+    .filter(([kind, c]) => {
+      if (c === null) return false
+      try {
+        checkReadCapability(
+          '/x/',
+          stub(kind, c.caches_reads === true, c.read_revalidatable === true, c.index_ttl ?? 0),
+          FRESH,
+        )
+        return true
+      } catch {
+        return false
+      }
+    })
+    .map(([kind]) => kind)
+    .sort()
 }
 
 describe('resolveReadSpec', () => {
@@ -167,6 +241,19 @@ describe('checkReadCapability', () => {
       checkReadCapability('/d/', stub('ram', false, false), { policy: ReadPolicy.FRESH, ttl: 0 })
     }).toThrow(/ttl must be at least 1 second/)
   })
+
+  it.each([
+    ['node', ['airtable', 'chroma', 'disk', 'qdrant', 'wandb']],
+    ['browser', ['airtable', 'chroma', 'opfs', 'qdrant', 'wandb']],
+  ])(
+    'allows fresh on the %s roster: the revalidatable ones plus listing caches',
+    (host, listing) => {
+      const known = new Set(Object.keys(CAPABILITIES[host] ?? {}))
+      expect(freshRoster(host)).toEqual(
+        [...REVALIDATABLE.filter((n) => known.has(n)), ...listing].sort(),
+      )
+    },
+  )
 
   it('refuses fresh on a backend that caches but stamps nothing comparable', () => {
     expect(() => {

@@ -19,11 +19,8 @@ permissions:
       - integ/index_store.*
       - integ/snapshot_smoke.*
       - integ/parity.sh
-      - integ/shell_stdin.py
-      - integ/doors.py
-      - integ/tools/**
+      - integ/access/**
       - integ/fuse/cli_fuse.sh
-      - integ/cli_config.sh
       - integ/cli_env.sh
       - integ/cli_ref.sh
       - integ/vfs_ref.sh
@@ -77,11 +74,8 @@ jobs:
               - 'integ/index_store.*'
               - 'integ/snapshot_smoke.*'
               - 'integ/parity.sh'
-              - 'integ/shell_stdin.py'
-              - 'integ/doors.py'
-              - 'integ/tools/**'
+              - 'integ/access/**'
               - 'integ/fuse/cli_fuse.sh'
-              - 'integ/cli_config.sh'
               - 'integ/cli_env.sh'
               - 'integ/cli_ref.sh'
               - 'integ/vfs_ref.sh'
@@ -291,7 +285,7 @@ jobs:
             ttl: 600
           YAML
           $MIRAGE workspace delete cfgkeys > /dev/null 2>&1 || true
-          sid=$($MIRAGE workspace create /tmp/cfgkeys.yaml --id cfgkeys | jq -r '.sessions[0].sessionId // .sessions[0].session_id')
+          sid=$($MIRAGE workspace create /tmp/cfgkeys.yaml --id cfgkeys | jq -r '.sessions[0].session_id')
           echo "  default_session_id (snake) => $sid (expected mysess)"
           if [ "$sid" != "mysess" ]; then
             echo "FAIL: snake_case top-level keys not applied"
@@ -496,10 +490,10 @@ jobs:
               return
             fi
             if [ -n "$expected_field" ]; then
-              field_val=$(echo "$out" | jq -r '.exitCode // .result.exitCode // empty')
-              echo "json exitCode: $field_val (expected $expected_field)"
+              field_val=$(echo "$out" | jq -r '.exit_code // .result.exit_code // empty')
+              echo "json exit_code: $field_val (expected $expected_field)"
               if [ "$field_val" != "$expected_field" ]; then
-                echo "FAIL: json exitCode mismatch"
+                echo "FAIL: json exit_code mismatch"
                 fail=1
                 return
               fi
@@ -519,7 +513,7 @@ jobs:
           submit=$($MIRAGE shell -w smoke --bg -c 'false')
           echo "submit response:"
           echo "$submit" | sed 's/^/  /'
-          JID=$(echo "$submit" | jq -r .jobId)
+          JID=$(echo "$submit" | jq -r .job_id)
           echo "job id: $JID"
           check "job wait on failing job" 1 1 $MIRAGE job wait "$JID"
 
@@ -601,7 +595,7 @@ jobs:
             ttl: 600
           YAML
           $MIRAGE workspace delete cfgkeys > /dev/null 2>&1 || true
-          sid=$($MIRAGE workspace create /tmp/cfgkeys.yaml --id cfgkeys | jq -r '.sessions[0].sessionId // .sessions[0].session_id')
+          sid=$($MIRAGE workspace create /tmp/cfgkeys.yaml --id cfgkeys | jq -r '.sessions[0].session_id')
           echo "  default_session_id (snake) => $sid (expected mysess)"
           if [ "$sid" != "mysess" ]; then
             echo "FAIL: snake_case top-level keys not applied"
@@ -761,18 +755,35 @@ jobs:
       - name: Fast RAM snapshot interop (no services or daemon)
         run: ./python/.venv/bin/python integ/snapshot_smoke.py
 
-      - name: Run CLI feature parity (subshell, sessions, session modes, versioning, fuse)
+      - name: Run CLI feature parity (subshell, sessions, session modes, workspaces, fuse)
         run: |
           bash integ/parity.sh \
             "python/.venv/bin/mirage" \
             "node typescript/packages/cli/dist/bin/mirage.js"
 
-      # Each door's tools and commands have unit tests; this proves the
-      # wiring on both hosts. One workspace is written through each door
-      # (HTTP, MCP over HTTP, `mirage mcp`, `mirage shell`, ssh, the ssh
-      # mcp subsystem, sftp) and read back through the next.
-      - name: Run door wiring and the tool corpus (CLI, HTTP, MCP, SSH) on both hosts
-        run: ./python/.venv/bin/python integ/doors.py
+
+  # Every access (in-app, HTTP, the CLI, MCP, RPC, SSH) gives the in-app
+  # answer for every case, on both hosts, under one deployment per leg:
+  # the CLI's own daemon, a token server and a JWT server. The dev leg adds
+  # the CLI's lifecycle and config and the CLI command gate.
+  access:
+    needs: [changes, typescript-build]
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
+    name: Access (${{ matrix.deployment }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        deployment: [dev, token, jwt]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: CLI battery toolchain
+        uses: ./.github/actions/cli-battery-setup
+
+      - name: Run every access on both hosts
+        run: ./python/.venv/bin/python integ/access/run.py --deployment ${{ matrix.deployment }}
 
   cross-snapshot:
     needs: [changes, typescript-build]
@@ -836,9 +847,6 @@ jobs:
             cgr.dev/chainguard/minio-client@sha256:b8b144ab34694ecea25aa352c4be9de4c26ee2a02701521dce02ee5593c57338 \
             mb --ignore-existing local/mirage-cross local/mirage-state
 
-      - name: Run daemon large-stdin and grep round trips (both languages)
-        run: ./python/.venv/bin/python integ/shell_stdin.py
-
       - name: Run cross-language snapshot interop (both directions)
         run: |
           bash integ/cross.sh \
@@ -861,7 +869,7 @@ jobs:
   cross-config:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
-    name: CLI config, ref and env batteries
+    name: CLI ref and env batteries
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -869,12 +877,6 @@ jobs:
 
       - name: CLI battery toolchain
         uses: ./.github/actions/cli-battery-setup
-
-      - name: Run CLI config battery (relocation, validation, resolved view)
-        run: |
-          bash integ/cli_config.sh \
-            "python/.venv/bin/mirage" \
-            "node typescript/packages/cli/dist/bin/mirage.js"
 
       - name: Run CLI ref battery (a program tree installed from a file)
         run: |
@@ -934,7 +936,7 @@ jobs:
   gate:
     name: cli-gate
     runs-on: ubuntu-latest
-    needs: [changes, typescript-build, python, typescript, cross-parity, cross-snapshot, cross-config, cross-ref-fuse]
+    needs: [changes, typescript-build, python, typescript, cross-parity, access, cross-snapshot, cross-config, cross-ref-fuse]
     if: always()
     steps:
       - name: Check required jobs

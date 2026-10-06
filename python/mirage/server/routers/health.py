@@ -15,7 +15,7 @@
 import os
 import time
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from mirage.server.schemas import HealthResponse
@@ -40,11 +40,16 @@ async def health(request: Request) -> HealthResponse:
 
 @router.post("/v1/shutdown", response_model=ShutdownResponse)
 async def shutdown(request: Request) -> ShutdownResponse:
-    """Trip the exit event so the daemon shuts down gracefully.
+    """Trip the exit event, which the app's ``on_idle_exit`` acts on.
 
-    The ``_watch_exit`` background task in the lifespan picks this up
-    and sends SIGTERM to the process. uvicorn handles the rest of the
-    shutdown sequence (close connections, run lifespan finally block).
+    The daemon's hook sends SIGTERM to its own process, so uvicorn runs
+    its graceful shutdown (close connections, run the lifespan's finally
+    block). An app run without a hook keeps serving. The server serves
+    every account, so an account may not stop it.
     """
+    if request.state.account is not None:
+        raise HTTPException(
+            status_code=403, detail="an account may not shut the server down"
+        )
     request.app.state.exit_event.set()
     return ShutdownResponse(status="shutting_down", pid=os.getpid())

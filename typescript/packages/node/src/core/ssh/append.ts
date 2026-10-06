@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { joinRoot, stripPrefix } from './utils.ts'
@@ -22,6 +24,7 @@ export async function appendBytes(
   p: PathSpec,
   data: Uint8Array,
 ): Promise<void> {
+  const timer = startOp()
   const sftp = await accessor.sftp()
   const virtual = stripPrefix(p)
   const remote = joinRoot(accessor.config.root ?? '/', virtual)
@@ -31,5 +34,6 @@ export async function appendBytes(
       else resolveFn()
     })
   })
+  record('append', p.virtual, VFSName.SSH, data.byteLength, timer)
   await invalidateAfterWrite(p)
 }

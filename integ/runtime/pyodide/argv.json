@@ -1,0 +1,96 @@
+{
+  "cases": [
+    {
+      "id": "argv_is_typed_and_names_no_mount",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/disk": {
+            "vfs": "ram",
+            "files": {
+              "app/argv.py": "import sys\nprint(sys.argv[1:])\n",
+              "app/file.py": "print(__file__)\n",
+              "data/in.csv": "x\n"
+            }
+          },
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "notes.txt": "line1\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /disk",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 app/argv.py data/in.csv data/in ./data/in.csv /disk/data/",
+          "expect": {
+            "exit": 0,
+            "stdout": "['data/in.csv', 'data/in', './data/in.csv', '/disk/data/']\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c 'import os, sys; print(os.path.join(\"backup\", sys.argv[1]))' data/in.csv",
+          "expect": {
+            "exit": 0,
+            "stdout": "backup/data/in.csv\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 app/argv.py data/*.csv 'data/*.csv'",
+          "expect": {
+            "exit": 0,
+            "stdout": "['data/in.csv', 'data/*.csv']\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 /disk/app/argv.py /ram/notes.txt /ram/new.csv",
+          "expect": {
+            "exit": 0,
+            "stdout": "['/ram/notes.txt', '/ram/new.csv']\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c 'import sys; print(sys.argv[1:])' /ram/notes.txt /disk/data/in.csv",
+          "expect": {
+            "exit": 0,
+            "stdout": "['/ram/notes.txt', '/disk/data/in.csv']\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cd /ram && python3 /disk/app/argv.py --input /ram/notes.txt --out=/ram/o.csv",
+          "expect": {
+            "exit": 0,
+            "stdout": "['--input', '/ram/notes.txt', '--out=/ram/o.csv']\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat /disk/app/file.py | python3",
+          "expect": {
+            "exit": 0,
+            "stdout": "<stdin>\n",
+            "stderr": ""
+          }
+        }
+      ]
+    }
+  ]
+}

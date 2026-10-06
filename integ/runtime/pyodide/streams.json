@@ -1,0 +1,166 @@
+{
+  "cases": [
+    {
+      "id": "json_tool_closes_output",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "input.json": "{\"value\":1}"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -m json.tool /ram/input.json",
+          "expect": {
+            "exit": 0,
+            "stdout": "{\n    \"value\": 1\n}\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat /ram/input.json | python3 -m json.tool",
+          "expect": {
+            "exit": 0,
+            "stdout": "{\n    \"value\": 1\n}\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -m json.tool /ram/input.json > /ram/formatted.json",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat /ram/formatted.json",
+          "expect": {
+            "exit": 0,
+            "stdout": "{\n    \"value\": 1\n}\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; sys.stdin.close(); print('still works')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "still works\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "echo reused | python3 -c \"import sys; print(sys.stdin.read(), end='')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "reused\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "memory_growth_output",
+      "sdk_only": "Holds 2.1 GB in one Pyodide heap for six steps to put output above the 2 GiB wasm32 boundary, an engine path the in-process pass already covers. Through the CLI that heap sits in a daemon sharing the runner with the other host's daemon, the service containers and the docker suite, where the case failed intermittently and nowhere else.",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import builtins, json; builtins._pressure = [bytearray(700 * 1024 * 1024) for _ in range(3)]; builtins._small = [str(i).encode() for i in range(100000)]; rows = json.loads(json.dumps([{'value': i, 'text': '世界'} for i in range(20000)])); assert len(rows) == 20000\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"print('hello world')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello world\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"print('hello')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print('hello world'); sys.stderr.write('stderr — café 🌍\\n')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello world\n",
+            "stderr": "stderr — café 🌍\n"
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print('世界 🌍'); sys.stderr.write('café 🌍\\n')\" > /ram/stdout.txt 2> /ram/stderr.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat /ram/stdout.txt; cat /ram/stderr.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "世界 🌍\ncafé 🌍\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"print('hello world')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello world\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"import builtins; del builtins._pressure, builtins._small\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print('after cleanup'); sys.stderr.write('still readable\\n')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "after cleanup\n",
+            "stderr": "still readable\n"
+          }
+        }
+      ]
+    }
+  ]
+}

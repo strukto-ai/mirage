@@ -796,7 +796,7 @@
       "command": "unzip -t /data/punzz/m.zip -x nomatch",
       "expect": {
         "exit": 0,
-        "stdout": "caution: excluded filename not matched:  nomatch\nNo errors detected in /data/punzz/m.zip\n",
+        "stdout": "Archive:  /data/punzz/m.zip\n    testing: dir/                     OK\n    testing: dir/a.txt                OK\n    testing: b.txt                    OK\ncaution: excluded filename not matched:  nomatch\nNo errors detected in /data/punzz/m.zip for the 3 files tested.\n",
         "stderr": ""
       },
       "flags": [

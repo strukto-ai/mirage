@@ -13,6 +13,7 @@
   "include": [
     "server/**/*.ts",
     "hosting/**/*.ts",
+    "access/**/*.ts",
     "watch/cache/**/*.ts",
     "wandb/**/*.ts",
     "slack_atlas.ts",

@@ -23,15 +23,15 @@ interface DaemonStatus {
   running: boolean
   pid: number | null
   url: string
-  uptimeS?: number
+  uptime_s?: number
   workspaces?: number
 }
 
 function formatStatus(d: DaemonStatus): string {
   if (!d.running) return `Daemon not running. URL: ${d.url}`
   const parts: string[] = [`Running. PID ${d.pid !== null ? String(d.pid) : '?'}`]
-  if (d.uptimeS !== undefined) {
-    parts.push(`uptime ${formatAge(Date.now() / 1000 - d.uptimeS)}`)
+  if (d.uptime_s !== undefined) {
+    parts.push(`uptime ${formatAge(Date.now() / 1000 - d.uptime_s)}`)
   }
   if (d.workspaces !== undefined) {
     parts.push(`${String(d.workspaces)} workspace${d.workspaces === 1 ? '' : 's'}`)
@@ -44,8 +44,8 @@ function formatStop(d: { via?: string; pid?: number }): string {
   return `Stopped (via ${via}${d.pid !== undefined ? `, PID ${String(d.pid)}` : ''}).`
 }
 
-function formatRestart(d: { spawnedFresh?: boolean }): string {
-  if (d.spawnedFresh === true) return 'Restarted (eager spawn).'
+function formatRestart(d: { spawned_fresh?: boolean }): string {
+  if (d.spawned_fresh === true) return 'Restarted (eager spawn).'
   return 'Restarted; next CLI command will auto-spawn.'
 }
 
@@ -165,13 +165,13 @@ export function registerDaemonCommands(program: Command): void {
       }
       if (opts.eager === true) {
         await buildClient().ensureRunning({ allowSpawn: true })
-        emit({ restarted: true, spawnedFresh: true }, formatRestart)
+        emit({ restarted: true, spawned_fresh: true }, formatRestart)
         return
       }
       emit(
         {
           restarted: true,
-          spawnedFresh: false,
+          spawned_fresh: false,
           note: 'next workspace create will auto-spawn',
         },
         formatRestart,

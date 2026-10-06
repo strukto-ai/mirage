@@ -1,0 +1,106 @@
+{
+  "cases": [
+    {
+      "id": "syntax_mixed_arithmetic_and_nested_subshell",
+      "seq": 930620,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "i=1; ((i++)); ((echo nested); echo done); echo \"$i\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "nested\ndone\n2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "syntax_unicode_before_nested_subshell",
+      "seq": 930621,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo é; ((echo nested); echo done)",
+      "expect": {
+        "exit": 0,
+        "stdout": "é\nnested\ndone\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "syntax_deep_substitution_error",
+      "seq": 930622,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( prefix='$(echo '; suffix=')'; for i in {1..12}; do prefix=\"$prefix$prefix\"; suffix=\"$suffix$suffix\"; done; eval \"echo ${prefix}x${suffix} (\" )",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error near '('\n"
+      }
+    }
+  ]
+}

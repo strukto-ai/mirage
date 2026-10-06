@@ -19,8 +19,6 @@ import asyncssh
 import pytest_asyncio
 
 from mirage import RAMVFS, MountMode, Workspace
-from mirage.server.jobs import JobTable
-from mirage.server.mcp.http import McpDoor
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.ssh.config import SSHConfig
 from mirage.server.ssh.server import start_ssh_server
@@ -37,7 +35,6 @@ class SSHHarness:
         acceptor (asyncssh.SSHAcceptor): the running listener.
         key (asyncssh.SSHKey): a client key in the authorized keys.
         config (SSHConfig): the listener's config.
-        door (McpDoor): the MCP endpoint the mcp subsystem relays to.
     """
 
     def __init__(
@@ -47,14 +44,12 @@ class SSHHarness:
         acceptor: asyncssh.SSHAcceptor,
         key: asyncssh.SSHKey,
         config: SSHConfig,
-        door: McpDoor,
     ) -> None:
         self.registry = registry
         self.entry = entry
         self.acceptor = acceptor
         self.key = key
         self.config = config
-        self.door = door
 
     @property
     def port(self) -> int:
@@ -90,15 +85,13 @@ async def start_harness(
         host_key_file=tmp_path / "host_key",
         authorized_keys_file=authorized,
     )
-    door = McpDoor(registry, JobTable())
-    acceptor = await start_ssh_server(registry, config, door)
-    return SSHHarness(registry, entry, acceptor, key, config, door)
+    acceptor = await start_ssh_server(registry, config)
+    return SSHHarness(registry, entry, acceptor, key, config)
 
 
 async def stop_harness(harness: SSHHarness) -> None:
     harness.acceptor.close()
     await harness.acceptor.wait_closed()
-    await harness.door.close()
     await harness.registry.close_all()
 
 

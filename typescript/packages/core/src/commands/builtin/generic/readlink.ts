@@ -14,6 +14,7 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -38,15 +39,32 @@ function normPath(p: string): string {
   return leading + out.join('/') || (leading !== '' ? '/' : '.')
 }
 
+interface ReadlinkFlags {
+  readonly canonicalize: boolean
+  readonly canonicalizeExisting: boolean
+  readonly canonicalizeMissing: boolean
+  readonly noNewline: boolean
+}
+
+function parseFlags(bag: Record<string, FlagValue>): ReadlinkFlags {
+  const fl = new FlagView(bag, specOf('readlink'))
+  return {
+    canonicalize: fl.asBool('canonicalize'),
+    canonicalizeExisting: fl.asBool('canonicalize_existing'),
+    canonicalizeMissing: fl.asBool('canonicalize_missing'),
+    noNewline: fl.asBool('no_newline'),
+  }
+}
+
 export function readlinkGeneric(
   paths: PathSpec[],
   _texts: string[],
   opts: CommandOpts,
 ): CommandFnResult {
   if (paths.length === 0) throw missingOperandError('readlink', null)
-  const fl = new FlagView(opts.flags, specOf('readlink'))
-  const normalize = fl.asBool('f') || fl.asBool('e') || fl.asBool('m')
-  const noNewline = fl.asBool('n')
+  const parsed = parseFlags(opts.flags)
+  const normalize = parsed.canonicalize || parsed.canonicalizeExisting || parsed.canonicalizeMissing
+  const noNewline = parsed.noNewline
   const results: string[] = []
   for (const p of paths) {
     let vp =

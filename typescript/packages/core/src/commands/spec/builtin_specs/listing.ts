@@ -150,9 +150,9 @@ export const SPECS: Record<string, CommandSpec> = {
   }),
   stat: new CommandSpec({
     options: [
-      new Option({ short: '-c', type: 'str' }),
-      new Option({ short: '-f', type: 'str' }),
-      new Option({ short: '-L' }),
+      new Option({ short: '-c', long: '--format', type: 'str' }),
+      new Option({ short: '-f', long: '--file-system' }),
+      new Option({ short: '-L', long: '--dereference' }),
     ],
     rest: new Operand({ type: 'path' }),
   }),

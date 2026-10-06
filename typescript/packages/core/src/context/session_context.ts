@@ -17,18 +17,11 @@ import type { ContextCall } from '../utils/async_context.ts'
 import type { SessionManager } from '../workspace/session/manager.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import { rstripSlash, stripSlash } from '../utils/slash.ts'
-import {
-  anchorDepth,
-  hidesIntersect,
-  isGlob,
-  pathVisible,
-  showHead,
-  shownMode,
-} from '../utils/hidden.ts'
+import { anchorDepth, isGlob, pathVisible, showHead, shownMode } from '../utils/hidden.ts'
 import { eacces, enoent, erofsReadOnly } from '../utils/errors.ts'
 import { parent } from '../utils/path.ts'
 import type { Policies } from '../policy/policies.ts'
-import type { EntryGate, PathSpec, WalkProbe } from '../types.ts'
+import type { EntryGate, PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
 import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
 
 /**
@@ -146,39 +139,13 @@ function sessionMode(mountPrefix: string): MountMode {
   return mode
 }
 
-/**
- * Whether the current session hides any paths at all.
- *
- * For a summarizing fast path (du -s asks the backend for one total)
- * that must not be trusted when hidden leaves could be inside it. Show
- * entries do not trip it: a show without a covering hide restricts
- * nothing, and modes never change what a walk enumerates.
- */
-export function hiddenPathsActive(): boolean {
-  return liveSessions().some((sess) => sess.hiddenPaths != null)
-}
-
-/**
- * Whether the current session hides anything at or under this path:
- * the per-operand form of `hiddenPathsActive`.
- *
- * The native fast paths (find's native op, du's summarize total)
- * classify the raw backend tree, so they fork to the guarded walk when
- * a hide could cover an entry inside the subtree they answer for, and
- * stay on when none can: one hidden `.env` under `/repo` must not
- * force `find` on `/s3` off its native op.
- */
-export function hiddenPathsIntersect(virtual: string): boolean {
-  return liveSessions().some((sess) => hidesIntersect(sess.hiddenPaths, virtual))
-}
-
 export const DEFAULT_UMASK = 0o022
 
 /**
  * The file-creation mask of the session bound to this context, read by
  * the creators that run inside a command handler (`mkdir`, which cannot
- * be handed the session) the way `pathAllowed` reads the hidden-paths
- * spec. bash's default when no session is bound; ORed across live
+ * be handed the session) the way `dotglobActive` reads the shell
+ * options. bash's default when no session is bound; ORed across live
  * sessions otherwise, since a mask can only clear more bits, failing
  * toward the tighter mode.
  */
@@ -206,30 +173,42 @@ export function dotglobActive(): boolean {
 }
 
 /**
- * Whether a session's path axis leaves this path visible: its hides,
- * re-opened where a deeper show entry says so. The explicit-session
- * form of `pathAllowed`, for a door that holds the session rather than
- * running under it: the admission gate drops a hidden operand before
- * any policy reads it, so a rule or an ask never names a path the
- * session cannot see.
+ * The bound session's visibility, null when no session is bound.
+ *
+ * For the op boundary, which runs under the session it serves and
+ * answers a hidden path as absent. A command reads the visibility off
+ * its namespace view (`opts.ns.visibility`) instead, so nothing past
+ * the boundary consults the session about what exists. On the fallback
+ * storage several sessions can be live at once, and the answer merges
+ * toward hiding: every live session's hides, re-opened only by a show
+ * every hiding session states (by path: the mode gates read each
+ * session's own shows), so no live session sees more than it would
+ * alone.
  */
-export function sessionPathAllowed(sess: SessionState, virtual: string): boolean {
-  return pathVisible(sess.hiddenPaths, sess.shownPaths, virtual)
-}
-
-/**
- * Whether the current session's hides leave this path visible:
- * enumeration surfaces filter names through it and the doors answer
- * `hiddenRefusal` when it says no, so hiding reads as nonexistence,
- * never as a denial that leaks the name. True when no
- * session is bound. This is how a profile keeps a session away from a
- * mount, since naming mounts only narrows their modes. Every live
- * session must leave the path visible, so on the fallback storage a
- * hide stays in force while its command's frame is shadowed, and a
- * concurrent settle cannot wipe it into visibility.
- */
-export function pathAllowed(virtual: string): boolean {
-  return liveSessions().every((sess) => sessionPathAllowed(sess, virtual))
+export function sessionVisibility(): Visibility | null {
+  const live = liveSessions().map((sess) => sess.visibility)
+  const first = live[0]
+  if (first === undefined) return null
+  if (live.every((vis) => vis === first)) return first
+  const hiding = live.filter((vis) => vis.paths != null)
+  const shown = (hiding[0]?.shown?.entries ?? []).filter((entry) =>
+    hiding.every((vis) => (vis.shown?.entries ?? []).some((e) => e.path === entry.path)),
+  )
+  const paths = hiding.flatMap((vis) => vis.paths?.paths ?? [])
+  const patterns = hiding.flatMap((vis) => vis.paths?.patterns ?? [])
+  const names = live.flatMap((vis) => vis.vars?.names ?? [])
+  const varPatterns = live.flatMap((vis) => vis.vars?.patterns ?? [])
+  const lists = live.flatMap((vis) => (vis.commands === null ? [] : [vis.commands]))
+  return {
+    paths: hiding.length === 0 ? null : { paths, patterns },
+    shown: shown.length === 0 ? null : { entries: shown },
+    vars: names.length + varPatterns.length === 0 ? null : { names, patterns: varPatterns },
+    processes: live.every((vis) => vis.processes === 'workspace') ? 'workspace' : 'session',
+    commands:
+      lists.length === 0
+        ? null
+        : (lists[0] ?? []).filter((pattern) => lists.every((list) => list.includes(pattern))),
+  }
 }
 
 /**
@@ -246,8 +225,8 @@ export function pathAllowed(virtual: string): boolean {
  * ENOENT. `create` is whether the op creates the path it names; a
  * rename or copy destination is one.
  */
-export function hiddenRefusal(virtual: string, create: boolean): Error {
-  if (create && pathAllowed(parent(rstripSlash(virtual) || '/'))) return eacces(virtual)
+export function hiddenRefusal(vis: Visibility | null, virtual: string, create: boolean): Error {
+  if (create && pathVisible(vis, parent(rstripSlash(virtual) || '/'))) return eacces(virtual)
   return enoent(virtual)
 }
 
@@ -277,8 +256,9 @@ export function runWithAdmission<T>(gate: EntryGate, fn: () => Promise<T>): Prom
  * refusal: an entry must pass every live gate's `check`, `refuses` is
  * true when any live gate refuses, a rule counts as granted only when
  * every live gate carries it (a once-grant nodded for one line must not
- * authorize another's op door), and `scoped` is true when any live gate
- * scopes, keeping walks off the unfiltered native fast paths.
+ * authorize another's op door), and `scoped` and `scopes` are true when
+ * any live gate scopes, keeping walks off the unfiltered native fast
+ * paths.
  */
 export function getAdmission(): EntryGate | null {
   const gates = admissionStorage.liveStores()
@@ -294,19 +274,10 @@ export function getAdmission(): EntryGate | null {
     refuses(virtual: string): boolean {
       return gates.some((gate) => gate.refuses(virtual))
     },
+    scopes(virtual: string): boolean {
+      return gates.some((gate) => gate.scopes(virtual))
+    },
   }
-}
-
-/**
- * Whether a path rule in force reads the running command's paths.
- *
- * The twin of `hiddenPathsActive` for the rule arms: a backend's native
- * find or du classifies the raw tree, so an entry a rule refuses would be
- * listed or summed past the gate; the readdir walk passes every entry
- * through it instead. False when no admitted command is bound.
- */
-export function pathRulesActive(): boolean {
-  return getAdmission()?.scoped ?? false
 }
 
 const opPoliciesStorage = createAsyncContext<Policies | null>()
@@ -323,19 +294,6 @@ const opPoliciesStorage = createAsyncContext<Policies | null>()
  */
 export function runWithOpPolicies<T>(policies: Policies, fn: () => Promise<T>): Promise<T> {
   return Promise.resolve(opPoliciesStorage.run(policies, fn))
-}
-
-/**
- * Unbind the op policies for the duration of `fn`: a delegated
- * sub-command whose door the caller has already cleared.
- *
- * find's `-delete` admits each removal itself, in find's own refusal
- * voice, and then delegates the mutation to `rm`; without the
- * suspension the delegated slot would admit the same deletion a second
- * time, so a counting or budget policy would see one removal twice.
- */
-export function runWithSuspendedOpPolicies<T>(fn: () => Promise<T>): Promise<T> {
-  return Promise.resolve(opPoliciesStorage.run(null, fn))
 }
 
 /**
@@ -413,6 +371,35 @@ export function mountGateFor(virtual: string): readonly [string, MountMode] | nu
   return bestPrefix === null || bestMode === null ? null : [bestPrefix, bestMode]
 }
 
+/** Where a refusal a door raises is noted for the line running it. */
+export type RefusalSink = (refusal: Refusal) => void
+
+const refusalSinkStorage = createAsyncContext<RefusalSink>()
+
+/**
+ * Bind where the doors note a policy's refusal, for the duration of `fn`:
+ * one line's run.
+ *
+ * Bound by the workspace around a typed line: a command renders an op
+ * refusal in its own GNU words, which say nothing of the policy, so the
+ * door notes the record here and the line carries it on its result.
+ * Every task and nested line the line starts inherits the binding, so a
+ * stream drained after its command returned still reaches it. Mirrors
+ * Python's set_refusal_sink.
+ */
+export function runWithRefusalSink<T>(sink: RefusalSink, fn: () => Promise<T>): Promise<T> {
+  return Promise.resolve(refusalSinkStorage.run(sink, fn))
+}
+
+/**
+ * Hand a door's refusal to the line running in this context; a door
+ * reached outside any line (a programmatic op) has no line to tell, and
+ * the record rides the thrown error alone.
+ */
+export function noteRefusal(refusal: Refusal): void {
+  refusalSinkStorage.getStore()?.(refusal)
+}
+
 const walkProbeStorage = createAsyncContext<readonly [string, WalkProbe]>()
 
 /**
@@ -456,7 +443,14 @@ export function walkProbeFor(virtual: string): WalkProbe | null {
   return best
 }
 
-const redirectStorage = createAsyncContext<[object, readonly PathSpec[]]>()
+/**
+ * Opens a statement's write targets as bash does before the command runs,
+ * given the admitted command's name and arguments; false when one cannot be
+ * opened.
+ */
+export type RedirectOpener = (name: string, args: readonly string[]) => Promise<boolean>
+
+const redirectStorage = createAsyncContext<[object, readonly PathSpec[], RedirectOpener | null]>()
 
 /**
  * Bind a statement's expanded redirect targets to the command node they
@@ -468,13 +462,18 @@ const redirectStorage = createAsyncContext<[object, readonly PathSpec[]]>()
  * Keyed by the node object itself so a nested line expanded on the way
  * to the command (a `$()` operand, an `eval`) never inherits the outer
  * statement's targets.
+ *
+ * The opener empties the targets bash opens for writing before the command
+ * runs; dispatch calls it with the command's name and arguments once the line
+ * is admitted, so a command the gate refuses leaves its targets as they were.
  */
 export function runWithRedirectPaths<T>(
   node: object,
   paths: readonly PathSpec[],
   fn: () => Promise<T>,
+  opener: RedirectOpener | null = null,
 ): Promise<T> {
-  return Promise.resolve(redirectStorage.run([node, paths], fn))
+  return Promise.resolve(redirectStorage.run([node, paths, opener], fn))
 }
 
 const programStorage = createAsyncContext<SessionState | null>()
@@ -541,6 +540,19 @@ export function redirectPathsFor(node: object): readonly PathSpec[] {
 }
 
 /**
+ * The opener bound with this command node's redirect targets, null for any
+ * other node or when none is bound.
+ */
+export function redirectOpenerFor(node: object): RedirectOpener | null {
+  const bindings = redirectStorage.liveStores()
+  for (let at = bindings.length - 1; at >= 0; at--) {
+    const bound = bindings[at]
+    if (bound?.[0] === node) return bound[2]
+  }
+  return null
+}
+
+/**
  * Whether a path is a redirect target the command door already judged
  * for the statement writing it now.
  *
@@ -595,7 +607,7 @@ function pathModeUnder(
   const cap = sess.mountModes?.get(prefix) ?? null
   let bestDepth = cap != null ? anchorDepth(prefix) : null
   let bestMode: MountMode | null = cap
-  const deepest = shownMode(sess.shownPaths, virtual)
+  const deepest = shownMode(sess.visibility.shown, virtual)
   if (deepest != null) {
     const [depth, mode] = deepest
     if (bestDepth === null || depth > bestDepth) {
@@ -654,9 +666,10 @@ function strongestUnderSession(
   mountMode: MountMode,
 ): MountMode {
   let best = weakerMode(mountMode, sessionModeOf(sess, mountPrefix))
-  if (sess.shownPaths == null) return best
+  const shown = sess.visibility.shown
+  if (shown == null) return best
   const prefix = normPrefix(mountPrefix)
-  for (const entry of sess.shownPaths.entries) {
+  for (const entry of shown.entries) {
     if (entry.mode == null) continue
     if (reachesUnder(showHead(entry.path), prefix)) {
       const reached = weakerMode(mountMode, entry.mode)
@@ -695,9 +708,10 @@ function readonlyBelowUnder(
   mountPrefix: string,
   mountMode: MountMode,
 ): string | null {
-  if (sess.shownPaths == null) return null
+  const shown = sess.visibility.shown
+  if (shown == null) return null
   const v = '/' + stripSlash(virtual)
-  for (const entry of sess.shownPaths.entries) {
+  for (const entry of shown.entries) {
     if (entry.mode == null) continue
     if (isGlob(entry.path)) {
       if (entry.mode === MountMode.READ && reachesUnder(showHead(entry.path), v)) {

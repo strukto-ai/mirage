@@ -40,7 +40,6 @@ def _load(*args, **kwargs):
 
 
 def _seed(ws, mount: str = "/m") -> None:
-
     async def _do():
         await ws.shell(f"echo hello > {mount}/a.txt")
         await ws.shell(
@@ -51,7 +50,6 @@ def _seed(ws, mount: str = "/m") -> None:
 
 
 def _read(ws, path: str) -> str:
-
     async def _do():
         r = await ws.shell(f"cat {path}")
         return await r.stdout_str()

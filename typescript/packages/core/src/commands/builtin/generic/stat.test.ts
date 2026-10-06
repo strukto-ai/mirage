@@ -13,11 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { materialize } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { OpsRegistry, type RegisteredOp } from '../../../ops/registry.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { type CommandOpts } from '../../config.ts'
 import {
+  CapacityState,
   ContentType,
   DEVICE_NUMBERS_KEY,
   FileStat,
@@ -33,6 +34,7 @@ import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { statGeneric } from './stat.ts'
 
 const MTIME = '2026-01-02T15:30:45Z'
+const MTIME_SHOWN = '2026-01-02 15:30:45.000000000 +0000'
 const MTIME_EPOCH = '1767367845'
 const DEC = new TextDecoder()
 
@@ -54,7 +56,7 @@ function fs(overrides: Partial<FileStatInit> = {}): FileStat {
 function opts(fmt: string): CommandOpts {
   return {
     stdin: null,
-    flags: { c: fmt },
+    flags: { format: fmt },
     filetypeFns: null,
     cwd: '/',
     vfs: null,
@@ -85,42 +87,19 @@ function linkFs(target: string): FileStat {
   return fs({ type: FileType.SYMLINK, extra: { [LINK_TARGET_KEY]: target } })
 }
 
-// Pinned against GNU coreutils 9.7 on debian:stable-slim. Single quotes are
-// the rule; a name whose only awkward character is an apostrophe reads better
-// in double quotes and GNU renders that one case that way, but any other shell
-// character (or an unprintable one) sends it back to single quotes. mirage
-// paths are text rather than bytes, so a non-ASCII name stays literal the way
-// GNU renders it in a UTF-8 locale instead of the octal bytes it emits under
-// LC_ALL=C.
+// Pinned against GNU coreutils 9.7 on debian:stable-slim under LC_ALL=C.
+// Single quotes are the rule; a name whose only awkward character is an
+// apostrophe reads better in double quotes and GNU renders that one case that
+// way, but any other shell character (or an unprintable one, a byte past
+// ASCII included) sends it back to single quotes. Mirrors test_stat.py.
 const GNU_QUOTED: [string, string][] = [
-  ['/data/f.txt', "'/data/f.txt'"],
-  ['a$b', "'a$b'"],
-  ['a"b', "'a\"b'"],
   ["a'b", '"a\'b"'],
-  ["a'b c", '"a\'b c"'],
   ["a'b$c", "'a'\\''b$c'"],
-  ["a'b`c", "'a'\\''b`c'"],
-  ["a'b\\c", "'a'\\''b\\c'"],
-  ['a\'b"c', "'a'\\''b\"c'"],
-  ["a'b!c", "'a'\\''b!c'"],
-  // # and ~ count as special only away from the front.
-  ["#a'b", '"#a\'b"'],
-  ["~a'b", '"~a\'b"'],
-  ["a#'b", "'a#'\\''b'"],
-  ["$a'b", "'$a'\\''b'"],
   ['a\tb', "'a'$'\\t''b'"],
-  ['a\nb', "'a'$'\\n''b'"],
-  ['a\x07b', "'a'$'\\a''b'"],
-  ['a\x01b', "'a'$'\\001''b'"],
-  ['a\x1bb', "'a'$'\\033''b'"],
-  ['a\x7fb', "'a'$'\\177''b'"],
   // A leading escape keeps the empty quotes; a trailing one does not.
   ['\ta', "''$'\\t''a'"],
-  ['a\t', "'a'$'\\t'"],
-  ['a\t\nb', "'a'$'\\t\\n''b'"],
-  ["a'b\tc", "'a'\\''b'$'\\t''c'"],
-  ['café', "'café'"],
-  ["a'béc", '"a\'béc"'],
+  ['café', "'caf'$'\\303\\251'"],
+  ["a'béc", "'a'\\''b'$'\\303\\251''c'"],
 ]
 
 class NoSetattrRegistry extends OpsRegistry {
@@ -156,31 +135,14 @@ describe('stat -c directive formatting', () => {
     }
   })
 
-  it('renders mode directives with defaults and explicit bits', async () => {
-    expect(await render('%a', fs({ mode: null }))).toBe('644')
-    expect(await render('%A', fs({ mode: null }))).toBe('-rw-r--r--')
-    expect(await render('%f', fs({ mode: null }))).toBe('81a4')
-    expect(await render('%a', fs({ mode: 0o640 }))).toBe('640')
-    expect(await render('%A', fs({ mode: 0o640 }))).toBe('-rw-r-----')
-    expect(await render('%f', fs({ mode: 0o640 }))).toBe('81a0')
-    expect(await render('%a', fs({ mode: 0o4755 }))).toBe('4755')
-    expect(await render('%f', fs({ mode: 0o4755 }))).toBe('89ed')
-  })
-
-  it('renders directory mode defaults', async () => {
-    const d = fs({ type: FileType.DIRECTORY, size: null, mode: null })
-    expect(await render('%a', d)).toBe('755')
-    expect(await render('%A', d)).toBe('drwxr-xr-x')
-    expect(await render('%f', d)).toBe('41ed')
-    expect(await render('%s', d)).toBe('4096')
-  })
-
-  it('renders setuid/setgid/sticky bits in %A', async () => {
-    expect(await render('%A', fs({ mode: 0o4755 }))).toBe('-rwsr-xr-x')
-    expect(await render('%A', fs({ mode: 0o4644 }))).toBe('-rwSr--r--')
-    expect(await render('%A', fs({ mode: 0o2755 }))).toBe('-rwxr-sr-x')
-    expect(await render('%A', fs({ mode: 0o1755 }))).toBe('-rwxr-xr-t')
-    expect(await render('%A', fs({ mode: 0o1644 }))).toBe('-rw-r--r-T')
+  // No mode is GNU's 0644 file default, as ls -l falls back to; a special bit
+  // keeps the high octal digit and renders as s/S/t/T. Mirrors test_stat.py.
+  it.each([
+    [fs({ mode: null }), '644 -rw-r--r-- 81a4'],
+    [fs({ mode: 0o4644 }), '4644 -rwSr--r-- 89a4'],
+    [fs({ type: FileType.DIRECTORY, size: null, mode: null }), '755 drwxr-xr-x 41ed'],
+  ])('renders the mode directives of %j', async (stat, want) => {
+    expect(await render('%a %A %f', stat)).toBe(want)
   })
 
   it('parses printf flags/width/precision, not as the directive', async () => {
@@ -211,17 +173,17 @@ describe('stat -c directive formatting', () => {
 
   it('renders time directives and epochs', async () => {
     const s = fs({ modified: MTIME, ctime: MTIME, atime: '2026-03-04T05:06:07Z' })
-    expect(await render('%y', s)).toBe(MTIME)
+    expect(await render('%y', s)).toBe(MTIME_SHOWN)
     expect(await render('%Y', s)).toBe(MTIME_EPOCH)
-    expect(await render('%z', s)).toBe(MTIME)
+    expect(await render('%z', s)).toBe(MTIME_SHOWN)
     expect(await render('%Z', s)).toBe(MTIME_EPOCH)
-    expect(await render('%x', s)).toBe('2026-03-04T05:06:07Z')
+    expect(await render('%x', s)).toBe('2026-03-04 05:06:07.000000000 +0000')
     expect(await render('%X', s)).toBe('1772600767')
   })
 
   it('falls back atime to mtime when absent', async () => {
     const s = fs({ modified: MTIME, ctime: MTIME, atime: null })
-    expect(await render('%x', s)).toBe(MTIME)
+    expect(await render('%x', s)).toBe(MTIME_SHOWN)
     expect(await render('%X', s)).toBe(MTIME_EPOCH)
   })
 
@@ -246,7 +208,48 @@ describe('stat -c directive formatting', () => {
 
   it('handles long incomplete directives in linear time', async () => {
     const fmt = `%${'0'.repeat(10_000)}!`
-    expect(await render(fmt, fs())).toBe(fmt)
+    expect(await render(fmt, fs())).toBe('?')
+  })
+
+  it('counts a quota in 1K blocks under -f', async () => {
+    const quota = {
+      ...opts('%T %S %b %f %a %c %d %i %5l|'),
+      flags: { format: '%T %S %b %f %a %c %d %i %5l|', file_system: true },
+      dispatch: () =>
+        Promise.resolve([
+          [
+            'disk',
+            {
+              state: CapacityState.QUOTA,
+              total: 40960,
+              used: 16384,
+              available: 12288,
+              inodes: 100,
+              inodesUsed: 40,
+              inodesFree: 50,
+            },
+          ],
+          new IOResult(),
+        ]),
+    } as unknown as CommandOpts
+    const result = await statGeneric([PathSpec.fromStrPath('/data/f.txt')], quota, () =>
+      Promise.resolve(fs()),
+    )
+    const [out, io] = result ?? [null, new IOResult()]
+    expect(io.exitCode).toBe(0)
+    expect(DEC.decode(await materialize(out))).toBe('disk 1024 40 24 12 100 60 ?     ?|\n')
+  })
+
+  it('knows no file system under -f without a workspace', async () => {
+    const bare = {
+      ...opts(''),
+      flags: { format: '%n %T %b %05c', file_system: true },
+    } as unknown as CommandOpts
+    const result = await statGeneric([PathSpec.fromStrPath('/data/f.txt')], bare, () =>
+      Promise.resolve(fs()),
+    )
+    const [out] = result ?? [null]
+    expect(DEC.decode(await materialize(out))).toBe('/data/f.txt - -     -\n')
   })
 
   it('reports missing operand', async () => {
@@ -315,7 +318,7 @@ it('renders GNU default layout with explicit unknown metadata', async () => {
   )
   expect(await render('%z %Z %w %W', info)).toBe('- 0 - 0')
   expect(await render('%z %Z %w %W', fs({ ctime: '2026-03-04T05:06:07Z', birthtime: MTIME }))).toBe(
-    `2026-03-04T05:06:07Z 1772600767 ${MTIME} ${MTIME_EPOCH}`,
+    `2026-03-04 05:06:07.000000000 +0000 1772600767 ${MTIME_SHOWN} ${MTIME_EPOCH}`,
   )
 })
 

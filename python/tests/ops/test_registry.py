@@ -15,8 +15,7 @@
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.ops.registry import OpsRegistry, RegisteredOp, op
-from mirage.ops.s3 import OPS as S3_VFS_OPS
+from mirage.ops.registry import RegisteredOp, op
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
 
@@ -33,7 +32,6 @@ def _spec(virtual: str) -> PathSpec:
 
 class TestOpDecorator:
     def test_attaches_metadata(self):
-
         @op("read", vfs="s3")
         async def my_read(config, path):
             return b"data"
@@ -47,7 +45,6 @@ class TestOpDecorator:
         assert ro.filetype is None
 
     def test_write_defaults_false(self):
-
         @op("read", vfs="s3")
         async def my_read2(config, path):
             return b"data"
@@ -56,7 +53,6 @@ class TestOpDecorator:
         assert ro.write is False
 
     def test_write_flag_true(self):
-
         @op("write", vfs="s3", write=True)
         async def my_write(config, path, data):
             pass
@@ -65,7 +61,6 @@ class TestOpDecorator:
         assert ro.write is True
 
     def test_with_filetype(self):
-
         @op("read", vfs="s3", filetype=".parquet")
         async def read_parquet(config, path):
             return b"parquet data"
@@ -75,7 +70,6 @@ class TestOpDecorator:
         assert ro.vfs == "s3"
 
     def test_stacks(self):
-
         @op("read", vfs="s3")
         @op("read", vfs="ram")
         async def read_multi(bind_arg, path):
@@ -84,137 +78,7 @@ class TestOpDecorator:
         assert len(read_multi._registered_ops) == 2
 
 
-class TestOpsRegistry:
-    @pytest.mark.asyncio
-    async def test_vfs_lookup(self):
-        registry = OpsRegistry()
-
-        @op("read", vfs="ram")
-        async def mem_read(store, path):
-            return b"memory data"
-
-        registry.register(mem_read)
-        fn = registry.resolve("read", "ram")
-        assert fn is not None
-        result = await fn(None, "/test")
-        assert result == b"memory data"
-
-    @pytest.mark.asyncio
-    async def test_filetype_priority(self):
-        registry = OpsRegistry()
-
-        @op("read", vfs="s3", filetype=".parquet")
-        async def read_parquet(config, path):
-            return b"parquet"
-
-        @op("read", vfs="s3")
-        async def read_default(config, path):
-            return b"default"
-
-        registry.register(read_parquet)
-        registry.register(read_default)
-
-        fn = registry.resolve("read", "s3", filetype=".parquet")
-        result = await fn(None, "/test.parquet")
-        assert result == b"parquet"
-
-        fn = registry.resolve("read", "s3", filetype=".txt")
-        result = await fn(None, "/test.txt")
-        assert result == b"default"
-
-    @pytest.mark.asyncio
-    async def test_none_fallthrough(self):
-        registry = OpsRegistry()
-
-        @op("read", vfs="s3", filetype=".custom")
-        async def read_custom(config, path):
-            return None
-
-        @op("read", vfs="s3")
-        async def read_default(config, path):
-            return b"fallback"
-
-        registry.register(read_custom)
-        registry.register(read_default)
-
-        result = await registry.call(
-            "read", "s3", (None,), _spec("/test.custom"), filetype=".custom"
-        )
-        assert result == b"fallback"
-
-    @pytest.mark.asyncio
-    async def test_not_found(self):
-        registry = OpsRegistry()
-        with pytest.raises(KeyError):
-            registry.resolve("read", "redis")
-
-    def test_register_registered_op(self):
-        registry = OpsRegistry()
-
-        async def my_fn(store, path):
-            return b"data"
-
-        ro = RegisteredOp(name="read", vfs="ram", filetype=None, fn=my_fn)
-        registry.register(ro)
-        assert registry.resolve("read", "ram") is my_fn
-
-    def test_register_type_error(self):
-        registry = OpsRegistry()
-        with pytest.raises(TypeError):
-            registry.register("not a function")
-
-
-class TestUserOpOverride:
-    @pytest.mark.asyncio
-    async def test_user_op_overrides_builtin(self):
-        registry = OpsRegistry()
-        builtin = RegisteredOp(
-            name="read",
-            vfs="disk",
-            filetype=None,
-            fn=lambda acc, p, **kw: b"builtin",
-        )
-        registry.register(builtin)
-
-        @op("read", vfs="disk")
-        async def custom_read(accessor, path, **kwargs):
-            return b"custom"
-
-        registry.register(custom_read)
-        fn = registry.resolve("read", "disk")
-        result = await fn(None, "/test")
-        assert result == b"custom"
-
-    @pytest.mark.asyncio
-    async def test_user_filetype_op_overrides_builtin(self):
-        registry = OpsRegistry()
-        builtin = RegisteredOp(
-            name="read",
-            vfs="s3",
-            filetype=".parquet",
-            fn=lambda acc, p, **kw: b"builtin-parquet",
-        )
-        registry.register(builtin)
-
-        @op("read", vfs="s3", filetype=".parquet")
-        async def my_parquet(accessor, path, **kwargs):
-            return b"my-parquet"
-
-        registry.register(my_parquet)
-        fn = registry.resolve("read", "s3", filetype=".parquet")
-        result = await fn(None, "/data.parquet")
-        assert result == b"my-parquet"
-
-
 class TestFiletypeOps:
-    @pytest.mark.asyncio
-    async def test_registered_for_s3(self):
-        registry = OpsRegistry()
-        for ro in S3_VFS_OPS:
-            registry.register(ro)
-        fn = registry.resolve("read", "s3", filetype=".parquet")
-        assert fn is not None
-
     @pytest.mark.asyncio
     async def test_default_read_still_works(self):
         vfs = RAMVFS()

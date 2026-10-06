@@ -35,7 +35,6 @@ async def _json(out):
 
 @pytest.mark.asyncio
 async def test_create_resolves_team_and_reads_stdin(monkeypatch):
-
     async def fake_resolve_team(config, token):
         return {"id": "team-1", "key": token}
 
@@ -67,7 +66,6 @@ async def test_create_resolves_team_and_reads_stdin(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_transition_resolves_state_name(monkeypatch):
-
     async def fake_resolve_issue(config, token):
         return "issue-uuid"
 
@@ -107,7 +105,6 @@ async def test_transition_resolves_state_name(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_set_priority_forwards_int(monkeypatch):
-
     async def fake_resolve_issue(config, token):
         return "issue-uuid"
 
@@ -136,7 +133,6 @@ async def test_set_priority_forwards_int(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_add_label_resolves_label_name(monkeypatch):
-
     async def fake_resolve_issue(config, token):
         return "issue-uuid"
 
@@ -180,7 +176,6 @@ async def test_add_label_resolves_label_name(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_set_project_resolves_project_name(monkeypatch):
-
     async def fake_resolve_issue(config, token):
         return "issue-uuid"
 
@@ -225,7 +220,6 @@ async def test_set_project_resolves_project_name(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_comment_add_requires_body(monkeypatch):
-
     async def fake_resolve_issue(config, token):
         return "issue-uuid"
 

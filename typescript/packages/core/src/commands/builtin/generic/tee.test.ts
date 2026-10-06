@@ -20,19 +20,15 @@ import { parseFlags, writeOutput } from './tee.ts'
 const DEC = new TextDecoder()
 
 describe('parseFlags', () => {
-  it('reads the exit/warn axis of --output-error', () => {
-    // Only this axis is observable: the -nopipe half distinguishes a pipe
-    // sink from a file sink, and every operand tee writes is a file.
-    for (const mode of ['warn', 'warn-nopipe']) {
-      expect(parseFlags({ output_error: mode })).toEqual({ append: false, stopOnError: false })
-    }
-    for (const mode of ['exit', 'exit-nopipe']) {
-      expect(parseFlags({ output_error: mode })).toEqual({ append: false, stopOnError: true })
-    }
-  })
-
-  it('treats a bare --output-error as warn, like GNU 9.7', () => {
-    expect(parseFlags({ output_error: true })).toEqual({ append: false, stopOnError: false })
+  // Only the exit/warn axis is observable: the -nopipe half tells a pipe
+  // sink from a file sink, and every operand tee writes is a file. A bare
+  // --output-error means warn (GNU 9.7).
+  it.each([
+    ['warn-nopipe', false],
+    ['exit', true],
+    [true, false],
+  ] as const)('reads --output-error=%j', (mode, stop) => {
+    expect(parseFlags({ output_error: mode })).toEqual({ append: false, stopOnError: stop })
   })
 })
 

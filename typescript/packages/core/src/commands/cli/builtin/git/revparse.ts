@@ -13,11 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import git from 'isomorphic-git'
-import { HEAD } from './constants.ts'
+import { DWIM_RULES, GITLINK_MODE, HEAD } from './constants.ts'
 
-import { AmbiguousArgumentError, BadRevisionError } from './errors.ts'
+import {
+  AmbiguousArgumentError,
+  BadRevisionError,
+  InvalidRevisionNameError,
+  PathNotAtStageError,
+  PathNotInIndexError,
+  PathNotInRevisionError,
+} from './errors.ts'
+import { readIndex } from './index_file.ts'
+import { exists, under } from './io.ts'
+import { isEnotdir } from '../../../../utils/errors.ts'
 import type { CommitFacts } from './format.ts'
-import { TAG_PREFIX } from './refs.ts'
+import { loadRefs, TAG_PREFIX } from './refs.ts'
 import { commitFacts, repoArgs, type Repo } from './repo.ts'
 import type { AncestryStep, GitObject, RevOp } from './types.ts'
 
@@ -34,6 +44,7 @@ export const TAG = 'tag'
 // Not a type any object reports: `^{object}` asks only that the name resolve to
 // something, and hands back whatever that is.
 export const OBJECT = 'object'
+const STAGED = /^[0-3]:/
 // `A..B` hides A and walks B; a third dot walks both and hides only what they
 // share. A leading caret hides one revision on its own.
 const RANGE = '..'
@@ -156,16 +167,7 @@ async function applyStep(
  */
 export async function resolveCommit(repo: Repo, revision: string): Promise<string> {
   const [base, ops] = splitOperators(revision)
-  let oid: string
-  try {
-    oid = await git.resolveRef({ ...repoArgs(repo), ref: base })
-  } catch {
-    try {
-      oid = await git.expandOid({ ...repoArgs(repo), oid: base })
-    } catch {
-      throw new AmbiguousArgumentError(revision)
-    }
-  }
+  let oid = await namedObject(repo, base, revision)
   // A tag names a tag object, not the commit under it; peel until it is one.
   for (;;) {
     let type: string
@@ -195,6 +197,61 @@ export async function resolveCommit(repo: Repo, revision: string): Promise<strin
     oid = await applyStep(repo, oid, op, revision)
   }
   return oid
+}
+
+/**
+ * Every ref git's rev-parse rules find for a name, in rule order: more than one
+ * is a name git calls ambiguous, and the first is the one it reads.
+ *
+ * @param table every ref, as loadRefs reads them
+ * @param name the name as typed
+ */
+export function refsNamed(table: ReadonlyMap<string, string>, name: string): string[] {
+  return [...new Set(DWIM_RULES.map((rule) => rule.replace('{}', name)))].filter((ref) =>
+    table.has(ref),
+  )
+}
+
+/**
+ * The object id a revision's base names, a ref read without peeling it or an
+ * id, full or abbreviated.
+ *
+ * A name two refs answer to reads as the first, and git warns that it is
+ * ambiguous each time it reads one, which is where the repository's list of
+ * warnings gets the line (pinned against git 2.47.3).
+ *
+ * @param repo repository to resolve against
+ * @param base the name or id, operators already split off
+ * @param revision the whole revision, for error attribution
+ */
+async function namedObject(repo: Repo, base: string, revision: string): Promise<string> {
+  let oid: string
+  try {
+    oid = await git.resolveRef({ ...repoArgs(repo), ref: base })
+  } catch {
+    try {
+      return await git.expandOid({ ...repoArgs(repo), oid: base })
+    } catch {
+      throw new AmbiguousArgumentError(revision)
+    }
+  }
+  await noteAmbiguity(repo, base)
+  return oid
+}
+
+/**
+ * Put git's `refname is ambiguous` warning on the repository's list when two
+ * refs answer to a name, as git does each time it reads one.
+ *
+ * @param repo the opened repository
+ * @param name the name as typed
+ */
+export async function noteAmbiguity(repo: Repo, name: string): Promise<void> {
+  if (repo.ambiguous === null) return
+  const table = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
+  if (refsNamed(table, name).length > 1) {
+    repo.ambiguous.push(`warning: refname '${name}' is ambiguous.\n`)
+  }
 }
 
 /** The type isomorphic-git records for one object id. */
@@ -284,17 +341,68 @@ async function peeled(
  * @param revision the whole revision, for error attribution
  */
 async function atPath(repo: Repo, rev: string, path: string, revision: string): Promise<GitObject> {
+  let named: GitObject
+  try {
+    named = await resolveObject(repo, rev)
+  } catch (err) {
+    if (err instanceof AmbiguousArgumentError) throw new InvalidRevisionNameError(rev)
+    throw err
+  }
   // A tag is no tree and holds no path, so it comes off first: the rev half is
   // a tree-ish, and `<tag-id>:a.txt` reads the blob through it exactly as
   // `v1:a.txt` does.
-  const holder = await unwrapped(repo, await resolveObject(repo, rev), revision)
+  const holder = await unwrapped(repo, named, revision)
   try {
     // eslint-disable-next-line @typescript-eslint/no-deprecated
     const found = await git.readObject({ ...repoArgs(repo), oid: holder.oid, filepath: path })
     return { oid: found.oid, type: found.type }
   } catch {
-    throw new AmbiguousArgumentError(revision)
+    throw new PathNotInRevisionError(path, rev, await onDisk(repo, path))
   }
+}
+
+/**
+ * Whether a repository-relative path is there in the working tree; a path
+ * through a file is not.
+ */
+async function onDisk(repo: Repo, path: string): Promise<boolean> {
+  if (path === '') return false
+  try {
+    return await exists(repo.dispatch, under(repo.location.worktree, path))
+  } catch (err) {
+    if (isEnotdir(err)) return false
+    throw err
+  }
+}
+
+/**
+ * The object `:<path>` or `:<n>:<path>` names in the index: the staged entry
+ * at stage 0, or at the merge stage given. A path the index holds at another
+ * stage, or not at all, is refused in git's words (pinned against git
+ * 2.50.1).
+ *
+ * @param repo the opened repository
+ * @param spec what follows the leading colon
+ */
+async function inIndex(repo: Repo, spec: string): Promise<GitObject> {
+  const staged = STAGED.exec(spec)
+  const stage = staged === null ? 0 : Number(spec.charAt(0))
+  const path = staged === null ? spec : spec.slice(staged[0].length)
+  const state = await readIndex(repo, repo.dispatch)
+  const conflicted = state.conflicts.get(path)
+  const stages = [
+    state.entries.get(path),
+    conflicted?.ancestor,
+    conflicted?.this,
+    conflicted?.other,
+  ]
+  const found = stages[stage]
+  if (found !== undefined && found !== null) {
+    return { oid: found.oid, type: found.mode.toString(8) === GITLINK_MODE ? COMMIT : 'blob' }
+  }
+  const held = stages.findIndex((entry) => entry !== undefined && entry !== null)
+  if (held !== -1) throw new PathNotAtStageError(path, stage, held)
+  throw new PathNotInIndexError(path, await onDisk(repo, path))
 }
 
 /**
@@ -324,37 +432,6 @@ export async function tagObject(repo: Repo, stem: string): Promise<GitObject | n
   let type: string
   try {
     type = await typeOf(repo, oid, stem)
-  } catch {
-    return null
-  }
-  return type === TAG ? { oid, type } : null
-}
-
-/**
- * The tag object a bare id names, null when the id names no tag.
- *
- * A tag is the one type whose bare-id reading differs from the commit-ish one,
- * which is why this is scoped to it rather than put in front of every
- * resolution: every other type either is the commit that reading returns or is
- * not commit-ish at all, and already falls through to the id.
- *
- * A tag *name* is deliberately not read here. git splits the two, and the split
- * is observable: `git tag nested v1` records the tag object while
- * `git restore --source=v1` reads the tree behind it.
- *
- * @param repo the opened repository
- * @param revision the revision as the user spelled it
- */
-async function tagAtId(repo: Repo, revision: string): Promise<GitObject | null> {
-  let oid: string
-  try {
-    oid = await expanded(repo, revision)
-  } catch {
-    return null
-  }
-  let type: string
-  try {
-    type = await typeOf(repo, oid, revision)
   } catch {
     return null
   }
@@ -510,35 +587,20 @@ export async function splitRevisions(
  */
 export async function resolveObject(repo: Repo, revision: string): Promise<GitObject> {
   const mark = revision.indexOf(PATH_MARK)
-  if (mark >= 0) {
-    const rev = revision.slice(0, mark)
-    return atPath(repo, rev === '' ? HEAD : rev, revision.slice(mark + 1), revision)
-  }
+  if (mark === 0) return inIndex(repo, revision.slice(1))
+  if (mark > 0) return atPath(repo, revision.slice(0, mark), revision.slice(mark + 1), revision)
   const [base, ops] = splitOperators(revision)
   if (ops.length === 0) {
-    // A bare id names that exact object, and for an annotated tag that is the
-    // tag rather than the commit behind it: the commit-ish reading below is a
-    // peel, and git does not peel an id. `git tag nested <tag-id>` records the
-    // tag, which is the nested tag git warns about rather than quietly
-    // flattens.
-    const held = await tagAtId(repo, revision)
-    if (held !== null) return held
-    try {
-      return { oid: await resolveCommit(repo, revision), type: COMMIT }
-    } catch {
-      // Not a commit-ish. A raw id is read as itself before the revision is
-      // called unresolved, and the type is kept, since it is what a caller
-      // records.
-      const oid = await expanded(repo, revision)
-      return { oid, type: await typeOf(repo, oid, revision) }
-    }
+    // A name or id stands for exactly the object it names, so an annotated
+    // tag is the tag rather than the commit behind it: git does not peel one
+    // until a caller asks for a commit-ish, and `git rev-parse v1` prints the
+    // tag's id.
+    const oid = await namedObject(repo, revision, revision)
+    return { oid, type: await typeOf(repo, oid, revision) }
   }
-  // The base is resolved without peeling an annotated tag, because `^{tag}` and
-  // `^{object}` are the two spellings that have to stop above it; every other
-  // operator unwraps the tag itself, which is git's own rule and costs nothing
-  // here.
-  const held = await tagObject(repo, base)
-  let obj = held ?? (await resolveObject(repo, base))
+  // Every operator but `^{tag}` and `^{object}` unwraps a tag, which is git's
+  // own rule and costs nothing here.
+  let obj = await resolveObject(repo, base)
   for (const op of ops) {
     if ('want' in op) {
       obj = await peeled(repo, obj, op.want, revision)
@@ -549,13 +611,4 @@ export async function resolveObject(repo: Repo, revision: string): Promise<GitOb
     obj = { oid: await applyStep(repo, commit.oid, op, revision), type: COMMIT }
   }
   return obj
-}
-
-/** One id, full or abbreviated, expanded through the object store. */
-async function expanded(repo: Repo, revision: string): Promise<string> {
-  try {
-    return await git.expandOid({ ...repoArgs(repo), oid: revision })
-  } catch {
-    throw new AmbiguousArgumentError(revision)
-  }
 }

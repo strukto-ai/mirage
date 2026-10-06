@@ -1055,7 +1055,7 @@
       "command": "h1 --help | head -1",
       "expect": {
         "exit": 0,
-        "stdout": "h1: IMAP/SMTP mail client\n",
+        "stdout": "usage: h1 [-h] {envelope,message} ...\n",
         "stderr": ""
       }
     },

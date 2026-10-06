@@ -27,6 +27,7 @@ import { populateIndex } from '../../../core/github/tree.ts'
 import type { TreeEntry } from '../../../core/github/tree_entry.ts'
 import { IOResult } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
+import { hiddenUnder } from '../../../utils/hidden.ts'
 import { SessionState } from '../../../workspace/session/session.ts'
 import type { CommandOpts } from '../../config.ts'
 import { findGeneric } from '../generic/find.ts'
@@ -102,10 +103,18 @@ describe('github find', () => {
     if (cmd === undefined) throw new Error('find not registered')
     const index = new RAMIndexCacheStore()
     await populateIndex(index, TREE, '')
-    const opts: CommandOpts = { stdin: null, flags: {}, filetypeFns: null, cwd: '/', index }
     const src = new PathSpec({ virtual: '/src', directory: '/src', vfsPath: 'src' })
     const sess = new SessionState({ sessionId: 'veiled' })
-    sess.hiddenPaths = { paths: ['/src/c.txt'] }
+    sess.visibility = { ...sess.visibility, paths: { paths: ['/src/c.txt'] } }
+    const vis = sess.visibility
+    const opts: CommandOpts = {
+      stdin: null,
+      flags: {},
+      filetypeFns: null,
+      cwd: '/',
+      index,
+      ns: { visibility: vis, scoped: (virtual: string) => hiddenUnder(vis, virtual) },
+    }
     const listed = await runWithSession(sess, async () => {
       await cmd.fn(makeAccessor(), [src], [], opts)
       const walk = generic.mock.calls[0]?.[3]

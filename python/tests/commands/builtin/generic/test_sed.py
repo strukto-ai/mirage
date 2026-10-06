@@ -39,49 +39,48 @@ def _make_backend(files: dict[str, bytes]):
 
 
 @pytest.mark.asyncio
-async def test_sed_p_flag_prints_substituted_line_twice():
+@pytest.mark.parametrize(
+    "script,stdin,out",
+    [
+        ("s/hi/HI/p", b"hi\nbye\n", b"HI\nHI\nbye\n"),
+        ("s/a+/X/", b"a+b\n", b"Xb\n"),
+        (r"/a\+b/d", b"x\na+b\naab\ny\n", b"x\na+b\ny\n"),
+        (r"/a\/b/,/c\/d/d", b"x\na/b\nmid\nc/d\ny\n", b"x\ny\n"),
+    ],
+)
+async def test_sed_scripts_over_stdin(script, stdin, out):
+    # s///p prints a substituted line twice, a BRE `+` is literal, and an
+    # address keeps its escapes, delimiters included.
     rb, wb, _ = _make_backend({})
     output, _ = await sed(
-        [], "s/hi/HI/p", read_bytes=rb, write_bytes=wb, stdin=b"hi\nbye\n"
+        [], script, read_bytes=rb, write_bytes=wb, stdin=stdin
     )
-    assert output == b"HI\nHI\nbye\n"
+    assert output == out
 
 
 @pytest.mark.asyncio
-async def test_sed_p_flag_under_suppress_prints_only_substituted():
-    rb, wb, _ = _make_backend({})
-    output, _ = await sed(
-        [],
-        "s/hi/HI/p",
-        read_bytes=rb,
-        write_bytes=wb,
-        stdin=b"hi\nbye\n",
-        suppress=True,
-    )
-    assert output == b"HI\n"
-
-
-@pytest.mark.asyncio
-async def test_sed_y_mismatched_lengths_refused():
+@pytest.mark.parametrize(
+    "script,message",
+    [
+        (
+            "y/ab/x/",
+            b"sed: -e expression #1, char 7: strings for `y' "
+            b"command are different lengths\n",
+        ),
+        (
+            "/a\\/b",
+            b"sed: -e expression #1, char 5: unterminated address regex\n",
+        ),
+    ],
+)
+async def test_sed_refuses_a_script(script, message):
     rb, wb, _ = _make_backend({})
     output, io = await sed(
-        [], "y/ab/x/", read_bytes=rb, write_bytes=wb, stdin=b"a\n"
+        [], script, read_bytes=rb, write_bytes=wb, stdin=b"a\n"
     )
     assert output is None
     assert io.exit_code == 1
-    assert io.stderr == (
-        b"sed: -e expression #1, char 7: strings for `y' "
-        b"command are different lengths\n"
-    )
-
-
-@pytest.mark.asyncio
-async def test_sed_bre_plus_is_literal():
-    rb, wb, _ = _make_backend({})
-    output, _ = await sed(
-        [], "s/a+/X/", read_bytes=rb, write_bytes=wb, stdin=b"a+b\n"
-    )
-    assert output == b"Xb\n"
+    assert io.stderr == message
 
 
 @pytest.mark.asyncio
@@ -96,59 +95,6 @@ async def test_sed_inplace_transliterate_writes_file():
     )
     assert output is None
     assert store["/a.txt"] == b"0ne\ntw0\n"
-
-
-@pytest.mark.asyncio
-async def test_sed_inplace_suppress_print_rewrites_same_content():
-    rb, wb, store = _make_backend({"/a.txt": b"one\ntwo\n"})
-    output, _ = await sed(
-        [_spec("/a.txt")],
-        "p",
-        read_bytes=rb,
-        write_bytes=wb,
-        in_place=True,
-        suppress=True,
-    )
-    assert output is None
-    assert store["/a.txt"] == b"one\ntwo\n"
-
-
-@pytest.mark.asyncio
-async def test_sed_address_keeps_bre_escapes():
-    rb, wb, _ = _make_backend({})
-    output, _ = await sed(
-        [],
-        r"/a\+b/d",
-        read_bytes=rb,
-        write_bytes=wb,
-        stdin=b"x\na+b\naab\ny\n",
-    )
-    assert output == b"x\na+b\ny\n"
-
-
-@pytest.mark.asyncio
-async def test_sed_address_range_with_escaped_delimiters():
-    rb, wb, _ = _make_backend({})
-    output, _ = await sed(
-        [],
-        r"/a\/b/,/c\/d/d",
-        read_bytes=rb,
-        write_bytes=wb,
-        stdin=b"x\na/b\nmid\nc/d\ny\n",
-    )
-    assert output == b"x\ny\n"
-
-
-@pytest.mark.asyncio
-async def test_sed_unterminated_address_refused():
-    rb, wb, _ = _make_backend({})
-    _, io = await sed(
-        [], "/a\\/b", read_bytes=rb, write_bytes=wb, stdin=b"x\n"
-    )
-    assert io.exit_code == 1
-    assert io.stderr == (
-        b"sed: -e expression #1, char 5: unterminated address regex\n"
-    )
 
 
 @pytest.mark.asyncio

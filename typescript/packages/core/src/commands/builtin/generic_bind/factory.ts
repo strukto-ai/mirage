@@ -18,16 +18,17 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
 import { cacheAwareReadBytes, cacheAwareReadStream } from '../../../cache/read_through.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { type PathSpec } from '../../../types.ts'
+import { PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../utils/errors.ts'
 import type { ChildMounts, LinkView } from '../../../ops/types.ts'
 import { type CommandFn, type RegisteredCommand, command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import {
   type CommandIO,
+  scopedIo,
   withAbortGuard,
+  withCommandGuards,
   withDirGuard,
-  withPathGuards,
   withPolicyGuard,
 } from './adapter.ts'
 import { type StatOp } from '../../../vfs/types.ts'
@@ -206,30 +207,35 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
     // refuses an explicit `undefined` for an optional field, so an absent
     // namespace has to mean an absent key rather than an undefined value.
     // Python's `glob_children` is `| None` and takes the uniform path.
-    // The policy guard sits outside the cache wraps (`finish`) so a
-    // coded preOps deny fires before a warm serve, the dispatcher's
-    // own order at the op door. A probe answer is served below the path
-    // guards (withProbeAnswers on the raw adapter), so they still judge
-    // every path before it. The invocation's mount prefix rides
-    // into its wrap-time scope for readers drained after the gate
-    // scopes return. The abort guard sits outermost: once the
-    // invocation's signal has fired no slot starts, so a handler the
-    // caller was released from begins no further read or write
-    // between its operands.
+    // Command path restrictions speak first, then the coded preOps
+    // hooks, both outside the cache wraps (`finish`) so a refusal fires
+    // before a warm serve, the dispatcher's own order at the op door. A
+    // probe answer is served below them (withProbeAnswers on the raw
+    // adapter), so they still judge every path before it. The
+    // invocation's mount prefix rides into its wrap-time scope for
+    // readers drained after the gate scopes return. Under a hide or a
+    // path rule the native subtree ops are set aside (scopedIo), so
+    // every entry passes through the guarded walk. The abort guard sits
+    // outermost: once the invocation's signal has fired no slot starts,
+    // so a handler the caller was released from begins no further read
+    // or write between its operands.
     const fn: CommandFn = (accessor, paths, texts, opts) => {
-      const guarded = withAbortGuard(
-        withDirGuard(
-          withPolicyGuard(
-            finish(
-              withPathGuards(
-                stampNamespace(answered, opts.ns?.childMounts, opts.ns?.links),
+      const guarded = scopedIo(
+        withAbortGuard(
+          withDirGuard(
+            withCommandGuards(
+              withPolicyGuard(
+                finish(stampNamespace(answered, opts.ns?.childMounts, opts.ns?.links)),
                 opts.mountPrefix,
               ),
+              opts.mountPrefix,
             ),
-            opts.mountPrefix,
           ),
+          opts.signal,
         ),
-        opts.signal,
+        opts.ns,
+        paths.length > 0 ? paths : [PathSpec.fromStrPath(opts.cwd)],
+        opts.mountPrefix ?? '',
       )
       return b.fn(
         {

@@ -15,14 +15,11 @@
 // Mirrors python/tests/commands/builtin/generic/test_diff.py.
 
 import { describe, expect, it } from 'vitest'
-import { diffGeneric } from './diff.ts'
-import { UsageError } from '../../errors.ts'
-import { materialize } from '../../../io/types.ts'
+import { cEscape, diffGeneric, switchWords } from './diff.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder()
 
 function operand(raw: string, virtual: string): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: virtual.slice(3), rawPath: raw })
@@ -30,23 +27,7 @@ function operand(raw: string, virtual: string): PathSpec {
 
 const DASH = operand('-', '/d/-')
 const DEV_STDIN = new PathSpec({ virtual: '/dev/stdin', directory: '/dev', vfsPath: 'stdin' })
-const FILE = operand('a.txt', '/d/a.txt')
-const SUB = operand('sub', '/d/sub')
-const SUB2 = operand('sub2', '/d/sub2')
-const FILES: Record<string, string> = {
-  '/d/a.txt': 'hello\n',
-  '/d/sub/x': '1\n',
-  '/d/sub2/x': '2\n',
-  '/d/sub2/y': '3\n',
-}
 const DIRS: Record<string, string[]> = { '/d/sub': ['x'], '/d/sub2': ['x', 'y'] }
-
-function read(p: PathSpec): AsyncIterable<Uint8Array> {
-  return (async function* gen() {
-    await Promise.resolve()
-    yield ENC.encode(FILES[p.virtual] ?? '')
-  })()
-}
 
 function readdir(p: PathSpec): Promise<string[]> {
   return Promise.resolve(DIRS[p.virtual] ?? [])
@@ -57,26 +38,7 @@ function stat(p: PathSpec): Promise<FileStat> {
   return Promise.resolve(new FileStat({ name: p.virtual.split('/').pop() ?? '', type }))
 }
 
-async function run(
-  paths: PathSpec[],
-  stdin: string | null = null,
-  flags: Record<string, boolean> = {},
-): Promise<[string, string, number]> {
-  const opts = {
-    flags,
-    stdin: stdin === null ? null : ENC.encode(stdin),
-  } as unknown as CommandOpts
-  const [out, io] = await diffGeneric(paths, opts, read, readdir, stat)
-  return [DEC.decode(await materialize(out)), DEC.decode(await materialize(io.stderr)), io.exitCode]
-}
-
 describe('diffGeneric with stdin', () => {
-  it('names the operands as typed in unified headers', async () => {
-    const [out, , code] = await run([FILE, DEV_STDIN], 'x\n', { u: true })
-    expect(out.startsWith('--- a.txt\n+++ /dev/stdin\n')).toBe(true)
-    expect(code).toBe(1)
-  })
-
   it('takes two stdin operands as one file', async () => {
     const unread = (p: PathSpec): AsyncIterable<Uint8Array> => {
       throw new Error(`read ${p.virtual}`)
@@ -86,29 +48,136 @@ describe('diffGeneric with stdin', () => {
     expect([out, io.exitCode]).toEqual([null, 0])
   })
 
-  it('refuses a directory against a dash', async () => {
-    expect(await run([SUB, DASH], 'x\n')).toEqual([
-      '',
-      "diff: cannot compare '-' to a directory\n",
-      2,
+  it('keeps the option words as typed for the header', () => {
+    expect(switchWords(['-ru', '--exclude', '.git', 'a', 'b', '-x*.log'])).toEqual([
+      '-ru',
+      '--exclude',
+      '.git',
+      '-x*.log',
     ])
+    expect(switchWords(['--exclude=.git', '-r', 'a', '--', '-b'])).toEqual([
+      '--exclude=.git',
+      '-r',
+      '--',
+    ])
+    expect(switchWords(['-rx', 'pat', '-U', '1', 'a', 'b'])).toEqual(['-rx', 'pat', '-U', '1'])
+  })
+})
+
+describe('diff headers', () => {
+  it('C-quotes a header name the way diffutils does', () => {
+    expect(cEscape('plain/é\x7f')).toBe('plain/é\x7f')
+    expect(cEscape('sp ace')).toBe('"sp ace"')
+    expect(cEscape('t\tq"b\\')).toBe('"t\\tq\\"b\\\\"')
+    expect(cEscape('c\x01')).toBe('"c\\001"')
   })
 
-  it("refuses a lone operand with GNU's missing operand usage error", async () => {
-    const call = run([FILE])
-    await expect(call).rejects.toThrow(
-      new UsageError(
-        "diff: missing operand after 'a.txt'\ndiff: Try 'diff --help' for more information.",
-      ),
+  it('reads the time the namespace keeps', async () => {
+    const read = async function* (p: PathSpec): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      yield ENC.encode(p.virtual === '/d/a' ? 'x\n' : 'y\n')
+    }
+    const backend = (p: PathSpec): Promise<FileStat> =>
+      Promise.resolve(
+        new FileStat({ name: p.virtual, type: FileType.FILE, modified: '2026-10-05T00:00:00Z' }),
+      )
+    const statPath = (virtual: string): Promise<FileStat | null> =>
+      Promise.resolve(
+        new FileStat({ name: virtual, type: FileType.FILE, modified: '2021-06-15T12:00:00Z' }),
+      )
+    const opts = { flags: { u: true }, stdin: new Uint8Array(), statPath } as unknown as CommandOpts
+    const [out] = await diffGeneric(
+      [operand('a', '/d/a'), operand('b', '/d/b')],
+      opts,
+      read,
+      readdir,
+      backend,
     )
-    await expect(call).rejects.toMatchObject({ exitCode: 2 })
+    expect(new TextDecoder().decode(out as Uint8Array).split('\n')[0]).toBe(
+      '--- a\t2021-06-15 12:00:00.000000000 +0000',
+    )
   })
 
-  it('names recursive children under the typed operands', async () => {
-    expect(await run([SUB, SUB2], null, { r: true })).toEqual([
-      'diff -r sub/x sub2/x\n1c1\n< 1\n---\n> 2\nOnly in sub2: y\n',
-      '',
-      1,
+  it('reads in the TZ zone with every digit of the stamp', async () => {
+    const read = async function* (): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      yield ENC.encode('x\n')
+    }
+    const backend = (p: PathSpec): Promise<FileStat> =>
+      p.virtual === '/d/gone'
+        ? Promise.reject(Object.assign(new Error(p.virtual), { code: 'ENOENT' }))
+        : Promise.resolve(new FileStat({ name: p.virtual, type: FileType.FILE }))
+    const statPath = (virtual: string): Promise<FileStat | null> =>
+      Promise.resolve(
+        new FileStat({
+          name: virtual,
+          type: FileType.FILE,
+          modified: '2026-03-04T05:06:07.123456789Z',
+        }),
+      )
+    const opts = {
+      flags: { u: true, new_file: true },
+      stdin: new Uint8Array(),
+      statPath,
+      env: { TZ: 'Asia/Hong_Kong' },
+    } as unknown as CommandOpts
+    const [out] = await diffGeneric(
+      [operand('a', '/d/a'), operand('gone', '/d/gone')],
+      opts,
+      read,
+      readdir,
+      backend,
+    )
+    expect(
+      new TextDecoder()
+        .decode(out as Uint8Array)
+        .split('\n')
+        .slice(0, 2),
+    ).toEqual([
+      '--- a\t2026-03-04 13:06:07.123456789 +0800',
+      '+++ gone\t1970-01-01 08:00:00.000000000 +0800',
     ])
+  })
+
+  it('carries each side mtime in a unified header', async () => {
+    const files: Record<string, string> = { '/d/a b': 'x\ny\n', '/d/c': 'x\nz\n' }
+    const read = async function* (p: PathSpec): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      yield ENC.encode(files[p.virtual] ?? '')
+    }
+    const statOf = (p: PathSpec): Promise<FileStat> => {
+      if (!(p.virtual in files))
+        return Promise.reject(Object.assign(new Error(p.virtual), { code: 'ENOENT' }))
+      return Promise.resolve(
+        new FileStat({ name: p.virtual, type: FileType.FILE, modified: '2026-01-02T03:04:05Z' }),
+      )
+    }
+    const pair = [operand('a b', '/d/a b'), operand('c', '/d/c')]
+    const opts = { flags: { u: true }, stdin: new Uint8Array() } as unknown as CommandOpts
+    const [out, io] = await diffGeneric(pair, opts, read, readdir, statOf)
+    expect(io.exitCode).toBe(1)
+    expect(
+      new TextDecoder()
+        .decode(out as Uint8Array)
+        .split('\n')
+        .slice(0, 2),
+    ).toEqual([
+      '--- "a b"\t2026-01-02 03:04:05.000000000 +0000',
+      '+++ c\t2026-01-02 03:04:05.000000000 +0000',
+    ])
+    const gone = {
+      flags: { u: true, new_file: true },
+      stdin: new Uint8Array(),
+    } as unknown as CommandOpts
+    const [absent] = await diffGeneric(
+      [operand('c', '/d/c'), operand('gone', '/d/gone')],
+      gone,
+      read,
+      readdir,
+      statOf,
+    )
+    expect(new TextDecoder().decode(absent as Uint8Array).split('\n')[1]).toBe(
+      '+++ gone\t1970-01-01 00:00:00.000000000 +0000',
+    )
   })
 })

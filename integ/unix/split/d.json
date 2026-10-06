@@ -34,6 +34,26 @@
         "d",
         "l"
       ]
+    },
+    {
+      "id": "split_d_start_values_parse_and_refuse",
+      "seq": 15300311,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/fcC_ss && (cd /data/fcC_ss && printf 'ab' > in && split -b 1 --numeric-suffixes=007 in n && for v in +5 ' 5' zz 100; do split -l 1 --numeric-suffixes=\"$v\" in p 2>&1; echo rc=$?; done; ls | tr '\\n' ' '; echo); rm -r /data/fcC_ss",
+      "expect": {
+        "exit": 0,
+        "stdout": "split: '+5': invalid start value for numerical suffix\nTry 'split --help' for more information.\nrc=1\nsplit: ' 5': invalid start value for numerical suffix\nTry 'split --help' for more information.\nrc=1\nsplit: 'zz': invalid start value for numerical suffix\nTry 'split --help' for more information.\nrc=1\nsplit: numerical suffix start value is too large for the suffix length\nTry 'split --help' for more information.\nrc=1\nin n07 n08 \n",
+        "stderr": ""
+      },
+      "flags": [
+        "numeric-suffixes",
+        "b",
+        "l"
+      ]
     }
   ]
 }

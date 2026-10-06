@@ -195,7 +195,7 @@ jobs:
 
       - name: Bundle browser package without E2B
         working-directory: integ
-        run: node runtime/e2b_install.ts "$RUNNER_TEMP/minimal"
+        run: node runtime/e2b/install.ts "$RUNNER_TEMP/minimal"
 
       - name: Core workspace smoke test on bare install
         run: |

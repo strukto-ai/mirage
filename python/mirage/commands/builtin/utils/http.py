@@ -63,10 +63,11 @@ class HttpResponse:
 
 
 def _with_default_ua(headers: dict[str, str] | None) -> dict[str, str]:
-    merged = {"User-Agent": DEFAULT_USER_AGENT}
-    if headers:
-        merged.update(headers)
-    return merged
+    # Header names are case-insensitive, so a `user-agent` the caller set
+    # replaces the default rather than riding beside it.
+    if headers and any(k.lower() == "user-agent" for k in headers):
+        return dict(headers)
+    return {"User-Agent": DEFAULT_USER_AGENT, **(headers or {})}
 
 
 def _endpoint(url: str) -> tuple[str, int]:

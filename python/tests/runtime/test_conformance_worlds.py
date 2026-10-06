@@ -164,7 +164,7 @@ def _guest_cases(spellings: dict[str, str]) -> list[object]:
 # ── Group 1: nested mount + namespace link are visible to every surface ──
 #
 # The shell and a headless FUSE readdir merge structure; the guest
-# surface is pinned per runtime by integ/runtime/readdir.json.
+# surface is pinned per runtime by integ/runtime/dir/readdir.json.
 
 
 @pytest.mark.asyncio

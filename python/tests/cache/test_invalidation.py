@@ -62,3 +62,31 @@ def test_the_last_writer_out_drops_the_key_counter():
     # `not stale(...)` would pass with the counter left in place.
     assert first == inv.enter("/a")
     inv.leave("/a")
+
+
+def test_a_prefix_invalidation_reaches_the_writers_under_it():
+    inv = Invalidation()
+    under = inv.enter("/a/x")
+    deeper = inv.enter("/a/b/c")
+    stamps = {key: inv.enter(key) for key in ("/b", "/a", "/ab/x")}
+    inv.invalidate_prefix("/a/")
+    assert inv.stale("/a/x", under)
+    assert inv.stale("/a/b/c", deeper)
+    for key, stamp in stamps.items():
+        assert not inv.stale(key, stamp), key
+    for key in ("/a/x", "/a/b/c", *stamps):
+        inv.leave(key)
+    assert inv._keys == {}
+
+
+def test_a_prefix_invalidation_spares_an_excluded_root():
+    inv = Invalidation()
+    nested = inv.enter("/a/nested/f")
+    root = inv.enter("/a/nested")
+    sibling = inv.enter("/a/nested2")
+    inv.invalidate_prefix("/a/", excluded=("/a/nested",))
+    assert not inv.stale("/a/nested/f", nested)
+    assert not inv.stale("/a/nested", root)
+    assert inv.stale("/a/nested2", sibling)
+    for key in ("/a/nested/f", "/a/nested", "/a/nested2"):
+        inv.leave(key)

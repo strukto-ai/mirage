@@ -1,0 +1,57 @@
+{
+  "cases": [
+    {
+      "id": "stdin",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "smolvm",
+        "apple_container"
+      ],
+      "steps": [
+        {
+          "command": "wc -l",
+          "stdin": "a\nb\nc\n",
+          "expect": {
+            "exit": 0,
+            "stdout": "3\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "stdin_absent_eof",
+      "runtimes": [
+        "ssh",
+        "e2b"
+      ],
+      "steps": [
+        {
+          "command": "timeout 5 wc -c",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "stdin_empty_eof",
+      "runtimes": [
+        "ssh",
+        "e2b"
+      ],
+      "steps": [
+        {
+          "command": "timeout 5 wc -c",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\n"
+          },
+          "stdin": ""
+        }
+      ]
+    }
+  ]
+}

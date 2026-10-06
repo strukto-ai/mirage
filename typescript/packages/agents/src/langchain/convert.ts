@@ -14,7 +14,7 @@
 
 import type { ExecuteResponse, FileInfo, GrepMatch } from 'deepagents'
 import type { Refusal } from '@struktoai/mirage-core/types'
-import { withRefusal } from '../io_text.ts'
+import { withRefusal } from '@struktoai/mirage-core/workspace/tools/io_text'
 
 interface IOLike {
   stdoutText: string

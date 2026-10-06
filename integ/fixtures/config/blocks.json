@@ -149,8 +149,49 @@
             "backend": "workspace",
             "mountpoint": "/mnt/d",
             "read": "bounded",
-            "ttl": 600
+            "ttl": 600,
+            "index": {
+              "type": "ram",
+              "ttl": 37
+            }
           }
+        }
+      }
+    },
+    {
+      "name": "mount block: a redis index, every key",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "disk",
+            "config": {
+              "root": "/tmp/x"
+            },
+            "index": {
+              "type": "redis",
+              "ttl": 41,
+              "url": "redis://localhost:6379/0",
+              "key_prefix": "t:"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "index block: a fractional ttl",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "index": {
+              "type": "ram",
+              "ttl": 0.5
+            }
+          }
+        },
+        "index": {
+          "type": "redis",
+          "ttl": 0.5
         }
       }
     },

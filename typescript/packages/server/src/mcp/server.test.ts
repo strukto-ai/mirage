@@ -45,7 +45,7 @@ describe('createMirageMcpServer', () => {
     await client.connect(clientTransport)
     const tools = await client.listTools()
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual(
-      ['edit', 'glob', 'grep', 'ls', 'read', 'session', 'shell', 'write'].sort(),
+      ['edit', 'glob', 'grep', 'ls', 'read', 'shell', 'write'].sort(),
     )
     const write = await client.callTool({
       name: 'write',
@@ -134,12 +134,7 @@ describe('createMirageMcpServer', () => {
     await workspace.vfs.write('/doc.txt', 'external')
     const stale = await client.callTool({
       name: 'edit',
-      arguments: {
-        path: '/doc.txt',
-        old_string: 'external',
-        new_string: 'changed',
-        session_id: workspace.defaultSessionId,
-      },
+      arguments: { path: '/doc.txt', old_string: 'external', new_string: 'changed' },
     })
     expect(stale.isError).toBe(true)
     expect(firstText(stale.content)).toContain('changed since it was last read')

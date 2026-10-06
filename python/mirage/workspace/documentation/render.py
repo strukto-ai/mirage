@@ -15,9 +15,9 @@
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.cli.walk import node_help, owns_argv
 from mirage.commands.spec.types import UsageStyle
-from mirage.context import effective_path_mode, path_allowed
+from mirage.context import effective_path_mode
 from mirage.types import MountMode
-from mirage.utils.hidden import is_glob
+from mirage.utils.hidden import is_glob, path_visible
 from mirage.workspace.lookup.lookup import command_visible, verb_visible
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session.session import SessionState
@@ -42,12 +42,13 @@ def vfs_md(registry: MountRegistry, session: SessionState) -> str:
         "Access is checked for each operation; "
         "command policies may impose further restrictions.",
     ]
+    vis = session.visibility
     for mount in sorted(registry.visible_mounts(), key=lambda m: m.prefix):
         prefix = mount.prefix.rstrip("/") or "/"
         if (
             prefix in {"/dev", "/usr/bin", "/.bash_history"}
             or mount.vfs.name in {"dev", "history", "bin", "document"}
-            or not path_allowed(prefix)
+            or not path_visible(vis, prefix)
         ):
             continue
         mode = effective_path_mode(prefix, mount.prefix, mount.mode)
@@ -58,8 +59,9 @@ def vfs_md(registry: MountRegistry, session: SessionState) -> str:
         # view it can advertise hidden paths or verbs, so describe only
         # structured facts rather than interpolate unrestricted guidance.
         if (
-            session.hidden_paths is None
-            and session.shown_paths is None
+            vis.paths is None
+            and vis.shown is None
+            and vis.commands is None
             and session.commands is None
             and mode == mount.mode
         ):
@@ -71,12 +73,12 @@ def vfs_md(registry: MountRegistry, session: SessionState) -> str:
                 parts.append(
                     mount.vfs.write_prompt.replace("{prefix}", prefix).strip()
                 )
-        if session.shown_paths is not None:
-            for entry in session.shown_paths.entries:
+        if vis.shown is not None:
+            for entry in vis.shown.entries:
                 if (
                     entry.mode is None
                     or is_glob(entry.path)
-                    or not path_allowed(entry.path)
+                    or not path_visible(vis, entry.path)
                 ):
                     continue
                 if registry.try_mount_for(entry.path) is mount:

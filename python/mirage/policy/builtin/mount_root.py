@@ -15,6 +15,8 @@
 from collections.abc import Sequence
 
 from mirage.commands.builtin.generic.tar.mode import is_create_mode
+from mirage.commands.spec.compile import expand_table_long
+from mirage.commands.spec.long_options import GNU_LONG_OPTIONS
 from mirage.policy.base import Policy
 from mirage.policy.types import (
     Action,
@@ -115,6 +117,86 @@ def has_parents_flag(argv: tuple[str, ...]) -> bool:
     return False
 
 
+def rm_options(argv: tuple[str, ...]) -> tuple[bool, bool, bool]:
+    """What an rm line asks of a directory operand, by raw token scan.
+
+    Recurse (-r, -R), remove an empty one (-d), and keep ``/`` out of a
+    recursive removal, which is the default; the last of
+    --preserve-root and --no-preserve-root wins. A long word is read
+    against rm's whole table, so an abbreviation counts too.
+
+    Args:
+        argv (tuple[str, ...]): raw argv after the command name.
+    """
+    recursive = empty_dir = False
+    preserve = True
+    for tok in argv:
+        if not isinstance(tok, str) or tok == "-":
+            continue
+        if tok == "--":
+            break
+        if tok.startswith("--"):
+            name = expand_table_long(
+                GNU_LONG_OPTIONS["rm"], tok.split("=", 1)[0]
+            )
+            if name == ("--recursive",):
+                recursive = True
+            elif name == ("--dir",):
+                empty_dir = True
+            elif name in (("--preserve-root",), ("--no-preserve-root",)):
+                preserve = name == ("--preserve-root",)
+            continue
+        if tok.startswith("-"):
+            recursive = recursive or "r" in tok or "R" in tok
+            empty_dir = empty_dir or "d" in tok
+    return recursive, empty_dir, preserve
+
+
+def fts_name(raw: str) -> str:
+    """An operand as fts hands it back: two or more trailing slashes
+    trimmed to one, so ``///`` reads ``/`` while ``//`` stays.
+
+    Args:
+        raw (str): the operand as typed.
+    """
+    end = len(raw)
+    if end > 2 and raw.endswith("/"):
+        while end > 1 and raw[end - 2] == "/":
+            end -= 1
+    return raw[:end]
+
+
+def rm_root_refusal(
+    path: PathSpec, recursive: bool, empty_dir: bool, preserve: bool
+) -> str:
+    """rm's refusal of a mount root, in GNU rm's order and words.
+
+    A recursive ``.`` or ``..`` is skipped before anything is looked
+    at, a directory without -r or -d is not removed at all, and a
+    recursive ``/`` meets the root failsafe; only what is left reaches
+    the mountpoint and is busy.
+
+    Args:
+        path (PathSpec): the operand naming a mount root.
+        recursive (bool): -r or -R.
+        empty_dir (bool): -d.
+        preserve (bool): the root failsafe is on.
+    """
+    raw = path.raw_path
+    if recursive and raw.rstrip("/").rsplit("/", 1)[-1] in (".", ".."):
+        return f"refusing to remove '.' or '..' directory: skipping '{raw}'"
+    if not recursive and not empty_dir:
+        return f"cannot remove '{raw}': Is a directory"
+    if recursive and preserve and not path.virtual.strip("/"):
+        shown = fts_name(raw)
+        named = "'/'" if shown == "/" else f"'{shown}' (same as '/')"
+        return (
+            f"it is dangerous to operate recursively on {named}\n"
+            "rm: use --no-preserve-root to override this failsafe"
+        )
+    return f"cannot remove '{raw}': Device or resource busy"
+
+
 def names_root(query: MountRootQuery, path: PathSpec) -> bool:
     """Whether an operand names a mount root.
 
@@ -178,20 +260,21 @@ class MountRootPolicy(Policy):
         if not ctx.paths:
             return None
         cmd = ctx.command
-        if cmd in ("rm", "rmdir"):
+        if cmd == "rm":
+            root = first_root(ctx.registry, ctx.paths)
+            if root is not None:
+                return Deny(
+                    rm_root_refusal(root, *rm_options(ctx.argv)),
+                    DenyScope.OPERAND,
+                )
+        elif cmd == "rmdir":
             for p in ctx.paths:
                 if names_root(ctx.registry, p):
-                    if cmd == "rmdir":
-                        msg = (
-                            f"failed to remove '{p.virtual}': "
-                            f"Device or resource busy"
-                        )
-                    else:
-                        msg = (
-                            f"cannot remove '{p.virtual}': "
-                            f"Device or resource busy"
-                        )
-                    return Deny(msg, DenyScope.OPERAND)
+                    return Deny(
+                        f"failed to remove '{p.virtual}': "
+                        f"Device or resource busy",
+                        DenyScope.OPERAND,
+                    )
         elif cmd == "mv":
             # The source is a slot, so it is read off the positionals:
             # `mv -t /mnt f` moves INTO a mount root, which is ordinary.

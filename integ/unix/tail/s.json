@@ -1,0 +1,79 @@
+{
+  "cases": [
+    {
+      "id": "tail_s_accepts_every_strtod_spelling",
+      "seq": 15400006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "n=0; for v in ' 1' $'\\r1' $'\\t1' '+1' '.5' '1.' '1e2' '+.5e1' '0x10' '0x1p4' '0x.8p1' '0x10.8' inf infinity INF 00; do tail -s \"$v\" -n1 /data/a.txt > /dev/null && n=$((n+1)); done; echo accepted=$n; tail --sleep-interval=0.5 -n1 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "accepted=16\nbaz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s",
+        "n"
+      ]
+    },
+    {
+      "id": "tail_s_refuses_and_quotes_what_strtod_refuses",
+      "seq": 15400007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "n=0; for v in $'1\\r' '1 ' $'1\\t' '' 1_0 1x 0x 1e 1e+ 1,5 . 1.5.5 0xp1 'inf inity' -1 nan NAN 'nan(x)' 1xé $'1x\\r' $'1x\\177' \"1x'\" '1x\\'; do tail -s \"$v\" /data/a.txt || n=$((n+1)); done; echo refused=$n",
+      "expect": {
+        "exit": 0,
+        "stdout": "refused=23\n",
+        "stderr": "tail: invalid number of seconds: '1\\r'\ntail: invalid number of seconds: '1 '\ntail: invalid number of seconds: '1\\t'\ntail: invalid number of seconds: ''\ntail: invalid number of seconds: '1_0'\ntail: invalid number of seconds: '1x'\ntail: invalid number of seconds: '0x'\ntail: invalid number of seconds: '1e'\ntail: invalid number of seconds: '1e+'\ntail: invalid number of seconds: '1,5'\ntail: invalid number of seconds: '.'\ntail: invalid number of seconds: '1.5.5'\ntail: invalid number of seconds: '0xp1'\ntail: invalid number of seconds: 'inf inity'\ntail: invalid number of seconds: '-1'\ntail: invalid number of seconds: 'nan'\ntail: invalid number of seconds: 'NAN'\ntail: invalid number of seconds: 'nan(x)'\ntail: invalid number of seconds: '1x\\303\\251'\ntail: invalid number of seconds: '1x\\r'\ntail: invalid number of seconds: '1x\\177'\ntail: invalid number of seconds: '1x\\''\ntail: invalid number of seconds: '1x\\\\'\n"
+      },
+      "flags": [
+        "s"
+      ]
+    }
+  ]
+}

@@ -29,9 +29,7 @@
         "stdout": "warning: low memory\ninfo: all good\nwarning: low memory\ninfo: all good\n@@\nnote: done\nerror: disk full\nwarning: low memory\ninfo: all good\nerror: timeout\nnote: done\nerror: disk full\nwarning: low memory\nwarning: low memory\n",
         "stderr": ""
       },
-      "flags": [
-        "A"
-      ]
+      "flags": ["A", "e", "C", "context_separator", "passthru"]
     }
   ]
 }

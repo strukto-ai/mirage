@@ -17,6 +17,7 @@ from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.arith import evaluate_arith
+from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ArithError
 from mirage.workspace.executor.builtins.shared import (
     readonly_refusal,
@@ -99,7 +100,7 @@ async def handle_let(
         except PolicyDenied as exc:
             return refusal("let", exc)
         if error is not None:
-            err = f"bash: let: {expr}: {error}\n".encode()
+            err = encode_text(f"bash: let: {expr}: {error}\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),

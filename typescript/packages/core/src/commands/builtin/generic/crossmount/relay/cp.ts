@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { cpGeneric, parseFlags } from '../../cp.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
@@ -66,6 +67,8 @@ export async function runCp(
   ns?: NamespaceView,
   // The working directory a typed link source resolves against.
   cwd = '/',
+  // Where -i reads its answers.
+  stdin: ByteSource | null = null,
 ): Promise<CrossResult> {
   const flat = flatten(scopes)
   const stat = statOp(dispatch)
@@ -88,7 +91,7 @@ export async function runCp(
     await dispatch('mkdir', p)
   }
   const strategy = { readBytes, write, mkdir, readdir }
-  return cpGeneric(
+  const [out, io] = await cpGeneric(
     flat,
     stat,
     strategy,
@@ -97,6 +100,22 @@ export async function runCp(
     storageKey,
     undefined,
     undefined,
-    links === undefined ? undefined : { links, dispatch, cwd, relay: strategy, relayStat: stat },
+    links === undefined
+      ? undefined
+      : {
+          links,
+          dispatch,
+          cwd,
+          relay: strategy,
+          relayStat: stat,
+          ...(ns?.visibility !== undefined ? { visibility: ns.visibility } : {}),
+        },
+    stdin,
   )
+  // Every read went through the dispatcher, whose cold read keeps what the
+  // file cache may hold; listing a read path again would keep a filetype
+  // renderer's output there, which cat would then print. A written path
+  // stays listed. Mirrors Python's run_cp.
+  io.cache = io.cache.filter((p) => !(p in io.reads))
+  return [out, io]
 }

@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "rm_R_removes_a_tree_like_r",
+      "seq": 15600501,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcF_rm/d/e /data/fcF_rm/g/h && echo k > /data/fcF_rm/keep && echo f > /data/fcF_rm/d/e/f && echo i > /data/fcF_rm/g/h/i && rm -R /data/fcF_rm/d; echo rc=$?; rm -Rv /data/fcF_rm/g; ls /data/fcF_rm; rm -R /data/fcF_rm; echo rc=$?; test -e /data/fcF_rm; echo gone=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nremoved '/data/fcF_rm/g/h/i'\nremoved directory '/data/fcF_rm/g/h'\nremoved directory '/data/fcF_rm/g'\nkeep\nrc=0\ngone=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "R",
+        "v"
+      ]
+    }
+  ]
+}

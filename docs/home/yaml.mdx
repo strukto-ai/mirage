@@ -15,6 +15,7 @@ A workspace can be described entirely in YAML and loaded with one call — `load
 | `mounts` | map | required | Prefix to mount block. See below. |
 | `mode` | `read` \| `write` \| `exec` | `write` | The mode a mount inherits when it declares none. |
 | `read` | `fresh` \| `bounded` | `bounded` | The read policy a mount inherits when it declares none. There is deliberately no top-level `ttl:` — see [the bound](#the-bound). |
+| `command_limits` | map | — | Per-command caps for every session. See [command limits](#command-limits). |
 | `clis` | map | — | Installed CLIs, keyed by head word. |
 | `runtimes` | list | — | The workspace's ordered runtime world. |
 | `profiles` / `profile` | map / string | — | Permission documents, and the default one. |
@@ -32,6 +33,7 @@ A workspace can be described entirely in YAML and loaded with one call — `load
 | `mode` | `read` \| `write` \| `exec` | top-level `mode` | This mount's mode. |
 | `read` | `fresh` \| `bounded` | top-level `read` | How this mount's cached bytes are served. |
 | `ttl` | integer (seconds) | `600` | The staleness bound for this mount's cached bytes and cached listings, under both `bounded` and `fresh`. |
+| `index` | block | top-level `index` | This mount's own listing store, the top-level `index:` keys (`type`, `ttl`, `url`, `key_prefix`). It replaces the top-level block whole; see [a mount's own index](#a-mounts-own-index). |
 | `command_limits` | map | `{}` | Per-command caps for this mount. |
 | `backend` | `workspace` \| `fuse` \| `fskit` | `workspace` | Whether the mount also registers a real mountpoint. |
 | `mountpoint` | path | — | Where, for the kernel backends. |
@@ -54,6 +56,51 @@ mounts:
     vfs: ram
 ```
 
+## Command limits
+
+`cat`, `grep`, `rg`, `head`, and `tail` cap their output at 2000 lines, and
+every command stops after 600 seconds. Change that with `command_limits` in
+three places: at the top level for every session, on a mount for commands
+that run on it, and on a profile for sessions created with it:
+
+```yaml
+command_limits:
+  head:
+    max_lines: 500
+    timeout_seconds: 30
+mounts:
+  /data:
+    vfs: ram
+    mode: WRITE
+    command_limits:
+      grep:
+        max_lines: 50
+        on_exceed: error
+profiles:
+  researcher:
+    command_limits:
+      head:
+        max_lines: 5000
+```
+
+A command's limit comes from the first place that names it: the session's
+profile, the mount the command runs on, the workspace, then the built-in
+default. A command that spans several mounts takes the tightest of their
+limits. An entry replaces that command's whole limit, so restate
+`timeout_seconds` if you still want a deadline; commands it does not name keep
+their defaults.
+
+- `max_lines` / `max_bytes` cap the output; `null` means no cap.
+- `timeout_seconds` is a deadline; a command that runs past it exits `124`.
+- `on_exceed: truncate` (default) keeps the capped output, adds a stderr
+  notice, and leaves the exit code alone. `on_exceed: error` drops the output
+  and exits `1`, so `&&` and `||` see the failure.
+
+Caps apply to what each command prints, one command at a time:
+`cat big.txt; echo end` still prints `end`. Data going into a pipe, a
+redirect, or `$(...)` is never cut, so `cat big.txt | wc -l` counts every
+line. See [Output Limits](/python/quickstart#output-limits) for the SDK form.
+
 ## The read policy
 
 `read: bounded` serves cached bytes and cached directory listings without asking the backend, for as long as `ttl:` allows. `read: fresh` revalidates against the backend's content token before serving a cached copy, at the cost of one backend stat per file read, and checks a cached listing before serving it: against the listing's stored version where the backend has one, otherwise by re-listing the folder once per command. See [listings under `fresh`](/home/cache#listings-under-fresh).
@@ -67,7 +114,7 @@ mounts:
 
 ### The bound
 
-`ttl:` lives only in a mount block. At the top level it would sit beside `index: {ttl: ...}` and mean a different thing, so the workspace-level default is `read:` alone and a workspace-level `bounded` takes 600 seconds.
+A bare `ttl:` lives only in a mount block. At the top level it would sit beside `index: {ttl: ...}` and mean a different thing, so the workspace-level default is `read:` alone and a workspace-level `bounded` takes 600 seconds. Inside a mount the two are told apart by nesting: `ttl:` is the bound, and a mount's own `index: {ttl: ...}` is how long its listing store keeps a listing, never longer than that bound.
 
 Each listing write is capped by the mount's `ttl`, under both policies. Backends may expire listings sooner, and mounts without a listing cache still keep none. `fresh` also checks listings, so a file added or removed outside mirage shows in the next `ls`, `find` or glob. A cached listing is served when:
 
@@ -88,6 +135,27 @@ mounts:
 ```
 
 Existing listings in a persisted Redis index retain their stored expiry until rewritten.
+
+### A mount's own index
+
+A mount's `index:` block takes the top-level `index:` keys and replaces that block for this mount, whole: nothing is inherited from it, so `type:` is required, a missing `ttl:` is 600 seconds, and a Redis store's `url:` and `key_prefix:` take the block's own defaults, not the top-level ones. A mount without one takes the top-level `index:`, and with neither, the backend's own listing lifetime ([Index TTL](/home/cache#index-ttl)). `index: null` is the same as leaving it out. The file cache has no per-mount block; a mount's `cache:` is refused.
+
+```yaml
+index: {type: redis, url: redis://cache:6379/0, ttl: 600}
+
+mounts:
+  /drive:
+    vfs: gdrive
+    read: bounded
+    ttl: 86400
+    index: {type: ram, ttl: 86400}   # this mount's listings, in RAM, for a day
+  /work:
+    vfs: disk
+    config: {root: /srv/work}
+    index: {type: ram, ttl: 0}       # this mount caches no listings
+```
+
+The mount's `ttl:` still caps every listing write, so a mount `index: {ttl: ...}` can only shorten how long a listing lives; `/drive` keeps listings for a day because its `ttl:` is raised to match. `fresh` is judged on the mount's own index: a zero `ttl` there takes listing-only `fresh` away from `disk` even under a nonzero top-level `index:`.
 
 Two shapes are refused, because a `read`/`ttl` pair that disagrees is almost always a typo:
 

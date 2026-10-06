@@ -1,0 +1,191 @@
+{
+  "cases": [
+    {
+      "id": "seek_then_read_reads_a_range",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "lines.txt": "one\ntwo\n",
+              "sub/inner.txt": "in\n",
+              "digits.txt": "0123456789"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "f = open('/data/digits.txt')\nf.seek(2)\nprint(f.tell(), repr(f.read(4)), f.tell(), repr(f.read()))",
+            "js": "const f = std.open('/data/digits.txt', 'r')\nf.seek(2, std.SEEK_SET)\nconst at = f.tell()\nconst a = f.readAsString(4)\nconsole.log(at, JSON.stringify(a), f.tell(), JSON.stringify(f.readAsString()))"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "2 '2345' 6 '6789'\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "2 \"2345\" 6 \"6789\"\n"
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "f = open('/data/digits.txt', 'rb')\nf.seek(-3, 2)\nprint(f.read(), f.tell())",
+            "js": "const f = std.open('/data/digits.txt', 'r')\nf.seek(-3, std.SEEK_END)\nconsole.log(f.readAsString(), f.tell())"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "b'789' 10\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "789 10\n"
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "f = open('/data/digits.txt', 'rb')\nf.seek(20)\nprint(f.read(4), f.tell())",
+            "js": "const f = std.open('/data/digits.txt', 'r')\nf.seek(20, std.SEEK_SET)\nconsole.log(JSON.stringify(f.readAsString(4)), f.tell(), f.eof())"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "b'' 20\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "\"\" 20 true\n"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "pread_reads_without_moving_the_position",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "lines.txt": "one\ntwo\n",
+              "sub/inner.txt": "in\n",
+              "digits.txt": "0123456789"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nfd = os.open('/data/digits.txt', os.O_RDONLY)\nprint(os.pread(fd, 4, 3), os.pread(fd, 4, 8), os.pread(fd, 4, 20))\nprint(os.read(fd, 2), os.lseek(fd, 0, os.SEEK_CUR))\nos.close(fd)"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "b'3456' b'89' b''\nb'01' 2\n"
+          },
+          "expect_on": {
+            "monty": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "'module' object has no attribute 'O_RDONLY'"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "seek_reads_across_a_chunk_edge",
+      "note": "1048576 is READ_CHUNK: a read-only open of a file past it reads ranges, so these reads straddle the first chunk's end and start inside the second.",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "f = open('/data/big.txt', 'w')\nf.write(''.join('line %d\\n' % i for i in range(150000)))\nf.close()",
+            "js": "const f = std.open('/data/big.txt', 'w')\nf.puts(Array.from({ length: 150000 }, (_, i) => 'line ' + i + '\\n').join(''))\nf.close()"
+          },
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "f = open('/data/big.txt', 'rb')\nf.seek(1048570)\na = f.read(12)\nf.seek(1500000)\nb = f.read(10)\nprint(a, b, f.tell())",
+            "js": "const f = std.open('/data/big.txt', 'r')\nf.seek(1048570, std.SEEK_SET)\nconst a = f.readAsString(12)\nf.seek(1500000, std.SEEK_SET)\nconst b = f.readAsString(10)\nconsole.log(JSON.stringify(a), JSON.stringify(b), f.tell())"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "b'6334\\nline 96' b'ne 134259\\n' 1500010\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "\"6334\\nline 96\" \"ne 134259\\n\" 1500010\n"
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "import os\nfd = os.open('/data/big.txt', os.O_RDONLY)\nprint(os.pread(fd, 12, 1048570), os.lseek(fd, 0, os.SEEK_CUR))"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "b'6334\\nline 96' 0\n"
+          },
+          "expect_on": {
+            "monty": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "'module' object has no attribute 'O_RDONLY'"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

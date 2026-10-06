@@ -1,0 +1,40 @@
+{
+  "cases": [
+    {
+      "id": "readlink_z_ends_each_name_with_nul",
+      "seq": 15000051,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -s a.txt /data/fc0l; readlink -z /data/fc0l /data/fc0l | od -An -c; readlink --zero -n /data/fc0l | od -An -c; rm -f /data/fc0l",
+      "expect": {
+        "exit": 0,
+        "stdout": "   a   .   t   x   t  \\0   a   .   t   x   t  \\0\n   a   .   t   x   t\n",
+        "stderr": ""
+      },
+      "flags": [
+        "z",
+        "zero",
+        "n"
+      ]
+    }
+  ]
+}

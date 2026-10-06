@@ -18,7 +18,7 @@ import { mkdir } from './mkdir.ts'
 import { rmRecursive } from './rm.ts'
 import { rmdir } from './rmdir.ts'
 import { unlink } from './unlink.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 import {
   jsonResponse,
   makeAccessor,
@@ -46,7 +46,7 @@ describe('writeBytes', () => {
       return new Response(null, { status: 204 })
     })
     vi.stubGlobal('fetch', fetch)
-    await writeBytes(makeAccessor(), spec('/volume/reports/a.txt'), ENC.encode('hi'))
+    await write(makeAccessor(), spec('/volume/reports/a.txt'), ENC.encode('hi'))
     const put = calls.find((c) => c.method === 'PUT')
     expect(put).toBeDefined()
     expect(put?.url).toContain('/fs/files/')
@@ -57,11 +57,9 @@ describe('writeBytes', () => {
   it('raises ENOENT when the parent directory is missing', async () => {
     const { fetch } = routedFetch(() => notFoundResponse())
     vi.stubGlobal('fetch', fetch)
-    const err = (await writeBytes(
-      makeAccessor(),
-      spec('/volume/missing/a.txt'),
-      ENC.encode('x'),
-    ).catch((e: unknown) => e)) as Error & { code?: string }
+    const err = (await write(makeAccessor(), spec('/volume/missing/a.txt'), ENC.encode('x')).catch(
+      (e: unknown) => e,
+    )) as Error & { code?: string }
     expect(err.code).toBe('ENOENT')
   })
 
@@ -71,11 +69,9 @@ describe('writeBytes', () => {
       return new Response(null, { status: 200 })
     })
     vi.stubGlobal('fetch', fetch)
-    const err = (await writeBytes(
-      makeAccessor(),
-      spec('/volume/file.txt/a.txt'),
-      ENC.encode('x'),
-    ).catch((e: unknown) => e)) as Error & { code?: string }
+    const err = (await write(makeAccessor(), spec('/volume/file.txt/a.txt'), ENC.encode('x')).catch(
+      (e: unknown) => e,
+    )) as Error & { code?: string }
     expect(err.code).toBe('ENOTDIR')
   })
 })
@@ -94,13 +90,15 @@ describe('create', () => {
 })
 
 describe('mkdir', () => {
-  it('rejects existing targets without parents', async () => {
-    const { fetch } = routedFetch(() => new Response(null, { status: 200 }))
+  it('names the operand when the parent is missing', async () => {
+    const { fetch, calls } = routedFetch(() => notFoundResponse())
     vi.stubGlobal('fetch', fetch)
-    const err = (await mkdir(makeAccessor(), spec('/volume/exists')).catch(
+    const err = (await mkdir(makeAccessor(), spec('/volume/missing/child')).catch(
       (e: unknown) => e,
     )) as Error & { code?: string }
-    expect(err.code).toBe('EEXIST')
+    expect(err.code).toBe('ENOENT')
+    expect(err.message).toBe('/volume/missing/child')
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false)
   })
 
   it('creates directories via PUT when parents=true', async () => {

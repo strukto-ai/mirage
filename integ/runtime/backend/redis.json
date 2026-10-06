@@ -1,0 +1,112 @@
+{
+  "requires": [
+    "env:REDIS_URL"
+  ],
+  "cases": [
+    {
+      "id": "redis_read",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/redis": {
+            "vfs": "redis"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "echo redis says hi > /redis/notes.txt"
+        },
+        {
+          "command": "python3 -c \"from pathlib import Path; print(Path('/redis/notes.txt').read_text().strip())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "redis says hi\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "redis_guest_open_modes",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/redis": {
+            "vfs": "redis"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"open('/redis/notes.txt', 'w').close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": [
+              "create /redis/notes.txt"
+            ]
+          }
+        },
+        {
+          "command": "python3 -c \"f = open('/redis/notes.txt', 'a'); f.write('hey'); f.close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": [
+              "append /redis/notes.txt"
+            ]
+          }
+        },
+        {
+          "command": "cat /redis/notes.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "hey"
+          }
+        }
+      ]
+    },
+    {
+      "id": "redis_guest_open_modes_js",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/redis": {
+            "vfs": "redis"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "js -e \"const f = std.open('/redis/notes.txt', 'w'); f.puts('hey'); f.close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": [
+              "create /redis/notes.txt"
+            ]
+          }
+        },
+        {
+          "command": "cat /redis/notes.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "hey"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "xm_chown_both_mounts",
+      "seq": 9900011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf a > /data/xm_chown && printf b > /data2/xm_chown && chown 123:456 /data/xm_chown /data2/xm_chown && stat -c \"%u:%g\" /data/xm_chown /data2/xm_chown",
+      "expect": {
+        "exit": 0,
+        "stdout": "123:456\n123:456\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_chown_continues_after_missing",
+      "seq": 9900012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "chown 123:456 /data/xm_chown_missing /data2/xm_chown; echo status:$?; stat -c \"%u:%g\" /data2/xm_chown",
+      "expect": {
+        "exit": 0,
+        "stdout": "status:1\n123:456\n",
+        "stderr": "chown: cannot access '/data/xm_chown_missing': No such file or directory\n"
+      }
+    }
+  ]
+}

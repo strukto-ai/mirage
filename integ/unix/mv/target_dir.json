@@ -104,6 +104,42 @@
       "flags": [
         "T"
       ]
+    },
+    {
+      "id": "mv_t_T_refusals_leave_everything_in_place",
+      "seq": 15600202,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcF_m2/d && echo k > /data/fcF_m2/d/k && echo a > /data/fcF_m2/a.txt && mv -T /data/fcF_m2/a.txt /data/fcF_m2/d; echo rc=$?; mv -t /data/fcF_m2/nosuch /data/fcF_m2/a.txt; echo rc=$?; mv -t /data/fcF_m2 -T /data/fcF_m2/a.txt; echo rc=$?; cat /data/fcF_m2/a.txt /data/fcF_m2/d/k; rm -r /data/fcF_m2",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\na\nk\n",
+        "stderr": "mv: cannot overwrite directory '/data/fcF_m2/d' with non-directory '/data/fcF_m2/a.txt'\nmv: target directory '/data/fcF_m2/nosuch': No such file or directory\nmv: cannot combine --target-directory (-t) and --no-target-directory (-T)\n"
+      },
+      "flags": [
+        "t",
+        "T"
+      ]
     }
   ]
 }

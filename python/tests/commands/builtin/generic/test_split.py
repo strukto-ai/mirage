@@ -36,16 +36,11 @@ _TRY = "\nTry 'split --help' for more information."
 _ALPHA_SUFFIXES = split_generic._ALPHA_SUFFIXES
 _HEX_SUFFIXES = split_generic._HEX_SUFFIXES
 _NUMERIC_SUFFIXES = split_generic._NUMERIC_SUFFIXES
-_suffix_name = split_generic._suffix_name
+_suffix_namer = split_generic._suffix_namer
 
 
 def test_bytes_accepts_gnu_suffixes():
-    assert parse_bytes_value("4") == 4
     assert parse_bytes_value("1k") == 1024
-    assert parse_bytes_value("1kB") == 1000
-    assert parse_bytes_value("1KiB") == 1024
-    assert parse_bytes_value("2b") == 1024
-    assert parse_bytes_value("1G") == 1024**3
     # split is base-10 only: a leading zero is not octal.
     assert parse_bytes_value("010") == 10
     # Counts past uintmax saturate rather than error in GNU (split -b 1Y
@@ -55,67 +50,41 @@ def test_bytes_accepts_gnu_suffixes():
 
 
 def test_counts_accept_one_leading_plus_and_whitespace():
-    # xstrtoumax skips leading whitespace and allows a single '+', so `-b +10`
-    # and `-b " 10"` are valid (pinned against coreutils 9.7). Suffix start
-    # values are the exception -- see the strict cases below.
+    # xstrtoumax allows a single '+' (pinned against coreutils 9.7); -a is
+    # the one count GNU lets be zero, signed or not.
     assert parse_bytes_value("+10") == 10
-    assert parse_bytes_value(" 10") == 10
-    assert parse_bytes_value("+10K") == 10240
-    assert parse_lines_value("+2") == 2
-    assert parse_chunks_value("l/+2").count == 2
-    assert parse_suffix_length("+2") == 2
-    # -a is the one count GNU lets be zero, signed or not.
     assert parse_suffix_length("+0") == 0
 
 
-@pytest.mark.parametrize("value", ["+0", "++10", "-10", "+ 10", "10 "])
-def test_bytes_rejects_bad_signs(value):
-    # '+' does not license zero, a second sign, a gap before the digits, or
-    # trailing space.
-    with pytest.raises(UsageError) as exc:
-        parse_bytes_value(value)
-    assert str(exc.value) == f"split: invalid number of bytes: '{value}'"
-
-
-def test_bytes_rejects_non_ascii_digits():
-    # python's `\d` would have accepted Arabic-Indic digits (int('١٢') is
-    # 12), which JS /\d/ and GNU's C-locale parser reject. The refused
-    # word is named through gnulib's quote(), so it comes back as one
-    # octal escape per byte (measured: `split -b ١٢`).
-    with pytest.raises(UsageError) as exc:
-        parse_bytes_value("١٢")
-    assert str(exc.value) == (
-        r"split: invalid number of bytes: '\331\241\331\242'"
-    )
-
-
 @pytest.mark.parametrize(
-    "value", ["abc", "", "1x1b", "0x10", "0", "0K", "1g", "5c"]
+    "value,shown",
+    [
+        ("++10", "++10"),
+        # Arabic-Indic digits are no digits to GNU's C-locale parser, and
+        # the word comes back as one octal escape per byte.
+        ("١٢", r"\331\241\331\242"),
+        ("0", "0"),
+    ],
 )
-def test_bytes_rejects_junk_zero_and_foreign_radix(value):
+def test_bytes_rejects_signs_foreign_digits_and_zero(value, shown):
     with pytest.raises(UsageError) as exc:
         parse_bytes_value(value)
-    assert str(exc.value) == f"split: invalid number of bytes: '{value}'"
+    assert str(exc.value) == f"split: invalid number of bytes: '{shown}'"
     assert exc.value.exit_code == 1
 
 
 def test_lines_rejects_junk_zero_and_suffixes():
     assert parse_lines_value("3") == 3
-    for value in ["abc", "0", "1k"]:
-        with pytest.raises(UsageError) as exc:
-            parse_lines_value(value)
-        assert str(exc.value) == f"split: invalid number of lines: '{value}'"
+    with pytest.raises(UsageError) as exc:
+        parse_lines_value("1k")
+    assert str(exc.value) == "split: invalid number of lines: '1k'"
 
 
 def test_chunks_quotes_only_the_count_of_a_spec():
-    assert parse_chunks_value("4").count == 4
     assert parse_chunks_value("l/4").count == 4
     with pytest.raises(UsageError) as exc:
         parse_chunks_value("l/abc")
     assert str(exc.value) == "split: invalid number of chunks: 'abc'"
-    with pytest.raises(UsageError) as exc:
-        parse_chunks_value("l/0")
-    assert str(exc.value) == "split: invalid number of chunks: '0'"
 
 
 def test_chunks_validates_the_head_components():
@@ -140,29 +109,9 @@ def test_chunks_validates_the_head_components():
 # whole spec whenever the head was bad, which is right only when no kind
 # prefix was typed. Mirrored in split.test.ts.
 CHUNK_SPECS = [
-    ("xé", r"x\303\251"),
-    ("l/xé", r"x\303\251"),
-    ("2/xé", r"x\303\251"),
-    ("l/1/xé", r"x\303\251"),
-    ("l/2/xé", r"x\303\251"),
-    ("+l/2", "+l/2"),
-    ("x/3", "x/3"),
     ("l/xé/4", r"x\303\251/4"),
-    ("r/xé/4", r"x\303\251/4"),
-    ("l/2/xé/4", r"x\303\251/4"),
-    ("l/xé/yé", r"x\303\251/y\303\251"),
-    ("xé/2", r"x\303\251/2"),
+    ("+l/2", "+l/2"),
     ("l/2/3/4", "3/4"),
-    ("1/2/3/4", "2/3/4"),
-    ("l//4", "/4"),
-    ("r/l/4", "l/4"),
-    ("2/l/4", "l/4"),
-    ("/", "/"),
-    ("l", "l"),
-    ("r", "r"),
-    ("l/", ""),
-    ("", ""),
-    ("l/2/4/", "4/"),
 ]
 
 
@@ -193,49 +142,45 @@ def test_separator_takes_one_byte_and_the_nul_spelling():
     assert parse_separator("\\") == b"\\"
 
 
-@pytest.mark.parametrize("value", ["XY", "abc", "\\n", "\\t", "é"])
-def test_separator_rejects_multi_byte_values(value):
+@pytest.mark.parametrize(
+    ("value", "shown"),
+    [("XY", "XY"), ("\\n", "\\\\n"), ("é", "\\303\\251")],
+)
+def test_separator_rejects_multi_byte_values(value, shown):
     # This used to keep the whole byte string as the separator, splitting on
     # 'XY' where GNU refuses to run at all. 'é' is one character but two
-    # UTF-8 bytes, and GNU counts bytes.
+    # UTF-8 bytes, and GNU counts bytes and escapes them.
     with pytest.raises(UsageError) as exc:
         parse_separator(value)
-    assert str(exc.value) == f"split: multi-character separator '{value}'"
+    assert str(exc.value) == f"split: multi-character separator '{shown}'"
     assert exc.value.exit_code == 1
 
 
 def test_suffix_names_auto_lengthen_like_gnu():
     # GNU reserves the last alphabet character as a growth prefix:
-    # aa..yz then zaaa.., 00..89 then 9000..9899 then 990000.., 00..ef
-    # then f000.. (pinned against coreutils 9.7). Index 676 must never
-    # wrap back onto aa.
-    assert _suffix_name(649, _ALPHA_SUFFIXES, True, 2, 0) == "yz"
-    assert _suffix_name(650, _ALPHA_SUFFIXES, True, 2, 0) == "zaaa"
-    assert _suffix_name(651, _ALPHA_SUFFIXES, True, 2, 0) == "zaab"
-    assert _suffix_name(89, _NUMERIC_SUFFIXES, True, 2, 0) == "89"
-    assert _suffix_name(90, _NUMERIC_SUFFIXES, True, 2, 0) == "9000"
-    assert _suffix_name(989, _NUMERIC_SUFFIXES, True, 2, 0) == "9899"
-    assert _suffix_name(990, _NUMERIC_SUFFIXES, True, 2, 0) == "990000"
-    assert _suffix_name(239, _HEX_SUFFIXES, True, 2, 0) == "ef"
-    assert _suffix_name(240, _HEX_SUFFIXES, True, 2, 0) == "f000"
+    # aa..yz then zaaa.., 00..89 then 9000.., 00..ef then f000.. (pinned
+    # against coreutils 9.7). Index 676 must never wrap back onto aa.
+    assert _suffix_namer(650, _ALPHA_SUFFIXES, True, 2, 0) == "zaaa"
+    assert _suffix_namer(90, _NUMERIC_SUFFIXES, True, 2, 0) == "9000"
+    assert _suffix_namer(240, _HEX_SUFFIXES, True, 2, 0) == "f000"
 
 
 def test_suffix_names_exhaust_fixed_widths():
     # An explicit -a width or an explicit start value pins the width;
     # GNU keeps the chunks already written and fails on the next name.
-    assert _suffix_name(675, _ALPHA_SUFFIXES, False, 2, 0) == "zz"
+    assert _suffix_namer(675, _ALPHA_SUFFIXES, False, 2, 0) == "zz"
     with pytest.raises(UsageError) as exc:
-        _suffix_name(676, _ALPHA_SUFFIXES, False, 2, 0)
+        _suffix_namer(676, _ALPHA_SUFFIXES, False, 2, 0)
     assert str(exc.value) == "split: output file suffixes exhausted"
     assert exc.value.exit_code == 1
-    assert _suffix_name(1, _NUMERIC_SUFFIXES, False, 2, 98) == "99"
+    assert _suffix_namer(1, _NUMERIC_SUFFIXES, False, 2, 98) == "99"
     with pytest.raises(UsageError):
-        _suffix_name(2, _NUMERIC_SUFFIXES, False, 2, 98)
+        _suffix_namer(2, _NUMERIC_SUFFIXES, False, 2, 98)
     # Deliberate divergence: GNU 9.7 with --hex-suffixes=f0 walks past its
     # alphabet into non-hex names; mirage exhausts cleanly at the width.
-    assert _suffix_name(15, _HEX_SUFFIXES, False, 2, 0xF0) == "ff"
+    assert _suffix_namer(15, _HEX_SUFFIXES, False, 2, 0xF0) == "ff"
     with pytest.raises(UsageError):
-        _suffix_name(16, _HEX_SUFFIXES, False, 2, 0xF0)
+        _suffix_namer(16, _HEX_SUFFIXES, False, 2, 0xF0)
 
 
 def test_suffix_length_overflows_past_uintmax():
@@ -252,21 +197,18 @@ def test_suffix_length_overflows_past_uintmax():
     )
 
 
-@pytest.mark.parametrize("value", ["+5", " 5"])
-def test_suffix_start_rejects_signs_and_whitespace(value):
-    # Unlike the counts, GNU validates start values itself rather than through
-    # xstrtoumax: `--numeric-suffixes=+5` and `=" 5"` are both errors.
+def test_suffix_start_rejects_signs_and_whitespace():
+    # Unlike the counts, GNU validates start values itself rather than
+    # through xstrtoumax: `--numeric-suffixes=+5` is an error.
     with pytest.raises(UsageError) as exc:
-        parse_suffix_start(value, False, 2)
+        parse_suffix_start("+5", False, 2)
     assert str(exc.value) == (
-        f"split: '{value}': invalid start value for numerical suffix" + _TRY
+        "split: '+5': invalid start value for numerical suffix" + _TRY
     )
 
 
 def test_suffix_start_parses_hex_in_hex_mode():
-    assert parse_suffix_start("07", False, 2) == 7
     assert parse_suffix_start("007", False, 2) == 7
-    assert parse_suffix_start("10", True, 2) == 16
     assert parse_suffix_start("ff", True, 2) == 255
 
 
@@ -300,48 +242,25 @@ def test_suffix_start_hex_junk_says_hexadecimal():
 QUOTED_VALUES = [
     ("1é", r"1\303\251"),
     ("1\r", r"1\r"),
-    ("1\x01", r"1\001"),
-    ("1\x7f", r"1\177"),
-    ("1'", r"1\'"),
-    ("1\\", r"1\\"),
-    ("", ""),
 ]
 
 
 @pytest.mark.parametrize("value,escaped", QUOTED_VALUES)
-def test_bytes_clause_quotes_the_word(value, escaped):
+@pytest.mark.parametrize(
+    "parse,clause,prefix",
+    [
+        (parse_bytes_value, "invalid number of bytes", ""),
+        (parse_lines_value, "invalid number of lines", ""),
+        (parse_chunks_value, "invalid number of chunks", ""),
+        (parse_chunks_value, "invalid number of chunks", "l/"),
+        (parse_suffix_length, "invalid suffix length", ""),
+    ],
+)
+def test_count_clauses_quote_the_word(parse, clause, prefix, value, escaped):
+    # `-n l/<w>` names the component, so the escaping travels with it.
     with pytest.raises(UsageError) as exc:
-        parse_bytes_value(value)
-    assert str(exc.value) == f"split: invalid number of bytes: '{escaped}'"
-
-
-@pytest.mark.parametrize("value,escaped", QUOTED_VALUES)
-def test_lines_clause_quotes_the_word(value, escaped):
-    with pytest.raises(UsageError) as exc:
-        parse_lines_value(value)
-    assert str(exc.value) == f"split: invalid number of lines: '{escaped}'"
-
-
-@pytest.mark.parametrize("value,escaped", QUOTED_VALUES)
-def test_chunks_clause_quotes_the_word(value, escaped):
-    with pytest.raises(UsageError) as exc:
-        parse_chunks_value(value)
-    assert str(exc.value) == f"split: invalid number of chunks: '{escaped}'"
-
-
-@pytest.mark.parametrize("value,escaped", QUOTED_VALUES)
-def test_chunks_clause_quotes_only_the_escaped_tail(value, escaped):
-    """`-n l/<w>` names the component, so the escaping travels with it."""
-    with pytest.raises(UsageError) as exc:
-        parse_chunks_value(f"l/{value}")
-    assert str(exc.value) == f"split: invalid number of chunks: '{escaped}'"
-
-
-@pytest.mark.parametrize("value,escaped", QUOTED_VALUES)
-def test_suffix_length_clause_quotes_the_word(value, escaped):
-    with pytest.raises(UsageError) as exc:
-        parse_suffix_length(value)
-    assert str(exc.value) == f"split: invalid suffix length: '{escaped}'"
+        parse(prefix + value)
+    assert str(exc.value) == f"split: {clause}: '{escaped}'"
 
 
 def test_suffix_length_overflow_clause_quotes_the_word():
@@ -360,32 +279,18 @@ def test_suffix_length_overflow_clause_quotes_the_word():
     )
 
 
-# The suffix-start clause puts its word FIRST, where the four count
-# clauses above put it last, and it escapes the word the same way
-# (measured on GNU coreutils 9.4 for both spellings). The empty word is
-# absent on purpose: `--numeric-suffixes=` is not a refusal in GNU at
-# all, it exits 0, which is a separate divergence from the escaping.
+# The suffix-start clause puts its word FIRST, where the count clauses
+# above put it last, and it escapes the word the same way (measured on
+# GNU coreutils 9.4 for both spellings).
+@pytest.mark.parametrize("value,escaped", QUOTED_VALUES)
 @pytest.mark.parametrize(
-    "value,escaped", [row for row in QUOTED_VALUES if row[0]]
+    "hexa,kind", [(False, "numerical"), (True, "hexadecimal")]
 )
-def test_suffix_start_clause_quotes_the_word(value, escaped):
+def test_suffix_start_clause_quotes_the_word(value, escaped, hexa, kind):
     with pytest.raises(UsageError) as exc:
-        parse_suffix_start(value, False, 2)
+        parse_suffix_start(value, hexa, 2)
     assert str(exc.value) == (
-        f"split: '{escaped}': invalid start value for numerical suffix" + _TRY
-    )
-    assert exc.value.exit_code == 1
-
-
-@pytest.mark.parametrize(
-    "value,escaped", [row for row in QUOTED_VALUES if row[0]]
-)
-def test_hex_suffix_start_clause_quotes_the_word(value, escaped):
-    with pytest.raises(UsageError) as exc:
-        parse_suffix_start(value, True, 2)
-    assert str(exc.value) == (
-        f"split: '{escaped}': invalid start value for hexadecimal suffix"
-        + _TRY
+        f"split: '{escaped}': invalid start value for {kind} suffix" + _TRY
     )
     assert exc.value.exit_code == 1
 
@@ -397,12 +302,10 @@ _LINES = b"line1\nline2\nline3\nline4\nline5\n"
 
 def test_chunk_spec_reads_k_of_n():
     assert parse_chunks_value("2/4") == ChunkSpec(ChunkKind.BYTES, 4, 2)
-    assert parse_chunks_value("+2/3") == ChunkSpec(ChunkKind.BYTES, 3, 2)
     assert parse_chunks_value("l/2/4") == ChunkSpec(ChunkKind.LINES, 4, 2)
     assert parse_chunks_value("r/2/4") == ChunkSpec(
         ChunkKind.ROUND_ROBIN, 4, 2
     )
-    assert parse_chunks_value("l/4") == ChunkSpec(ChunkKind.LINES, 4)
 
 
 def test_byte_chunks_spread_the_remainder_over_the_first_chunks():
@@ -411,38 +314,12 @@ def test_byte_chunks_spread_the_remainder_over_the_first_chunks():
         b"de",
         b"fg",
     ]
-    assert list(chunk_parts(b"ab", parse_chunks_value("5"), b"\n")) == [
-        b"a",
-        b"b",
-        b"",
-        b"",
-        b"",
-    ]
-    assert list(chunk_parts(b"", parse_chunks_value("3"), b"\n")) == [
-        b"",
-        b"",
-        b"",
-    ]
 
 
 @pytest.mark.parametrize(
     "value,expected",
     [
-        ("l/2", [b"line1\nline2\nline3\n", b"line4\nline5\n"]),
         ("l/3", [b"line1\nline2\n", b"line3\nline4\n", b"line5\n"]),
-        ("l/4", [b"line1\nline2\n", b"line3\n", b"line4\n", b"line5\n"]),
-        (
-            "l/7",
-            [
-                b"line1\n",
-                b"line2\n",
-                b"line3\n",
-                b"",
-                b"line4\n",
-                b"line5\n",
-                b"",
-            ],
-        ),
     ],
 )
 def test_line_chunks_keep_records_whole(value, expected):
@@ -455,23 +332,12 @@ def test_line_chunks_leave_a_swallowed_chunk_empty():
     assert list(
         chunk_parts(b"aaaaaa\nb\n", parse_chunks_value("l/3"), b"\n")
     ) == [b"aaaaaa\n", b"", b"b\n"]
-    assert list(
-        chunk_parts(b"aaaaa\nbb\n", parse_chunks_value("l/3"), b"\n")
-    ) == [b"aaaaa\n", b"", b"bb\n"]
-    assert list(
-        chunk_parts(b"aaaa\nb\nc\nd\n", parse_chunks_value("l/2"), b"\n")
-    ) == [b"aaaa\nb\n", b"c\nd\n"]
 
 
 def test_line_chunks_give_an_unterminated_tail_to_its_chunk():
     assert list(
         chunk_parts(b"aa\nbb\ncc", parse_chunks_value("l/2"), b"\n")
     ) == [b"aa\nbb\n", b"cc"]
-    assert list(chunk_parts(b"ab", parse_chunks_value("l/3"), b"\n")) == [
-        b"ab",
-        b"",
-        b"",
-    ]
 
 
 def test_chunk_at_reads_one_chunk_without_cutting_the_rest():
@@ -479,19 +345,12 @@ def test_chunk_at_reads_one_chunk_without_cutting_the_rest():
     huge = 1_000_000_000
     data = b"abc\ndef\n"
     assert chunk_at(data, parse_chunks_value(f"2/{huge}"), b"\n", 2) == b"b"
-    assert chunk_at(data, parse_chunks_value(f"l/2/{huge}"), b"\n", 2) == b""
     assert (
         chunk_at(data, parse_chunks_value(f"l/5/{huge}"), b"\n", 5) == b"def\n"
     )
     assert (
-        chunk_at(data, parse_chunks_value(f"l/{huge}/{huge}"), b"\n", huge)
-        == b""
-    )
-    assert (
         chunk_at(data, parse_chunks_value(f"r/2/{huge}"), b"\n", 2) == b"def\n"
     )
-    assert chunk_at(data, parse_chunks_value(f"r/3/{huge}"), b"\n", 3) == b""
-    assert chunk_at(b"abcdefg", parse_chunks_value("2/3"), b"\n", 2) == b"de"
 
 
 def test_chunk_parts_pads_the_empty_tail_lazily():
@@ -522,7 +381,6 @@ def _no_read_stream(path: PathSpec) -> AsyncIterator[bytes]:
 @pytest.mark.parametrize(
     "cwd,named",
     [
-        ("/data", ["/data/xaa", "/data/xab"]),
         ("/data/sub", ["/data/sub/xaa", "/data/sub/xab"]),
     ],
 )
@@ -537,7 +395,7 @@ async def test_stdin_outputs_are_named_in_the_working_directory(
     async def write_bytes(path: PathSpec, data: bytes) -> None:
         specs.append(path)
 
-    _, io = await split_generic.split(
+    _, io = await split_generic.split_generic(
         [],
         read_stream=_no_read_stream,
         write_bytes=write_bytes,

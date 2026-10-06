@@ -18,14 +18,56 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '@struktoai/mirage-node'
 import { buildApp } from '../app.ts'
+import type * as multipart from '../multipart.ts'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
 import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
+
+const limits = vi.hoisted(() => ({ snapshot: undefined as number | undefined }))
+
+vi.mock('../multipart.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof multipart>()
+  return {
+    ...actual,
+    get MAX_SNAPSHOT_PART(): number {
+      return limits.snapshot ?? actual.MAX_SNAPSHOT_PART
+    },
+  }
+})
 
 const LoadAccountConfig = z.strictObject({ account: z.string().default('default') })
 type LoadAccountConfig = z.infer<typeof LoadAccountConfig>
 
 const UUID7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
+const RAM = { mounts: { '/': { vfs: 'ram', mode: 'write' } } }
+const STORE = { bucket: 'snaps', region: 'us-east-1' }
+
+type App = ReturnType<typeof buildApp>
+
+async function download(app: App, id: string): Promise<Buffer> {
+  const res = await app.inject({ method: 'GET', url: `/v1/workspaces/${id}/snapshot` })
+  expect(res.statusCode).toBe(200)
+  expect(res.headers['content-type']).toBe('application/x-tar')
+  return res.rawPayload
+}
+
+async function upload(
+  app: App,
+  tar: Uint8Array,
+  request: Record<string, unknown> = {},
+): Promise<Awaited<ReturnType<App['inject']>>> {
+  const form = new FormData()
+  form.set('request', JSON.stringify(request))
+  form.set('snapshot', new Blob([new Uint8Array(tar)]), 'snap.tar')
+  const body = new Request('http://localhost', { method: 'POST', body: form })
+  return app.inject({
+    method: 'POST',
+    url: '/v1/workspaces/load',
+    headers: { 'content-type': body.headers.get('content-type') ?? '' },
+    payload: Buffer.from(await body.arrayBuffer()),
+  })
+}
 
 function slackPayload(source: string, workspaceId: string): Record<string, unknown> {
   return {
@@ -170,7 +212,13 @@ describe('workspaces router', () => {
     })
     try {
       const first = await app.inject({ method: 'POST', url: '/v1/workspaces', payload })
-      const removal = app.registry.remove('going', () => gate)
+      const runner = app.registry.get('going').runner
+      const stop = runner.stop.bind(runner)
+      vi.spyOn(runner, 'stop').mockImplementationOnce(async (options) => {
+        await gate
+        await stop(options)
+      })
+      const removal = app.registry.remove('going')
       const during = await app.inject({ method: 'POST', url: '/v1/workspaces', payload })
       release()
       await removal
@@ -211,8 +259,8 @@ describe('workspaces router', () => {
         payload: { command: 'pager' },
       })
       expect(res.statusCode).toBe(200)
-      const body = res.json<{ exitCode: number; stdout: string }>()
-      expect([body.exitCode, body.stdout]).toEqual([0, 'prog pager\n'])
+      const body = res.json<{ exit_code: number; stdout: string }>()
+      expect([body.exit_code, body.stdout]).toEqual([0, 'prog pager\n'])
     } finally {
       await app.close().catch(() => undefined)
       rmSync(dir, { recursive: true, force: true })
@@ -349,12 +397,10 @@ describe('workspaces router', () => {
 
   it('DELETE drops the workspace state, so a recreated id starts empty', async () => {
     // Deleting a workspace deletes everything it kept: one created again
-    // under the same id finds no link, no history, no version and no
-    // state on disk.
+    // under the same id finds no link, no history and no state on disk.
     const root = mkdtempSync(join(tmpdir(), 'mirage-delete-state-'))
     const stateRoot = join(root, 'state')
-    const versionRoot = join(root, 'versions')
-    const app = buildApp({ stateRoot, versionRoot })
+    const app = buildApp({ stateRoot })
     const create = (): Promise<unknown> =>
       app.inject({
         method: 'POST',
@@ -372,22 +418,9 @@ describe('workspaces router', () => {
     try {
       await create()
       await run('ln -s /data /alias && echo secret-token')
-      const commit = await app.inject({
-        method: 'POST',
-        url: '/v1/workspaces/again/commit',
-        payload: { message: 'first' },
-      })
-      expect(commit.statusCode).toBe(200)
       expect(existsSync(join(stateRoot, 'workspaces', 'again'))).toBe(true)
-      expect(existsSync(join(versionRoot, 'again'))).toBe(true)
       await app.inject({ method: 'DELETE', url: '/v1/workspaces/again' })
       expect(existsSync(join(stateRoot, 'workspaces', 'again'))).toBe(false)
-      expect(existsSync(join(versionRoot, 'again'))).toBe(false)
-      // Reading the versions of a deleted workspace finds none, and does
-      // not recreate the repo its delete removed.
-      const versions = await app.inject({ method: 'GET', url: '/v1/workspaces/again/versions' })
-      expect(versions.json()).toEqual([])
-      expect(existsSync(join(versionRoot, 'again'))).toBe(false)
       await create()
       const out = await run('readlink /alias || echo no-link; cat /.bash_history')
       expect(out).toContain('no-link')
@@ -412,7 +445,7 @@ describe('workspaces router', () => {
       const load = await app.inject({
         method: 'POST',
         url: '/v1/workspaces/load',
-        payload: { id, path: 'missing.tar' },
+        payload: { id, key: 'missing.tar' },
       })
       expect(load.json<{ detail: string }>().detail).toContain('invalid workspace id')
     }
@@ -554,64 +587,121 @@ describe('workspaces router', () => {
     await app.close()
   })
 
-  it('POST /v1/workspaces/:id/snapshot writes a tar to the path and load round-trips', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-ws-'))
-    const tar = join(dir, 'seed.tar')
-    const app1 = buildApp({ snapshotRoot: dir })
-    try {
-      await app1.inject({
-        method: 'POST',
-        url: '/v1/workspaces',
-        payload: { id: 'seed', config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } },
-      })
-      const snap = await app1.inject({
-        method: 'POST',
-        url: '/v1/workspaces/seed/snapshot',
-        payload: { path: tar },
-      })
-      expect(snap.statusCode).toBe(200)
-      const snapBody = snap.json<{ path: string; size: number }>()
-      expect(snapBody.path).toBe(tar)
-      expect(snapBody.size).toBeGreaterThan(0)
-      expect(existsSync(tar)).toBe(true)
-
-      const app2 = buildApp({ snapshotRoot: dir })
-      try {
-        const res = await app2.inject({
-          method: 'POST',
-          url: '/v1/workspaces/load',
-          payload: { path: tar, id: 'loaded' },
-        })
-        expect(res.statusCode).toBe(201)
-        expect(res.json<{ id: string }>().id).toBe('loaded')
-      } finally {
-        await app2.close().catch(() => undefined)
-      }
-    } finally {
-      await app1.close().catch(() => undefined)
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
-  it('POST /v1/workspaces/:id/snapshot rejects a path outside the snapshot root', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-ws-'))
-    const app = buildApp({ snapshotRoot: dir })
+  it('GET /v1/workspaces/:id/snapshot answers the tar, writes nothing, and loads back', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'mirage-home-'))
+    vi.stubEnv('MIRAGE_HOME', home)
+    const app = buildApp()
     try {
       await app.inject({
         method: 'POST',
         url: '/v1/workspaces',
-        payload: { id: 'esc', config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } },
+        payload: { id: 'seed', config: RAM },
       })
-      const res = await app.inject({
+      await app.inject({
         method: 'POST',
-        url: '/v1/workspaces/esc/snapshot',
-        payload: { path: '../escape.tar' },
+        url: '/v1/workspaces/seed/shell',
+        payload: { command: 'echo hi > /f' },
       })
-      expect(res.statusCode).toBe(400)
-      expect(existsSync(join(dir, '..', 'escape.tar'))).toBe(false)
+      const tar = await download(app, 'seed')
+      expect(tar.subarray(257, 262).toString()).toBe('ustar')
+      expect(existsSync(join(home, 'snapshots'))).toBe(false)
+      const res = await upload(app, tar, { id: 'loaded' })
+      expect(res.statusCode).toBe(201)
+      const cat = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/loaded/shell',
+        payload: { command: 'cat /f' },
+      })
+      expect(cat.json<{ stdout: string }>().stdout).toBe('hi\n')
     } finally {
       await app.close().catch(() => undefined)
-      rmSync(dir, { recursive: true, force: true })
+      vi.unstubAllEnvs()
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('a key goes to the snapshot store the server was given', async () => {
+    const app = buildApp({ snapshotStore: STORE })
+    try {
+      await app.inject({ method: 'POST', url: '/v1/workspaces', payload: { id: 'w', config: RAM } })
+      const ws = app.registry.get('w').runner.ws
+      const save = vi.spyOn(ws, 'snapshot').mockResolvedValue(42)
+      const snap = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/w/snapshot',
+        payload: { key: 'a.tar' },
+      })
+      expect(snap.json()).toEqual({ id: 'w', key: 'a.tar', size: 42 })
+      expect(save).toHaveBeenCalledWith('a.tar', { s3: STORE })
+      const load = vi.spyOn(Workspace, 'load').mockResolvedValueOnce(ws)
+      await app.inject({ method: 'DELETE', url: '/v1/workspaces/w' })
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/load',
+        payload: { key: 'a.tar', id: 'back' },
+      })
+      expect(res.statusCode).toBe(201)
+      expect(load.mock.calls[0]?.[0]).toBe('a.tar')
+      expect(load.mock.calls[0]?.[1]).toEqual({ s3: STORE })
+      load.mockRejectedValueOnce(Object.assign(new Error('gone'), { code: 'ENOENT' }))
+      const missing = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/load',
+        payload: { key: 'nope.tar' },
+      })
+      expect(missing.statusCode).toBe(400)
+      expect(missing.json<{ detail: string }>().detail).toBe('snapshot not found: nope.tar')
+    } finally {
+      vi.restoreAllMocks()
+      await app.close().catch(() => undefined)
+    }
+  })
+
+  it('a key needs a snapshot store', async () => {
+    const app = buildApp()
+    try {
+      await app.inject({ method: 'POST', url: '/v1/workspaces', payload: { id: 'w', config: RAM } })
+      for (const res of [
+        await app.inject({
+          method: 'POST',
+          url: '/v1/workspaces/w/snapshot',
+          payload: { key: 'a.tar' },
+        }),
+        await app.inject({ method: 'POST', url: '/v1/workspaces/load', payload: { key: 'a.tar' } }),
+      ]) {
+        expect(res.statusCode).toBe(400)
+        expect(res.json<{ detail: string }>().detail).toBe('this server has no snapshot store')
+      }
+    } finally {
+      await app.close().catch(() => undefined)
+    }
+  })
+
+  it('POST /v1/workspaces/load takes exactly one source', async () => {
+    const app = buildApp()
+    try {
+      const none = await app.inject({ method: 'POST', url: '/v1/workspaces/load', payload: {} })
+      expect(none.statusCode).toBe(400)
+      const both = await upload(app, new Uint8Array(), { key: 'a.tar' })
+      expect(both.statusCode).toBe(400)
+      expect(both.json<{ detail: string }>().detail).toContain('not both')
+      const junk = await upload(app, new TextEncoder().encode('not a tar'))
+      expect(junk.statusCode).toBe(400)
+    } finally {
+      await app.close().catch(() => undefined)
+    }
+  })
+
+  it('POST /v1/workspaces/load refuses a snapshot over the limit', async () => {
+    const app = buildApp()
+    limits.snapshot = 8
+    try {
+      const res = await upload(app, new Uint8Array(9))
+      expect(res.statusCode).toBe(413)
+      expect(res.json<{ detail: string }>().detail).toBe('snapshot part too large')
+    } finally {
+      limits.snapshot = undefined
+      await app.close().catch(() => undefined)
     }
   })
 
@@ -635,11 +725,9 @@ describe('workspaces router', () => {
     registerSecrets('acct-load', LoadAccountConfig, (config: LoadAccountConfig, ref: string) =>
       Promise.resolve({ fields: { credential: `${config.account}:${ref}` } }),
     )
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-ws-'))
-    const tar = join(dir, 'ptr.tar')
-    const app1 = buildApp({ snapshotRoot: dir })
+    const app = buildApp()
     try {
-      await app1.inject({
+      await app.inject({
         method: 'POST',
         url: '/v1/workspaces',
         payload: {
@@ -652,79 +740,36 @@ describe('workspaces router', () => {
           },
         },
       })
-      const snap = await app1.inject({
-        method: 'POST',
-        url: '/v1/workspaces/ptr-src/snapshot',
-        payload: { path: tar },
-      })
-      expect(snap.statusCode).toBe(200)
-      const app2 = buildApp({ snapshotRoot: dir })
-      try {
-        const res = await app2.inject({
-          method: 'POST',
-          url: '/v1/workspaces/load',
-          payload: {
-            path: tar,
-            id: 'ptr-loaded',
-            override: {
-              secrets: { prod: { source: 'acct-load', config: { account: 'live' } } },
-              mounts: {
-                '/slack': {
-                  vfs: 'slack',
-                  config: { token: { from: 'prod', ref: 'bot', key: 'credential' } },
-                },
-              },
+      const res = await upload(app, await download(app, 'ptr-src'), {
+        id: 'ptr-loaded',
+        override: {
+          secrets: { prod: { source: 'acct-load', config: { account: 'live' } } },
+          mounts: {
+            '/slack': {
+              vfs: 'slack',
+              config: { token: { from: 'prod', ref: 'bot', key: 'credential' } },
             },
           },
-        })
-        expect(res.statusCode).toBe(201)
-      } finally {
-        await app2.close().catch(() => undefined)
-      }
-    } finally {
-      await app1.close().catch(() => undefined)
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
-  it('POST /v1/workspaces/load returns 400 when the snapshot path does not exist', async () => {
-    const app = buildApp()
-    try {
-      const res = await app.inject({
-        method: 'POST',
-        url: '/v1/workspaces/load',
-        payload: { path: '/no/such/file.tar' },
+        },
       })
-      expect(res.statusCode).toBe(400)
+      expect(res.statusCode).toBe(201)
     } finally {
       await app.close().catch(() => undefined)
     }
   })
 
   it('POST /v1/workspaces/load returns 409 on id conflict', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-ws-'))
-    const tar = join(dir, 'taken.tar')
-    const app = buildApp({ snapshotRoot: dir })
+    const app = buildApp()
     try {
       await app.inject({
         method: 'POST',
         url: '/v1/workspaces',
-        payload: { id: 'taken', config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } },
+        payload: { id: 'taken', config: RAM },
       })
-      await app.inject({
-        method: 'POST',
-        url: '/v1/workspaces/taken/snapshot',
-        payload: { path: tar },
-      })
-      const res = await app.inject({
-        method: 'POST',
-        url: '/v1/workspaces/load',
-        payload: { path: tar, id: 'taken' },
-      })
+      const res = await upload(app, await download(app, 'taken'), { id: 'taken' })
       expect(res.statusCode).toBe(409)
     } finally {
       await app.close().catch(() => undefined)
-      rmSync(dir, { recursive: true, force: true })
     }
   })
 
@@ -784,5 +829,88 @@ describe('daemon disk-store default', () => {
     expect(existsSync(join(stateRoot, 'workspaces', 'diskws', 'workspace.json'))).toBe(true)
     await app.close()
     rmSync(stateRoot, { recursive: true, force: true })
+  })
+})
+
+describe('workspace cancel, kill and close', () => {
+  const RAM = { config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } }
+
+  it('cancel and kill reach every session', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-cancel-'))
+    const app = buildApp({ stateRoot: join(root, 'state') })
+    try {
+      const wid = (await app.inject({ method: 'POST', url: '/v1/workspaces', payload: RAM })).json<{
+        id: string
+      }>().id
+      await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/${wid}/sessions`,
+        payload: { session_id: 'a' },
+      })
+      await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/${wid}/shell`,
+        payload: { command: 'sleep 30 &', session_id: 'a' },
+      })
+      const jobId = (
+        await app.inject({
+          method: 'POST',
+          url: `/v1/workspaces/${wid}/shell?background=true`,
+          payload: { command: 'sleep 30' },
+        })
+      ).json<{ job_id: string }>().job_id
+      for (let i = 0; i < 500; i += 1) {
+        const job = (await app.inject({ method: 'GET', url: `/v1/jobs/${jobId}` })).json<{
+          status: string
+        }>()
+        if (job.status === 'running') break
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      expect(
+        (await app.inject({ method: 'POST', url: `/v1/workspaces/${wid}/cancel` })).json(),
+      ).toEqual({
+        canceled: 1,
+      })
+      expect(
+        (await app.inject({ method: 'POST', url: `/v1/workspaces/${wid}/kill` })).json(),
+      ).toEqual({
+        killed: 1,
+      })
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('close keeps state for the same id', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-close-'))
+    const app = buildApp({ stateRoot: join(root, 'state') })
+    try {
+      const body = { ...RAM, id: 'keep' }
+      expect(
+        (await app.inject({ method: 'POST', url: '/v1/workspaces', payload: body })).statusCode,
+      ).toBe(201)
+      await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/keep/shell',
+        payload: { command: 'echo kept' },
+      })
+      expect(
+        (await app.inject({ method: 'POST', url: '/v1/workspaces/keep/close' })).statusCode,
+      ).toBe(200)
+      expect((await app.inject({ method: 'GET', url: '/v1/workspaces/keep' })).statusCode).toBe(404)
+      expect(
+        (await app.inject({ method: 'POST', url: '/v1/workspaces', payload: body })).statusCode,
+      ).toBe(201)
+      const r = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/keep/shell',
+        payload: { command: 'history' },
+      })
+      expect(r.json<{ stdout: string }>().stdout).toContain('echo kept')
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

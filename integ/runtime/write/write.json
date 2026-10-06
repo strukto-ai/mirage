@@ -1,0 +1,366 @@
+{
+  "cases": [
+    {
+      "id": "writes_reach_the_mount",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "lines.txt": "one\ntwo\n",
+              "sub/inner.txt": "in\n",
+              "digits.txt": "0123456789"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "from pathlib import Path\nPath('/data/w.txt').write_text('text')",
+            "js": "const f = std.open('/data/w.txt', 'w')\nf.puts('text')\nf.close()"
+          },
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "cat /data/w.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "text"
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\nPath('/data/b.txt').write_bytes(b'bytes')",
+            "js": "const f = std.open('/data/b.txt', 'w')\nf.write(new Uint8Array([98, 121, 116, 101, 115]).buffer, 0, 5)\nf.close()"
+          },
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "cat /data/b.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "bytes"
+          }
+        },
+        {
+          "program": {
+            "python": "f = open('/data/w.txt', 'a')\nf.write('-more')\nf.close()",
+            "js": "const f = std.open('/data/w.txt', 'a')\nf.puts('-more')\nf.close()"
+          },
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "cat /data/w.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "text-more"
+          }
+        },
+        {
+          "program": {
+            "python": "f = open('/data/w.txt', 'w')\nf.write('one')\nf.write('two')\nf.close()",
+            "js": "const f = std.open('/data/w.txt', 'w')\nf.puts('one')\nf.puts('two')\nf.close()"
+          },
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "cat /data/w.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "onetwo"
+          }
+        },
+        {
+          "program": {
+            "python": "f = open('/data/live.txt', 'w')\nf.write('v1')\nf.close()\nprint(open('/data/live.txt').read())",
+            "js": "const w = std.open('/data/live.txt', 'w')\nw.puts('v1')\nw.close()\nconsole.log(std.open('/data/live.txt', 'r').readAsString())"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "v1\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_read_only_mount_refuses_writes",
+      "note": "Pyodide writes its own MEMFS and replays the journal after the run, so a read-only mount refuses at that flush: the guest saw success and the line exits 1.",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "world": {
+        "mounts": {
+          "/ro": {
+            "vfs": "ram",
+            "mode": "read"
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "try:\n    open('/ro/x.txt', 'w').write('nope')\nexcept OSError as e:\n    print(type(e).__name__)",
+            "js": "const e = {}\nconst w = std.open('/ro/x.txt', 'w', e)\nconsole.log(w === null, e.errno)"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "OSError\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "true 69\n"
+            }
+          },
+          "expect_on": {
+            "pyodide": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "failed to create /ro/x.txt on mount: mount /ro/ is read-only"
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\ntry:\n    Path('/ro/y.txt').write_text('nope')\nexcept OSError as e:\n    print(type(e).__name__)"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "OSError\n"
+          },
+          "expect_on": {
+            "pyodide": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "failed to create /ro/y.txt on mount: mount /ro/ is read-only"
+            }
+          }
+        },
+        {
+          "command": "ls /ro",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_root_mount_is_served_like_any_other",
+      "note": "`/` is the one prefix a runtime could take for its own: wasi roots a build directory there and serves the mount anyway; pyodide cannot, since Emscripten owns `/`, so it warns that it cannot serve a mount at '/' and the guest's write stays in MEMFS.",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "world": {
+        "mounts": {
+          "/": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "from pathlib import Path\nPath('/mine.txt').write_text('R')",
+            "js": "const w = std.open('/mine.txt', 'w')\nw.puts('R')\nw.close()"
+          },
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "cat /mine.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "R"
+          },
+          "expect_on": {
+            "pyodide": {
+              "exit": 1,
+              "stdout": ""
+            }
+          }
+        },
+        {
+          "command": "echo root-mount > /f.txt",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "print(open('/f.txt').read().strip())",
+            "js": "console.log(std.open('/f.txt', 'r').readAsString().trim())"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "root-mount\n"
+          },
+          "expect_on": {
+            "pyodide": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "No such file or directory: '/f.txt'"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_write_loop_reaches_the_mount_as_one_op",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "with open('/data/log.txt', 'w') as f:\n    for _ in range(200):\n        f.write('x')",
+            "js": "const f = std.open('/data/log.txt', 'w')\nfor (let i = 0; i < 200; i++) f.puts('x')\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "ops_count": {
+              "write /data/log.txt": 0,
+              "pwrite /data/log.txt": 1,
+              "append /data/log.txt": 0
+            }
+          },
+          "expect_on": {
+            "s3": {
+              "ops_count": {
+                "write /data/log.txt": 1,
+                "pwrite /data/log.txt": 0,
+                "append /data/log.txt": 0
+              }
+            },
+            "redis": {
+              "ops_count": {
+                "write /data/log.txt": 1,
+                "pwrite /data/log.txt": 0,
+                "append /data/log.txt": 0
+              }
+            },
+            "monty": {
+              "ops_count": {
+                "write /data/log.txt": 0,
+                "pwrite /data/log.txt": 0,
+                "append /data/log.txt": 200
+              }
+            },
+            "monty@redis": {
+              "ops_count": {
+                "write /data/log.txt": 0,
+                "pwrite /data/log.txt": 0,
+                "append /data/log.txt": 200
+              }
+            },
+            "monty@s3": {
+              "ops_count": {
+                "write /data/log.txt": 200,
+                "pwrite /data/log.txt": 0,
+                "append /data/log.txt": 0
+              }
+            }
+          }
+        },
+        {
+          "command": "wc -c /data/log.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "200 /data/log.txt\n"
+          }
+        },
+        {
+          "program": {
+            "python": "with open('/data/log.txt', 'a') as f:\n    for _ in range(200):\n        f.write('y')",
+            "js": "const f = std.open('/data/log.txt', 'a')\nfor (let i = 0; i < 200; i++) f.puts('y')\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "ops_count": {
+              "write /data/log.txt": 0,
+              "pwrite /data/log.txt": 0,
+              "append /data/log.txt": 1
+            }
+          },
+          "expect_on": {
+            "s3": {
+              "ops_count": {
+                "write /data/log.txt": 1,
+                "pwrite /data/log.txt": 0,
+                "append /data/log.txt": 0
+              }
+            },
+            "monty": {
+              "ops_count": {
+                "write /data/log.txt": 0,
+                "pwrite /data/log.txt": 0,
+                "append /data/log.txt": 200
+              }
+            },
+            "monty@s3": {
+              "ops_count": {
+                "write /data/log.txt": 200,
+                "pwrite /data/log.txt": 0,
+                "append /data/log.txt": 0
+              }
+            }
+          }
+        },
+        {
+          "command": "wc -c /data/log.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "400 /data/log.txt\n"
+          }
+        }
+      ]
+    }
+  ]
+}

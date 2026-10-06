@@ -17,9 +17,10 @@ import type { Workspace } from '@struktoai/mirage-node'
 import type { Ops } from '@struktoai/mirage-core/ops/ops'
 import { encodeBase64 } from '@struktoai/mirage-core/utils/base64'
 import { gnuDirname } from '@struktoai/mirage-core/utils/path'
-import { FileVersionTracker } from '../file_version.ts'
-import { readWorkspaceFile } from '../read_file.ts'
-import { replaceText, withRefusal } from '../io_text.ts'
+import { FileVersionTracker } from '@struktoai/mirage-core/workspace/tools/file_version'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
+import { readWorkspaceFile } from '@struktoai/mirage-core/workspace/tools/read_file'
+import { decode, replaceText, withRefusal } from '@struktoai/mirage-core/workspace/tools/io_text'
 
 const z = tool.schema
 
@@ -75,7 +76,10 @@ function trackerFor(
   }
   let tracker = sessions.get(ctx.sessionID)
   if (tracker === undefined) {
-    tracker = new FileVersionTracker(ws, enabled, sessionId)
+    tracker = new FileVersionTracker(
+      sessionId === undefined ? ws.vfs : new Session(ws, sessionId).vfs,
+      enabled,
+    )
     sessions.set(ctx.sessionID, tracker)
   }
   return tracker
@@ -158,7 +162,7 @@ export function mirageTools(
       const versions = trackerFor(trackers, w, ctx, staleWriteProtection, sessionId)
       let current: string
       try {
-        current = (await versions.readForEdit(filePath)).toString('utf8')
+        current = decode(await versions.readForEdit(filePath))
       } catch (err) {
         if (await versions.vfs.exists(filePath)) return `Error: ${errMsg(err)}`
         return `Error: file '${filePath}' not found`
@@ -257,4 +261,4 @@ export function miragePlugin(ws: WsLike, options: MirageOpenCodeOptions = {}): P
   return () => Promise.resolve({ tool: mirageTools(ws, options) })
 }
 
-export { StaleMirageFileError } from '../file_version.ts'
+export { StaleMirageFileError } from '@struktoai/mirage-core/workspace/tools/file_version'

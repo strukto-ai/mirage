@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.commands.builtin.generic.csplit import csplit
+from mirage.commands.builtin.generic.csplit import csplit_generic
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -56,7 +56,7 @@ async def test_stdin_outputs_are_named_on_the_executing_mount(
     async def write_bytes(path: PathSpec, data: bytes) -> None:
         specs.append(path)
 
-    _, io = await csplit(
+    _, io = await csplit_generic(
         [],
         ["2"],
         read_bytes=_no_read,

@@ -5,6 +5,7 @@ import pytest
 from mirage.utils.posix import (
     class_characters,
     compile_posix_regex,
+    skip_raw_bytes,
     translate_bracket,
 )
 
@@ -35,7 +36,7 @@ def _bracket(pattern: str) -> str:
 )
 def test_class_membership(name, yes, no):
     compiled = re.compile(_bracket(f"[[:{name}:]]"))
-    expanded = class_characters(name)
+    expanded = class_characters(name) or ""
     for char in yes:
         assert compiled.fullmatch(char)
         assert char in expanded
@@ -47,6 +48,7 @@ def test_class_membership(name, yes, no):
 def test_class_order_for_translation():
     assert class_characters("space") == "\t\n\v\f\r "
     assert class_characters("lower") == "abcdefghijklmnopqrstuvwxyz"
+    assert class_characters("bogus") is None
 
 
 @pytest.mark.parametrize(
@@ -105,3 +107,33 @@ def test_c_locale_whitespace(flags):
         assert not compile_posix_regex(source, flags).search("\u00a0")
     assert compile_posix_regex(r"\S", flags).search("\u00a0")
     assert compile_posix_regex(r"\\s", flags).search(r"\s")
+
+
+def test_skip_raw_bytes_guards_dots_and_negated_brackets_only():
+    guard = "(?![\\udc80-\\udcff])"
+    assert skip_raw_bytes(r"a.b\.[.][^x]") == (
+        f"a(?:{guard}.)b\\.[.](?:{guard}[^x])"
+    )
+    assert skip_raw_bytes("[^]x]") == f"(?:{guard}[^]x])"
+
+
+@pytest.mark.parametrize(
+    "source,text,expected",
+    [
+        ("^a.b$", "aéb", True),
+        ("^a.b$", "a\udcffb", False),
+        ("^a[^x]b$", "a规b", True),
+        ("^a[^x]b$", "a\udcffb", False),
+        ("^a\udcffb$", "a\udcffb", True),
+        ("^..$", "规定", True),
+    ],
+)
+def test_utf8_subject_matches_characters_not_raw_bytes(source, text, expected):
+    pattern = compile_posix_regex(source, 0, True)
+    assert bool(pattern.search(text)) == expected
+
+
+def test_utf8_keeps_dotall_and_ascii_classes():
+    assert compile_posix_regex("a.b", re.DOTALL, True).search("a\nb")
+    assert not compile_posix_regex("a.b", 0, True).search("a\nb")
+    assert not compile_posix_regex(r"\w", 0, True).search("é")

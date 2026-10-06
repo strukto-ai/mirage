@@ -14,11 +14,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { DaemonConfigError } from '@struktoai/mirage-server/daemon_config'
+import { DaemonUnreachable } from '../client.ts'
+import { LoginError } from '../credentials.ts'
 import { buildProgram } from '../main.ts'
 
 const ALIASES: Record<string, string> = {
   '--workspace_id': '--workspace',
   '--session_id': '--session',
+  '--background': '--bg',
 }
 
 function rewriteArgv(argv: string[]): string[] {
@@ -37,6 +40,10 @@ buildProgram()
     if (err instanceof DaemonConfigError) {
       console.error(err.message)
       process.exit(2)
+    }
+    if (err instanceof DaemonUnreachable || err instanceof LoginError) {
+      console.error(err.message)
+      process.exit(1)
     }
     console.error(err)
     process.exit(1)

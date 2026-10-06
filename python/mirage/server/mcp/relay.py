@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
 import httpx2
@@ -24,29 +25,25 @@ from mcp.types import (
     CallToolResult,
     ListToolsResult,
     PaginatedRequestParams,
-    TextContent,
 )
 
 from mirage import __version__
+from mirage.concurrency.limiter import run_blocking
 
 
 class McpRelay:
     """Answers MCP over one stream by asking the daemon's HTTP endpoint.
 
     Every way into mirage's MCP tools ends at the daemon's
-    ``/v1/workspaces/{id}/mcp``: the stdio CLI and the SSH subsystem only
-    carry messages to it, so auth, sessions, jobs and history are decided
-    in one place.
+    ``/v1/workspaces/{id}/mcp``: the stdio CLI only carries messages to
+    it, so auth, sessions, jobs and history are decided in one place.
 
     Args:
         upstream (Client): an MCP client connected to the endpoint.
     """
 
-    def __init__(
-        self, upstream: Client, session_id: str | None = None
-    ) -> None:
+    def __init__(self, upstream: Client) -> None:
         self._upstream = upstream
-        self._session_id = session_id
         self.server: Server[dict[str, Any]] = Server(
             "mirage",
             version=__version__,
@@ -70,23 +67,7 @@ class McpRelay:
             ListToolsResult: the endpoint's answer.
         """
         cursor = params.cursor if params is not None else None
-        result = await self._upstream.list_tools(cursor=cursor)
-        if self._session_id is not None:
-            result.tools = [
-                tool for tool in result.tools if tool.name != "session"
-            ]
-            for tool in result.tools:
-                tool.input_schema = {
-                    **tool.input_schema,
-                    "properties": {
-                        k: v
-                        for k, v in tool.input_schema.get(
-                            "properties", {}
-                        ).items()
-                        if k != "session_id"
-                    },
-                }
-        return result
+        return await self._upstream.list_tools(cursor=cursor)
 
     async def call_tool(
         self,
@@ -104,34 +85,37 @@ class McpRelay:
             CallToolResult: the endpoint's answer; its protocol errors
                 propagate as this server's.
         """
-        if self._session_id is not None and (
-            params.name == "session"
-            or "session_id" in (params.arguments or {})
-        ):
-            return CallToolResult(
-                content=[
-                    TextContent(
-                        type="text",
-                        text="SSH MCP is bound to its login session",
-                    )
-                ],
-                is_error=True,
-            )
         return await self._upstream.call_tool(
             params.name, params.arguments or {}
         )
 
 
-async def relay_stdio(url: str, headers: dict[str, str]) -> None:
+async def relay_stdio(url: str, token: Callable[[], str]) -> None:
     """Relay this process's stdio to a daemon's MCP endpoint.
+
+    A tool call may run for as long as its command does, so reads are
+    not timed.
 
     Args:
         url (str): the workspace's ``/v1/workspaces/{id}/mcp`` URL.
-        headers (dict[str, str]): request headers, the bearer token among
-            them.
+        token (Callable[[], str]): the bearer token, asked for on every
+            request, so a login refreshed while the relay runs is sent;
+            empty sends none.
     """
+
+    class Bearer(httpx2.Auth):
+        async def async_auth_flow(
+            self, request: httpx2.Request
+        ) -> AsyncGenerator[httpx2.Request, httpx2.Response]:
+            value = await run_blocking(token)
+            if value:
+                request.headers["Authorization"] = f"Bearer {value}"
+            yield request
+
     async with (
-        httpx2.AsyncClient(headers=headers) as http,
+        httpx2.AsyncClient(
+            auth=Bearer(), timeout=httpx2.Timeout(30.0, read=None)
+        ) as http,
         Client(streamable_http_client(url, http_client=http)) as upstream,
         stdio_server() as (read_stream, write_stream),
     ):

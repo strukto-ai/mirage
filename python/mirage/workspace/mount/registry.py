@@ -250,7 +250,6 @@ class MountRegistry:
             return False
 
     def _attach_manager(self, m: MountEntry) -> None:
-
         async def gate(key: str) -> bool:
             # The cache is shared by every session: a warm entry the
             # running command may not read goes cold to the guarded read,

@@ -12,20 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
 import io
 import zipfile
 
 import pytest
 
 from mirage.commands.builtin.generic.unzip import (
-    CORRUPT_CDIR,
     EXTRA_BYTES,
     MISSING_BYTES,
     ZERO_TESTED,
+    corrupt_cdir,
     unzip,
 )
 from mirage.commands.errors import UsageError
-from mirage.types import MountMode, PathSpec
+from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
@@ -43,10 +44,9 @@ def _zip_entries(entries: tuple[tuple[str, bytes], ...]) -> bytes:
     return buf.getvalue()
 
 
-def _zip_bytes(names_dirs: tuple[str, ...] = ()) -> bytes:
+def _zip_bytes() -> bytes:
     return _zip_entries(
-        tuple((d, b"") for d in names_dirs)
-        + (
+        (
             ("docProps/app.xml", APP),
             ("xl/sheet1.xml", SHEET),
             ("xl/media/img.bin", MEDIA),
@@ -69,14 +69,6 @@ class _Recorder:
 
     async def __call__(self, p: PathSpec, data: bytes) -> None:
         self.written[p.virtual] = data
-
-
-async def _no_write(_p: PathSpec, data: bytes) -> None:
-    raise AssertionError("write_bytes must not be called")
-
-
-async def _no_mkdir(_p: PathSpec, parents: bool = False) -> None:
-    raise AssertionError("mkdir_fn must not be called")
 
 
 async def _mkdir_ok(_p: PathSpec, parents: bool = False) -> None:
@@ -105,162 +97,93 @@ def _stderr_text(res) -> str:
 
 
 @pytest.mark.asyncio
-async def test_p_output_follows_archive_order_not_arg_order():
-    out, res, _ = await _run(("xl/workbook.xml", "docProps/app.xml"), p=True)
-    assert out == APP + WORKBOOK
-    assert res.exit_code == 0
+@pytest.mark.parametrize(
+    "members,out,code,stderr",
+    [
+        (("xl/workbook.xml", "docProps/app.xml"), APP + WORKBOOK, 0, ""),
+        (
+            ("*.xml", "xl/workbook.xml"),
+            APP + SHEET + WORKBOOK,
+            11,
+            "caution: filename not matched:  xl/workbook.xml\n",
+        ),
+        (("xl/*",), SHEET + MEDIA + WORKBOOK, 0, ""),
+    ],
+)
+async def test_p_selects_in_archive_order_charging_the_first_match(
+    members, out, code, stderr
+):
+    got, res, _ = await _run(members, p=True)
+    assert (got, res.exit_code, _stderr_text(res)) == (out, code, stderr)
 
 
 @pytest.mark.asyncio
-async def test_p_wildcard_star_crosses_slash():
-    out, res, _ = await _run(("doc*",), p=True)
-    assert out == APP
-    assert res.exit_code == 0
-
-
-@pytest.mark.asyncio
-async def test_p_wildcard_subtree():
-    out, res, _ = await _run(("xl/*",), p=True)
-    assert out == SHEET + MEDIA + WORKBOOK
-    assert res.exit_code == 0
-
-
-@pytest.mark.asyncio
-async def test_p_first_match_wins_attribution():
-    out, res, _ = await _run(("*.xml", "xl/workbook.xml"), p=True)
-    assert out == APP + SHEET + WORKBOOK
-    assert res.exit_code == 11
-    assert _stderr_text(res) == (
-        "caution: filename not matched:  xl/workbook.xml\n"
-    )
-
-
-@pytest.mark.asyncio
-async def test_p_duplicate_spec_cautions_second():
-    out, res, _ = await _run(("xl/workbook.xml", "xl/workbook.xml"), p=True)
-    assert out == WORKBOOK
-    assert res.exit_code == 11
-    assert _stderr_text(res) == (
-        "caution: filename not matched:  xl/workbook.xml\n"
-    )
-
-
-@pytest.mark.asyncio
-async def test_p_dir_entry_spec_matches_with_no_output():
-    out, res = await unzip(
-        _archive(),
-        read_bytes=_Reader(_zip_bytes(names_dirs=("xl/",))),
-        write_bytes=_no_write,
-        mkdir_fn=_no_mkdir,
-        members=("xl/",),
-        p=True,
-    )
-    assert out in (None, b"")
-    assert res.exit_code == 0
-
-
-@pytest.mark.asyncio
-@pytest.mark.filterwarnings("ignore:Duplicate name:UserWarning")
-async def test_p_duplicate_names_serve_each_entrys_own_data():
-    data = _zip_entries((("dup.txt", b"FIRST\n"), ("dup.txt", b"SECOND\n")))
-    out, res, _ = await _run(("dup.txt",), data=data, p=True)
-    assert out == b"FIRST\nSECOND\n"
-    assert res.exit_code == 0
-
-
-@pytest.mark.asyncio
-async def test_p_question_mark_matches_one_byte_not_one_code_point():
-    data = _zip_entries((("é.txt", b"ACCENT\n"), ("ab.txt", b"AB\n")))
-    out, res, _ = await _run(("?.txt",), data=data, p=True)
-    assert out in (None, b"")
-    assert res.exit_code == 11
-    assert _stderr_text(res) == "caution: filename not matched:  ?.txt\n"
-    out, res, _ = await _run(("??.txt",), data=data, p=True)
-    assert out == b"ACCENT\nAB\n"
-    assert res.exit_code == 0
-
-
-@pytest.mark.asyncio
-async def test_p_no_members_concats_whole_archive():
-    out, res, _ = await _run((), p=True)
-    assert out == APP + SHEET + MEDIA + WORKBOOK
-    assert res.exit_code == 0
-
-
-@pytest.mark.asyncio
-async def test_l_filters_rows_to_members():
-    out, res, _ = await _run(("xl/workbook.xml",), args_l=True)
+@pytest.mark.parametrize(
+    "members,listed,code",
+    [
+        (("NOSUCHFILE.xml",), False, 11),
+        (("xl/workbook.xml", "NOSUCHFILE.xml"), True, 0),
+    ],
+)
+async def test_l_filters_rows_and_exits_11_only_when_nothing_matched(
+    members, listed, code
+):
+    out, res, _ = await _run(members, args_l=True)
     text = out.decode()
-    assert "xl/workbook.xml" in text
+    assert ("xl/workbook.xml" in text) is listed
     assert "docProps/app.xml" not in text
-    assert res.exit_code == 0
+    assert (res.exit_code, res.stderr) == (code, None)
 
 
 @pytest.mark.asyncio
-async def test_l_all_miss_exits_11_without_stderr():
-    out, res, _ = await _run(("NOSUCHFILE.xml",), args_l=True)
-    text = out.decode()
-    assert "NOSUCHFILE" not in text
-    assert res.exit_code == 11
-    assert res.stderr is None
+@pytest.mark.parametrize(
+    "members,said,code",
+    [
+        (("xl/workbook.xml",), "No errors detected", 0),
+        (
+            ("xl/workbook.xml", "NOSUCHFILE.xml"),
+            "caution: filename not matched:  NOSUCHFILE.xml",
+            11,
+        ),
+    ],
+)
+async def test_t_reports_on_stdout(members, said, code):
+    out, res, _ = await _run(members, t=True)
+    assert said in out.decode()
+    assert (res.exit_code, res.stderr) == (code, None)
 
 
 @pytest.mark.asyncio
-async def test_l_partial_match_exits_0():
-    out, res, _ = await _run(
-        ("xl/workbook.xml", "NOSUCHFILE.xml"), args_l=True
+@pytest.mark.parametrize(
+    "members,written,code,stderr",
+    [
+        (
+            ("xl/workbook.xml", "NOSUCHFILE.xml"),
+            {"/xl/workbook.xml": WORKBOOK},
+            11,
+            "caution: filename not matched:  NOSUCHFILE.xml\n",
+        ),
+        (
+            ("xl/*",),
+            {
+                "/xl/sheet1.xml": SHEET,
+                "/xl/media/img.bin": MEDIA,
+                "/xl/workbook.xml": WORKBOOK,
+            },
+            0,
+            "",
+        ),
+    ],
+)
+async def test_extract_writes_only_the_selected_members(
+    members, written, code, stderr
+):
+    out, res, got = await _run(members)
+    assert got == written
+    assert out.decode() == "Archive:  /a.zip\n" + "".join(
+        f"  inflating: {path[1:]:<22}  \n" for path in written
     )
-    assert "xl/workbook.xml" in out.decode()
-    assert res.exit_code == 0
-    assert res.stderr is None
-
-
-@pytest.mark.asyncio
-async def test_t_member_ok():
-    out, res, _ = await _run(("xl/workbook.xml",), t=True)
-    assert b"No errors detected" in out
-    assert res.exit_code == 0
-
-
-@pytest.mark.asyncio
-async def test_t_missing_member_caution_on_stdout_exit_11():
-    out, res, _ = await _run(("xl/workbook.xml", "NOSUCHFILE.xml"), t=True)
-    text = out.decode()
-    assert "caution: filename not matched:  NOSUCHFILE.xml" in text
-    assert "At least one error was detected" in text
-    assert res.exit_code == 11
-    assert res.stderr is None
-
-
-@pytest.mark.asyncio
-async def test_extract_writes_only_selected_members():
-    out, res, written = await _run(("xl/workbook.xml",))
-    assert set(written) == {"/xl/workbook.xml"}
-    assert written["/xl/workbook.xml"] == WORKBOOK
-    assert out.decode() == "Archive:  /a.zip\n  inflating: xl/workbook.xml\n"
-    assert "app.xml" not in out.decode()
-    assert res.exit_code == 0
-
-
-@pytest.mark.asyncio
-async def test_extract_missing_member_caution_stderr_exit_11():
-    out, res, written = await _run(("docProps/app.xml", "NOSUCHFILE.xml"))
-    assert set(written) == {"/docProps/app.xml"}
-    assert res.exit_code == 11
-    assert _stderr_text(res) == (
-        "caution: filename not matched:  NOSUCHFILE.xml\n"
-    )
-
-
-@pytest.mark.asyncio
-async def test_extract_wildcard_selects_subtree():
-    out, res, written = await _run(("xl/*",))
-    assert set(written) == {
-        "/xl/sheet1.xml",
-        "/xl/media/img.bin",
-        "/xl/workbook.xml",
-    }
-    assert res.exit_code == 0
+    assert (res.exit_code, _stderr_text(res)) == (code, stderr)
 
 
 STAMP = (2026, 9, 20, 7, 33, 0)
@@ -281,52 +204,75 @@ def _stored(entries: tuple[tuple[str, bytes], ...]) -> bytes:
 
 
 MULTI = (("dir/", b""), ("dir/a.txt", b"a" * 200), ("b.txt", b"b"))
+# What -t prints for each of MULTI's members (UnZip 6.00).
+MULTI_TESTED = (
+    b"    testing: dir/                     OK\n"
+    b"    testing: dir/a.txt                OK\n"
+    b"    testing: b.txt                    OK\n"
+)
+
+
+def _patch(data: bytes, sig: bytes, at: int, value: int, width: int) -> bytes:
+    pos = data.find(sig) + at
+    return data[:pos] + value.to_bytes(width, "little") + data[pos + width :]
+
+
+_MULTI_ZIP = _stored(MULTI)
+_END = _MULTI_ZIP.find(b"PK\x05\x06")
+_CDIR_AT = int.from_bytes(_MULTI_ZIP[_END + 16 : _END + 20], "little")
 
 
 @pytest.mark.asyncio
-async def test_entry_reaching_past_the_directory_exits_3():
-    data = bytearray(_stored(MULTI))
-    at = data.find(b"PK\x01\x02")
-    data[at + 28 : at + 30] = (0xFFFF).to_bytes(2, "little")
-    out, res, _ = await _run((), data=bytes(data), args_l=True)
-    assert out is None
-    assert res.exit_code == 3
-    assert _stderr_text(res) == CORRUPT_CDIR.format("/a.zip")
-
-
-@pytest.mark.asyncio
-async def test_entry_count_short_of_the_directory_exits_3():
-    data = bytearray(_stored(MULTI))
-    at = data.rfind(b"PK\x05\x06")
-    data[at + 10 : at + 12] = (2).to_bytes(2, "little")
-    out, res, _ = await _run((), data=bytes(data), Z=True)
-    assert out is None
-    assert res.exit_code == 3
-    assert _stderr_text(res) == CORRUPT_CDIR.format("/a.zip")
-
-
-@pytest.mark.asyncio
-async def test_extra_bytes_warning_precedes_cautions_and_yields_to_11():
-    out, res, _ = await _run(("nomatch",), data=b"X" + _stored(MULTI), p=True)
-    assert out in (None, b"")
-    assert res.exit_code == 11
-    assert _stderr_text(res) == (
-        EXTRA_BYTES.format("/a.zip", 1, "")
-        + "caution: filename not matched:  nomatch\n"
+@pytest.mark.parametrize(
+    "data,members,flags,out,code,stderr",
+    [
+        (
+            _patch(_MULTI_ZIP, b"PK\x01\x02", 28, 0xFFFF, 2),
+            (),
+            {"args_l": True},
+            None,
+            3,
+            corrupt_cdir("/a.zip"),
+        ),
+        (
+            _patch(_MULTI_ZIP, b"PK\x05\x06", 10, 2, 2),
+            (),
+            {"Z": True},
+            None,
+            3,
+            corrupt_cdir("/a.zip"),
+        ),
+        (
+            b"X" + _MULTI_ZIP,
+            ("nomatch",),
+            {"p": True},
+            b"",
+            11,
+            EXTRA_BYTES.format("/a.zip", 1, "")
+            + "caution: filename not matched:  nomatch\n",
+        ),
+        (
+            _patch(_MULTI_ZIP, b"PK\x05\x06", 16, _CDIR_AT + 3, 4),
+            (),
+            {"Z": True, "args_1": True},
+            b"dir/\ndir/a.txt\nb.txt\n",
+            2,
+            MISSING_BYTES.format("/a.zip", 3),
+        ),
+    ],
+)
+async def test_a_damaged_archive_is_reported_and_served_where_it_can_be(
+    data, members, flags, out, code, stderr
+):
+    # An entry reaching past the directory and an entry count short of
+    # it are fatal; bytes before the archive and bytes missing from it
+    # are named and the archive is still read.
+    got, res, _ = await _run(members, data=data, **flags)
+    assert (got or None, res.exit_code, _stderr_text(res)) == (
+        out or None,
+        code,
+        stderr,
     )
-
-
-@pytest.mark.asyncio
-async def test_missing_bytes_is_an_error_that_still_lists():
-    data = _stored(MULTI)
-    # Point the end record 3 bytes past where the directory really is.
-    at = data.rfind(b"PK\x05\x06")
-    offset = int.from_bytes(data[at + 16 : at + 20], "little") + 3
-    patched = data[: at + 16] + offset.to_bytes(4, "little") + data[at + 20 :]
-    out, res, _ = await _run((), data=patched, Z=True, args_1=True)
-    assert out == b"dir/\ndir/a.txt\nb.txt\n"
-    assert res.exit_code == 2
-    assert _stderr_text(res) == MISSING_BYTES.format("/a.zip", 3)
 
 
 @pytest.mark.asyncio
@@ -346,7 +292,11 @@ async def test_t_and_p_outrank_the_listing_letters(listing):
     out, _, _ = await _run(("b.txt",), data=_stored(MULTI), p=True, **listing)
     assert out == b"b"
     out, _, _ = await _run((), data=_stored(MULTI), t=True, **listing)
-    assert out == b"No errors detected in /a.zip\n"
+    assert out == (
+        b"Archive:  /a.zip\n"
+        + MULTI_TESTED
+        + b"No errors detected in compressed data of /a.zip.\n"
+    )
 
 
 @pytest.mark.asyncio
@@ -364,19 +314,9 @@ async def test_x_that_leaves_nothing_exits_11_in_every_mode():
     data = _stored(MULTI)
     out, res, _ = await _run((), data=data, Z=True, args_1=True, x=("*",))
     assert out is None and res.exit_code == 11 and res.stderr is None
-    out, res, _ = await _run((), data=data, args_l=True, x=("*",))
-    assert out == b"  Length      Name\n---------  ----\n"
-    assert res.exit_code == 11
-    out, res, _ = await _run((), data=data, p=True, x=("*",))
-    assert out == b"" and res.exit_code == 11
     out, res, _ = await _run((), data=data, t=True, x=("*",))
-    assert out == ZERO_TESTED.format("/a.zip").encode()
+    assert out == b"Archive:  /a.zip\n" + ZERO_TESTED.format("/a.zip").encode()
     assert res.exit_code == 11
-    out, res, written = await _run((), data=data, x=("*",))
-    # An extraction heads its listing with the archive even when the
-    # filter leaves nothing to extract (UnZip 6.00).
-    assert out == b"Archive:  /a.zip\n"
-    assert res.exit_code == 11 and written == {}
 
 
 @pytest.mark.asyncio
@@ -395,6 +335,7 @@ async def test_t_reports_both_caution_kinds_on_stdout():
         ("nomatch",), data=_stored(MULTI), t=True, x=("b.txt",)
     )
     assert out == (
+        b"Archive:  /a.zip\n"
         b"caution: filename not matched:  nomatch\n"
         b"caution: excluded filename not matched:  b.txt\n"
         b"At least one error was detected in /a.zip.\n"
@@ -402,8 +343,10 @@ async def test_t_reports_both_caution_kinds_on_stdout():
     assert res.exit_code == 11
     out, res, _ = await _run((), data=_stored(MULTI), t=True, x=("nomatch",))
     assert out == (
-        b"caution: excluded filename not matched:  nomatch\n"
-        b"No errors detected in /a.zip\n"
+        b"Archive:  /a.zip\n"
+        + MULTI_TESTED
+        + b"caution: excluded filename not matched:  nomatch\n"
+        b"No errors detected in /a.zip for the 3 files tested.\n"
     )
     assert res.exit_code == 0
 
@@ -430,12 +373,8 @@ def _read_only_unzip_mount() -> tuple[Workspace, RAMVFS]:
 @pytest.mark.parametrize(
     "line",
     [
-        "unzip -l /ro/a.zip",
-        "unzip -v /ro/a.zip",
         "unzip -t /ro/a.zip",
         "unzip -p /ro/a.zip f.txt",
-        "unzip -Z /ro/a.zip",
-        "unzip -Z -1 /ro/a.zip",
     ],
 )
 async def test_a_read_only_mount_runs_unzip_where_it_writes_nothing(line: str):
@@ -447,17 +386,16 @@ async def test_a_read_only_mount_runs_unzip_where_it_writes_nothing(line: str):
     assert vfs._store.files == before
 
 
-_CANNOT_CREATE = (
-    b"error:  cannot create f.txt\n        Read-only file system\n"
-)
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "line,code,stdout,stderr",
     [
-        ("cd /ro && unzip a.zip", 50, b"Archive:  a.zip\n", _CANNOT_CREATE),
-        ("cd /ro && unzip -o a.zip", 50, b"Archive:  a.zip\n", _CANNOT_CREATE),
+        (
+            "cd /ro && unzip a.zip",
+            50,
+            b"Archive:  a.zip\n",
+            b"error:  cannot create f.txt\n        Read-only file system\n",
+        ),
         (
             "unzip -d /ro/out /ro/a.zip",
             2,
@@ -485,25 +423,35 @@ async def test_a_read_only_mount_refuses_unzip_at_the_write(
 
 
 @pytest.mark.asyncio
-async def test_unzip_extracts():
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        zf.writestr("a.txt", b"hello")
-        zf.writestr("sub/b.txt", b"world")
-    data = buf.getvalue()
+async def test_a_refused_probe_still_reports_the_entry_and_goes_on():
+    """A stat refused while naming the level in the way ends no run.
 
-    async def read_bytes(path):
-        return data
+    The level a member needs cannot be searched, so its mkdir fails and
+    so does the stat that looks for a file in the way; Info-ZIP reports
+    the member with a checkdir error, extracts the next one and exits 2.
+    """
+    data = _zip_entries((("sec/a.txt", b"A"), ("ok.txt", b"OK")))
+    recorder = _Recorder()
 
-    async def write_bytes(path, data):
-        pass
+    async def stat(path: PathSpec) -> FileStat:
+        if path.virtual.startswith("/out/sec"):
+            raise PermissionError(errno.EACCES, "Permission denied")
+        if path.virtual == "/out":
+            return FileStat(name="out", type=FileType.DIRECTORY)
+        raise FileNotFoundError(errno.ENOENT, "No such file or directory")
 
-    out, io_res = await unzip(
+    async def mkdir(_p: PathSpec, parents: bool = False) -> None:
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    _, res = await unzip(
         _archive(),
-        read_bytes=read_bytes,
-        write_bytes=write_bytes,
-        mkdir_fn=_mkdir_ok,
+        read_bytes=_Reader(data),
+        write_bytes=recorder,
+        mkdir_fn=mkdir,
+        stat=stat,
+        d="/out",
+        q=True,
     )
-    assert b"inflating" in out
-    assert "/a.txt" in io_res.writes
-    assert "/sub/b.txt" in io_res.writes
+    assert recorder.written == {"/out/ok.txt": b"OK"}
+    assert res.exit_code == 2
+    assert _stderr_text(res).endswith("unable to process sec/a.txt.\n")

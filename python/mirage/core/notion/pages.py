@@ -226,17 +226,6 @@ async def create_page(
     return await notion_post(config, "/pages", body, session=session)
 
 
-async def append_blocks(
-    config: NotionConfig,
-    block_id: str,
-    body: dict[str, Any],
-    session: SessionArg = None,
-) -> dict[str, Any]:
-    return await notion_patch(
-        config, f"/blocks/{block_id}/children", body, session=session
-    )
-
-
 async def create_comment(
     config: NotionConfig, body: dict[str, Any], session: SessionArg = None
 ) -> dict[str, Any]:

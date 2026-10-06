@@ -14,10 +14,11 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { isStdin, resolveSource, stdinStream } from '../utils/stream.ts'
+import { resolveSource, stdinStream } from '../utils/stream.ts'
 import { operandsIo, readOperands, singleChunk } from '../utils/operands.ts'
 
 const ENC = new TextEncoder()
@@ -49,24 +50,33 @@ async function reverseSource(
   return ENC.encode(records.reverse().join(''))
 }
 
+interface TacFlags {
+  readonly separator: string
+  readonly before: boolean
+  readonly regex: boolean
+}
+
+function parseFlags(bag: Record<string, FlagValue>): TacFlags {
+  const fl = new FlagView(bag, specOf('tac'))
+  return {
+    separator: fl.asStr('separator') ?? '\n',
+    before: fl.asBool('before'),
+    regex: fl.asBool('regex'),
+  }
+}
+
 export async function tacGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, opts.stdin)
-  const fl = new FlagView(opts.flags, specOf('tac'))
-  const separatorValue = fl.asStr('separator')
-  const separator = typeof separatorValue === 'string' ? separatorValue : '\n'
-  const before = fl.asBool('before')
-  const regex = fl.asBool('regex')
+  const { separator, before, regex } = parseFlags(opts.flags)
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the remaining operands
     // still reverse (GNU tac).
     const [ok, err] = await readOperands(paths, stream, 'tac')
-    const io = operandsIo(err, {
-      cache: ok.filter((o) => !isStdin(o.path)).map((o) => o.path.virtual),
-    })
+    const io = operandsIo(err)
     if (ok.length === 0 && err !== '') return [null, io]
     const parts: Uint8Array[] = []
     let total = 0

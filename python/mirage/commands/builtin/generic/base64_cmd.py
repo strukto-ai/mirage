@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.operands import split_readable
 from mirage.commands.builtin.utils.stream import (
-    is_stdin,
     resolve_source,
     stdin_stat,
     stdin_stream,
@@ -15,6 +14,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, ReadStreamFn, StatFn
 
 
@@ -28,13 +28,13 @@ async def _base64_encode_stream(
     if not encoded:
         return
     if wrap is not None and wrap == 0:
-        yield encoded.encode() + b"\n"
+        yield encode_text(encoded) + b"\n"
         return
     line_len = wrap if wrap is not None else 76
     lines: list[str] = []
     for i in range(0, len(encoded), line_len):
         lines.append(encoded[i : i + line_len])
-    yield "\n".join(lines).encode() + b"\n"
+    yield encode_text("\n".join(lines)) + b"\n"
 
 
 async def _base64_decode_stream(
@@ -60,20 +60,16 @@ async def base64_cmd(
         raise extra_operand_error(
             CommandName.BASE64, paths[1].raw_path or paths[1].virtual
         )
-    cache: list[str] = []
     if paths:
         source: AsyncIterator[bytes] = stdin_stream(read_stream, stdin)(
             paths[0]
         )
-        cache = [] if is_stdin(paths[0]) else [paths[0].mount_path]
     else:
         source = resolve_source(stdin)
 
     if decode:
-        return _base64_decode_stream(source, ignore_garbage), IOResult(
-            cache=cache
-        )
-    return _base64_encode_stream(source, wrap=wrap), IOResult(cache=cache)
+        return _base64_decode_stream(source, ignore_garbage), IOResult()
+    return _base64_encode_stream(source, wrap=wrap), IOResult()
 
 
 __all__ = ["base64_cmd"]

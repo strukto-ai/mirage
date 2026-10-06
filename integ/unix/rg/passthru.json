@@ -1,0 +1,76 @@
+{
+  "cases": [
+    {
+      "id": "rg_passthrough_is_passthru",
+      "seq": 15200101,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "rg --passthrough -n world /data/a.txt; rg --passthru zzz /data/b.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1-hello\n2:world\n3-foo\n4-bar\n5-baz\n1\n2\n3\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "passthru",
+        "passthrough",
+        "n"
+      ]
+    },
+    {
+      "id": "rg_passthru_and_context_resolve_in_line_order",
+      "seq": 15200102,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "rg -A2 -B1 -C4 -n bar /data/a.txt; rg -C2 -A0 -n world /data/a.txt; rg -C1 --passthru -n world /data/a.txt; rg --passthru -C1 -n bar /data/a.txt; rg -A1 --passthru -B1 -n bar /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "3-foo\n4:bar\n5-baz\n1-hello\n2:world\n1-hello\n2:world\n3-foo\n4-bar\n5-baz\n3-foo\n4:bar\n5-baz\n3-foo\n4:bar\n",
+        "stderr": ""
+      },
+      "flags": [
+        "passthru",
+        "A",
+        "B",
+        "C",
+        "n"
+      ]
+    }
+  ]
+}

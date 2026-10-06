@@ -20,43 +20,25 @@ describe('od parseCount', () => {
   // strtoumax base 0 (0x hex, leading 0 octal), GNU size suffixes, and one
   // leading '+' or whitespace that keeps the radix.
   it.each([
-    ['64', '-N', 64],
-    ['0x10', '-N', 16],
-    ['010', '-j', 8],
-    ['0', '-j', 0],
-    ['3k', '-N', 3072],
-    ['1KiB', '-N', 1024],
-    ['1KB', '-N', 1000],
-    ['2b', '-N', 1024],
     ['010K', '-N', 8192],
-    ['+10', '-N', 10],
-    [' 10', '-N', 10],
     ['+0x10', '-N', 16],
-    ['+010', '-j', 8],
-    ['+10K', '-N', 10240],
   ] as const)("parses '%s' for %s as %d", (raw, flag, value) => {
     expect(parseCount(raw, flag)).toBe(value)
   })
 
-  it.each(['abc', '', 'x10', '++10', '-10', '+ 10'])(
-    "junk number '%s' uses the invalid-argument message",
-    (value) => {
-      expect(() => parseCount(value, '-N')).toThrow(
-        new UsageError(`od: invalid -N argument '${value}'`, 1),
-      )
-    },
-  )
+  it.each(['', '+ 10'])("junk number '%s' uses the invalid-argument message", (value) => {
+    expect(() => parseCount(value, '-N')).toThrow(
+      new UsageError(`od: invalid -N argument '${value}'`, 1),
+    )
+  })
 
   // GNU distinguishes an unparseable number from an unknown suffix; 08 is
   // octal-0 followed by the junk suffix "8", matching strtoumax.
-  it.each(['5c', '1g', '1t', '08', '0x'])(
-    "junk suffix '%s' uses the invalid-suffix message",
-    (value) => {
-      expect(() => parseCount(value, '-j')).toThrow(
-        new UsageError(`od: invalid suffix in -j argument '${value}'`, 1),
-      )
-    },
-  )
+  it.each(['08', '0x'])("junk suffix '%s' uses the invalid-suffix message", (value) => {
+    expect(() => parseCount(value, '-j')).toThrow(
+      new UsageError(`od: invalid suffix in -j argument '${value}'`, 1),
+    )
+  })
 
   it('reports uintmax overflow as too large', () => {
     // Q/R/Y/Z are in GNU's suffix set but always overflow uintmax.

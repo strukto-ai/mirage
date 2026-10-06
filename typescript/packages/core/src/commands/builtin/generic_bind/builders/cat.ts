@@ -14,17 +14,19 @@
 
 import { concatAggregate } from '../../aggregators.ts'
 import { catGeneric } from '../../generic/cat.ts'
-import { type Builder, dirAwareStat, resolveGlobOf } from '../adapter.ts'
+import { type Builder, dirAwareStat, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+
+const cat: BuilderFn = async (ops, accessor, paths, texts, opts) => {
+  const idx = opts.index ?? undefined
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  return catGeneric(resolved, texts, opts, dirAwareStat(ops, accessor, opts), (p) =>
+    ops.readStream(accessor, p, idx),
+  )
+}
 
 export const BUILDER: Builder = {
   name: 'cat',
   read: true,
   aggregate: concatAggregate,
-  fn: async (ops, accessor, paths, texts, opts) => {
-    const idx = opts.index ?? undefined
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return catGeneric(resolved, texts, opts, dirAwareStat(ops, accessor, opts), (p) =>
-      ops.readStream(accessor, p, idx),
-    )
-  },
+  fn: cat,
 }

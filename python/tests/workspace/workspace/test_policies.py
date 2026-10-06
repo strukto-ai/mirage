@@ -79,8 +79,10 @@ async def test_workspace_guards_refuse_before_backend_io():
         result = await ws.shell("rm /data/prod/x.txt")
         assert result.exit_code == 1
         assert result.stderr == (
-            b"rm: /data/prod/x.txt: production data is protected\n"
+            b"rm: cannot remove '/data/prod/x.txt': Permission denied\n"
         )
+        assert result.refusal is not None
+        assert result.refusal.reason == "production data is protected"
         out = await ws.shell("cat /data/prod/x.txt")
         assert out.stdout == b"keep\n"
         ok = await ws.shell(
@@ -153,7 +155,7 @@ async def test_guards_cover_shell_builtins_and_namespace_routes():
         )
         result = await ws.shell("touch /data/prod/x")
         assert result.exit_code == 1
-        assert b"frozen" in result.stderr
+        assert result.refusal and "frozen" in result.refusal.reason
         ok = await ws.shell("touch /data/dev-x && echo done")
         assert b"done" in ok.stdout
     finally:
@@ -183,7 +185,7 @@ async def test_guards_cover_path_valued_flags():
         await ws.shell("mkdir -p /data/prod")
         result = await ws.shell("shuf -e a -o /data/prod/out")
         assert result.exit_code == 1
-        assert b"prod is protected" in result.stderr
+        assert result.refusal and "prod is protected" in result.refusal.reason
         listing = await ws.shell("ls /data/prod")
         assert b"out" not in listing.stdout
     finally:
@@ -220,7 +222,8 @@ async def test_path_guards_hold_at_the_programmatic_door():
         with pytest.raises(PermissionError) as excinfo:
             await ws.vfs.write("/data/prod/x.txt", b"nope\n")
         assert excinfo.value.errno == errno.EACCES
-        assert "prod is protected" in str(excinfo.value)
+        assert excinfo.value.refusal is not None
+        assert "prod is protected" in excinfo.value.refusal.reason
         with pytest.raises(PermissionError):
             await ws.vfs.read("/data/prod/x.txt")
     finally:
@@ -262,6 +265,30 @@ async def test_post_ops_deny_still_records_the_completed_write():
             await ws.vfs.write("/data/prod/x.txt", b"data\n")
         assert any(r.op == "write" for r in ws.vfs.records)
         assert await ws.vfs.read("/data/prod/x.txt") == b"data\n"
+    finally:
+        await ws.close()
+
+
+class SuppressCapacity(Policy):
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        if ctx.op == "statfs":
+            return Deny("no capacity")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_post_ops_deny_suppresses_a_capacity_reply():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("touch /data/f")
+        ws.policies.add(SuppressCapacity())
+        result = await ws.shell("stat -f -c %b /data/f")
+        assert result.exit_code == 1
+        assert await result.materialize_stdout() == b""
+        assert await result.stderr_str() == (
+            "stat: cannot read file system information for '/data/f': "
+            "Permission denied\n"
+        )
     finally:
         await ws.close()
 
@@ -777,7 +804,8 @@ async def test_a_post_ops_deny_beats_a_limit():
         await ws.vfs.write("/data/f.txt", b"hello world")
         with pytest.raises(PermissionError) as excinfo:
             await ws.vfs.read("/data/f.txt")
-        assert "reads are suppressed" in str(excinfo.value)
+        assert excinfo.value.refusal is not None
+        assert "reads are suppressed" in excinfo.value.refusal.reason
     finally:
         await ws.close()
 
@@ -1308,7 +1336,9 @@ async def test_a_profile_policy_judges_the_session_door():
         ws.create_session("s", profile="release")
         refused = await ws.shell("export AWS_SECRET=x", session_id="s")
         assert refused.exit_code == 1
-        assert refused.stderr == b"credentials are set by the operator\n"
+        assert refused.stderr == b"AWS_SECRET: permission denied\n"
+        assert refused.refusal is not None
+        assert refused.refusal.reason == "credentials are set by the operator"
         landed = await ws.shell("export SAFE=1 && echo $SAFE", session_id="s")
         assert landed.exit_code == 0
         assert landed.stdout == b"1\n"
@@ -1345,5 +1375,88 @@ async def test_a_policys_own_read_passes_the_door_its_op_hook_guards():
         refused = await ws.shell("echo x > /data/frozen/f", session_id="s")
         assert refused.exit_code == 1
         assert b"Permission denied" in refused.stderr
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "exit_code"),
+    [
+        ("find /data/src", 1),
+        ("du -a /data/src", 1),
+        ("du -s /data/src", 1),
+        ("grep -r PRIVATE_SENTINEL /data/src", 2),
+        ("rg PRIVATE_SENTINEL /data/src", 2),
+    ],
+)
+async def test_recursive_commands_enforce_admitted_path_rules(
+    command, exit_code
+):
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("mkdir -p /data/src/cache")
+        await ws.vfs.write(
+            "/data/src/cache/private.txt", b"PRIVATE_SENTINEL\n"
+        )
+        await ws.vfs.write("/data/src/public.txt", b"public\n")
+        ws.create_session(
+            "restricted",
+            profile=SessionProfile(
+                commands=CommandsBlock(
+                    deny=(
+                        CommandRule(
+                            reason="sealed", paths=("/data/src/cache",)
+                        ),
+                    )
+                )
+            ),
+        )
+
+        result = await ws.shell(command, session_id="restricted")
+
+        assert result.exit_code == exit_code
+        assert b"private.txt" not in (result.stdout or b"")
+        assert b"PRIVATE_SENTINEL" not in (result.stdout or b"")
+        assert b"/data/src/cache" in result.stderr
+        assert b"Permission denied" in result.stderr
+    finally:
+        await ws.close()
+
+
+class SealedSubtree(Policy):
+    """Refuse listing /data/sec, as a mode 0300 directory does."""
+
+    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
+        if ctx.op == "readdir" and ctx.path.virtual.startswith("/data/sec"):
+            return Deny("sealed")
+        return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command_line, refusal",
+    [
+        ("find /data", b"find: '/data/sec': Permission denied\n"),
+        ("find /data/sec", b"find: '/data/sec': Permission denied\n"),
+        (
+            "du -a /data",
+            b"du: cannot read directory '/data/sec': Permission denied\n",
+        ),
+        (
+            "du -a /data/sec",
+            b"du: cannot read directory '/data/sec': Permission denied\n",
+        ),
+    ],
+)
+async def test_native_walks_meet_a_coded_pre_ops_deny(command_line, refusal):
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("mkdir -p /data/sec && echo SECRET > /data/sec/k.txt")
+        ws.policies.add(SealedSubtree())
+        result = await ws.shell(command_line)
+        assert result.exit_code == 1
+        assert b"/data/sec/k.txt" not in (result.stdout or b"")
+        assert result.stderr == refusal
     finally:
         await ws.close()

@@ -282,6 +282,41 @@
         "gdrive-folder",
         "box"
       ]
+    },
+    {
+      "id": "cp_t_names_a_file_that_is_not_a_directory",
+      "seq": 15600006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "cp -t /data/a.txt /data/b.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "cp: target directory '/data/a.txt': Not a directory\n"
+      },
+      "flags": [
+        "t"
+      ]
     }
   ]
 }

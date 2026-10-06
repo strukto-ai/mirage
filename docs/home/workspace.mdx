@@ -112,18 +112,10 @@ Replace `vfs-md` with `skill-md` for the other document.
 | Expose a session file | `PUT /v1/workspaces/WS/sessions/agent-a/vfs-md` | `{"path":"/VFS.md"}` |
 | Change session profile | `PATCH /v1/workspaces/WS/sessions/agent-a` | `{"profile":"reader"}`, or `null` for the workspace default |
 
-Document responses use `text/markdown`. Missing sessions or parents return 404; collisions return 409; invalid paths or profile selectors return 422. Existing session creation accepts a named `profile`. Python's existing create route names the id `session_id`; TypeScript's names it `sessionId`.
+Document responses use `text/markdown`. Missing sessions or parents return 404; collisions return 409; invalid paths or profile selectors return 422. Session creation accepts a named `profile`.
 
 ## MCP, SSH, and FUSE
 
-MCP exposes the normal `read`, `ls`, and `shell` tools for these files. It does not add document-specific tools. Host MCP clients can create and switch sessions without restarting the server:
+MCP reads these files with its normal `read`, `ls` and `shell` tools and adds no document tools. The endpoint serves the session its `?session_id=` names ([MCP](/home/access/mcp)), so an agent reads that session's view and cannot pick another one; change its profile from the host with `PATCH` or `mirage session update`.
 
-```json
-{"name":"session","arguments":{"action":"create","session_id":"agent-a","profile":"reader"}}
-{"name":"read","arguments":{"path":"/VFS.md","session_id":"agent-a"}}
-{"name":"session","arguments":{"action":"update","session_id":"agent-a","profile":"reader"}}
-```
-
-The `session` tool also supports `list` and `close`. Omit `session_id` on a file or shell tool to use the connection's default session. `profile: null` selects the workspace default during an update.
-
-SSH and its MCP subsystem use the session authorized by the login key. They read exposed workspace documents through that session and cannot switch to another session using MCP. FUSE and FSKit use their bound session and ordinary file reads; they do not need additional document APIs.
+SSH uses the session its login key authorizes. FUSE and FSKit use their bound session. Each reads the files through ordinary file operations and needs no document API.

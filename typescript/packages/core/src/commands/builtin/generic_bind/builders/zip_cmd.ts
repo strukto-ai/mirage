@@ -14,21 +14,23 @@
 
 import type { FileStat, PathSpec } from '../../../../types.ts'
 import { zipGeneric } from '../../generic/zip_cmd.ts'
-import { type Builder, requireOp, resolveGlobOf } from '../adapter.ts'
+import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
 import { walkOf } from '../archive_io.ts'
+
+const zipCmd: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  const idx = opts.index ?? undefined
+  const write = requireOp(ops.write, 'write')
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  return zipGeneric(resolved, opts, {
+    stream: (p) => ops.readStream(accessor, p, idx),
+    write: (p, data) => write(accessor, p, data),
+    stat: async (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, idx),
+    walk: walkOf(ops, accessor, idx),
+  })
+}
 
 export const BUILDER: Builder = {
   name: 'zip',
   write: true,
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    const idx = opts.index ?? undefined
-    const write = requireOp(ops.write, 'write')
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return zipGeneric(resolved, opts, {
-      stream: (p) => ops.readStream(accessor, p, idx),
-      write: (p, data) => write(accessor, p, data),
-      stat: async (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, idx),
-      walk: walkOf(ops, accessor, idx),
-    })
-  },
+  fn: zipCmd,
 }

@@ -1,0 +1,40 @@
+{
+  "cases": [
+    {
+      "id": "zip_r_stores_one_path_named_twice_once",
+      "seq": 15100611,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "(mkdir -p /data/fcA_zr && cd /data/fcA_zr && printf 'alpha\\n' > a.txt && zip -q -r t.zip . a.txt a.txt; echo rc=$?; unzip -Z1 t.zip; cd / && rm -r /data/fcA_zr)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\na.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "q",
+        "r"
+      ]
+    }
+  ]
+}

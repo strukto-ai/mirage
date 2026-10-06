@@ -18,12 +18,12 @@ from typing import TYPE_CHECKING, Literal
 from mirage.cache.index import NULL_INDEX
 from mirage.context import (
     get_current_session_unless_foreign,
-    path_allowed,
     reset_current_session,
     set_current_session,
 )
 from mirage.types import FileType, MountMode, PathSpec, ReadSpec
 from mirage.utils.errors import eexist, enoent, enotdir
+from mirage.utils.hidden import path_visible
 from mirage.utils.path import norm, parent
 from mirage.vfs.document.document import DocumentVFS
 from mirage.workspace.documentation import render
@@ -53,6 +53,12 @@ class Documents:
         ws = self.workspace
         renderer = render.vfs_md if kind == "vfs" else render.skill_md
         return renderer(ws._registry, self.session())
+
+    async def clear(self) -> None:
+        """Drop every binding; a snapshot load restores none."""
+        async with self.lock:
+            for path in list(self.views):
+                await self.workspace.unmount(path)
 
     async def release_session(self, session_id: str) -> None:
         async with self.lock:
@@ -106,12 +112,18 @@ class Documents:
                     raise ValueError(
                         "document path must be an absolute, normalized file path"
                     )
-                if not path_allowed(virtual):
+                # Bound where a later read lands: every link above the
+                # name is followed, as the read's own walk follows it.
+                bound = ws._namespace.follow_parent(virtual)
+                if not all(
+                    path_visible(session.visibility, p)
+                    for p in (virtual, bound)
+                ):
                     raise enoent(virtual)
                 async with self.lock:
                     await self.expose(
                         kind,
-                        virtual,
+                        bound,
                         session if session_id is not None else None,
                     )
             return self.render(kind)
@@ -129,10 +141,9 @@ class Documents:
         if directory.type != FileType.DIRECTORY:
             raise enotdir(parent(path))
         view = self.views.get(path)
-        if view is not None:
-            if view.kind != kind:
-                raise eexist(path)
-        else:
+        if view is not None and view.kind != kind:
+            raise eexist(path)
+        if view is None:
             # Collision checks are host-side: a hidden backend entry must
             # not be overwritten by a new view either.
             token = set_current_session(
@@ -147,6 +158,7 @@ class Documents:
                     raise eexist(path)
             finally:
                 reset_current_session(token)
+        if view is None:
             view = DocumentVFS(
                 path.rsplit("/", 1)[-1], lambda: self.render(kind), kind
             )

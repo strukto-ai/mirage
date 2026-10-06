@@ -1,0 +1,127 @@
+{
+  "cases": [
+    {
+      "id": "pipe_to_grep",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "local"
+      ],
+      "steps": [
+        {
+          "command": {
+            "python": "python3 -c \"print('alpha'); print('beta')\" | grep beta",
+            "js": "node -e \"console.log('alpha'); console.log('beta')\" | grep beta"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "beta\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "output_survives_failure_and_reuse",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "local"
+      ],
+      "steps": [
+        {
+          "command": {
+            "python": "python3 -c \"print('before failure'); raise ValueError('original failure')\"",
+            "js": "js -e \"console.log('before failure'); throw new Error('original failure')\""
+          },
+          "expect": {
+            "exit": 1,
+            "stdout": "before failure\n",
+            "stderr_contains": "original failure"
+          }
+        },
+        {
+          "command": {
+            "python": "python3 -c \"print('next')\"",
+            "js": "js -e \"console.log('next')\""
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "next\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "closed_output_and_reuse",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "local"
+      ],
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": {
+            "python": "python3 -c \"import sys; print('out'); sys.stderr.write('err'); sys.stdout.close(); sys.stderr.close(); assert sys.stdout.closed and sys.stderr.closed\""
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "out\n",
+            "stderr": "err"
+          }
+        },
+        {
+          "command": {
+            "python": "python3 -c \"import sys; print('next'); sys.stderr.write('next err')\""
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "next\n",
+            "stderr": "next err"
+          }
+        },
+        {
+          "command": {
+            "python": "python3 -c \"import sys; sys.stdout.buffer.write(b'binary'); sys.stdout.buffer.close()\""
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "binary",
+            "stderr": ""
+          }
+        },
+        {
+          "command": {
+            "python": "python3 -c \"import sys; print('before exit'); sys.stdout.close(); sys.stderr.close(); sys.exit(7)\""
+          },
+          "expect": {
+            "exit": 7,
+            "stdout": "before exit\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": {
+            "python": "python3 -c \"print('after exit')\""
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "after exit\n",
+            "stderr": ""
+          }
+        }
+      ]
+    }
+  ]
+}

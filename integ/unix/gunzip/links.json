@@ -315,6 +315,137 @@
         "stdout": "",
         "stderr": "gzip: /data/a.txt/: Not a directory\n"
       }
+    },
+    {
+      "id": "gunzip_refuses_a_link_in_place_however_reached",
+      "seq": 15100321,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_ln/dir && cd /data/fcA_ln && printf 'hello\\n' | gzip > t.gz && ln -s t.gz tl.gz && gunzip -k -q tl.gz; echo rc=$?; gzip -d tl.gz; echo rc=$?; ln -s nowhere d.gz && gunzip d.gz; echo rc=$?; ln -s dir dl && gunzip dl; echo rc=$?; ls -F; cd / && rm -r /data/fcA_ln)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nd.gz@\ndir/\ndl@\nt.gz\ntl.gz@\n",
+        "stderr": "gzip: tl.gz: Too many levels of symbolic links\ngzip: tl.gz: Too many levels of symbolic links\ngzip: d.gz: Too many levels of symbolic links\ngzip: dl: Too many levels of symbolic links\n"
+      },
+      "flags": [
+        "k",
+        "q"
+      ]
+    },
+    {
+      "id": "gunzip_counts_a_link_to_a_directory_at_the_output_as_taken",
+      "seq": 15100322,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_lo/dir && cd /data/fcA_lo && printf 'hello\\n' | gzip > t.gz && ln -s dir t && gunzip t.gz; echo rc=$?; gunzip -f t.gz; echo rc=$?; ls -F; cat t; cd / && rm -r /data/fcA_lo)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=0\ndir/\nt\nhello\n",
+        "stderr": "gzip: t already exists;\tnot overwritten\n"
+      },
+      "flags": [
+        "f"
+      ]
+    },
+    {
+      "id": "gunzip_f_finds_a_link_an_earlier_operand_removed_missing",
+      "seq": 15100323,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_lr && cd /data/fcA_lr && printf 'hello\\n' | gzip > t.gz && ln -s t.gz tl.gz && gunzip -f tl.gz tl.gz; echo rc=$?; ls; cd / && rm -r /data/fcA_lr)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nt.gz\ntl\n",
+        "stderr": "gzip: tl.gz: No such file or directory\n"
+      },
+      "flags": [
+        "f"
+      ]
+    },
+    {
+      "id": "gzip_k_and_q_refuse_a_link_and_kf_compresses_beside_it",
+      "seq": 15100324,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_gl && cd /data/fcA_gl && printf 'hello\\n' > a.txt && ln -s a.txt al && gzip -k al; echo rc=$?; gzip -q al; echo rc=$?; gzip -kf al; echo rc=$?; ls -F; gunzip -c al.gz; cd / && rm -r /data/fcA_gl)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=0\na.txt\nal@\nal.gz\nhello\n",
+        "stderr": "gzip: al: Too many levels of symbolic links\ngzip: al: Too many levels of symbolic links\n"
+      },
+      "flags": [
+        "k",
+        "q",
+        "f"
+      ]
     }
   ]
 }

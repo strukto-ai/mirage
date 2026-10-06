@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import errno
+from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -25,14 +27,22 @@ from mirage.policy import (
     CommandRule,
     Deny,
     OpsContext,
+    OpsResultContext,
     Policies,
     Policy,
     PolicyDenied,
 )
 from mirage.policy.rule import RulePolicy
-from mirage.types import FileStat, FileType, HiddenPaths, MountMode, PathSpec
+from mirage.types import (
+    FileStat,
+    FileType,
+    HiddenPaths,
+    MountMode,
+    PathSpec,
+    Visibility,
+)
 from mirage.utils.errors import ReadOnlyError
-from mirage.utils.ranges import slice_window
+from mirage.utils.ranges import slice_window, splice_window
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -64,6 +74,11 @@ class DenyRemnantUnlink(Policy):
         return None
 
 
+class DenyUnlinkAfter(Policy):
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        return Deny("too late") if ctx.op == "unlink" else None
+
+
 def _path(virtual: str) -> PathSpec:
     return PathSpec(
         virtual=virtual,
@@ -84,6 +99,7 @@ def _dispatcher(policies: Policies) -> tuple[Dispatcher, MagicMock]:
     mount.retiring = False
     mount.ensure_ready = AsyncMock()
     mount.vfs.caches_reads = True
+    mount.has_filetype_op = MagicMock(return_value=False)
     mount.execute_op = AsyncMock(return_value=b"cold")
     namespace.try_mount_for = MagicMock(return_value=mount)
     namespace.registry.policies = policies
@@ -174,7 +190,7 @@ async def test_spec_op_twin_holds_on_the_dispatch_door():
     dispatcher, _ = _dispatcher(policies)
     with pytest.raises(PolicyDenied) as excinfo:
         await dispatcher.dispatch("read", _path("/data/locked/a.txt"))
-    assert "frozen" in str(excinfo.value)
+    assert excinfo.value.refusal and "frozen" in excinfo.value.refusal.reason
 
 
 def _structure_only(dispatcher) -> None:
@@ -185,7 +201,7 @@ def _structure_only(dispatcher) -> None:
     namespace.try_mount_for = MagicMock(return_value=None)
     deep = MagicMock()
     deep.prefix = "/data/locked/inner/deep/"
-    namespace.registry.mounts = MagicMock(return_value=[deep])
+    namespace.registry.visible_mounts = MagicMock(return_value=[deep])
     namespace.symlink_targets = MagicMock(return_value={})
 
 
@@ -220,8 +236,10 @@ def scoped_session():
     leaving the mount nested below it reachable."""
     session = SessionState(
         session_id="agent",
-        hidden_paths=HiddenPaths(
-            paths=("/data/locked/other", "/data/locked/f.txt")
+        visibility=Visibility(
+            paths=HiddenPaths(
+                paths=("/data/locked/other", "/data/locked/f.txt")
+            )
         ),
     )
     token = set_current_session(session)
@@ -675,13 +693,16 @@ async def test_the_remnant_channel_invalidates_each_deletion():
     seen: list[str] = []
     admitted: list[tuple[str, str]] = []
 
-    async def admit(op: str, spec: PathSpec) -> None:
+    async def admit(op: str, spec: PathSpec, write: bool, **kwargs) -> None:
         admitted.append((op, spec.virtual))
 
     async def invalidate(spec: PathSpec) -> None:
         seen.append(spec.virtual)
 
-    channel = _MountChannel(mount, admit, invalidate)
+    boundary = MagicMock()
+    boundary.admit = admit
+    boundary.complete = AsyncMock()
+    channel = _MountChannel(mount, boundary, invalidate)
     await channel.readdir(_path("/data/d"))
     await channel.stat(_path("/data/d/h"))
     assert seen == []
@@ -711,9 +732,9 @@ async def test_ops_rmdir_cascade_invalidates_each_remnant(monkeypatch):
     recorded: list[str] = []
     real = Dispatcher.invalidate_after_write
 
-    async def spy(self, mount, path, observed=None):
+    async def spy(self, mount, path, observed=None, times=True):
         recorded.append(path.virtual)
-        await real(self, mount, path, observed=observed)
+        await real(self, mount, path, observed=observed, times=times)
 
     monkeypatch.setattr(Dispatcher, "invalidate_after_write", spy)
     token = set_current_session(sess)
@@ -750,6 +771,26 @@ async def test_a_policy_denied_remnant_keeps_the_refusal():
     assert exc.value.errno in (errno.ENOTEMPTY, errno.EEXIST)
     kept = await ws.shell("cat /a/d/sec/k")
     assert (kept.stdout or b"") == b"k\n"
+
+
+@pytest.mark.asyncio
+async def test_a_post_ops_deny_does_not_strand_the_cascade():
+    # A deletion is done by the time post_ops could speak, so the
+    # cascade never asks it: the rmdir takes the hidden remnant and the
+    # directory, rather than refusing with a child already gone.
+    ws = Workspace(
+        {"/a": RAMVFS()}, mode=MountMode.WRITE, policies=[DenyUnlinkAfter()]
+    )
+    io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
+    assert io.exit_code == 0, io.stderr
+    sess = ws.create_session("rev", profile={"paths": {"hide": ["/a/d/sec"]}})
+    token = set_current_session(sess)
+    try:
+        await ws.vfs.rmdir("/a/d")
+    finally:
+        reset_current_session(token)
+    gone = await ws.shell("test -e /a/d")
+    assert gone.exit_code == 1
 
 
 @pytest.mark.asyncio
@@ -1108,13 +1149,23 @@ class _CachingRAM(RAMVFS):
     caches_reads = True
 
 
-def _counted_workspace(race: bool = False) -> tuple[Workspace, list[str]]:
-    """A caching mount whose ``.count`` reads render ``BODY``, one tally per
-    fetch; with ``race`` the first fetch is overtaken by a write."""
+def _counted_workspace(
+    race: bool = False, filetype: str | None = None
+) -> tuple[Workspace, list[str]]:
+    """A caching mount whose reads answer ``BODY``, one tally per fetch.
+
+    The counted read replaces the mount's plain read, or with
+    ``filetype`` renders only that extension; with ``race`` the first
+    fetch is overtaken by a write.
+
+    Args:
+        race (bool): overtake the first fetch with a write.
+        filetype (str | None): the extension the counted read renders.
+    """
     fetched: list[str] = []
     ws = Workspace({"/data/": _CachingRAM()}, mode=MountMode.WRITE)
 
-    @register_op("read", vfs="ram", filetype=".count")
+    @register_op("read", vfs="ram", filetype=filetype)
     async def counted(accessor, path: PathSpec, **kwargs) -> bytes:
         fetched.append(path.virtual)
         if race and len(fetched) == 1:
@@ -1128,10 +1179,10 @@ def _counted_workspace(race: bool = False) -> tuple[Workspace, list[str]]:
 
 
 @pytest.mark.asyncio
-async def test_ranges_of_a_render_come_from_one_kept_read():
-    # A render has no remote range: the read op would fetch the whole
-    # file and slice it for every range, so the first range keeps the
-    # file and the rest, and the whole read, are served from it.
+async def test_ranges_of_an_unranged_read_come_from_one_kept_read():
+    # A read op with no remote range would fetch the whole file and
+    # slice it for every range, so the first range keeps the file and
+    # the rest, and the whole read, are served from it.
     ws, fetched = _counted_workspace()
     await ws.vfs.write("/data/f.count", b"STORED")
     assert await ws.vfs.read("/data/f.count", 0, 2) == b"BO"
@@ -1145,7 +1196,7 @@ async def test_ranges_of_a_render_come_from_one_kept_read():
 async def test_raw_and_natively_ranged_reads_keep_nothing():
     # A raw read is not the rendering the cache holds under the same key,
     # and a store that serves a range itself moved only that range.
-    ws, fetched = _counted_workspace()
+    ws, fetched = _counted_workspace(filetype=".count")
     await ws.vfs.write("/data/f.count", b"STORED")
     await ws.vfs.write("/data/f.txt", b"0123456789")
     assert await ws.vfs.read("/data/f.count", raw=True) == b"STORED"
@@ -1164,6 +1215,82 @@ async def test_a_write_racing_the_fetch_keeps_the_read_out_of_the_cache():
     await ws.vfs.read("/data/f.count")
     await ws.vfs.read("/data/f.count")
     assert len(fetched) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_render_is_neither_kept_nor_served_to_a_command():
+    # The file cache holds what commands read under the path alone, so a
+    # kept render would be what cat prints, and a kept cat what the
+    # renderer read returns.
+    ws, fetched = _counted_workspace(filetype=".count")
+    await ws.vfs.write("/data/f.count", b"STORED")
+    assert await ws.vfs.read("/data/f.count") == b"BODY"
+    assert not await ws.cache.exists("/data/f.count")
+    out = await ws.shell("cat /data/f.count")
+    assert await out.stdout_str() == "STORED"
+    assert await ws.vfs.read("/data/f.count", 0, 2) == b"BO"
+    assert await ws.vfs.read("/data/f.count") == b"BODY"
+    assert fetched == ["/data/f.count"] * 3
+
+
+@pytest.mark.asyncio
+async def test_a_ranged_render_reaches_the_renderer_as_its_range():
+    # A render is never kept, so filling the whole file for a range would
+    # only render more than the read asked for.
+    ws, _ = _counted_workspace()
+    windows: list[tuple[int | None, int | None]] = []
+
+    @register_op("read", vfs="ram", filetype=".count")
+    async def windowed(accessor, path: PathSpec, **kwargs) -> bytes:
+        windows.append((kwargs.get("offset"), kwargs.get("size")))
+        return b"RE"
+
+    ws.mount("/data/").register_fns([windowed])
+    await ws.vfs.write("/data/f.count", b"STORED")
+    assert await ws.vfs.read("/data/f.count", 0, 2) == b"RE"
+    assert windows == [(0, 2)]
+
+
+@register_op("read", vfs="ram", filetype=".count")
+async def _render_count(accessor, path: PathSpec, **kwargs) -> bytes:
+    return b"RENDER"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "window, rendered",
+    [((), b"RENDER"), ((0, 2), b"RE")],
+    ids=["whole", "ranged"],
+)
+async def test_a_renderer_registered_after_the_probe_is_not_kept(
+    window, rendered
+):
+    # The fill is chosen after the probe, but the op is resolved only
+    # once the mount is ready; a renderer landing in between runs, and
+    # its rendering must not become what cat reads. A ranged read on a
+    # store with no native range fills the whole file too.
+    ws, _ = _counted_workspace()
+    await ws.vfs.write("/data/f.count", b"STORED")
+    mount = ws.mount("/data/")
+    probe, ready = ws.cache.get, mount.ensure_ready
+    probed = False
+
+    async def probe_once(path, *args, **kwargs):
+        nonlocal probed
+        probed = True
+        return await probe(path, *args, **kwargs)
+
+    async def register_after_probe():
+        if probed and not mount.has_filetype_op("read", ".count"):
+            mount.register_fns([_render_count])
+        await ready()
+
+    ws.cache.get = probe_once
+    mount.ensure_ready = register_after_probe
+    assert await ws.vfs.read("/data/f.count", *window) == rendered
+    assert not await ws.cache.exists("/data/f.count")
+    out = await ws.shell("cat /data/f.count")
+    assert await out.stdout_str() == "STORED"
 
 
 class _RefusingGate:
@@ -1287,7 +1414,8 @@ async def test_hidden_space_answers_a_marked_op_before_any_rule():
     )
     token = set_current_session(
         SessionState(
-            session_id="hider", hidden_paths=HiddenPaths(paths=("/data/hid",))
+            session_id="hider",
+            visibility=Visibility(paths=HiddenPaths(paths=("/data/hid",))),
         )
     )
     try:
@@ -1327,3 +1455,74 @@ async def test_the_mark_never_reaches_the_op(monkeypatch):
         assert gate.asked == ["/data/real/secret"]
     finally:
         await ws.close()
+
+
+class _SplicingRAMVFS(RAMVFS):
+    """A RAM mount that answers pwrite the way S3 and redis do: read the
+    file, give the loop a turn, and write the whole file back."""
+
+    def ops(self):
+        found = {ro.name: ro.fn for ro in super().ops()}
+        read, write = found["read"], found["write"]
+
+        async def pwrite(accessor, path, data, offset, **kwargs):
+            whole = await read(accessor, path)
+            await asyncio.sleep(0)
+            await write(accessor, path, splice_window(whole, offset, data))
+
+        return [
+            replace(ro, fn=pwrite) if ro.name == "pwrite" else ro
+            for ro in super().ops()
+        ]
+
+
+@pytest.mark.asyncio
+async def test_offset_writes_to_one_path_all_land_on_a_splicing_store():
+    # Four sessions' edits at once: each pwrite reads the file before any
+    # writes it back, so without one writer at a time per path every
+    # write puts back three bytes the others had just replaced.
+    with Workspace({"/data/": _SplicingRAMVFS()}, mode=MountMode.WRITE) as ws:
+        f = PathSpec.from_str_path("/data/f")
+        await ws.dispatch("write", f, data=b"0123456789")
+        await asyncio.gather(
+            *(
+                ws.dispatch("pwrite", f, data=letter, offset=offset)
+                for letter, offset in (
+                    (b"A", 0),
+                    (b"B", 3),
+                    (b"C", 6),
+                    (b"D", 9),
+                )
+            )
+        )
+        got, _ = await ws.dispatch("read", f)
+        assert bytes(got) == b"A12B45C78D"
+
+
+@pytest.mark.asyncio
+async def test_offset_writes_through_two_mounts_of_one_store_all_land():
+    # One store mounted twice holds one file under two names: the writes
+    # are one writer at a time by the store's own key, not by the name.
+    store = _SplicingRAMVFS()
+    with Workspace({"/a/": store, "/b/": store}, mode=MountMode.WRITE) as ws:
+        await ws.dispatch(
+            "write", PathSpec.from_str_path("/a/f"), data=b"0123456789"
+        )
+        await asyncio.gather(
+            *(
+                ws.dispatch(
+                    "pwrite",
+                    PathSpec.from_str_path(name),
+                    data=letter,
+                    offset=offset,
+                )
+                for name, letter, offset in (
+                    ("/a/f", b"A", 0),
+                    ("/b/f", b"B", 3),
+                    ("/a/f", b"C", 6),
+                    ("/b/f", b"D", 9),
+                )
+            )
+        )
+        got, _ = await ws.dispatch("read", PathSpec.from_str_path("/b/f"))
+        assert bytes(got) == b"A12B45C78D"

@@ -2,14 +2,21 @@ import { expect, it, vi } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import { withPathGuards, type CommandIO } from '../generic_bind/adapter.ts'
+import { withCommandGuards, type CommandIO } from '../generic_bind/adapter.ts'
 import { makeRm } from './rm.ts'
 
 it.each([
-  ['ENOENT', '', 'No such file or directory'],
-  ['ELOOP', 'loop/child', 'Too many levels of symbolic links'],
-] as const)('rm handles refused %s operands and continues', async (refusal, raw, message) => {
-  for (const force of [false, true]) {
+  [
+    false,
+    'ELOOP',
+    'loop/child',
+    1,
+    "rm: cannot remove 'loop/child': Too many levels of symbolic links\n",
+  ],
+  [true, 'ENOENT', '', 0, ''],
+] as const)(
+  'rm handles a refused operand under -f=%s (%s) and continues',
+  async (force, refusal, raw, code, err) => {
     const stat = vi.fn(() => Promise.resolve(new FileStat({ name: 'ok', type: FileType.FILE })))
     const unlink = vi.fn(() => Promise.resolve())
     const io: CommandIO = {
@@ -24,7 +31,7 @@ it.each([
       rmR: unlink,
       isMounted: () => true,
     }
-    const command = makeRm('s3', withPathGuards(io))[0]
+    const command = makeRm('s3', withCommandGuards(io))[0]
     if (command === undefined) throw new Error('rm was not registered')
     const refused = new PathSpec({
       virtual: '/data',
@@ -40,12 +47,9 @@ it.each([
       filetypeFns: null,
       cwd: '/',
     })
-    const ignored = force && refusal === 'ENOENT'
-    expect(result?.[1].exitCode).toBe(ignored ? 0 : 1)
-    expect(new TextDecoder().decode(await materialize(result?.[1].stderr ?? null))).toBe(
-      ignored ? '' : `rm: cannot remove '${raw}': ${message}\n`,
-    )
+    expect(result?.[1].exitCode).toBe(code)
+    expect(new TextDecoder().decode(await materialize(result?.[1].stderr ?? null))).toBe(err)
     expect(stat).toHaveBeenCalledTimes(1)
     expect(unlink.mock.calls).toHaveLength(1)
-  }
-})
+  },
+)

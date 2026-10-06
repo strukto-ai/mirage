@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "id": "sha256sum_t_and_b_set_the_mode_marker",
+      "seq": 15600733,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha256sum -t /data/b.txt; sha256sum --binary /data/b.txt; sha256sum --text /data/b.txt; sha256sum -tb /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "14c5e74c4b96ccef41cd94db73a9ec3348038ac094feca4fd897cecffa07cdae  /data/b.txt\n14c5e74c4b96ccef41cd94db73a9ec3348038ac094feca4fd897cecffa07cdae */data/b.txt\n14c5e74c4b96ccef41cd94db73a9ec3348038ac094feca4fd897cecffa07cdae  /data/b.txt\n14c5e74c4b96ccef41cd94db73a9ec3348038ac094feca4fd897cecffa07cdae */data/b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "b",
+        "binary",
+        "text"
+      ]
+    },
+    {
+      "id": "sha256sum_t_and_b_the_last_one_wins",
+      "seq": 15600734,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha256sum -bt /data/b.txt; sha256sum --binary --text /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "14c5e74c4b96ccef41cd94db73a9ec3348038ac094feca4fd897cecffa07cdae  /data/b.txt\n14c5e74c4b96ccef41cd94db73a9ec3348038ac094feca4fd897cecffa07cdae  /data/b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "b"
+      ]
+    }
+  ]
+}

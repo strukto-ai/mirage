@@ -52,7 +52,7 @@ def make_touch(vfs: str, io: CommandIO) -> Callable[..., Any]:
         paths = await resolve_glob(accessor, paths, opts.index)
         writes: dict[str, ByteSource] = {}
         for p in paths:
-            if fl.as_bool("c"):
+            if fl.as_bool("no_create"):
                 continue
             if not await exists(accessor, p):
                 await write_bytes(accessor, p, b"")

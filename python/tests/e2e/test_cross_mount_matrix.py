@@ -18,9 +18,9 @@ from contextlib import ExitStack
 import pytest
 
 from mirage.core.ram.mkdir import mkdir as mem_mkdir
-from mirage.core.ram.write import write_bytes as mem_write
+from mirage.core.ram.write import write as mem_write
 from mirage.core.redis.mkdir import mkdir as redis_mkdir
-from mirage.core.redis.write import write_bytes as redis_write
+from mirage.core.redis.write import write as redis_write
 from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
 from tests.e2e.gdrive_mock import patch_gdrive
@@ -135,7 +135,6 @@ class CrossMountEnv:
             asyncio.run(_ls_for_index(self.ws, state, name))
 
     def run(self, cmd: str) -> str:
-
         async def _inner():
             io = await self.ws.shell(cmd)
             return await io.stdout_str()

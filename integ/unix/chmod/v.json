@@ -1,0 +1,83 @@
+{
+  "cases": [
+    {
+      "id": "chmod_v_and_c_report_each_file",
+      "seq": 15000010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf x > /data/fc0m.txt; chmod -v 644 /data/fc0m.txt; chmod --verbose 755 /data/fc0m.txt; chmod -c 755 /data/fc0m.txt; chmod --changes 640 /data/fc0m.txt; chmod 600 /data/fc0m.txt -v; chmod -c -v 600 /data/fc0m.txt; chmod -v -c 600 /data/fc0m.txt; rm -f /data/fc0m.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "mode of '/data/fc0m.txt' retained as 0644 (rw-r--r--)\nmode of '/data/fc0m.txt' changed from 0644 (rw-r--r--) to 0755 (rwxr-xr-x)\nmode of '/data/fc0m.txt' changed from 0755 (rwxr-xr-x) to 0640 (rw-r-----)\nmode of '/data/fc0m.txt' changed from 0640 (rw-r-----) to 0600 (rw-------)\nmode of '/data/fc0m.txt' retained as 0600 (rw-------)\n",
+        "stderr": ""
+      },
+      "flags": [
+        "v",
+        "verbose",
+        "c",
+        "changes"
+      ]
+    },
+    {
+      "id": "chmod_v_names_a_missing_file_and_f_silences_it",
+      "seq": 15000011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "chmod -v 644 /data/fc0nope; echo rc=$?; chmod -f 644 /data/fc0nope; echo rc=$?; chmod --quiet -v 644 /data/fc0nope; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "'/data/fc0nope' could not be accessed\nrc=1\nrc=1\n'/data/fc0nope' could not be accessed\nrc=1\n",
+        "stderr": "chmod: cannot access '/data/fc0nope': No such file or directory\n"
+      },
+      "flags": [
+        "v",
+        "f",
+        "quiet"
+      ]
+    }
+  ]
+}

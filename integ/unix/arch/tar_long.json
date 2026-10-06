@@ -327,6 +327,101 @@
         "stdout": "hello\nworld\nsource\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "tar_takes_get_and_an_abbreviated_gunzip",
+      "seq": 15100521,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_tl/dir && cd /data/fcA_tl && printf 'x\\n' > a.txt && echo k > dir/.keep && tar -cf a.tar a.txt && tar --get -f a.tar --directory=dir && ls dir && tar --create --gzip --file=a.tgz a.txt && tar -t --gun -f a.tgz; rc=$?; cd / && rm -r /data/fcA_tl; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a.txt\na.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tar_refusals_follow_the_line_order",
+      "seq": 15100522,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(tar --strip-components=x -c -x 2>&1; echo rc=$?; tar -c -x --strip-components=x 2>&1; echo rc=$?; tar -x --list 2>&1; echo rc=$?; tar -t --strip-components=-1 -f - 2>&1; echo rc=$?; tar -t --strip-components= -f - 2>&1; echo rc=$?; tar -t --strip-components=99999999999999999999 -f - 2>&1; echo rc=$?) | grep -v '^Try '",
+      "expect": {
+        "exit": 0,
+        "stdout": "tar: x: Invalid number of elements\nrc=2\ntar: You may not specify more than one '-Acdtrux', '--delete' or  '--test-label' option\nrc=2\ntar: You may not specify more than one '-Acdtrux', '--delete' or  '--test-label' option\nrc=2\ntar: -1: Invalid number of elements\nrc=2\ntar: : Invalid number of elements\nrc=2\ntar: 99999999999999999999: Invalid number of elements\nrc=2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tar_strip_components_reads_its_count_at_base_ten",
+      "seq": 15100523,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_sc/1/2/3/4/5/6/7/8/9/10 /data/fcA_sc/out && cd /data/fcA_sc && echo deep > 1/2/3/4/5/6/7/8/9/10/k.txt && echo k > out/.keep && tar -cf a.tar 1/2/3/4/5/6/7/8/9/10/k.txt && tar -xf a.tar --strip-components=010 -C out && ls out && tar -xOf a.tar --strip-components=+1 && tar -tf a.tar --strip-components=' 2'; rc=$?; cd / && rm -r /data/fcA_sc; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "k.txt\ndeep\n1/2/3/4/5/6/7/8/9/10/k.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "strip_components"
+      ]
     }
   ]
 }

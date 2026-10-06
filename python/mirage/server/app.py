@@ -16,8 +16,8 @@ import asyncio
 import importlib
 import logging
 import os
-import signal
 import time
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -43,27 +43,28 @@ from mirage.server.mcp.http import register_mcp_routes
 from mirage.server.paths import (
     mirage_home,
     pid_file_path,
-    snapshot_root_path,
     state_root_path,
-    version_root_path,
 )
-from mirage.server.registry import WorkspaceRegistry
+from mirage.server.registry import OWNERS_PREFIX, WorkspaceRegistry
 from mirage.server.routers import (
     asks,
     documents,
     health,
     jobs,
+    oauth,
     sessions,
     shell,
+    ssh,
     tools,
-    versions,
     workspaces,
 )
+from mirage.server.rpc.http import register_rpc_routes
 from mirage.server.ssh.config import SSHConfig, resolve_ssh_config
 from mirage.server.ssh.constants import SERVER_MODULE
 from mirage.server.ssh.errors import SSHConfigError
 from mirage.server.ssh.types import SSHListener, StartSSH
-from mirage.server.version.backend import LocalBackend
+from mirage.vfs.s3.config import S3Config
+from mirage.workspace.record.disk import DiskRecordClient
 
 logger = logging.getLogger(__name__)
 
@@ -80,17 +81,23 @@ def _remove_pid_file(path: Path) -> None:
         logger.debug("could not remove pid file %s", path)
 
 
-async def _watch_exit(exit_event: asyncio.Event) -> None:
-    """Send SIGTERM to self when ``exit_event`` is set.
+async def _watch_exit(
+    exit_event: asyncio.Event, on_exit: Callable[[], None]
+) -> None:
+    """Call ``on_exit`` once ``exit_event`` is set: the idle timer fired
+    or ``POST /v1/shutdown`` asked.
 
-    Lets uvicorn handle its own graceful shutdown sequence.
+    Args:
+        exit_event (asyncio.Event): the app's exit event.
+        on_exit (Callable[[], None]): what stopping the app means to
+            whoever runs it.
     """
     try:
         await exit_event.wait()
     except asyncio.CancelledError:
         return
-    logger.info("exit event tripped; sending SIGTERM to self")
-    os.kill(os.getpid(), signal.SIGTERM)
+    logger.info("exit event tripped")
+    on_exit()
 
 
 def _load_ssh_starter() -> StartSSH:
@@ -119,57 +126,71 @@ async def _start_ssh(app: FastAPI) -> SSHListener | None:
         SSHListener | None: the running listener, or None when SSH is
             off.
     """
-    config: SSHConfig | None = app.state.ssh_config
-    if config is None:
+    config: SSHConfig = app.state.ssh_config
+    if config.port is None:
         return None
     start = _load_ssh_starter()
-    return await start(app.state.registry, config, app.state.mcp)
+    return await start(app.state.registry, config)
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    ssh = await _start_ssh(app)
-    app.state.ssh = ssh
-    await run_blocking(_write_pid_file, app.state.pid_file)
-    exit_task = asyncio.create_task(_watch_exit(app.state.exit_event))
+    listener = await _start_ssh(app)
+    app.state.ssh = listener
+    if app.state.pid_file is not None:
+        await run_blocking(_write_pid_file, app.state.pid_file)
+    on_exit = app.state.on_idle_exit
+    exit_task = (
+        asyncio.create_task(_watch_exit(app.state.exit_event, on_exit))
+        if on_exit is not None
+        else None
+    )
     try:
         yield
     finally:
-        exit_task.cancel()
-        if ssh is not None:
-            ssh.close()
-            await ssh.wait_closed()
+        if exit_task is not None:
+            exit_task.cancel()
+        if listener is not None:
+            listener.close()
+            await listener.wait_closed()
         try:
             await app.state.mcp.close()
             await app.state.jobs.close()
         finally:
             await app.state.registry.close_all()
-            await run_blocking(_remove_pid_file, app.state.pid_file)
+            if app.state.pid_file is not None:
+                await run_blocking(_remove_pid_file, app.state.pid_file)
 
 
 def build_app(
     idle_grace_seconds: float = 30.0,
     exit_event: asyncio.Event | None = None,
+    on_idle_exit: Callable[[], None] | None = None,
     allowed_hosts: list[str] | None = None,
     auth_config: AuthConfig | None = None,
-    version_root: str | Path | None = None,
-    snapshot_root: str | Path | None = None,
+    snapshot_store: S3Config | None = None,
     state_root: str | Path | None = None,
     pid_file: str | Path | None = None,
     ssh_config: SSHConfig | None = None,
 ) -> FastAPI:
-    """Construct a daemon FastAPI app.
+    """Construct the Mirage server's FastAPI app.
 
-    The workspace registry is created eagerly so the app is usable
-    even without ASGI lifespan events firing (e.g. inside an
-    ``httpx.ASGITransport`` test client).
+    The app serves until whoever runs it stops it: it neither exits on
+    its own nor writes a PID file unless asked to, which is what the
+    daemon entry (``mirage.server.daemon:app``) does. The workspace
+    registry is created eagerly so the app is usable even without ASGI
+    lifespan events firing (e.g. inside an ``httpx.ASGITransport`` test
+    client).
 
     Args:
         idle_grace_seconds (float): seconds to wait after the last
             workspace is removed before signalling shutdown.
         exit_event (asyncio.Event | None): event the registry trips
-            when the idle timer fires. The runner of this app should
-            await it and shut uvicorn down. Defaults to a fresh event.
+            when the idle timer fires, and ``POST /v1/shutdown`` sets.
+            Defaults to a fresh event.
+        on_idle_exit (Callable[[], None] | None): called once the exit
+            event is set. None (default) keeps the app serving; the
+            daemon passes one that stops its process.
         allowed_hosts (list[str] | None): host allowlist for the
             ``Host`` header. ``None`` (default) reads
             ``$MIRAGE_ALLOWED_HOSTS`` (CSV) or falls back to
@@ -179,16 +200,16 @@ def build_app(
         auth_config (AuthConfig | None): bearer/JWT auth config.
             ``None`` (default) resolves from ``MIRAGE_AUTH_MODE`` env
             and the mode-specific ``MIRAGE_*`` env vars.
-        version_root (str | Path | None): git repos root. ``None``
-            (default) uses ``$MIRAGE_HOME/repos`` (or ``~/.mirage/repos``).
-        snapshot_root (str | Path | None): snapshot root. ``None``
-            (default) uses ``$MIRAGE_HOME/snapshots``.
+        snapshot_store (S3Config | None): the S3-like store a snapshot
+            request may name a key in. ``None`` (default) has none: a
+            snapshot then only goes back to the caller, as the server
+            never writes one to its own disk.
         state_root (str | Path | None): live-state root for the disk
             store the daemon defaults workspaces to. ``None`` (default)
             uses ``$MIRAGE_HOME/state``.
-        pid_file (str | Path | None): daemon pid file path. ``None``
-            (default) uses ``$MIRAGE_HOME/daemon.pid`` (or
-            ``~/.mirage/daemon.pid``).
+        pid_file (str | Path | None): a file to hold the process id
+            while the app runs. ``None`` (default) writes none; the
+            daemon passes ``$MIRAGE_HOME/daemon.pid``.
         ssh_config (SSHConfig | None): the SSH door, opened with the
             app's lifespan. ``None`` (default) resolves it from the
             ``MIRAGE_SSH_*`` env vars and the ``ssh_*`` config keys; it
@@ -214,29 +235,35 @@ def build_app(
     app.state.auth_config = auth
     app.state.started_at = time.time()
     app.state.exit_event = exit_event or asyncio.Event()
+    app.state.on_idle_exit = on_idle_exit
+    app.state.state_root = state_root_path(state_root)
     app.state.registry = WorkspaceRegistry(
         idle_grace_seconds=idle_grace_seconds,
         exit_event=app.state.exit_event,
+        accounts_required=auth.mode == AuthMode.JWT,
+        owners=DiskRecordClient(str(app.state.state_root), OWNERS_PREFIX),
     )
     app.state.jobs = JobTable()
-    app.state.pid_file = pid_file_path(pid_file)
-    app.state.version_backend = LocalBackend(version_root_path(version_root))
-    app.state.snapshot_root = snapshot_root_path(snapshot_root)
-    app.state.state_root = state_root_path(state_root)
+    app.state.pid_file = (
+        pid_file_path(pid_file) if pid_file is not None else None
+    )
+    app.state.snapshot_store = snapshot_store
     app.state.ssh_config = (
         ssh_config if ssh_config is not None else resolve_ssh_config()
     )
     app.state.ssh = None
     app.include_router(workspaces.router)
     app.include_router(documents.router)
-    app.include_router(versions.router)
     app.include_router(sessions.router)
     app.include_router(asks.router)
     app.include_router(shell.router)
+    app.include_router(ssh.router)
     app.include_router(tools.router)
     app.include_router(jobs.router)
     app.include_router(health.router)
+    app.include_router(oauth.router)
     app.state.mcp = register_mcp_routes(
         app, app.state.registry, app.state.jobs
     )
+    register_rpc_routes(app, app.state.registry, app.state.jobs, app.state.mcp)
     return app

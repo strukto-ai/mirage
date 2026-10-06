@@ -72,7 +72,6 @@ def test_nested_prefix_outer(nested_registry):
 
 
 def _register_cmd(mount, name):
-
     @command(name, vfs="ram", spec=CommandSpec())
     async def _fn(accessor, paths, *texts, **flags):
         return None, IOResult()

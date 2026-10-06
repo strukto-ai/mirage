@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { byteView } from '../../shell/bytes.ts'
 import { AwkSyntaxError } from './errors.ts'
 import { TokKind, tokenize, type Token } from './lexer.ts'
 import {
@@ -671,5 +672,5 @@ function simpleJump(word: string): Stmt {
 }
 
 export function parse(src: string): Program {
-  return new Parser(tokenize(src)).parseProgram()
+  return new Parser(tokenize(byteView(src))).parseProgram()
 }

@@ -32,10 +32,10 @@ import { rmR as diskRmR } from '../../../core/disk/rm.ts'
 import { rmdir as diskRmdir } from '../../../core/disk/rmdir.ts'
 import { setAttrs as diskSetAttrs } from '../../../core/disk/set_attrs.ts'
 import { stat as diskStat } from '../../../core/disk/stat.ts'
-import { stream as diskStream } from '../../../core/disk/stream.ts'
+import { readStream as diskStream } from '../../../core/disk/stream.ts'
 import { truncate as diskTruncate } from '../../../core/disk/truncate.ts'
 import { unlink as diskUnlink } from '../../../core/disk/unlink.ts'
-import { writeBytes as diskWrite } from '../../../core/disk/write.ts'
+import { write as diskWrite } from '../../../core/disk/write.ts'
 
 export const IO: CommandIO<DiskAccessor> = new VFSAdapter<DiskAccessor>({
   read: { readdir: diskReaddir, readBytes: diskRead, stat: diskStat },

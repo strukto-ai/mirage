@@ -18,15 +18,19 @@ import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
-import { IDENTITY } from './checkout.ts'
 import { DWIM_RULES } from './constants.ts'
 import { isBare } from './discover.ts'
-import { GitError, MissingRepositoryError, NoWorkspaceError } from './errors.ts'
+import {
+  FetchHeadReadOnlyError,
+  GitError,
+  MissingRepositoryError,
+  NoWorkspaceError,
+} from './errors.ts'
 import { configLines, configValues } from './fs.ts'
 import { resolvedRefs } from './history.ts'
 import { globalSources } from './inspect.ts'
 import { under, writeFile } from './io.ts'
-import { append, entry, ZERO } from './reflog.ts'
+import { append, entry, IDENTITY, ZERO } from './reflog.ts'
 import {
   deleteRef,
   loadRefs,
@@ -47,8 +51,8 @@ import {
   type Advertisement,
   type Transport,
 } from './transport.ts'
-import type { Refspec } from './types.ts'
-import { fatal } from './util.ts'
+import type { ReadOnlyRefusal, Refspec } from './types.ts'
+import { checkSwitches, fatal } from './util.ts'
 
 const ENC = new TextEncoder()
 export const HEADS = 'refs/heads/'
@@ -179,7 +183,7 @@ async function receive(repo: Repo, transport: Transport, wants: readonly string[
     tips.size ? (oid) => holds(repo, oid) : () => Promise.resolve(false),
   )
   await storePack(repo, pack)
-  return openRepo(repo.dispatch, repo.location)
+  return openRepo(repo.dispatch, repo.location, repo.ambiguous)
 }
 
 /**
@@ -473,6 +477,7 @@ async function prune(repo: Repo, adv: Advertisement, specs: readonly Refspec[]):
 export async function fetch(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   try {
+    checkSwitches(inv, inv.texts)
     const doors = inv.doors ?? {}
     if (doors.dispatch === undefined) throw new NoWorkspaceError()
     const repo = await opened(fl, doors)
@@ -536,3 +541,14 @@ export async function fetch(inv: CLIInvocation): Promise<CommandFnResult> {
     throw err
   }
 }
+
+/**
+ * fetch's refusal by a read-only mount, at FETCH_HEAD, named the way git names
+ * it from the top of the work tree.
+ */
+export const fetchReadOnly: ReadOnlyRefusal = (_inv, location) =>
+  new FetchHeadReadOnlyError(
+    location === null || location.gitdir === under(location.worktree, '.git')
+      ? `.git/${FETCH_HEAD}`
+      : under(location.gitdir, FETCH_HEAD),
+  )

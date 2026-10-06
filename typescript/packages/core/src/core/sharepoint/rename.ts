@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import { invalidateSubtree } from '../../cache/context.ts'
+import { invalidateAfterMove } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { renameReplace } from '../msgraph/drive.ts'
 import { driveLoc, resolveItem } from './resolve.ts'
@@ -26,11 +26,17 @@ export async function rename(
   const config = accessor.config
   const srcResolved = await resolveItem(accessor, src)
   const dstResolved = await resolveItem(accessor, dst)
-  await renameReplace(
+  const { moved, replacedNonFile } = await renameReplace(
     config,
     driveLoc(config, srcResolved, src.vfsPath),
     driveLoc(config, dstResolved, dst.vfsPath),
   )
-  await invalidateSubtree(dst)
-  await invalidateSubtree(src)
+  // A folder carries a subtree under both names. dst also loses one when
+  // the move replaced anything there but a file (an empty folder, or an
+  // item of no known kind), whose name may still have cached children.
+  // Only a file facet narrows; a reply that names no type keeps the
+  // subtree.
+  const folder = !('file' in moved)
+  await invalidateAfterMove(dst, folder || replacedNonFile)
+  await invalidateAfterMove(src, folder)
 }

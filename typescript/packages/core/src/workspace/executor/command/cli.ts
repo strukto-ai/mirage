@@ -36,12 +36,13 @@ import { envSnapshot } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import { resolveLimit } from '../../../policy/index.ts'
 import { runtimeForLanguage } from '../../../runtime/routing/decide.ts'
-import type { ScriptSource } from '../../../runtime/routing/types.ts'
+import type { ScriptSource } from '../../../runtime/types.ts'
 import { runOutput } from '../../../commands/builtin/general/interpreter.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
 import { optionError, parseFlags } from './flags.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
+import { encodeText } from '../../../shell/bytes.ts'
 
 // A textual rest operand is a CLI node's pass-through form: parsed under
 // unknownIsOperand, it takes the undeclared dashed tokens the node does not
@@ -281,15 +282,16 @@ export async function handleCli(
   )
   const { paths, texts, flagKwargs, warnings } = parsed
   if (mirageHelp && flagKwargs.help === true) {
-    const helpText = new TextEncoder().encode(nodeHelp(prog, parseSpec, style))
+    const helpText = encodeText(nodeHelp(prog, parseSpec, style))
     return [helpText, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
   }
 
   const refusal = optionError(prog, parsed)
   let msg: Uint8Array | null = null
+  let shown: Uint8Array | null = null
   let code = 0
   if (refusal !== null) {
-    ;[msg, code] = leafRefusal(style, refusal[0], parsed)
+    ;[msg, code, shown] = leafRefusal(style, refusal[0], parsed, result.path.join(' '), leaf)
   } else if (parsed.missingRequiredOperands.length > 0 && style === UsageStyle.CLAP) {
     // Only clap names the empty slots. Under every other style a required
     // operand stays the leaf's own business, worded by the command, which is
@@ -305,8 +307,8 @@ export async function handleCli(
   }
   if (msg !== null) {
     return [
-      null,
-      new IOResult({ exitCode: code, stderr: msg }),
+      shown,
+      new IOResult({ exitCode: code, stderr: msg.length > 0 ? msg : null }),
       new ExecutionNode({ command: cmdStr, exitCode: code, stderr: msg }),
     ]
   }
@@ -375,7 +377,7 @@ export async function handleCli(
     if (runtime === null) {
       // The interpreter is missing, not the command: 127 like an
       // interpreter command no runtime entry captures.
-      const stderr = new TextEncoder().encode(`${refused ?? ''}\n`)
+      const stderr = encodeText(`${refused ?? ''}\n`)
       return [
         null,
         new IOResult({ exitCode: 127, stderr }),
@@ -419,7 +421,7 @@ export async function handleCli(
     // Leaf-raised usage errors (a malformed --json) keep the bare
     // message and exit 2, matching the refusal branch above.
     if (err instanceof UsageError) {
-      const stderr = new TextEncoder().encode(`${err.message}\n`)
+      const stderr = encodeText(`${err.message}\n`)
       return [
         null,
         new IOResult({ exitCode: err.exitCode, stderr }),
@@ -457,7 +459,7 @@ export async function handleCli(
     // serving its pre-write bytes.
     if (leaf.write && dropCaches !== null) await dropCaches()
     const message = err instanceof Error ? err.message : String(err)
-    const stderr = new TextEncoder().encode(`${prog}: ${message}\n`)
+    const stderr = encodeText(`${prog}: ${message}\n`)
     return [
       err instanceof PartialOutputError ? err.stdout : null,
       new IOResult({ exitCode: 1, stderr }),
@@ -474,7 +476,7 @@ export async function handleCli(
   io.producer = { command: prog, prefixes: [], declared: leaf.limit ?? null }
 
   if (warnings.length > 0) {
-    const warn = new TextEncoder().encode(warnings.map((w) => `${prog}: ${w}\n`).join(''))
+    const warn = encodeText(warnings.map((w) => `${prog}: ${w}\n`).join(''))
     const existing = await materialize(io.stderr)
     io.stderr = concat([warn, existing])
   }

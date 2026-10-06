@@ -28,6 +28,39 @@
         "stdout": "rmdir: removing directory, '/data/qrmd_v'\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "rmdir_v_names_every_attempt",
+      "seq": 15000062,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rmdir -v /data/fc0nope; echo rc=$?; mkdir -p /data/fc0v && rmdir --verbose /data/fc0v; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rmdir: removing directory, '/data/fc0nope'\nrc=1\nrmdir: removing directory, '/data/fc0v'\nrc=0\n",
+        "stderr": "rmdir: failed to remove '/data/fc0nope': No such file or directory\n"
+      },
+      "flags": [
+        "v",
+        "verbose"
+      ]
     }
   ]
 }

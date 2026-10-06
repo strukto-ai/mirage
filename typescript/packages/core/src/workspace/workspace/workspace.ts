@@ -17,12 +17,13 @@ import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import { checkCliVerbs } from '../session/validate.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
-import type { IndexConfig } from '../../cache/index/config.ts'
+import { normalizeIndexConfig, type IndexConfig } from '../../cache/index/config.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { type EventDict, Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { type OpKwargs, OpsRegistry } from '../../ops/registry.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
+import type { S3Config } from '../../vfs/s3/config.ts'
 import { HISTORY_PREFIX, HistoryViewVFS } from '../../vfs/history/history.ts'
 import { BIN_PREFIX } from '../../shell/constants.ts'
 import { Consumer } from '../lookup/types.ts'
@@ -40,8 +41,8 @@ import type { ShellParser } from '../../shell/parse/index.ts'
 import { buildFileCache } from './cache.ts'
 import { rejectConfigScript } from './guard.ts'
 import { DriftQueue, installDriftState } from '../snapshot/drift.ts'
-import { snapshot as writeSnapshot } from '../snapshot/api.ts'
-import { readFileBytes } from '../snapshot/fs.ts'
+import { readSnapshot, snapshot as writeSnapshot } from '../snapshot/api.ts'
+import { makeStagingDir, removeDir } from '../snapshot/fs.ts'
 import {
   applyStateDict,
   buildMountArgs,
@@ -51,8 +52,7 @@ import {
 } from '../snapshot/state.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
 import { resolveGlobs } from '../expand/globs.ts'
-import { readSnapshotTar } from '../snapshot/tar_io.ts'
-import { normMountPrefix } from '../snapshot/utils.ts'
+import { QUIESCE_SECONDS, normMountPrefix } from '../snapshot/utils.ts'
 import type { WorkspaceStateDict, MountSnapshot } from '../snapshot/types.ts'
 import type { FileEvent } from '../../types.ts'
 import {
@@ -88,7 +88,7 @@ import {
   runAsProgram,
 } from '../../context/session_context.ts'
 import { namespaceViewOf } from '../mount/namespace/view.ts'
-import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
+import { asyncContextIsolatesTasks, createAsyncContext } from '../../utils/async_context.ts'
 import { makeVar, VarAttr } from '../../shell/variable.ts'
 import { enoent } from '../../utils/errors.ts'
 import { sessionView, envSnapshot } from '../session/state.ts'
@@ -121,6 +121,7 @@ import {
 import { applyProfile, compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
 import { ScriptPolicy } from '../../policy/script.ts'
 import { newSessionId, newWorkspaceId } from '../../utils/ids.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import type { WatchRuntime } from '../../watch/base.ts'
 import { resolveControlStores } from './build.ts'
 import { executeLine, type ExecuteEnv } from './execute.ts'
@@ -130,12 +131,23 @@ import { normalizeMounts, prepareAddedMount, unmountPrefix } from './mounts.ts'
 import { Router } from './routing.ts'
 import { Runtimes } from './runtimes.ts'
 import { Session } from './handle.ts'
+import { FileVersionTracker } from '../tools/file_version.ts'
+import { MirageToolOperations } from '../tools/tool_operations.ts'
 import type { ExecuteOptions, ExecuteResult, MountSpec, WorkspaceOptions } from './types.ts'
 import { Mount } from '../mount/spec.ts'
 import { WatchManager } from './watch.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 export { ExecuteResult } from './types.ts'
 export type { ExecuteOptions, MountSpec, WorkspaceOptions } from './types.ts'
+
+// The stop of the top-level line this context runs in, so a line that
+// cancels its own session does not wait on itself.
+const LINE_STOP = createAsyncContext<AbortController>()
+
+// Set inside a write the capture gate let through, so the ops it runs
+// itself are not held behind it.
+const WRITE_HELD = createAsyncContext<boolean>()
 
 export class Workspace {
   private readonly runtimeBinding: WorkspaceBinding
@@ -165,9 +177,22 @@ export class Workspace {
   private readonly dispatcher: Dispatcher
   readonly observer: Observer
   readonly vfs: Ops
+  private readonly toolTables = new Map<string | null, MirageToolOperations>()
+  private readonly reads = new Map<string, FileVersionTracker>()
   private closed = false
-  private readonly documents: Documents
+  readonly documents: Documents
   private readonly lineLock = new KeyLock()
+  private readonly lines = new Map<
+    AbortController,
+    { sessionId: string | undefined; ended: Promise<void> }
+  >()
+  private admitting: Promise<void> = Promise.resolve()
+  private captures: Promise<void> = Promise.resolve()
+  private capturing = false
+  private readonly admitted = new Set<AbortController>()
+  private writes = 0
+  private writesIdle: Promise<void> = Promise.resolve()
+  private settleWrites: () => void = () => undefined
   private readonly closers: (() => Promise<void>)[] = []
   private closing: Promise<void> | null = null
   private stateDropped = false
@@ -220,8 +245,9 @@ export class Workspace {
     }
     // The workspace-level default a mount overrides, as `mode` is.
     this.readDefault = options.read ?? DEFAULT_READ_SPEC
-    const normalized = normalizeMounts(mounts, this.readDefault, options.index)
-    this.indexConfig = options.index
+    const index = options.index === undefined ? undefined : normalizeIndexConfig(options.index)
+    const normalized = normalizeMounts(mounts, this.readDefault, index)
+    this.indexConfig = index
     this.registry = new MountRegistry(
       normalized.bare,
       options.mode ?? MountMode.READ,
@@ -229,7 +255,7 @@ export class Workspace {
       this.readDefault,
       normalized.read,
       {
-        ...(options.index !== undefined ? { index: options.index } : {}),
+        ...(index !== undefined ? { index } : {}),
         refs: normalized.refs,
         indexes: normalized.indexes,
       },
@@ -397,6 +423,7 @@ export class Workspace {
       this.opsRegistry,
       this.registry.policies,
       this.drift,
+      (write) => this.admitWrite(write),
     )
     this.registry.setReconciler(this.dispatcher.reconciler)
     this.registry.setOpStat((mount, path) => this.dispatcher.opStat(mount, path))
@@ -459,6 +486,7 @@ export class Workspace {
       (name) => compileProfile(this.baseProfile(name), name),
       () => this.ensureSessionsLoaded(),
       (path) => this.unmount(path),
+      (path) => this.namespace.followParent(path),
     )
     this.runtimeWorld = new Runtimes({
       registry: this.registry,
@@ -569,7 +597,7 @@ export class Workspace {
     return captureBinding(
       this.runtimeBinding,
       {
-        ns: namespaceViewOf(this.registry, this.namespace, this.dispatcher.dispatch),
+        ns: namespaceViewOf(this.registry, this.namespace, this.dispatcher.dispatch, session),
         sessionView: sessionView(session, this.policies),
         processes: this.processView(session),
         cwd: PathSpec.fromStrPath(session.cwd),
@@ -744,6 +772,11 @@ export class Workspace {
           await dispatch('append', path, [buf])
           return undefined
         }
+        case 'pwrite': {
+          if (bytes === undefined) throw new Error('pwrite op requires bytes')
+          await dispatch('pwrite', path, [bytes, attrs?.offset ?? 0])
+          return undefined
+        }
         case 'stat':
           // The mount's own row, nothing projected: the runtime door
           // builds the one VFSStat both languages read, so the two
@@ -760,7 +793,7 @@ export class Workspace {
           await dispatch('create', path)
           return undefined
         case 'truncate':
-          await dispatch('truncate', path, [0])
+          await dispatch('truncate', path, [attrs?.length ?? 0])
           return undefined
         case 'unlink':
           await dispatch('unlink', path)
@@ -857,6 +890,51 @@ export class Workspace {
     return this.registry.decisions
   }
 
+  /** The agent tools as the default session; `Session.tools` for another. */
+  get tools(): MirageToolOperations {
+    return this.sessionTools(null)
+  }
+
+  /**
+   * The one tool table a session has, made on first use. Every caller in
+   * the process shares it, so a file the agent read through one is
+   * guarded when it writes through another. Closing the session drops it.
+   * Null is the default session as it is when each call runs, so its
+   * table keeps working when a snapshot load or an attach re-keys the
+   * default; an id stays that session.
+   *
+   * @internal `Session.tools` is the door.
+   */
+  sessionTools(sessionId: string | null): MirageToolOperations {
+    let tools = this.toolTables.get(sessionId)
+    if (tools === undefined) {
+      tools = new MirageToolOperations(new Session(this, sessionId))
+      this.toolTables.set(sessionId, tools)
+    }
+    return tools
+  }
+
+  /**
+   * The read history the agent tools keep for one session. Every guarded
+   * table of the session shares it, the one following the default
+   * included, so a read through `ws.tools` guards a write through
+   * `new Session(ws, id).tools`. Sessions load first, so the default's id
+   * is final before it is looked up. Closing the session drops it, and a
+   * snapshot restore drops them all; null is the default as it is now.
+   *
+   * @internal `Session.tools` is the door.
+   */
+  async sessionReads(sessionId: string | null): Promise<FileVersionTracker> {
+    await this.ensureSessionsLoaded()
+    const id = sessionId ?? this.defaultSessionId
+    let reads = this.reads.get(id)
+    if (reads === undefined) {
+      reads = new FileVersionTracker(this.vfs.forSession(id))
+      this.reads.set(id, reads)
+    }
+    return reads
+  }
+
   get cwd(): string {
     return this.sessionManager.cwd
   }
@@ -931,7 +1009,7 @@ export class Workspace {
       withInline(base, inline),
       this.profileName(options.profile ?? null),
     )
-    checkCliVerbs(compiled.commands, this.cliVerbs())
+    checkCliVerbs(compiled.policies.commands, this.cliVerbs())
     const session = this.sessionManager.create(sessionId)
     applyProfile(session, compiled)
     return session
@@ -995,7 +1073,7 @@ export class Workspace {
   ): Promise<SessionState> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     const compiled = compileProfile(this.baseProfile(profile), this.profileName(profile))
-    checkCliVerbs(compiled.commands, this.cliVerbs())
+    checkCliVerbs(compiled.policies.commands, this.cliVerbs())
     const wasDefault = sessionId === this.defaultSessionId
     await this.ensureSessionsLoaded()
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
@@ -1012,10 +1090,14 @@ export class Workspace {
   async closeSession(sessionId: string): Promise<void> {
     // The manager refuses the default and an unknown id first; a session
     // that did close takes its jobs with it, so a later session reusing
-    // the id inherits nothing.
+    // the id inherits nothing. Its lines are cancelled first, as a hangup
+    // ends a terminal's foreground job.
+    if (sessionId !== this.defaultSessionId) await this.cancel(sessionId)
     await this.sessionManager.close(sessionId)
     await this.documents.releaseSession(sessionId)
     await this.jobTable.closeSession(sessionId)
+    this.toolTables.delete(sessionId)
+    this.reads.delete(sessionId)
   }
 
   async closeAllSessions(): Promise<void> {
@@ -1026,6 +1108,8 @@ export class Workspace {
     for (const id of closed) {
       await this.documents.releaseSession(id)
       await this.jobTable.closeSession(id)
+      this.toolTables.delete(id)
+      this.reads.delete(id)
     }
   }
 
@@ -1090,6 +1174,16 @@ export class Workspace {
     await this.meta.adoptDefault(sessionId)
   }
 
+  /**
+   * Snapshot restore: every session the snapshot restores is a new one
+   * to the agent tools, so none keeps what was read before.
+   *
+   * @internal
+   */
+  forgetReads(): void {
+    this.reads.clear()
+  }
+
   /** This workspace's metadata record (discovery surface). */
   async workspaceMeta(): Promise<WorkspaceFields> {
     return this.meta.load()
@@ -1134,6 +1228,11 @@ export class Workspace {
    * The runtime door runs the same read-policy verdict the constructor
    * does: a mount added here is no more able to declare a policy its
    * backend cannot honour than one declared in config.
+   *
+   * `index` is the mount's own index; left out, the workspace's. A VFS
+   * already mounted elsewhere keeps the index of that mount, as in the
+   * constructor, and this one goes unused -- though a typo in it is still
+   * refused, before the read policy is judged.
    */
   addMount(
     prefix: string,
@@ -1141,21 +1240,18 @@ export class Workspace {
     mode: MountMode = MountMode.READ,
     read?: ReadSpec,
     vfsRef: string | null = null,
+    index?: IndexConfig,
   ): MountEntry {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
+    const own = index === undefined ? this.indexConfig : normalizeIndexConfig(index)
     this.registry.checkVfsAvailable(vfs)
     const resolvedRead = read ?? this.readDefault
     // An alias keeps the index of the VFS's other mount.
     const alias = this.registry.allMounts().find((m) => m.vfs === vfs)
-    checkReadCapability(
-      prefix,
-      vfs,
-      resolvedRead,
-      alias !== undefined ? alias.indexConfig : this.indexConfig,
-    )
+    checkReadCapability(prefix, vfs, resolvedRead, alias !== undefined ? alias.indexConfig : own)
     const previous = this.registry.allMounts()
     const m = this.registry.mount(prefix, vfs, mode, resolvedRead, {
-      ...(this.indexConfig !== undefined ? { index: this.indexConfig } : {}),
+      ...(own !== undefined ? { index: own } : {}),
       vfsRef,
     })
     prepareAddedMount(this.registry, m, previous)
@@ -1188,7 +1284,7 @@ export class Workspace {
       },
       prefix,
     )
-    this.documents.views.delete(prefix.replace(/\/+$/, '') || '/')
+    this.documents.views.delete(rstripSlash(prefix) || '/')
   }
 
   /**
@@ -1508,7 +1604,151 @@ export class Workspace {
     // internal dispatch path stays open, which is what the journal replay
     // uses.
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
-    return this.executeInternal(command, options)
+    // A top-level line also answers the workspace's own stop, set by
+    // `cancel`; nested lines take the internal path and inherit it. It is
+    // listed before it waits out a capture, so `cancel` reaches it queued;
+    // a capture waits only for the lines it let in.
+    const stop = new AbortController()
+    let settle = (): void => undefined
+    const ended = new Promise<void>((resolve) => {
+      settle = resolve
+    })
+    this.lines.set(stop, { sessionId: options.sessionId, ended })
+    const signal =
+      options.signal === undefined ? stop.signal : AbortSignal.any([options.signal, stop.signal])
+    try {
+      while (this.capturing) await abortable(this.admitting, signal)
+      this.admitted.add(stop)
+      return await LINE_STOP.run(stop, () => this.executeInternal(command, { ...options, signal }))
+    } finally {
+      this.lines.delete(stop)
+      this.admitted.delete(stop)
+      settle()
+    }
+  }
+
+  /**
+   * Cancel the top-level lines running or queued in a session, or in
+   * every session when `sessionId` is undefined. What Ctrl-C does to a
+   * foreground line, for every door at once: HTTP jobs, SSH and codex
+   * lines and SDK callers alike reject with the abort error, their `$?`
+   * left as they found it. Resolves once those lines have ended, so the
+   * session is quiet; a line cancelling its own session is stopped but
+   * not waited for. Returns how many lines were cancelled.
+   */
+  async cancel(sessionId?: string): Promise<number> {
+    const own = LINE_STOP.getStore()
+    const hit = [...this.lines].filter(
+      ([, line]) =>
+        sessionId === undefined || (line.sessionId ?? this.defaultSessionId) === sessionId,
+    )
+    const cancelled = hit.filter(([stop]) => !stop.signal.aborted).length
+    for (const [stop] of hit) stop.abort()
+    await Promise.all(hit.filter(([stop]) => stop !== own).map(([, line]) => line.ended))
+    return cancelled
+  }
+
+  /**
+   * Run `capture` while new top-level lines wait and the running ones have
+   * ended. A capture (a snapshot, a copy, a clone) reads disk files after
+   * its state names them, so what it reads is the revision the lines left.
+   * Lines still running after `seconds` reject it with EBUSY; cancel them
+   * first to capture at once. The caller's own line is not waited for, and
+   * captures take turns.
+   */
+  async quiesced<T>(capture: () => Promise<T>, seconds = QUIESCE_SECONDS): Promise<T> {
+    const previous = this.captures
+    let finished = (): void => undefined
+    this.captures = new Promise<void>((resolve) => {
+      finished = resolve
+    })
+    await previous
+    let reopen = (): void => undefined
+    this.admitting = new Promise<void>((resolve) => {
+      reopen = resolve
+    })
+    this.capturing = true
+    try {
+      const own = LINE_STOP.getStore()
+      const waited = ([stop]: [AbortController, unknown]): boolean =>
+        stop !== own && this.admitted.has(stop)
+      const running = [...this.lines].filter(waited).map(([, line]) => line.ended)
+      if (this.writes > 0) running.push(this.writesIdle)
+      if (running.length > 0) {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const late = new Promise<true>((resolve) => {
+          timer = setTimeout(() => {
+            resolve(true)
+          }, seconds * 1000)
+        })
+        const busy = await Promise.race([Promise.all(running).then(() => false), late])
+        clearTimeout(timer)
+        if (busy) {
+          const pending = [...this.lines].filter(waited).length + (this.writes > 0 ? 1 : 0)
+          throw Object.assign(
+            new Error(`workspace busy: ${String(pending)} line(s) or write(s) still running`),
+            { code: 'EBUSY' },
+          )
+        }
+      }
+      return await capture()
+    } finally {
+      this.capturing = false
+      reopen()
+      finished()
+    }
+  }
+
+  /**
+   * Hold a write while a capture reads, unless its line is waited for. A
+   * write from a running top-level line passes: the capture waits for that
+   * line. Any other (a door's file op, SFTP, FUSE, a background job) waits
+   * for the capture to finish, and counts as under way until it ends, so a
+   * capture that starts waits it out.
+   */
+  private async admitWrite<T>(write: () => Promise<T>): Promise<T> {
+    // Without task-isolated context a running line's write looks like
+    // anyone's, and holding it would stall the capture waiting on that
+    // line; such hosts have no SFTP or FUSE door to hold, so writes pass.
+    if (!asyncContextIsolatesTasks) return write()
+    const line = LINE_STOP.getStore()
+    if (WRITE_HELD.getStore() === true || (line !== undefined && this.admitted.has(line))) {
+      return write()
+    }
+    while (this.capturing) await this.admitting
+    if (this.writes++ === 0) {
+      this.writesIdle = new Promise<void>((resolve) => {
+        this.settleWrites = resolve
+      })
+    }
+    try {
+      return await WRITE_HELD.run(true, write)
+    } finally {
+      if (--this.writes === 0) this.settleWrites()
+    }
+  }
+
+  /**
+   * Kill the background jobs and runners a session started, or every
+   * session's when `sessionId` is undefined: what `kill` does to
+   * `cmd &` jobs, leaving the session open. Runners outside the job list
+   * (a runtime's spawned process) are stopped too. Returns how many jobs
+   * and runners were stopped.
+   */
+  async kill(sessionId?: string): Promise<number> {
+    const jobs =
+      sessionId === undefined
+        ? this.jobTable.allRunningJobs()
+        : this.jobTable.runningJobs(sessionId)
+    let killed = 0
+    for (const job of jobs) {
+      if (await this.jobTable.kill(job.id, job.sessionId)) killed += 1
+    }
+    for (const runner of this.processes.live()) {
+      if (sessionId !== undefined && runner.info.sessionId !== sessionId) continue
+      if (runner.terminate()) killed += 1
+    }
+    return killed
   }
 
   private async executeInternal(command: string, options: ExecuteOptions): Promise<ExecuteResult> {
@@ -1614,27 +1854,50 @@ export class Workspace {
       return {
         value: null,
         stdout: new Uint8Array(),
-        stderr: new TextEncoder().encode(`python3: ${msg}\n`),
+        stderr: encodeText(`python3: ${msg}\n`),
         exitCode: unavailable ? 127 : 1,
         status: 'complete',
       }
     }
   }
 
-  async snapshot(target: string): Promise<number> {
-    return writeSnapshot(this, target)
+  /**
+   * Serialize this workspace to a tar: its bytes, or with a target the
+   * file it is written to, or with `s3` that key of an S3-like store.
+   *
+   * @returns The tar's bytes, or with a target its size.
+   */
+  snapshot(): Promise<Uint8Array>
+  snapshot(target: string, options?: { s3?: S3Config }): Promise<number>
+  async snapshot(target?: string, options: { s3?: S3Config } = {}): Promise<Uint8Array | number> {
+    const tar = await writeSnapshot(this, target, options)
+    return target === undefined || typeof tar === 'number' ? tar : tar.byteLength
   }
 
+  /**
+   * Reconstruct a workspace from a snapshot tar: a file, its bytes, or
+   * with `s3` a key of an S3-like store.
+   */
   static async load<T extends typeof Workspace>(
     this: T,
     source: string | Uint8Array,
-    options: WorkspaceOptions = {},
+    options: WorkspaceOptions & { s3?: S3Config } = {},
     overrides: Record<string, BaseVFS | Mount> = {},
     cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
-    const bytes = typeof source === 'string' ? await readFileBytes(source) : source
-    const state = (await readSnapshotTar(bytes)) as WorkspaceStateDict
-    return this.fromState(state, options, overrides, cliOverrides)
+    const { s3, ...rest } = options
+    // A tar file's disk mount files are staged on disk, not held in
+    // memory, until the restored mounts have copied them in.
+    const staging = typeof source === 'string' && s3 === undefined ? await makeStagingDir() : null
+    try {
+      const state = (await readSnapshot(source, {
+        ...(s3 !== undefined ? { s3 } : {}),
+        ...(staging !== null ? { staging } : {}),
+      })) as WorkspaceStateDict
+      return await this.fromState(state, rest, overrides, cliOverrides)
+    } finally {
+      if (staging !== null) await removeDir(staging)
+    }
   }
 
   static async fromState<T extends typeof Workspace>(
@@ -1696,6 +1959,10 @@ export class Workspace {
   }
 
   async copy(options: WorkspaceOptions = {}): Promise<this> {
+    return this.quiesced(() => this.copyQuiesced(options))
+  }
+
+  private async copyQuiesced(options: WorkspaceOptions): Promise<this> {
     // Mirrors Python's Workspace.copy(): remote-backed mounts (Redis, S3,
     // GDrive — with redacted config) are reused; local mounts (RAM, Disk)
     // are reconstructed from snapshot state. Uses _fromState directly (no tar

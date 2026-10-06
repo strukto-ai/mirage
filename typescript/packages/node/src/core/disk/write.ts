@@ -21,11 +21,7 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { diskError } from './errors.ts'
 import { resolveInside } from './utils.ts'
 
-export async function writeBytes(
-  accessor: DiskAccessor,
-  p: PathSpec,
-  data: Uint8Array,
-): Promise<void> {
+export async function write(accessor: DiskAccessor, p: PathSpec, data: Uint8Array): Promise<void> {
   const timer = startOp()
   const full = await resolveInside(accessor.root, p)
   // A write is not `mkdir -p`: GNU reports ENOENT on a missing parent

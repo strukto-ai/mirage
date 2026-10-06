@@ -288,7 +288,8 @@
         "exit": 0,
         "stdout": "/data/r4/notes.txt:alpha\n/data/r4/sub/inner.txt:alpha inner\n/data/r4/notes.txt:alpha\n/data/r4/sub/inner.txt:alpha inner\n/data/r4/sub/inner.txt\n/data/r4/notes.txt\n/data/r4/notes.txt:alpha\n/data/r4/app.log\n/data/r4/code.js\n/data/r4/code.py\n/data/r4/notes.txt\n/data/r4/notes.txt\n/data/r4/sub/inner.txt\nrc=0\nrc=1\nreturn 42\n[Omitted long matching line]\nbet [... omitted end of long line]\n/data/r4/notes.txt\n/data/r4/sub/inner.txt\n",
         "stderr": ""
-      }
+      },
+      "flags": ["sort", "sortr", "l", "d", "max_filesize", "q", "trim", "M", "max_columns_preview", "one_file_system"]
     },
     {
       "id": "rg_walks_a_directory_after_a_file",

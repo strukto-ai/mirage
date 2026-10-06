@@ -20,7 +20,14 @@ import type { ByteSource } from '../../io/types.ts'
 import { DeviceInput, IOResult, materialize } from '../../io/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
-import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from '../../shell/constants.ts'
+import {
+  FD_BOTH,
+  FD_CLOSE,
+  FD_STDERR,
+  FD_STDIN,
+  FD_STDOUT,
+  OUTPUT_ONLY_BUILTINS,
+} from '../../shell/constants.ts'
 import {
   ENCLOSING,
   FileDescription,
@@ -28,6 +35,7 @@ import {
   Inherited,
   Recorder,
   type Descriptor,
+  type StreamOwner,
   badDescriptorLine,
   deliver,
   unreadableStdin,
@@ -35,13 +43,13 @@ import {
 } from '../../shell/descriptors.ts'
 import { getText } from '../../shell/helpers.ts'
 import { ExitSignal } from '../../shell/errors.ts'
-import { type Redirect, RedirectKind } from '../../shell/types.ts'
+import { NodeType as NT, type Redirect, RedirectKind } from '../../shell/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
-import { writeDescription } from './create.ts'
+import { createFile, writeDescription } from './create.ts'
 import {
   CLOSED as EXEC_CLOSED,
   OPEN_FOR_READ_WRITE,
@@ -50,10 +58,11 @@ import {
   TO_STDIN as EXEC_TO_STDIN,
   TO_STDOUT as EXEC_TO_STDOUT,
 } from './builtins/exec/constants.ts'
-import { drained, type ExecuteNodeFn, pump } from './jobs.ts'
+import { drained, pump } from './jobs.ts'
+import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, isUnwinding, takeStderr, type Unwinding } from './control.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
-import { Channel } from '../../shell/console/index.ts'
+import { Channel, JobOutput, type OwnedStream } from '../../shell/console/index.ts'
 import { concat } from '../../io/cachable_iterator.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
@@ -66,9 +75,118 @@ const TO_STDERR = Symbol('stderr')
 const CLOSED = Symbol('closed')
 type FdDest = typeof TO_STDOUT | typeof TO_STDERR | typeof CLOSED | FileDescription | Inherited
 
+/**
+ * Where a background job started under a redirect writes.
+ *
+ * Into the redirected command's recorder while the command runs, so it
+ * goes through the descriptors with what the command writes; after that
+ * straight through them, to the file the redirect opened or the stream it
+ * pointed at, as bash's job keeps the descriptors it was started with.
+ */
+export class JobRoute extends JobOutput {
+  /** Who the level's own stdout and stderr belong to, for a copy of them (`3>&1`). */
+  readonly owner: StreamOwner
+
+  constructor(
+    recorder: Recorder,
+    readonly outputs: ReadonlyMap<number, FdDest>,
+    outer: JobConsole,
+    readonly dispatch: DispatchFn,
+    readonly session: SessionState,
+  ) {
+    super(outer)
+    this.recorder = recorder
+    this.owner = recorder.owner
+  }
+
+  /** Route what a job wrote. */
+  override async emit(channel: Channel, data: Uint8Array): Promise<void> {
+    if (this.recorder !== null) await this.recorder.emit(channel, data)
+    else await this.write(channel, data)
+  }
+
+  /** Route what a job wrote to a stream a level owns. */
+  override async emitTo(stream: OwnedStream, data: Uint8Array): Promise<void> {
+    if (this.recorder !== null) await this.recorder.emitTo(stream, data)
+    else await this.write(stream instanceof Inherited ? stream : stream.channel, data)
+  }
+
+  /** Which of the level's own writes, or the streams above it, a job's streams reach. */
+  override passes(streams: ReadonlySet<Channel | OwnedStream>): Set<Channel | OwnedStream> {
+    const reached = new Set<Channel | OwnedStream>()
+    for (const stream of streams) {
+      const dest =
+        stream instanceof Inherited
+          ? stream
+          : typeof stream === 'string'
+            ? this.outputs.get(stream === Channel.STDOUT ? 1 : 2)
+            : undefined
+      if (dest === TO_STDOUT) reached.add(Channel.STDOUT)
+      else if (dest === TO_STDERR) reached.add(Channel.STDERR)
+      else if (dest instanceof Inherited)
+        reached.add(dest.owner === this.owner ? dest.channel : dest)
+    }
+    return reached
+  }
+
+  /**
+   * Send on, in order, what jobs wrote while the redirect wrote its
+   * command's output, then let them write straight through: the command
+   * wrote first, and its first write is the one that opens the file. A
+   * held write that fails is the job's, which has moved on, so it never
+   * stops the line that released it: Python logs it at debug, and core,
+   * which runs on every host, has no logger to give it to (`console`
+   * writes to a Node process's stdout).
+   */
+  async release(): Promise<void> {
+    try {
+      let held = this.recorder
+      while (held instanceof Recorder && held.chunks.length > 0) {
+        this.recorder = new Recorder()
+        for (const [key, data] of held.chunks) {
+          try {
+            await this.write(key, data)
+          } catch (error) {
+            if (!isFsError(error)) throw error
+          }
+        }
+        held = this.recorder
+      }
+    } finally {
+      this.recorder = null
+    }
+  }
+
+  private async write(key: Channel | Inherited, data: Uint8Array): Promise<void> {
+    if (key instanceof Inherited) {
+      if (key.owner === this.owner) await this.target.emit(key.channel, data)
+      else await this.target.emitTo(key, data)
+      return
+    }
+    const dest = this.outputs.get(key === Channel.STDOUT ? 1 : 2)
+    if (dest === TO_STDOUT) await this.target.emit(Channel.STDOUT, data)
+    else if (dest === TO_STDERR) await this.target.emit(Channel.STDERR, data)
+    else if (dest instanceof Inherited) await this.target.emitTo(dest, data)
+    else if (dest instanceof FileDescription)
+      await writeDescription(this.dispatch, this.session, dest, data)
+  }
+}
+
 /** Ordered descriptor bindings for one command, restored after execution.
- * Output opens remain deferred until admission completes so a refused command
- * cannot truncate its targets; ordinary opens can still fail after execution. */
+ * A target opened for writing is emptied before the command runs, as bash's
+ * open-before-exec does, so `cat f > f` reads an empty file and `ls > out`
+ * lists `out`; a target that cannot be opened stops the command before it
+ * runs. A `>>` target is opened then too, created when it is missing, so
+ * `ls >> out` lists `out`. A simple command opens its targets only once
+ * dispatch admits it, so a command the gate refuses leaves them as they were.
+ * A builtin that touches no file of its own (`echo`, `printf`, `:`) cannot
+ * tell, so its targets are opened by the write of its output, one write per
+ * target, and one that cannot be opened fails that write with the open's
+ * error, the output dropped. Two opens stay out of bash's order: an input that cannot be opened stops the
+ * line before any target is opened, where bash has emptied the ones written
+ * before it, because the gate has not judged the line yet; and an input that
+ * reaches a `>` target only through a symlink is read before the target is
+ * emptied, since the paths are compared as typed. */
 const UNREADABLE: unique symbol = Symbol('unreadable')
 type Input = ByteSource | null | typeof UNREADABLE
 
@@ -120,7 +238,20 @@ export async function handleRedirect(
     if (descriptor.identity === EXEC_CLOSED) closed.add(fd)
   }
   const files: FileDescription[] = []
-  for (const r of redirects) {
+  // bash empties a write target as it opens it, so the command finds nothing
+  // to read in the same file through an input redirect.
+  const truncated = new Map<string, number>()
+  for (const [at, r] of redirects.entries()) {
+    if (
+      (r.kind === RedirectKind.STDOUT || r.kind === RedirectKind.STDERR) &&
+      !r.append &&
+      typeof r.target !== 'number'
+    ) {
+      const virtual = ensureScope(r.target).virtual
+      if (!truncated.has(virtual)) truncated.set(virtual, at)
+    }
+  }
+  for (const [at, r] of redirects.entries()) {
     if (r.kind === RedirectKind.AMBIGUOUS) {
       const word = r.target instanceof PathSpec ? r.target.rawPath : String(r.target)
       return shellFailure(encodeText(`${word}: ambiguous redirect\n`))
@@ -168,13 +299,19 @@ export async function handleRedirect(
     }
     const scope = ensureScope(r.target)
     if (r.kind === RedirectKind.STDIN || r.kind === RedirectKind.READWRITE) {
+      // Opened after the target was emptied there is nothing to read; opened
+      // before, the file must still be there.
+      const emptiedAt = r.kind === RedirectKind.STDIN ? truncated.get(scope.virtual) : undefined
       let source: ByteSource | null
       try {
         if (scope.virtual === '/dev/stdin' && r.kind === RedirectKind.STDIN) {
           inputs.set(r.fd, stdin)
           continue
         }
-        source = (await dispatch('read', scope))[0] as ByteSource | null
+        source =
+          emptiedAt !== undefined && emptiedAt < at
+            ? new Uint8Array()
+            : ((await dispatch('read', scope))[0] as ByteSource | null)
       } catch (error) {
         if (r.kind === RedirectKind.READWRITE && isMissingPath(error)) source = new Uint8Array()
         else {
@@ -182,7 +319,7 @@ export async function handleRedirect(
           return redirectFailure(scope, error)
         }
       }
-      const data = await materialize(source)
+      const data = emptiedAt !== undefined ? new Uint8Array() : await materialize(source)
       if (r.kind === RedirectKind.READWRITE) {
         const file = new FileDescription(scope, true)
         file.source = new FileInput(file, data)
@@ -206,6 +343,31 @@ export async function handleRedirect(
   }
   const refusal = await openRefusal(dispatch, session, redirects)
   if (refusal !== null) return refusal
+  const opening = files.filter((file) => file.source === null)
+  const opened = new Set<FileDescription>()
+  const failure: [PathSpec, unknown][] = []
+  // Open the statement's write targets, as bash's opens do before the command
+  // runs: a `>` one emptied, a `>>` one created when it is missing; false, the
+  // failure kept, when one cannot be opened. An output-only builtin's targets
+  // wait for the write of its output instead (`outputOnly`).
+  const openTargets = async (name = '', args: readonly string[] = []): Promise<boolean> => {
+    if (outputOnly(name, args)) return true
+    for (let file = opening.shift(); file !== undefined; file = opening.shift()) {
+      try {
+        await createFile(dispatch, session, file.scope, new Uint8Array(), file.append)
+      } catch (error) {
+        if (!isFsError(error)) throw error
+        failure.push([file.scope, error])
+        return false
+      }
+      opened.add(file)
+    }
+    return true
+  }
+  // A simple command opens its targets once dispatch has admitted it (see
+  // runWithRedirectPaths); a compound one has no gate of its own and opens
+  // them here, before its body runs.
+  const simple = command !== null && command.type === NT.COMMAND
   const recorder = new Recorder()
   for (const file of files) {
     if (file.source !== null) continue
@@ -243,22 +405,29 @@ export async function handleRedirect(
     .map((r) => ensureScope(r.target))
   const terminalOutput = session.terminalOutput
   session.terminalOutput = terminalOutput && outputs.get(1) === TO_STDOUT
+  const jobOutput = session.jobOutput
+  const route = new JobRoute(recorder, outputs, jobOutput ?? session.tty.jobs, dispatch, session)
+  session.jobOutput = route
   try {
     const given = inputs.get(0) ?? null
     if (command === null) {
       if (captureInput && given !== UNREADABLE) await pump(recorder, Channel.STDOUT, given)
-    } else {
+    } else if (simple || (await runWithRedirectPaths(command, targets, openTargets))) {
       const [, execIo, execNode] = await drained(
         recorder,
         ...(await ENCLOSING.run(recorder, () =>
-          runWithRedirectPaths(command, targets, () =>
-            executeNode(
-              command,
-              session,
-              given === UNREADABLE ? unreadableStdin() : given,
-              callStack,
-              { sink: recorder },
-            ),
+          runWithRedirectPaths(
+            command,
+            targets,
+            () =>
+              executeNode(
+                command,
+                session,
+                given === UNREADABLE ? unreadableStdin() : given,
+                callStack,
+                { sink: recorder },
+              ),
+            simple ? openTargets : null,
           ),
         )),
       )
@@ -277,6 +446,10 @@ export async function handleRedirect(
       if (diagnostic.byteLength > 0) await recorder.emit(Channel.STDERR, diagnostic)
     }
   } finally {
+    // A body that raised (an abort, an error) skips the writes below: its
+    // jobs write straight through.
+    route.recorder = null
+    session.jobOutput = jobOutput
     for (const file of files) file.emit = null
     session.terminalOutput = terminalOutput
     for (const fd of claimed) {
@@ -285,86 +458,116 @@ export async function handleRedirect(
       else session.descriptors.delete(fd)
     }
   }
-  const chunks = recorder.chunks
-  if (refused) {
-    outputs.clear()
-    outputs.set(0, CLOSED)
-    outputs.set(1, TO_STDOUT)
-    outputs.set(2, TO_STDERR)
-    for (const r of redirects)
-      if (typeof r.target === 'number') outputs.set(r.fd, outputs.get(r.target) ?? CLOSED)
-  }
-  if (
-    outputs.get(1) === CLOSED &&
-    command !== null &&
-    chunks.some(([channel]) => channel === Channel.STDOUT)
-  ) {
-    chunks.push([Channel.STDERR, closedWriteLine(command)])
-    io.exitCode = 1
-  }
-  const dest = (key: Channel | Inherited): FdDest | undefined => {
-    if (!(key instanceof Inherited)) return outputs.get(key === Channel.STDOUT ? 1 : 2)
-    if (key.owner !== recorder.owner) return key
-    return key.channel === Channel.STDOUT ? TO_STDOUT : TO_STDERR
-  }
-  const routed: [Channel | Inherited, Uint8Array][] = []
-  const writeFiles = async () => {
-    const consumed = new Set<FileDescription>()
-    let failedScope: PathSpec | null = null
-    try {
-      if (!refused)
-        for (const file of files) {
-          failedScope = file.scope
-          const unique =
-            files.filter((other) => other.scope.virtual === file.scope.virtual).length === 1
-          const data = unique
-            ? concat(chunks.filter(([key]) => dest(key) === file).map(([, data]) => data))
-            : new Uint8Array()
-          await writeDescription(dispatch, session, file, data)
-          if (unique) {
-            consumed.add(file)
-            if (data.byteLength > 0) io.writes[file.scope.virtual] = data
-          }
-        }
-      for (const [key, data] of chunks) {
-        const target = dest(key)
-        if (target === TO_STDOUT) routed.push([Channel.STDOUT, data])
-        else if (target === TO_STDERR) routed.push([Channel.STDERR, data])
-        else if (target instanceof Inherited) routed.push([target, data])
-        else if (target instanceof FileDescription && !consumed.has(target)) {
-          failedScope = target.scope
-          await writeDescription(dispatch, session, target, data)
-          io.writes[target.scope.virtual] = data
-        }
-      }
-    } catch (error) {
-      if (!isFsError(error) || failedScope === null) throw error
-      routed.push([Channel.STDERR, redirectErrorLine(failedScope, error)])
+  let stdout: Uint8Array | null = null
+  // What a job writes from here waits until the command's own output is
+  // written (`route.release()`).
+  route.recorder = new Recorder()
+  try {
+    const [stopped] = failure
+    if (stopped !== undefined) return redirectFailure(...stopped)
+    const chunks = recorder.chunks
+    if (refused) {
+      outputs.clear()
+      outputs.set(0, CLOSED)
+      outputs.set(1, TO_STDOUT)
+      outputs.set(2, TO_STDERR)
+      for (const r of redirects)
+        if (typeof r.target === 'number') outputs.set(r.fd, outputs.get(r.target) ?? CLOSED)
+    }
+    if (
+      outputs.get(1) === CLOSED &&
+      command !== null &&
+      chunks.some(([channel]) => channel === Channel.STDOUT)
+    ) {
+      chunks.push([Channel.STDERR, closedWriteLine(command)])
       io.exitCode = 1
     }
-  }
-  if (command === null) await writeFiles()
-  else await runWithRedirectPaths(command, targets, writeFiles)
-  let stdout: Uint8Array | null = null
-  io.stderr = null
-  const kept: [Channel, Uint8Array][] = []
-  for (const [key, data] of routed) {
-    if (key instanceof Inherited) {
-      if (!(await deliver(sink ?? null, key, data))) kept.push([key.channel, data])
-    } else if (sink !== undefined) await sink.emit(key, data)
-    else kept.push([key, data])
-  }
-  if (sink !== undefined) for (const [channel, data] of kept) await sink.emit(channel, data)
-  else {
-    const joined = (channel: Channel): Uint8Array | null => {
-      const data = concat(kept.filter(([c]) => c === channel).map(([, d]) => d))
-      return data.byteLength === 0 ? null : data
+    const dest = (key: Channel | Inherited): FdDest | undefined => {
+      if (!(key instanceof Inherited)) return outputs.get(key === Channel.STDOUT ? 1 : 2)
+      if (key.owner !== recorder.owner) return key
+      return key.channel === Channel.STDOUT ? TO_STDOUT : TO_STDERR
     }
-    stdout = joined(Channel.STDOUT)
-    io.stderr = joined(Channel.STDERR)
+    const routed: [Channel | Inherited, Uint8Array][] = []
+    const writeFiles = async () => {
+      const consumed = new Set<FileDescription>()
+      let failedScope: PathSpec | null = null
+      try {
+        if (!refused)
+          for (const file of files) {
+            failedScope = file.scope
+            const unique =
+              files.filter((other) => other.scope.virtual === file.scope.virtual).length === 1
+            const data = unique
+              ? concat(chunks.filter(([key]) => dest(key) === file).map(([, data]) => data))
+              : new Uint8Array()
+            if (data.byteLength > 0 || !opened.has(file))
+              await writeDescription(dispatch, session, file, data)
+            else file.opened = true
+            if (unique) {
+              consumed.add(file)
+              if (data.byteLength > 0) {
+                io.writes[file.scope.virtual] = data
+                io.cache = io.cache.filter((p) => p !== file.scope.virtual)
+              }
+            }
+          }
+        for (const [key, data] of chunks) {
+          const target = dest(key)
+          if (target === TO_STDOUT) routed.push([Channel.STDOUT, data])
+          else if (target === TO_STDERR) routed.push([Channel.STDERR, data])
+          else if (target instanceof Inherited) routed.push([target, data])
+          else if (target instanceof FileDescription && !consumed.has(target)) {
+            failedScope = target.scope
+            await writeDescription(dispatch, session, target, data)
+            io.writes[target.scope.virtual] = data
+            io.cache = io.cache.filter((p) => p !== target.scope.virtual)
+          }
+        }
+      } catch (error) {
+        if (!isFsError(error) || failedScope === null) throw error
+        routed.push([Channel.STDERR, redirectErrorLine(failedScope, error)])
+        io.exitCode = 1
+      }
+    }
+    if (command === null) await writeFiles()
+    else await runWithRedirectPaths(command, targets, writeFiles)
+    io.stderr = null
+    const kept: [Channel, Uint8Array][] = []
+    for (const [key, data] of routed) {
+      if (key instanceof Inherited) {
+        if (!(await deliver(sink ?? null, key, data))) kept.push([key.channel, data])
+      } else if (sink !== undefined) await sink.emit(key, data)
+      else kept.push([key, data])
+    }
+    if (sink !== undefined) for (const [channel, data] of kept) await sink.emit(channel, data)
+    else {
+      const joined = (channel: Channel): Uint8Array | null => {
+        const data = concat(kept.filter(([c]) => c === channel).map(([, d]) => d))
+        return data.byteLength === 0 ? null : data
+      }
+      stdout = joined(Channel.STDOUT)
+      io.stderr = joined(Channel.STDERR)
+    }
+  } finally {
+    await route.release()
   }
   if (unwound !== null) throw await carried(unwound, stdout, new IOResult({ stderr: io.stderr }))
   return [stdout, io, new ExecutionNode({ command: 'redirect', exitCode: io.exitCode, refused })]
+}
+
+/**
+ * Whether an admitted command reads and writes no file of its own.
+ *
+ * Its write targets can then be opened by the write of its output: no read it
+ * makes can see a target emptied early, and a target that cannot be opened
+ * fails that write with the error the open would have met, the output dropped
+ * and the status 1, which is what bash shows for a command it never ran.
+ * `printf -v` assigns a variable a refused open must stop, so an option ahead
+ * of the format opens first. Mirrors Python's `_output_only`.
+ */
+function outputOnly(name: string, args: readonly string[]): boolean {
+  if (!OUTPUT_ONLY_BUILTINS.has(name)) return false
+  return name !== 'printf' || args.length === 0 || !(args[0] ?? '').startsWith('-')
 }
 
 function descriptorOutput(descriptor: Descriptor): FdDest {
@@ -444,7 +647,7 @@ function describe(output: FdDest, source: Input, owner: Recorder | null): Descri
 function redirectErrorLine(scope: PathSpec, err: unknown): Uint8Array {
   const strerror = fsStrerror(err)
   const label = scope.rawPath
-  return new TextEncoder().encode(strerror !== null ? `${label}: ${strerror}\n` : `${label}\n`)
+  return encodeText(strerror !== null ? `${label}: ${strerror}\n` : `${label}\n`)
 }
 
 /** GNU's line for a write onto a closed stdout, in the command's name. */
@@ -453,7 +656,7 @@ function closedWriteLine(command: TSNodeLike): Uint8Array {
     .split(/\s+/)
     .filter((w) => w !== '')
   const name = words[0] ?? 'redirect'
-  return new TextEncoder().encode(`${name}: write error: Bad file descriptor\n`)
+  return encodeText(`${name}: write error: Bad file descriptor\n`)
 }
 
 /** Shell-attributed IOResult for a redirect target that cannot be opened. */
@@ -553,7 +756,7 @@ async function openRefusal(
     if (scope.rawPath.endsWith('/')) {
       const earlier = await applyPendingOpens(dispatch, pending)
       if (earlier !== null) return earlier
-      return shellFailure(new TextEncoder().encode(`${scope.rawPath}: Is a directory\n`))
+      return shellFailure(encodeText(`${scope.rawPath}: Is a directory\n`))
     }
     const path = scope.virtual
     let exists = opened.has(path)
@@ -575,7 +778,7 @@ async function openRefusal(
       const earlier = await applyPendingOpens(dispatch, pending)
       if (earlier !== null) return earlier
       const detail = isDir ? 'Is a directory' : 'cannot overwrite existing file'
-      return shellFailure(new TextEncoder().encode(`${scope.rawPath}: ${detail}\n`))
+      return shellFailure(encodeText(`${scope.rawPath}: ${detail}\n`))
     }
     // This open succeeds, so the target exists for every redirect after
     // it, and a truncating one leaves it empty to be found. Without the

@@ -1,0 +1,40 @@
+{
+  "cases": [
+    {
+      "id": "mv_strip_trailing_slashes_t_moves_the_link",
+      "seq": 15600205,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcF_ms/t /data/fcF_ms/d && echo f > /data/fcF_ms/t/f && ln -s t /data/fcF_ms/l && mv --strip-trailing-slashes -t /data/fcF_ms/d /data/fcF_ms/l/; echo rc=$?; readlink /data/fcF_ms/d/l; ls /data/fcF_ms /data/fcF_ms/t; rm -r /data/fcF_ms",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nt\n/data/fcF_ms:\nd\nt\n\n/data/fcF_ms/t:\nf\n",
+        "stderr": ""
+      },
+      "flags": [
+        "strip-trailing-slashes",
+        "t"
+      ]
+    }
+  ]
+}

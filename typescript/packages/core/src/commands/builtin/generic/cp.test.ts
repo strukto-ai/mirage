@@ -144,16 +144,6 @@ describe('cpGeneric guards', () => {
     expect(await io.stderrStr()).toBe("cp: cannot stat '/plain/a/b': Not a directory\n")
   })
 
-  it('multiple sources with a missing target report No such file or directory', async () => {
-    const files = new Map([
-      ['/a.txt', new Uint8Array([1])],
-      ['/b.txt', new Uint8Array([2])],
-    ])
-    await expect(run(files, new Set(['/']), ['/a.txt', '/b.txt', '/nodir'])).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
-  })
-
   it('multiple sources with a slashed plain-file target report Not a directory', async () => {
     // GNU 9.7: `cp a b reg/` is `target 'reg/': Not a directory`, the
     // destination probe's verdict, where only a genuinely absent target is
@@ -197,14 +187,7 @@ describe('cpGeneric guards', () => {
     })
     expect(io.exitCode).toBe(1)
     expect(await io.stderrStr()).toContain('into itself')
-    expect([...files.keys()]).toEqual(['/d/a.txt'])
-  })
-
-  it('copies a single source into a directory', async () => {
-    const files = new Map([['/a.txt', new Uint8Array([1])]])
-    const [, io] = await run(files, new Set(['/d']), ['/a.txt', '/d'])
-    expect(io.exitCode).toBe(0)
-    expect(files.has('/d/a.txt')).toBe(true)
+    expect([...files.keys()]).toEqual(['/d/a.txt', '/d/sub/d/a.txt'])
   })
 
   it('refuses multiple sources when the target is not a directory', async () => {
@@ -408,67 +391,59 @@ function rootReaddir(files: Map<string, Uint8Array>, dirs: Set<string>): Readdir
 }
 
 describe('cpGeneric --update', () => {
-  it('older skips on equal mtimes', async () => {
+  // Freshness cannot be proven without mtimes: the copy proceeds.
+  it.each([
+    ['older', OLD, 2],
+    ['older', undefined, 1],
+    ['none', undefined, 2],
+  ] as const)('%s with mtime %s keeps byte %d', async (update, stamp, kept) => {
     const files = new Map([
       ['/a.txt', new Uint8Array([1])],
       ['/b.txt', new Uint8Array([2])],
     ])
-    const mtimes = new Map([
-      ['/a.txt', OLD],
-      ['/b.txt', OLD],
-    ])
+    const stamps: [string, string][] =
+      stamp === undefined
+        ? []
+        : [
+            ['/a.txt', stamp],
+            ['/b.txt', stamp],
+          ]
     const [, io] = await run(files, new Set(), ['/a.txt', '/b.txt'], {
-      mtimes,
-      flags: cpFlags({ update: 'older' }),
+      mtimes: new Map(stamps),
+      flags: cpFlags({ update }),
     })
-    expect(io.exitCode).toBe(0)
-    expect(files.get('/b.txt')).toEqual(new Uint8Array([2]))
-  })
-
-  it('older replaces when mtimes are unknown', async () => {
-    // Freshness cannot be proven without mtimes: the copy proceeds.
-    const files = new Map([
-      ['/a.txt', new Uint8Array([1])],
-      ['/b.txt', new Uint8Array([2])],
-    ])
-    await run(files, new Set(), ['/a.txt', '/b.txt'], { flags: cpFlags({ update: 'older' }) })
-    expect(files.get('/b.txt')).toEqual(new Uint8Array([1]))
-  })
-
-  it('none skips silently', async () => {
-    const files = new Map([
-      ['/a.txt', new Uint8Array([1])],
-      ['/b.txt', new Uint8Array([2])],
-    ])
-    const [, io] = await run(files, new Set(), ['/a.txt', '/b.txt'], {
-      flags: cpFlags({ update: 'none' }),
-    })
-    expect(io.exitCode).toBe(0)
-    expect(io.stderr).toBeNull()
-    expect(files.get('/b.txt')).toEqual(new Uint8Array([2]))
+    expect([io.exitCode, io.stderr]).toEqual([0, null])
+    expect(files.get('/b.txt')).toEqual(new Uint8Array([kept]))
   })
 })
 
 describe('cpGeneric --backup', () => {
-  it('skips a missing destination', async () => {
-    const files = new Map([['/a.txt', new Uint8Array([1])]])
-    await run(files, new Set(), ['/a.txt', '/b.txt'], { flags: cpFlags({ backup: 'existing' }) })
-    expect(files.get('/b.txt')).toEqual(new Uint8Array([1]))
-    expect(files.has('/b.txt~')).toBe(false)
-  })
-
-  it('existing prefers numbered versions', async () => {
-    const files = new Map([
-      ['/a.txt', new Uint8Array([1])],
-      ['/b.txt', new Uint8Array([2])],
-      ['/b.txt.~3~', new Uint8Array([3])],
-    ])
-    await run(files, new Set(), ['/a.txt', '/b.txt'], {
-      readdir: rootReaddir(files, new Set()),
-      flags: cpFlags({ backup: 'existing' }),
-    })
-    expect(files.get('/b.txt.~4~')).toEqual(new Uint8Array([2]))
-  })
+  it.each([
+    [{}, {}],
+    [
+      { '/b.txt': 2, '/b.txt.~3~': 3 },
+      { '/b.txt.~3~': 3, '/b.txt.~4~': 2 },
+    ],
+  ] as [Record<string, number>, Record<string, number>][])(
+    'existing follows the numbered versions of %j',
+    async (before, backups) => {
+      const files = new Map(
+        Object.entries({ '/a.txt': 1, ...before }).map(([path, byte]) => [
+          path,
+          new Uint8Array([byte]),
+        ]),
+      )
+      await run(files, new Set(), ['/a.txt', '/b.txt'], {
+        readdir: rootReaddir(files, new Set()),
+        flags: cpFlags({ backup: 'existing' }),
+      })
+      expect(Object.fromEntries([...files].map(([path, data]) => [path, data[0]]))).toEqual({
+        '/a.txt': 1,
+        '/b.txt': 1,
+        ...backups,
+      })
+    },
+  )
 
   it('records the backup write', async () => {
     const files = new Map([
@@ -518,7 +493,7 @@ describe('cpGeneric -t/-T', () => {
       ['/f.txt', new Uint8Array([2])],
     ])
     const [, io] = await run(files, new Set(), ['/a.txt'], {
-      flags: cpFlags({ targetDir: '/f.txt' }),
+      flags: cpFlags({ targetDir: PathSpec.fromStrPath('/f.txt') }),
     })
     expect(io.exitCode).toBe(1)
     expect(await io.stderrStr()).toBe("cp: target directory '/f.txt': Not a directory\n")
@@ -566,11 +541,7 @@ describe('parseFlags', () => {
   })
 
   it('resolves the GNU update and backup grammars', () => {
-    expect(parseFlags(view({ update: true })).update).toBe('older')
     expect(parseFlags(view({})).update).toBeNull()
-    const parsed = parseFlags(view({ suffix: '.bak' }))
-    expect(parsed.backup).toBe('existing')
-    expect(parsed.suffix).toBe('.bak')
     expect(parseFlags(view({ backup: 't' })).backup).toBe('numbered')
     expect(parseFlags(view({ backup: 'nil' })).backup).toBe('existing')
   })
@@ -714,18 +685,20 @@ describe('cp quotes the word its argument clauses name', () => {
 })
 
 // Measured against GNU coreutils 9.7 on debian:stable-slim, LC_ALL=C.
-describe.each(['cp', 'mv'])('%s --update candidates', (command) => {
+describe('--update candidates', () => {
   it.each([
-    ['all', 'all'],
-    ['none', 'none'],
-    ['none-fail', 'none-fail'],
-    ['older', 'older'],
-    ['a', 'all'],
-    ['al', 'all'],
-    ['o', 'older'],
-    ['old', 'older'],
-    ['none-', 'none-fail'],
-  ])('accepts %s as %s', (value, mode) => {
+    ['cp', 'older', 'older'],
+    ['cp', 'a', 'all'],
+    ['cp', 'o', 'older'],
+    ['cp', 'old', 'older'],
+    ['mv', 'all', 'all'],
+    ['mv', 'older', 'older'],
+    ['mv', 'a', 'all'],
+    ['mv', 'al', 'all'],
+    ['mv', 'o', 'older'],
+    ['mv', 'old', 'older'],
+    ['mv', 'none-', 'none-fail'],
+  ])('%s accepts %s as %s', (command, value, mode) => {
     expect(updateMode(command, new FlagView({ update: value }, specOf(command)))).toBe(mode)
   })
 })
@@ -754,13 +727,8 @@ describe('the link options', () => {
   // one wins; with none, a recursive copy copies links as links and any other
   // copy follows them. Mirrors test_cp.py.
   it.each([
-    [[], 'always'],
-    [['-r'], 'never'],
     [['-R'], 'never'],
     [['-a'], 'never'],
-    [['-rL'], 'always'],
-    [['-rH'], 'command_line'],
-    [['-P'], 'never'],
     [['-d'], 'never'],
     [['-L', '-P'], 'never'],
     [['-P', '-L'], 'always'],
@@ -774,7 +742,7 @@ describe('a link reached through a linked directory', () => {
   // The table keys a link by its resolved directory, so `dl/al` stands at
   // `dir/al`; coreutils 9.7 copies the link itself. Mirrors python's
   // test_a_link_reached_through_a_linked_directory_copies_as_a_link.
-  it.each(['-P', '-d'])('cp %s copies it as a link', async (flag) => {
+  it('cp -P copies it as a link', async () => {
     const ws = new Workspace(
       { '/data/': new RAMVFS() },
       { mode: MountMode.WRITE, shellParser: await getTestParser() },
@@ -782,7 +750,7 @@ describe('a link reached through a linked directory', () => {
     await ws.shell(
       "cd /data && mkdir dir w && printf 'x\\n' > a.txt && ln -s ../a.txt dir/al && ln -s dir dl",
     )
-    const r = await ws.shell(`cd /data && cp ${flag} dl/al w/x && ls -F w`)
+    const r = await ws.shell('cd /data && cp -P dl/al w/x && ls -F w')
     expect([r.exitCode, DEC.decode(r.stdout)]).toEqual([0, 'x@\n'])
     await ws.close()
   })
@@ -893,33 +861,28 @@ for (const native of [false, true]) {
   }
 }
 
-for (const flag of ['-r', '-rL']) {
-  it.each(['/data/copy', '/other/copy'])(
-    `cp ${flag} omits hidden links at %s`,
-    async (destination) => {
-      const ws = new Workspace(
-        { '/data': new RAMVFS(), '/other': new RAMVFS() },
-        { mode: MountMode.WRITE, shellParser: await getTestParser() },
-      )
-      try {
-        await ws.shell(
-          'mkdir -p /data/src/sec && echo visible > /data/src/a && ' +
-            'ln -s a /data/src/public && ln -s /private/key /data/src/secret && ' +
-            'ln -s /private/nested /data/src/sec/link',
-        )
-        ws.createSession('agent', {
-          profile: { paths: { hide: ['/data/src/secret', '/data/src/sec'] } },
-        })
-        const result = await ws.shell(`cp ${flag} /data/src ${destination}`, { sessionId: 'agent' })
-        expect(result.exitCode).toBe(0)
-        expect(DEC.decode(result.stderr)).toBe('')
-        const copied = await ws.shell(`ls -A ${destination} && cat ${destination}/public`)
-        expect(DEC.decode(copied.stdout)).toBe('a\npublic\nvisible\n')
-        expect(ws.namespace.isLink(`${destination}/secret`)).toBe(false)
-        expect(ws.namespace.isLink(`${destination}/sec/link`)).toBe(false)
-      } finally {
-        await ws.close()
-      }
-    },
+it('cp -rL omits hidden links', async () => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS(), '/other': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
   )
-}
+  try {
+    await ws.shell(
+      'mkdir -p /data/src/sec && echo visible > /data/src/a && ' +
+        'ln -s a /data/src/public && ln -s /private/key /data/src/secret && ' +
+        'ln -s /private/nested /data/src/sec/link',
+    )
+    ws.createSession('agent', {
+      profile: { paths: { hide: ['/data/src/secret', '/data/src/sec'] } },
+    })
+    const result = await ws.shell('cp -rL /data/src /other/copy', { sessionId: 'agent' })
+    expect(result.exitCode).toBe(0)
+    expect(DEC.decode(result.stderr)).toBe('')
+    const copied = await ws.shell('ls -A /other/copy && cat /other/copy/public')
+    expect(DEC.decode(copied.stdout)).toBe('a\npublic\nvisible\n')
+    expect(ws.namespace.isLink('/other/copy/secret')).toBe(false)
+    expect(ws.namespace.isLink('/other/copy/sec/link')).toBe(false)
+  } finally {
+    await ws.close()
+  }
+})

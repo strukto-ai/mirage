@@ -62,6 +62,11 @@ silent allow.
   thousands of ops under one recursive command — so keep it cheap;
   expensive decisions belong at `pre_command` or precomputed into
   policy state.
+  A denied directory reads like a mode-000 one: it still lists and
+  stats, and a walk (`find`, `du`, `ls -R`, `grep -r`) reports
+  `Permission denied` for it. A command you register yourself and
+  that reads its accessor directly never reaches a door, so this hook
+  never sees those reads; that handler is trusted host code.
 - **`pre_session`** — once per session-state write, before it lands.
   `export`, a plain assignment, `${X:=default}`, `$((X=5))` and
   `printf -v` all clear the same gate, because every writer goes
@@ -82,13 +87,17 @@ silent allow.
   reads `<command>: Permission denied` at exit 126, bash's own wording,
   and the reason travels as the result's `refusal` record
   (`kind: deny`, the reason, the policy's class name, the scope); the
-  `OPERAND` scope keeps the GNU operand voice instead —
-  `<command>: <reason>` at the command's own operand exit code, the
-  reason naming the operand
-  (`cat: /vault/aws.token: credentials are never read by hand`,
-  exit 1). Exit codes derive from the plane and the scope, never from
-  a number a policy returns. At the op and session doors a Deny is
-  `EACCES`.
+  `OPERAND` scope keeps the GNU operand voice instead: the command's
+  own line for an operand it may not open, at its operand exit code
+  (`cat: /vault/aws.token: Permission denied`, exit 1), the reason
+  again on the record. Exit codes derive from the plane and the scope,
+  never from a number a policy returns. At the op and session doors a
+  Deny is `EACCES` (`<NAME>: permission denied` for a session write),
+  and the reason rides the raised `PolicyDenied`'s `refusal` and the
+  line's record. A surface that hands the agent text appends the record
+  as one line, `policy denied: <reason>`.
+- **`Hide`** is the hidden-paths answer: the op answers as absent
+  (`ENOENT`) before any other policy is asked, and leaves no record.
 - **`Ask(reason)`** (`pre_command` only): the line does not run, the
   agent reads `<command>: Permission denied` at exit 126 with a
   `pending` refusal record naming the ask id, and the question lands in

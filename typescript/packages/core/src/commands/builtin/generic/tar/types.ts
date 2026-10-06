@@ -53,4 +53,7 @@ export interface ReadResult {
   entries: TarEntry[]
   failure: GzipDataError | null
   notices: string[]
+  // The first member whose data ran past the end of the stream, null when
+  // every member is whole.
+  cut: number | null
 }

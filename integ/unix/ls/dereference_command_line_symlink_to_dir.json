@@ -1,0 +1,43 @@
+{
+  "cases": [
+    {
+      "id": "ls_dereference_command_line_symlink_to_dir_lists_the_target",
+      "seq": 15600401,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcF_ls/t && echo x > /data/fcF_ls/t/f && ln -s t /data/fcF_ls/l && ln -s t/f /data/fcF_ls/lf && ls -F /data/fcF_ls/l; ls -F --dereference-command-line-symlink-to-dir /data/fcF_ls/l; ls -dF --dereference-command-line-symlink-to-dir /data/fcF_ls/l /data/fcF_ls/lf; ls -F --dereference-command-line-symlink-to-dir /data/fcF_ls; rm -r /data/fcF_ls",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fcF_ls/l@\nf\n/data/fcF_ls/l/\n/data/fcF_ls/lf@\nl@\nlf@\nt/\n",
+        "stderr": ""
+      },
+      "flags": [
+        "dereference-command-line-symlink-to-dir",
+        "F",
+        "d"
+      ]
+    }
+  ]
+}

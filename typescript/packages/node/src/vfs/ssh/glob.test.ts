@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import { makeResolveGlob } from '@struktoai/mirage-core/utils/glob_walk'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { describe, expect, it } from 'vitest'

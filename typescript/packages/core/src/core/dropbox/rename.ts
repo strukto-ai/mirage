@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { invalidateSubtree } from '../../cache/context.ts'
+import { invalidateAfterMove } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { DropboxApiError } from './client.ts'
-import { deletePath, getMetadata, listFolder, movePath } from './api.ts'
+import { deletePath, getMetadata, listFolder, movePath, type DropboxEntry } from './api.ts'
 import { invalidateAncestors } from '../../cache/context.ts'
 import { dropboxPathOf } from './paths.ts'
 
@@ -35,8 +35,10 @@ export async function rename(
   const from = dropboxPathOf(accessor, src)
   const to = dropboxPathOf(accessor, dst)
   const timer = startOp()
+  let moved: Partial<DropboxEntry>
+  let replacedNonFile = false
   try {
-    await movePath(accessor.tokenManager, from, to)
+    moved = await movePath(accessor.tokenManager, from, to)
   } catch (err) {
     if (!(err instanceof DropboxApiError)) throw err
     if (err.summary.startsWith('from_lookup/not_found')) throw enoent(src.virtual)
@@ -47,11 +49,18 @@ export async function rename(
       if (children.length > 0) throw err
     }
     await deletePath(accessor.tokenManager, to)
-    await movePath(accessor.tokenManager, from, to)
+    replacedNonFile = existing['.tag'] !== 'file'
+    moved = await movePath(accessor.tokenManager, from, to)
   }
   record('rename', src.virtual, 'dropbox', 0, timer)
-  await invalidateSubtree(src)
+  // A folder carries a subtree under both names. dst also loses one when
+  // the move replaced anything there but a file (an empty folder, or an
+  // entry of no known kind), whose name may still have cached children.
+  // Only a file tag narrows; a reply that names no type keeps the
+  // subtree.
+  const folder = moved['.tag'] !== 'file'
+  await invalidateAfterMove(src, folder)
   await invalidateAncestors(src)
-  await invalidateSubtree(dst)
+  await invalidateAfterMove(dst, folder || replacedNonFile)
   await invalidateAncestors(dst)
 }

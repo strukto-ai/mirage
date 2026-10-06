@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isStdin, readStdinAsync, stdinStream } from '../utils/stream.ts'
+import { readStdinAsync, stdinStream } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { eisdir, fsErrorLine, fsStrerror, isFsError } from '../../../utils/errors.ts'
 import { dispatchStat, typedSpec } from '../utils/paths.ts'
@@ -35,9 +36,7 @@ import {
   type SedScriptPiece,
 } from '../sed_script.ts'
 import { SED_LINE_LENGTH, SedMachine, type SedFileContent, type SedInput } from '../sed_exec.ts'
-import { encodeText } from '../../../shell/bytes.ts'
-
-const DEC = new TextDecoder('utf-8', { fatal: false })
+import { byteView, decodeText, encodeText, fromByteView, utf8Locale } from '../../../shell/bytes.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 type Write = (p: PathSpec, data: Uint8Array) => Promise<void>
@@ -120,15 +119,17 @@ async function openWriteFiles(names: readonly string[], doors: SedDoors): Promis
 
 // Read the files `r` or `R` names: a file that cannot be opened reads as
 // empty, as POSIX asks, and a directory opens and then fails to read,
-// which GNU reports and exits 4 on when it gets there.
+// which GNU reports and exits 4 on when it gets there. `utf8` reads them as
+// text, under a UTF-8 locale.
 async function readScriptFiles(
   names: readonly string[],
   doors: SedDoors,
+  utf8: boolean,
 ): Promise<Map<string, SedFileContent>> {
   const files = new Map<string, SedFileContent>()
   for (const name of names) {
     try {
-      files.set(name, { text: DEC.decode(await doors.read(name)) })
+      files.set(name, { text: byteView(await doors.read(name), utf8) })
     } catch (err) {
       if (!isFsError(err)) throw err
       const code = (err as { code?: string }).code
@@ -146,13 +147,14 @@ async function readScriptFiles(
 async function flushWriteFiles(
   machine: SedMachine,
   doors: SedDoors,
+  utf8: boolean,
   edited: ReadonlySet<string> = new Set(),
 ): Promise<string> {
   let err = ''
   for (const [name, out] of machine.wfiles) {
     if (out.chunks.length === 0 || edited.has(doors.virtual(name))) continue
     try {
-      await doors.write(name, encodeText(out.chunks.join('')))
+      await doors.write(name, fromByteView(out.chunks.join(''), utf8))
     } catch (e) {
       if (!isFsError(e)) throw e
       err += openFailure(name, e)
@@ -203,6 +205,28 @@ function scriptOrigins(
   return out.length === count ? out : null
 }
 
+interface SedFlags {
+  readonly inPlace: boolean
+  readonly suppress: boolean
+  readonly extended: boolean
+  readonly separate: boolean
+  readonly lineLength: number
+  // -e and -f in the order typed, each with its text.
+  readonly scripts: readonly (readonly [string, string])[]
+}
+
+function parseFlags(bag: Record<string, FlagValue>): SedFlags {
+  const fl = new FlagView(bag, specOf('sed'))
+  return {
+    inPlace: fl.asBool('i'),
+    suppress: fl.asBool('n'),
+    extended: fl.asBool('E') || fl.asBool('r'),
+    separate: fl.asBool('separate'),
+    lineLength: lineLength(fl.asStr('line_length')),
+    scripts: fl.occurrences('e', 'f').map(([name, value]) => [name, String(value)] as const),
+  }
+}
+
 export async function sedGeneric(
   paths: PathSpec[],
   texts: string[],
@@ -210,8 +234,8 @@ export async function sedGeneric(
   stream: Stream,
   write: Write,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('sed'))
-  const inPlace = fl.asBool('i')
+  const parsed = parseFlags(opts.flags)
+  const inPlace = parsed.inPlace
   if (!inPlace) stream = stdinStream(stream, opts.stdin)
   const pieces: SedScriptPiece[] = []
   const firstPath = paths[0]
@@ -219,10 +243,8 @@ export async function sedGeneric(
     (firstPath === undefined ? undefined : mountPrefixOf(firstPath.virtual, firstPath.vfsPath)) ??
     opts.mountPrefix ??
     ''
-  const occurrences = fl.occurrences('e', 'f')
-  const origins = scriptOrigins(opts.argv, occurrences.length)
-  for (const [index, [name, value]] of occurrences.entries()) {
-    const text = String(value)
+  const origins = scriptOrigins(opts.argv, parsed.scripts.length)
+  for (const [index, [name, text]] of parsed.scripts.entries()) {
     const shown = origins?.[index] ?? null
     if (name === 'e') {
       pieces.push(shown === null ? { kind: 'expr', text } : { kind: 'file', text, name: shown })
@@ -231,7 +253,7 @@ export async function sedGeneric(
     const spec = PathSpec.fromStrPath(text, mountKey(text, scriptPrefix))
     let body: string
     try {
-      body = DEC.decode(await materialize(stream(spec)))
+      body = decodeText(await materialize(stream(spec)))
     } catch (err) {
       if (!isFsError(err)) throw err
       return failed(openFailure(shown ?? text, err), 4)
@@ -242,10 +264,11 @@ export async function sedGeneric(
   if (pieces.length === 0) return failed(`${SED_MISSING_SCRIPT}\n`, 1)
 
   const doors = sedDoors(opts, stream, write)
+  const utf8 = utf8Locale(opts.env)
   let program: SedProgram
   try {
     // -E / -r select Extended Regular Expressions; without them sed is BRE.
-    program = compileScript(pieces, fl.asBool('E') || fl.asBool('r'))
+    program = compileScript(pieces, parsed.extended, utf8)
   } catch (err) {
     if (!(err instanceof SedError)) throw err
     const refused = await openWriteFiles(err.wfiles, doors)
@@ -254,20 +277,20 @@ export async function sedGeneric(
   const refused = await openWriteFiles(program.wfiles, doors)
   if (refused !== null) return failed(refused, 4)
   const machine = new SedMachine(program, {
-    suppress: fl.asBool('n'),
-    separate: inPlace || fl.asBool('separate'),
-    lineLength: lineLength(fl.asStr('line_length')),
-    files: await readScriptFiles(program.rfiles, doors),
-    readerFiles: await readScriptFiles(program.readerFiles, doors),
+    suppress: parsed.suppress,
+    separate: inPlace || parsed.separate,
+    lineLength: parsed.lineLength,
+    files: await readScriptFiles(program.rfiles, doors, utf8),
+    readerFiles: await readScriptFiles(program.readerFiles, doors, utf8),
+    utf8,
   })
 
-  if (inPlace) return runInPlace(paths, program, machine, doors, stream, write)
+  if (inPlace) return runInPlace(paths, program, machine, doors, stream, write, utf8)
 
   const inputs: SedInput[] = []
-  const readOk: string[] = []
   if (paths.length === 0) {
     const raw = (await readStdinAsync(opts.stdin)) ?? new Uint8Array(0)
-    inputs.push({ name: '-', text: DEC.decode(raw) })
+    inputs.push({ name: '-', text: byteView(raw, utf8) })
   }
   // sed owns its exit code rather than letting the executor's chokepoint
   // pick it, because GNU sed splits a failed operand two ways (GNU sed
@@ -282,13 +305,12 @@ export async function sedGeneric(
   // (`sed -n '$p' ok.txt dir ok2.txt` prints ok2.txt's last line, exit 0).
   // Only `$`, `n` and `N` look ahead, and under -s never into the next
   // file, so otherwise nothing past the directory is read.
-  const lookAhead = looksAhead(program) && !fl.asBool('separate')
+  const lookAhead = looksAhead(program) && !parsed.separate
   for (const p of paths) {
     const last = inputs.at(-1)
     if (last !== undefined && 'fatal' in last && last.fatal && !lookAhead) break
     try {
-      inputs.push({ name: p.rawPath, text: DEC.decode(await materialize(stream(p))) })
-      if (!isStdin(p)) readOk.push(p.mountPath)
+      inputs.push({ name: p.rawPath, text: byteView(await materialize(stream(p)), utf8) })
     } catch (e) {
       if (!isFsError(e)) throw e
       const fatal = (e as { code?: string }).code === 'EISDIR'
@@ -301,12 +323,11 @@ export async function sedGeneric(
     }
   }
   machine.process(inputs, true)
-  const writeErr = await flushWriteFiles(machine, doors)
+  const writeErr = await flushWriteFiles(machine, doors, utf8)
   const stderr = machine.stderr() + writeErr
   return [
-    encodeText(machine.stdout.chunks.join('')),
+    fromByteView(machine.stdout.chunks.join(''), utf8),
     new IOResult({
-      cache: readOk,
       exitCode: writeErr === '' ? machine.exitCode() : 4,
       stderr: stderr === '' ? null : encodeText(stderr),
     }),
@@ -325,6 +346,7 @@ async function runInPlace(
   doors: SedDoors,
   stream: Stream,
   write: Write,
+  utf8: boolean,
 ): Promise<CommandFnResult> {
   if (paths.length === 0) return failed(`${SED_NO_INPUT_FILES}\n`, SED_NO_INPUT_EXIT)
   const writes: Record<string, Uint8Array> = {}
@@ -345,22 +367,22 @@ async function runInPlace(
       continue
     }
     // An `r` file edited by an earlier file of this command reads new.
-    if (edited.length > 0) machine.setFiles(await readScriptFiles(program.rfiles, doors))
-    const out = machine.process([{ name: p.rawPath, text: DEC.decode(data) }], false)
+    if (edited.length > 0) machine.setFiles(await readScriptFiles(program.rfiles, doors, utf8))
+    const out = machine.process([{ name: p.rawPath, text: byteView(data, utf8) }], false)
     if (machine.panicCode !== null) break
-    const newData = encodeText(out)
+    const newData = fromByteView(out, utf8)
     await write(p, newData)
     writes[p.mountPath] = newData
     edited.push(p.mountPath)
     editedVirtual.add(p.virtual)
   }
-  const writeErr = await flushWriteFiles(machine, doors, editedVirtual)
+  const writeErr = await flushWriteFiles(machine, doors, utf8, editedVirtual)
   const stderr = err + machine.stderr() + writeErr
   const exitCode =
     machine.panicCode ?? (writeErr !== '' ? 4 : code === 4 ? 4 : code || machine.exitCode())
   const stdout = machine.stdout.chunks.join('')
   return [
-    stdout === '' ? null : encodeText(stdout),
+    stdout === '' ? null : fromByteView(stdout, utf8),
     new IOResult({
       writes,
       cache: edited,
@@ -368,4 +390,23 @@ async function runInPlace(
       stderr: stderr === '' ? null : encodeText(stderr),
     }),
   ]
+}
+
+/**
+ * When the script is supplied via -e/-f, GNU sed treats every bare argument as
+ * a file. The arg parser instead routes the first bare arg into the positional
+ * `text` (script) slot, so recover it as a path operand here.
+ */
+export function positionalAsPaths(texts: string[], opts: CommandOpts): PathSpec[] {
+  const prefix = opts.mountPrefix !== undefined ? rstripSlash(opts.mountPrefix) : ''
+  return texts.map((t) => {
+    const resolved = resolvePath(t, opts.cwd)
+    const slash = resolved.lastIndexOf('/')
+    return new PathSpec({
+      virtual: resolved,
+      directory: slash >= 0 ? resolved.slice(0, slash + 1) : '/',
+      resolved: true,
+      vfsPath: mountKey(resolved, prefix),
+    })
+  })
 }

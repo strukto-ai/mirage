@@ -1,0 +1,64 @@
+{
+  "cases": [
+    {
+      "id": "py_config_typo",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          {
+            "name": "wasi",
+            "config": {
+              "homee": "/x"
+            }
+          },
+          "workspace"
+        ]
+      },
+      "build_error": {
+        "contains": "homee"
+      }
+    },
+    {
+      "id": "ts_config_typo",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          {
+            "name": "pyodide",
+            "config": {
+              "homee": "/x"
+            }
+          },
+          "workspace"
+        ]
+      },
+      "build_error": {
+        "contains": "unknown runtime config key 'homee'"
+      }
+    },
+    {
+      "id": "wasi_bad_home",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          {
+            "name": "wasi",
+            "config": {
+              "home": "/nonexistent-wasi-build"
+            }
+          },
+          "workspace"
+        ]
+      },
+      "build_error": {
+        "contains": "cpython-wasi-build"
+      }
+    }
+  ]
+}

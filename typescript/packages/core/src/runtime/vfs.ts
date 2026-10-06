@@ -28,38 +28,17 @@ import {
 import { ABSENT_PATH, LISTING_ENTRY_CONCURRENCY } from './constants.ts'
 import { CrossMountError } from './errors.ts'
 import { normDir, rstripSlash } from '../utils/slash.ts'
-import { planFlush } from './handles/index.ts'
+import type { FlushStep } from './handles/index.ts'
 import { PrefixResolver, type MountResolver } from './resolver.ts'
 import type { BridgeDispatchFn, RuntimeContext } from './types.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
 import { concat } from '../io/cachable_iterator.ts'
+import type { VFSEntry, VFSStat } from './types.ts'
 
 /** Whether a failure is the mount saying the path is not there. */
 function isAbsent(err: unknown): boolean {
   const condition = classify(err)
   return condition !== null && ABSENT_PATH.has(condition)
-}
-
-/** One directory entry as the mounts report it. */
-export interface VFSEntry {
-  path: string
-  size: number
-  isDir: boolean
-  // A namespace symlink. Marked so a whole-tree preload can skip it:
-  // stat follows links, so a directory link would otherwise read as a
-  // plain directory and a cyclic one would recurse the walk forever.
-  isLink?: boolean
-  // The stat's mode and stamp, absent on a row that carries no stat.
-  // A backend that slash-marks its directories is listed without one,
-  // which is the whole point of the mark, and so is an entry the
-  // listing did not classify, so the row says "not known" rather than
-  // inventing a default the guest cannot tell from an answer. A row
-  // that did stat carries both, so a guest seeding a whole tree from
-  // one listing needs no second stat per file.
-  mode?: number
-  mtimeMs?: number
-  // Encoded logical major:minor; present only for a character device.
-  rdev?: number
 }
 
 /**
@@ -73,26 +52,6 @@ export interface VFSEntry {
  */
 export function isUnclassified(entry: VFSEntry | VFSStat): boolean {
   return entry.mode === undefined && !entry.isDir && entry.isLink !== true
-}
-
-/** One path's metadata, in the shape every guest encoder needs. */
-export interface VFSStat {
-  size: number
-  isDir: boolean
-  // Milliseconds here and nanoseconds in python, on purpose: epoch
-  // nanoseconds are past 2**53, so a number cannot hold them exactly.
-  mtimeMs: number
-  // The full st_mode, type bits included, so a chmod the shell made is
-  // what a guest's stat reports. A guest that has no mode field on its
-  // own wire (preview1's filestat carries only a filetype) reads the
-  // type bits and drops the rest. `isDir` and `isLink` are this
-  // field's type bits spelled out; mode is the authority.
-  mode: number
-  // Only ever set for a stat the caller asked not to follow, since
-  // every other answer is the target's.
-  isLink?: boolean
-  // Encoded logical major:minor; present only for a character device.
-  rdev?: number
 }
 
 /**
@@ -240,6 +199,14 @@ export class RuntimeVFS {
     if (out !== undefined) {
       throw new TypeError(`runtime vfs: write ${path} expected void, got ${typeof out}`)
     }
+  }
+
+  /**
+   * Write bytes at an offset, leaving the rest of the file as it is; past
+   * the end, the gap reads as zeros.
+   */
+  async pwrite(path: string, offset: number, bytes: Uint8Array): Promise<void> {
+    await this.dispatch('pwrite', path, bytes, undefined, { offset })
   }
 
   /**
@@ -411,13 +378,9 @@ export class RuntimeVFS {
     await this.dispatch('create', path)
   }
 
-  /**
-   * Discard `path`'s content. Only ever a truncate-to-zero: the guest
-   * surfaces that reach this are fopen-style opens, and a guest
-   * ftruncate to a length operates on its open handle's buffer.
-   */
-  async truncate(path: string): Promise<void> {
-    await this.dispatch('truncate', path)
+  /** Set `path`'s length: a shrink drops bytes, growth reads zeros. */
+  async truncate(path: string, length = 0): Promise<void> {
+    await this.dispatch('truncate', path, undefined, undefined, { length })
   }
 
   async unlink(path: string): Promise<void> {
@@ -514,32 +477,25 @@ export class RuntimeVFS {
    * fallback then costs one failed dispatch per mount rather than one
    * per call.
    *
-   * The fallback needs the whole file. An encoder that already holds
-   * it (a closing file handle) passes it; one that does not (monty's
-   * appends, pyodide's mutation replay, which recorded only the tail)
-   * omits it, and the fallback reads the base fresh. Fresh every time,
-   * never a copy from an earlier append: an append lands after whatever
-   * the file holds now, so a write another action made between two
-   * appends is kept, as O_APPEND keeps it.
-   * Only a confirmed absence starts from an empty base, since an append may
-   * create the file — every other read failure propagates, because
-   * writing the tail alone over a file that exists but is momentarily
-   * unreadable would replace content this run never saw.
+   * The fallback reads the base fresh every time, never a copy from an
+   * earlier append: an append lands after whatever the file holds now,
+   * so a write another action made between two appends is kept, as
+   * O_APPEND keeps it. It reads the stored bytes, not a rendering, since
+   * it writes them back. Only a confirmed absence starts from an empty
+   * base, since an append may create the file; every other read failure
+   * propagates, because writing the tail alone over a file that exists
+   * but is momentarily unreadable would replace content this run never
+   * saw.
    *
    * Args:
    *   path: guest-absolute virtual path.
    *   tail: only the newly appended bytes.
-   *   whole: the file's full content, when the caller has it.
    */
-  async append(path: string, tail: Uint8Array, whole?: Uint8Array): Promise<void> {
+  async append(path: string, tail: Uint8Array): Promise<void> {
     if (await this.appendDelta(path, tail)) return
-    if (whole !== undefined) {
-      await this.write(path, whole)
-      return
-    }
     let base: Uint8Array = new Uint8Array()
     try {
-      base = await this.read(path)
+      base = await this.read(path, { raw: true })
     } catch (err) {
       if (!isMissingPath(err)) throw err
     }
@@ -568,12 +524,14 @@ export class RuntimeVFS {
    *   lowWrite: lowest offset this handle wrote at.
    *   buf: the handle's whole buffer.
    */
-  async flush(path: string, baseLen: number, lowWrite: number, buf: Uint8Array): Promise<void> {
-    const [kind, payload] = planFlush(baseLen, lowWrite, buf)
-    if (kind === 'write') {
-      await this.write(path, payload)
-      return
+  /** Send what a closing handle owes the mount, in order (its `flushPlan()`). */
+  async flush(path: string, steps: readonly FlushStep[]): Promise<void> {
+    for (const step of steps) {
+      const data = step.data ?? new Uint8Array()
+      if (step.kind === 'write') await this.write(path, data)
+      else if (step.kind === 'append') await this.append(path, data)
+      else if (step.kind === 'pwrite') await this.pwrite(path, step.offset ?? 0, data)
+      else await this.truncate(path, step.length ?? 0)
     }
-    await this.append(path, payload, buf)
   }
 }

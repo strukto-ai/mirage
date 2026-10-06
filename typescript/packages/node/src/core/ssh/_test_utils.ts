@@ -395,6 +395,20 @@ function makeFakeSftp(state: FakeSftp): SFTPWrapper {
       }
       cb(undefined)
     },
+    fsetstat(handle: Buffer, attrs: { size?: number }, cb: (err: Error | undefined) => void): void {
+      const h = decodeHandle(handle)
+      const file = h === null ? undefined : state.files.get(h.path)
+      if (h === null || file === undefined) {
+        cb(failure('invalid handle'))
+        return
+      }
+      if (attrs.size !== undefined) {
+        const out = new Uint8Array(attrs.size)
+        out.set(file.data.subarray(0, Math.min(file.data.byteLength, attrs.size)))
+        state.files.set(h.path, { data: out, attrs: file.attrs })
+      }
+      cb(undefined)
+    },
     chmod(path: string, mode: number, cb: (err: Error | undefined) => void): void {
       const file = state.files.get(path)
       const dir = state.dirs.get(path)

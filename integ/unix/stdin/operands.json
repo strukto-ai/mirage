@@ -1379,6 +1379,51 @@
         "stdout": "rc=1\n",
         "stderr": "join: -:2: is not sorted: a 2\njoin: input is not in sorted order\n"
       }
+    },
+    {
+      "id": "shell_stdin_gunzip_writes_a_dash_to_stdout_beside_files",
+      "seq": 15100401,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "(cd /data && printf 'file\\n' > fcA_sio && gzip fcA_sio && printf 'hi\\n' | gzip | gunzip - fcA_sio.gz && ls fcA_sio* && cat fcA_sio; rm -f fcA_sio)",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\nfcA_sio\nfile\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_stdin_cmp_reads_dev_stdin_and_shares_a_dash",
+      "seq": 15800072,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf 'hellO\\n' > /data/sio-cmp2; printf 'hello\\n' | cmp /dev/stdin /data/sio-cmp2; echo rc=$?; printf 'hello\\n' > /data/sio-cmp3; cmp - - 1 2 < /data/sio-cmp3; echo rc=$?; cmp -s - - 1 2 < /data/sio-cmp3; echo rc=$?; cmp - - 1 0 < /data/sio-cmp3; echo rc=$?; cmp - - 5 1 < /data/sio-cmp3; echo rc=$?; cmp -s - - 5 1 < /data/sio-cmp3; echo rc=$?; cmp -n 2 -s - - 0 1 < /data/sio-cmp3; echo rc=$?; rm /data/sio-cmp2 /data/sio-cmp3",
+      "expect": {
+        "exit": 0,
+        "stdout": "/dev/stdin /data/sio-cmp2 differ: char 5, line 1\nrc=1\nrc=2\nrc=1\nrc=0\nrc=2\nrc=1\nrc=2\n",
+        "stderr": "cmp: EOF on - which is empty\ncmp: -: Bad file descriptor\ncmp: -: Bad file descriptor\ncmp: -: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "shell_stdin_diff_u_names_dev_stdin_as_typed",
+      "seq": 15800075,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf 'one\\n' > /data/sio-diff2; printf 'two\\n' | diff -u /data/sio-diff2 /dev/stdin | head -2 | cut -f1; rm /data/sio-diff2",
+      "expect": {
+        "exit": 0,
+        "stdout": "--- /data/sio-diff2\n+++ /dev/stdin\n",
+        "stderr": ""
+      }
     }
   ]
 }

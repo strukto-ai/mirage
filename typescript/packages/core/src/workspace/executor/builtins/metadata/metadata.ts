@@ -17,9 +17,17 @@ import type { FileStat, SetAttrFields } from '../../../../types.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
+import type { SessionState } from '../../../session/session.ts'
+import { groupName, ownerName } from '../../../../commands/builtin/utils/identity.ts'
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
+import type { FlagView } from '../../../../commands/spec/flag_view.ts'
 import { fsStrerror, isEnoent, isEnotdir, walkRefusal } from '../../../../utils/errors.ts'
 import { CycleError } from '../../../../utils/path.ts'
+import { shellQuoteAlways } from '../../../../utils/quote.ts'
+import { rstripSlash } from '../../../../utils/slash.ts'
+import { expandOperands, result } from '../shared.ts'
+import type { Result } from '../types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 export function parseOwner(text: string): [number | string | null, number | string | null] {
   const sep = text.indexOf(':')
@@ -201,31 +209,38 @@ export async function resolveOperand(
   }
 }
 
+// A subtree as [path, stat] pairs, in fts's pre-order. Mirrors Python's
+// walk_stats.
 export async function walkStats(
   namespace: Namespace,
   dispatch: DispatchFn,
   root: PathSpec,
   rootStat: FileStat,
 ): Promise<[PathSpec, FileStat][]> {
-  const entries: [PathSpec, FileStat][] = [[root, rootStat]]
-  const queue: PathSpec[] = rootStat.type === FileType.DIRECTORY ? [root] : []
-  while (queue.length > 0) {
-    const directory = queue.shift()
-    if (directory === undefined) break
-    const [children] = await dispatch('readdir', directory)
-    for (const childVirtual of children as string[]) {
+  const entries: [PathSpec, FileStat][] = []
+  // An explicit stack, so a deep tree costs no recursion: a directory's
+  // children go on in reverse and come off in listing order.
+  const stack: [PathSpec, FileStat][] = [[root, rootStat]]
+  for (let top = stack.pop(); top !== undefined; top = stack.pop()) {
+    entries.push(top)
+    const [path, stat] = top
+    if (stat.type !== FileType.DIRECTORY) continue
+    const [children] = await dispatch('readdir', path)
+    const found: [PathSpec, FileStat][] = []
+    for (const listed of children as string[]) {
+      // A folder-backed readdir spells a directory child with its slash.
+      const childVirtual = rstripSlash(listed)
       if (namespace.isLink(childVirtual)) continue
       const child = PathSpec.fromStrPath(childVirtual)
       const [childStat] = await dispatch('stat', child)
-      const stat = childStat as FileStat
-      entries.push([child, stat])
-      if (stat.type === FileType.DIRECTORY) queue.push(child)
+      found.push([child, childStat as FileStat])
     }
+    for (const entry of found.reverse()) stack.push(entry)
   }
   return entries
 }
 
-// A subtree split into backend paths and namespace link nodes. chown and
+// A subtree split into backend entries and namespace link nodes. chown and
 // chgrp change a traversed symlink itself rather than its referent (POSIX
 // gives -R an implicit -P), and a link is namespace state that no readdir
 // can report, so the link nodes are folded back in from the node table.
@@ -234,10 +249,155 @@ export async function walkOwned(
   dispatch: DispatchFn,
   root: PathSpec,
   rootStat: FileStat,
-): Promise<{ paths: PathSpec[]; links: string[] }> {
-  const walked = await walkStats(namespace, dispatch, root, rootStat)
+): Promise<{ walked: [PathSpec, FileStat][]; links: string[] }> {
   return {
-    paths: walked.map(([path]) => path),
+    walked: await walkStats(namespace, dispatch, root, rootStat),
     links: namespace.linkStatsBelow(root.virtual).map(([path]) => path),
   }
+}
+
+// Which files chmod, chown and chgrp report: 'verbose' (every one),
+// 'changes' (the changed ones) or null. The last of -c and -v wins.
+export function verbosity(fl: FlagView): string | null {
+  return fl.typedOrder('changes', 'verbose').at(-1) ?? null
+}
+
+// An entry of a walked operand as GNU names it: the operand as typed, then
+// the entry's path below it.
+export function walkedName(typed: string, root: PathSpec, path: PathSpec): string {
+  let below = path.virtual.slice(root.virtual.replace(/\/+$/, '').length)
+  if (typed.endsWith('/')) below = below.replace(/^\/+/, '')
+  return typed + below
+}
+
+// Whether chown or chgrp changes a link's referent, or GNU's refusal. The
+// last of -h and --dereference wins; -R implies -h, and refuses an explicit
+// --dereference, which needs the -H or -L walk mirage does not offer.
+export function followsLinks(cmd: string, fl: FlagView): [boolean, Result | null] {
+  const last = fl.typedOrder('no_dereference', 'dereference').at(-1)
+  if (!fl.asBool('recursive')) return [last !== 'no_dereference', null]
+  if (last === 'dereference') {
+    const stderr = `${cmd}: -R --dereference requires either -H or -L\n`
+    return [false, result(cmd, { exitCode: 1, stderr })]
+  }
+  return [false, null]
+}
+
+// `USER:GROUP`, or the one of them given (GNU's user_group_str).
+export function ownerSpec(user: string | null, group: string | null): string | null {
+  if (user === null) return group
+  return group === null ? user : `${user}:${group}`
+}
+
+// chown and chgrp's report for one file (GNU 9.7's describe_change).
+// `status` is 'changed', 'retained' or 'failed'; `old` is null when the
+// file could not be read.
+export function ownerLine(
+  name: string,
+  status: string,
+  old: [string, string] | null,
+  user: string | null,
+  group: string | null,
+): string {
+  const now = ownerSpec(user, group) ?? ''
+  const was =
+    old === null ? null : ownerSpec(user !== null ? old[0] : null, group !== null ? old[1] : null)
+  const what = user !== null ? 'ownership' : 'group'
+  const shown = shellQuoteAlways(name)
+  if (status === 'changed') return `changed ${what} of ${shown} from ${String(was)} to ${now}\n`
+  if (status === 'retained') return `${what} of ${shown} retained as ${now}\n`
+  if (was === null) return `failed to change ${what} of ${shown} to ${now}\n`
+  return `failed to change ${what} of ${shown} from ${was} to ${now}\n`
+}
+
+/**
+ * Set the owner and group of every operand, the way chown and chgrp do: -R
+ * walks under an implicit -P, -h changes a link itself, -v and -c report,
+ * -f drops the per-file errors. Mirrors Python's change_owner.
+ */
+export async function changeOwner(
+  namespace: Namespace,
+  dispatch: DispatchFn,
+  session: SessionState,
+  cmd: string,
+  fl: FlagView,
+  operands: readonly PathSpec[],
+  uid: number | string | null,
+  gid: number | string | null,
+): Promise<Result> {
+  const [follow, refused] = followsLinks(cmd, fl)
+  if (refused !== null) return refused
+  const report = verbosity(fl)
+  const identity = { user: namespace.user, profile: session.profile ?? null }
+  const user = uid === null ? null : String(uid)
+  const group = gid === null ? null : String(gid)
+  const fields: SetAttrFields = {
+    ...(uid !== null ? { uid } : {}),
+    ...(gid !== null ? { gid } : {}),
+  }
+  const action = cmd === 'chown' ? 'changing ownership of' : 'changing group of'
+  const errors: string[] = []
+  const out: string[] = []
+  const describe = (name: string, stat: FileStat | null, failed: boolean): void => {
+    let old: [string, string] | null = null
+    let same = false
+    if (stat !== null) {
+      old = [ownerName(stat.uid, identity), groupName(stat.gid, identity)]
+      same = (uid === null || uid === stat.uid) && (gid === null || gid === stat.gid)
+    }
+    const status = failed ? 'failed' : same ? 'retained' : 'changed'
+    if (report === 'verbose' || (report === 'changes' && status === 'changed')) {
+      out.push(ownerLine(name, status, old, user, group))
+    }
+  }
+  const own = async (path: PathSpec, link: boolean): Promise<boolean> => {
+    try {
+      if (link) await setattrLink(dispatch, path, fields)
+      else await setattrVia(dispatch, path, fields)
+      return true
+    } catch (err) {
+      if (!isReadOnlyError(err)) throw err
+      errors.push(permissionError(cmd, action, path, err))
+      return false
+    }
+  }
+  const ownLink = async (link: PathSpec, name: string): Promise<void> => {
+    let stat: FileStat | null = null
+    try {
+      ;[stat] = (await dispatch('stat', link, [], { nofollow: true })) as [FileStat, unknown]
+    } catch (err) {
+      if (!isEnoent(err) && !isEnotdir(err)) throw err
+    }
+    describe(name, stat, !(await own(link, true)))
+  }
+  for (const target of await expandOperands(namespace, operands)) {
+    const typed = target.rawPath
+    if (!follow && namespace.isLink(target.virtual)) {
+      await ownLink(target, typed)
+      continue
+    }
+    const found = await resolveOperand(namespace, dispatch, cmd, target, errors)
+    if (found === null) {
+      describe(typed, null, true)
+      continue
+    }
+    const [resolved, stat] = found
+    const { walked, links } = fl.asBool('recursive')
+      ? await walkOwned(namespace, dispatch, resolved, stat)
+      : { walked: [[resolved, stat]] as [PathSpec, FileStat][], links: [] as string[] }
+    for (const [path, pathStat] of walked) {
+      describe(walkedName(typed, resolved, path), pathStat, !(await own(path, false)))
+    }
+    for (const link of links) {
+      const linkSpec = PathSpec.fromStrPath(link)
+      await ownLink(linkSpec, walkedName(typed, resolved, linkSpec))
+    }
+  }
+  const quiet = fl.asBool('silent') || fl.asBool('quiet')
+  const text = out.join('')
+  return result(cmd, {
+    out: text === '' ? null : encodeText(text),
+    exitCode: errors.length > 0 ? 1 : 0,
+    ...(quiet ? {} : { stderr: errors.join('') }),
+  })
 }

@@ -474,6 +474,114 @@
         "no_pcre2",
         "engine"
       ]
+    },
+    {
+      "id": "rg_P_pcre2_unicode_negates_no_pcre2_unicode",
+      "seq": 15200041,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'a\\303\\251\\n' | rg -P --no-pcre2-unicode --pcre2-unicode -o '\\w+'; printf 'a\\303\\251\\n' | rg -P --pcre2-unicode --no-pcre2-unicode -o '\\w+'",
+      "expect": {
+        "exit": 0,
+        "stdout": "aé\na\n",
+        "stderr": ""
+      },
+      "flags": [
+        "pcre2",
+        "no_pcre2_unicode",
+        "pcre2_unicode",
+        "only_matching"
+      ]
+    },
+    {
+      "id": "rg_no_pcre2_unicode_is_no_unicode_for_both_engines",
+      "seq": 15200042,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'a\\303\\251\\n' | rg --no-pcre2-unicode -o '\\w+'; printf 'a\\303\\251\\n' | rg -P --no-pcre2-unicode --unicode -o '\\w+'",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\naé\n",
+        "stderr": ""
+      },
+      "flags": [
+        "no_pcre2_unicode",
+        "unicode",
+        "pcre2",
+        "only_matching"
+      ]
+    },
+    {
+      "id": "rg_no_auto_hybrid_regex_selects_the_default_engine",
+      "seq": 15200043,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'aa\\n' | rg -P --no-auto-hybrid-regex -o '(a)\\1'; echo rc=$?; printf 'aa\\n' | rg --no-auto-hybrid-regex -P -o '(a)\\1'; echo rc=$?; printf 'aa\\n' | rg --engine auto --no-auto-hybrid-regex -o '(a)\\1'; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\naa\nrc=0\nrc=2\n",
+        "stderr": "rg: regex parse error:\n    (?:(a)\\1)\n          ^^\nerror: backreferences are not supported\n\nConsider enabling PCRE2 with the --pcre2 flag, which can handle backreferences\nand look-around.\nrg: regex parse error:\n    (?:(a)\\1)\n          ^^\nerror: backreferences are not supported\n\nConsider enabling PCRE2 with the --pcre2 flag, which can handle backreferences\nand look-around.\n"
+      },
+      "flags": [
+        "no_auto_hybrid_regex",
+        "pcre2",
+        "engine",
+        "only_matching"
+      ]
     }
   ]
 }

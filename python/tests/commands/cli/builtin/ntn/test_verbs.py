@@ -73,7 +73,6 @@ async def _text(out):
 
 @pytest.mark.asyncio
 async def test_pages_get_renders_markdown_with_frontmatter(monkeypatch):
-
     async def fake_markdown(config, page_id):
         return {"object": "page_markdown", "markdown": "# Body\n"}
 
@@ -192,7 +191,6 @@ async def test_pages_trash_refuses_without_yes(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_datasources_resolve_lists_stubs(monkeypatch):
-
     async def fake_database(config, database_id):
         return {"data_sources": [{"id": "S1", "name": "Tasks"}]}
 
@@ -302,7 +300,6 @@ async def test_datasources_query_takes_columns_from_the_rows(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_datasources_query_reports_the_next_cursor(monkeypatch):
-
     async def fake_source(config, source_id):
         return {"id": source_id, "properties": {}}
 
@@ -354,7 +351,6 @@ async def test_auth_token_prints_the_configured_key():
 
 @pytest.mark.asyncio
 async def test_whoami_renders_the_row(monkeypatch):
-
     async def fake_self(config):
         return WORKSPACE_OWNED
 
@@ -426,7 +422,6 @@ async def test_api_builds_nested_bodies(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_api_prints_compact_sorted_json(monkeypatch):
-
     async def fake_get(config, path, params=None, extra_headers=None):
         return {"b": 1, "a": {"d": 2, "c": 3}}
 

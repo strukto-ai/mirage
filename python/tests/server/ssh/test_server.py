@@ -18,8 +18,6 @@ import asyncssh
 import pytest
 from asyncssh.gss import GSSError
 
-from mirage.server.jobs import JobTable
-from mirage.server.mcp.http import McpDoor
 from mirage.server.registry import WorkspaceRegistry
 from mirage.server.ssh.config import SSHConfig
 from mirage.server.ssh.server import MirageSSHServer, start_ssh_server
@@ -120,15 +118,11 @@ async def test_host_key_persists_across_restarts(tmp_path):
         authorized_keys_file=tmp_path / "authorized_keys",
     )
     registry = WorkspaceRegistry(idle_grace_seconds=0)
-    first = await start_ssh_server(
-        registry, config, McpDoor(registry, JobTable())
-    )
+    first = await start_ssh_server(registry, config)
     first.close()
     await first.wait_closed()
     minted = config.host_key_file.read_bytes()
-    second = await start_ssh_server(
-        registry, config, McpDoor(registry, JobTable())
-    )
+    second = await start_ssh_server(registry, config)
     second.close()
     await second.wait_closed()
     assert config.host_key_file.read_bytes() == minted
@@ -144,9 +138,7 @@ async def test_missing_authorized_keys_warns_and_refuses(tmp_path, caplog):
     )
     registry = WorkspaceRegistry(idle_grace_seconds=0)
     with caplog.at_level(logging.WARNING, logger="mirage.server.ssh.server"):
-        acceptor = await start_ssh_server(
-            registry, config, McpDoor(registry, JobTable())
-        )
+        acceptor = await start_ssh_server(registry, config)
     try:
         assert "every login will be refused" in caplog.text
         key = asyncssh.generate_private_key("ssh-ed25519")

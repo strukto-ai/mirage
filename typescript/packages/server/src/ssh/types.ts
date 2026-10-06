@@ -22,6 +22,6 @@ export interface SSHListener {
 
 /** The daemon's SSH door: its config, and the listener once it is open. */
 export interface SSHDoor {
-  readonly config: SSHConfig | null
+  readonly config: SSHConfig
   listener: SSHListener | null
 }

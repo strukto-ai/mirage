@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "id": "tail_retry_still_gives_up_without_a_name_follow",
+      "seq": 15400018,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail --retry /data/fcD_nope.txt; echo rc=$?; mkdir -p /data/fcD_rd; printf k > /data/fcD_rd/k; tail --follow=descriptor --retry /data/fcD_rd; echo rc=$?; rm -r /data/fcD_rd",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\n",
+        "stderr": "tail: warning: --retry ignored; --retry is useful only when following\ntail: cannot open '/data/fcD_nope.txt' for reading: No such file or directory\ntail: warning: --retry only effective for the initial open\ntail: error reading '/data/fcD_rd': Is a directory\ntail: /data/fcD_rd: cannot follow end of this type of file\ntail: no files remaining\n"
+      },
+      "flags": [
+        "retry",
+        "follow"
+      ]
+    },
+    {
+      "id": "tail_retry_warns_when_following_a_pipe_by_descriptor",
+      "seq": 15400019,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nb\\n' | tail -n1 -f --retry; echo rc=$?; printf 'a\\nb\\n' | tail -n1 -F --follow=descriptor; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "b\nrc=0\nb\nrc=0\n",
+        "stderr": "tail: warning: --retry only effective for the initial open\ntail: warning: --retry only effective for the initial open\n"
+      },
+      "flags": [
+        "retry",
+        "f",
+        "F",
+        "follow"
+      ]
+    }
+  ]
+}

@@ -30,7 +30,7 @@ from mirage.runtime.python.host.constants import (
     ROUTED_CALLS,
 )
 from mirage.runtime.python.host.fs import make_os_module, os_routing
-from mirage.types import HiddenPaths, PathSpec
+from mirage.types import HiddenPaths, PathSpec, Visibility
 from mirage.utils.stat_view import DIR_SIZE
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
@@ -591,8 +591,8 @@ class TestProcessPatch:
         run(ws.vfs.mkdir("/mem/secrets"))
         run(ws.vfs.write("/mem/secrets/token.txt", b"s3cret"))
         session = ws.create_session("agent")
-        session.hidden_paths = HiddenPaths(
-            paths=("/mem/secrets",), patterns=("*.key",)
+        session.visibility = Visibility(
+            paths=HiddenPaths(paths=("/mem/secrets",), patterns=("*.key",))
         )
         run(ws.vfs.write("/mem/note.key", b"key"))
         with ws:
@@ -613,7 +613,9 @@ class TestProcessPatch:
         ws = Workspace({"/mem/": RAMVFS()}, mode=MountMode.WRITE)
         run(ws.vfs.write("/mem/a.txt", b"hello"))
         session = ws.create_session("agent")
-        session.hidden_paths = HiddenPaths(paths=(), patterns=("*.key",))
+        session.visibility = Visibility(
+            paths=HiddenPaths(paths=(), patterns=("*.key",))
+        )
         with ws:
             os.symlink("a.txt", "/mem/secret.key")
             os.lchown("/mem/secret.key", 4242, 4343)

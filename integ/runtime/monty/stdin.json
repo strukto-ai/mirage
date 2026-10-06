@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "id": "stdin_pipe",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "pipe.py": "print('came-through-pipe')\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cat /ram/pipe.py | python3",
+          "expect": {
+            "exit": 0,
+            "stdout": "came-through-pipe\n"
+          }
+        }
+      ]
+    }
+  ]
+}

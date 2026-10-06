@@ -555,6 +555,39 @@ class HiddenVars:
     patterns: tuple[str, ...] = ()
 
 
+ProcessScope = Literal["session", "workspace"]
+
+
+@dataclass(frozen=True, slots=True)
+class Visibility:
+    """What exists for one session, compiled once from its profile.
+
+    The one answer to "is this here?" for everything a session touches:
+    paths (hides, re-opened by deeper shows), variables, processes and
+    commands. The views filter what they list through it and the op
+    boundary answers a hidden path as absent from it; nothing else asks
+    the profile what exists. The default hides nothing.
+
+    Args:
+        paths (HiddenPaths | None): the hidden paths, None for none.
+        shown (ShownPaths | None): the show entries, which re-open a
+            hidden subtree and state a subtree's mode.
+        vars (HiddenVars | None): the hidden variable names.
+        processes (ProcessScope): whose processes the session sees.
+        commands (tuple[str, ...] | None): the allow patterns that
+            install commands, None installing every one.
+    """
+
+    paths: HiddenPaths | None = None
+    shown: ShownPaths | None = None
+    vars: HiddenVars | None = None
+    processes: ProcessScope = "session"
+    commands: tuple[str, ...] | None = None
+
+
+DEFAULT_VISIBILITY = Visibility()
+
+
 class EntryGate(Protocol):
     """What a command's own I/O asks before touching an entry it
     reached below its operands.
@@ -568,7 +601,8 @@ class EntryGate(Protocol):
 
     Args:
         scoped (bool): whether a path rule in force reads this command's
-            paths at all; a native walk (a backend's own find or du)
+            paths at all, or a coded or scripted pre_ops policy speaks
+            for its session; a native walk (a backend's own find or du)
             yields to the guarded readdir walk while it is set, so each
             entry passes the gate.
         granted (tuple[CommandRule, ...]): the ask rules this line runs
@@ -582,6 +616,16 @@ class EntryGate(Protocol):
 
     @property
     def granted(self) -> "tuple[CommandRule, ...]": ...
+
+    def scopes(self, virtual: str) -> bool:
+        """Whether anything at or under this path could be refused for
+        the running command, so a native walk there gives way to the
+        guarded one; per operand, unlike ``scoped``.
+
+        Args:
+            virtual (str): absolute virtual path of a walk's start point.
+        """
+        ...
 
     def check(self, virtual: str) -> None:
         """Raise when a rule in force refuses this entry for the running

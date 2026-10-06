@@ -327,6 +327,10 @@ def live_only_mount_prefixes(
             continue
         if ws._implicit_root and m.prefix == "/":
             continue
+        # A document binding is not saved at all, so a load never serves
+        # it live either.
+        if m.vfs.name == "document":
+            continue
         if not m.vfs.supports_snapshot:
             out.append(m.prefix)
     return out

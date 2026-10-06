@@ -65,6 +65,42 @@
         "stdout": "2\n2\nxx00\nxx01\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "split_stdin_outputs_land_in_a_nested_cwd",
+      "seq": 15300315,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/fcC_sc/sub && (cd /data/fcC_sc/sub && printf 'a\\nb\\n' | split -l 1 && ls && cat xab); rm -r /data/fcC_sc",
+      "expect": {
+        "exit": 0,
+        "stdout": "xaa\nxab\nb\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l"
+      ]
+    },
+    {
+      "id": "split_dash_prefix_names_outputs_in_the_cwd",
+      "seq": 15700003,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/fcR_sp/sub && printf '1\\n2\\n' > /data/fcR_sp/in && (cd /data/fcR_sp/sub && split -l1 /data/fcR_sp/in - && ls -A && cat -- -ab && printf '3\\n' | split -l1 - - && cat -- -aa); ls -A /data/fcR_sp; rm -r /data/fcR_sp",
+      "expect": {
+        "exit": 0,
+        "stdout": "-aa\n-ab\n2\n3\nin\nsub\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l"
+      ]
     }
   ]
 }

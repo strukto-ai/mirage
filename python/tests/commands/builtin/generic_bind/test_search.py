@@ -206,7 +206,6 @@ def test_stream_first_pull_failure_falls_back_to_bytes():
 
 
 def test_stream_failure_after_data_propagates():
-
     async def _breaking_stream(
         accessor: FakeAccessor, path: PathSpec, index=NULL_INDEX
     ):

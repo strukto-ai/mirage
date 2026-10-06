@@ -716,7 +716,13 @@ const CASES: [string, string, string, string, number][] = [
     '',
     0,
   ],
-  ['jobs_r_running_only', 'sleep 5 & echo hi & sleep 0.3; jobs -r', '[1] running sleep 5\n', '', 0],
+  [
+    'jobs_r_running_only',
+    'sleep 5 & echo hi & sleep 0.3; jobs -r',
+    'hi\n[1] running sleep 5\n',
+    '',
+    0,
+  ],
   [
     'jobs_p_pids_only',
     'sleep 5 & a=$!; sleep 5 & b=$!; set -- $(jobs -p); echo $#; [ "$1 $2" = "$a $b" ] && echo pids',
@@ -735,7 +741,7 @@ const CASES: [string, string, string, string, number][] = [
   [
     'jobs_n_changed_then_none',
     'sleep 5 & echo hi & sleep 0.3; jobs -n; echo ---; jobs -n',
-    '[2] completed echo hi\n---\n',
+    'hi\n[2] completed echo hi\n---\n',
     '',
     0,
   ],

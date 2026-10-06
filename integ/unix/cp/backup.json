@@ -420,6 +420,109 @@
         "stdout": "rc=0\nY\nX\nrc=1\nX\nY\n",
         "stderr": "cp: will not overwrite just-created '/data/r10nb/d/a' with '/data/r10nb/x/a'\n"
       }
+    },
+    {
+      "id": "cp_backup_existing_follows_the_numbered_versions",
+      "seq": 15600004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/fcF_b1 && echo S > /data/fcF_b1/s && cp --backup=existing /data/fcF_b1/s /data/fcF_b1/new; echo rc=$?; echo D > /data/fcF_b1/d && cp --backup=existing /data/fcF_b1/s /data/fcF_b1/d; echo E > /data/fcF_b1/e && echo V3 > '/data/fcF_b1/e.~3~' && cp --backup=existing /data/fcF_b1/s /data/fcF_b1/e; ls /data/fcF_b1; cat '/data/fcF_b1/d~' '/data/fcF_b1/e.~4~'; rm -r /data/fcF_b1",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nd\nd~\ne\ne.~3~\ne.~4~\nnew\ns\nD\nE\n",
+        "stderr": ""
+      },
+      "flags": [
+        "backup"
+      ]
+    },
+    {
+      "id": "cp_rb_empty_tree_still_creates_every_directory",
+      "seq": 15600005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/fcF_b2/t/a/b && cp -r -b /data/fcF_b2/t /data/fcF_b2/c; echo rc=$?; find /data/fcF_b2/c | sort; rm -r /data/fcF_b2",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n/data/fcF_b2/c\n/data/fcF_b2/c/a\n/data/fcF_b2/c/a/b\n",
+        "stderr": ""
+      },
+      "flags": [
+        "r",
+        "b"
+      ]
+    },
+    {
+      "id": "cp_rb_backs_up_each_merged_file",
+      "seq": 16100001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/r10rb/src /data/r10rb/d/src && printf 'SRC\\n' > /data/r10rb/src/f.txt && printf 'DST\\n' > /data/r10rb/d/src/f.txt && cp -rbv /data/r10rb/src /data/r10rb/d; echo rc=$?; cat /data/r10rb/d/src/f.txt /data/r10rb/d/src/f.txt~; ls -1 /data/r10rb/d/src; rm -r /data/r10rb",
+      "expect": {
+        "exit": 0,
+        "stdout": "'/data/r10rb/src/f.txt' -> '/data/r10rb/d/src/f.txt' (backup: '/data/r10rb/d/src/f.txt~')\nrc=0\nSRC\nDST\nf.txt\nf.txt~\n",
+        "stderr": ""
+      }
     }
   ]
 }

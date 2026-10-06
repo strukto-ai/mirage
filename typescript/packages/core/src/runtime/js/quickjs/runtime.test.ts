@@ -59,3 +59,23 @@ describe('QuickJS cwd', () => {
     }
   })
 })
+
+describe('QuickJS eval', () => {
+  it('saves a file the evaluation left open', async () => {
+    const rt = new QuickJsRuntime()
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: await getTestParser(),
+        runtimes: [rt, 'workspace'],
+      },
+    )
+    try {
+      expect((await rt.eval("std.open('/data/out.txt', 'w').puts('kept'); 1")).value).toBe(1)
+      expect(new TextDecoder().decode((await ws.shell('cat /data/out.txt')).stdout)).toBe('kept')
+    } finally {
+      await ws.close()
+    }
+  })
+})

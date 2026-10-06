@@ -35,18 +35,28 @@ from mirage.commands.cli.builtin.git.errors import (
     BadDateError,
     GitError,
     IncompatibleLogOptionsError,
+    InvalidDecorateError,
     UnrecognizedArgumentError,
 )
 from mirage.commands.cli.builtin.git.format import (
     DEFAULT_DATE,
     MEDIUM,
     LogFormat,
+    needs_decorations,
     parse_pretty,
 )
 from mirage.commands.cli.builtin.git.mailmap import mapped_identity
 from mirage.commands.cli.builtin.git.pickaxe import touches
-from mirage.commands.cli.builtin.git.types import DateMode, MailmapEntry
+from mirage.commands.cli.builtin.git.repo import config_values
+from mirage.commands.cli.builtin.git.types import (
+    DateMode,
+    Decoration,
+    MailmapEntry,
+    RepoLocation,
+)
+from mirage.commands.cli.builtin.git.util import maybe_bool
 from mirage.commands.spec.flag_view import FlagView
+from mirage.runtime.types import DispatchFn
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.posix import compile_posix_regex
 
@@ -88,6 +98,9 @@ class LogFlags:
             ``--committer`` match.
         ignore_case (bool): ``-i``, which folds case for ``--grep``,
             ``--author`` and ``-S`` alike.
+        decorate (Decoration): how commits are labelled with their
+            refs; parse_flags leaves it off, and ``decoration_for``
+            settles it once the repository's config can be read.
         all_refs (bool): ``--all``, start from every ref as well.
         pretty (LogFormat): how each commit renders; medium unless
             ``--oneline`` or ``--pretty``/``--format`` said otherwise.
@@ -112,7 +125,7 @@ class LogFlags:
     use_mailmap: bool = True
     ignore_case: bool = False
     date: DateMode = DEFAULT_DATE
-    decorate: bool = False
+    decorate: Decoration = Decoration.NONE
     all_refs: bool = False
     pretty: LogFormat = MEDIUM
     abbrev_commit: bool = False
@@ -281,7 +294,6 @@ def parse_flags(
         greps=greps,
         ignore_case=ignore_case,
         date=parse_date_mode(fl.as_str("date") or "default", date_clock(env)),
-        decorate=fl.as_bool("decorate"),
         # git reads a negative count as no limit at all.
         max_count=None
         if max_count is not None and max_count < 0
@@ -335,7 +347,81 @@ def ref_commits(repo: BaseRepo) -> list[Commit]:
     return commits
 
 
-def decorations(repo: BaseRepo) -> dict[bytes, list[str]]:
+def decoration_style(value: bytes) -> Decoration | None:
+    """``parse_decoration_style``: the style a value names, None for none.
+
+    A boolean word or number, ``short``, ``full`` or ``auto``, which
+    decorates only a terminal and so never here.
+
+    Args:
+        value (bytes): the ``--decorate=`` or ``log.decorate`` value.
+    """
+    flag = maybe_bool(value)
+    if flag is not None:
+        return Decoration.SHORT if flag else Decoration.NONE
+    if value == b"short":
+        return Decoration.SHORT
+    if value == b"full":
+        return Decoration.FULL
+    if value == b"auto":
+        return Decoration.NONE
+    return None
+
+
+async def decoration_for(
+    dispatch: DispatchFn,
+    location: RepoLocation,
+    fl: FlagView,
+    pretty: LogFormat,
+) -> Decoration:
+    """How a ``log`` or ``show`` line labels its commits.
+
+    As git's ``cmd_log_init_finish`` settles it (pinned against git
+    2.47.3): ``log.decorate`` sets the style, a value it cannot read
+    meaning none, and the line's ``--decorate[=<style>]`` and
+    ``--no-decorate`` override it, the last one typed winning;
+    ``--pretty=raw`` ignores the config. A template that prints ``%d``
+    or ``%D`` is decorated even when nothing asked, by short names
+    unless a style says full, and one that prints neither loads no
+    labels at all.
+
+    Args:
+        dispatch (DispatchFn): workspace op dispatcher.
+        location (RepoLocation): the discovered repository.
+        fl (FlagView): the line's flags.
+        pretty (LogFormat): the line's format.
+
+    Raises:
+        InvalidDecorateError: a ``--decorate`` value that names no style.
+    """
+    style: Decoration | None = None
+    for key, value in fl.occurrences("decorate", "no_decorate"):
+        if key == "no_decorate":
+            style = Decoration.NONE
+        elif not isinstance(value, str):
+            style = Decoration.SHORT
+        else:
+            style = decoration_style(value.encode())
+            if style is None:
+                raise InvalidDecorateError(value)
+    if style is None and pretty.kind != "raw":
+        configured = await config_values(
+            dispatch, location, b"log", b"decorate"
+        )
+        if configured:
+            style = decoration_style(configured[-1])
+    if style is None:
+        style = Decoration.NONE
+    if pretty.kind not in ("format", "tformat"):
+        return style
+    if not needs_decorations(pretty):
+        return Decoration.NONE
+    return Decoration.SHORT if style is Decoration.NONE else style
+
+
+def decorations(
+    repo: BaseRepo, style: Decoration = Decoration.SHORT
+) -> dict[bytes, list[str]]:
     """Ref labels per commit, in the order git prints them.
 
     git walks refs alphabetically and prepends each label, so a
@@ -346,7 +432,10 @@ def decorations(repo: BaseRepo) -> dict[bytes, list[str]]:
 
     Args:
         repo (BaseRepo): repository whose refs to enumerate.
+        style (Decoration): ``FULL`` keeps each ref's whole name;
+            anything else shortens it.
     """
+    full = style is Decoration.FULL
     labels: dict[bytes, list[str]] = {}
     for name in sorted(repo.refs.allkeys()):
         if name == HEADREF:
@@ -358,20 +447,24 @@ def decorations(repo: BaseRepo) -> dict[bytes, list[str]]:
         commit = peel_to_commit(repo, sha)
         if commit is None:
             continue
-        labels.setdefault(commit.id, []).insert(0, _ref_label(name))
-    _decorate_head(repo, labels)
+        labels.setdefault(commit.id, []).insert(0, _ref_label(name, full))
+    _decorate_head(repo, labels, full)
     return labels
 
 
-def _ref_label(name: bytes) -> str:
-    """One ref's decoration label, in git's spelling.
+def _ref_label(name: bytes, full: bool) -> str:
+    """One ref's decoration label, in git's spelling, by its short or
+    its full name.
 
     Args:
         name (bytes): the full ref name.
+        full (bool): keep the whole name.
     """
     text = name.decode("utf-8", errors="replace")
     if name.startswith(LOCAL_TAG_PREFIX):
-        return f"tag: {text[len(LOCAL_TAG_PREFIX) :]}"
+        return f"tag: {text if full else text[len(LOCAL_TAG_PREFIX) :]}"
+    if full:
+        return text
     if name.startswith(LOCAL_BRANCH_PREFIX):
         return text[len(LOCAL_BRANCH_PREFIX) :]
     if name.startswith(REMOTE_PREFIX):
@@ -379,12 +472,15 @@ def _ref_label(name: bytes) -> str:
     return text
 
 
-def _decorate_head(repo: BaseRepo, labels: dict[bytes, list[str]]) -> None:
+def _decorate_head(
+    repo: BaseRepo, labels: dict[bytes, list[str]], full: bool
+) -> None:
     """Prepend the HEAD label, absorbing the attached branch's own.
 
     Args:
         repo (BaseRepo): repository whose HEAD to read.
         labels (dict[bytes, list[str]]): per-commit labels to amend.
+        full (bool): label by full ref names.
     """
     try:
         chain, sha = repo.refs.follow(HEADREF)
@@ -397,7 +493,7 @@ def _decorate_head(repo: BaseRepo, labels: dict[bytes, list[str]]) -> None:
         return
     names = labels.setdefault(commit.id, [])
     if len(chain) > 1:
-        branch = _ref_label(chain[-1])
+        branch = _ref_label(chain[-1], full)
         if branch in names:
             names.remove(branch)
         names.insert(0, f"HEAD -> {branch}")

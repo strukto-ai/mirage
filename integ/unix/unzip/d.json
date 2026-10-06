@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "unzip_d_extracts_only_the_selected_members",
+      "seq": 15100721,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_ud/xl/media /data/fcA_ud/out /data/fcA_ud/out2 && cd /data/fcA_ud && printf 'APP\\n' > app.xml && printf 'SHEET\\n' > xl/sheet1.xml && printf 'MEDIA\\n' > xl/media/img.bin && zip -q book.zip app.xml xl/sheet1.xml xl/media/img.bin && echo k > out/.keep && echo k > out2/.keep && unzip -q book.zip xl/sheet1.xml NOSUCH.xml -d out; echo rc=$?; find out -type f | sort; unzip -q book.zip 'xl/*' -d out2; echo rc=$?; find out2 -type f | sort; cd / && rm -r /data/fcA_ud)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=11\nout/.keep\nout/xl/sheet1.xml\nrc=0\nout2/.keep\nout2/xl/media/img.bin\nout2/xl/sheet1.xml\n",
+        "stderr": "caution: filename not matched:  NOSUCH.xml\n"
+      },
+      "flags": [
+        "d",
+        "q"
+      ]
+    }
+  ]
+}

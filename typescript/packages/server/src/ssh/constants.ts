@@ -29,13 +29,29 @@ export const AUTHORIZED_KEYS_NAME = 'authorized_keys'
  */
 export const PROFILE_OPTION = 'mirage-profile'
 
+// The authorized_keys option naming the account a key belongs to
+// (`mirage-account="alice" ssh-ed25519 AAAA...`). The account opens only
+// the workspaces it owns; in jwt mode a key without one opens nothing.
+export const ACCOUNT_OPTION = 'mirage-account'
+
+// A client that answers no keepalive for this many intervals is gone, so
+// its connection closes and the line it was running is cancelled rather
+// than left behind a half-open socket.
+export const KEEPALIVE_INTERVAL_SECONDS = 15
+export const KEEPALIVE_COUNT_MAX = 3
+
+// How much of each stream's start and end the door keeps to tell whether
+// a refusal already says why: the refused command's own diagnostic sits
+// near the start of a line refused early and near the end of one refused
+// late, so both ends hold it without the whole output.
+export const REFUSAL_WINDOW = 4096
+
 /**
  * The subsystem Codex opens (`ssh ... -s codex-exec`) to run its tools in
  * a workspace. It speaks Codex's exec-server protocol: one JSON-RPC
  * message per line, without the `jsonrpc` member.
  */
 export const CODEX_SUBSYSTEM = 'codex-exec'
-export const MCP_SUBSYSTEM = 'mcp'
 export const CODEX_AGENT_ID = 'codex'
 export const CODEX_SHELL_NAME = 'bash'
 export const CODEX_SHELL_PATH = '/bin/bash'
@@ -60,13 +76,6 @@ export const CODEX_CTRL_D = 0x04
  */
 export const CODEX_INTERRUPTED = 130
 export const CODEX_TERMINATED = -1
-
-export const RPC_PARSE_ERROR = -32700
-export const RPC_INVALID_REQUEST = -32600
-export const RPC_METHOD_NOT_FOUND = -32601
-export const RPC_INVALID_PARAMS = -32602
-export const RPC_INTERNAL_ERROR = -32603
-export const RPC_NOT_FOUND = -32004
 
 export const SSH_ENV_KEYS = {
   ssh_port: ENV_SSH_PORT,

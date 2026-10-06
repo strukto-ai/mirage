@@ -17,16 +17,17 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { dbxFetch } from './client.ts'
-import { isNotFound, notFoundError } from './errors.ts'
+import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
 import { rangeHeader, windowIfUnranged } from '../../utils/ranges.ts'
+import { enoent } from '../../utils/errors.ts'
 
 export interface DbxReadOptions {
   offset?: number
   size?: number
 }
 
-export async function readBytes(
+export async function read(
   accessor: DatabricksVolumeAccessor,
   path: PathSpec,
   _index?: IndexCacheStore,
@@ -48,7 +49,7 @@ export async function readBytes(
   try {
     r = await dbxFetch(accessor, 'GET', 'files', remotePath, { headers })
   } catch (exc) {
-    if (isNotFound(exc)) throw notFoundError(path.virtual)
+    if (isNotFound(exc)) throw enoent(path.virtual)
     throw exc
   }
   const data = windowIfUnranged(new Uint8Array(await r.arrayBuffer()), r.status, offset, size)

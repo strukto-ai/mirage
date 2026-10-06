@@ -27,8 +27,8 @@ from mirage.commands.builtin.generic_bind.adapter import (
     overlaid_stat,
 )
 from mirage.commands.config import CommandOpts
-from mirage.context import hidden_paths_intersect, path_rules_active
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.namespace_view import paths_scoped
 from mirage.types import FileStat, PathSpec
 
 
@@ -80,8 +80,7 @@ async def find(
     if (
         ops.find is None
         or "-empty" in texts
-        or path_rules_active()
-        or any(hidden_paths_intersect(p.virtual) for p in resolved)
+        or paths_scoped(opts.ns, resolved)
     ):
         # -mtime must see namespace times (touch results, observed
         # writes on mtime-less backends), same as ls.

@@ -1,0 +1,83 @@
+{
+  "cases": [
+    {
+      "id": "chown_v_and_c_report_each_file",
+      "seq": 15000020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf x > /data/fc0o.txt; chown 1000:1000 /data/fc0o.txt; chown -v 1000 /data/fc0o.txt; chown --verbose 2000:3000 /data/fc0o.txt; chown -c 2000:3000 /data/fc0o.txt; chown --changes 4000 /data/fc0o.txt; chown :5000 /data/fc0o.txt -v; rm -f /data/fc0o.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "ownership of '/data/fc0o.txt' retained as 1000\nchanged ownership of '/data/fc0o.txt' from 1000:1000 to 2000:3000\nchanged ownership of '/data/fc0o.txt' from 2000 to 4000\nchanged group of '/data/fc0o.txt' from 3000 to 5000\n",
+        "stderr": ""
+      },
+      "flags": [
+        "v",
+        "verbose",
+        "c",
+        "changes"
+      ]
+    },
+    {
+      "id": "chown_v_names_a_missing_file_and_f_silences_it",
+      "seq": 15000021,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "chown -v 6000 /data/fc0nope; echo rc=$?; chown -f 6000 /data/fc0nope; echo rc=$?; chown --silent 6000 /data/fc0nope; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "failed to change ownership of '/data/fc0nope' to 6000\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "chown: cannot access '/data/fc0nope': No such file or directory\n"
+      },
+      "flags": [
+        "v",
+        "f",
+        "silent"
+      ]
+    }
+  ]
+}

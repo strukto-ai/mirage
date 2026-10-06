@@ -13,19 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { joinGeneric } from '../../generic/join.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+
+const join: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  const idx = opts.index ?? undefined
+  const resolveGlob = resolveGlobOf(ops)
+  return joinGeneric(
+    paths,
+    opts,
+    (targets) => resolveGlob(accessor, targets, idx),
+    (p) => ops.readStream(accessor, p, idx),
+  )
+}
 
 export const BUILDER: Builder = {
   name: 'join',
   read: true,
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    const idx = opts.index ?? undefined
-    const resolveGlob = resolveGlobOf(ops)
-    return joinGeneric(
-      paths,
-      opts,
-      (targets) => resolveGlob(accessor, targets, idx),
-      (p) => ops.readStream(accessor, p, idx),
-    )
-  },
+  fn: join,
 }

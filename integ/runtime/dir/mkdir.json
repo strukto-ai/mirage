@@ -1,0 +1,145 @@
+{
+  "cases": [
+    {
+      "id": "mkdir_reaches_the_mount",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "from pathlib import Path\nPath('/data/d').mkdir()\nprint(Path('/data/d').is_dir())",
+            "js": "console.log(os.mkdir('/data/d'), (os.stat('/data/d')[0].mode & os.S_IFMT) === os.S_IFDIR)"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "True\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "0 true\n"
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\ntry:\n    Path('/data/d').mkdir()\nexcept OSError as e:\n    print(type(e).__name__)",
+            "js": "console.log(os.mkdir('/data/d'))"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileExistsError\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "-20\n"
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\nfor parents in (False, True):\n    try:\n        Path('/data/seed.txt').mkdir(parents=parents)\n        print('created')\n    except OSError as e:\n        print(type(e).__name__)",
+            "js": "console.log(os.mkdir('/data/seed.txt'))"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileExistsError\nFileExistsError\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "-20\n"
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\ntry:\n    Path('/data/x/y').mkdir()\n    print('created')\nexcept OSError as e:\n    print(type(e).__name__)",
+            "js": "const r = os.mkdir('/data/x/y')\nconsole.log(r === 0 ? 'created' : r)"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "-44\n"
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\nPath('/data/p/q').mkdir(parents=True)\nPath('/data/p/q').mkdir(parents=True, exist_ok=True)\nprint(sorted(p.name for p in Path('/data/p').iterdir()))"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "['q']\n"
+          }
+        },
+        {
+          "program": {
+            "python": "import os\nos.makedirs('/data/m/n')\nprint(os.listdir('/data/m'))"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "['n']\n"
+          }
+        },
+        {
+          "program": {
+            "python": "import os\nos.mkdir('/data/m1')"
+          },
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\nPath('/data/sub').mkdir()\nPath('/data/sub/n.txt').write_text('deep')",
+            "js": "os.mkdir('/data/sub')\nconst f = std.open('/data/sub/n.txt', 'w')\nf.puts('deep')\nf.close()"
+          },
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "cat /data/sub/n.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "deep"
+          }
+        },
+        {
+          "command": "ls -d /data/d /data/seed.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "/data/d\n/data/seed.txt\n"
+          }
+        }
+      ]
+    }
+  ]
+}

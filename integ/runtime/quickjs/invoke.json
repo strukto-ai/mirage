@@ -1,0 +1,160 @@
+{
+  "requires": {
+    "python": [
+      "env:MIRAGE_QUICKJS_HOME"
+    ],
+    "typescript": []
+  },
+  "cases": [
+    {
+      "id": "version_names_quickjs_for_both_aliases",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "version.js": "console.log(scriptArgs[0])\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "for n in js node; do for f in --version -v; do $n $f 2>&1 | grep -cE '^JavaScript \\((quickjs [0-9]{4}-[0-9]{2}-[0-9]{2}|quickjs-ng [0-9]+\\.[0-9]+\\.[0-9]+)\\)$'; done; done",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n1\n1\n1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node -e \"console.log(scriptArgs[0])\" -- --version",
+          "expect": {
+            "exit": 0,
+            "stdout": "--version\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "js /ram/version.js --version",
+          "expect": {
+            "exit": 0,
+            "stdout": "--version\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "echo 'console.log(scriptArgs[0])' | node - --version",
+          "expect": {
+            "exit": 0,
+            "stdout": "--version\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "stdin_and_module_mode",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "mod.mjs": "const k = await Promise.resolve(5);\nconsole.log(k * 2)\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "echo hello | js -e \"console.log(std.in.readAsString().trim().toUpperCase())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "HELLO\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "js -m -e \"const x = await Promise.resolve(41); console.log(x + 1)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node /ram/mod.mjs",
+          "expect": {
+            "exit": 0,
+            "stdout": "10\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "errors_and_the_sandbox",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "js -e \"this is not js\"",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "SyntaxError"
+          }
+        },
+        {
+          "command": "js -e \"console.log(typeof process, typeof require, typeof fetch)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "undefined undefined undefined\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "js -e \"console.error('x')\"",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "TypeError"
+          }
+        },
+        {
+          "command": "js",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "js: no input"
+          }
+        },
+        {
+          "command": "js /missing-script",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "js: /missing-script: No such file\n"
+          }
+        },
+        {
+          "command": "node /missing-script",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "node: /missing-script: No such file\n"
+          }
+        }
+      ]
+    }
+  ]
+}

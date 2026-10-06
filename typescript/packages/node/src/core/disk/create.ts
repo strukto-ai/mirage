@@ -12,10 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { DiskAccessor } from '../../accessor/disk.ts'
+import { writeFile } from 'node:fs/promises'
+import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { writeBytes } from './write.ts'
+import type { DiskAccessor } from '../../accessor/disk.ts'
+import { diskError } from './errors.ts'
+import { resolveInside } from './utils.ts'
 
-export function create(accessor: DiskAccessor, path: PathSpec): Promise<void> {
-  return writeBytes(accessor, path, new Uint8Array())
+export async function create(accessor: DiskAccessor, path: PathSpec): Promise<void> {
+  const timer = startOp()
+  const full = await resolveInside(accessor.root, path)
+  try {
+    await writeFile(full, new Uint8Array())
+  } catch (err) {
+    throw diskError(err, path)
+  }
+  record('create', path.virtual, VFSName.DISK, 0, timer)
+  await invalidateAfterWrite(path)
 }

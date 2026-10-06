@@ -41,7 +41,12 @@ from mirage.fuse.core import MountCore
 from mirage.fuse.errors import classify_error
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.ssh.constants import LISTING_CONCURRENCY
-from mirage.server.ssh.session import key_profile, new_session_id, open_session
+from mirage.server.ssh.session import (
+    key_profile,
+    login_entry,
+    new_session_id,
+    open_session,
+)
 from mirage.server.ssh.stream import ENCODING, ERRORS
 from mirage.utils.errors import NoMountError
 
@@ -284,6 +289,10 @@ def as_os_error(err: Exception) -> OSError:
     code = classify_error(err)
     if code == errno.EIO and not isinstance(err, (OSError, ValueError)):
         logger.warning("sftp: unclassified error: %r", err)
+    if code in (errno.EROFS, errno.EPERM):
+        # SFTP v3 says permission denied for every refused write; asyncssh
+        # would send EROFS as write-protect, which a v3 client cannot read.
+        return OSError(errno.EACCES, os.strerror(code))
     return OSError(code, os.strerror(code))
 
 
@@ -324,11 +333,11 @@ class MirageSFTPServer(asyncssh.SFTPServer):
     async def _mount(self) -> MountCore:
         if self._core is not None:
             return self._core
-        if self._workspace_id not in self._registry:
+        entry = login_entry(self._registry, self._conn, self._workspace_id)
+        if entry is None:
             raise asyncssh.SFTPNoSuchFile(
                 f"no such workspace: {self._workspace_id}"
             )
-        entry = self._registry.get(self._workspace_id)
         ws = entry.runner.ws
         profile = key_profile(self._conn)
         await entry.runner.call(

@@ -1,0 +1,392 @@
+{
+  "cases": [
+    {
+      "id": "reads_reach_the_mount",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "lines.txt": "one\ntwo\n",
+              "sub/inner.txt": "in\n",
+              "digits.txt": "0123456789"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "from pathlib import Path\nprint(Path('/data/seed.txt').read_text(), end='')",
+            "js": "console.log(std.open('/data/seed.txt', 'r').readAsString().trim())"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "seed\n",
+            "ops_contain": [
+              "read /data/seed.txt"
+            ]
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\nprint(Path('/data/seed.txt').read_bytes())"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "b'seed\\n'\n"
+          },
+          "expect_on": {
+            "s3": {
+              "ops_absent": [
+                "read /data/seed.txt"
+              ]
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "for line in open('/data/lines.txt'):\n    print(line, end='')",
+            "js": "const f = std.open('/data/lines.txt', 'r')\nlet l\nwhile ((l = f.getline()) !== null) console.log(l)"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "one\ntwo\n"
+          },
+          "expect_on": {
+            "monty": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "'_io.TextIOWrapper' object is not iterable"
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "print(open('/data/sub/inner.txt').read(), end='')",
+            "js": "console.log(std.open('/data/sub/inner.txt', 'r').readAsString().trim())"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "in\n",
+            "ops_contain": [
+              "read /data/sub/inner.txt"
+            ]
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\nprint(Path('/data/nope.txt').read_text())"
+          },
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "No such file or directory: '/data/nope.txt'"
+          }
+        },
+        {
+          "command": "echo new > /data/seed.txt",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\nprint(Path('/data/seed.txt').read_text(), end='')",
+            "js": "console.log(std.open('/data/seed.txt', 'r').readAsString().trim())"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "new\n"
+          }
+        },
+        {
+          "program": {
+            "js": "const f = std.open('/data/digits.txt', 'r')\nconst b = new ArrayBuffer(6)\nconst n = f.read(b, 1, 4)\nconsole.log(n, JSON.stringify(Array.from(new Uint8Array(b))))\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "4 [0,48,49,50,51,0]\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "reads_only_the_files_it_touches",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "one.txt": "one",
+              "unused.txt": "unused"
+            }
+          },
+          "/data/nested": {
+            "vfs": "ram",
+            "files": {
+              "inside.txt": "nested"
+            }
+          },
+          "/large": {
+            "vfs": "ram",
+            "generated_files": 47000
+          }
+        },
+        "policies": [
+          {
+            "name": "seal_reads",
+            "suffix": "/large"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "is_file",
+            "path": "/large/file-46999.txt"
+          },
+          "expect": {
+            "value": true
+          }
+        },
+        {
+          "program": {
+            "python": "print(42)",
+            "js": "print(42)"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n",
+            "stderr": "",
+            "ops_absent": [
+              "read"
+            ]
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\nprint(Path('/data/one.txt').read_text())",
+            "js": "const f = std.open('/data/one.txt', 'r')\nprint(f.readAsString())\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "one\n",
+            "stderr": "",
+            "ops_contain": [
+              "read /data/one.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "facade": {
+            "method": "append",
+            "path": "/data/one.txt",
+            "data": "-fresh"
+          },
+          "expect": {
+            "ops_contain": [
+              "append /data/one.txt"
+            ]
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\nprint(Path('/data/one.txt').read_text())",
+            "js": "const f = std.open('/data/one.txt', 'r')\nprint(f.readAsString())\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "one-fresh\n",
+            "stderr": "",
+            "ops_contain": [
+              "read /data/one.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\nprint(Path('/data/nested/inside.txt').read_text())",
+            "js": "const f = std.open('/data/nested/inside.txt', 'r')\nprint(f.readAsString())\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "nested\n",
+            "stderr": "",
+            "ops_contain": [
+              "read /data/nested/inside.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "program": {
+            "python": "f = open('/data/one.txt', 'a')\nf.write('!')\nf.close()",
+            "js": "const f = std.open('/data/one.txt', 'a')\nf.puts('!')\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": "",
+            "ops_contain": [
+              "append /data/one.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\nprint(Path('/data/one.txt').read_text())",
+            "js": "const f = std.open('/data/one.txt', 'r')\nprint(f.readAsString())\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "one-fresh!\n",
+            "stderr": "",
+            "ops_contain": [
+              "read /data/one.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "program": {
+            "python": "import glob\nprint(open(glob.glob('/data/*/inside.txt')[0]).read())"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "nested\n",
+            "ops_contain": [
+              "read /data/nested/inside.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          },
+          "expect_on": {
+            "monty": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "No module named 'glob'",
+              "ops_contain": []
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "list_files",
+            "path": "/large"
+          },
+          "expect": {
+            "errno": "EACCES"
+          }
+        }
+      ]
+    },
+    {
+      "id": "reads_a_file_larger_than_one_chunk",
+      "note": "Past READ_CHUNK (1 MiB) a read-only open on quickjs and wasi fetches ranges as it goes instead of the whole file; every read here crosses a chunk edge.",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "f = open('/data/big.txt', 'w')\nf.write(''.join('line %d\\n' % i for i in range(150000)))\nf.close()",
+            "js": "const f = std.open('/data/big.txt', 'w')\nf.puts(Array.from({ length: 150000 }, (_, i) => 'line ' + i + '\\n').join(''))\nf.close()"
+          },
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "wc -c /data/big.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "1688890 /data/big.txt\n"
+          }
+        },
+        {
+          "program": {
+            "python": "data = open('/data/big.txt').read()\npart = open('/data/big.txt').read(1048580)\nn = 0\nfor line in open('/data/big.txt'):\n    n += 1\n    last = line.rstrip()\nprint(len(data), len(part), n, last)",
+            "js": "const all = std.open('/data/big.txt', 'r').readAsString()\nconst part = std.open('/data/big.txt', 'r').readAsString(1048580)\nconst f = std.open('/data/big.txt', 'r')\nlet n = 0, l, last\nwhile ((l = f.getline()) !== null) { n++; last = l }\nconsole.log(all.length, part.length, n, last)"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "1688890 1048580 150000 line 149999\n"
+          },
+          "expect_on": {
+            "monty": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "'_io.TextIOWrapper' object is not iterable"
+            }
+          }
+        },
+        {
+          "program": {
+            "js": "let refused\ntry { std.open('/data/big.txt', 'r').readAsString(-2) } catch (e) { refused = e.name + ': ' + e.message }\nconsole.log(refused)"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "RangeError: invalid array index\n"
+          }
+        }
+      ]
+    }
+  ]
+}

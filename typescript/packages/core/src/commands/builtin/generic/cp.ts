@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { pathAllowed } from '../../../context/session_context.ts'
-import { mountedPath, rekey, respelled } from '../../../utils/key_prefix.ts'
+import { pathVisible } from '../../../utils/hidden.ts'
+import { mountedPath, respelled } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import {
   FileType,
@@ -29,6 +30,7 @@ import {
   type PrimitiveMove,
   type ReaddirFn,
   type StatFn,
+  type Visibility,
 } from '../../../types.ts'
 import { UsageError } from '../../errors.ts'
 import { argmatchError, extraOperandError } from '../../spec/usage.ts'
@@ -61,6 +63,7 @@ import { compareCodePoints } from '../../../utils/sort.ts'
 import type { LinkView } from '../../../ops/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { CycleError, resolvePath } from '../../../utils/path.ts'
+import { shellQuoteAlways } from '../../../utils/quote.ts'
 
 const ENC = new TextEncoder()
 
@@ -69,11 +72,12 @@ const UPDATE_MODES = ['all', 'none', 'none-fail', 'older'] as const
 export interface CpFlags {
   recursive: boolean
   noClobber: boolean
+  interactive: boolean
   verbose: boolean
   update: string | null
   backup: string | null
   suffix: string
-  targetDir: PathSpec | string | null
+  targetDir: PathSpec | null
   noTargetDir: boolean
   dereference: CopyDeref
 }
@@ -91,6 +95,8 @@ export interface TransferLinks {
   cwd: string
   relay: PrimitiveCopy
   relayStat: StatFn
+  /** The session's visibility; a link it hides is not copied. */
+  visibility?: Visibility
 }
 
 // Each option of cp's link policy, and what it asks for; the last typed wins
@@ -107,6 +113,7 @@ export function cpFlags(init: Partial<CpFlags> = {}): CpFlags {
   return {
     recursive: init.recursive ?? false,
     noClobber: init.noClobber ?? false,
+    interactive: init.interactive ?? false,
     verbose: init.verbose ?? false,
     update: init.update ?? null,
     backup: init.backup ?? null,
@@ -118,14 +125,46 @@ export function cpFlags(init: Partial<CpFlags> = {}): CpFlags {
 }
 
 // Per-entry overwrite policy shared by cp and mv: the command name for
-// error prefixes, -n, the --update mode, the canonical backup control and
-// the simple-backup suffix.
+// error prefixes, -n, the --update mode, the canonical backup control, the
+// simple-backup suffix and -i's question for one target.
 export interface TransferPolicy {
   cmdName: string
   noClobber: boolean
   update: string | null
   backup: string | null
   suffix: string
+  ask?: ((target: PathSpec) => Promise<boolean>) | null
+}
+
+/**
+ * GNU's -i: ask on stderr before replacing a target and read one line of
+ * stdin as the answer. Only a line starting with `y` or `Y` is yes (rpmatch
+ * in the C locale); the end of input is no. A yes is recorded in `accepted`,
+ * since it is no failure. Mirrors Python's prompter.
+ */
+export function prompter(
+  cmdName: string,
+  stdin: ByteSource | null,
+  errors: string[],
+  accepted: string[],
+): (target: PathSpec) => Promise<boolean> {
+  const replies = stdin !== null ? new AsyncLineIterator(stdin) : null
+  return async (target: PathSpec): Promise<boolean> => {
+    errors.push(`${cmdName}: overwrite ${shellQuoteAlways(target.rawPath)}? `)
+    const reply = replies !== null ? await replies.readline() : null
+    const first = reply?.[0]
+    if (first !== 0x79 && first !== 0x59) return false
+    accepted.push(target.virtual)
+    return true
+  }
+}
+
+// The collected messages as stderr: one per line, except that a question
+// leaves the cursor after it, as a terminal prompt does. Mirrors Python's
+// stderr_of.
+export function stderrOf(errors: readonly string[]): Uint8Array | null {
+  if (errors.length === 0) return null
+  return ENC.encode(errors.map((line) => (line.endsWith('? ') ? line : `${line}\n`)).join(''))
 }
 
 function isPrimitiveCopy(strategy: CopyStrategy): strategy is PrimitiveCopy {
@@ -173,13 +212,10 @@ export function backupRaw(fl: FlagView): string | boolean | undefined {
   return undefined
 }
 
-// -t arrives as the PathSpec of the word that spelled it on the
-// single-mount path, and as its resolved virtual-path string on the relay
-// path, which parses for a cross-mount strategy. Mirrors Python.
-export function targetFlags(cmdName: string, fl: FlagView): [PathSpec | string | null, boolean] {
+// -t arrives as the PathSpec of the word that spelled it. Mirrors Python.
+export function targetFlags(cmdName: string, fl: FlagView): [PathSpec | null, boolean] {
   const raw: unknown = fl.raw('target_directory')
-  const targetDir: PathSpec | string | null =
-    raw instanceof PathSpec || typeof raw === 'string' ? raw : null
+  const targetDir = raw instanceof PathSpec ? raw : null
   const noTarget = fl.asBool('no_target_directory')
   if (targetDir !== null && noTarget) {
     throw new UsageError(
@@ -198,7 +234,9 @@ export function parseFlags(fl: FlagView): CpFlags {
   const update = updateMode('cp', fl)
   const suffix = suffixFlag(fl)
   const control = backupControl('cp', backupRaw(fl), suffix)
-  const noClobber = fl.asBool('no_clobber')
+  // -i and -n set one answer, so the later of the two wins.
+  const asking = fl.typedOrder('interactive', 'no_clobber').at(-1)
+  const noClobber = asking === 'no_clobber'
   if (control !== null && control !== 'none' && (noClobber || update === 'none-fail')) {
     throw new UsageError(
       'cp: --backup is mutually exclusive with -n or --update=none-fail\n' +
@@ -216,6 +254,7 @@ export function parseFlags(fl: FlagView): CpFlags {
   return cpFlags({
     recursive,
     noClobber,
+    interactive: asking === 'interactive',
     verbose: fl.asBool('verbose'),
     update,
     backup: control,
@@ -330,7 +369,7 @@ export async function copyTreeLinks(
   const shownDst = rstripSlash(target.rawPath) || target.rawPath
   const below = [...copies.links.subtree(base)].sort((a, b) => compareCodePoints(a[0], b[0]))
   for (const [virtual, row] of below) {
-    if (!pathAllowed(virtual)) continue
+    if (!pathVisible(copies.visibility, virtual)) continue
     const rel = virtual.slice(rstripSlash(base).length + 1)
     const landing = `${dstBase}/${rel}`
     const shown = `${shownSrc}/${rel}`
@@ -426,21 +465,20 @@ export async function copyTreeLinks(
 }
 
 // Split operands into sources and destination, GNU arity errors. With -t
-// every operand is a source and the returned destination is null (the
-// caller wraps the target-directory string itself). -T requires exactly
-// two operands.
+// every operand is a source and the target directory is the destination.
+// -T requires exactly two operands.
 export function splitOperands(
   cmdName: string,
   paths: PathSpec[],
-  targetDir: PathSpec | string | null,
+  targetDir: PathSpec | null,
   noTargetDir: boolean,
-): [PathSpec[], PathSpec | null] {
+): [PathSpec[], PathSpec] {
   const hint = `Try '${cmdName} --help' for more information.`
   const first = paths[0]
   if (first === undefined) {
     throw new UsageError(`${cmdName}: missing file operand\n${hint}`, 1)
   }
-  if (targetDir !== null) return [[...paths], null]
+  if (targetDir !== null) return [[...paths], targetDir]
   if (paths.length === 1) {
     throw new UsageError(
       `${cmdName}: missing destination file operand after '${first.rawPath}'\n${hint}`,
@@ -450,13 +488,7 @@ export function splitOperands(
   if (noTargetDir && paths.length > 2) {
     throw extraOperandError(cmdName, paths[2]?.rawPath ?? '')
   }
-  const dst = paths[paths.length - 1]
-  return [paths.slice(0, -1), dst ?? null]
-}
-
-// Build the -t directory PathSpec from a same-mount reference operand.
-export function wrapTargetDir(ref: PathSpec, virtual: string): PathSpec {
-  return PathSpec.fromStrPath(virtual, rekey(ref.virtual, ref.vfsPath, virtual))
+  return [paths.slice(0, -1), paths[paths.length - 1] ?? first]
 }
 
 // GNU error line when a -t operand is missing or not a directory.
@@ -601,7 +633,8 @@ export async function overwriteGate(
 ): Promise<boolean> {
   // No gating flag: skip the target probe entirely so API-backed mounts
   // pay no extra stat per entry.
-  if (!policy.noClobber && !updateGates(policy.update)) return true
+  const ask = policy.ask ?? null
+  if (!policy.noClobber && !updateGates(policy.update) && ask === null) return true
   let targetInfo: FileStat
   try {
     targetInfo = await stat(target)
@@ -628,7 +661,8 @@ export async function overwriteGate(
     const targetTs = modifiedTs(targetInfo.modified)
     if (srcTs !== null && targetTs !== null && srcTs <= targetTs) return false
   }
-  return true
+  // -i asks last, once the target survived the update checks.
+  return ask !== null ? ask(target) : true
 }
 
 // Materialize the backup: mv renames the target away, cp copies it. A
@@ -769,36 +803,49 @@ function transferLine(src: PathSpec, target: PathSpec, backup: PathSpec | null):
 // destination, and an entirely empty tree would copy to nothing. A backend
 // exposing no mkdir (directories are implied by keys) is a no-op. Parents
 // sort before children so a nested tree lands in order.
-// GNU -v lines for a natively copied tree, parents first. GNU `cp -rv`
-// reports directories as well as files, including the source root itself.
-// Deliberate divergence: GNU's sibling order follows readdir, which no backend
-// can reproduce, so entries are sorted lexicographically instead. That keeps
-// every parent ahead of its children (GNU's only load-bearing ordering
-// guarantee) and is stable across backends.
+// GNU -v lines for a tree about to be copied natively, parents first. GNU
+// `cp -rv` reports every file and every directory it creates, including the
+// source root itself; a directory already at the destination is merged into
+// without a line. Read before the copy, so the destination still shows which
+// directories exist. Deliberate divergence: GNU's sibling order follows
+// readdir, which no backend can reproduce, so entries are sorted
+// lexicographically instead. That keeps every parent ahead of its children
+// (GNU's only load-bearing ordering guarantee) and is stable across backends.
 async function treeLines(
   strategy: NativeCopy,
+  stat: StatFn,
   src: PathSpec,
   target: PathSpec,
   srcBase: string,
   dstBase: string,
+  index?: IndexCacheStore,
 ): Promise<string[]> {
-  const dirs = await strategy.find(src, { type: 'd' })
+  const dirs = new Set([srcBase, ...(await strategy.find(src, { type: 'd' }))])
   const files = await strategy.find(src, { type: 'f' })
-  const unique = [...new Set([srcBase, ...dirs, ...files])].sort(compareCodePoints)
-  return unique.map((entryMount) => {
+  const unique = [...new Set([...dirs, ...files])].sort(compareCodePoints)
+  const lines: string[] = []
+  for (const entryMount of unique) {
     const entry = spelledFrom(mountedPath(src, entryMount), src)
     const entryDst = spelledFrom(
       mountedPath(target, dstBase + entryMount.slice(srcBase.length)),
       target,
     )
-    return `'${entry.rawPath}' -> '${entryDst.rawPath}'`
-  })
+    if (dirs.has(entryMount) && (await isDirectory(stat, entryDst, index))) continue
+    lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
+  }
+  return lines
 }
 
 // A failed mkdir stops the whole source, mirroring copyEntries and GNU: the
 // children of a directory that could not be created cannot land, so reporting
 // one line per descendant (and then copying the files anyway) would be both
 // noisy and wrong. Returns false when the caller must skip the file pass.
+// Whether `path` is `root` or below it. Mirrors Python's within.
+export function within(path: string, root: string): boolean {
+  const base = rstripSlash(root)
+  return rstripSlash(path) === base || path.startsWith(`${base}/`)
+}
+
 async function mirrorDirs(
   strategy: NativeCopy,
   stat: StatFn,
@@ -808,11 +855,16 @@ async function mirrorDirs(
   dstBase: string,
   writes: Record<string, ByteSource>,
   errors: string[],
+  intoItself: boolean,
   index?: IndexCacheStore,
   lines?: string[],
 ): Promise<boolean> {
   if (strategy.mkdir === undefined) return true
-  const mounts = [srcBase, ...(await strategy.find(src, { type: 'd' }))]
+  // A destination inside the source leaves its own subtree out, as the
+  // file pass does.
+  const mounts = [srcBase, ...(await strategy.find(src, { type: 'd' }))].filter(
+    (found) => !(intoItself && within(found, dstBase)),
+  )
   // Shortest first so a parent is created before its children, then by name:
   // sorting on length alone leaves equal-length siblings in whatever order
   // the Set happened to hold, which is insertion order here and hash order in
@@ -823,10 +875,6 @@ async function mirrorDirs(
       mountedPath(target, dstBase + entryMount.slice(srcBase.length)),
       target,
     )
-    if (lines !== undefined) {
-      const entry = spelledFrom(mountedPath(src, entryMount), src)
-      lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
-    }
     if (await isDirectory(stat, entryDst, index)) continue
     try {
       await strategy.mkdir(entryDst)
@@ -836,6 +884,10 @@ async function mirrorDirs(
       return false
     }
     writes[entryDst.mountPath] = new Uint8Array()
+    if (lines !== undefined) {
+      const entry = spelledFrom(mountedPath(src, entryMount), src)
+      lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
+    }
   }
   return true
 }
@@ -1014,7 +1066,7 @@ export async function copyEntries(
       continue
     }
     wroteAny = true
-    if (opts.reads !== undefined) opts.reads[entrySpec.virtual] = data
+    if (opts.reads !== undefined) opts.reads[entrySpec.mountPath] = data
     if (opts.writes !== undefined) opts.writes[entryDstSpec.mountPath] = new Uint8Array()
     if (opts.lines !== undefined) opts.lines.push(transferLine(entrySpec, entryDstSpec, backup))
   }
@@ -1045,20 +1097,15 @@ export async function cpGeneric(
   // as a link where the policy says to; undefined outside a workspace, where
   // no link can stand.
   copies?: TransferLinks,
+  // Where -i reads its answers.
+  stdin?: ByteSource | null,
 ): Promise<[ByteSource | null, IOResult]> {
   const keyOf = backendKey ?? backendKeyDefault
-  const [sources, dstOperand] = splitOperands('cp', paths, flags.targetDir, flags.noTargetDir)
-  let dst: PathSpec
+  const [sources, dst] = splitOperands('cp', paths, flags.targetDir, flags.noTargetDir)
   let dstIsDir: boolean
   let dstExists: boolean
   let dstErr: string | null = null
-  if (dstOperand === null) {
-    const firstSource = sources[0]
-    if (firstSource === undefined) return [null, new IOResult()]
-    dst =
-      flags.targetDir instanceof PathSpec
-        ? flags.targetDir
-        : wrapTargetDir(firstSource, String(flags.targetDir))
+  if (flags.targetDir !== null) {
     const err = await targetDirError('cp', stat, dst)
     if (err !== null) {
       return [null, new IOResult({ stderr: ENC.encode(`${err}\n`), exitCode: 1 })]
@@ -1066,11 +1113,9 @@ export async function cpGeneric(
     dstIsDir = true
     dstExists = true
   } else if (flags.noTargetDir) {
-    dst = dstOperand
     dstIsDir = false
     dstExists = true
   } else {
-    dst = dstOperand
     const probe = await destKind(stat, dst)
     dstExists = probe.exists
     dstIsDir = probe.isDir
@@ -1080,19 +1125,24 @@ export async function cpGeneric(
   if (versionReaddir === undefined && isPrimitiveCopy(strategy)) {
     versionReaddir = strategy.readdir
   }
+  const errors: string[] = []
+  const accepted: string[] = []
   const policy: TransferPolicy = {
     cmdName: 'cp',
     noClobber: flags.noClobber,
     update: flags.update,
     backup: flags.backup,
     suffix: flags.suffix,
+    ask: flags.interactive ? prompter('cp', stdin ?? null, errors, accepted) : null,
   }
   const perEntryNative =
-    flags.noClobber || updateGates(flags.update) || backupDisplaces(flags.backup)
+    flags.noClobber ||
+    flags.interactive ||
+    updateGates(flags.update) ||
+    backupDisplaces(flags.backup)
   const writes: Record<string, ByteSource> = {}
   const reads: Record<string, Uint8Array> = {}
   const lines: string[] = []
-  const errors: string[] = []
   let warned = 0
   const seen = new Set<string>()
   const created = new Set<string>()
@@ -1125,6 +1175,7 @@ export async function cpGeneric(
         continue
       }
       if (guardsCreated && created.has(keyOf(target))) {
+        if (policy.ask && !(await policy.ask(target))) continue
         errors.push(`cp: will not overwrite just-created '${target.rawPath}' with '${src.rawPath}'`)
         continue
       }
@@ -1161,10 +1212,9 @@ export async function cpGeneric(
       errors.push(`cp: '${src.rawPath}' and '${target.rawPath}' are the same file`)
       continue
     }
-    if (flags.recursive && keyOf(target).startsWith(keyOf(src) + '/')) {
-      errors.push(`cp: cannot copy a directory, '${src.rawPath}', into itself, '${target.rawPath}'`)
-      continue
-    }
+    // GNU copies a directory into its own subtree too: everything but the
+    // new copy itself, before it says it could not (cp -r d d).
+    const intoItself = flags.recursive && keyOf(target).startsWith(keyOf(src) + '/')
     if (!flags.recursive && srcIsDir) {
       errors.push(`cp: -r not specified; omitting directory '${src.rawPath}'`)
       continue
@@ -1206,19 +1256,17 @@ export async function cpGeneric(
       errors.push(`cp: not writing through dangling symlink '${target.rawPath}'`)
       continue
     }
+    if (intoItself) {
+      errors.push(`cp: cannot copy a directory, '${src.rawPath}', into itself, '${target.rawPath}'`)
+    }
     if (flags.recursive && srcIsDir) {
       const srcBase = rstripSlash(src.mountPath)
       const dstBase = rstripSlash(target.mountPath)
       if (isPrimitiveCopy(strategy)) {
-        const entries = await cpWalk(
-          strategy.readdir,
-          stat,
-          src,
-          index,
-          'cp',
-          errors,
-          copies?.links,
-        )
+        const walked = await cpWalk(strategy.readdir, stat, src, index, 'cp', errors, copies?.links)
+        const entries = intoItself
+          ? walked.filter((entry) => !within(entry.path, target.virtual))
+          : walked
         await copyEntries('cp', strategy, stat, src, target, entries, errors, index, {
           policy,
           writes,
@@ -1241,14 +1289,14 @@ export async function cpGeneric(
         }
         continue
       }
-      if (strategy.dirCopy !== undefined && !perEntryNative) {
+      if (strategy.dirCopy !== undefined && !perEntryNative && !intoItself) {
+        if (flags.verbose) {
+          lines.push(...(await treeLines(strategy, stat, src, target, srcBase, dstBase, index)))
+        }
         await strategy.dirCopy(src, target)
         for (const entryMount of await strategy.find(src, { type: 'f' })) {
           const entryDst = mountedPath(target, dstBase + entryMount.slice(srcBase.length))
           writes[entryDst.mountPath] = new Uint8Array()
-        }
-        if (flags.verbose) {
-          lines.push(...(await treeLines(strategy, src, target, srcBase, dstBase)))
         }
         if (copies !== undefined) {
           await copyTreeLinks(
@@ -1277,11 +1325,13 @@ export async function cpGeneric(
         dstBase,
         writes,
         errors,
+        intoItself,
         index,
         flags.verbose ? lines : undefined,
       )
       if (!mirrored) continue
       for (const entryMount of await strategy.find(src, { type: 'f' })) {
+        if (intoItself && within(entryMount, dstBase)) continue
         const entry = spelledFrom(mountedPath(src, entryMount), src)
         const entryDst = spelledFrom(
           mountedPath(target, dstBase + entryMount.slice(srcBase.length)),
@@ -1320,6 +1370,9 @@ export async function cpGeneric(
       continue
     }
     if (guardsCreated && created.has(keyOf(target))) {
+      // -i asks first: GNU only meets the just-created rule once the answer
+      // says to replace.
+      if (policy.ask && !(await policy.ask(target))) continue
       errors.push(`cp: will not overwrite just-created '${target.rawPath}' with '${src.rawPath}'`)
       continue
     }
@@ -1355,7 +1408,7 @@ export async function cpGeneric(
         )
         continue
       }
-      reads[src.virtual] = data
+      reads[src.mountPath] = data
     } else {
       try {
         await strategy.copy(src, target)
@@ -1372,15 +1425,14 @@ export async function cpGeneric(
     if (flags.verbose) lines.push(transferLine(src, target, made.backup))
   }
   const output: ByteSource | null = lines.length > 0 ? ENC.encode(lines.join('\n') + '\n') : null
-  const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : null
   return [
     output,
     new IOResult({
       writes,
       reads: { ...reads },
       cache: Object.keys(reads),
-      stderr,
-      exitCode: errors.length > warned ? 1 : 0,
+      stderr: stderrOf(errors),
+      exitCode: errors.length > warned + accepted.length ? 1 : 0,
     }),
   ]
 }

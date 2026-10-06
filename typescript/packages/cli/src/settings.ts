@@ -14,6 +14,7 @@
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { defaultTokenFile, readTokenFile } from '@struktoai/mirage-server/auth/storage'
 import {
@@ -33,14 +34,35 @@ import {
 } from '@struktoai/mirage-server/ssh/constants'
 import { defaultSSHDir } from '@struktoai/mirage-server/ssh/config'
 
+import { loginPath, readLogin, type Login } from './credentials.ts'
 import { ENV_DAEMON_URL, ENV_TOKEN } from './env.ts'
 
 export const DEFAULT_DAEMON_URL = 'http://127.0.0.1:8765'
+
+/**
+ * Whether a daemon URL points at this machine. Only such a URL may use
+ * the local token file or start a daemon, so neither the file's token
+ * nor a spawn ever goes to a remote host.
+ *
+ * @param url - The daemon URL.
+ * @returns True when its host is a loopback name.
+ */
+export function isLocalUrl(url: string): boolean {
+  let host: string
+  try {
+    host = new URL(url).hostname
+  } catch {
+    return false
+  }
+  return DEFAULT_ALLOWED_HOSTS.includes(host.replace(/^\[(.*)\]$/, '$1'))
+}
 
 export interface DaemonSettings {
   url: string
   authToken: string
   idleGraceSeconds: number
+  /** The `mirage login` made for this URL, used when no token is set. */
+  login?: Login
 }
 
 export interface LoadOptions {
@@ -71,6 +93,13 @@ export function loadDaemonSettings(options: LoadOptions = {}): DaemonSettings {
     settings.authToken = envToken
   }
   if (settings.authToken === '') {
+    const login = readLogin(loginPath(env))
+    if (login !== null && login.url === rstripSlash(settings.url)) {
+      settings.login = login
+      return settings
+    }
+  }
+  if (settings.authToken === '' && isLocalUrl(settings.url)) {
     const fileToken = readTokenFile(options.tokenFile ?? defaultTokenFile(env))
     if (fileToken !== undefined && fileToken !== '') {
       settings.authToken = fileToken
@@ -91,8 +120,10 @@ const ENV_FOR_KEY: Record<string, string> = {
   jwt_issuer: 'MIRAGE_JWT_ISSUER',
   jwt_audience: 'MIRAGE_JWT_AUDIENCE',
   jwt_pubkey_file: 'MIRAGE_JWT_PUBKEY_FILE',
+  jwt_jwks_url: 'MIRAGE_JWT_JWKS_URL',
   jwt_clock_skew: 'MIRAGE_JWT_CLOCK_SKEW_SECONDS',
   jwt_authorized_parties: 'MIRAGE_JWT_AUTHORIZED_PARTIES',
+  login_client_id: 'MIRAGE_LOGIN_CLIENT_ID',
   auth_token: ENV_TOKEN,
   idle_grace_seconds: 'MIRAGE_IDLE_GRACE_SECONDS',
   port: 'MIRAGE_DAEMON_PORT',
@@ -108,8 +139,10 @@ function defaultForKey(key: string, home: string): string {
     jwt_issuer: '',
     jwt_audience: '',
     jwt_pubkey_file: '',
+    jwt_jwks_url: '',
     jwt_clock_skew: '5',
     jwt_authorized_parties: '',
+    login_client_id: '',
     socket: '',
     auth_token: '',
     idle_grace_seconds: '30',

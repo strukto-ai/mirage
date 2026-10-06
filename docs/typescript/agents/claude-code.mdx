@@ -1,47 +1,54 @@
 ---
 title: Claude Code
-description: Run Anthropic's Claude Code CLI against any Mirage workspace by mounting it as a real filesystem via FUSE.
+description: Connect Claude Code to a Mirage workspace through the CLI or a FUSE mount.
 icon: /images/claude-logo.svg
 ---
 
-[Claude Code](https://github.com/anthropics/claude-code) is Anthropic's CLI for Claude. It expects a real filesystem and doesn't expose a pluggable backend, so instead of an SDK integration, Mirage exposes any workspace as a real filesystem via [FUSE](/typescript/setup/fuse) and lets you point `claude` at the mountpoint.
+| Way | Claude Code gets | Needs |
+| --- | --- | --- |
+| [CLI](#cli) | Mirage's seven tools, beside its own | the `mirage` CLI |
+| [FUSE](#fuse) | its own tools, on the workspace as a folder | a [FUSE driver](/home/setup/fuse) |
 
 ## Install
 
 ```bash
-pnpm add @struktoai/mirage-node @zkochan/fuse-native
+npm install -g @struktoai/mirage-cli
 ```
 
-See [TypeScript FUSE setup](/typescript/setup/fuse) for the pnpm `onlyBuiltDependencies` allow-list and macOS macFUSE 4 symlink workaround. Then install [Claude Code](https://docs.claude.com/en/docs/claude-code/setup) separately.
+On macOS, FUSE also needs the [macFUSE 4 workaround](/typescript/setup/fuse#macos-4-symlink-workaround). Install [Claude Code](https://docs.claude.com/en/docs/claude-code/setup) separately.
 
-## Usage
+## Workspace
 
-```ts
-import { Mount, MountMode, RAMVFS, S3VFS, Workspace } from '@struktoai/mirage-node'
-
-const ws = new Workspace({
-  '/': new Mount(new RAMVFS(), { mode: MountMode.WRITE, backend: MountBackend.FUSE }),
-  '/s3/': new Mount(new S3VFS({ bucket: 'my-bucket', /* ... */ }), { mode: MountMode.READ }),
-})
-await ws.fuseReady()
-
-console.log(`cd ${ws.fuseMountpoint} && claude`)
-// ... run claude in another terminal, then:
-await ws.close() // auto-unmounts
+```yaml workspace.yaml
+mode: write
+mounts:
+  /:
+    vfs: ram
+    backend: fuse                 # FUSE only
+    mountpoint: /tmp/mirage-demo  # FUSE only
+  /s3:
+    vfs: s3
+    mode: read
+    config:
+      bucket: my-bucket
 ```
 
-The mountpoint behaves like a regular directory. `claude` reads, writes, runs `bash`, and patches files just like it would on a normal disk, every operation goes through Mirage's ops layer, so writes to `/s3/...` hit S3, writes to `/` stay in RAM.
+```bash
+mirage workspace create workspace.yaml --id demo
+```
 
-## Why FUSE instead of an SDK integration?
+## CLI
 
-Claude Code's tool-use loop is fully internal, there's no `Backend` interface to swap. FUSE gives Mirage a single unforced way in: present a real path, let the agent be the agent.
+```bash
+claude mcp add mirage -- mirage mcp -w demo
+```
 
-You lose:
-- Per-tool prompt customization
-- Observation hooks on tool calls
-- Mirage's op-record telemetry on the agent's specific calls (host syscalls aren't recorded the same way)
+Claude Code gets `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob` from the workspace's [MCP server](/home/access/mcp).
 
-You gain:
-- Zero integration effort
-- Compatibility with every Claude Code feature, including future ones
-- The same approach works for any other directory-based agent ([OpenAI Codex](/typescript/agents/codex), `aider`, etc.)
+## FUSE
+
+```bash
+cd /tmp/mirage-demo && claude
+```
+
+Every file and shell call Claude Code makes goes through Mirage: `/tmp/mirage-demo/s3` is the bucket. `mirage workspace delete demo` unmounts it. On macOS the daemon holds one FUSE mount at a time.

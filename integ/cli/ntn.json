@@ -987,6 +987,71 @@
       "targets": [
         "cli-ntn"
       ]
+    },
+    {
+      "id": "ntn_api_patch_unknown_property_is_refused",
+      "seq": 566076,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/pages/a0000000-0000-4000-8000-000000000002 -X PATCH -d '{\"properties\":{\"Net PnL %\":{\"number\":1}}}'",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": "error: Public API request failed (400 Bad Request validation_error): Net PnL % is not a property that exists.\n"
+      }
+    },
+    {
+      "id": "ntn_refused_property_stays_off_the_row",
+      "seq": 566077,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/pages/a0000000-0000-4000-8000-000000000002 | jq -r '.properties | has(\"Net PnL %\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "false\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_api_create_under_page_takes_only_title",
+      "seq": 566078,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/pages -d '{\"parent\":{\"page_id\":\"aaaa1111-2222-3333-4444-555566667777\"},\"properties\":{\"title\":{\"title\":[{\"text\":{\"content\":\"Refused child\"}}]},\"AIME (8x)\":{\"number\":0.1}}}'",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": "error: Public API request failed (400 Bad Request validation_error): AIME (8x) is not a property that exists.\n"
+      }
+    },
+    {
+      "id": "ntn_refused_child_page_is_not_created",
+      "seq": 566079,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/search -d '{\"query\":\"Refused child\"}' | jq -r '.results | length'",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_api_create_row_names_title_by_id",
+      "seq": 566080,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/pages -d '{\"parent\":{\"data_source_id\":\"d5000000-2222-3333-4444-555566667777\"},\"properties\":{\"title\":{\"title\":[{\"text\":{\"content\":\"By id\"}}]}}}' | jq -r '.properties.Name.title[0].plain_text, (.properties | has(\"title\"))'",
+      "expect": {
+        "exit": 0,
+        "stdout": "By id\nfalse\n",
+        "stderr": ""
+      }
     }
   ]
 }

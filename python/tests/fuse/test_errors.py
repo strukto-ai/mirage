@@ -13,12 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
+import logging
 import os
 
 import pytest
 
 from mirage.fuse.errors import NO_XATTR, classify_error
+from mirage.policy import PolicyDenied
 from mirage.runtime.errors import CrossMountError
+from mirage.types import Refusal
 from mirage.utils.errors import no_mount
 from mirage.utils.path import CycleError
 
@@ -89,3 +92,16 @@ def test_message_matching_is_case_insensitive():
 
 def test_no_xattr_is_platform_appropriate():
     assert NO_XATTR in (getattr(errno, "ENOATTR", None), errno.ENODATA)
+
+
+def test_a_policys_reason_goes_to_the_log(caplog):
+    # The kernel carries only the number, so the reason is logged.
+    refused = PolicyDenied(
+        errno.EACCES,
+        "Permission denied",
+        "/data/x",
+        refusal=Refusal(kind="deny", reason="sealed", policy="RulePolicy"),
+    )
+    with caplog.at_level(logging.INFO, logger="mirage.fuse.errors"):
+        assert classify_error(refused) == errno.EACCES
+    assert "policy RulePolicy refused /data/x: sealed" in caplog.text

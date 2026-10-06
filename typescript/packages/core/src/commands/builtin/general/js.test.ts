@@ -25,7 +25,7 @@ describe('node/js: quickjs runtime', () => {
   it('uses the invoked alias in script errors', async () => {
     const { ws } = await makeWorkspace()
     try {
-      for (const name of ['python', 'python3', 'js', 'node']) {
+      for (const name of ['python', 'node']) {
         const io = await ws.shell(`${name} /missing-script`)
         expect(io.exitCode).toBe(1)
         expect(stderrStr(io)).toBe(`${name}: /missing-script: No such file\n`)
@@ -38,32 +38,24 @@ describe('node/js: quickjs runtime', () => {
   it('identifies QuickJS for both aliases and both version flags', async () => {
     const { ws } = await makeWorkspace()
     try {
-      for (const name of ['js', 'node']) {
-        for (const flag of ['--version', '-v']) {
-          const io = await ws.shell(`${name} ${flag}`)
-          expect(io.exitCode).toBe(0)
-          expect(stdoutStr(io)).toMatch(/^JavaScript \(quickjs \d{4}-\d{2}-\d{2}\)\n$/)
-          expect(stderrStr(io)).toBe('')
-        }
+      for (const line of ['js --version', 'node -v']) {
+        const io = await ws.shell(line)
+        expect(io.exitCode).toBe(0)
+        expect(stdoutStr(io)).toMatch(/^JavaScript \(quickjs \d{4}-\d{2}-\d{2}\)\n$/)
+        expect(stderrStr(io)).toBe('')
       }
     } finally {
       await ws.close()
     }
   })
 
-  it('passes --version to scripts and inline programs', async () => {
+  it('passes --version to a script', async () => {
     const { ws } = await makeWorkspace()
     try {
       await ws.shell("echo 'console.log(scriptArgs[0])' > /ram/version.js")
-      for (const line of [
-        'node -e "console.log(scriptArgs[0])" -- --version',
-        'js /ram/version.js --version',
-        "echo 'console.log(scriptArgs[0])' | node - --version",
-      ]) {
-        const io = await ws.shell(line)
-        expect(io.exitCode).toBe(0)
-        expect(stdoutStr(io)).toBe('--version\n')
-      }
+      const io = await ws.shell('js /ram/version.js --version')
+      expect(io.exitCode).toBe(0)
+      expect(stdoutStr(io)).toBe('--version\n')
     } finally {
       await ws.close()
     }

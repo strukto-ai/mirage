@@ -42,6 +42,7 @@ export {
   ENV_JWT_ISSUER,
   ENV_JWT_PUBKEY,
   ENV_JWT_PUBKEY_FILE,
+  ENV_JWT_JWKS_URL,
   JWTVerificationError,
   defaultTokenFile,
   ensureTokenFile,
@@ -62,4 +63,4 @@ export {
   readDaemonTable,
   validateDaemonTable,
 } from './daemon_config.ts'
-export { mirageHome, pidFilePath, snapshotRootPath, versionRootPath } from './paths.ts'
+export { mirageHome, pidFilePath } from './paths.ts'

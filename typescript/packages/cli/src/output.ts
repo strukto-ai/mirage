@@ -35,10 +35,10 @@ export function exitCodeFromResponse(r: unknown): number {
   if (
     inner !== null &&
     inner.kind === 'io' &&
-    typeof inner.exitCode === 'number' &&
-    Number.isFinite(inner.exitCode)
+    typeof inner.exit_code === 'number' &&
+    Number.isFinite(inner.exit_code)
   ) {
-    return Math.min(255, Math.max(0, Math.trunc(inner.exitCode)))
+    return Math.min(255, Math.max(0, Math.trunc(inner.exit_code)))
   }
   if (typeof obj.status === 'string' && (obj.status === 'failed' || obj.status === 'canceled')) {
     return 2

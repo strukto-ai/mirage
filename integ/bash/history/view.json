@@ -77,6 +77,19 @@
         "stdout": ".\n..\n.bash_history\ndata\ndev\nusr\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ls_aF_root_marks_the_history_file_as_a_file",
+      "seq": 310059,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "ls -aF /",
+      "expect": {
+        "exit": 0,
+        "stdout": "./\n../\n.bash_history\ndata/\ndev/\nusr/\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -47,7 +47,7 @@ function ctx(
 
 describe('MountRootPolicy', () => {
   it.each([
-    ['rm', 'Device or resource busy'],
+    ['rm', 'Is a directory'],
     ['rmdir', 'Device or resource busy'],
     ['mv', 'Device or resource busy'],
     ['mkdir', 'File exists'],
@@ -86,6 +86,27 @@ describe('MountRootPolicy', () => {
       expect(policy.preCommand(ctx(cmd, [path('/data/file.txt')], [], reg))).toBeNull()
     }
     expect(policy.preCommand(ctx('rm', [], ['-r'], reg))).toBeNull()
+  })
+
+  it.each([
+    [
+      ['-r'],
+      '/data/x/..',
+      '/data',
+      "refusing to remove '.' or '..' directory: skipping '/data/x/..'",
+    ],
+    [
+      ['-r'],
+      '//',
+      '//',
+      "it is dangerous to operate recursively on '//' (same as '/')\n" +
+        'rm: use --no-preserve-root to override this failsafe',
+    ],
+    [['-r', '--no-pres'], '/', '/', "cannot remove '/': Device or resource busy"],
+  ])('rm %j refuses %s in GNU order', (argv, raw, virtual, reason) => {
+    const reg = new MountRegistry({ '/': new RAMVFS(), '/data': new RAMVFS() }, MountMode.WRITE, {})
+    const deny = new MountRootPolicy().preCommand(ctx('rm', [path(virtual, raw)], argv, reg))
+    expect(deny && 'reason' in deny ? deny.reason : '').toBe(reason)
   })
 
   it('rm -r on a mount root is refused, never treated as an unmount', () => {

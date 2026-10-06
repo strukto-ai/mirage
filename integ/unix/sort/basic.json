@@ -373,6 +373,78 @@
         "stdout": "",
         "stderr": "sort: stat failed: -: Bad file descriptor\n"
       }
+    },
+    {
+      "id": "sort_cannot_read_names_the_operand_as_typed",
+      "seq": 15300106,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && sort 'no such.txt'); echo rc=$?; sort /data/fcC_m1 /data/fcC_m2; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\n",
+        "stderr": "sort: cannot read: 'no such.txt': No such file or directory\nsort: cannot read: /data/fcC_m1: No such file or directory\n"
+      }
+    },
+    {
+      "id": "sort_closed_stdin_is_a_read_failure_under_m_and_c",
+      "seq": 15300107,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sort -m <&-; echo rc=$?; sort -c <&-; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\n",
+        "stderr": "sort: read failed: -: Bad file descriptor\nsort: read failed: -: Bad file descriptor\n"
+      },
+      "flags": [
+        "m",
+        "c"
+      ]
     }
   ]
 }

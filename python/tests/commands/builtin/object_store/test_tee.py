@@ -27,7 +27,15 @@ from mirage.context import (
     set_current_session,
     set_mount_gate,
 )
-from mirage.types import MountMode, PathSpec, ShowEntry, ShownPaths
+from mirage.types import (
+    FileStat,
+    FileType,
+    MountMode,
+    PathSpec,
+    ShowEntry,
+    ShownPaths,
+    Visibility,
+)
 from mirage.workspace.session import SessionState
 
 
@@ -49,12 +57,21 @@ async def _exists(
     return False
 
 
+async def _stat(
+    _accessor: Accessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+) -> FileStat:
+    # The parents the outputs land in hold keys, so they read as
+    # directories; every output itself is new.
+    if path.virtual.rstrip("/") in ("/s3", "/s3/build"):
+        return FileStat(name=path.name, type=FileType.DIRECTORY)
+    raise FileNotFoundError(path.virtual)
+
+
 async def _unused_dir_op(_accessor: Accessor, _path: PathSpec) -> None:
     raise AssertionError("directory op must not run")
 
 
 def _io(writes: list[str]) -> CommandIO:
-
     async def write(_accessor: Accessor, path: PathSpec, _data: bytes) -> None:
         writes.append(path.virtual)
 
@@ -62,7 +79,7 @@ def _io(writes: list[str]) -> CommandIO:
         readdir=_readdir,
         read_bytes=_missing,
         read_stream=_missing,
-        stat=_missing,
+        stat=_stat,
         write=write,
         exists=_exists,
         mkdir=_unused_dir_op,
@@ -89,8 +106,10 @@ async def test_tee_holds_each_path_to_its_regions_mode():
     sess = SessionState(
         session_id="agent",
         mount_modes={"/s3": MountMode.READ},
-        shown_paths=ShownPaths(
-            entries=(ShowEntry("/s3/build", MountMode.WRITE),)
+        visibility=Visibility(
+            shown=ShownPaths(
+                entries=(ShowEntry("/s3/build", MountMode.WRITE),)
+            )
         ),
     )
     session_token = set_current_session(sess)
@@ -117,8 +136,10 @@ async def test_tee_writes_inside_the_granted_region():
     sess = SessionState(
         session_id="agent",
         mount_modes={"/s3": MountMode.READ},
-        shown_paths=ShownPaths(
-            entries=(ShowEntry("/s3/build", MountMode.WRITE),)
+        visibility=Visibility(
+            shown=ShownPaths(
+                entries=(ShowEntry("/s3/build", MountMode.WRITE),)
+            )
         ),
     )
     session_token = set_current_session(sess)

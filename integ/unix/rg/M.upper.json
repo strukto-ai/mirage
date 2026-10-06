@@ -1,0 +1,43 @@
+{
+  "cases": [
+    {
+      "id": "rg_M_omits_a_line_longer_than_the_limit",
+      "seq": 15200081,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'short\\na much longer line\\n' > /data/fcB_m.txt; rg -M 5 o /data/fcB_m.txt; rg -M 5 --max-columns-preview o /data/fcB_m.txt; rg -M5 --max-columns-preview --no-max-columns-preview o /data/fcB_m.txt; rg --max-columns=6 -n -H line /data/fcB_m.txt; rg -M 0 line /data/fcB_m.txt; rg -M 5 -o much /data/fcB_m.txt; rg -M 5 -c o /data/fcB_m.txt; rm -f /data/fcB_m.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "[Omitted long matching line]\n[Omitted long matching line]\nshort [... omitted end of long line]\na muc [... omitted end of long line]\n[Omitted long matching line]\n[Omitted long matching line]\n/data/fcB_m.txt:2:[Omitted long matching line]\na much longer line\nmuch\n2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "M",
+        "max_columns_preview",
+        "no_max_columns_preview",
+        "o",
+        "c",
+        "n",
+        "H"
+      ]
+    }
+  ]
+}

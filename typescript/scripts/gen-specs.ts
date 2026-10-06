@@ -35,11 +35,9 @@ import {
   type Capabilities,
   type CommandIoFacts,
   type ConfigFacts,
-  capabilitiesOf,
-  collectClasses,
   commandIoFacts,
   configFacts,
-  registryClasses,
+  registryCapabilities,
 } from './vfs_facts.ts'
 
 const __dirname = resolve(fileURLToPath(import.meta.url), '..')
@@ -338,22 +336,6 @@ function emitVfsNames(
   console.log(`emitted ${payload.registry.length} registry names to ${path}`)
 }
 
-// Every registry name's capability values, read from the class the entry
-// constructs. A name whose class cannot be resolved is a hard error: a
-// missing row would read as "no divergence here" in the parity gate.
-function capabilitiesFor(
-  pkgs: readonly string[],
-  variantPkg: string,
-): Record<string, Capabilities | null> {
-  const classes = collectClasses(PACKAGES, pkgs)
-  const names = registryClasses(resolve(PACKAGES, variantPkg, 'src', 'vfs', 'registry.ts'))
-  const out: Record<string, Capabilities | null> = {}
-  for (const [vfs, className] of [...names].sort(([a], [b]) => compareCodePoints(a, b))) {
-    out[vfs] = className === null ? null : capabilitiesOf(className, classes)
-  }
-  return out
-}
-
 // Every registered command SPECS does not declare. A backend verb (`trello
 // card create`) carries its spec inline, so the SPECS loop never sees it and
 // the parity gate could not tell a flag one language dropped. Each name gets
@@ -419,7 +401,7 @@ function emitVariant(
     name,
     knownVfsNames,
     registry,
-    capabilitiesFor(pkgs, pkgs[pkgs.length - 1] as string),
+    registryCapabilities(PACKAGES, pkgs),
     commandIoFacts(PACKAGES, pkgs, {
       maxGlobMatches: DEFAULT_MAX_GLOB_MATCHES,
       maxDuEntries: DEFAULT_MAX_DU_ENTRIES,

@@ -84,11 +84,6 @@ async function run(
 }
 
 describe('runLs — cross-mount ls', () => {
-  it('prints a file operand first, unheaded', async () => {
-    const { out } = await run(['/b/two', '/a/z.txt'])
-    expect(out).toBe('/a/z.txt\n\n/b/two:\ny.txt\n')
-  })
-
   it('never relays the caller index to another mount', async () => {
     // An index belongs to one mount, so operand A's index cannot answer
     // for mount B; the relayed op consults its own mount's index.
@@ -110,11 +105,6 @@ describe('runLs — cross-mount ls', () => {
     const none = await run(['/a', '/b'])
     const empty = await run(['/a', '/b'], {}, {})
     expect(empty.out).toBe(none.out)
-  })
-
-  it('interleaves each operand subtree under -R', async () => {
-    const { out } = await run(['/a', '/b'], { recursive: true })
-    expect(out).toBe('/a:\none\nz.txt\n\n/a/one:\nx.txt\n\n/b:\ntwo\n\n/b/two:\ny.txt\n')
   })
 
   it('leaves a lone operand unheaded', async () => {

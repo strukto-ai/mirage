@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-from pathlib import Path
 
 import pytest
 
@@ -22,12 +20,12 @@ from mirage.types import DEFAULT_READ_TTL, MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.aliyun.aliyun import AliyunVFS
 from mirage.vfs.backblaze.backblaze import BackblazeVFS
 from mirage.vfs.base import BaseVFS
+from mirage.vfs.box.box import BoxVFS
+from mirage.vfs.box.config import BoxConfig
 from mirage.vfs.ceph.ceph import CephVFS
 from mirage.vfs.dev.dev import DevVFS
 from mirage.vfs.digitalocean.digitalocean import DigitalOceanVFS
 from mirage.vfs.disk.disk import DiskVFS
-from mirage.vfs.dropbox.config import DropboxConfig
-from mirage.vfs.dropbox.dropbox import DropboxVFS
 from mirage.vfs.gcs.gcs import GCSVFS
 from mirage.vfs.gdocs import GDocsConfig, GDocsVFS
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
@@ -62,7 +60,6 @@ from mirage.workspace.mount.read_policy import (
 )
 
 FRESH = ReadSpec(policy=ReadPolicy.FRESH)
-SPEC_ROOT = Path(__file__).parents[4] / "spec"
 
 # Every S3-compatible provider reaches the verdict through S3VFS, so the
 # flag is declared once and inherited. Listing them is what catches a new
@@ -281,14 +278,14 @@ def test_fresh_is_allowed_on_a_listing_cache_without_a_file_cache(
 
 
 def test_fresh_is_refused_on_a_backend_that_caches_but_stamps_nothing():
-    # dropbox reaches the gate -- it caches reads -- but its read record
+    # box reaches the gate -- it caches reads -- but its read record
     # carries no fingerprint, so there is nothing to compare.
-    vfs = DropboxVFS(
-        DropboxConfig(client_id="i", client_secret="s", refresh_token="r")
+    vfs = BoxVFS(
+        BoxConfig(client_id="i", client_secret="s", refresh_token="r")
     )
     assert vfs.caches_reads is True
     with pytest.raises(ValueError) as exc:
-        check_read_capability("/dbx/", vfs, FRESH)
+        check_read_capability("/box/", vfs, FRESH)
     assert "comparable content token" in str(exc.value)
 
 
@@ -413,6 +410,7 @@ REVALIDATABLE = {
     "sharepoint",
     "hf_buckets",
     "github",
+    "dropbox",
 }
 
 FRESH_BY_LISTING = {"disk", "chroma", "qdrant", "airtable", "wandb"}
@@ -536,29 +534,6 @@ def test_the_revalidatable_roster_is_exactly_these_backends():
         if getattr(load_attr(entry.vfs_path), "read_revalidatable", False):
             declared.add(name)
     assert declared == REVALIDATABLE
-
-
-@pytest.mark.parametrize("host", ["typescript/node", "typescript/browser"])
-def test_the_typescript_roster_is_the_same_list(host):
-    """The absolute value, on the other side too.
-
-    ``check_spec_parity.py`` pins that the two languages agree, and the
-    test above pins python's answer, so a backend gaining the flag in
-    both at once is caught -- but only for a name python has. A
-    browser-only backend (``opfs``) has no python row, so nothing would
-    catch it. Reading the committed spec is exact and costs no
-    construction, which is why the TypeScript facts are generated rather
-    than probed in the first place.
-    """
-    spec = json.loads((SPEC_ROOT / host / "vfs.json").read_text())
-    declared = {
-        name
-        for name, caps in spec["capabilities"].items()
-        if caps and caps.get("read_revalidatable") is True
-    }
-    # gridfs and the Hugging Face repos and buckets have no browser
-    # implementation; github's VFS is core, so the browser declares it too.
-    assert declared == {n for n in REVALIDATABLE if n in spec["capabilities"]}
 
 
 def test_lancedb_decides_per_config_not_per_class():

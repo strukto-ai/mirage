@@ -23,6 +23,8 @@ import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { Limit, MountMode } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
+import { CLISpec } from '../commands/cli/types.ts'
+import { IOResult } from '../io/types.ts'
 
 class SignalProbeRuntime extends LanguageRuntime {
   readonly language = 'python'
@@ -284,6 +286,39 @@ describe('background job kill', () => {
       await ws.shell('kill %1')
       await new Promise((resolve) => setTimeout(resolve, 100))
       expect(probe.aborted).toBe(true)
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
+
+  it('a killed subshell stops its EXIT action', async () => {
+    const ws = buildWs()
+    const reached: string[] = []
+    for (const name of ['started', 'reached'])
+      ws.registerCli(
+        name,
+        new CLISpec({
+          name,
+          fn: () => {
+            reached.push(name)
+            return Promise.resolve([null, new IOResult()])
+          },
+        }),
+      )
+    try {
+      const running = ws.shell('(trap "started; sleep 0.3; reached" EXIT; true); echo after')
+      const subshell = () =>
+        ws.jobTable.processes.live().find((p) => p.info.command.startsWith('(trap'))
+      const deadline = Date.now() + 3000
+      while (subshell() === undefined) {
+        if (Date.now() > deadline) throw new Error('the subshell never started')
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      subshell()?.terminate()
+      await expect(running).rejects.toMatchObject({ name: 'AbortError' })
+      await new Promise((resolve) => setTimeout(resolve, 600))
+      expect(reached).toEqual(['started'])
     } finally {
       await ws.close()
     }

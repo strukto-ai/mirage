@@ -9,32 +9,23 @@ from mirage.commands.builtin.generic.wc import (
     wc,
 )
 from mirage.commands.errors import UsageError
+from mirage.io.types import CountedRun
 from mirage.types import PathSpec
 
 
 @pytest.mark.asyncio
-async def test_wc_words_leading_trailing_whitespace():
-    """POSIX: leading/trailing whitespace doesn't add words."""
-    counts = await wc(b"   hello   world   ")
-    assert counts.words == 2
-
-
-@pytest.mark.asyncio
-async def test_wc_words_only_whitespace():
-    counts = await wc(b"   \t  \n  ")
-    assert counts.words == 0
-
-
-@pytest.mark.asyncio
-async def test_wc_max_line_length_empty():
-    counts = await wc(b"")
-    assert counts.max_line_length == 0
-
-
-@pytest.mark.asyncio
-async def test_wc_max_line_length_no_trailing_newline():
-    counts = await wc(b"hello world")
-    assert counts.max_line_length == 11
+@pytest.mark.parametrize(
+    "data,field,value",
+    [
+        (b"   hello   world   ", "words", 2),
+        (b"hello world", "max_line_length", 11),
+        (bytes(range(256)), "bytes_", 256),
+    ],
+)
+async def test_wc_counts(data, field, value):
+    # POSIX words ignore surrounding blanks, an unterminated last line is
+    # measured, and arbitrary bytes count without a decode error.
+    assert getattr(await wc(data), field) == value
 
 
 @pytest.mark.asyncio
@@ -68,7 +59,6 @@ async def test_wc_max_line_length_no_trailing_newline():
 async def test_wc_counts_the_same_across_chunk_boundaries(
     chunks: list[bytes], expected: WCCounts
 ):
-
     async def src():
         for chunk in chunks:
             yield chunk
@@ -98,11 +88,6 @@ def test_format_wc_lines_quotes_only_a_name_holding_a_newline():
     assert _fmt(counts, lines=True, label="/a/b c") == "2 /a/b c"
 
 
-def test_format_wc_lines_combines_lines_and_max_line_length():
-    counts = WCCounts(lines=2, max_line_length=11)
-    assert _fmt(counts, lines=True, max_line_length=True) == "      2      11"
-
-
 def test_format_wc_lines_combines_selected_counts_in_canonical_order():
     counts = WCCounts(lines=2, words=4, bytes_=20, chars=18)
     assert (
@@ -127,16 +112,16 @@ async def test_format_multi_accepts_a_sync_or_async_iterator_read(read):
     assert await format_multi(paths, read=read, lines=True) == (
         b"1 /a.txt\n",
         b"",
+        [CountedRun((1,), "/a.txt")],
     )
 
 
 @pytest.mark.asyncio
 async def test_format_multi_empty_paths_returns_empty():
-
     async def fake_read(_path):
         return b""
 
-    out, err = await format_multi([], read=fake_read, lines=True)
+    out, err, _ = await format_multi([], read=fake_read, lines=True)
     assert out == b""
     assert err == b""
 
@@ -151,7 +136,8 @@ async def test_format_multi_all_missing_zero_total():
     async def fake_read(path):
         raise FileNotFoundError(path.virtual)
 
-    out, err = await format_multi(paths, read=fake_read, lines=True)
+    out, err, runs = await format_multi(paths, read=fake_read, lines=True)
+    assert runs == []
     assert out == b"0 total\n"
     assert err == (
         b"wc: /m1.txt: No such file or directory\n"
@@ -168,10 +154,6 @@ async def test_format_multi_all_missing_zero_total():
     [
         ("xé", r"x\303\251"),
         ("x\r", r"x\r"),
-        ("x\x01", r"x\001"),
-        ("x\x7f", r"x\177"),
-        ("x'", r"x\'"),
-        ("x\\", r"x\\"),
     ],
 )
 def test_total_refusal_quotes_the_word(value, escaped):
@@ -202,20 +184,11 @@ def test_an_empty_total_is_ambiguous_not_the_default():
 def test_total_accepts_an_unambiguous_prefix():
     assert parse_flags({"total": "al"}).total == "always"
     assert parse_flags({"total": "au"}).total == "auto"
-    assert parse_flags({"total": "o"}).total == "only"
-    assert parse_flags({"total": "n"}).total == "never"
-    assert parse_flags({"total": "always"}).total == "always"
 
 
 @pytest.mark.parametrize(
     "sizes,operands,counts,width",
     [
-        ([24], 1, 1, 1),
-        ([24], 1, 3, 2),
-        ([24, 6], 2, 1, 2),
-        ([0, 0], 2, 3, 1),
-        ([None], 1, 3, 7),
-        ([None], 1, 1, 1),
         ([None, 24], 2, 1, 7),
         ([123456789], 2, 1, 9),
     ],

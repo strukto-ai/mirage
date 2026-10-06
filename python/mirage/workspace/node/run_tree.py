@@ -31,7 +31,7 @@ from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
-from mirage.shell.console import JobConsole
+from mirage.shell.console import JobConsole, Terminal
 from mirage.shell.helpers import input_substitution_redirect
 from mirage.shell.job_table import JobTable
 from mirage.types import PathSpec, Producer
@@ -181,6 +181,16 @@ async def run_command_tree(
             finally:
                 reset_admission(token)
     stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
+    # A line written to a terminal (a typed line's, a substitution's)
+    # is bounded as what reached it, its jobs' output included, and
+    # what the bound leaves goes back ahead of anything later.
+    screen = (
+        sink if isinstance(sink, Terminal) and sink.reader is None else None
+    )
+    if screen is not None:
+        out, err = screen.drain()
+        stdout = out + (await materialize(stdout) or b"")
+        io.stderr = err + (await materialize(io.stderr) or b"") or None
     # The boundary consultation: the envelope's producer facts become
     # the post_execute context; the built-in cap and any user policies
     # answer with Limits (tightest merged), enforced by guard_output.
@@ -195,9 +205,18 @@ async def run_command_tree(
         io.exit_code = code
         io.stdout = None
         io.refusal = refusal_of(deny)
+        if screen is not None:
+            screen.put_back(b"", io.stderr)
+            io.stderr = None
         return io, exec_node
     stdout, io.stderr, io.exit_code = await guard_output(
         stdout, io.stderr, io.exit_code, bound
     )
+    if screen is not None:
+        screen.put_back(
+            await materialize(stdout) or b"",
+            await materialize(io.stderr) or b"",
+        )
+        stdout = io.stderr = None
     io.stdout = stdout
     return io, exec_node

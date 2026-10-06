@@ -24,7 +24,7 @@ from mirage.core.s3.client import (
     async_session,
     is_not_found,
 )
-from mirage.core.s3.read import _fp_rev_from_response
+from mirage.core.s3.read import _fp_rev_from_s3_response
 from mirage.observe.context import record_stream, revision_for
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -68,7 +68,7 @@ async def read_stream(
             raise enoent(virtual) from exc
         raise
     if rec is not None:
-        fingerprint, revision = _fp_rev_from_response(response)
+        fingerprint, revision = _fp_rev_from_s3_response(response)
         rec.fingerprint = fingerprint
         rec.revision = revision
     body = response["Body"]

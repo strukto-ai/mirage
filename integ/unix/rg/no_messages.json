@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "rg_no_messages_silences_file_errors",
+      "seq": 15200131,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "rg --no-messages hello /data/nosuch.txt /data/a.txt; echo rc=$?; rg --no-messages --messages hello /data/nosuch.txt; echo rc=$?; rg --no-messages '(' /data/a.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt:hello\nrc=2\nrc=2\nrc=2\n",
+        "stderr": "rg: /data/nosuch.txt: IO error for operation on /data/nosuch.txt: No such file or directory (os error 2)\nrg: regex parse error:\n    (?:()\n    ^\nerror: unclosed group\n"
+      },
+      "flags": [
+        "no_messages",
+        "messages"
+      ]
+    }
+  ]
+}

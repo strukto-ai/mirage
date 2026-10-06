@@ -29,11 +29,6 @@ WASI: dict[FsCondition, int] = {
     FsCondition.EPERM: 63,
     FsCondition.ENOTEMPTY: 55,
     FsCondition.EXDEV: 75,
-    # Each mount is its own preopen to a WASI guest, so a rename between
-    # two of them reads as a destination that is not there. pathlib's
-    # EXDEV is the monty dialect's answer, not this wire's; the row IS
-    # that decision (finding 8).
-    FsCondition.CROSS_MOUNT: 44,
     FsCondition.ENOTSUP: 58,
     FsCondition.ELOOP: 32,
     FsCondition.EINVAL: 28,
@@ -74,8 +69,7 @@ def errno_for(exc: BaseException) -> int:
     """Map a host/dispatch exception to its preview1 errno.
 
     The naming lives in ``mirage.errors.classify`` and the numbering in
-    the ``WASI`` table above, where the cross-mount-rename-is-ENOENT
-    decision also lives. An OSError the vocabulary does not name
+    the ``WASI`` table above. An OSError the vocabulary does not name
     degrades to EIO and anything else to EINVAL, matching the arms this
     function carried by hand.
 

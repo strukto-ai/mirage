@@ -7,9 +7,7 @@ from mirage.core.chroma import read
 async def test_read_bytes_reassembles_sorted_chunks(
     chroma_accessor, chroma_index, quickstart_path
 ):
-    data = await read.read_bytes(
-        chroma_accessor, quickstart_path, chroma_index
-    )
+    data = await read.read(chroma_accessor, quickstart_path, chroma_index)
 
     assert data == b"first\nsecond"
 

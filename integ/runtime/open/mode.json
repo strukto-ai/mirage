@@ -1,0 +1,87 @@
+{
+  "cases": [
+    {
+      "id": "refuses_a_malformed_mode",
+      "note": "qjs-libc checks a mode word letter by letter and musl's fopen reads only its first letter, so QuickJS opens 'rr' as 'r', refuses a letter outside rwa+bx with a TypeError, and answers a first letter outside rwa with EINVAL.",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "in\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "open('/data/seed.txt', 'rr')",
+            "js": "const f = std.open('/data/seed.txt', 'rr')\nconsole.log(JSON.stringify(f.getline()))\nf.close()"
+          },
+          "expect": {
+            "python": {
+              "exit": 1,
+              "stderr_contains": "invalid mode: 'rr'"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "\"seed\"\n"
+            }
+          },
+          "expect_on": {
+            "monty": {
+              "stderr_contains": "must have exactly one of create/read/write/append mode"
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "open('/data/seed.txt', 'rq')",
+            "js": "std.open('/data/seed.txt', 'rq')"
+          },
+          "expect": {
+            "python": {
+              "exit": 1,
+              "stderr_contains": "invalid mode: 'rq'"
+            },
+            "js": {
+              "exit": 1,
+              "stderr_contains": "invalid file mode"
+            }
+          },
+          "expect_on": {
+            "monty": {
+              "stderr_contains": "invalid mode: 'q'"
+            }
+          }
+        },
+        {
+          "program": {
+            "js": "std.open('/data/seed.txt')"
+          },
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "invalid file mode"
+          }
+        },
+        {
+          "program": {
+            "js": "const e = {}\nconsole.log(std.open('/data/seed.txt', 'br', e), e.errno)"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "null 28\n"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -18,7 +18,7 @@ import type { OpKwargs, RegisteredOp } from '../registry.ts'
 import type { MakeGenericOpsOptions, OpsTable } from './types.ts'
 import { isUnsatisfiableRange, sliceWindow, spliceWindow } from '../../utils/ranges.ts'
 import { DEFAULT_MAX_GLOB_MATCHES, resolveGlobWith } from '../../utils/glob_walk.ts'
-import { einval, eisdir, isMissingPath } from '../../utils/errors.ts'
+import { eexist, einval, eisdir, isEnotdir, isMissingPath } from '../../utils/errors.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 
 const expectPathSpec = (value: unknown, op: string): PathSpec => {
@@ -47,6 +47,34 @@ const expectOffset = (value: unknown, path: PathSpec): number => {
   }
   if (!Number.isInteger(value) || value < 0) throw einval(path)
   return value
+}
+
+/**
+ * Refuse a mkdir of a name that is taken, as mkdir(2) does.
+ *
+ * mkdir(2) refuses a name that exists, file or directory, and `mkdir -p`
+ * passes only a directory. Not every backend's create says so (a Graph 409
+ * on a folder, Nextcloud's MKCOL 405, SFTP under `-p`), so both doors look
+ * the name up before the create. A directory under `-p` still reaches the
+ * create, which keeps it durable (an object store writes the marker of a
+ * directory only a key implied), and a name that cannot be looked up is left
+ * to it too, to answer ENOENT or ENOTDIR. Mirrors Python's `refuse_taken`.
+ */
+export async function refuseTaken<A>(
+  stat: (accessor: A, path: PathSpec) => unknown,
+  accessor: A,
+  path: PathSpec,
+  parents: boolean,
+): Promise<void> {
+  let row: unknown
+  try {
+    row = await stat(accessor, path)
+  } catch (error) {
+    if (isMissingPath(error) || isEnotdir(error)) return
+    throw error
+  }
+  if (parents && (row as { type?: unknown } | null)?.type === FileType.DIRECTORY) return
+  throw eexist(path)
 }
 
 /**
@@ -253,6 +281,15 @@ export function makeGenericOps<A extends Accessor>(
           existing = await table.readBytes(asA(accessor), path, kwargs.index)
         } catch (error) {
           if (!isMissingPath(error)) throw error
+          // A key store answers a read of a directory's name as a missing
+          // key; writing there would put an object beside the directory.
+          let found: unknown = null
+          try {
+            found = await table.stat(asA(accessor), path, kwargs.index)
+          } catch (statError) {
+            if (!isMissingPath(statError)) throw statError
+          }
+          if (found instanceof FileStat && found.type === FileType.DIRECTORY) throw eisdir(path)
           existing = new Uint8Array()
         }
         return write(asA(accessor), path, spliceWindow(existing, offset, data))
@@ -267,13 +304,16 @@ export function makeGenericOps<A extends Accessor>(
     // A per-call `parents: true` kwarg (pathlib's mkdir(parents=True)
     // through a runtime bridge) forwards like python's registry, which
     // hands dispatch kwargs to the op; `mkdirParents` still forces it
-    // for backends whose core requires the flag (disk).
+    // for backends whose core requires the flag (databricks_volume).
     emit(
       'mkdir',
-      (accessor, path, _args, kwargs) =>
-        options.mkdirParents || kwargs.parents === true
+      async (accessor, path, _args, kwargs) => {
+        const parents = kwargs.parents === true
+        await refuseTaken(table.stat, asA(accessor), path, parents)
+        await (options.mkdirParents || parents
           ? mkdir(asA(accessor), path, true)
-          : mkdir(asA(accessor), path),
+          : mkdir(asA(accessor), path))
+      },
       true,
     )
   }

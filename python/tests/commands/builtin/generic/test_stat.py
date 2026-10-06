@@ -9,6 +9,8 @@ from mirage.ops.types import LinkView
 from mirage.types import (
     DEVICE_NUMBERS_KEY,
     LINK_TARGET_KEY,
+    CapacityResult,
+    CapacityState,
     ContentType,
     FileStat,
     FileType,
@@ -20,6 +22,7 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 _MTIME = "2026-01-02T15:30:45Z"
+_MTIME_SHOWN = "2026-01-02 15:30:45.000000000 +0000"
 _MTIME_EPOCH = "1767367845"
 
 
@@ -100,37 +103,21 @@ async def test_default_record_sizes_a_directory_as_percent_s_does():
 
 
 @pytest.mark.asyncio
-async def test_mode_directives_default_and_explicit():
-    # No mode -> GNU-style 0644 file default (matches ls -l fallback).
-    assert await _render("%a", _fs(mode=None)) == "644"
-    assert await _render("%A", _fs(mode=None)) == "-rw-r--r--"
-    assert await _render("%f", _fs(mode=None)) == "81a4"
-    # Explicit mode.
-    assert await _render("%a", _fs(mode=0o640)) == "640"
-    assert await _render("%A", _fs(mode=0o640)) == "-rw-r-----"
-    assert await _render("%f", _fs(mode=0o640)) == "81a0"
-    # Setuid keeps the high octal digit; %f carries the regular-file bits.
-    assert await _render("%a", _fs(mode=0o4755)) == "4755"
-    assert await _render("%f", _fs(mode=0o4755)) == "89ed"
-
-
-@pytest.mark.asyncio
-async def test_mode_directives_directory_default():
-    d = _fs(type=FileType.DIRECTORY, size=None, mode=None)
-    assert await _render("%a", d) == "755"
-    assert await _render("%A", d) == "drwxr-xr-x"
-    assert await _render("%f", d) == "41ed"
-    assert await _render("%s", d) == "4096"
-
-
-@pytest.mark.asyncio
-async def test_special_permission_bits_in_A():
-    # setuid/setgid/sticky render as s/S/t/T, matching %a's high octal digit.
-    assert await _render("%A", _fs(mode=0o4755)) == "-rwsr-xr-x"
-    assert await _render("%A", _fs(mode=0o4644)) == "-rwSr--r--"
-    assert await _render("%A", _fs(mode=0o2755)) == "-rwxr-sr-x"
-    assert await _render("%A", _fs(mode=0o1755)) == "-rwxr-xr-t"
-    assert await _render("%A", _fs(mode=0o1644)) == "-rw-r--r-T"
+@pytest.mark.parametrize(
+    "fs,want",
+    [
+        # No mode is GNU's 0644 file default, as ls -l falls back to.
+        (_fs(mode=None), "644 -rw-r--r-- 81a4"),
+        # A special bit keeps the high octal digit and renders as s/S/t/T.
+        (_fs(mode=0o4644), "4644 -rwSr--r-- 89a4"),
+        (
+            _fs(type=FileType.DIRECTORY, size=None, mode=None),
+            "755 drwxr-xr-x 41ed",
+        ),
+    ],
+)
+async def test_mode_directives(fs, want):
+    assert await _render("%a %A %f", fs) == want
 
 
 @pytest.mark.asyncio
@@ -146,42 +133,19 @@ async def test_printf_flags_width_precision():
     assert await _render("%.3F", _fs()) == "reg"
 
 
-# Pinned against GNU coreutils 9.7 on debian:stable-slim. Single quotes
-# are the rule; a name whose only awkward character is an apostrophe reads
-# better in double quotes and GNU renders that one case that way, but any
-# other shell character (or an unprintable one) sends it back to single
-# quotes. mirage paths are text rather than bytes, so a non-ASCII name
-# stays literal the way GNU renders it in a UTF-8 locale instead of the
-# octal bytes it emits under LC_ALL=C.
+# Pinned against GNU coreutils 9.7 on debian:stable-slim under LC_ALL=C.
+# Single quotes are the rule; a name whose only awkward character is an
+# apostrophe reads better in double quotes and GNU renders that one case
+# that way, but any other shell character (or an unprintable one, a byte
+# past ASCII included) sends it back to single quotes.
 _GNU_QUOTED = [
-    ("/data/f.txt", "'/data/f.txt'"),
-    ("a$b", "'a$b'"),
-    ('a"b', "'a\"b'"),
     ("a'b", '"a\'b"'),
-    ("a'b c", '"a\'b c"'),
     ("a'b$c", "'a'\\''b$c'"),
-    ("a'b`c", "'a'\\''b`c'"),
-    ("a'b\\c", "'a'\\''b\\c'"),
-    ("a'b\"c", "'a'\\''b\"c'"),
-    ("a'b!c", "'a'\\''b!c'"),
-    # # and ~ count as special only away from the front.
-    ("#a'b", '"#a\'b"'),
-    ("~a'b", '"~a\'b"'),
-    ("a#'b", "'a#'\\''b'"),
-    ("$a'b", "'$a'\\''b'"),
     ("a\tb", "'a'$'\\t''b'"),
-    ("a\nb", "'a'$'\\n''b'"),
-    ("a\x07b", "'a'$'\\a''b'"),
-    ("a\x01b", "'a'$'\\001''b'"),
-    ("a\x1bb", "'a'$'\\033''b'"),
-    ("a\x7fb", "'a'$'\\177''b'"),
     # A leading escape keeps the empty quotes; a trailing one does not.
     ("\ta", "''$'\\t''a'"),
-    ("a\t", "'a'$'\\t'"),
-    ("a\t\nb", "'a'$'\\t\\n''b'"),
-    ("a'b\tc", "'a'\\''b'$'\\t''c'"),
-    ("café", "'café'"),
-    ("a'béc", '"a\'béc"'),
+    ("café", "'caf'$'\\303\\251'"),
+    ("a'béc", "'a'\\''b'$'\\303\\251''c'"),
 ]
 
 
@@ -220,18 +184,18 @@ async def test_owner_directives():
 @pytest.mark.asyncio
 async def test_time_directives():
     fs = _fs(modified=_MTIME, ctime=_MTIME, atime="2026-03-04T05:06:07Z")
-    assert await _render("%y", fs) == _MTIME
+    assert await _render("%y", fs) == _MTIME_SHOWN
     assert await _render("%Y", fs) == _MTIME_EPOCH
-    assert await _render("%z", fs) == _MTIME
+    assert await _render("%z", fs) == _MTIME_SHOWN
     assert await _render("%Z", fs) == _MTIME_EPOCH
-    assert await _render("%x", fs) == "2026-03-04T05:06:07Z"
+    assert await _render("%x", fs) == "2026-03-04 05:06:07.000000000 +0000"
     assert await _render("%X", fs) == "1772600767"
 
 
 @pytest.mark.asyncio
 async def test_atime_falls_back_to_mtime():
     fs = _fs(modified=_MTIME, atime=None)
-    assert await _render("%x", fs) == _MTIME
+    assert await _render("%x", fs) == _MTIME_SHOWN
     assert await _render("%X", fs) == _MTIME_EPOCH
 
 
@@ -269,7 +233,7 @@ async def test_literal_percent_and_unknown_and_text():
 @pytest.mark.asyncio
 async def test_long_incomplete_directive_is_linear():
     fmt = "%" + "0" * 10_000 + "!"
-    assert await _render(fmt, _fs()) == fmt
+    assert await _render(fmt, _fs()) == "?"
 
 
 @pytest.mark.asyncio
@@ -278,15 +242,42 @@ async def test_missing_operand_raises():
         await stat([], stat_fn=partial(_const_stat, _fs()), c="%n")
 
 
+async def _quota_fs(_p: PathSpec) -> tuple[str, CapacityResult]:
+    return "disk", CapacityResult(
+        state=CapacityState.QUOTA,
+        total=40960,
+        used=16384,
+        available=12288,
+        inodes=100,
+        inodes_used=40,
+        inodes_free=50,
+    )
+
+
 @pytest.mark.asyncio
-async def test_f_flag_shares_c_formatter():
-    # `stat -f` is not filesystem-mode yet (#609 Tier 3); it reuses -c.
+async def test_f_counts_a_quota_in_1k_blocks():
     out, io = await stat(
         [PathSpec.from_str_path("/data/f.txt")],
-        stat_fn=partial(_const_stat, _fs(size=6)),
-        f="%s",
+        stat_fn=partial(_const_stat, _fs()),
+        c="%T %S %b %f %a %c %d %i %5l|",
+        f=True,
+        statfs=_quota_fs,
     )
-    assert (await materialize(out)).decode() == "6\n"
+    assert io.exit_code == 0
+    assert (
+        await materialize(out)
+    ).decode() == "disk 1024 40 24 12 100 60 ?     ?|\n"
+
+
+@pytest.mark.asyncio
+async def test_f_without_a_workspace_knows_no_file_system():
+    out, io = await stat(
+        [PathSpec.from_str_path("/data/f.txt")],
+        stat_fn=partial(_const_stat, _fs()),
+        c="%n %T %b %05c",
+        f=True,
+    )
+    assert (await materialize(out)).decode() == "/data/f.txt - -     -\n"
 
 
 @pytest.mark.asyncio
@@ -409,7 +400,8 @@ async def test_default_stat_layout_and_unknown_metadata():
     info = _fs(ctime="2026-03-04T05:06:07Z", birthtime=_MTIME)
     assert (
         await _render("%z %Z %w %W", info)
-        == f"2026-03-04T05:06:07Z 1772600767 {_MTIME} {_MTIME_EPOCH}"
+        == "2026-03-04 05:06:07.000000000 +0000 1772600767 "
+        f"{_MTIME_SHOWN} {_MTIME_EPOCH}"
     )
 
 

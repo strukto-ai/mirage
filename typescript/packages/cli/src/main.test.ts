@@ -27,18 +27,23 @@ describe('mirage CLI program', () => {
         'glob',
         'grep',
         'job',
+        'login',
+        'logout',
         'ls',
         'mcp',
         'read',
+        'rpc',
         'session',
         'shell',
+        'ssh-proxy',
+        'whoami',
         'workspace',
         'write',
       ].sort(),
     )
   })
 
-  it('workspace subcommand has lifecycle + versioning commands', () => {
+  it('workspace subcommand has the lifecycle commands', () => {
     const program = buildProgram()
     const ws = program.commands.find((c) => c.name() === 'workspace')
     expect(ws).toBeDefined()
@@ -46,19 +51,17 @@ describe('mirage CLI program', () => {
     expect(sub).toEqual(
       [
         'allow',
-        'branch',
-        'checkout',
+        'cancel',
         'clone',
-        'commit',
+        'close',
         'create',
         'delete',
         'deny',
-        'diff',
         'get',
+        'kill',
         'list',
         'list-asks',
         'load',
-        'log',
         'snapshot',
         'vfs-md',
         'skill-md',

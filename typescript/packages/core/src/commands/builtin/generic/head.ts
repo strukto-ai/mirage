@@ -22,14 +22,13 @@ import { numberFlagError, parseByteCount } from '../tail_counts.ts'
 import { CHAR_DEVICE_MAX_BYTES, STDIN_HEADER_NAME } from '../utils/constants.ts'
 import { asyncChain } from '../../../io/stream.ts'
 import { truncateStream } from '../utils/limit.ts'
-import { splitReadable } from '../utils/operands.ts'
+import { splitOpened } from '../utils/operands.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
-
-const ENC = new TextEncoder()
+import { encodeText } from '../../../shell/bytes.ts'
 
 const NL = 0x0a
 
@@ -47,11 +46,13 @@ function parseFlags(bag: Record<string, FlagValue>): HeadFlags | string {
   const cRaw = fl.asStr('bytes') ?? null
   const numErr = numberFlagError('head', nRaw, cRaw)
   if (numErr !== null) return numErr
+  // The last of -q and -v decides, as in GNU head.
+  const headers = fl.typedOrder('quiet', 'silent', 'verbose').at(-1)
   return {
     lines: nRaw !== null ? Number.parseInt(nRaw, 10) : 10,
     bytesMode: cRaw !== null ? parseByteCount(cRaw) : null,
-    quiet: fl.asBool('quiet') || fl.asBool('silent'),
-    verbose: fl.asBool('verbose'),
+    quiet: headers === 'quiet' || headers === 'silent',
+    verbose: headers === 'verbose',
     zeroTerminated: fl.asBool('zero_terminated'),
   }
 }
@@ -152,14 +153,17 @@ async function* headMulti(
   bytesMode: number | null,
   showHeaders: boolean,
   zeroTerminated: boolean,
+  unread: ReadonlySet<string>,
 ): AsyncIterable<Uint8Array> {
   for (let i = 0; i < paths.length; i++) {
     const p = paths[i]
     if (p === undefined) continue
     if (showHeaders) {
       const prefix = i > 0 ? '\n' : ''
-      yield ENC.encode(`${prefix}==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`)
+      yield encodeText(`${prefix}==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`)
     }
+    // A directory opened: its header prints and its read fails.
+    if (unread.has(p.virtual)) continue
     const source = stream(p)
     for await (const chunk of headStream(source, lines, bytesMode, zeroTerminated)) yield chunk
   }
@@ -176,16 +180,16 @@ export async function headGeneric(
   stream = stdinStream(cacheAwareStreamEager(stream), opts.stdin)
   const parsed = parseFlags(opts.flags)
   if (typeof parsed === 'string') {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
+    return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]
   }
   if (paths.length > 0) {
     const showHeaders = (parsed.verbose || paths.length > 1) && !parsed.quiet
-    const [readable, err] = await splitReadable(paths, stat, 'head')
+    const [opened, unread, err] = await splitOpened(paths, stat, 'head')
     const io = new IOResult({
       exitCode: err === '' ? 0 : 1,
-      stderr: err === '' ? null : ENC.encode(err),
+      stderr: err === '' ? null : encodeText(err),
     })
-    if (readable.length === 0) return [null, io]
+    if (opened.length === 0) return [null, io]
     const sourceFor = async function* (p: PathSpec): AsyncIterable<Uint8Array> {
       const source = stream(p)
       if ((await stat(p)).type === FileType.CHAR_DEVICE && parsed.bytesMode === null) {
@@ -197,11 +201,12 @@ export async function headGeneric(
     return [
       headMulti(
         sourceFor,
-        readable,
+        opened,
         parsed.lines,
         parsed.bytesMode,
         showHeaders,
         parsed.zeroTerminated,
+        unread,
       ),
       io,
     ]
@@ -210,10 +215,10 @@ export async function headGeneric(
     const source = resolveSource(opts.stdin)
     const body = headStream(source, parsed.lines, parsed.bytesMode, parsed.zeroTerminated)
     // -v heads a stdin nobody named with the name it gives `-`.
-    const header = ENC.encode(`==> ${STDIN_HEADER_NAME} <==\n`)
+    const header = encodeText(`==> ${STDIN_HEADER_NAME} <==\n`)
     return [parsed.verbose && !parsed.quiet ? asyncChain([header, body]) : body, new IOResult()]
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
+    return [null, new IOResult({ exitCode: 1, stderr: encodeText(`${msg}\n`) })]
   }
 }

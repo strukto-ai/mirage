@@ -1,0 +1,59 @@
+{
+  "cases": [
+    {
+      "id": "stdin_operand_path_policy",
+      "note": "Stdin executes under a path deny in the cwd and preserves program arguments and flags.",
+      "world": {
+        "runtimes": [
+          "local",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "default": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "sealed",
+                  "paths": [
+                    "/ram/*"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /ram",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python - -c arg",
+          "stdin": "import sys; print(sys.argv[1:])\n",
+          "expect": {
+            "exit": 0,
+            "stdout": "['-c', 'arg']\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -u -- - -c arg",
+          "stdin": "import sys; print(sys.argv[1:])\n",
+          "expect": {
+            "exit": 0,
+            "stdout": "['-c', 'arg']\n",
+            "stderr": ""
+          }
+        }
+      ]
+    }
+  ]
+}

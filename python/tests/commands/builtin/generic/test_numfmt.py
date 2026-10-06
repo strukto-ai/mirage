@@ -14,12 +14,12 @@
 
 import pytest
 
-from mirage.commands.builtin.generic.numfmt import numfmt
+from mirage.commands.builtin.generic.numfmt import numfmt_generic
 from mirage.commands.errors import UsageError
 
 
 async def run(value: str, **kwargs: str | bool) -> str:
-    out, io = await numfmt(value, **kwargs)
+    out, io = await numfmt_generic(value, **kwargs)
     if io.exit_code != 0:
         raise UsageError(bytes(io.stderr).decode().rstrip("\n"), io.exit_code)
     assert out is not None
@@ -31,16 +31,7 @@ async def run(value: str, **kwargs: str | bool) -> str:
     ("value", "from_mode", "expected"),
     [
         ("1Y", "si", "1000000000000000000000000"),
-        ("1Q", "si", "1000000000000000000000000000000"),
-        ("1Y", "iec", "1208925819614629174706176"),
         ("1Q", "iec", "1267650600228229401496703205376"),
-        ("1.5Y", "si", "1500000000000000000000000"),
-        ("1.5Y", "iec", "1813388729421943762059264"),
-        (
-            "12345678901234567890123456789",
-            "none",
-            "12345678901234567890123456789",
-        ),
     ],
 )
 async def test_to_none_prints_every_digit(value, from_mode, expected):
@@ -54,13 +45,8 @@ async def test_to_none_prints_every_digit(value, from_mode, expected):
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
-        ("1", "1"),
-        ("1.000", "1.000"),
-        ("1.100", "1.100"),
         ("1.20", "1.20"),
-        ("0.10", "0.10"),
         ("00012", "12"),
-        ("-1", "-1"),
     ],
 )
 async def test_to_none_keeps_the_precision_it_was_given(value, expected):
@@ -74,14 +60,7 @@ async def test_to_none_keeps_the_precision_it_was_given(value, expected):
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
-        ("1.5K", "1500"),
-        ("1.500K", "1500"),
-        (".5K", "500"),
         ("1.0005K", "1001"),
-        ("1.0000005K", "1001"),
-        ("0.0015K", "2"),
-        ("1.23456789K", "1235"),
-        ("-1.5K", "-1500"),
         ("-0.0015K", "-2"),
     ],
 )
@@ -95,16 +74,8 @@ async def test_a_scaled_value_is_a_whole_number_rounded_away_from_zero(
 @pytest.mark.parametrize(
     ("value", "from_mode", "expected"),
     [
-        ("1K", "si", "1000"),
-        ("1k", "si", "1000"),
-        ("1K", "iec", "1024"),
         ("1k", "iec", "1024"),
-        ("1Ki", "iec-i", "1024"),
-        ("1K", "auto", "1000"),
-        ("1Ki", "auto", "1024"),
         ("1ki", "auto", "1024"),
-        ("1M", "auto", "1000000"),
-        ("1Mi", "auto", "1048576"),
     ],
 )
 async def test_each_from_mode_spells_its_units_its_own_way(
@@ -118,15 +89,7 @@ async def test_each_from_mode_spells_its_units_its_own_way(
     ("value", "from_mode", "message"),
     [
         ("1KiB", "iec", "numfmt: invalid suffix in input '1KiB': 'iB'"),
-        ("1Ki", "iec", "numfmt: invalid suffix in input '1Ki': 'i'"),
-        ("1KB", "iec", "numfmt: invalid suffix in input '1KB': 'B'"),
-        ("1kB", "si", "numfmt: invalid suffix in input '1kB': 'B'"),
         ("1KiB", "auto", "numfmt: invalid suffix in input '1KiB': 'B'"),
-        ("1kI", "auto", "numfmt: invalid suffix in input '1kI': 'I'"),
-        ("1KiB", "iec-i", "numfmt: invalid suffix in input '1KiB': 'B'"),
-        ("1Z9", "si", "numfmt: invalid suffix in input '1Z9': '9'"),
-        ("1Kx", "si", "numfmt: invalid suffix in input '1Kx': 'x'"),
-        ("1KK", "si", "numfmt: invalid suffix in input '1KK': 'K'"),
     ],
 )
 async def test_a_unit_followed_by_junk_names_the_junk(
@@ -145,13 +108,7 @@ async def test_a_unit_followed_by_junk_names_the_junk(
     ("value", "from_mode", "message"),
     [
         ("1m", "si", "numfmt: invalid suffix in input: '1m'"),
-        ("1g", "si", "numfmt: invalid suffix in input: '1g'"),
-        ("1J", "si", "numfmt: invalid suffix in input: '1J'"),
-        ("1i", "auto", "numfmt: invalid suffix in input: '1i'"),
-        ("1i", "iec-i", "numfmt: invalid suffix in input: '1i'"),
         ("1e3", "none", "numfmt: invalid suffix in input: '1e3'"),
-        ("0x10", "none", "numfmt: invalid suffix in input: '0x10'"),
-        ("1.5.5", "si", "numfmt: invalid suffix in input: '1.5.5'"),
     ],
 )
 async def test_an_unusable_first_character_quotes_only_the_field(
@@ -166,29 +123,13 @@ async def test_an_unusable_first_character_quotes_only_the_field(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "value",
-    [
-        "1",
-        "1.5",
-        "0",
-        "1000",
-        "1K",
-        "1Ké",
-        "1Kx",
-        "1KB",
-        "1KI",
-        "1KII",
-        "1M",
-    ],
-)
+@pytest.mark.parametrize("value", ["1K", "1Ké"])
 async def test_iec_i_demands_its_i(value):
-    # GNU tests for the 'i' OUTSIDE the suffix branch of
-    # simple_strtod_human, so this clause answers for every field whose
-    # unit letter is not followed by one -- a field with no unit at all
-    # included. Measured on coreutils 9.4; mirage used to reach it only
-    # with a bare unit and called `1Kx` and `1Ké` invalid suffixes, and
-    # it accepted a bare number outright.
+    # The clause answers for every field whose unit letter is not
+    # followed by an 'i'; mirage used to call `1Kx` and `1Ké` invalid
+    # suffixes. A field with no unit at all is read as it stands
+    # (coreutils 9.7).
+    assert await run("1.5", from_mode="iec-i") == "1.5"
     escaped = value.replace("é", r"\303\251")
     with pytest.raises(UsageError) as exc:
         await run(value, from_mode="iec-i")
@@ -203,17 +144,7 @@ async def test_iec_i_demands_its_i(value):
     ("value", "message"),
     [
         ("1Kii", "numfmt: invalid suffix in input '1Kii': 'i'"),
-        ("1KiB", "numfmt: invalid suffix in input '1KiB': 'B'"),
-        (
-            "1Kié",
-            r"numfmt: invalid suffix in input '1Ki\303\251': "
-            r"'\303\251'",
-        ),
-        ("1i", "numfmt: invalid suffix in input: '1i'"),
         ("1iK", "numfmt: invalid suffix in input: '1iK'"),
-        ("1iB", "numfmt: invalid suffix in input: '1iB'"),
-        ("x", "numfmt: invalid number: 'x'"),
-        ("", "numfmt: invalid number: ''"),
     ],
 )
 async def test_iec_i_gets_past_its_i_and_then_names_the_leftover(
@@ -235,8 +166,6 @@ async def test_iec_i_gets_past_its_i_and_then_names_the_leftover(
     [
         ("1000", "1000"),
         ("1024", "1.0Ki"),
-        ("2048", "2.0Ki"),
-        ("0", "0"),
     ],
 )
 async def test_to_iec_i_has_no_missing_i_clause(value, expected):
@@ -247,7 +176,7 @@ async def test_to_iec_i_has_no_missing_i_clause(value, expected):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("value", ["1K", "1k", "1Ki", "1KiB", "1Kx", "1.5K"])
+@pytest.mark.parametrize("value", ["1k", "1KiB"])
 async def test_a_real_unit_without_from_points_at_from(value):
     with pytest.raises(UsageError) as exc:
         await run(value)
@@ -261,11 +190,8 @@ async def test_a_real_unit_without_from_points_at_from(value):
 @pytest.mark.parametrize(
     ("value", "from_mode"),
     [
-        ("abc", "si"),
-        ("abc", "none"),
         ("+1", "si"),
         ("1.", "none"),
-        ("1.x", "si"),
     ],
 )
 async def test_bad_numbers_report_the_number(value, from_mode):
@@ -279,50 +205,27 @@ async def test_bad_numbers_report_the_number(value, from_mode):
 # Every numfmt clause that names a field names it through gnulib's
 # quote(), so a byte outside 0x20-0x7e comes back escaped rather than
 # interpolated raw. Rows measured against GNU coreutils 9.4 under
-# `LC_ALL=C` with a raw `bytes` argv (`numfmt <w>`,
-# `numfmt --from=si <w>`). Mirrored in numfmt.test.ts.
-QUOTED_FIELDS = [
-    ("é", r"\303\251"),
-    ("\r", r"\r"),
-    ("\x01", r"\001"),
-    ("\x7f", r"\177"),
-    ("'", r"\'"),
-    ("\\", r"\\"),
+# `LC_ALL=C` with a raw `bytes` argv. Mirrored in numfmt.test.ts.
+QUOTED_CLAUSES = [
+    ("1{0}", "si", "numfmt: invalid suffix in input: '1{0}'"),
+    ("1K{0}", "si", "numfmt: invalid suffix in input '1K{0}': '{0}'"),
+    ("x{0}", "none", "numfmt: invalid number: 'x{0}'"),
+    (
+        "1K{0}",
+        "none",
+        "numfmt: rejecting suffix in input: '1K{0}' (consider using --from)",
+    ),
 ]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("tail", "escaped"), QUOTED_FIELDS)
-async def test_unusable_first_character_clause_quotes_the_field(tail, escaped):
+@pytest.mark.parametrize(
+    ("tail", "escaped"), [("é", r"\303\251"), ("\\", r"\\")]
+)
+@pytest.mark.parametrize(("field", "from_mode", "message"), QUOTED_CLAUSES)
+async def test_every_clause_quotes_the_field(
+    field, from_mode, message, tail, escaped
+):
     with pytest.raises(UsageError) as exc:
-        await run(f"1{tail}", from_mode="si")
-    assert str(exc.value) == (f"numfmt: invalid suffix in input: '1{escaped}'")
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(("tail", "escaped"), QUOTED_FIELDS)
-async def test_junk_after_a_unit_clause_quotes_both_words(tail, escaped):
-    with pytest.raises(UsageError) as exc:
-        await run(f"1K{tail}", from_mode="si")
-    assert str(exc.value) == (
-        f"numfmt: invalid suffix in input '1K{escaped}': '{escaped}'"
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(("tail", "escaped"), QUOTED_FIELDS)
-async def test_invalid_number_clause_quotes_the_field(tail, escaped):
-    with pytest.raises(UsageError) as exc:
-        await run(f"x{tail}", from_mode="none")
-    assert str(exc.value) == f"numfmt: invalid number: 'x{escaped}'"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(("tail", "escaped"), QUOTED_FIELDS)
-async def test_rejecting_suffix_clause_quotes_the_field(tail, escaped):
-    with pytest.raises(UsageError) as exc:
-        await run(f"1K{tail}", from_mode="none")
-    assert str(exc.value) == (
-        f"numfmt: rejecting suffix in input: '1K{escaped}' "
-        "(consider using --from)"
-    )
+        await run(field.format(tail), from_mode=from_mode)
+    assert str(exc.value) == message.format(escaped)

@@ -1,0 +1,47 @@
+{
+  "cases": [
+    {
+      "id": "hard_link_is_refused_with_eperm",
+      "note": "monty has no link calls (symlink, readlink, lstat, scandir) and quickjs has none on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
+      "runtimes": [
+        "wasi",
+        "pyodide"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "t.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import errno, os\ntry:\n    os.link('/data/t.txt', '/data/hard')\nexcept OSError as exc:\n    print(errno.errorcode[exc.errno])"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "EPERM\n"
+          },
+          "expect_on": {
+            "pyodide": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "module 'os' has no attribute 'link'"
+            }
+          }
+        },
+        {
+          "command": "ls /data",
+          "expect": {
+            "exit": 0,
+            "stdout": "t.txt\n"
+          }
+        }
+      ]
+    }
+  ]
+}

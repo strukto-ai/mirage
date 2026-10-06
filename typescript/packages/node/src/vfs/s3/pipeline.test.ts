@@ -190,8 +190,7 @@ describe('pipeline', () => {
   // ── Background jobs ──────────────────────────────────────────────
 
   it('background basic', async () => {
-    await ws.shell('cat /data/hello.txt &')
-    const io = await ws.shell('wait %1')
+    const io = await ws.shell('cat /data/hello.txt & wait %1')
     expect(decode(io.stdout)).toContain('hello')
   })
 
@@ -209,8 +208,7 @@ describe('pipeline', () => {
 
   it('background sees parent env', async () => {
     await ws.shell('export VISIBLE=yes')
-    await ws.shell('printenv VISIBLE &')
-    const io = await ws.shell('wait %1')
+    const io = await ws.shell('printenv VISIBLE & wait %1')
     expect(decode(io.stdout)).toContain('yes')
   })
 
@@ -348,8 +346,7 @@ describe('pipeline', () => {
   })
 
   it('background with pipe', async () => {
-    await ws.shell('cat /data/numbers.txt | sort | uniq &')
-    const io = await ws.shell('wait %1')
+    const io = await ws.shell('cat /data/numbers.txt | sort | uniq & wait %1')
     const lines = decode(io.stdout).trim().split('\n')
     expect([...lines].sort()).toEqual(['1', '2', '3'])
   })
@@ -572,8 +569,7 @@ describe('pipeline', () => {
   })
 
   it('grep background exit code', async () => {
-    await ws.shell('grep ERROR /data/log.txt &')
-    const io = await ws.shell('wait %1')
+    const io = await ws.shell('grep ERROR /data/log.txt & wait %1')
     expect(io.exitCode).toBe(0)
     expect(decode(io.stdout)).toContain('ERROR')
   })

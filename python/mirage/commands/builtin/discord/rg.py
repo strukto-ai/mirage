@@ -23,8 +23,8 @@ from mirage.commands.builtin.discord.io import resolve_glob
 from mirage.commands.builtin.generic.rg import (
     parse_flags,
     refuse_missing_pattern,
+    rg_generic,
 )
-from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import pushdown_operand
@@ -119,7 +119,7 @@ async def rg(
     resolved = (
         await resolve_glob(accessor, paths, index=opts.index) if paths else []
     )
-    stdout, io = await generic_rg(
+    stdout, io = await rg_generic(
         resolved,
         texts,
         opts,

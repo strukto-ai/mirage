@@ -14,7 +14,6 @@ from mirage.cache.read_through import (
     cache_aware_bound_bytes,
     cache_aware_bound_stream,
 )
-from mirage.commands.builtin.grep_offsets import decode_line, encode_line
 from mirage.commands.builtin.grep_pattern import (
     NEVER_MATCH,
     resolve_pattern,
@@ -67,6 +66,7 @@ from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import MountView
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, WALK_ERRORS, walk_refusal
 from mirage.utils.key_prefix import mount_prefix_of
@@ -253,7 +253,7 @@ def filename_flag(fl: FlagView) -> str | None:
     return _last(fl, "with_filename", "no_filename")
 
 
-def _context(fl: FlagView) -> tuple[bool, int, int]:
+def _context_of(fl: FlagView) -> tuple[bool, int, int]:
     """--passthru and -A/-B/-C resolved in line order, as ripgrep's
     ContextMode resolves them.
 
@@ -288,24 +288,28 @@ def _context(fl: FlagView) -> tuple[bool, int, int]:
     )
 
 
-def _binary(fl: FlagView, unrestricted: int) -> bool:
-    """Whether -a, --binary or -uuu, the last word of their group, lift
-    the walk's binary-extension skip; --no-text and --no-binary put it
-    back.
+def _binary_mode_of(fl: FlagView, unrestricted: int) -> str:
+    """How rg treats a binary file: the last word of its group decides.
+
+    ``text`` under -a, which searches every byte as text; ``binary``
+    under --binary or -uuu, which searches what a walk would skip but
+    still reports a binary match by its notice; ``auto`` otherwise, and
+    after --no-text or --no-binary.
 
     Args:
         fl (FlagView): the flag view.
         unrestricted (int): how many -u the line gave.
     """
-    on = False
+    mode = "auto"
     for name in fl.typed_order(
         "text", "no_text", "binary", "no_binary", "unrestricted"
     ):
         if name == "unrestricted":
-            on = on or unrestricted >= 3
+            if unrestricted >= 3 and mode == "auto":
+                mode = "binary"
         else:
-            on = name in ("text", "binary")
-    return on
+            mode = {"text": "text", "binary": "binary"}.get(name, "auto")
+    return mode
 
 
 def path_separator(fl: FlagView) -> str | None:
@@ -321,7 +325,7 @@ def path_separator(fl: FlagView) -> str | None:
     value = fl.as_str("path_separator")
     if value is None:
         return None
-    raw = encode_line(unescape(value))
+    raw = encode_text(unescape(value))
     if not raw:
         return None
     if len(raw) != 1:
@@ -331,7 +335,7 @@ def path_separator(fl: FlagView) -> str | None:
             f"bytes: {value}\nIn some shells on Windows '/' is automatically "
             "expanded. Use '//' instead."
         )
-    return decode_line(raw)
+    return decode_text(raw)
 
 
 def parse_flags(fl: FlagView) -> RgFlags:
@@ -354,7 +358,7 @@ def parse_flags(fl: FlagView) -> RgFlags:
     Raises:
         UsageError: a value ripgrep refuses, in its words.
     """
-    number_flag(fl, "threads")
+    threads = number_flag(fl, "threads")
     _choice(fl, "color", "--color", COLOR_CHOICES)
     case = _last(fl, "ignore_case", "case_sensitive", "smart_case")
     bounds = _last(fl, "word_regexp", "line_regexp")
@@ -369,8 +373,9 @@ def parse_flags(fl: FlagView) -> RgFlags:
     vimgrep = fl.as_bool("vimgrep")
     columns = _last(fl, "column", "no_column")
     column = columns == "column" if columns is not None else vimgrep
-    passthru, context_before, context_after = _context(fl)
+    passthru, context_before, context_after = _context_of(fl)
     unrestricted = fl.as_int("unrestricted") or 0
+    binary_mode = _binary_mode_of(fl, unrestricted)
     hidden = False
     for name in fl.typed_order("hidden", "no_hidden", "unrestricted"):
         if name == "hidden":
@@ -387,6 +392,9 @@ def parse_flags(fl: FlagView) -> RgFlags:
         sort = _choice(fl, sort_flag, f"--{sort_flag}", SORT_KEYS)
     separator = _last(fl, "context_separator", "no_context_separator")
     typed_separator = fl.as_str("context_separator")
+    # An empty field separator is a value: ripgrep runs the fields together.
+    match_separator = fl.as_str("field_match_separator")
+    context_field_separator = fl.as_str("field_context_separator")
     if sort == "created":
         raise UsageError(
             "rg: sorting by creation time is not supported by the virtual "
@@ -404,8 +412,10 @@ def parse_flags(fl: FlagView) -> RgFlags:
     ]
     return RgFlags(
         engine=engine_flag(fl),
-        pcre2_unicode=_last(fl, "pcre2_unicode", "no_pcre2_unicode")
-        != "no_pcre2_unicode",
+        unicode=_last(
+            fl, "unicode", "no_unicode", "pcre2_unicode", "no_pcre2_unicode"
+        )
+        not in ("no_unicode", "no_pcre2_unicode"),
         ignore_case=case == "ignore_case",
         smart_case=case == "smart_case",
         invert=_last(fl, "invert_match", "no_invert_match") == "invert_match",
@@ -458,10 +468,10 @@ def parse_flags(fl: FlagView) -> RgFlags:
             else "--"
         ),
         field_match_separator=unescape(
-            fl.as_str("field_match_separator") or ":"
+            ":" if match_separator is None else match_separator
         ),
         field_context_separator=unescape(
-            fl.as_str("field_context_separator") or "-"
+            "-" if context_field_separator is None else context_field_separator
         ),
         globs=tuple(fl.as_list("glob")),
         iglobs=tuple(fl.as_list("iglob")),
@@ -477,10 +487,12 @@ def parse_flags(fl: FlagView) -> RgFlags:
         follow=_last(fl, "follow", "no_follow") == "follow",
         one_file_system=_last(fl, "one_file_system", "no_one_file_system")
         == "one_file_system",
-        binary=_binary(fl, unrestricted),
+        binary=binary_mode != "auto",
         sort=sort,
         sort_reverse=sort_flag == "sortr",
         no_messages=_last(fl, "no_messages", "messages") == "no_messages",
+        threads=threads,
+        text=binary_mode == "text",
     )
 
 
@@ -498,9 +510,11 @@ def rg_syntax(f: RgFlags) -> RegexSyntax:
 
 
 def engine_flag(fl: FlagView) -> str:
-    """The regex engine the line asks for, the last of -P, --no-pcre2
-    and --engine winning (ripgrep 14.1.1: `rg -P --no-pcre2` is the
-    default engine and `rg --no-pcre2 -P` is PCRE2).
+    """The regex engine the line asks for, the last of -P, --no-pcre2,
+    --engine and the deprecated --auto-hybrid-regex pair winning
+    (ripgrep 14.1.1: `rg -P --no-pcre2` is the default engine, `rg
+    --no-pcre2 -P` is PCRE2, and --no-auto-hybrid-regex selects the
+    default engine as --auto-hybrid-regex selects auto).
 
     Args:
         fl (FlagView): the flag view.
@@ -508,9 +522,18 @@ def engine_flag(fl: FlagView) -> str:
     Raises:
         UsageError: --engine names no engine ripgrep has.
     """
-    chosen = _last(fl, "pcre2", "no_pcre2", "engine")
+    chosen = _last(
+        fl,
+        "pcre2",
+        "no_pcre2",
+        "engine",
+        "auto_hybrid_regex",
+        "no_auto_hybrid_regex",
+    )
     if chosen == "pcre2":
         return "pcre2"
+    if chosen == "auto_hybrid_regex":
+        return "auto"
     if chosen != "engine":
         return "default"
     value = fl.as_str("engine") or ""
@@ -536,14 +559,14 @@ def rust_matcher(
         UsageError: regex-syntax refuses the pattern.
     """
     try:
-        translated = translate_rust(patterns, fold, f.null_data)
+        translated = translate_rust(patterns, fold, f.null_data, f.unicode)
     except RustRegexError as exc:
         raise UsageError(f"rg: {exc}") from exc
     source = translated.source
     if f.line_regexp:
         source = whole_line(source, f.null_data)
     elif f.whole_word:
-        source = whole_word(source)
+        source = whole_word(source, f.unicode)
     return re.compile(source, re.IGNORECASE if translated.ignore_case else 0)
 
 
@@ -569,16 +592,14 @@ def pcre_matcher(
     elif f.whole_word:
         display = f"(?<!\\w)(?:{display})(?!\\w)"
     try:
-        translated = translate_pcre(
-            display, f.pcre2_unicode, fold, f.null_data
-        )
+        translated = translate_pcre(display, f.unicode, fold, f.null_data)
     except PcreError as exc:
         raise UsageError(
             f"rg: PCRE2: error compiling pattern at offset "
             f"{exc.offset}: {exc.message}"
         ) from exc
     flags = re.IGNORECASE if translated.ignore_case else 0
-    if not f.pcre2_unicode:
+    if not f.unicode:
         flags |= re.ASCII
     return re.compile(translated.source, flags)
 
@@ -780,7 +801,7 @@ def sort_haystacks(found: list[Haystack], f: RgFlags) -> list[Haystack]:
     return unknown + ordered if f.sort_reverse else ordered + unknown
 
 
-async def rg(
+async def rg_generic(
     paths: list[PathSpec],
     texts: Sequence[str],
     opts: CommandOpts,
@@ -870,7 +891,7 @@ async def rg(
     rb = partial(call_read_bytes, read_bytes, prefix=mount_prefix)
 
     if pat is not None and len(paths) == 1:
-        single = await _single(
+        single = await _search_single(
             paths[0], pat, f, st, rd, rb, read_stream, operand_stream
         )
         if single is not None:
@@ -894,7 +915,7 @@ async def rg(
     # A mount below the operand shadows whatever the backend holds there;
     # the fan-out that would search the mount itself is off too.
     boundary = mounts if f.one_file_system else None
-    found = _haystacks(
+    found = haystacks(
         paths, rd, st, cwd, walk, f, warnings, boundary, link_door(opts)
     )
     if f.sort not in (None, "none") and not (
@@ -923,7 +944,7 @@ async def _replay(found: list[Haystack]) -> AsyncIterator[Haystack]:
         yield h
 
 
-async def _single(
+async def _search_single(
     p: PathSpec,
     pat: re.Pattern[str],
     f: RgFlags,
@@ -977,7 +998,7 @@ async def _single(
     io = IOResult(exit_code=1)
     tally = Tally()
     return _settled(
-        search_haystack(source, pat, f, name, label, tally),
+        search_haystack(source, pat, f, name, label, tally, pipe=is_stdin(p)),
         f,
         label,
         tally,
@@ -1020,8 +1041,13 @@ async def _settled(
     printed = False
     try:
         async for chunk in chunks:
-            if not printed and label is not None and _headed(f):
-                yield encode_line(label) + (
+            if (
+                not printed
+                and label is not None
+                and _headed(f)
+                and not tally.binary
+            ):
+                yield encode_text(label) + (
                     b"\0" if f.null or f.null_data else b"\n"
                 )
             printed = True
@@ -1101,11 +1127,11 @@ def between_files(f: RgFlags) -> bytes:
     if _headed(f) and not f.no_filename:
         return b"\n"
     if prints_context(f) and f.context_separator is not None:
-        return encode_line(f.context_separator) + b"\n"
+        return encode_text(f.context_separator) + b"\n"
     return b""
 
 
-async def _haystacks(
+async def haystacks(
     paths: list[PathSpec],
     rd: Callable[[str], Awaitable[list[str]]],
     st: Callable[[str], Awaitable[FileStat]],
@@ -1133,6 +1159,10 @@ async def _haystacks(
         door (LinkDoor | None): the namespace's links and the door past
             them, which -L walks through.
     """
+    # ripgrep holds one path that is not a directory to one thread, as it
+    # does -j1 and a sort; every other line runs its parallel walker.
+    parallel = f.threads != 1 and f.sort is None
+    several = parallel and len(paths) > 1
     for p in paths:
         if is_stdin(p):
             yield Haystack(
@@ -1140,7 +1170,9 @@ async def _haystacks(
             )
             continue
         if p.walk_error is not None:
-            warnings.append(walk_error_line(p.raw_path, walk_refusal(p)))
+            warnings.append(
+                walk_error_line(p.raw_path, walk_refusal(p), several)
+            )
             continue
         is_dir = False
         s: FileStat | None = None
@@ -1154,7 +1186,7 @@ async def _haystacks(
                 await rd(p.virtual)
                 is_dir = True
             except WALK_ERRORS:
-                warnings.append(walk_error_line(p.raw_path, exc))
+                warnings.append(walk_error_line(p.raw_path, exc, several))
                 continue
         if not is_dir:
             yield Haystack(p.virtual, p.raw_path, s, p)
@@ -1178,6 +1210,7 @@ async def _haystacks(
             crosses,
             door,
             f.follow,
+            parallel,
         ):
             yield found
 
@@ -1195,7 +1228,7 @@ async def _list_files(
     term = b"\0" if f.null else b"\n"
     out: list[bytes] = []
     async for h in found:
-        out.append(encode_line(printed_path(h.shown, f)) + term)
+        out.append(encode_text(printed_path(h.shown, f)) + term)
         if f.quiet:
             break
     code = exit_code_for(bool(out), bool(warnings), f.quiet)
@@ -1240,6 +1273,7 @@ async def _search_all(
     out: list[bytes] = []
     printed = False
     selected = False
+    skipped = False
     searched = 0
     async for h in found:
         searched += 1
@@ -1264,7 +1298,14 @@ async def _search_all(
             chunks = [
                 c
                 async for c in search_haystack(
-                    source, pat, f, name, label, tally
+                    source,
+                    pat,
+                    f,
+                    name,
+                    label,
+                    tally,
+                    not walked,
+                    h.spec is not None and is_stdin(h.spec),
                 )
             ]
         except FS_ERRORS as exc:
@@ -1272,16 +1313,18 @@ async def _search_all(
             warnings.append(open_error_line(h.shown, exc))
             continue
         selected = selected or tally.selected
+        skipped = skipped or tally.skipped
         if chunks:
             if label is not None and _headed(f):
                 if printed:
                     out.append(b"\n")
-                out.append(
-                    encode_line(label)
-                    + (b"\0" if f.null or f.null_data else b"\n")
-                )
+                if not tally.binary:
+                    out.append(
+                        encode_text(label)
+                        + (b"\0" if f.null or f.null_data else b"\n")
+                    )
             elif context and printed and f.context_separator is not None:
-                out.append(encode_line(f.context_separator) + b"\n")
+                out.append(encode_text(f.context_separator) + b"\n")
             out.extend(chunks)
             printed = True
         if f.quiet and tally.selected:
@@ -1290,7 +1333,9 @@ async def _search_all(
         # ripgrep's status under --files-without-match follows the
         # listing, not the matching: 0 when a file was listed, 1 when
         # every file matched (14.1.1; GNU grep keeps the match status).
-        selected = printed
+        # A walked binary file it skipped counts as one without a match,
+        # though no listing names it.
+        selected = printed or skipped
     code = exit_code_for(selected, bool(warnings), f.quiet)
     shown = [] if f.no_messages else list(warnings)
     if implicit and searched == 0:
@@ -1303,7 +1348,7 @@ async def _search_all(
     )
 
 
-__all__ = ["rg"]
+__all__ = ["rg_generic"]
 
 
 def label_flags(flags: Mapping[str, FlagValue]) -> dict[str, FlagValue]:

@@ -1,5 +1,5 @@
 import logging
-from functools import partial
+from collections.abc import Awaitable, Callable
 
 from opendal.exceptions import NotFound
 from opendal.types import EntryMode
@@ -19,20 +19,38 @@ from mirage.utils.key_prefix import mount_prefix_of
 logger = logging.getLogger(__name__)
 
 
-async def _is_file(accessor: NextcloudAccessor, key: str) -> bool:
-    try:
-        md = await accessor.operator().stat(key.strip("/"))
-    except NotFound:
-        return False
-    return md.mode != EntryMode.Dir
+def _kind_probes(
+    accessor: NextcloudAccessor,
+) -> tuple[Callable[[str], Awaitable[bool]], Callable[[str], Awaitable[bool]]]:
+    """``is_file`` and ``is_dir`` probes that share one PROPFIND per key.
 
+    One stat answers both, a collection included, so a walk asking each
+    of a component in turn sends one request for it rather than two.
 
-async def _is_dir(accessor: NextcloudAccessor, key: str) -> bool:
-    try:
-        md = await accessor.operator().stat(key.strip("/") + "/")
-    except NotFound:
-        return False
-    return md.mode == EntryMode.Dir
+    Args:
+        accessor (NextcloudAccessor): Nextcloud accessor.
+    """
+    kinds: dict[str, EntryMode | None] = {}
+
+    async def kind(key: str) -> EntryMode | None:
+        stripped = key.strip("/")
+        if stripped not in kinds:
+            try:
+                md = await accessor.operator().stat(stripped)
+            except NotFound:
+                kinds[stripped] = None
+            else:
+                kinds[stripped] = md.mode
+        return kinds[stripped]
+
+    async def is_file(key: str) -> bool:
+        mode = await kind(key)
+        return mode is not None and mode != EntryMode.Dir
+
+    async def is_dir(key: str) -> bool:
+        return await kind(key) == EntryMode.Dir
+
+    return is_file, is_dir
 
 
 async def readdir(
@@ -83,12 +101,7 @@ async def readdir(
         # rather than raising, so without this `ls /nextcloud/never`
         # rendered an empty directory and exited 0. The mount root is
         # exempt: it exists because it is mounted.
-        raise await listing_error(
-            path,
-            target,
-            partial(_is_file, accessor),
-            partial(_is_dir, accessor),
-        )
+        raise await listing_error(path, target, *_kind_probes(accessor))
     # PROPFIND normally carries getcontentlength for every file; when the
     # lister omits the metadata, one stat per affected file fills the gap
     # so the index never caches an unknown size.

@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "redirect_append_of_nothing_keeps_the_mtime",
+      "seq": 501163,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/r9 && cd /data/r9 && echo a > f && touch -d '2001-01-01T00:00:00' f && true >> f && stat -c %y f && : >> f && printf '' >> f && stat -c %y f && echo b >> f && cat f; cd / && rm -r /data/r9",
+      "expect": {
+        "exit": 0,
+        "stdout": "2001-01-01 00:00:00.000000000 +0000\n2001-01-01 00:00:00.000000000 +0000\na\nb\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

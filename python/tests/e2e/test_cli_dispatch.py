@@ -103,7 +103,7 @@ async def test_renamed_install_attributes_to_its_own_head(ws):
     assert err == b"sl: 'bogus' is not a sl command. See 'sl --help'.\n"
     code, out, _ = await run(ws, "sl message send --help")
     assert code == 0
-    assert out.startswith(b"sl message send\n")
+    assert out.startswith(b"usage: sl message send ")
 
 
 @pytest.mark.asyncio
@@ -419,7 +419,7 @@ async def test_man_of_a_script_cli_promises_no_help_flag(ws):
     ws.register_cli("pager", pager_spec("print('hi')"))
     code, out, _ = await run(ws, "man pager")
     assert code == 0
-    assert out.startswith(b"pager\n")
+    assert out.startswith(b"usage: pager\n")
     assert b"--help" not in out
 
 

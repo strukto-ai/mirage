@@ -15,6 +15,8 @@
 import type { FileStat } from '../../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Zone } from '../../../../utils/timezone.ts'
+import type { CLIInvocation } from '../../types.ts'
+import type { GitError } from './errors.ts'
 
 /**
  * The workspace op dispatcher, as every module here consumes it.
@@ -248,6 +250,28 @@ export interface DateMode {
   readonly now: number
   /** The session's `TZ`, null for the host's own zone. */
   readonly zone: Zone | null
+}
+
+/**
+ * git's refusal for a verb a read-only mount turned down, built from the line
+ * and the repository it opened, null when it opened none.
+ */
+export type ReadOnlyRefusal = (inv: CLIInvocation, location: RepoLocation | null) => GitError
+
+/** Where a chain of symbolic refs ends: the last name reached, and whether any hop was symbolic. */
+export interface SymbolicEnd {
+  readonly name: string
+  readonly symbolic: boolean
+}
+
+/**
+ * How `log` and `show` label a commit with the refs that point at it, git's
+ * decoration style: not at all, by short names, or by full ref names.
+ */
+export enum Decoration {
+  NONE = 'no',
+  SHORT = 'short',
+  FULL = 'full',
 }
 
 /** How a ref field sorts, git's `cmp_type`: as text, or by the number behind it. */

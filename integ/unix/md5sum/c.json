@@ -1,0 +1,86 @@
+{
+  "cases": [
+    {
+      "id": "md5sum_c_modifiers_ignore_missing_status_quiet_warn_strict",
+      "seq": 15600711,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcF_k1 && echo one > /data/fcF_k1/ok && (cd /data/fcF_k1 && md5sum ok > L1 && md5sum ok | sed 's/ok$/gone/' >> L1 && md5sum ok > L2 && echo junk >> L2 && md5sum -c --ignore-missing L1; echo rc=$?; md5sum -c --status L1; echo rc=$?; md5sum --check --quiet L1; echo rc=$?; md5sum -c -w L2; echo rc=$?; md5sum -c --strict L2; echo rc=$?); rm -r /data/fcF_k1",
+      "expect": {
+        "exit": 0,
+        "stdout": "ok: OK\nrc=0\nrc=1\ngone: FAILED open or read\nrc=1\nok: OK\nrc=0\nok: OK\nrc=1\n",
+        "stderr": "md5sum: gone: No such file or directory\nmd5sum: gone: No such file or directory\nmd5sum: WARNING: 1 listed file could not be read\nmd5sum: L2: 2: improperly formatted MD5 checksum line\nmd5sum: WARNING: 1 line is improperly formatted\nmd5sum: WARNING: 1 line is improperly formatted\n"
+      },
+      "flags": [
+        "c",
+        "ignore-missing",
+        "status",
+        "quiet",
+        "w",
+        "strict"
+      ]
+    },
+    {
+      "id": "md5sum_c_refuses_t_b_and_z",
+      "seq": 15600712,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "md5sum -c -t /data/b.txt; echo rc=$?; md5sum --check --binary /data/b.txt; echo rc=$?; md5sum -c -z /data/b.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\n",
+        "stderr": "md5sum: the --binary and --text options are meaningless when verifying checksums\nTry 'md5sum --help' for more information.\nmd5sum: the --binary and --text options are meaningless when verifying checksums\nTry 'md5sum --help' for more information.\nmd5sum: the --zero option is not supported when verifying checksums\nTry 'md5sum --help' for more information.\n"
+      },
+      "flags": [
+        "c",
+        "t",
+        "b",
+        "z"
+      ]
+    }
+  ]
+}

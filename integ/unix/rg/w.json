@@ -29,9 +29,7 @@
         "stdout": "alpha\nalpha\nalpha\nALPHA\nrc=1\n",
         "stderr": ""
       },
-      "flags": [
-        "w"
-      ]
+      "flags": ["w", "x"]
     },
     {
       "id": "rg_w_word_no_partial",

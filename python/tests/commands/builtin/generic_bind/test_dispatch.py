@@ -15,9 +15,17 @@
 import pytest
 
 from mirage.cache.index.scope import command_scope, command_started
+from mirage.commands.builtin.generic.du import TRUNCATED_NOTE
 from mirage.commands.builtin.generic_bind.adapter import Builder
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
+from mirage.commands.config import command
+from mirage.commands.spec import SPECS
 from mirage.io import IOResult
+from mirage.ops.registry import op as register_op
+from mirage.types import MountMode
+from mirage.utils.errors import eacces
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
 
 
 @pytest.mark.asyncio
@@ -27,7 +35,6 @@ async def test_output_is_read_inside_the_running_command():
     seen: list[int | None] = []
 
     async def fn(ops, accessor, paths, texts, opts):
-
         async def walk():
             seen.append(command_started())
             yield b"hit\n"
@@ -43,3 +50,87 @@ async def test_output_is_read_inside_the_running_command():
             Builder("grep", fn), [], [], {}, dispatch, "/"
         )
     assert (stdout, seen) == (b"hit\n", [started])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("overwrite", [False, True])
+async def test_relay_sort_caches_inputs_and_replacements(overwrite):
+    left, right = RAMVFS(), RAMVFS()
+    left.caches_reads = right.caches_reads = True
+    left.load_state({"files": {"/input": b"z\na\n"}})
+    right.load_state({"files": {"/input": b"m\n"}})
+    ws = Workspace({"/a": left, "/b": right}, mode=MountMode.WRITE)
+    command = "sort /a/input /b/input"
+    try:
+        result = await ws.shell(
+            command + (" -o /a/input" if overwrite else "")
+        )
+        assert result.exit_code == 0
+        assert await result.materialize_stdout() == (
+            b"" if overwrite else b"a\nm\nz\n"
+        )
+        assert await ws.cache.get("/a/input") == (
+            b"a\nm\nz\n" if overwrite else b"z\na\n"
+        )
+        assert await ws.cache.get("/b/input") == b"m\n"
+        assert result.reads["/b/input"] == b"m\n"
+        left.load_state({"files": {"/input": b"changed\n"}})
+        again = await ws.shell("cat /a/input" if overwrite else command)
+        assert await again.materialize_stdout() == b"a\nm\nz\n"
+    finally:
+        await ws.close()
+
+
+class _Uncapped(RAMVFS):
+    max_du_entries = None
+
+
+class _Capped(RAMVFS):
+    max_du_entries = 2
+
+
+@command("du", vfs="ram", spec=SPECS["du"])
+async def _unmeasured_du(accessor, paths, texts, opts):
+    return b"0\t" + paths[0].raw_path.encode() + b"\n", IOResult()
+
+
+@pytest.mark.asyncio
+async def test_du_walk_charges_each_mount_its_own_cap():
+    # A du that reports no measurement leaves the line to this walk.
+    outer, inner = _Uncapped(), _Capped()
+    outer.load_state({"files": {f"/f{i}": b"x" for i in range(4)}})
+    inner.load_state({"files": {f"/g{i}": b"y" for i in range(3)}})
+    ws = Workspace({"/a": outer, "/a/b": inner}, mode=MountMode.WRITE)
+    ws.mount("/a/b").register_fns([_unmeasured_du])
+    try:
+        result = await ws.shell("du -a /a")
+        rows = (await result.materialize_stdout()).decode().splitlines()
+        assert [r for r in rows if "/a/f" in r] == [
+            f"1\t/a/f{i}" for i in range(4)
+        ]
+        assert len([r for r in rows if "/a/b/g" in r]) == 2
+        assert result.stderr == TRUNCATED_NOTE.encode() + b"\n"
+        assert result.exit_code == 1
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_du_x_never_lists_a_mount_below_the_operand():
+    @register_op("readdir", vfs="ram")
+    async def refusing(accessor, path, **kwargs):
+        raise eacces(path)
+
+    ws = Workspace(
+        {"/a": RAMVFS(), "/a/b": RAMVFS(), "/c": RAMVFS()},
+        mode=MountMode.WRITE,
+    )
+    try:
+        await ws.shell("echo aa > /a/f; echo ccc > /a/b/g; echo d > /c/h")
+        ws.mount("/a/b").register_fns([refusing])
+        result = await ws.shell("du -x /a /c")
+        assert await result.materialize_stdout() == b"3\t/a\n2\t/c\n"
+        assert not result.stderr
+        assert result.exit_code == 0
+    finally:
+        await ws.close()

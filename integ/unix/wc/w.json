@@ -36,6 +36,43 @@
       "flags": [
         "w"
       ]
+    },
+    {
+      "id": "wc_w_blank_runs_add_no_words",
+      "seq": 15300201,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '   hello   world   ' | wc -w; printf '   \\t  \\n  ' | wc -w",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "w"
+      ]
     }
   ]
 }

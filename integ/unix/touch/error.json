@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "touch_option_errors_and_time_sources",
+      "seq": 15000042,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "touch --bogus /data/fc0x; echo rc=$?; touch /data/fc0x -d; echo rc=$?; touch -d 2020-01-01 -t 202001010000 /data/fc0x; echo rc=$?; touch -t bad /data/fc0x; echo rc=$?; touch -d bad; echo rc=$?; touch -r /data/fc0nope; echo rc=$?; touch --no-; echo rc=$?; ls /data/fc0x",
+      "expect": {
+        "exit": 2,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "touch: unrecognized option '--bogus'\nTry 'touch --help' for more information.\ntouch: option requires an argument -- 'd'\nTry 'touch --help' for more information.\ntouch: cannot specify times from more than one source\nTry 'touch --help' for more information.\ntouch: invalid date format 'bad'\ntouch: invalid date format 'bad'\ntouch: failed to get attributes of '/data/fc0nope': No such file or directory\ntouch: option '--no-' is ambiguous; possibilities: '--no-create' '--no-dereference'\nTry 'touch --help' for more information.\nls: cannot access '/data/fc0x': No such file or directory\n"
+      }
+    }
+  ]
+}

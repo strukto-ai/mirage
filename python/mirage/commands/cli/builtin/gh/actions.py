@@ -22,6 +22,7 @@ from typing import Any
 
 from mirage.commands.cli.builtin.gh.accessor import (
     camel,
+    gh_bool,
     list_limit,
     read_cli_file,
     repo_for,
@@ -149,8 +150,8 @@ async def run_view_cmd(
     raw = inv.texts[0] if inv.texts else ""
     if not raw.isdigit():
         raise ValueError("a run ID is required in noninteractive mode")
-    logs = fl.as_bool("log")
-    failed_only = fl.as_bool("log_failed")
+    logs = gh_bool(fl, "log")
+    failed_only = gh_bool(fl, "log_failed")
     if logs and failed_only:
         raise UsageError("specify only one of --log or --log-failed", 1)
     ref = repo_for(inv, fl)
@@ -167,7 +168,7 @@ async def run_view_cmd(
         f"event:\t{row.get('event', '')}\n"
     )
     out, io = await typed_out(row, fl, human, RUN_FIELDS)
-    if fl.as_bool("exit_status") and row.get("conclusion") not in (
+    if gh_bool(fl, "exit_status") and row.get("conclusion") not in (
         None,
         "",
         "success",
@@ -255,7 +256,6 @@ def _log_segments(
     fetchers = 0
 
     def read_entry(entry: str) -> Callable[[], Awaitable[bytes]]:
-
         async def read() -> bytes:
             return archive.read(entry)
 
@@ -382,11 +382,11 @@ async def run_rerun_cmd(
     if job:
         if not job.isdigit():
             raise ValueError("--job expects a numeric job ID")
-        await rerun_job(inv.config, ref, int(job), fl.as_bool("debug"))
+        await rerun_job(inv.config, ref, int(job), gh_bool(fl, "debug"))
     else:
-        suffix = "rerun-failed-jobs" if fl.as_bool("failed") else "rerun"
+        suffix = "rerun-failed-jobs" if gh_bool(fl, "failed") else "rerun"
         body: JsonValue = (
-            {"enable_debug_logging": True} if fl.as_bool("debug") else None
+            {"enable_debug_logging": True} if gh_bool(fl, "debug") else None
         )
         await rerun(inv.config, ref, int(raw), suffix, body)
     return text_out("")
@@ -397,7 +397,9 @@ async def workflow_list_cmd(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(inv.flags)
     include = (
-        None if fl.as_bool("all") else lambda row: row.get("state") == "active"
+        None
+        if gh_bool(fl, "all")
+        else lambda row: row.get("state") == "active"
     )
     rows = [
         _workflow(value)
@@ -419,7 +421,7 @@ async def workflow_view_cmd(
     workflow = inv.texts[0] if inv.texts else ""
     if not workflow:
         raise ValueError("a workflow ID, name, or filename is required")
-    yaml = fl.as_bool("yaml")
+    yaml = gh_bool(fl, "yaml")
     git_ref = fl.as_str("ref") or ""
     if not yaml and git_ref:
         raise UsageError("`--yaml` required when specifying `--ref`", 1)
@@ -474,7 +476,7 @@ async def _workflow_yaml(
 async def _workflow_inputs(
     inv: CLIInvocation[GhConfig], fl: FlagView
 ) -> dict[str, JsonValue]:
-    if fl.as_bool("json"):
+    if gh_bool(fl, "json"):
         if inv.stdin is None:
             raise ValueError("--json needs standard input")
         try:

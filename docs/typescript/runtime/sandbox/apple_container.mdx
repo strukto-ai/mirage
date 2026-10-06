@@ -123,13 +123,14 @@ const agentA = await ws.session('agent_a', { profile: 'guarded' })
 await agentA.shell('python3 job.py', { cwd: '/data' }) // runs in sandbox-a
 ```
 
-In YAML the same block is `config: {container: my-sandbox, containers:
-{agent_a: sandbox-a, agent_b: sandbox-b}}`. Separate containers are separate
+In YAML the same block is
+`config: {container: my-sandbox, containers: {agent_a: sandbox-a, agent_b: sandbox-b}}`.
+Separate containers are separate
 VMs, so agents share no files, processes, CPU or memory. Each container serves
 its own view of the workspace: with Mirage inside it, make that agent's rules
 the `default` profile in its `sandbox.yaml`; with a mount over SFTP, bind the
 container's key to the agent's profile
-([Bind a key to a profile](/home/ssh#bind-a-key-to-a-profile)). A session
+([Bind a key to a profile](/home/access/ssh#bind-a-key-to-a-profile)). A session
 with no container of its own and no `container` fails with
 `apple_container has no container for session ...`. Each container is checked
 with `container inspect` on its first line.

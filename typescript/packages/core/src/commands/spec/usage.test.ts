@@ -437,7 +437,7 @@ describe('unexpectedValueError', () => {
 
   // curl, python, jq and find answer this as an unknown option, each measured:
   // `curl --silent=2` is `option --silent=2: is unknown`, `python3
-  // --version=2` is `unknown option --version=2`, and `jq --tab=2` is jq's own
+  // --version=2` is `Unknown option: --version=2`, and `jq --tab=2` is jq's own
   // unknown-option line. Routing them through the getopt_long wording would put
   // GNU's words in a program that does not use GNU's parser.
   it('keeps the unknown wording for a program that is not getopt_long', () => {
@@ -448,7 +448,7 @@ describe('unexpectedValueError', () => {
     const [jq] = unexpectedValueError('jq', '--tab=2')
     expect(dec.decode(jq).startsWith("jq: unrecognized option '--tab=2'\n")).toBe(true)
     const [py] = unexpectedValueError('python3', '--version=2')
-    expect(dec.decode(py).startsWith('unknown option --version=2\n')).toBe(true)
+    expect(dec.decode(py).startsWith('Unknown option: --version=2\n')).toBe(true)
     const [find] = unexpectedValueError('find', '--help=2')
     expect(dec.decode(find)).toBe("find: unknown predicate `--help=2'\n")
   })

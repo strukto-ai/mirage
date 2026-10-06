@@ -76,6 +76,7 @@ export const SHELL_QUOTED_COMMANDS: ReadonlySet<string> = new Set([
   'nl',
   'od',
   'paste',
+  'readlink',
   'realpath',
   'sha1sum',
   'sha256sum',

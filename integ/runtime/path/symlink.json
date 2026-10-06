@@ -1,0 +1,315 @@
+{
+  "cases": [
+    {
+      "id": "symlink_roundtrip",
+      "note": "monty has no link calls (symlink, readlink, lstat, scandir) and quickjs has none on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
+      "runtimes": [
+        "wasi",
+        "pyodide"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "t.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nos.symlink('t.txt', '/data/made')"
+          },
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "readlink /data/made",
+          "expect": {
+            "exit": 0,
+            "stdout": "t.txt\n"
+          }
+        },
+        {
+          "command": "cat /data/made",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "readlink_and_lstat_a_shell_link",
+      "note": "monty has no link calls (symlink, readlink, lstat, scandir) and quickjs has none on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
+      "runtimes": [
+        "wasi",
+        "pyodide"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "t.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "ln -s t.txt /data/l",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "import os, stat\nprint(os.readlink('/data/l'))\nst = os.lstat('/data/l')\nprint(stat.S_ISLNK(st.st_mode), st.st_size)\nprint(os.path.islink('/data/l'), os.path.islink('/data/t.txt'))"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "t.txt\nTrue 5\nTrue False\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "is_symlink_reads_the_name_plane",
+      "note": "Pyodide does not mount a link outside every mount (/alias).",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "t.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "ln -s t.txt /data/l",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\nprint(Path('/data/l').is_symlink(), Path('/data/t.txt').is_symlink())"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "True False\n"
+          }
+        },
+        {
+          "command": "ln -s /data/t.txt /alias",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\na = Path('/alias')\nprint(a.is_symlink(), a.exists(), a.read_text(), end='')"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "True True hello\n"
+          },
+          "expect_on": {
+            "pyodide": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "No such file or directory: '/alias'"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "readlink_splits_its_two_misses",
+      "note": "monty has no link calls (symlink, readlink, lstat, scandir) and quickjs has none on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
+      "runtimes": [
+        "wasi",
+        "pyodide"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "t.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "mkdir /data/d",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "import errno, os\nfor p in ('/data/t.txt', '/data/d', '/data/missing', '/data/d/deep/missing'):\n    try:\n        os.readlink(p)\n    except OSError as exc:\n        print(p, errno.errorcode[exc.errno])"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "/data/t.txt EINVAL\n/data/d EINVAL\n/data/missing ENOENT\n/data/d/deep/missing ENOENT\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "symlink_refuses_an_occupied_name",
+      "note": "monty has no link calls (symlink, readlink, lstat, scandir) and quickjs has none on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
+      "runtimes": [
+        "wasi",
+        "pyodide"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "t.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "mkdir /data/d && ln -s t.txt /data/lk",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "import os\nfor p in ('/data/t.txt', '/data/d', '/data/lk', '/data'):\n    try:\n        os.symlink('elsewhere', p)\n        print(p, 'created')\n    except OSError as exc:\n        print(p, type(exc).__name__)"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "/data/t.txt FileExistsError\n/data/d FileExistsError\n/data/lk FileExistsError\n/data FileExistsError\n"
+          }
+        },
+        {
+          "command": "cat /data/t.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello\n"
+          }
+        },
+        {
+          "command": "readlink /data/lk",
+          "expect": {
+            "exit": 0,
+            "stdout": "t.txt\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "scandir_reports_a_link_as_a_link",
+      "note": "monty has no link calls (symlink, readlink, lstat, scandir) and quickjs has none on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
+      "runtimes": [
+        "wasi",
+        "pyodide"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "t.txt": "hello\n",
+              "d/inner.txt": "x\n",
+              "real/t.txt": "hello\n",
+              "real/sub/deep.txt": "x\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "ln -s t.txt /data/lk && ln -s d /data/dlk",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "ln -s /data/real/t.txt /data/real/lk && ln -s /data/real/sub /data/real/dlk && ln -s /data/real /data/alias",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "import os\nfor root in ('/data', '/data/alias'):\n    for e in sorted(os.scandir(root), key=lambda x: x.name):\n        print(e.name, 'link' if e.is_symlink() else ('dir' if e.is_dir() else 'file'))"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "alias link\nd dir\ndlk link\nlk link\nreal dir\nt.txt file\ndlk link\nlk link\nsub dir\nt.txt file\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "rename_a_link_moves_the_name",
+      "note": "monty has no link calls (symlink, readlink, lstat, scandir) and quickjs has none on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
+      "runtimes": [
+        "wasi",
+        "pyodide"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "t.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "ln -s t.txt /data/lk",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "import os\nos.rename('/data/lk', '/data/moved')\nprint(os.readlink('/data/moved'))\nprint(os.path.islink('/data/lk'))"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "t.txt\nFalse\n"
+          }
+        },
+        {
+          "command": "readlink /data/moved",
+          "expect": {
+            "exit": 0,
+            "stdout": "t.txt\n"
+          }
+        },
+        {
+          "command": "readlink /data/lk",
+          "expect": {
+            "exit": 1
+          }
+        }
+      ]
+    }
+  ]
+}

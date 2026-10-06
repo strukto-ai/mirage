@@ -15,9 +15,9 @@
 import type { CLISpec } from '../../commands/cli/types.ts'
 import { nodeHelp, ownsArgv } from '../../commands/cli/walk.ts'
 import type { UsageStyle } from '../../commands/spec/types.ts'
-import { effectivePathMode, pathAllowed } from '../../context/session_context.ts'
+import { effectivePathMode } from '../../context/session_context.ts'
 import { MountMode } from '../../types.ts'
-import { isGlob } from '../../utils/hidden.ts'
+import { isGlob, pathVisible } from '../../utils/hidden.ts'
 import { commandVisible, verbVisible } from '../lookup/lookup.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
@@ -33,6 +33,7 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
     '# Virtual filesystem',
     'Paths are inside the MIRAGE workspace. Access is checked for each operation; command policies may impose further restrictions.',
   ]
+  const vis = session.visibility
   for (const mount of [...registry.visibleMounts()].sort((a, b) =>
     a.prefix < b.prefix ? -1 : a.prefix > b.prefix ? 1 : 0,
   )) {
@@ -40,14 +41,15 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
     if (
       ['/dev', '/usr/bin', '/.bash_history'].includes(prefix) ||
       ['dev', 'history', 'bin', 'document'].includes(mount.vfs.name) ||
-      !pathAllowed(prefix)
+      !pathVisible(vis, prefix)
     )
       continue
     const mode = effectivePathMode(prefix, mount.prefix, mount.mode)
     parts.push(`## \`${prefix}\`\n\nBackend: \`${mount.vfs.name}\`. Access: ${MODE_LINES[mode]}.`)
     if (
-      session.hiddenPaths === null &&
-      session.shownPaths === null &&
+      vis.paths === null &&
+      vis.shown === null &&
+      vis.commands === null &&
       session.commands === null &&
       mode === mount.mode
     ) {
@@ -55,8 +57,8 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
       if (mode !== MountMode.READ && mount.vfs.writePrompt)
         parts.push(mount.vfs.writePrompt.replaceAll('{prefix}', prefix).trim())
     }
-    for (const entry of session.shownPaths?.entries ?? []) {
-      if (entry.mode === null || isGlob(entry.path) || !pathAllowed(entry.path)) continue
+    for (const entry of vis.shown?.entries ?? []) {
+      if (entry.mode === null || isGlob(entry.path) || !pathVisible(vis, entry.path)) continue
       if (registry.tryMountFor(entry.path) === mount) {
         const effective = effectivePathMode(entry.path, mount.prefix, mount.mode)
         parts.push(`- \`${entry.path}\`: ${MODE_LINES[effective]}.`)

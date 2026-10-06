@@ -13,7 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 import logging
+import shutil
+import tempfile
 from collections.abc import (
     AsyncIterator,
     Awaitable,
@@ -21,8 +24,11 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import replace
 from functools import partial
+from pathlib import Path
 from shlex import join as shell_join
 from types import TracebackType
 from typing import Any
@@ -101,6 +107,7 @@ from mirage.utils.ids import new_session_id, new_workspace_id
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.bin import BinViewVFS
 from mirage.vfs.history import HISTORY_PREFIX, HistoryViewVFS
+from mirage.vfs.s3.config import S3Config
 from mirage.workspace.abort import MirageAbortError, run_cancellable
 from mirage.workspace.cli import CLIInstall
 from mirage.workspace.dispatcher import Dispatcher
@@ -134,7 +141,7 @@ from mirage.workspace.snapshot import (
     apply_state_dict,
     build_mount_args,
     install_fingerprints,
-    read_tar,
+    read_snapshot,
     to_state_dict,
 )
 from mirage.workspace.snapshot import snapshot as _write_snapshot
@@ -145,7 +152,10 @@ from mirage.workspace.snapshot.state import (
     reusable_clis,
     reusable_mounts,
 )
+from mirage.workspace.snapshot.utils import QUIESCE_SECONDS
 from mirage.workspace.store import WorkspaceStateStore
+from mirage.workspace.tools.file_version import FileVersionTracker
+from mirage.workspace.tools.tool_operations import MirageToolOperations
 from mirage.workspace.workspace.build import (
     resolve_control_stores,
     wire_runtime_world,
@@ -174,6 +184,16 @@ from mirage.workspace.workspace.types import VFSMount
 from mirage.workspace.workspace.watch import WatchDelegate, WatchManager
 
 logger = logging.getLogger(__name__)
+
+# The stop event of the top-level line this context runs in, so a line
+# that cancels its own session does not wait on itself.
+LINE_STOP: ContextVar[asyncio.Event | None] = ContextVar(
+    "mirage_line_stop", default=None
+)
+
+# Set inside a write the capture gate let through, so the ops it runs
+# itself are not held behind it.
+WRITE_HELD: ContextVar[bool] = ContextVar("mirage_write_held", default=False)
 
 
 class Workspace:
@@ -265,6 +285,14 @@ class Workspace:
         self._drift = DriftQueue()
         self.processes = ProcessSupervisor()
         self.job_table = JobTable(console_factory, self.processes)
+        self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
+        self._admitting = asyncio.Event()
+        self._admitting.set()
+        self._capture_lock = asyncio.Lock()
+        self._admitted: set[asyncio.Event] = set()
+        self._writes = 0
+        self._writes_idle = asyncio.Event()
+        self._writes_idle.set()
         self._default_agent_id = agent_id
         # The env block, translated once: a literal entry becomes an
         # exported var, a managed one becomes a pointer the fill step
@@ -314,6 +342,8 @@ class Workspace:
         self._session_mgr = SessionManager(
             session_id, store=stores.sessions, seed_vars=seed_vars
         )
+        self._tools: dict[str | None, MirageToolOperations] = {}
+        self._reads: dict[str, FileVersionTracker] = {}
         # Admission policies, consulted in registration order after the
         # built-ins the registry seeds: the profile's admission rules
         # (PermissionsPolicy, reading each session's compiled rules
@@ -363,7 +393,10 @@ class Workspace:
             self._registry, store=stores.namespace, user=agent_id
         )
         self._dispatcher = Dispatcher(
-            self._namespace, self._cache, drift=self._drift
+            self._namespace,
+            self._cache,
+            drift=self._drift,
+            admit_write=self._admit_write,
         )
         self._registry.set_reconciler(self._dispatcher.reconciler)
         self._watch = WatchManager(self._registry)
@@ -582,6 +615,54 @@ class Workspace:
         return self._ops
 
     @property
+    def tools(self) -> MirageToolOperations:
+        """The agent tools as the default session; ``Session.tools``
+        for another."""
+        return self._session_tools(None)
+
+    def _session_tools(self, session_id: str | None) -> MirageToolOperations:
+        """The one tool table a session has, made on first use.
+
+        Every caller in the process shares it, so a file the agent read
+        through one is guarded when it writes through another. Closing
+        the session drops it. None is the default session as it is when
+        each call runs, so its table keeps working when a snapshot load
+        or an attach re-keys the default; an id stays that session.
+
+        Args:
+            session_id (str | None): the session, or None for the
+                default.
+        """
+        tools = self._tools.get(session_id)
+        if tools is None:
+            tools = MirageToolOperations(Session(self, session_id))
+            self._tools[session_id] = tools
+        return tools
+
+    async def _session_reads(
+        self, session_id: str | None
+    ) -> FileVersionTracker:
+        """The read history the agent tools keep for one session.
+
+        Every guarded table of the session shares it, the one following
+        the default included, so a read through ``ws.tools`` guards a
+        write through ``Session(ws, id).tools``. Sessions load first, so
+        the default's id is final before it is looked up. Closing the
+        session drops it, and a snapshot restore drops them all.
+
+        Args:
+            session_id (str | None): the session, or None for the
+                default as it is now.
+        """
+        await self.ensure_sessions_loaded()
+        sid = self.default_session_id if session_id is None else session_id
+        reads = self._reads.get(sid)
+        if reads is None:
+            reads = FileVersionTracker(self.vfs._for_session(sid))
+            self._reads[sid] = reads
+        return reads
+
+    @property
     def namespace(self) -> Namespace:
         return self._namespace
 
@@ -647,6 +728,7 @@ class Workspace:
         mode: MountMode = MountMode.READ,
         read: ReadSpec | None = None,
         vfs_ref: str | None = None,
+        index: IndexConfig | None = None,
     ) -> MountEntry:
         """Add a VFS to a running workspace, mirroring TS ``addMount``.
 
@@ -662,6 +744,10 @@ class Workspace:
                 the workspace default.
             vfs_ref (str | None): the ``vfs:`` value the driver was built
                 from, recorded for snapshots; None for one built in code.
+            index (IndexConfig | None): the mount's own index; None takes
+                the workspace's. A VFS already mounted elsewhere keeps
+                the index of that mount, as in the constructor, and this
+                one goes unused.
 
         Returns:
             MountEntry: the installed mount, with its normalized prefix.
@@ -677,11 +763,12 @@ class Workspace:
         alias = next(
             (m for m in self._registry.mounts() if m.vfs is vfs), None
         )
+        own = index if index is not None else self._index_config
         check_read_capability(
             prefix,
             vfs,
             resolved_read,
-            alias.index_config if alias is not None else self._index_config,
+            alias.index_config if alias is not None else own,
         )
         self._registry.check_vfs_available(vfs)
         previous = self._registry.mounts()
@@ -690,7 +777,7 @@ class Workspace:
             vfs,
             mode,
             resolved_read,
-            index=self._index_config,
+            index=own,
             vfs_ref=vfs_ref,
         )
         prepare_added_mount(self._registry, entry, previous)
@@ -841,7 +928,7 @@ class Workspace:
             return capture_binding(
                 self._runtime_binding,
                 ns=namespace_view_of(
-                    self._registry, self._namespace, self.dispatch
+                    self._registry, self._namespace, self.dispatch, session
                 ),
                 session_view=session_view(session, self.policies),
                 processes=self._process_view(session),
@@ -1180,7 +1267,13 @@ class Workspace:
 
     # ── snapshot / load / copy ─────────────────────────────────────────────
 
-    async def snapshot(self, target, *, compress: str | None = None) -> None:
+    async def snapshot(
+        self,
+        target,
+        *,
+        compress: str | None = None,
+        s3: S3Config | None = None,
+    ) -> int:
         """Serialize this workspace to a tar.
 
         Captured:
@@ -1204,10 +1297,15 @@ class Workspace:
         ``supports_snapshot`` mount.
 
         Args:
-            target: filesystem path OR a writable file-like object.
+            target: filesystem path OR a writable file-like object; with
+                ``s3``, the object key.
             compress: None | "gz" | "bz2" | "xz".
+            s3 (S3Config | None): an S3-like store to put the tar in.
+
+        Returns:
+            int: the tar's size in bytes.
         """
-        await _write_snapshot(self, target, compress=compress)
+        return await _write_snapshot(self, target, compress=compress, s3=s3)
 
     @classmethod
     async def load(
@@ -1218,6 +1316,7 @@ class Workspace:
         clis: CLIOverrides | None = None,
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
         drift_policy: DriftPolicy = DriftPolicy.STRICT,
+        s3: S3Config | None = None,
     ) -> "Workspace":
         """Reconstruct a Workspace from a tar.
 
@@ -1240,7 +1339,8 @@ class Workspace:
         execute), so downstream code can rely on consistent state.
 
         Args:
-            source: filesystem path OR a readable file-like object.
+            source: filesystem path OR a readable file-like object; with
+                ``s3``, the object key.
             mounts: {prefix: VFS} overrides for mounts saved
                 with redacted creds.
             clis: {name: config} overrides for CLIs saved with
@@ -1257,14 +1357,23 @@ class Workspace:
                 cache entries for fingerprinted paths; a Redis cache is
                 never restored from a snapshot, so it has nothing to
                 drop.
+            s3 (S3Config | None): the S3-like store the tar is in.
         """
-        return await cls.from_state(
-            await run_blocking(read_tar, source),
-            mounts=mounts,
-            clis=clis,
-            secrets=secrets,
-            drift_policy=drift_policy,
+        # Disk mount files are staged on disk, not held in memory, until
+        # the restored mounts have copied them in.
+        staging = Path(
+            await run_blocking(tempfile.mkdtemp, prefix="mirage-restore-")
         )
+        try:
+            return await cls.from_state(
+                await read_snapshot(source, s3=s3, staging=staging),
+                mounts=mounts,
+                clis=clis,
+                secrets=secrets,
+                drift_policy=drift_policy,
+            )
+        finally:
+            await run_blocking(shutil.rmtree, staging, ignore_errors=True)
 
     @classmethod
     async def from_state(
@@ -1323,6 +1432,10 @@ class Workspace:
         See ``snapshot.api.snapshot`` for why remote backends are
         shared and local content mounts are reconstructed fresh.
         """
+        async with self._quiesced():
+            return await self._copy()
+
+    async def _copy(self) -> "Workspace":
         state = await to_state_dict(self)
         for mount in self._registry.mounts():
             for saved in state["mounts"]:
@@ -1447,7 +1560,7 @@ class Workspace:
         compiled = compile_profile(
             with_inline(base, inline), self._profile_name(profile)
         )
-        check_cli_verbs(compiled.commands, self._cli_verbs())
+        check_cli_verbs(compiled.policies.commands, self._cli_verbs())
         session = self._session_mgr.create(session_id)
         apply_profile(session, compiled)
         return session
@@ -1580,7 +1693,7 @@ class Workspace:
         compiled = compile_profile(
             self._base_profile(profile), self._profile_name(profile)
         )
-        check_cli_verbs(compiled.commands, self._cli_verbs())
+        check_cli_verbs(compiled.policies.commands, self._cli_verbs())
         was_default = session_id == self.default_session_id
         await self.ensure_sessions_loaded()
         if self._shutting_down:
@@ -1623,13 +1736,161 @@ class Workspace:
         """Persist every session's durable fields to the session store."""
         await self._session_mgr.flush()
 
+    async def cancel(self, session_id: str | None = None) -> int:
+        """Cancel the top-level lines running or queued in a session.
+
+        What Ctrl-C does to a foreground line, for every door at once:
+        HTTP jobs, SSH and codex lines and SDK callers alike end with
+        ``MirageAbortError``, their ``$?`` left as they found it. Returns
+        once those lines have ended, so the session is quiet; a line
+        cancelling its own session is stopped but not waited for.
+
+        Args:
+            session_id (str | None): the session, or None for every
+                session.
+
+        Returns:
+            int: how many lines were cancelled.
+        """
+        default = self._session_mgr.default_id
+        own = LINE_STOP.get()
+        hit = [
+            (stop, ended)
+            for stop, (named, ended) in list(self._lines.items())
+            if session_id is None or (named or default) == session_id
+        ]
+        cancelled = sum(1 for stop, _ in hit if not stop.is_set())
+        for stop, _ in hit:
+            stop.set()
+        await asyncio.gather(
+            *(ended.wait() for stop, ended in hit if stop is not own)
+        )
+        return cancelled
+
+    @asynccontextmanager
+    async def _quiesced(
+        self, seconds: float = QUIESCE_SECONDS
+    ) -> AsyncIterator[None]:
+        """Hold new top-level lines and let the running ones end.
+
+        A capture (a snapshot, a copy, a clone) reads disk files after
+        its state names them, so it runs here: what it reads is the
+        revision the lines left. Lines still running after ``seconds``
+        answer EBUSY; cancel them first to capture at once. The caller's
+        own line is not waited for, and captures take turns.
+
+        Args:
+            seconds (float): how long to wait for running lines.
+        """
+        async with self._capture_lock:
+            own = LINE_STOP.get()
+            self._admitting.clear()
+            try:
+                waiters = [
+                    asyncio.ensure_future(ended.wait())
+                    for stop, (_, ended) in self._lines.items()
+                    if stop in self._admitted and stop is not own
+                ]
+                if self._writes:
+                    waiters.append(
+                        asyncio.ensure_future(self._writes_idle.wait())
+                    )
+                if waiters:
+                    _, pending = await asyncio.wait(waiters, timeout=seconds)
+                    for waiter in pending:
+                        waiter.cancel()
+                    if pending:
+                        raise OSError(
+                            errno.EBUSY,
+                            f"workspace busy: {len(pending)} line(s) or "
+                            "write(s) still running",
+                        )
+                yield
+            finally:
+                self._admitting.set()
+
+    async def _admit_line(
+        self, stop: asyncio.Event, cancel: asyncio.Event | None
+    ) -> None:
+        """Hold a top-level line while a capture reads, then let it in.
+
+        The line is already listed, so ``cancel`` reaches it while it
+        waits; a capture waits only for lines let in.
+
+        Args:
+            stop (asyncio.Event): the line's own stop.
+            cancel (asyncio.Event | None): the caller's abort event.
+        """
+        while not self._admitting.is_set():
+            await run_cancellable(self._admitting.wait(), cancel, stop)
+        self._admitted.add(stop)
+
+    @asynccontextmanager
+    async def _admit_write(self) -> AsyncIterator[None]:
+        """Hold a write while a capture reads, unless its line is waited for.
+
+        A write from a running top-level line passes: the capture waits
+        for that line. Any other (a door's file op, SFTP, FUSE, a
+        background job) waits for the capture to finish, and counts as
+        under way until it ends, so a capture that starts waits it out.
+        """
+        if WRITE_HELD.get() or LINE_STOP.get() in self._admitted:
+            yield
+            return
+        while not self._admitting.is_set():
+            await self._admitting.wait()
+        self._writes += 1
+        self._writes_idle.clear()
+        token = WRITE_HELD.set(True)
+        try:
+            yield
+        finally:
+            WRITE_HELD.reset(token)
+            self._writes -= 1
+            if self._writes == 0:
+                self._writes_idle.set()
+
+    async def kill(self, session_id: str | None = None) -> int:
+        """Kill the background jobs and runners a session started.
+
+        What ``kill`` does to ``cmd &`` jobs, leaving the session open;
+        runners outside the job list (a runtime's spawned process) are
+        stopped too.
+
+        Args:
+            session_id (str | None): the session, or None for every
+                session.
+
+        Returns:
+            int: how many jobs and runners were stopped.
+        """
+        jobs = (
+            self.job_table.all_running_jobs()
+            if session_id is None
+            else self.job_table.running_jobs(session_id)
+        )
+        killed = 0
+        for job in jobs:
+            if await self.job_table.kill(job.id, job.session_id):
+                killed += 1
+        for process in self.processes.live():
+            if session_id in (None, process.info.session_id):
+                if process.terminate():
+                    killed += 1
+        return killed
+
     async def close_session(self, session_id: str) -> None:
         # The manager refuses the default and an unknown id first; a
         # session that did close takes its jobs with it, so a later
-        # session reusing the id inherits nothing.
+        # session reusing the id inherits nothing. Its lines are
+        # cancelled first, as a hangup ends a terminal's foreground job.
+        if session_id != self._session_mgr.default_id:
+            await self.cancel(session_id)
         await self._session_mgr.close(session_id)
         await self._documents.release_session(session_id)
         await self.job_table.close_session(session_id)
+        self._tools.pop(session_id, None)
+        self._reads.pop(session_id, None)
 
     async def close_all_sessions(self) -> None:
         closed = [
@@ -1641,6 +1902,8 @@ class Workspace:
         for session_id in closed:
             await self._documents.release_session(session_id)
             await self.job_table.close_session(session_id)
+            self._tools.pop(session_id, None)
+            self._reads.pop(session_id, None)
 
     # ── mount management ────────────────────────────────────────────────────
 
@@ -1817,6 +2080,7 @@ class Workspace:
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
         execution_scope: ExecutionScope | None = None,
+        job_table: JobTable | None = None,
     ) -> IOResult:
         """Execute a shell command in the workspace.
 
@@ -1873,15 +2137,30 @@ class Workspace:
             execution_scope: Internal. Scheduling and admission shared by
                 nested foreground evaluations. Background jobs start a
                 separate scope.
+            job_table: Internal. The jobs of a child shell (``$( )``,
+                ``bash -c``) that the line starts its own in, where its
+                caller's ``jobs`` and ``wait`` never see them; None for
+                the session's.
         """
         # The one cancellation seam: the whole line is one task, so a
         # cancel set while a store is still loading, a secret is still
         # fetching, the tree is still running or the flush is still
         # writing lands on that await, and the line is joined before the
         # abort is raised. The event is the caller's and the line never
-        # sets it.
+        # sets it. A top-level line (a nested one is handed its caller's
+        # grants) also answers the workspace's own stop, set by
+        # ``cancel``.
         frame = LineFrame()
+        stop: asyncio.Event | None = None
+        ended = asyncio.Event()
+        token = None
+        if handed is None:
+            stop = asyncio.Event()
+            self._lines[stop] = (session_id, ended)
+            token = LINE_STOP.set(stop)
         try:
+            if stop is not None:
+                await self._admit_line(stop, cancel)
             result = await run_cancellable(
                 self._serialize_line(
                     session_id,
@@ -1903,9 +2182,11 @@ class Workspace:
                         sink=sink,
                         call_stack=call_stack,
                         execution_scope=execution_scope,
+                        job_table=job_table,
                     ),
                 ),
                 cancel,
+                stop,
             )
         except (MirageAbortError, asyncio.CancelledError):
             # An abandoned invocation is the caller's outcome, not the
@@ -1918,6 +2199,12 @@ class Workspace:
                     frame.session, frame.status_before, frame.writer
                 )
             raise
+        finally:
+            if stop is not None and token is not None:
+                del self._lines[stop]
+                self._admitted.discard(stop)
+                ended.set()
+                LINE_STOP.reset(token)
         if sink is not None and isinstance(result, IOResult):
             for channel, data in (
                 (Channel.STDOUT, await result.materialize_stdout()),

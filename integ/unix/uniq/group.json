@@ -73,6 +73,80 @@
       "flags": [
         "group"
       ]
+    },
+    {
+      "id": "uniq_group_refusals_list_and_escape",
+      "seq": 15500205,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nb\\n' | uniq --group=x; echo rc=$?; printf 'a\\nb\\n' | uniq --group=pp; echo rc=$?; printf 'a\\n' | uniq --group=; echo rc=$?; for t in é $'\\r' $'\\001' $'\\177' \"'\" '\\'; do printf 'a\\n' | uniq --group=\"x$t\" 2>&1 | head -n 1; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nuniq: invalid argument 'x\\303\\251' for '--group'\nuniq: invalid argument 'x\\r' for '--group'\nuniq: invalid argument 'x\\001' for '--group'\nuniq: invalid argument 'x\\177' for '--group'\nuniq: invalid argument 'x\\'' for '--group'\nuniq: invalid argument 'x\\\\' for '--group'\n",
+        "stderr": "uniq: invalid argument 'x' for '--group'\nValid arguments are:\n  - 'prepend'\n  - 'append'\n  - 'separate'\n  - 'both'\nTry 'uniq --help' for more information.\nuniq: invalid argument 'pp' for '--group'\nValid arguments are:\n  - 'prepend'\n  - 'append'\n  - 'separate'\n  - 'both'\nTry 'uniq --help' for more information.\nuniq: ambiguous argument '' for '--group'\nValid arguments are:\n  - 'prepend'\n  - 'append'\n  - 'separate'\n  - 'both'\nTry 'uniq --help' for more information.\n"
+      },
+      "flags": [
+        "group"
+      ]
+    },
+    {
+      "id": "uniq_group_accepts_an_unambiguous_prefix",
+      "seq": 15500206,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for w in p a se b; do echo \"-- $w\"; printf 'a\\na\\nb\\n' | uniq --group=$w; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "-- p\n\na\na\n\nb\n-- a\na\na\n\nb\n\n-- se\na\na\n\nb\n-- b\n\na\na\n\nb\n\n",
+        "stderr": ""
+      },
+      "flags": [
+        "group"
+      ]
     }
   ]
 }

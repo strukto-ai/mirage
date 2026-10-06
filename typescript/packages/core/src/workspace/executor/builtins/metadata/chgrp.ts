@@ -12,20 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PathSpec, wordText } from '../../../../types.ts'
-import { missingOperandError, unknownOptionError } from '../../../../commands/spec/usage.ts'
+import type { PathSpec } from '../../../../types.ts'
+import { missingOperandError } from '../../../../commands/spec/usage.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
-import { expandOperands, fail, finish, splitValueFlags } from '../shared.ts'
-import {
-  isReadOnlyError,
-  permissionError,
-  parseGroup,
-  resolveOperand,
-  setattrLink,
-  setattrVia,
-  walkOwned,
-} from './metadata.ts'
+import type { SessionState } from '../../../session/session.ts'
+import { fail, parseLine } from '../shared.ts'
+import { changeOwner, parseGroup } from './metadata.ts'
 import type { Result } from '../types.ts'
 
 // chgrp GROUP FILE...: set group ownership via setattr. The group half of
@@ -35,49 +28,19 @@ import type { Result } from '../types.ts'
 export async function handleChgrp(
   namespace: Namespace,
   dispatch: DispatchFn,
+  session: SessionState,
   args: readonly (string | PathSpec)[],
 ): Promise<Result> {
-  const { flags, operands, bad } = splitValueFlags(args, 'Rvfh', '')
-  if (bad !== null) {
-    const [message, code] = unknownOptionError('chgrp', bad)
-    return fail('chgrp', new TextDecoder().decode(message), code)
-  }
-  const first = operands[0]
-  if (operands.length < 2 || first === undefined) {
-    const error = missingOperandError('chgrp', first === undefined ? null : wordText(first))
+  const [parsed, fl, refused] = parseLine('chgrp', args, session.cwd)
+  if (refused !== null) return refused
+  const groupText = parsed.texts[0]
+  if (groupText === undefined || parsed.paths.length === 0) {
+    const error = missingOperandError('chgrp', groupText ?? null)
     return fail('chgrp', `${error.message}\n`, error.exitCode)
   }
-  const groupText = first instanceof PathSpec ? first.virtual : first
   const gid = parseGroup(groupText)
   if (gid === null) {
     return fail('chgrp', `chgrp: invalid group: '${groupText}'\n`, 1)
   }
-
-  const recursive = flags.has('R')
-  const noDeref = recursive || flags.has('h')
-  const errors: string[] = []
-  for (const target of await expandOperands(namespace, operands.slice(1))) {
-    if (noDeref && namespace.isLink(target.virtual)) {
-      await setattrLink(dispatch, target, { gid })
-      continue
-    }
-    const found = await resolveOperand(namespace, dispatch, 'chgrp', target, errors)
-    if (found === null) continue
-    const [resolved, stat] = found
-    const { paths, links } = recursive
-      ? await walkOwned(namespace, dispatch, resolved, stat)
-      : { paths: [resolved], links: [] as string[] }
-    for (const path of paths) {
-      try {
-        await setattrVia(dispatch, path, { gid })
-      } catch (err) {
-        if (!isReadOnlyError(err)) throw err
-        errors.push(permissionError('chgrp', 'changing group of', path, err))
-      }
-    }
-    for (const link of links) {
-      await setattrLink(dispatch, PathSpec.fromStrPath(link), { gid })
-    }
-  }
-  return finish('chgrp', errors)
+  return changeOwner(namespace, dispatch, session, 'chgrp', fl, parsed.paths, null, gid)
 }

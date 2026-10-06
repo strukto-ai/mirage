@@ -169,7 +169,6 @@ def test_errors_number_the_pieces():
 
 
 def test_errors_name_a_script_file_and_line():
-
     def file(text: str) -> SedScriptPiece:
         return SedScriptPiece("file", text, "/s.sed")
 
@@ -326,3 +325,17 @@ def test_accepts_what_glibc_accepts():
         [SedScriptPiece("expr", "s/a**/x/;s/a{,1}b/X/;s/()/x/")], True
     )
     assert len(program.commands) == 3
+
+
+def test_a_utf8_script_reads_characters():
+    program = compile_script(
+        [SedScriptPiece("expr", "y/\u00e9/e/;s/\\xc3\\xa9/x/")], utf8=True
+    )
+    y, s = program.commands
+    assert (y.y_src, y.y_dst) == (["\u00e9"], ["e"])
+    assert s.subst is not None and s.subst.re is not None
+    assert s.subst.re.source == "\u00e9"
+    assert _error("y/\u00e9/e/") == (
+        "sed: -e expression #1, char 7: "
+        "strings for `y' command are different lengths"
+    )

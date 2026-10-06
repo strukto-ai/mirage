@@ -36,6 +36,43 @@
       "flags": [
         "c"
       ]
+    },
+    {
+      "id": "tail_c_keeps_binary_bytes_and_empty_input",
+      "seq": 15400002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail -c 10 /data/empty.txt | wc -c; tail -c 99 /data/a.txt | wc -c; printf 'a\\000b\\200\\377\\n\\376' | tail -c 4 | od -An -tx1; printf '\\000\\001\\002' | tail -c +2 | od -An -tx1; tail -c 1k /data/a.txt | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n24\n 80 ff 0a fe\n 01 02\n24\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
     }
   ]
 }

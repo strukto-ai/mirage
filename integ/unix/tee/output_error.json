@@ -378,6 +378,38 @@
         "stdout": "rc=1\n0\n",
         "stderr": "tee: r10tf/bar: Not a directory\n"
       }
+    },
+    {
+      "id": "tee_output_error_warn_modes_keep_writing",
+      "seq": 15400102,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for m in '' =warn =warn-nopipe; do printf y | tee --output-error$m /data/a.txt/x /data/fcD_t3; echo \" rc=$?\"; cat /data/fcD_t3; echo; rm -f /data/fcD_t3; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "y rc=1\ny\ny rc=1\ny\ny rc=1\ny\n",
+        "stderr": "tee: /data/a.txt/x: Not a directory\ntee: /data/a.txt/x: Not a directory\ntee: /data/a.txt/x: Not a directory\n"
+      },
+      "flags": [
+        "output-error"
+      ]
     }
   ]
 }

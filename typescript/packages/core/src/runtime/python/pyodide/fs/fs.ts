@@ -12,14 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { planFlush } from '../../../handles/index.ts'
 import { epochToIso } from '../../../../utils/dates.ts'
 import type { SetAttrFields } from '../../../../types.ts'
-import { BLKSIZE, LINK_MODE, SEEK_CUR, SEEK_END } from './constants.ts'
+import { BLKSIZE, GROW_FLOOR, LINK_MODE, O_APPEND, SEEK_CUR, SEEK_END } from './constants.ts'
 import { errnoError } from './errors.ts'
 import { classify } from '../../../../errors/index.ts'
 import { isMissingPath } from '../../../../utils/errors.ts'
-import { isUnclassified, type VFSEntry, type VFSStat } from '../../../vfs.ts'
+import { isUnclassified } from '../../../vfs.ts'
+import type { VFSEntry, VFSStat } from '../../../types.ts'
 import type { MutationJournal } from './journal.ts'
 import type { PyodideFsSeed } from './seed.ts'
 import { NodeTable } from './nodes.ts'
@@ -250,7 +250,7 @@ export class PyodideFs {
       dev: 1,
       ino: node.id,
       mode: node.mode,
-      nlink: 1,
+      nlink: this.host.isDir(node.mode) ? 2 : 1,
       uid: 0,
       gid: 0,
       rdev: node.rdev,
@@ -295,10 +295,10 @@ export class PyodideFs {
     node.contents = next
     node.usedBytes = attr.size
     node.loaded = true
-    // A resize rewrites history, so it can only ship whole. Recording here
-    // rather than at close is what makes a bare `os.truncate(path, n)`,
-    // which opens no handle at all, reach the mount.
-    this.journal.markWrite(this.nodes.pathOf(node), next)
+    // A resize goes as a truncate to the new length. Recording here rather
+    // than at close is what makes a bare `os.truncate(path, n)`, which
+    // opens no handle at all, reach the mount.
+    this.journal.markTruncate(this.nodes.pathOf(node), attr.size)
   }
 
   private lookup(parent: FSNode, name: string): FSNode {
@@ -342,10 +342,9 @@ export class PyodideFs {
     const path = this.nodes.pathOf(node)
     if (this.host.isDir(mode)) this.journal.markMkdir(path)
     else {
-      // An empty write is what carries a file that is created and never
-      // written (`Path.touch()`, `open(p,'w').close()`) through to the
-      // mount. A later write for the same path coalesces over it.
-      this.journal.markWrite(path, new Uint8Array(0))
+      // The create is what carries a file that is made and never written
+      // (`Path.touch()`, `open(p,'w').close()`) through to the mount.
+      this.journal.markCreate(path)
       // FS.open finalizes a new file with a chmod of its own, right
       // here and on this node. Only a file is marked: a directory gets
       // no such call, so a marker left on one would swallow the guest's
@@ -543,22 +542,30 @@ export class PyodideFs {
     if (length === 0) return 0
     const node = stream.node
     if (isCharDevice(node.mode)) return length
-    const baseLen = node.usedBytes ?? 0
+    const used = node.usedBytes ?? 0
     const need = position + length
     let contents = node.contents ?? new Uint8Array(0)
+    // Capacity doubles past what the file uses, so a loop of small writes
+    // copies the file a logarithmic number of times, not once per write.
     if (contents.length < need) {
-      const grown = new Uint8Array(need)
-      grown.set(contents)
+      const grown = new Uint8Array(Math.max(need, contents.length * 2, GROW_FLOOR))
+      grown.set(contents.subarray(0, used))
       contents = grown
       node.contents = grown
     }
-    contents.set(buffer.subarray(offset, offset + length), position)
-    node.usedBytes = Math.max(node.usedBytes ?? 0, need)
+    if (position > used) contents.fill(0, used, position)
+    const written = buffer.subarray(offset, offset + length)
+    contents.set(written, position)
+    node.usedBytes = Math.max(used, need)
     node.mtime = node.ctime = Date.now()
-    const [kind, bytes] = planFlush(baseLen, position, contents.subarray(0, node.usedBytes))
+    // The rule the shared flush plan keeps: a write that starts where the
+    // file ended goes as an append when the file had bytes or the stream
+    // appends, and any other write as the bytes it changed, so another
+    // writer's bytes elsewhere in the file survive.
     const path = this.nodes.pathOf(node)
-    if (kind === 'append') this.journal.markAppend(path, bytes)
-    else this.journal.markWrite(path, bytes)
+    const appending = (stream.flags & O_APPEND) !== 0
+    if (position === used && (used > 0 || appending)) this.journal.markAppend(path, used, written)
+    else this.journal.markPwrite(path, position, written)
     return length
   }
 

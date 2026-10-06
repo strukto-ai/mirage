@@ -101,6 +101,44 @@
         "stdout": "keep.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xm_unzip_l_lists_without_extracting",
+      "seq": 15100811,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_xzl && echo l > /data/fcA_xzl/f.txt && zip -q -r /data/fcA_xzl.zip /data/fcA_xzl && unzip -l /data/fcA_xzl.zip -d /data2/fcA_xzlout > /dev/null 2>&1; ls /data2/fcA_xzlout; rc=$?; rm -r /data/fcA_xzl /data/fcA_xzl.zip; exit $rc)",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "ls: cannot access '/data2/fcA_xzlout': No such file or directory\n"
+      },
+      "flags": [
+        "l",
+        "d"
+      ]
     }
   ]
 }

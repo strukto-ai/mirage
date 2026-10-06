@@ -19,6 +19,7 @@ import { parseSessionProfile } from '../../policy/profile.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { CLISpec } from '../../commands/cli/types.ts'
 import { Option, Operand } from '../../commands/spec/types.ts'
+import { applyStateDict, toStateDict } from '../snapshot/state.ts'
 
 function workspace(): Workspace {
   const ws = new Workspace(
@@ -167,5 +168,39 @@ it('excludes live documents from a workspace copy', async () => {
   await clone.vfsMd('/VFS.md')
   expect(await clone.vfs.cat('/VFS.md')).toContain('Virtual filesystem')
   await clone.close()
+  await ws.close()
+})
+
+it('binds where a read lands when a link sits above the name', async () => {
+  const ws = workspace()
+  await ws.vfs.mkdir('/data/guides')
+  await ws.vfs.symlink('/guides', '/data/guides')
+  const markdown = await ws.vfsMd('/guides/VFS.md')
+  expect(await ws.vfs.cat('/guides/VFS.md')).toBe(markdown)
+  expect(await ws.vfs.cat('/data/guides/VFS.md')).toBe(markdown)
+  await ws.close()
+})
+
+it('drops bindings on an in-place load, so the restored file shows', async () => {
+  const source = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+  await source.vfs.write('/data/VFS.md', 'restored\n')
+  const state = await toStateDict(source)
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.vfsMd('/data/VFS.md')
+  await applyStateDict(ws, state)
+  expect(await ws.vfs.cat('/data/VFS.md')).toBe('restored\n')
+  await ws.vfsMd('/VFS.md')
+  expect(await ws.vfs.cat('/VFS.md')).toContain('Virtual filesystem')
+  await source.close()
+  await ws.close()
+})
+
+it('leaves bindings out of the snapshot audit', async () => {
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+  const session = await ws.session('a')
+  const unbound = (await toStateDict(ws)).live_only_mounts
+  await ws.vfsMd('/VFS.md')
+  await session.skillMd('/SKILL.md')
+  expect((await toStateDict(ws)).live_only_mounts).toEqual(unbound)
   await ws.close()
 })

@@ -269,6 +269,43 @@
         "stdout": "ok.txt: OK\nok.txt: OK\nrc=0\nok.txt: OK\nrc=1\n",
         "stderr": "sha256sum: nope.sums: No such file or directory\n"
       }
+    },
+    {
+      "id": "sha256sum_c_stdin_list_reads_files_from_the_shells_cwd",
+      "seq": 15000090,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cd /; sha256sum /data/a.txt /data/b.txt | sha256sum -c; echo rc=$?; sha256sum /data/a.txt > /data/fc0sums; sha256sum -c < /data/fc0sums; echo rc=$?; (cd /data && sha256sum a.txt) | sha256sum -c; echo rc=$?; rm -f /data/fc0sums",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt: OK\n/data/b.txt: OK\nrc=0\n/data/a.txt: OK\nrc=0\na.txt: FAILED open or read\nrc=1\n",
+        "stderr": "sha256sum: a.txt: No such file or directory\nsha256sum: WARNING: 1 listed file could not be read\n"
+      },
+      "flags": [
+        "c"
+      ]
     }
   ]
 }

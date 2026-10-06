@@ -29,9 +29,7 @@
         "stdout": "/data/r4/notes.txt:alpha\n/data/r4/notes.txt:alpha\nalpha\n/data/r4/notes.txt\nalpha\n/data/r4/notes.txt@alpha\n#data#r4#notes.txt:alpha\n/data/r4/notes.txt | alpha\n",
         "stderr": ""
       },
-      "flags": [
-        "H"
-      ]
+      "flags": ["H", "I", "heading", "0", "path_separator", "field_match_separator"]
     }
   ]
 }

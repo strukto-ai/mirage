@@ -81,7 +81,7 @@ const NAMED: Record<string, new (options?: RuntimeOptions<never>) => Runtime> = 
  * registers monty (`DEFAULT_PYTHON` in `mirage/runtime/table.py`),
  * because `@pydantic/monty` cannot answer builtin `open()` calls yet
  * while `pydantic-monty` can. Both are sandboxed; neither reaches the
- * host. Pinned by integ/runtime/defaults.json, which reads the split
+ * host. Pinned by integ/runtime/routing/defaults.json, which reads the split
  * back out of a default world on each host.
  *
  * A name, not a class: `name` is an instance field, so `PyodideRuntime.name`

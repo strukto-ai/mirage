@@ -67,6 +67,40 @@
         "stdout": "rc=1\nrc=2\n",
         "stderr": "bash: disown: %9: no such job\nbash: disown: -x: invalid option\ndisown: usage: disown [-h] [-ar] [jobspec ... | pid ...]\n"
       }
+    },
+    {
+      "id": "job_disown_h_preserves_console",
+      "seq": 513020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(echo kept & disown -h \"$!\"; wait)",
+      "expect": {
+        "exit": 0,
+        "stdout": "kept\n",
+        "stderr": ""
+      }
     }
   ]
 }

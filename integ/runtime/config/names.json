@@ -1,0 +1,46 @@
+{
+  "cases": [
+    {
+      "id": "py_rejects_ts_only_name",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ]
+      },
+      "build_error": {
+        "contains": "TypeScript-only"
+      }
+    },
+    {
+      "id": "ts_rejects_py_only_name",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "wasi",
+          "workspace"
+        ]
+      },
+      "build_error": {
+        "contains": "Python-only"
+      }
+    },
+    {
+      "id": "unknown_name",
+      "world": {
+        "runtimes": [
+          "ghost",
+          "workspace"
+        ]
+      },
+      "build_error": {
+        "contains": "unknown runtime"
+      }
+    }
+  ]
+}

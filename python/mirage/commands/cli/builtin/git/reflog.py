@@ -16,13 +16,19 @@ import asyncio
 import posixpath
 
 from mirage.commands.cli.builtin.git.constants import HEAD
+from mirage.commands.cli.builtin.git.discover import is_bare
 from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.builtin.git.io import read_optional, write_file
 from mirage.commands.cli.builtin.git.objects import abbrev_for
+from mirage.commands.cli.builtin.git.repo import config_values
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation
-from mirage.commands.cli.builtin.git.util import fatal
+from mirage.commands.cli.builtin.git.util import (
+    check_operands,
+    fatal,
+    maybe_bool,
+)
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -31,6 +37,11 @@ from mirage.runtime.types import DispatchFn
 LOGS_DIR = "logs"
 HEAD_LOG = "logs/HEAD"
 ZERO = b"0" * 40
+# What a move of HEAD or a new branch records in the reflog. There is no
+# committer there, only a ref moving, so the stated identity commit uses
+# is reused.
+IDENTITY = b"mirage <mirage@localhost>"
+LOGGED_PREFIXES = ("refs/heads/", "refs/remotes/", "refs/notes/")
 
 
 def entry(
@@ -41,7 +52,8 @@ def entry(
     ``<old> <new> <identity> <epoch> <offset>\\t<message>``, with the
     old id all zeroes when there was nothing there before. The tab is
     load-bearing: it is what separates the fixed fields from a message
-    that may itself contain spaces.
+    that may itself contain spaces. An empty message leaves the tab
+    out, as git does.
 
     Args:
         before (bytes): the id the ref held, zeroes when it held none.
@@ -50,13 +62,8 @@ def entry(
         when (int): epoch seconds.
         message (str): what happened, e.g. ``commit: add delta``.
     """
-    return b"%s %s %s %d +0000\t%s\n" % (
-        before,
-        after,
-        who,
-        when,
-        message.encode(),
-    )
+    tail = b"\t" + message.encode() if message else b""
+    return b"%s %s %s %d +0000%s\n" % (before, after, who, when, tail)
 
 
 async def append(
@@ -80,6 +87,36 @@ async def append(
     target = posixpath.join(gitdir, path)
     existing = await read_optional(dispatch, target)
     await write_file(dispatch, target, (existing or b"") + line)
+
+
+async def logged(
+    dispatch: DispatchFn, location: RepoLocation, name: str, log: str
+) -> bool:
+    """Whether an update to a ref is logged.
+
+    Always where its log already exists, and otherwise as
+    ``core.logAllRefUpdates`` says, which defaults to HEAD and the
+    branch, remote and notes refs outside a bare repository, and to
+    nothing in one (``should_autocreate_reflog``).
+
+    Args:
+        dispatch (DispatchFn): workspace op dispatcher.
+        location (RepoLocation): the discovered repository.
+        name (str): the full ref name.
+        log (str): the path of its log.
+    """
+    if await read_optional(dispatch, log) is not None:
+        return True
+    values = await config_values(
+        dispatch, location, b"core", b"logallrefupdates"
+    )
+    if values and values[-1].lower() == b"always":
+        return True
+    if values:
+        normal = bool(maybe_bool(values[-1]))
+    else:
+        normal = not await is_bare(dispatch, location)
+    return normal and (name == HEAD or name.startswith(LOGGED_PREFIXES))
 
 
 async def record(
@@ -174,10 +211,11 @@ async def reflog(
     """
     fl = FlagView(inv.flags)
     try:
+        texts = inv.texts[1:] if inv.texts[:1] == ("show",) else inv.texts
+        check_operands(inv, texts)
         doors = inv.doors or CLIDoors()
         repo, location = await opened(fl, doors)
         assert doors.dispatch is not None
-        texts = inv.texts[1:] if inv.texts[:1] == ("show",) else inv.texts
         revision = texts[0] if texts else HEAD
         await asyncio.to_thread(resolve_commit, repo, revision)
         name, data = await _named_log(doors.dispatch, location, revision)

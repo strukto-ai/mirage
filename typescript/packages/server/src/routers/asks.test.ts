@@ -19,7 +19,7 @@ const ASK_REASON = 'removal needs sign-off'
 
 interface AskRow {
   id: string
-  sessionId: string
+  session_id: string
   command: string
   argv: string[]
   reason: string
@@ -53,7 +53,7 @@ async function createSession(
   const r = await app.inject({
     method: 'POST',
     url: `/v1/workspaces/${wsId}/sessions`,
-    payload: { sessionId, profile: 'guarded' },
+    payload: { session_id: sessionId, profile: 'guarded' },
   })
   expect(r.statusCode).toBe(201)
 }
@@ -63,15 +63,19 @@ async function execute(
   wsId: string,
   sessionId: string,
   command: string,
-): Promise<{ exitCode: number; stderr: string; refusal: { kind: string; reason: string } | null }> {
+): Promise<{
+  exit_code: number
+  stderr: string
+  refusal: { kind: string; reason: string } | null
+}> {
   const r = await app.inject({
     method: 'POST',
     url: `/v1/workspaces/${wsId}/shell`,
-    payload: { command, sessionId },
+    payload: { command, session_id: sessionId },
   })
   expect(r.statusCode).toBe(200)
   return r.json<{
-    exitCode: number
+    exit_code: number
     stderr: string
     refusal: { kind: string; reason: string } | null
   }>()
@@ -83,12 +87,12 @@ async function raiseAsk(
   sessionId: string,
 ): Promise<string> {
   const refused = await execute(app, wsId, sessionId, 'rm /f.txt')
-  expect(refused.exitCode).toBe(126)
+  expect(refused.exit_code).toBe(126)
   expect(refused.stderr).toBe('rm: Permission denied\n')
   expect(refused.refusal?.kind).toBe('pending')
   const r = await app.inject({
     method: 'GET',
-    url: `/v1/workspaces/${wsId}/asks?sessionId=${sessionId}`,
+    url: `/v1/workspaces/${wsId}/asks?session_id=${sessionId}`,
   })
   expect(r.statusCode).toBe(200)
   const pending = r.json<AskRow[]>()
@@ -111,7 +115,7 @@ describe('asks router', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({
       id: askId,
-      sessionId: 'agent_a',
+      session_id: 'agent_a',
       command: 'rm',
       argv: ['/f.txt'],
       reason: ASK_REASON,
@@ -140,7 +144,7 @@ describe('asks router', () => {
     expect(allAfter.json<AskRow[]>().map((a) => a.id)).toEqual([askId])
 
     const retried = await execute(app, 'asks-allow', 'agent_a', 'rm /f.txt')
-    expect(retried.exitCode).toBe(0)
+    expect(retried.exit_code).toBe(0)
     // The ONCE answer is consumed by the retry that used it.
     const spent = await app.inject({
       method: 'GET',
@@ -165,7 +169,7 @@ describe('asks router', () => {
     expect(answered.json<AskRow>().outcome).toBe('deny')
 
     const retried = await execute(app, 'asks-deny', 'agent_a', 'rm /f.txt')
-    expect(retried.exitCode).toBe(126)
+    expect(retried.exit_code).toBe(126)
     expect(retried.stderr).toBe('rm: Permission denied\n')
     expect(retried.refusal?.kind).toBe('deny')
     expect(retried.refusal?.reason).toContain(ASK_REASON)
@@ -189,7 +193,7 @@ describe('asks router', () => {
 
     for (const target of ['/f.txt', '/g.txt']) {
       const retried = await execute(app, 'asks-scope', 'agent_a', `rm ${target}`)
-      expect(retried.exitCode).toBe(0)
+      expect(retried.exit_code).toBe(0)
     }
     await app.close()
   })
@@ -203,17 +207,17 @@ describe('asks router', () => {
     await raiseAsk(app, 'asks-filter', 'agent_b')
 
     const all = await app.inject({ method: 'GET', url: '/v1/workspaces/asks-filter/asks' })
-    expect(new Set(all.json<AskRow[]>().map((a) => a.sessionId))).toEqual(
+    expect(new Set(all.json<AskRow[]>().map((a) => a.session_id))).toEqual(
       new Set(['agent_a', 'agent_b']),
     )
     const one = await app.inject({
       method: 'GET',
-      url: '/v1/workspaces/asks-filter/asks?sessionId=agent_b',
+      url: '/v1/workspaces/asks-filter/asks?session_id=agent_b',
     })
-    expect(one.json<AskRow[]>().map((a) => a.sessionId)).toEqual(['agent_b'])
+    expect(one.json<AskRow[]>().map((a) => a.session_id)).toEqual(['agent_b'])
     const unknown = await app.inject({
       method: 'GET',
-      url: '/v1/workspaces/asks-filter/asks?sessionId=nope',
+      url: '/v1/workspaces/asks-filter/asks?session_id=nope',
     })
     expect(unknown.statusCode).toBe(404)
     await app.close()

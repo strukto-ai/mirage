@@ -51,8 +51,9 @@ cp = await ws.copy()
 ```typescript TypeScript
 import { DriftPolicy, Workspace } from '@struktoai/mirage-node'
 
-// capture to a tar file
+// capture to a tar file, or as the tar's bytes
 await ws.snapshot('run.tar')
+const tar = await ws.snapshot()
 
 // replay with strict drift detection (default)
 const restored = await Workspace.load('run.tar')
@@ -68,32 +69,37 @@ const copy = await ws.copy()
 
 </CodeGroup>
 
-TypeScript file-path snapshot I/O is available in Node. In the browser, `Workspace.load(snapshotBytes)` accepts a `Uint8Array`, and `Workspace.fromState(...)` restores a state object; writing the tar to a file or download target is the application's responsibility.
+TypeScript file-path snapshot I/O is available in Node. In the browser, `ws.snapshot()` answers the tar as a `Uint8Array`, `Workspace.load(snapshotBytes)` takes it back, and `Workspace.fromState(...)` restores a state object; saving the bytes to a file or download target is the application's responsibility.
 
 Both `snapshot` and `copy` are async because they serialize workspace state and collect recorded fingerprints.
 
 `copy` also keeps the workspace's profiles, default profile, and command limits. Policy objects and the route policy are not copied; add them to the copy again if it needs them.
 
-## Versioning: commit, checkout, clone
+## An S3-like store
 
-A tar snapshot is a *portable* capture you move between machines. Versioning is the in-place complement: a git-style history kept *with* the workspace, server-side and keyed by workspace id, so you can checkpoint, roll back, branch, and fork without writing a file. It is backed by a real git object store (dulwich) inside the daemon.
+A snapshot can go to an S3-like store instead of a file. Pass an `S3Config`, the one the [S3 mount](/python/vfs/s3) takes, so S3, R2, MinIO and other S3-compatible stores all work; the key becomes the object key, under the config's `key_prefix`.
 
-This is a CLI / REST feature, not an SDK method (there is no `ws.commit()` in-process):
+<CodeGroup>
 
-```bash
-mirage workspace commit demo -m "before refactor"   # checkpoint the live state
-mirage workspace checkout demo <version>             # roll back in place
-mirage workspace clone demo --at <version>           # fork a past version
+```python Python
+from mirage.vfs.s3 import S3Config
+
+store = S3Config(bucket="snapshots", key_prefix="team/")
+await ws.snapshot("run.tar", s3=store)
+restored = await Workspace.load("run.tar", s3=store)
 ```
 
-See the [CLI versioning reference](/home/cli#versioning) for `log`, `diff`, `branch`, and the full flag set.
+```typescript TypeScript
+import { type S3Config, Workspace } from '@struktoai/mirage-node'
 
-| | Tar snapshot | Versioning |
-| --- | --- | --- |
-| Output | a `.tar` you move or archive | history kept with the workspace (server) |
-| API | `ws.snapshot()` / `Workspace.load()` (SDK) | `mirage workspace commit` / `checkout` / `clone` (CLI + REST) |
-| Lineage | none, each tar stands alone | git-style commits, branches, diff |
-| Best for | reproducing a run on another machine | iterating in place with checkpoints to revert to |
+const store: S3Config = { bucket: 'snapshots', keyPrefix: 'team/' }
+await ws.snapshot('run.tar', { s3: store })
+const restored = await Workspace.load('run.tar', { s3: store })
+```
+
+</CodeGroup>
+
+A server never writes a snapshot to its own disk. Over [HTTP](/home/access/http#snapshot-a-workspace) and the [CLI](/home/access/cli#workspaces) the tar goes back to the caller, whether the server runs on the same machine or another, or into the store its operator gave it (`build_app(snapshot_store=...)`, `buildApp({ snapshotStore })`), named by a key.
 
 ## What Is And Isn't Captured
 

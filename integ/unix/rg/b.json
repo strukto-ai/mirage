@@ -370,6 +370,41 @@
         "A",
         "B"
       ]
+    },
+    {
+      "id": "rg_b_no_byte_offset_last_wins",
+      "seq": 15200051,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'abc\\ndefabc\\n' > /data/fcB_b.txt; rg -b --no-byte-offset abc /data/fcB_b.txt; rg --no-byte-offset -b abc /data/fcB_b.txt; rg -bo --no-byte-offset abc /data/fcB_b.txt; rm -f /data/fcB_b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "abc\ndefabc\n0:abc\n4:defabc\nabc\nabc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b",
+        "no_byte_offset",
+        "o"
+      ]
     }
   ]
 }

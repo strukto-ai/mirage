@@ -55,7 +55,7 @@ import {
   getUnsetArgs,
   getWhileParts,
 } from '../../shell/helpers.ts'
-import { JobTable } from '../../shell/job_table/index.ts'
+import type { JobTable } from '../../shell/job_table/index.ts'
 import { ERREXIT_EXEMPT_TYPES, FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
 import { NodeType as NT, type PipelineStages, Redirect, RedirectKind } from '../../shell/types.ts'
 import { NodeKind, nodeKind, pipelineTransparent } from '../../shell/node_kind.ts'
@@ -107,7 +107,11 @@ import {
   visibleEnv,
 } from '../session/state.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
-import { drained, type ExecuteNodeOpts, runStatement } from '../executor/jobs.ts'
+import { drained, runStatement } from '../executor/jobs.ts'
+import type { ExecuteNodeOpts } from '../executor/command/types.ts'
+import { endShell } from '../executor/traps.ts'
+import { concat } from '../../io/cachable_iterator.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 const STREAMING_KINDS: ReadonlySet<NodeKind> = new Set([
   NodeKind.PROGRAM,
@@ -420,6 +424,7 @@ async function runPipeline(
     callStack,
     signal,
     processes,
+    executeFn,
   )
   if (!stages.negated) return [stdout, io, execNode]
   const flipped = new IOResult({
@@ -573,18 +578,42 @@ async function runRedirected(
     return await installExecRedirects(dispatch, session, expandedRedirects, stdin)
   }
   // A heredoc's operator line reads the routed stdout, so then it is
-  // returned rather than written.
-  let [stdout, io, execNode] = await handleRedirect(
-    recurse,
-    dispatch,
-    command,
-    expandedRedirects,
-    session,
-    stdin,
-    callStack,
-    false,
-    pipeNode === null ? sink : undefined,
-  )
+  // returned rather than written. A simple command expands its words
+  // before its redirects apply, so what that printed (a substitution's
+  // stderr) goes around them; a compound body expands inside them.
+  const simple = command !== null && command.type === NT.COMMAND
+  const outer = session.diagnostics
+  if (simple) session.diagnostics = []
+  let stdout: ByteSource | null
+  let io: IOResult
+  let execNode: ExecutionNode
+  try {
+    ;[stdout, io, execNode] = await handleRedirect(
+      simple
+        ? (n, s, i, cs, opts) => recurse(n, s, i, cs, { ...opts, ownDiagnostics: false })
+        : recurse,
+      dispatch,
+      command,
+      expandedRedirects,
+      session,
+      stdin,
+      callStack,
+      false,
+      pipeNode === null ? sink : undefined,
+    )
+    if (simple && session.diagnostics.length > 0) {
+      const err = diagnosticStderr(command, session)
+      io.stderr = concat([err, await io.materializeStderr()])
+      execNode.stderr = concat([err, execNode.stderr])
+    }
+  } catch (err) {
+    if (simple && err instanceof ExitSignal) {
+      err.stderr = concat([diagnosticStderr(command, session), err.stderr])
+    }
+    throw err
+  } finally {
+    session.diagnostics = outer
+  }
   if (pipeNode !== null && stdout !== null) {
     const [stdout2, io2, execNode2] = await recurse(pipeNode, session, stdout, callStack)
     stdout = stdout2
@@ -770,9 +799,43 @@ export async function executeNode(
   session: SessionState,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
+  // What expanding the node printed (a substitution's stderr) goes out with
+  // the node's own stderr, unless its caller collects it: a simple
+  // command's words expand before its redirects apply.
+  ownDiagnostics = true,
+  // The node is the whole of a child shell (a background job), which runs
+  // its EXIT action when the node ends, its evaluator bound the way
+  // `executeNodeBody` binds it for the node's own lines.
+  endsShell = false,
 ): Promise<Result> {
+  if (endsShell) {
+    const { signal, executionScope } = deps
+    const executeFn: ExecuteFn = (cmd, opts) =>
+      deps.executeFn(cmd, {
+        session,
+        ...(signal !== undefined ? { signal } : {}),
+        ...(executionScope !== undefined ? { executionScope } : {}),
+        ...opts,
+      })
+    return endShell(
+      executeFn,
+      session,
+      stdin,
+      callStack,
+      executeNode(deps, node, session, stdin, callStack, ownDiagnostics),
+    )
+  }
   const executionScope = deps.executionScope ?? new ExecutionScope()
   await executionScope.checkpoint(deps.signal ?? session.abortSignal ?? undefined)
+  if (!ownDiagnostics) {
+    const result = await executeNodeBody(deps, node, session, stdin, callStack, executionScope)
+    if (deps.signal?.aborted === true || session.abortSignal?.aborted === true) {
+      throw makeAbortError(
+        deps.signal?.aborted === true ? deps.signal : (session.abortSignal ?? undefined),
+      )
+    }
+    return result
+  }
   const outer = session.diagnostics
   session.diagnostics = []
   try {
@@ -822,7 +885,7 @@ function diagnosticStderr(node: TSNodeLike, session: SessionState): Uint8Array {
     : ''
   const prefix = builtin === '' ? 'bash: ' : `bash: ${builtin}: `
   const parts = session.diagnostics.map((message) =>
-    typeof message === 'string' ? new TextEncoder().encode(prefix + message + '\n') : message,
+    typeof message === 'string' ? encodeText(prefix + message + '\n') : message,
   )
   const result = new Uint8Array(parts.reduce((size, part) => size + part.length, 0))
   let offset = 0
@@ -869,7 +932,16 @@ async function executeNodeBody(
     i: ByteSource | null,
     cs: CallStack | null,
     opts?: ExecuteNodeOpts,
-  ): Promise<Result> => executeNode(withOpts(captureDeps, opts), n, s, i, cs)
+  ): Promise<Result> =>
+    executeNode(
+      withOpts(captureDeps, opts),
+      n,
+      s,
+      i,
+      cs,
+      opts?.ownDiagnostics !== false,
+      opts?.endsShell === true,
+    )
   const stream =
     sink === undefined
       ? recurse
@@ -879,7 +951,16 @@ async function executeNodeBody(
           i: ByteSource | null,
           cs: CallStack | null,
           opts?: ExecuteNodeOpts,
-        ): Promise<Result> => executeNode(withOpts(deps, opts), n, s, i, cs)
+        ): Promise<Result> =>
+          executeNode(
+            withOpts(deps, opts),
+            n,
+            s,
+            i,
+            cs,
+            opts?.ownDiagnostics !== false,
+            opts?.endsShell === true,
+          )
 
   const { dispatch, registry, jobTable, agentId } = deps
   // Capture the walker's session before any await; a concurrent line's
@@ -972,6 +1053,7 @@ async function executeNodeBody(
       registry.decisions,
       sink ?? null,
       inline,
+      executeFn,
     )
   }
 
@@ -1054,7 +1136,7 @@ async function executeNodeBody(
     // A subshell is its own shell: background jobs started inside live
     // in a private job table (`$!`/`wait`/`kill` in the body see them;
     // the parent's table never does), mirroring bash's forked process.
-    const subTable = new JobTable(null, jobTable.processes)
+    const subTable = jobTable.child()
     const abort = new AbortController()
     const subDeps: ExecuteNodeDeps = {
       ...captureDeps,
@@ -1074,7 +1156,16 @@ async function executeNodeBody(
       inp: ByteSource | null,
       cs: CallStack | null,
       opts?: ExecuteNodeOpts,
-    ): Promise<Result> => executeNode(withOpts(subDeps, opts), n, s, inp, cs)
+    ): Promise<Result> =>
+      executeNode(
+        withOpts(subDeps, opts),
+        n,
+        s,
+        inp,
+        cs,
+        opts?.ownDiagnostics !== false,
+        opts?.endsShell === true,
+      )
     const childSession = session.fork()
     const asProgram = isProgramInvocation(session)
     let result: Result | undefined
@@ -1103,6 +1194,7 @@ async function executeNodeBody(
               deps.handed ?? null,
               registry.decisions,
               sink ?? null,
+              executeFn,
             )
           result = await runWithSession(childSession, () =>
             asProgram ? runAsProgram(childSession, body) : body(),
@@ -1112,7 +1204,7 @@ async function executeNodeBody(
       })
     } catch (error) {
       if ((error as { code?: unknown }).code === 'EAGAIN')
-        throw new ExitSignal(FORK_FAILED_STATUS, new TextEncoder().encode(FORK_FAILED))
+        throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
       throw error
     }
     childSession.processId = process.info.pid
@@ -1161,7 +1253,7 @@ async function executeNodeBody(
         ensureVarVisible(session, name)
       } catch (err) {
         if (!(err instanceof PolicyDenied)) throw err
-        const errBytes = new TextEncoder().encode(`bash: ${err.message}\n`)
+        const errBytes = encodeText(`bash: ${err.message}\n`)
         return [
           null,
           new IOResult({ exitCode: 1, stderr: errBytes }),
@@ -1169,7 +1261,7 @@ async function executeNodeBody(
         ]
       }
       if (session.readonlyVars.has(name)) {
-        const errBytes = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
+        const errBytes = encodeText(`bash: ${name}: readonly variable\n`)
         return [
           null,
           new IOResult({ exitCode: 1, stderr: errBytes }),
@@ -1190,7 +1282,7 @@ async function executeNodeBody(
       reader.settle()
     } catch (err) {
       if (!(err instanceof PolicyDenied)) throw err
-      const errBytes = new TextEncoder().encode(`bash: ${err.message}\n`)
+      const errBytes = encodeText(`bash: ${err.message}\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: errBytes }),
@@ -1198,7 +1290,7 @@ async function executeNodeBody(
       ]
     }
     if (error !== null) {
-      const errBytes = new TextEncoder().encode(`bash: ((: ${expr}: ${error.message}\n`)
+      const errBytes = encodeText(`bash: ((: ${expr}: ${error.message}\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: errBytes }),
@@ -1301,7 +1393,7 @@ async function executeNodeBody(
   if (kind === NodeKind.FOR || kind === NodeKind.SELECT) {
     const [variable, values, body] = getForParts(node)
     if (!isValidName(variable)) {
-      const err = new TextEncoder().encode(`bash: \`${variable}': not a valid identifier\n`)
+      const err = encodeText(`bash: \`${variable}': not a valid identifier\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),
@@ -1445,7 +1537,7 @@ async function executeNodeBody(
       // `readonly -f f` froze the body: either definition syntax refuses
       // with `f: readonly function`, exit 1, and the old body stays,
       // pinned on 5.2.37.
-      const err = new TextEncoder().encode(`bash: ${name}: readonly function\n`)
+      const err = encodeText(`bash: ${name}: readonly function\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),
@@ -1532,9 +1624,7 @@ async function executeNodeBody(
   // Constructs the parser accepts but the executor cannot honor (e.g.
   // C-style `for ((;;))`). Mirrors the unsupported-builtin diagnostic
   // so agents see a capability gap, not a crash.
-  const unsupportedErr = new TextEncoder().encode(
-    `mirage: unsupported shell construct: ${node.type}\n`,
-  )
+  const unsupportedErr = encodeText(`mirage: unsupported shell construct: ${node.type}\n`)
   return [
     null,
     new IOResult({ exitCode: 2, stderr: unsupportedErr }),

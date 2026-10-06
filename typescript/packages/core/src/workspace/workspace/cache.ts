@@ -12,7 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CacheType, type CacheConfig, type RedisCacheConfig } from '../../cache/file/config.ts'
+import {
+  CacheType,
+  normalizeCacheConfig,
+  type CacheConfig,
+  type RedisCacheConfig,
+} from '../../cache/file/config.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
@@ -61,7 +66,8 @@ export function buildFileCache(
         'and name that type here',
     )
   }
-  const type = cache?.type ?? CacheType.RAM
+  const normalized = cache === undefined ? undefined : normalizeCacheConfig(cache)
+  const type = normalized?.type ?? CacheType.RAM
   if (type !== CacheType.RAM) {
     const factory = FACTORIES[type]
     if (factory === undefined) {
@@ -70,10 +76,10 @@ export function buildFileCache(
           `(which registers it) or call registerFileCacheStore('${type}', ...)`,
       )
     }
-    return factory(cache as RedisCacheConfig)
+    return factory(normalized as RedisCacheConfig)
   }
   return new RAMFileCacheStore({
-    limit: cache?.limit ?? cacheLimit,
-    maxDrainBytes: cache?.maxDrainBytes ?? null,
+    limit: normalized?.limit ?? cacheLimit,
+    maxDrainBytes: normalized?.maxDrainBytes ?? null,
   })
 }

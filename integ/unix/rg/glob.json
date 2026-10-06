@@ -29,9 +29,7 @@
         "stdout": "/data/r4/app.log:error: disk full\n/data/r4/app.log:error: timeout\n/data/r4/app.log:error: disk full\n/data/r4/app.log:error: timeout\n/data/r4/code.py:    return 42\n/data/r4/code.js:function main() { return 42; }\n/data/r4/code.js:function main() { return 42; }\n/data/r4/code.py:    return 42\n/data/r4/code.js:function main() { return 42; }\n/data/r4/app.log:error: disk full\n/data/r4/app.log:error: disk full\nrc=1\n",
         "stderr": ""
       },
-      "flags": [
-        "glob"
-      ]
+      "flags": ["glob", "g", "l", "iglob", "glob_case_insensitive"]
     },
     {
       "id": "rg_glob_does_not_filter_a_named_file",
@@ -100,6 +98,42 @@
         "stdout": "world\nworld\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "rg_glob_case_insensitive_last_wins",
+      "seq": 15200061,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcB_g && printf 'x\\n' > /data/fcB_g/A.TXT && printf 'x\\n' > /data/fcB_g/b.txt && rg -l --sort path --glob-case-insensitive --no-glob-case-insensitive -g '*.txt' x /data/fcB_g; rg -l --sort path --no-glob-case-insensitive --glob-case-insensitive -g '*.txt' x /data/fcB_g; rg -l --sort path --no-glob-case-insensitive --iglob '*.txt' x /data/fcB_g; rm -rf /data/fcB_g",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fcB_g/b.txt\n/data/fcB_g/A.TXT\n/data/fcB_g/b.txt\n/data/fcB_g/A.TXT\n/data/fcB_g/b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "glob",
+        "glob_case_insensitive",
+        "no_glob_case_insensitive",
+        "iglob"
+      ]
     }
   ]
 }

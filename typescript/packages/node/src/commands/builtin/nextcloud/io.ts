@@ -18,7 +18,7 @@ import { rename } from '../../../core/nextcloud/rename.ts'
 import { rmR } from '../../../core/nextcloud/rm.ts'
 import { rmdir } from '../../../core/nextcloud/rmdir.ts'
 import { stat } from '../../../core/nextcloud/stat.ts'
-import { stream } from '../../../core/nextcloud/stream.ts'
+import { readStream } from '../../../core/nextcloud/stream.ts'
 import { truncate } from '../../../core/nextcloud/truncate.ts'
 import { unlink } from '../../../core/nextcloud/unlink.ts'
 import { write } from '../../../core/nextcloud/write.ts'
@@ -27,13 +27,13 @@ export const IO: CommandIO<NextcloudAccessor> = new VFSAdapter<NextcloudAccessor
   read: { readdir, readBytes: read, stat },
   native: {
     readRange: rangeOf(read),
-    readStream: stream,
+    readStream,
     exists,
     find,
     du: { size: nextcloudDuSize, entries: nextcloudDuEntries },
   },
   writes: {
-    append: appendFromRead(read, write),
+    append: appendFromRead(read, write, stat),
     write,
     mkdir,
     unlink,

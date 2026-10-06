@@ -13,7 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { HiddenPaths, PathSpec } from '../../types.ts'
-import { anchorDepth, classifyPaths, pathCovers, pathHidden } from '../../utils/hidden.ts'
+import {
+  anchorDepth,
+  classifyPaths,
+  hidesIntersect,
+  pathCovers,
+  pathHidden,
+} from '../../utils/hidden.ts'
 import {
   ASK_SECOND,
   DENY_FIRST,
@@ -49,7 +55,8 @@ export function betterMatch(
  * returns null when the rule does not apply, `{operand: null}` when the
  * rule refuses (or asks about) the whole line, and the operand as typed
  * when the rule is path-scoped and one operand fell under its paths, so
- * the refusal is scoped to that operand (`rm: x: <reason>`, exit 1)
+ * the refusal is scoped to that operand (`rm: cannot remove 'x':
+ * Permission denied`, exit 1)
  * rather than to the command (`rm: Permission denied`, 126).
  */
 export interface RuleMatch {
@@ -350,6 +357,60 @@ export function matchIo(
   const commands = rule.commands ?? []
   if (commands.length > 0 && !commands.some((p) => patternMatches(p, tokens))) return false
   return pathHidden(scope, virtual)
+}
+
+/**
+ * Whether a rule holds at an op door too: a pure path rule, which names
+ * no command and has paths to match, the one kind an op can meet. The
+ * sort of a profile's rules: a POSIX-level rule holds at every door, a
+ * command-level one (it names a command, or no path) only where a line
+ * is judged.
+ */
+export function posixLevel(rule: CommandRule): boolean {
+  return (rule.commands ?? []).length === 0 && ruleScope(rule) !== null
+}
+
+/**
+ * The command-level parts of a profile's rules, which a door that sees
+ * only ops (a kernel mount, SFTP, codex-exec's file calls) cannot apply,
+ * each described for the operator's warning: the allow list and every
+ * rule that is not POSIX level.
+ */
+export function skippedAtOpDoors(rules: AdmissionRules | null): string[] {
+  if (rules === null) return []
+  const skipped = rules.allow !== null ? ['commands.allow'] : []
+  for (const [verb, listed] of [
+    ['deny', rules.deny],
+    ['ask', rules.ask],
+  ] as const) {
+    for (const rule of listed) {
+      if (!posixLevel(rule)) skipped.push(`commands.${verb}: ${rule.reason}`)
+    }
+  }
+  return skipped
+}
+
+/**
+ * Whether a rule in force could reach an entry at or under this path for
+ * the running line: the rule names the line and its paths could cover
+ * something in the subtree. What a native walk asks before it trusts the
+ * raw tree, per operand the way a hide is: a rule on `/repo/.env` leaves
+ * `find /s3` its native op.
+ */
+export function ioReach(
+  rules: AdmissionRules | null,
+  tokens: readonly string[],
+  virtual: string,
+): boolean {
+  if (rules === null) return false
+  for (const rule of [...rules.deny, ...rules.ask]) {
+    const scope = ruleScope(rule)
+    if (scope === null) continue
+    const commands = rule.commands ?? []
+    if (commands.length > 0 && !commands.some((p) => patternMatches(p, tokens))) continue
+    if (hidesIntersect(scope, virtual)) return true
+  }
+  return false
 }
 
 /**

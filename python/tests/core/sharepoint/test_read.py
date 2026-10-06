@@ -5,7 +5,7 @@ from aioresponses import CallbackResult, aioresponses
 from yarl import URL
 
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
-from mirage.core.sharepoint.read import read_bytes
+from mirage.core.sharepoint.read import read
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -45,7 +45,7 @@ async def test_read_returns_content():
             virtual="/sp/Engineering/Documents/report.txt",
             directory="/sp/Engineering/Documents/report.txt",
         )
-        data = await read_bytes(_accessor(), path)
+        data = await read(_accessor(), path)
         assert (_calls(m, url), _calls(m, _BYTES)) == (1, 1)
     assert data == b"file content"
 
@@ -71,7 +71,7 @@ async def test_an_unrecorded_read_fetches_the_item_then_its_download_url():
             virtual="/sp/Engineering/Documents/report.txt",
             directory="/sp/Engineering/Documents/report.txt",
         )
-        data = await read_bytes(_accessor(), path)
+        data = await read(_accessor(), path)
     assert data == b"file content"
     # Token first, then the pre-signed download without the bearer token.
     assert seen == [("item", "Bearer tok"), ("download", None)]
@@ -88,7 +88,7 @@ async def test_a_read_falls_back_to_content_when_graph_omits_the_download_url():
             virtual="/sp/Engineering/Documents/report.txt",
             directory="/sp/Engineering/Documents/report.txt",
         )
-        data = await read_bytes(_accessor(), path)
+        data = await read(_accessor(), path)
         assert (_calls(m, url), _calls(m, f"{url}:/content")) == (1, 1)
     assert data == b"file content"
 
@@ -108,7 +108,7 @@ async def test_read_missing_raises_file_not_found():
             directory="/sp/Engineering/Documents/nope.txt",
         )
         with pytest.raises(FileNotFoundError):
-            await read_bytes(_accessor(), path)
+            await read(_accessor(), path)
 
 
 @pytest.mark.asyncio
@@ -128,7 +128,7 @@ async def test_read_range():
             virtual="/sp/Engineering/Documents/data.bin",
             directory="/sp/Engineering/Documents/data.bin",
         )
-        data = await read_bytes(_accessor(), path, offset=2, size=3)
+        data = await read(_accessor(), path, offset=2, size=3)
     assert captured["range"] == "bytes=2-4"
     assert data == b"llo"
 
@@ -155,7 +155,7 @@ async def test_recorded_read_names_the_virtual_path():
                 f"{_BASE}/drives/{_DRIVE_ID}/root:/k.txt:/content",
                 body=b"bytes",
             )
-            data = await read_bytes(accessor, spec)
+            data = await read(accessor, spec)
     finally:
         scope.close()
     assert data == b"bytes"

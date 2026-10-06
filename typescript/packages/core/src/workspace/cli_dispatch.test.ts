@@ -26,7 +26,7 @@ import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { MountMode } from '../types.ts'
-import { ScriptSource } from '../runtime/routing/types.ts'
+import { ScriptSource } from '../runtime/types.ts'
 import type { RuntimeLanguage } from '../runtime/types.ts'
 import { Workspace } from './workspace/workspace.ts'
 
@@ -107,7 +107,7 @@ describe('CLI dispatch e2e', () => {
     expect(dec.decode(bogus.stderr)).toBe("sl: 'bogus' is not a sl command. See 'sl --help'.\n")
     const help = await ws.shell('sl message send --help')
     expect(help.exitCode).toBe(0)
-    expect(dec.decode(help.stdout).startsWith('sl message send\n')).toBe(true)
+    expect(dec.decode(help.stdout).startsWith('usage: sl message send ')).toBe(true)
   })
 
   it('command tiers key on the installed name', async () => {
@@ -285,7 +285,7 @@ describe('script CLI e2e', () => {
       const res = await ws.shell('man pager')
       const out = dec.decode(res.stdout)
       expect(res.exitCode).toBe(0)
-      expect(out.startsWith('pager\n')).toBe(true)
+      expect(out.startsWith('usage: pager\n')).toBe(true)
       expect(out).not.toContain('--help')
     } finally {
       await ws.close()
@@ -446,7 +446,7 @@ describe('the session plane reaches a CLI leaf', () => {
     ws.registerCli('stash', STASH)
     const denied = await ws.shell('stash AWS_PROFILE prod')
     expect(denied.exitCode).not.toBe(0)
-    expect(dec.decode(denied.stderr)).toContain('not yours to set')
+    expect(denied.refusal?.reason).toContain('not yours to set')
     expect(dec.decode((await ws.shell('echo $AWS_PROFILE')).stdout)).toBe('\n')
     expect((await ws.shell('stash OTHER fine')).exitCode).toBe(0)
   })

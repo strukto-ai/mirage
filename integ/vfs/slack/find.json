@@ -77,6 +77,19 @@
         "stdout": "/slack/channels/leadership__C5/2026-01-07/files/pivot_rationale__F11.pdf\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "slack_find_type_f_and_d_in_a_day",
+      "seq": 520015,
+      "targets": [
+        "slack"
+      ],
+      "command": "find /slack/channels/eng-agents__C8/2026-02-06/ -type f; echo --; find /slack/channels/eng-agents__C8/2026-02-06/ -type d",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/eng-agents__C8/2026-02-06/chat.jsonl\n/slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv\n--\n/slack/channels/eng-agents__C8/2026-02-06/\n/slack/channels/eng-agents__C8/2026-02-06/files\n",
+        "stderr": ""
+      }
     }
   ]
 }

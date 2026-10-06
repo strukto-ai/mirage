@@ -24,7 +24,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cat: /scratch/private/k: private\n"
+        "stderr": "cat: /scratch/private/k: Permission denied\n"
       }
     },
     {
@@ -51,7 +51,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "ls: /scratch/private: private\n"
+        "stderr": "ls: cannot access '/scratch/private': Permission denied\n"
       }
     },
     {
@@ -66,7 +66,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cat: /scratch/locked/y: frozen\n"
+        "stderr": "cat: /scratch/locked/y: Permission denied\n"
       }
     },
     {
@@ -80,7 +80,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "rm: /scratch/both: both: locked\n"
+        "stderr": "rm: cannot remove '/scratch/both': Permission denied\n"
       }
     },
     {
@@ -107,7 +107,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "rm: /scratch/locked: frozen\n"
+        "stderr": "rm: cannot remove '/scratch/locked': Permission denied\n"
       }
     },
     {
@@ -121,7 +121,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "mv: /scratch/locked: frozen\n"
+        "stderr": "mv: /scratch/locked: Permission denied\n"
       }
     },
     {
@@ -135,7 +135,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "mv: /scratch/locked: frozen\n"
+        "stderr": "mv: /scratch/locked: Permission denied\n"
       }
     },
     {
@@ -163,7 +163,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "rmdir: /scratch/locked: frozen\n"
+        "stderr": "rmdir: failed to remove '/scratch/locked': Permission denied\n"
       }
     },
     {

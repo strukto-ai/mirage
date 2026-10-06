@@ -19,16 +19,22 @@ import { FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
 import type { ProcessHandle } from '../../process/handle.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
+import { concat } from '../../io/cachable_iterator.ts'
 import { runWithRecording } from '../../observe/context.ts'
 import type { Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { Channel } from '../../shell/console/types.ts'
 import type { JobConsole } from '../../shell/console/job_console.ts'
+import { Terminal } from '../../shell/console/index.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
-import { getCurrentSessionFor, runWithSession } from '../../context/session_context.ts'
-import type { JobTable } from '../../shell/job_table/index.ts'
 import {
-  syntaxErrorMessage,
+  getCurrentSessionFor,
+  runWithRefusalSink,
+  runWithSession,
+} from '../../context/session_context.ts'
+import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
+import {
+  syntaxErrorResult,
   findSyntaxError,
   findUnterminatedBacktick,
   type ShellParser,
@@ -63,11 +69,13 @@ import { prejudgeLine, unrefusedNodes } from '../node/explain.ts'
 import { runCommandTree } from '../node/run_tree.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
 import type { SessionManager } from '../session/manager.ts'
-import { type SessionState, type StatusWriter, newStatusWriter } from '../session/session.ts'
+import { type SessionState } from '../session/session.ts'
+import { type StatusWriter, newStatusWriter } from '../abort.ts'
 import { ExecutionNode } from '../types.ts'
 import { abortable, joinOrAbort } from '../abort.ts'
 import { failureResult, isControlFlowError } from './failure.ts'
 import { ended, isUnwinding } from '../executor/control.ts'
+import { finishShell, inheritExitTrap } from '../executor/traps.ts'
 import { expandingAliases } from '../executor/builtins/alias/index.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
 import { cliEnvNames, fillEnv, fillNames, guestBound, lineNodes } from './fill.ts'
@@ -79,6 +87,7 @@ import type { Router } from './routing.ts'
 import type { Runtimes } from './runtimes.ts'
 import { ExecuteResult, type ExecuteOptions } from './types.ts'
 import { commandName, forkForCall } from './utils.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 /**
  * Everything `executeLine` needs from the workspace, passed explicitly
@@ -121,9 +130,18 @@ interface NestedRefusal {
   latest: Refusal | null
 }
 
-function syntaxErrorResult(offending: string, root: TSNodeLike): ExecuteResult {
-  const errMsg = syntaxErrorMessage(offending, root)
-  return new ExecuteResult(new Uint8Array(), new TextEncoder().encode(errMsg), 2)
+/**
+ * What a line showed, for its record: what waits on its terminal for it
+ * to take, then what it answers with besides. Mirrors Python's `_shown`.
+ */
+async function shown(io: IOResult, sink: JobConsole | undefined): Promise<IOResult> {
+  if (!(sink instanceof Terminal) || sink.reader !== null) return io
+  const [out, err] = sink.drain()
+  sink.putBack(out, err)
+  return new IOResult({
+    stdout: concat([out, await io.materializeStdout()]),
+    exitCode: io.exitCode,
+  })
 }
 
 /**
@@ -143,11 +161,14 @@ async function answerLine(
     await joinOrAbort(
       env.observer.logExecution(
         command,
-        new IOResult({
-          exitCode: result.exitCode,
-          stderr: result.stderr,
-          refusal: result.refusal,
-        }),
+        await shown(
+          new IOResult({
+            exitCode: result.exitCode,
+            stderr: result.stderr,
+            refusal: result.refusal,
+          }),
+          options.sink,
+        ),
         [],
         options.agentId ?? env.agentId ?? '',
         session.sessionId,
@@ -257,20 +278,32 @@ async function runLine(
   // Ambient re-entry is safe only with task-local storage: the browser
   // fallback's newest frame may belong to an unrelated shell call.
   const ambient = asyncContextIsolatesTasks ? getCurrentSessionFor(env.sessions) : null
+  const inPlace =
+    ambient !== null && (options.sessionId === undefined || options.sessionId === ambient.sessionId)
   const targetSession =
     options.session ??
-    (ambient !== null &&
-    (options.sessionId === undefined || options.sessionId === ambient.sessionId)
-      ? ambient
-      : env.sessions.get(options.sessionId ?? env.sessions.defaultId))
+    (inPlace ? ambient : env.sessions.get(options.sessionId ?? env.sessions.defaultId))
   frame.session = targetSession
   const executionScope = options.executionScope ?? new ExecutionScope()
-  options = { ...options, executionScope }
   await executionScope.start()
-  if (targetSession.processId === null) {
+  // A typed line writes to its session's terminal, and so do the jobs it
+  // starts, as they write; the line answers with whatever reached the
+  // terminal while it ran, a job's output from before it first.
+  const tty = options.session === undefined && !inPlace ? targetSession.tty : null
+  const lineOptions: ExecuteOptions = {
+    ...options,
+    executionScope,
+    ...(tty !== null ? { sink: tty } : {}),
+  }
+  const run = async (): Promise<ExecuteResult> => {
+    if (targetSession.processId !== null) {
+      return runPreparedLine(env, command, targetSession, lineOptions, frame, argv)
+    }
     const abort = new AbortController()
     const combined =
-      options.signal === undefined ? abort.signal : AbortSignal.any([options.signal, abort.signal])
+      lineOptions.signal === undefined
+        ? abort.signal
+        : AbortSignal.any([lineOptions.signal, abort.signal])
     let result: ExecuteResult | undefined
     let process: ProcessHandle
     try {
@@ -278,7 +311,7 @@ async function runLine(
         sessionId: targetSession.sessionId,
         limit: targetSession.processes.max,
         command,
-        cwd: PathSpec.fromStrPath(options.cwd ?? targetSession.cwd),
+        cwd: PathSpec.fromStrPath(lineOptions.cwd ?? targetSession.cwd),
         cancel: () => {
           abort.abort()
         },
@@ -290,7 +323,7 @@ async function runLine(
                 env,
                 command,
                 targetSession,
-                { ...options, signal: combined },
+                { ...lineOptions, signal: combined },
                 frame,
                 argv,
               ),
@@ -302,11 +335,7 @@ async function runLine(
     } catch (error) {
       if ((error as { code?: unknown }).code !== 'EAGAIN') throw error
       recordStatus(targetSession, FORK_FAILED_STATUS)
-      return new ExecuteResult(
-        new Uint8Array(),
-        new TextEncoder().encode(FORK_FAILED),
-        FORK_FAILED_STATUS,
-      )
+      return new ExecuteResult(new Uint8Array(), encodeText(FORK_FAILED), FORK_FAILED_STATUS)
     }
     targetSession.processId = process.info.pid
     targetSession.shellPid ??= process.info.pid
@@ -318,7 +347,26 @@ async function runLine(
       targetSession.processId = null
     }
   }
-  return runPreparedLine(env, command, targetSession, options, frame, argv)
+  if (tty === null) return run()
+  let result: ExecuteResult
+  try {
+    // What reaches a streaming caller goes under the line's grace, as the
+    // sink drain does: a stalled reader releases an aborted caller.
+    await joinOrAbort(tty.attach(options.sink ?? null), options.signal)
+    result = await run()
+    const answered = result
+    await joinOrAbort(
+      tty
+        .emit(Channel.STDOUT, answered.stdout)
+        .then(() => tty.emit(Channel.STDERR, answered.stderr)),
+      options.signal,
+    )
+  } catch (error) {
+    tty.dropLine()
+    throw error
+  }
+  const [stdout, stderr] = tty.take()
+  return new ExecuteResult(stdout, stderr, result.exitCode, result.refusal)
 }
 
 /**
@@ -367,14 +415,16 @@ async function runPreparedLine(
                 expandingAliases(effectiveSession),
               ) ?? findUnterminatedBacktick(root.text))
             : null
-        if (offending !== null)
+        if (offending !== null) {
+          const io = syntaxErrorResult(offending, root)
           return answerLine(
             env,
             command,
             options,
             targetSession,
-            syntaxErrorResult(offending, root),
+            new ExecuteResult(new Uint8Array(), await materialize(io.stderr), io.exitCode),
           )
+        }
         const rootNode = root as unknown as TSNodeLike
         let routingDecision: RouteDecision | null
         try {
@@ -451,16 +501,23 @@ async function runPreparedLine(
           // writes its statements there as they finish.
           if (opts.sink !== undefined) innerOpts.sink = opts.sink
           if (opts.callStack !== undefined) innerOpts.callStack = opts.callStack
+          // A nested shell's jobs are its own: its `jobs` and `wait` see
+          // only them, and its caller's never see them.
+          const jobs = opts.jobTable ?? options.jobTable
+          if (jobs !== undefined) innerOpts.jobTable = jobs
           const session = opts.session ?? effectiveSession
           const substitutionTree =
             opts.substitution === true && opts.node?.type === NT.COMMAND_SUBSTITUTION
               ? parser.parse(cmd)
               : null
           if (substitutionTree !== null && inputSubstitutionRedirect(substitutionTree) !== null) {
+            // The file is the substitution's value, never what the line
+            // shows: the read runs with no sink, the line's terminal least
+            // of all.
             const [stdout, io] = await runCommandTree(
               withHandOff(
                 {
-                  ...deps,
+                  ...lineDeps,
                   ...(innerSignal !== undefined ? { signal: innerSignal } : {}),
                   ...(opts.executionScope !== undefined
                     ? { executionScope: opts.executionScope }
@@ -480,23 +537,65 @@ async function runPreparedLine(
           }
           const saved = opts.substitution === true ? session.snapshot() : null
           const terminalOutput = session.terminalOutput
-          if (saved !== null) session.terminalOutput = false
+          const capture = new Terminal()
+          const waits = new JobWaits(capture.jobs)
+          const rest = session.jobOutput ?? session.tty.jobs
+          if (saved !== null) {
+            session.terminalOutput = false
+            inheritExitTrap(session)
+            // A substitution reads its pipe until every writer has closed
+            // it, so what a job it started writes is part of its value,
+            // and it ends when its jobs do. They are its own jobs.
+            session.jobOutput = capture.jobs
+            session.jobWaits = waits
+            const caller = innerOpts.jobTable ?? env.jobTable
+            innerOpts.jobTable = caller.child(caller)
+            innerOpts.sink = capture
+          }
           try {
-            const res = await env.execute(cmd, innerOpts)
-            // The record rides back with the streams: a refusal the inner line
-            // earned is the outer line's to report.
-            if (res.refusal !== null) nested.latest = res.refusal
-            return new IOResult({
-              exitCode: res.exitCode,
-              stdout: res.stdout,
-              stderr: res.stderr,
-              refusal: res.refusal,
-            })
-          } catch (err) {
-            // A substitution runs on a copy of the caller's frames, and it is a
-            // child shell: whatever unwinds out of it ends it.
-            if (saved === null || !isUnwinding(err)) throw err
-            return ended(err)
+            let io: IOResult
+            try {
+              const res = await env.execute(cmd, innerOpts)
+              // The record rides back with the streams: a refusal the inner
+              // line earned is the outer line's to report.
+              if (res.refusal !== null) nested.latest = res.refusal
+              io = new IOResult({
+                exitCode: res.exitCode,
+                stdout: res.stdout,
+                stderr: res.stderr,
+                refusal: res.refusal,
+              })
+            } catch (err) {
+              // A substitution runs on a copy of the caller's frames, and it
+              // is a child shell: whatever unwinds out of it ends it.
+              if (saved === null || !isUnwinding(err)) throw err
+              io = ended(err)
+            }
+            if (saved === null) return io
+            const { node, handed: outer, signal, executionScope } = opts
+            const shellJobs = innerOpts.jobTable
+            io = await finishShell(
+              (action, o) =>
+                executeFn(action, {
+                  ...o,
+                  ...(node !== undefined ? { node } : {}),
+                  ...(outer !== undefined ? { handed: outer } : {}),
+                  ...(signal !== undefined ? { signal } : {}),
+                  ...(executionScope !== undefined ? { executionScope } : {}),
+                  ...(shellJobs !== undefined ? { jobTable: shellJobs } : {}),
+                }),
+              session,
+              io,
+              opts.stdin ?? null,
+              opts.callStack ?? null,
+            )
+            await capture.emit(Channel.STDOUT, await io.materializeStdout())
+            await capture.emit(Channel.STDERR, await io.materializeStderr())
+            await waits.join(rest)
+            const [out, err] = capture.take()
+            io.stdout = out.byteLength > 0 ? out : null
+            io.stderr = err.byteLength > 0 ? err : null
+            return io
           } finally {
             if (saved !== null) {
               session.terminalOutput = terminalOutput
@@ -505,28 +604,28 @@ async function runPreparedLine(
           }
         }
 
-        const deps = withHandOff(
-          {
-            dispatch,
-            registry: env.registry,
-            namespace: env.namespace,
-            jobTable: env.jobTable,
-            executeFn,
-            agentId: options.agentId ?? env.agentId ?? '',
-            workspaceId: env.workspaceId,
-            executionScope: options.executionScope ?? new ExecutionScope(),
-            registerCloser: (fn: () => Promise<void>) => {
-              env.registerCloser(fn)
-            },
-            runtimeBindings: env.runtimes.bindings,
-            // Alias expansion rewrites the head word and reads the result as a
-            // fresh line, so it needs the same parser the line reader used. The
-            // parser is already resolved by the time the tree runs.
-            parser,
-            ...(routingDecision !== null ? { routingDecision } : {}),
-            ...(options.signal !== undefined ? { signal: options.signal } : {}),
-            ...(options.sink !== undefined ? { sink: options.sink } : {}),
+        const lineDeps: ExecuteNodeDeps = {
+          dispatch,
+          registry: env.registry,
+          namespace: env.namespace,
+          jobTable: options.jobTable ?? env.jobTable,
+          executeFn,
+          agentId: options.agentId ?? env.agentId ?? '',
+          workspaceId: env.workspaceId,
+          executionScope: options.executionScope ?? new ExecutionScope(),
+          registerCloser: (fn: () => Promise<void>) => {
+            env.registerCloser(fn)
           },
+          runtimeBindings: env.runtimes.bindings,
+          // Alias expansion rewrites the head word and reads the result as a
+          // fresh line, so it needs the same parser the line reader used. The
+          // parser is already resolved by the time the tree runs.
+          parser,
+          ...(routingDecision !== null ? { routingDecision } : {}),
+          ...(options.signal !== undefined ? { signal: options.signal } : {}),
+        }
+        const deps = withHandOff(
+          options.sink !== undefined ? { ...lineDeps, sink: options.sink } : lineDeps,
           handed,
         )
         return runWithSession(
@@ -583,6 +682,12 @@ async function runParsedLine(
 ): Promise<ExecuteResult> {
   const cacheFacts = env.dispatcher.captureCacheFacts()
   const callAgentId = options.agentId ?? env.agentId ?? ''
+  // An op a policy refuses inside a command prints the command's own GNU
+  // line, so the door notes the record here, for the line to carry on its
+  // result.
+  const note = (refusal: Refusal): void => {
+    nested.latest = refusal
+  }
   // The line-reader decision (GNU: history is appended where the typed
   // line is read, never inside the evaluator). Internal evaluations run
   // with record:false: no new recording scope, so their ops land in the
@@ -692,11 +797,14 @@ async function runParsedLine(
           await joinOrAbort(
             env.observer.logExecution(
               command,
-              new IOResult({
-                exitCode: refused.exitCode,
-                stderr: refused.stderr,
-                refusal: refused.refusal,
-              }),
+              await shown(
+                new IOResult({
+                  exitCode: refused.exitCode,
+                  stderr: refused.stderr,
+                  refusal: refused.refusal,
+                }),
+                options.sink,
+              ),
               [],
               callAgentId,
               targetSession.sessionId,
@@ -719,25 +827,28 @@ async function runParsedLine(
         if (filled !== null) return filled
       }
       const result = await abortable(
-        runWholeLine(
-          lineRuntime,
-          command,
-          stdin,
-          effectiveSession,
-          env.registry.allMounts(),
-          env.registry.policies,
-          () => env.invalidateAllAfterRemote(),
-          killed,
-          env.registry.commandLimits,
+        runWithRefusalSink(note, () =>
+          runWholeLine(
+            lineRuntime,
+            command,
+            stdin,
+            effectiveSession,
+            env.registry.allMounts(),
+            env.registry.policies,
+            () => env.invalidateAllAfterRemote(),
+            killed,
+            env.registry.commandLimits,
+          ),
         ),
         killed,
       )
+      const refusal = result.refusal ?? nested.latest
       recordStatus(targetSession, result.exitCode)
       if (isLine) {
         const lineIo = new IOResult({
           exitCode: result.exitCode,
           stdout: result.stdout,
-          refusal: result.refusal,
+          refusal,
           ...(result.stderr !== null ? { stderr: result.stderr } : {}),
         })
         // Joined like the tree's record: a stalled store releases the
@@ -745,7 +856,7 @@ async function runParsedLine(
         await joinOrAbort(
           env.observer.logExecution(
             command,
-            lineIo,
+            await shown(lineIo, options.sink),
             [],
             callAgentId,
             targetSession.sessionId,
@@ -758,7 +869,7 @@ async function runParsedLine(
         result.stdout,
         result.stderr ?? new Uint8Array(),
         result.exitCode,
-        result.refusal,
+        refusal,
       )
     }
     // The line is the unit a rule judges, so every command in it is
@@ -833,7 +944,9 @@ async function runParsedLine(
       }
     }
     try {
-      execResult = isLine ? await runWithRecording(runBody) : [await runBody(), []]
+      execResult = await runWithRefusalSink(note, async () =>
+        isLine ? runWithRecording(runBody) : [await runBody(), []],
+      )
       // A record a nested line earned is the line's to report when its
       // own tree earned none (see NestedRefusal). A question a gate left
       // waiting holds the line exactly as one the pass left waiting
@@ -873,7 +986,7 @@ async function runParsedLine(
   // wrapper around them, like a group.
   // A rejected invocation records its outcome without changing shell status.
   if (rootNode.warnings)
-    io.stderr = new TextEncoder().encode(rootNode.warnings + (await io.stderrStr()))
+    io.stderr = concat([encodeText(rootNode.warnings), await io.materializeStderr()])
   if (!callerError) recordStatus(targetSession, io.exitCode, true)
   let stdoutBytes: Uint8Array
   try {
@@ -900,7 +1013,7 @@ async function runParsedLine(
       io.exitCode = 1
       io.stderr = isFsError(err)
         ? formatFsError(cmdName, err)
-        : new TextEncoder().encode(`${err instanceof Error ? err.message : String(err)}\n`)
+        : encodeText(`${err instanceof Error ? err.message : String(err)}\n`)
       recordStatus(targetSession, 1)
       stdoutBytes = new Uint8Array()
     }
@@ -923,7 +1036,7 @@ async function runParsedLine(
     await joinOrAbort(
       env.observer.logExecution(
         command,
-        io,
+        await shown(io, options.sink),
         opRecords,
         callAgentId,
         targetSession.sessionId,

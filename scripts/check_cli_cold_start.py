@@ -32,7 +32,8 @@ HEAVY = (
 # its entry module leaves in `sys.modules`. Package barrels resolve their
 # names on first use, so reaching any of these from a CLI module means a
 # top-level import that belongs inside the one verb that needs it (`mcp`
-# serving, `workspace create` validating), as the TypeScript CLI awaits.
+# and `rpc` serving, `workspace create` validating), as the TypeScript
+# CLI awaits.
 PY_CLI_ENTRY = "mirage.cli.main"
 PY_HEAVY = (
     "mirage.workspace.workspace",
@@ -47,7 +48,13 @@ PY_HEAVY = (
 
 # `.` is the barrel and is *meant* to be heavy; `./bin/daemon` is a program,
 # not a module anyone imports for a symbol.
-UNGATED_SUBPATHS = (".", "./package.json", "./bin/daemon", "./mcp")
+UNGATED_SUBPATHS = (
+    ".",
+    "./package.json",
+    "./bin/daemon",
+    "./mcp",
+    "./rpc",
+)
 
 # One pattern for every static form, because the first version of this gate
 # used `[^;\n]*?` and so matched only single-line imports -- blind to the
@@ -132,8 +139,8 @@ def gated_entries() -> dict[str, Path]:
     """Every built entry the gate walks.
 
     The server's light subpaths, plus the CLI binary itself -- the CLI is
-    what pays the cold start, and its own three deferrals
-    (`mirage-server/mcp`, `mirage-node/config`, `yaml`) are ungated
+    what pays the cold start, and its own deferrals (`mirage-server/mcp`,
+    `mirage-server/rpc`, `mirage-node/config`, `yaml`) are ungated
     without it.
 
     Returns:

@@ -1,0 +1,44 @@
+{
+  "cases": [
+    {
+      "id": "tree_x_stays_on_one_filesystem",
+      "seq": 15300401,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/fcC_tx/deep && printf 'x\\n' > /data/fcC_tx/deep/deeper.txt && printf 'y\\n' > /data/fcC_tx/nested.txt && tree -x /data/fcC_tx; echo rc=$?; tree -xa -L 1 /data/fcC_tx; echo rc=$?; tree -xd /data/fcC_tx; echo rc=$?; rm -r /data/fcC_tx",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fcC_tx\n|-- deep\n|   `-- deeper.txt\n`-- nested.txt\n\n2 directories, 2 files\nrc=0\n/data/fcC_tx\n|-- deep\n`-- nested.txt\n\n2 directories, 1 file\nrc=0\n/data/fcC_tx\n`-- deep\n\n2 directories\nrc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "x",
+        "a",
+        "L",
+        "d"
+      ]
+    }
+  ]
+}

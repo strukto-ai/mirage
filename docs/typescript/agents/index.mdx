@@ -1,49 +1,49 @@
 ---
 title: Overview
-description: Drop a Mirage workspace into the TypeScript agent framework you already use.
+description: Connect a coding agent or an agent framework to a Mirage workspace.
 icon: robot
 ---
 
-Each integration is a subpath of `@struktoai/mirage-agents`. Install it once; tree-shaking keeps unused adapters out of your bundle.
+## Coding Agents
+
+Run the agent as it is, on a workspace the `mirage` CLI creates.
+
+| Agent | CLI | SSH | FUSE |
+| --- | :-: | :-: | :-: |
+| [Claude Code](/typescript/agents/claude-code) | ✓ | | ✓ |
+| [Codex](/typescript/agents/codex) | ✓ | ✓ | ✓ |
+| [Grok Build](/typescript/agents/grok-build) | ✓ | | ✓ |
+
+- **CLI**: the agent adds Mirage's seven tools from `mirage mcp`.
+- **SSH**: the agent's own tools run in the workspace.
+- **FUSE**: the agent's own tools work on the workspace, mounted as a folder.
+
+Or load Mirage into the agent as a plugin, which replaces its own file and shell tools:
+
+| Agent | Plugin |
+| --- | --- |
+| [Pi Coding Agent](/typescript/agents/pi) | `mirageExtension(ws)` |
+| [OpenCode](/typescript/agents/opencode) | `@struktoai/mirage-opencode` in `opencode.json` |
+| [DeepSeek Harness](/typescript/agents/dsh) | `@struktoai/mirage-dsh` |
+
+## Agent SDKs
+
+Your program holds the workspace and hands it to the framework.
+
+| Framework | Hand it | The agent gets |
+| --- | --- | --- |
+| [Vercel AI SDK](/typescript/agents/vercel) | `mirageTools(ws)` | Mirage's seven tools |
+| [Mastra](/typescript/agents/mastra) | `mirageTools(ws)` | Mirage's seven tools |
+| [Claude Agent SDK](/typescript/agents/claude-agent-sdk) | `MirageServer(ws)` | Mirage's seven tools |
+| [OpenAI Agents](/typescript/agents/openai) | `mirageTools(ws)`, or `MirageShell`, `MirageEditor` and `MirageSandboxClient` | Mirage's seven tools, or its shell, patch and sandbox tools run in Mirage |
+| [LangChain Deep Agents](/typescript/agents/langchain) | `new LangchainWorkspace(ws)` | its file and shell tools, run in Mirage |
+
+Mirage's seven tools are the session's [`session.tools`](/typescript/access/in-app#session-tools): `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob`.
+
+Each framework is a subpath of `@struktoai/mirage-agents`, such as `@struktoai/mirage-agents/vercel`, so a bundle carries only what it imports.
 
 ```bash
 pnpm add @struktoai/mirage-agents @struktoai/mirage-node
 ```
 
-For browser apps, swap `@struktoai/mirage-node` for `@struktoai/mirage-browser`.
-
-<CardGroup cols={2}>
-  <Card title="OpenAI Agents" icon="/images/openai-logo.svg" href="/typescript/agents/openai">
-    For the [@openai/agents](https://github.com/openai/openai-agents-js) SDK.
-  </Card>
-  <Card title="LangChain · Deep Agents" icon="/images/langchain-logo.svg" href="/typescript/agents/langchain">
-    Run [Deep Agents](https://github.com/langchain-ai/deepagents) on a Mirage workspace.
-  </Card>
-  <Card title="Pi Coding Agent" icon="/images/pi-logo.svg" href="/typescript/agents/pi">
-    For [@earendil-works/pi-coding-agent](https://github.com/earendil-works/pi).
-  </Card>
-  <Card title="Vercel AI SDK" icon="triangle" href="/typescript/agents/vercel">
-    For [`ai`](https://sdk.vercel.ai) `generateText` and `streamText`.
-  </Card>
-  <Card title="Mastra" icon="wand-magic-sparkles" href="/typescript/agents/mastra">
-    For [Mastra](https://mastra.ai) `Agent` definitions.
-  </Card>
-  <Card title="OpenCode" icon="/images/opencode-logo.svg" href="/typescript/agents/opencode">
-    Native installable plugin for [OpenCode](https://opencode.ai), with Mirage tools and per-session stale-write protection.
-  </Card>
-  <Card title="Claude Code" icon="/images/claude-logo.svg" href="/typescript/agents/claude-code">
-    Mount a workspace via FUSE and run `claude` against it.
-  </Card>
-  <Card title="Claude Agent SDK" icon="/images/claude-logo.svg" href="/typescript/agents/claude-agent-sdk">
-    For [@anthropic-ai/claude-agent-sdk](https://github.com/anthropics/claude-agent-sdk-typescript) via an in-process MCP server.
-  </Card>
-  <Card title="Codex" icon="/images/openai-logo.svg" href="/typescript/agents/codex">
-    Install the Mirage plugin and use its tools from the Codex CLI or app, or run Codex's own tools in a workspace over SSH.
-  </Card>
-  <Card title="Grok Build" icon="terminal" href="/typescript/agents/grok-build">
-    Install the Mirage plugin and use its tools from Grok's native TUI.
-  </Card>
-  <Card title="DeepSeek Harness" icon="/images/deepseek-logo.svg" href="/typescript/agents/dsh">
-    Cordis plugins that back dsh's `ctx.fs` and `ctx.shell` seams with a Mirage workspace.
-  </Card>
-</CardGroup>
+For a browser app, use `@struktoai/mirage-browser` in place of `@struktoai/mirage-node`.

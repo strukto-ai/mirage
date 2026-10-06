@@ -27,7 +27,7 @@ from mirage.commands.builtin.generic.shuf import (
     parse_flags,
     parse_input_range,
     range_error,
-    shuf,
+    shuf_generic,
 )
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -146,7 +146,9 @@ def test_shuf_input_range_refusal_is_uniform(raw):
     """
     with pytest.raises(ValueError) as refusal:
         asyncio.run(
-            shuf([], [], read_bytes=_unused_read_bytes, input_range=raw)
+            shuf_generic(
+                [], [], read_bytes=_unused_read_bytes, input_range=raw
+            )
         )
     assert str(refusal.value) == f"shuf: invalid input range: '{raw}'"
 
@@ -154,7 +156,7 @@ def test_shuf_input_range_refusal_is_uniform(raw):
 def test_shuf_input_range_single_element_is_valid():
     """GNU `-i 2-2` is a one-element range, not a degenerate one."""
     rendered, io = asyncio.run(
-        shuf([], [], read_bytes=_unused_read_bytes, input_range="2-2")
+        shuf_generic([], [], read_bytes=_unused_read_bytes, input_range="2-2")
     )
     assert io.exit_code == 0
     assert rendered == b"2\n"
@@ -162,7 +164,7 @@ def test_shuf_input_range_single_element_is_valid():
 
 def test_shuf_input_range_stays_valid():
     rendered, io = asyncio.run(
-        shuf([], [], read_bytes=_unused_read_bytes, input_range="1-3")
+        shuf_generic([], [], read_bytes=_unused_read_bytes, input_range="1-3")
     )
     assert io.exit_code == 0
     assert sorted(rendered.decode().strip().split("\n")) == ["1", "2", "3"]
@@ -199,7 +201,9 @@ def test_shuf_head_count_refuses_a_trailing_newline(raw, quoted):
 def test_shuf_input_range_refuses_a_trailing_newline(raw, quoted):
     with pytest.raises(ValueError) as refusal:
         asyncio.run(
-            shuf([], [], read_bytes=_unused_read_bytes, input_range=raw)
+            shuf_generic(
+                [], [], read_bytes=_unused_read_bytes, input_range=raw
+            )
         )
     assert str(refusal.value) == f"shuf: invalid input range: '{quoted}'"
 
@@ -309,7 +313,7 @@ def test_shuf_no_write_op_is_not_swallowed_by_that_catch():
     assert NO_WRITE_OP == "shuf: backend provides no write op"
     with pytest.raises(ValueError, match="backend provides no write op"):
         asyncio.run(
-            shuf(
+            shuf_generic(
                 [],
                 [],
                 read_bytes=_unused_read_bytes,
@@ -370,7 +374,9 @@ def test_shuf_input_range_overflow_earns_the_clause(raw):
     assert parse_input_range(raw) is RangeRefusal.OVERFLOW
     with pytest.raises(ValueError) as refusal:
         asyncio.run(
-            shuf([], [], read_bytes=_unused_read_bytes, input_range=raw)
+            shuf_generic(
+                [], [], read_bytes=_unused_read_bytes, input_range=raw
+            )
         )
     assert str(refusal.value) == (
         f"shuf: invalid input range: '{raw}'"
@@ -400,7 +406,9 @@ def test_shuf_input_range_span_limit_is_the_plain_message():
     assert parse_input_range(raw) is RangeRefusal.INVALID
     with pytest.raises(ValueError) as refusal:
         asyncio.run(
-            shuf([], [], read_bytes=_unused_read_bytes, input_range=raw)
+            shuf_generic(
+                [], [], read_bytes=_unused_read_bytes, input_range=raw
+            )
         )
     assert str(refusal.value) == f"shuf: invalid input range: '{raw}'"
     assert parse_input_range(f"+0-{SIZE_MAX}") is RangeRefusal.INVALID
@@ -438,7 +446,9 @@ def test_shuf_range_error_renders_the_clause_only_when_earned():
 )
 def test_shuf_input_range_emits_a_large_bound_exactly(low):
     rendered, io = asyncio.run(
-        shuf([], [], read_bytes=_unused_read_bytes, input_range=f"{low}-{low}")
+        shuf_generic(
+            [], [], read_bytes=_unused_read_bytes, input_range=f"{low}-{low}"
+        )
     )
     assert io.exit_code == 0
     assert rendered == f"{low}\n".encode()
@@ -459,7 +469,9 @@ def test_shuf_input_range_emits_a_large_bound_exactly(low):
 )
 def test_shuf_samples_a_huge_range_without_enumerating_it(raw):
     rendered, io = asyncio.run(
-        shuf([], [], read_bytes=_unused_read_bytes, input_range=raw, count=3)
+        shuf_generic(
+            [], [], read_bytes=_unused_read_bytes, input_range=raw, count=3
+        )
     )
     assert io.exit_code == 0
     low, high = parse_input_range(raw)
@@ -472,7 +484,7 @@ def test_shuf_samples_a_huge_range_without_enumerating_it(raw):
 def test_shuf_head_count_zero_on_a_huge_range_emits_nothing():
     """GNU answers `-n 0` instantly however large the range is."""
     rendered, io = asyncio.run(
-        shuf(
+        shuf_generic(
             [],
             [],
             read_bytes=_unused_read_bytes,
@@ -486,7 +498,7 @@ def test_shuf_head_count_zero_on_a_huge_range_emits_nothing():
 
 def test_shuf_repeat_draws_from_a_huge_range_without_enumerating_it():
     rendered, io = asyncio.run(
-        shuf(
+        shuf_generic(
             [],
             [],
             read_bytes=_unused_read_bytes,
@@ -519,7 +531,9 @@ def test_shuf_repeat_draws_from_a_huge_range_without_enumerating_it():
 )
 def test_shuf_refuses_an_output_it_cannot_render(kwargs):
     with pytest.raises(ValueError) as refusal:
-        asyncio.run(shuf([], [], read_bytes=_unused_read_bytes, **kwargs))
+        asyncio.run(
+            shuf_generic([], [], read_bytes=_unused_read_bytes, **kwargs)
+        )
     assert str(refusal.value) == MEMORY_EXHAUSTED
     assert MEMORY_EXHAUSTED == "shuf: memory exhausted"
 
@@ -532,7 +546,7 @@ def test_shuf_repeat_with_a_huge_count_on_stdin_is_refused_too():
     """
     with pytest.raises(ValueError) as refusal:
         asyncio.run(
-            shuf(
+            shuf_generic(
                 [],
                 [],
                 read_bytes=_unused_read_bytes,
@@ -543,7 +557,7 @@ def test_shuf_repeat_with_a_huge_count_on_stdin_is_refused_too():
         )
     assert str(refusal.value) == MEMORY_EXHAUSTED
     rendered, io = asyncio.run(
-        shuf(
+        shuf_generic(
             [],
             [],
             read_bytes=_unused_read_bytes,

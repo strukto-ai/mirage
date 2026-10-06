@@ -1,0 +1,64 @@
+{
+  "cases": [
+    {
+      "id": "no_language_runtime_leaves_no_interpreter_on_path",
+      "world": {
+        "runtimes": [
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "which python3 node; echo \"exit=$?\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "exit=1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "type -a python3 node; echo \"exit=$?\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "exit=1\n",
+            "stderr": "bash: type: python3: not found\nbash: type: node: not found\n"
+          }
+        },
+        {
+          "command": "ls /usr/bin | grep -E '^(python|python3|node|js)$'; command -v python3; echo \"exit=$?\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "exit=1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -V; echo \"exit=$?\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "exit=127\n",
+            "stderr": "python3: command not found\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "no_language_runtime_names_each_alias",
+      "world": {
+        "runtimes": [
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "for n in python js node; do $n --version; echo \"exit=$?\"; done",
+          "expect": {
+            "exit": 0,
+            "stdout": "exit=127\nexit=127\nexit=127\n",
+            "stderr": "python: command not found\njs: command not found\nnode: command not found\n"
+          }
+        }
+      ]
+    }
+  ]
+}

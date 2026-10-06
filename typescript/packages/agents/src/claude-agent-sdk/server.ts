@@ -16,7 +16,11 @@ import { VERSION } from '@struktoai/mirage-core/version'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
-import { MirageToolOperations, type MirageToolOperationsOptions } from '../tool_operations.ts'
+import {
+  MirageToolOperations,
+  type MirageToolOperationsOptions,
+} from '@struktoai/mirage-core/workspace/tools/tool_operations'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 import {
   EDIT_DESCRIPTION,
   EDIT_INPUT,
@@ -32,14 +36,18 @@ import {
   SHELL_INPUT,
   WRITE_DESCRIPTION,
   WRITE_INPUT,
-} from '../tool_descriptions.ts'
+} from '@struktoai/mirage-core/workspace/tools/tool_descriptions'
 
 /**
  * The SDK takes zod shapes, so each one restates its tool's input schema
  * from `tool_descriptions`, descriptions read off the same constants.
  */
 export function MirageServer(workspace: Workspace, options: MirageToolOperationsOptions = {}) {
-  const operations = new MirageToolOperations(workspace, options)
+  const session = new Session(workspace, options.sessionId ?? null)
+  const operations =
+    options.staleWriteProtection === false
+      ? new MirageToolOperations(session, false)
+      : session.tools
   const read = READ_INPUT.properties
   const edit = EDIT_INPUT.properties
   const grep = GREP_INPUT.properties

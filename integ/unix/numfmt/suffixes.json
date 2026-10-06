@@ -88,14 +88,14 @@
       "flags": []
     },
     {
-      "id": "numfmt_iec_i_missing_i_names_a_bare_number",
+      "id": "numfmt_iec_i_reads_a_bare_number_as_it_stands",
       "seq": 14102201,
       "targets": ["ram", "opfs", "disk"],
       "command": "numfmt --from=iec-i 1",
       "expect": {
-        "exit": 2,
-        "stdout": "",
-        "stderr": "numfmt: missing 'i' suffix in input: '1' (e.g Ki/Mi/Gi)\n"
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
       },
       "flags": [
         "from"
@@ -142,6 +142,38 @@
       "flags": [
         "from"
       ]
+    },
+    {
+      "id": "numfmt_keeps_the_precision_of_each_operand",
+      "seq": 15500011,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "numfmt -- 1 1.100 1.20 0.10 00012 -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n1.100\n1.20\n0.10\n12\n-1\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "numfmt_every_unit_without_from_points_at_from",
+      "seq": 15500012,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "for v in 1k 1Ki 1KiB 1Kx 1.5K; do numfmt \"$v\"; echo rc=$?; done 2>&1",
+      "expect": {
+        "exit": 0,
+        "stdout": "numfmt: rejecting suffix in input: '1k' (consider using --from)\nrc=2\nnumfmt: rejecting suffix in input: '1Ki' (consider using --from)\nrc=2\nnumfmt: rejecting suffix in input: '1KiB' (consider using --from)\nrc=2\nnumfmt: rejecting suffix in input: '1Kx' (consider using --from)\nrc=2\nnumfmt: rejecting suffix in input: '1.5K' (consider using --from)\nrc=2\n",
+        "stderr": ""
+      },
+      "flags": []
     }
   ]
 }

@@ -25,6 +25,7 @@ import {
   bodyValue,
   camel,
   csvValues,
+  ghBool,
   ghTransport,
   repoFor,
   textOut,
@@ -109,9 +110,9 @@ export async function createCmd(inv: CLIInvocation): Promise<CommandFnResult> {
     tag_name: tag,
     name: fl.asStr('title') ?? tag,
     body: (await bodyValue(inv, fl, { value: 'notes', file: 'notes_file' })) ?? '',
-    draft: fl.asBool('draft'),
-    prerelease: fl.asBool('prerelease'),
-    generate_release_notes: fl.asBool('generate_notes'),
+    draft: ghBool(fl, 'draft'),
+    prerelease: ghBool(fl, 'prerelease'),
+    generate_release_notes: ghBool(fl, 'generate_notes'),
   }
   const target = fl.asStr('target')
   if (target !== undefined) body.target_commitish = target

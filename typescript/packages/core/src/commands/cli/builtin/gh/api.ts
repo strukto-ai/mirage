@@ -21,7 +21,7 @@ import type { GhConfig } from '../../../../core/github/config.ts'
 import { GRAPHQL_PATH } from '../../../../core/github/constants.ts'
 import { GitHubApiError, type GitHubResponse } from '../../../../core/github/client.ts'
 import { PartialOutputError } from '../../../errors.ts'
-import { ghTransport, jqLines, readCliFile } from './accessor.ts'
+import { ghBool, ghTransport, jqLines, readCliFile } from './accessor.ts'
 import { HTTP_REASONS } from './constants.ts'
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
@@ -228,7 +228,7 @@ export async function api(inv: CLIInvocation): Promise<CommandFnResult> {
   if (params !== undefined && Object.keys(params).length === 0) params = undefined
 
   const pages: Printed[] = []
-  const include = fl.asBool('include')
+  const include = ghBool(fl, 'include')
   const transport = ghTransport(inv.config)
   let current: string | undefined = path
   let first = true
@@ -274,7 +274,7 @@ export async function api(inv: CLIInvocation): Promise<CommandFnResult> {
     }
     pages.push({ data: response.data, head })
     first = false
-    current = fl.asBool('paginate')
+    current = ghBool(fl, 'paginate')
       ? nextPath(response.headers.link, (inv.config as GhConfig).baseUrl)
       : undefined
   }
@@ -418,17 +418,17 @@ function joinedPages(pages: unknown[], more: boolean): (string | Uint8Array)[] {
  * writer opens each page before the head is printed.
  */
 async function renderPages(pages: Printed[], fl: FlagView, failure?: Failure): Promise<Uint8Array> {
-  const include = fl.asBool('include')
+  const include = ghBool(fl, 'include')
   const between = include ? '\n' : ''
   const all = failure === undefined ? pages : [...pages, { data: null, head: failure.head }]
-  if (fl.asBool('silent'))
+  if (ghBool(fl, 'silent'))
     return bytesOf(
       joined(
         all.map((page) => [page.head]),
         between,
       ),
     )
-  const slurp = fl.asBool('slurp')
+  const slurp = ghBool(fl, 'slurp')
   const printed = pages.map((page) => [page.head, bodyText(page.data)])
   const failed = failure === undefined ? [] : [[failure.head, failure.body]]
   // gh's jsonArrayWriter: every body in one array, a comma between each.

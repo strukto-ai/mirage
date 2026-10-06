@@ -1,0 +1,126 @@
+{
+  "cases": [
+    {
+      "id": "content_outside_the_view_is_refused",
+      "note": "Pyodide is not on the shared view rule yet: a write outside every mount (/tmp/new.txt) lands in the interpreter's own MEMFS, where monty, quickjs and wasi refuse it.",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "a\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cat /data/a.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "a\n"
+          }
+        },
+        {
+          "command": "cat /.bash_history",
+          "expect": {
+            "exit": 0,
+            "stdout_contains": "cat /data/a.txt"
+          }
+        },
+        {
+          "program": {
+            "python": "try:\n    open('/.bash_history', 'r').close()\n    print('opened')\nexcept OSError as e:\n    print(type(e).__name__)",
+            "js": "const f = std.open('/.bash_history', 'r')\nif (f !== null) f.close()\nconsole.log(f === null ? 'refused' : 'opened')"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\n",
+              "ops_absent": [
+                "read /.bash_history"
+              ]
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "refused\n",
+              "ops_absent": [
+                "read /.bash_history"
+              ]
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "try:\n    open('/tmp/new.txt', 'w').close()\n    print('opened')\nexcept OSError as e:\n    print(type(e).__name__)",
+            "js": "const f = std.open('/tmp/new.txt', 'w')\nif (f !== null) f.close()\nconsole.log(f === null ? 'refused' : 'opened')"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\n",
+              "ops_absent": [
+                "create /tmp/new.txt"
+              ]
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "refused\n",
+              "ops_absent": [
+                "create /tmp/new.txt"
+              ]
+            }
+          },
+          "expect_on": {
+            "pyodide": {
+              "stdout": "opened\n"
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\nprint(Path('/tmp/new.txt').exists())",
+            "js": "console.log(os.stat('/tmp/new.txt')[1])"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "False\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "44\n"
+            }
+          },
+          "expect_on": {
+            "pyodide": {
+              "stdout": "True\n"
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "try:\n    open('/etc/passwd', 'r').close()\n    print('opened')\nexcept OSError as e:\n    print(type(e).__name__)",
+            "js": "const f = std.open('/etc/passwd', 'r')\nif (f !== null) f.close()\nconsole.log(f === null ? 'refused' : 'opened')"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "refused\n"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

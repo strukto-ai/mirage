@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { existsSync, readFileSync } from 'node:fs'
+import { createReadStream, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { Command } from 'commander'
@@ -66,9 +66,9 @@ async function loadConfigArgument(path: string): Promise<JsonValue> {
 interface WorkspaceBrief {
   id: string
   mode: string
-  mountCount: number
-  sessionCount: number
-  createdAt: number
+  mount_count: number
+  session_count: number
+  created_at: number
 }
 
 interface MountSummary {
@@ -78,21 +78,21 @@ interface MountSummary {
 }
 
 interface SessionSummary {
-  sessionId: string
+  session_id: string
   cwd: string
 }
 
 interface Internals {
-  cacheBytes: number | null
-  cacheEntries: number | null
-  historyLength: number
-  inFlightJobs: number
+  cache_bytes: number | null
+  cache_entries: number | null
+  history_length: number
+  in_flight_jobs: number
 }
 
 interface WorkspaceDetail {
   id: string
   mode: string
-  createdAt: number
+  created_at: number
   mounts?: MountSummary[]
   sessions?: SessionSummary[]
   internals?: Internals | null
@@ -103,9 +103,9 @@ function formatWorkspaceList(items: WorkspaceBrief[]): string {
   const rows = items.map((w) => [
     w.id,
     w.mode,
-    String(w.mountCount),
-    String(w.sessionCount),
-    formatAge(w.createdAt),
+    String(w.mount_count),
+    String(w.session_count),
+    formatAge(w.created_at),
   ])
   return formatTable(['ID', 'MODE', 'MOUNTS', 'SESSIONS', 'AGE'], rows)
 }
@@ -114,7 +114,7 @@ function formatWorkspaceDetail(d: WorkspaceDetail): string {
   const lines: string[] = [
     `ID:        ${d.id}`,
     `Mode:      ${d.mode}`,
-    `Created:   ${formatAge(d.createdAt)} ago`,
+    `Created:   ${formatAge(d.created_at)} ago`,
   ]
   if (d.mounts !== undefined && d.mounts.length > 0) {
     const rows = d.mounts.map((m) => [m.prefix, m.vfs, m.mode])
@@ -124,7 +124,7 @@ function formatWorkspaceDetail(d: WorkspaceDetail): string {
     }
   }
   if (d.sessions !== undefined && d.sessions.length > 0) {
-    const rows = d.sessions.map((s) => [s.sessionId, s.cwd])
+    const rows = d.sessions.map((s) => [s.session_id, s.cwd])
     lines.push('', 'Sessions:')
     for (const ln of formatTable(['SESSION', 'CWD'], rows).split('\n')) {
       lines.push('  ' + ln)
@@ -132,7 +132,7 @@ function formatWorkspaceDetail(d: WorkspaceDetail): string {
   }
   if (d.internals != null) {
     lines.push('', 'Internals:')
-    for (const k of ['cacheBytes', 'cacheEntries', 'historyLength', 'inFlightJobs'] as const) {
+    for (const k of ['cache_bytes', 'cache_entries', 'history_length', 'in_flight_jobs'] as const) {
       const value = d.internals[k]
       lines.push(`  ${k.padEnd(16)} ${value === null ? 'n/a (not tracked)' : String(value)}`)
     }
@@ -142,8 +142,8 @@ function formatWorkspaceDetail(d: WorkspaceDetail): string {
 
 interface AskRecord {
   id: string
-  sessionId: string
-  agentId: string
+  session_id: string
+  agent_id: string
   command: string
   argv: string[]
   cwd: string
@@ -160,39 +160,12 @@ function formatAsks(items: AskRecord[]): string {
     ['ID', 'SESSION', 'COMMAND', 'STATUS', 'REASON'],
     items.map((a) => [
       a.id,
-      a.sessionId,
+      a.session_id,
       [a.command, ...a.argv].join(' '),
       a.outcome ?? 'pending',
       a.reason,
     ]),
   )
-}
-
-interface VersionLogItem {
-  id: string
-  message: string
-}
-
-interface DiffResult {
-  added: string[]
-  modified: string[]
-  deleted: string[]
-}
-
-function formatVersionLog(items: VersionLogItem[]): string {
-  if (items.length === 0) return 'No versions.'
-  return formatTable(
-    ['VERSION', 'MESSAGE'],
-    items.map((v) => [v.id.slice(0, 12), v.message]),
-  )
-}
-
-function formatDiff(changes: DiffResult): string {
-  const lines: string[] = []
-  for (const kind of ['added', 'modified', 'deleted'] as const) {
-    for (const path of changes[kind]) lines.push(`${kind.padEnd(9)} ${path}`)
-  }
-  return lines.length > 0 ? lines.join('\n') : 'No changes.'
 }
 
 export function registerWorkspaceCommands(program: Command): void {
@@ -232,7 +205,12 @@ export function registerWorkspaceCommands(program: Command): void {
       // trip), but sent in the file's own spelling: the daemon runs the
       // same check, and it speaks snake_case like the Python one.
       const { checkWorkspaceConfigFile } = await import('@struktoai/mirage-node/config')
-      const cfg = checkWorkspaceConfigFile(configPath)
+      let cfg: unknown
+      try {
+        cfg = checkWorkspaceConfigFile(configPath)
+      } catch (err: unknown) {
+        fail(err instanceof Error ? err.message : String(err), 2)
+      }
       const body: { config: unknown; id?: string } = { config: cfg }
       if (opts.id !== undefined) body.id = opts.id
       const c = buildClient()
@@ -283,94 +261,62 @@ export function registerWorkspaceCommands(program: Command): void {
       )
     })
 
+  ws.command('close')
+    .description('Stop a workspace and keep its state for the same id.')
+    .argument('<id>')
+    .action(async (id: string) => {
+      const c = buildClient()
+      await c.ensureRunning({ allowSpawn: false })
+      emit(
+        (await handleResponse(
+          await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/close`),
+        )) as {
+          id: string
+        },
+        (d) => `Closed workspace ${d.id}.`,
+      )
+    })
+
+  ws.command('cancel')
+    .description('Cancel the running and queued commands of every session.')
+    .argument('<id>')
+    .action(async (id: string) => {
+      const c = buildClient()
+      await c.ensureRunning({ allowSpawn: false })
+      emit(
+        await handleResponse(
+          await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/cancel`),
+        ),
+      )
+    })
+
+  ws.command('kill')
+    .description('Kill the background jobs of every session.')
+    .argument('<id>')
+    .action(async (id: string) => {
+      const c = buildClient()
+      await c.ensureRunning({ allowSpawn: false })
+      emit(
+        await handleResponse(
+          await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/kill`),
+        ),
+      )
+    })
+
   ws.command('clone')
-    .description('Clone a workspace, optionally from one of its past versions.')
+    .description("Clone a workspace's live state.")
     .argument('<srcId>')
     .option('--id <id>', 'Explicit id for the clone')
-    .option('--at <ref>', 'Clone from a past version (id or branch) not the live state')
-    .action(async (srcId: string, opts: { id?: string; at?: string }) => {
-      const body: Record<string, unknown> = { sourceId: srcId }
+    .action(async (srcId: string, opts: { id?: string }) => {
+      const body: Record<string, unknown> = {}
       if (opts.id !== undefined) body.id = opts.id
-      if (opts.at !== undefined) body.at = opts.at
       const c = buildClient()
       await c.ensureRunning({ allowSpawn: false })
-      const r = await c.request('POST', '/v1/workspaces/clone', { body: JSON.stringify(body) })
+      const r = await c.request('POST', `/v1/workspaces/${encodeURIComponent(srcId)}/clone`, {
+        body: JSON.stringify(body),
+      })
       emit((await handleResponse(r)) as WorkspaceDetail, formatWorkspaceDetail)
     })
-
-  ws.command('commit')
-    .description("Commit the workspace's current state as a version.")
-    .argument('<id>')
-    .option('-m, --message <msg>', 'Version message', '')
-    .option('-b, --branch <branch>', 'Branch to commit on', 'main')
-    .action(async (id: string, opts: { message: string; branch: string }) => {
-      const c = buildClient()
-      await c.ensureRunning({ allowSpawn: false })
-      const r = await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/commit`, {
-        body: JSON.stringify({ message: opts.message, branch: opts.branch }),
-      })
-      emit(
-        (await handleResponse(r)) as { version: string; branch: string },
-        (d) => `Committed ${d.version.slice(0, 12)} on ${d.branch}.`,
-      )
-    })
-
-  ws.command('branch')
-    .description("Create a branch at another branch's current version.")
-    .argument('<id>')
-    .argument('<name>')
-    .option('--from <branch>', 'Branch to fork from', 'main')
-    .action(async (id: string, name: string, opts: { from: string }) => {
-      const c = buildClient()
-      await c.ensureRunning({ allowSpawn: false })
-      const r = await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/branch`, {
-        body: JSON.stringify({ name, fromBranch: opts.from }),
-      })
-      emit(
-        (await handleResponse(r)) as { branch: string; version: string },
-        (d) => `Created branch ${d.branch} at ${d.version.slice(0, 12)}.`,
-      )
-    })
-
-  ws.command('log')
-    .description("List a workspace's versions (newest first).")
-    .argument('<id>')
-    .option('-b, --branch <branch>', 'Branch', 'main')
-    .action(async (id: string, opts: { branch: string }) => {
-      const c = buildClient()
-      await c.ensureRunning({ allowSpawn: false })
-      const r = await c.request(
-        'GET',
-        `/v1/workspaces/${encodeURIComponent(id)}/versions?branch=${encodeURIComponent(opts.branch)}`,
-      )
-      emit((await handleResponse(r)) as VersionLogItem[], formatVersionLog)
-    })
-
-  ws.command('diff')
-    .description('Show changed files (git-style): live vs HEAD, live vs <a>, or <a> vs <b>.')
-    .argument('<id>')
-    .argument('[a]', 'Base ref; omit to use live state')
-    .argument('[b]', 'Compare ref; omit to use live state')
-    .option('-b, --branch <branch>', 'Branch', 'main')
-    .action(
-      async (
-        id: string,
-        a: string | undefined,
-        b: string | undefined,
-        opts: { branch: string },
-      ) => {
-        const params = new URLSearchParams({ branch: opts.branch })
-        if (a !== undefined) params.set('a', a)
-        if (b !== undefined) params.set('b', b)
-        const c = buildClient()
-        await c.ensureRunning({ allowSpawn: false })
-        const r = await c.request(
-          'GET',
-          `/v1/workspaces/${encodeURIComponent(id)}/diff?${params.toString()}`,
-        )
-        emit((await handleResponse(r)) as DiffResult, formatDiff)
-      },
-    )
 
   ws.command('list-asks')
     .description('List pending asks (every decision with --all).')
@@ -379,7 +325,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .option('--all', 'Include settled decisions, not just pending asks')
     .action(async (id: string, opts: { session?: string; all?: boolean }) => {
       const params = new URLSearchParams()
-      if (opts.session !== undefined) params.set('sessionId', opts.session)
+      if (opts.session !== undefined) params.set('session_id', opts.session)
       if (opts.all === true) params.set('all', 'true')
       const c = buildClient()
       await c.ensureRunning({ allowSpawn: false })
@@ -432,48 +378,83 @@ export function registerWorkspaceCommands(program: Command): void {
       emit((await handleResponse(r)) as AskRecord, (d) => `Denied ${d.id}.`)
     })
 
-  ws.command('checkout')
-    .description('Restore a workspace in place to one of its versions.')
-    .argument('<id>')
-    .argument('<ref>', 'Version id or branch to restore')
-    .action(async (id: string, ref: string) => {
-      const c = buildClient()
-      await c.ensureRunning({ allowSpawn: false })
-      const r = await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/checkout`, {
-        body: JSON.stringify({ ref }),
-      })
-      emit((await handleResponse(r)) as WorkspaceDetail, formatWorkspaceDetail)
-    })
-
   ws.command('snapshot')
     .description(
-      'Snapshot a workspace to a tar file. The path is resolved to an absolute path and the daemon writes the tar.',
+      "Snapshot a workspace. The server sends the tar back and it is written to <output> here, whether the server runs on this machine or another; with --key it goes to the server's snapshot store.",
     )
     .argument('<id>')
-    .argument('<output>', 'Path to write the .tar to')
-    .action(async (id: string, output: string) => {
+    .argument('[output]', 'File to write the .tar to, on this machine')
+    .option('--key <key>', "Put it in the server's snapshot store instead")
+    .action(async (id: string, output: string | undefined, opts: { key?: string }) => {
+      if (output !== undefined && opts.key !== undefined) {
+        fail('snapshot takes an output file or --key', 2)
+      }
       const c = buildClient()
       await c.ensureRunning({ allowSpawn: false })
-      const r = await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/snapshot`, {
-        body: JSON.stringify({ path: resolve(output) }),
-      })
-      const d = (await handleResponse(r)) as { id: string; path: string; size: number }
-      emit(d, (x) => `Snapshot ${x.id} -> ${x.path} (${x.size.toLocaleString()} bytes).`)
+      const path = `/v1/workspaces/${encodeURIComponent(id)}/snapshot`
+      const human = (d: { id: string; size: number }, target: string): string =>
+        `Snapshot ${d.id} -> ${target} (${d.size.toLocaleString()} bytes).`
+      if (opts.key !== undefined) {
+        const key = opts.key
+        const r = await c.request('POST', path, {
+          body: JSON.stringify({ key }),
+          timeoutMs: null,
+        })
+        emit((await handleResponse(r)) as { id: string; key: string; size: number }, (d) =>
+          human(d, key),
+        )
+        return
+      }
+      if (output === undefined) fail('snapshot takes an output file or --key', 2)
+      const target = output
+      const r = await c.request('GET', path, { timeoutMs: null })
+      if (!r.ok) await handleResponse(r)
+      const tar = new Uint8Array(await r.arrayBuffer())
+      writeFileSync(target, tar)
+      emit({ id, path: target, size: tar.byteLength }, (d) => human(d, target))
     })
 
   ws.command('load')
-    .description('Load a workspace from a tar file.')
-    .argument('<tar>', 'Path to a .tar produced by `mirage workspace snapshot`')
+    .description(
+      "Load a workspace from a snapshot. <file> is read here and uploaded, whether the server runs on this machine or another; with --key the tar comes from the server's snapshot store.",
+    )
+    .argument('[file]', 'The .tar to upload; omit with --key')
     .argument('[config]', 'Workspace YAML/JSON config')
+    .option('--key <key>', "Load from the server's snapshot store")
     .option('--id <id>', 'Explicit workspace id')
-    .action(async (tarPath: string, configPath: string | undefined, opts: { id?: string }) => {
-      if (!existsSync(tarPath)) fail(`tar file not found: ${tarPath}`, 2)
-      const body: { path: string; id?: string; override?: JsonValue } = { path: resolve(tarPath) }
-      if (opts.id !== undefined) body.id = opts.id
-      if (configPath !== undefined) body.override = await loadConfigArgument(configPath)
-      const c = buildClient()
-      await c.ensureRunning({ allowSpawn: true })
-      const r = await c.request('POST', '/v1/workspaces/load', { body: JSON.stringify(body) })
-      emit((await handleResponse(r)) as WorkspaceDetail, formatWorkspaceDetail)
-    })
+    .action(
+      async (
+        first: string | undefined,
+        second: string | undefined,
+        opts: { key?: string; id?: string },
+      ) => {
+        const given = [first, second].filter((p): p is string => p !== undefined)
+        if (opts.key !== undefined && given.length > 1)
+          fail('load takes a FILE or --key, not both', 2)
+        if (opts.key === undefined && given.length === 0) {
+          fail('load takes a FILE (or --key) and an optional CONFIG', 2)
+        }
+        const tarPath = opts.key === undefined ? given.shift() : undefined
+        const configPath = given[0]
+        for (const p of [tarPath, configPath]) {
+          if (p !== undefined && !existsSync(p)) fail(`file not found: ${p}`, 2)
+        }
+        const body: Record<string, JsonValue> = {}
+        if (opts.id !== undefined) body.id = opts.id
+        if (configPath !== undefined) body.override = await loadConfigArgument(configPath)
+        const c = buildClient()
+        await c.ensureRunning({ allowSpawn: true })
+        const r =
+          tarPath === undefined
+            ? await c.request('POST', '/v1/workspaces/load', {
+                body: JSON.stringify({ ...body, key: opts.key }),
+                timeoutMs: null,
+              })
+            : await c.requestUpload('POST', '/v1/workspaces/load', body, {
+                name: 'snapshot',
+                data: createReadStream(tarPath),
+              })
+        emit((await handleResponse(r)) as WorkspaceDetail, formatWorkspaceDetail)
+      },
+    )
 }

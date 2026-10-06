@@ -18,9 +18,9 @@ from mirage.commands.builtin.generic.rg import (
     labelled,
     needs_every_file,
     parse_flags,
+    rg_generic,
     walk_filter,
 )
-from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
     CommandIO,
@@ -75,7 +75,7 @@ async def rg(
                 return b"", IOResult(exit_code=1)
             opts = labelled(opts)
         paths = narrowed
-    return await generic_rg(
+    return await rg_generic(
         paths,
         texts,
         opts,

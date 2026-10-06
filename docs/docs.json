@@ -62,8 +62,25 @@
             "group": "Getting Started",
             "pages": [
               "home/introduction",
-              "home/install",
-              "home/cli"
+              "home/install"
+            ]
+          },
+          {
+            "group": "Access",
+            "pages": [
+              "home/access/overview",
+              {
+                "group": "Server",
+                "icon": "server",
+                "pages": [
+                  "home/access/http",
+                  "home/access/mcp",
+                  "home/access/rpc",
+                  "home/access/ssh",
+                  "home/access/fuse",
+                  "home/access/cli"
+                ]
+              }
             ]
           },
           {
@@ -79,10 +96,7 @@
               "home/observer",
               "home/permissions",
               "home/policy-engine",
-              "home/route-policy",
-              "home/auth",
-              "home/ssh",
-          "home/mcp"
+              "home/route-policy"
             ]
           },
           {
@@ -245,24 +259,36 @@
             ]
           },
           {
-            "group": "AI Agents",
-            "icon": "robot",
+            "group": "Access",
             "pages": [
+              "python/access/in-app",
+              "python/access/server"
+            ]
+          },
+          {
+            "group": "AI Agents",
+            "pages": [
+              "python/agents/index",
               {
-                "group": "Integrations",
-                "icon": "robot",
+                "group": "Coding Agents",
+                "icon": "laptop-code",
                 "pages": [
-                  "python/agents/index",
+                  "python/agents/claude-code",
+                  "python/agents/codex",
+                  "python/agents/grok-build"
+                ]
+              },
+              {
+                "group": "Agent SDKs",
+                "icon": "cubes",
+                "pages": [
+                  "python/agents/claude-agent-sdk",
+                  "python/agents/agno",
                   "python/agents/openai-agents",
                   "python/agents/langchain",
                   "python/agents/openhands",
                   "python/agents/pydantic-ai",
-                  "python/agents/agno",
-                  "python/agents/haystack",
-                  "python/agents/claude-code",
-                  "python/agents/claude-agent-sdk",
-                  "python/agents/codex",
-                  "python/agents/grok-build"
+                  "python/agents/haystack"
                 ]
               }
             ]
@@ -436,32 +462,43 @@
             "pages": [
               "typescript/install",
               "typescript/quickstart",
-              "typescript/server-and-cli",
               "typescript/setup/fuse",
               "typescript/python",
               "typescript/limitations"
             ]
           },
           {
-            "group": "AI Agents",
-            "icon": "robot",
+            "group": "Access",
             "pages": [
+              "typescript/access/in-app",
+              "typescript/access/server"
+            ]
+          },
+          {
+            "group": "AI Agents",
+            "pages": [
+              "typescript/agents/index",
               {
-                "group": "Integrations",
-                "icon": "robot",
+                "group": "Coding Agents",
+                "icon": "laptop-code",
                 "pages": [
-                  "typescript/agents/index",
-                  "typescript/agents/openai",
-                  "typescript/agents/langchain",
-                  "typescript/agents/pi",
-                  "typescript/agents/vercel",
-                  "typescript/agents/mastra",
-                  "typescript/agents/opencode",
                   "typescript/agents/claude-code",
-                  "typescript/agents/claude-agent-sdk",
                   "typescript/agents/codex",
                   "typescript/agents/grok-build",
+                  "typescript/agents/pi",
+                  "typescript/agents/opencode",
                   "typescript/agents/dsh"
+                ]
+              },
+              {
+                "group": "Agent SDKs",
+                "icon": "cubes",
+                "pages": [
+                  "typescript/agents/vercel",
+                  "typescript/agents/mastra",
+                  "typescript/agents/claude-agent-sdk",
+                  "typescript/agents/openai",
+                  "typescript/agents/langchain"
                 ]
               }
             ]
@@ -627,6 +664,28 @@
       }
     ]
   },
+  "redirects": [
+    {
+      "source": "/home/auth",
+      "destination": "/home/access/http"
+    },
+    {
+      "source": "/home/cli",
+      "destination": "/home/access/cli"
+    },
+    {
+      "source": "/home/mcp",
+      "destination": "/home/access/mcp"
+    },
+    {
+      "source": "/home/ssh",
+      "destination": "/home/access/ssh"
+    },
+    {
+      "source": "/typescript/server-and-cli",
+      "destination": "/typescript/access/server"
+    }
+  ],
   "navbar": {
     "links": [
       {
@@ -635,7 +694,7 @@
         "href": "https://www.strukto.ai/mirage"
       },
       {
-        "label": "Discord",
+        "label": "",
         "icon": "discord",
         "href": "https://discord.gg/u8BPQ65KsS"
       },

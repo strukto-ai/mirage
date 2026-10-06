@@ -1,0 +1,316 @@
+---
+title: HTTP
+description: The Mirage server's HTTP routes, how to run it, and how it checks tokens.
+icon: globe
+---
+
+The Mirage server serves JSON over HTTP, every route under `/v1`, the same in Python and TypeScript. The CLI is a client of these routes.
+
+```bash
+curl -s http://127.0.0.1:8765/v1/workspaces \
+  -H "Authorization: Bearer $(cat ~/.mirage/auth_token)"
+```
+
+## Run it
+
+The server is a FastAPI app in Python and a Fastify app in TypeScript. Run it as your own service:
+
+<CodeGroup>
+```python Python
+import uvicorn
+
+from mirage.server.app import build_app
+
+uvicorn.run(build_app(), host="127.0.0.1", port=8765)
+```
+
+```ts TypeScript
+import { buildApp } from '@struktoai/mirage-server'
+
+await buildApp().listen({ host: '127.0.0.1', port: 8765 })
+```
+</CodeGroup>
+
+It answers only the `Host` names in `allowed_hosts` (`MIRAGE_ALLOWED_HOSTS`), `127.0.0.1`, `localhost` and `::1` by default, so add the name your clients use. On your own machine the CLI starts the same server as a daemon, which exits 30 seconds after its last workspace is deleted. Options are on the [Python](/python/access/server) and [TypeScript](/typescript/access/server) server pages.
+
+## Auth
+
+Every route but `GET /v1/health` and `GET /.well-known/oauth-protected-resource` needs `Authorization: Bearer <token>`. `MIRAGE_AUTH_MODE` decides what the server accepts:
+
+| Mode | Accepts | Configure |
+| --- | --- | --- |
+| `local` (default) | the token in `~/.mirage/auth_token`, which the CLI writes when it starts the server | nothing |
+| `token` | one fixed token | `MIRAGE_AUTH_TOKEN` |
+| `jwt` | a JWT your issuer signed | `MIRAGE_JWT_PUBKEY`, `MIRAGE_JWT_PUBKEY_FILE` or `MIRAGE_JWT_JWKS_URL`, and `MIRAGE_JWT_ALG` |
+
+In `jwt` mode the server checks the signature against that public key, or against the key set your issuer publishes at `MIRAGE_JWT_JWKS_URL`; it keeps that set and fetches it again for a key id it does not hold, so a key rotation needs no restart (a fixed key needs one). It accepts only the pinned algorithm, requires `exp` and `sub`, and checks `iss` when `MIRAGE_JWT_ISSUER` is set. A token with `aud` must name one of `MIRAGE_JWT_AUDIENCE`, a comma-separated list. A token without `aud` must carry an `azp` in `MIRAGE_JWT_AUTHORIZED_PARTIES` when that is set, and is refused when only an audience is. So one server takes both your app's session tokens and an OAuth client's access tokens, as Clerk issues them:
+
+```bash
+MIRAGE_AUTH_MODE=jwt
+MIRAGE_JWT_ALG=RS256
+MIRAGE_JWT_JWKS_URL=https://clerk.example.com/.well-known/jwks.json
+MIRAGE_JWT_ISSUER=https://clerk.example.com
+MIRAGE_JWT_AUTHORIZED_PARTIES=https://app.example.com   # session tokens from your app
+MIRAGE_JWT_AUDIENCE=client_cli                          # OAuth tokens the CLI logs in with
+MIRAGE_LOGIN_CLIENT_ID=client_cli                       # where `mirage login` signs in
+```
+
+### CLI login
+
+With `MIRAGE_LOGIN_CLIENT_ID` set, `GET /.well-known/oauth-protected-resource` tells [`mirage login`](/home/access/cli#log-in) where to sign in: the issuer (`MIRAGE_JWT_ISSUER`) and the OAuth client. The CLI reads the issuer's endpoints from its `/.well-known/oauth-authorization-server`, opens the browser on its sign-in, and swaps the code it gets back for tokens with PKCE, so no secret is kept on the user's machine. The setting needs `jwt` mode and an issuer, and `MIRAGE_JWT_AUDIENCE` must list the client. Without it the route answers `404`, and `mirage login` reports that the server needs no login.
+
+In Clerk, create an OAuth application with no client secret and PKCE on, add the redirect `http://127.0.0.1/callback` (the CLI picks a free port), allow the `offline_access` scope so the CLI gets a refresh token, and turn the consent screen off so a signed-in user goes straight back to the CLI. Its access tokens last a day and the CLI refreshes them; it asks the user to log in again after 30 days.
+
+### Accounts
+
+In `jwt` mode the token's `sub` is the caller's account, and an account reaches only the workspaces it created:
+
+- Another account's workspace answers `404` on every route, the same as a missing one, and so do its sessions, jobs and asks. `GET /v1/workspaces` and `GET /v1/jobs` list only the caller's.
+- The owner is kept under the state root, so after a restart a stored workspace reopens only for its owner. A workspace stored before the server ran in `jwt` mode has no owner, and no account can create its id.
+- Snapshot keys live under `accounts/<account>/` in the snapshot store.
+- `POST /v1/shutdown` answers `403`.
+
+An [SSH key](/home/access/ssh#bind-a-key-to-an-account) belongs to an account through its `mirage-account` option.
+
+<Warning>
+  Accounts keep workspaces apart, not the host: a workspace config can still mount a host directory or run the `local` runtime. In `local` and `token` mode any accepted token can use every route and every workspace, including `POST /v1/shutdown`. In `local` mode with no token in the environment or in `~/.mirage/auth_token`, the server asks for none.
+</Warning>
+
+## Errors
+
+A failed request answers `{"detail": "<message>"}`.
+
+| Status | When |
+| --- | --- |
+| `400` | The body is not JSON or fails its schema, or the `Host` is not allowed. |
+| `401` | A missing or rejected token. |
+| `403` | An account asked to shut the server down. |
+| `404` | An unknown workspace, session, job or ask, or one of another account's. |
+| `409` | A taken id, an ask already answered, or a workspace whose lines did not end for a snapshot or clone. |
+| `413` | A body over 4 MiB, or an uploaded snapshot over 1 GiB. |
+| `422` | An unknown profile or a bad mode. |
+| `499` | The job was canceled. |
+| `500` | The job failed inside the server. |
+
+## Server
+
+### Check health
+
+<Badge color="blue">GET</Badge> `/v1/health`
+
+Answers `{"status": "ok", "workspaces": 2, "uptime_s": 12.5}`, without a token.
+
+### Shut down
+
+<Badge color="green">POST</Badge> `/v1/shutdown`
+
+Asks the server to stop. The daemon the CLI starts closes its workspaces and exits; a server you run yourself stops only if you gave it `on_idle_exit` (`onIdleExit` in TypeScript).
+
+## Workspaces
+
+### Create a workspace
+
+<Badge color="green">POST</Badge> `/v1/workspaces`
+
+<ParamField body="config" type="object" required>The [workspace YAML](/home/yaml) as JSON.</ParamField>
+<ParamField body="id" type="string">The workspace id. A fresh one when absent.</ParamField>
+
+Answers `201` and the workspace. The same id and config again answers `200` and that workspace; another config under a taken id answers `409`.
+
+```bash
+curl -s http://127.0.0.1:8765/v1/workspaces \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"id": "demo", "config": {"mounts": {"/": {"vfs": "ram", "mode": "WRITE"}}}}'
+```
+
+### List workspaces
+
+<Badge color="blue">GET</Badge> `/v1/workspaces`
+
+### Get a workspace
+
+<Badge color="blue">GET</Badge> `/v1/workspaces/{id}`
+
+<ParamField query="verbose" type="boolean" default="false">Add cache and job internals.</ParamField>
+
+### Delete a workspace
+
+<Badge color="red">DELETE</Badge> `/v1/workspaces/{id}`
+
+Closes the workspace and deletes its state.
+
+### Close a workspace
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/close`
+
+Stops the workspace and keeps its state: creating the same id again picks up its sessions, history and disk files. RAM mounts are lost unless you snapshot first.
+
+### Cancel a workspace's lines
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/cancel`
+
+Cancels the running and queued lines of every session, from HTTP, the CLI and SSH alike, and answers `{"canceled": 2}` once they have ended. The sessions stay open.
+
+### Kill a workspace's jobs
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/kill`
+
+Kills every session's background jobs (`cmd &`) and the processes runtimes started, and answers `{"killed": 1}`.
+
+### Clone a workspace
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/clone`
+
+<ParamField body="id" type="string">The new workspace's id.</ParamField>
+<ParamField body="override" type="object">A config whose mounts replace the source's.</ParamField>
+
+### Snapshot a workspace
+
+<Badge color="blue">GET</Badge> `/v1/workspaces/{id}/snapshot`
+
+Answers the tar (`application/x-tar`). Secrets are stored redacted. The server never writes a snapshot to its own disk. While it captures, new lines and file writes wait, and running ones get 30 seconds to end; if any are still running then, it answers `409`, so cancel them and retry. A clone waits the same way.
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/snapshot`
+
+<ParamField body="key" type="string" required>Puts the tar in the server's [snapshot store](/home/snapshot#an-s3-like-store) under this key, and answers `{id, key, size}`. `400` when the server has none.</ParamField>
+
+### Load a snapshot
+
+<Badge color="green">POST</Badge> `/v1/workspaces/load`
+
+Upload the tar as `multipart/form-data`: a `request` part holding the JSON fields below, then a `snapshot` part of up to 1 GiB. Or send JSON with a `key` to load from the snapshot store.
+
+<ParamField body="key" type="string">The tar's key in the snapshot store; leave it out when uploading.</ParamField>
+<ParamField body="id" type="string">The new workspace's id.</ParamField>
+<ParamField body="override" type="object">A config that re-supplies the redacted credentials.</ParamField>
+
+## Sessions
+
+### Create a session
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/sessions`
+
+<ParamField body="session_id" type="string">The session id. A fresh one when absent.</ParamField>
+<ParamField body="profile" type="string">A [profile](/home/permissions) from the workspace's `profiles`.</ParamField>
+<ParamField body="mounts" type="object">Prefix to mode (`read`, `write`, `exec`) to narrow those mounts, such as `{"/data": "read"}`.</ParamField>
+
+### List sessions
+
+<Badge color="blue">GET</Badge> `/v1/workspaces/{id}/sessions`
+
+### Delete a session
+
+<Badge color="red">DELETE</Badge> `/v1/workspaces/{id}/sessions/{session_id}`
+
+Cancels its lines, kills its jobs and closes it.
+
+### Cancel a session's lines
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/sessions/{session_id}/cancel`
+
+Cancels the session's running and queued lines, from every way in, and answers `{"canceled": 1}` once they have ended. The session stays open.
+
+### Kill a session's jobs
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/sessions/{session_id}/kill`
+
+Kills the session's background jobs and the processes its runtimes started, and answers `{"killed": 1}`. The session stays open.
+
+### Change a session's profile
+
+<Badge color="orange">PATCH</Badge> `/v1/workspaces/{id}/sessions/{session_id}`
+
+<ParamField body="profile" type="string | null" required>A [profile](/home/permissions) from the workspace's `profiles`; `null` for the workspace default.</ParamField>
+
+Replaces the session's modes, hides and rules. Its cwd, env and history stay.
+
+### VFS.md and SKILL.md
+
+<Badge color="blue">GET</Badge> `/v1/workspaces/{id}/vfs-md` · `/v1/workspaces/{id}/sessions/{session_id}/vfs-md`
+
+<Badge color="orange">PUT</Badge> the same routes
+
+<ParamField query="profile" type="string">GET only, on the workspace route: preview this profile.</ParamField>
+<ParamField body="path" type="string" required>PUT only: expose the document as a live, read-only file at this path.</ParamField>
+
+Answers the [document](/home/workspace#vfs-md-and-skill-md) as `text/markdown`. `skill-md` in place of `vfs-md` serves SKILL.md. A missing session or parent is `404`, a path that is taken `409`, a bad path or profile `422`.
+
+## Shell and tools
+
+### Run a shell line
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/shell`
+
+<ParamField body="command" type="string" required>The line.</ParamField>
+<ParamField body="session_id" type="string">The session. The default when absent.</ParamField>
+<ParamField body="cwd" type="string">A working directory for this line only.</ParamField>
+<ParamField query="background" type="boolean" default="false">Answer `202` with `{job_id, workspace_id, submitted_at}` at once.</ParamField>
+
+Answers `{kind, exit_code, stdout, stderr, refusal}` when the line finishes, with the job id in `X-Mirage-Job-Id`. A dropped request cancels its job.
+
+To send stdin, post `multipart/form-data` with a `request` part holding the JSON body, then a `stdin` part. The line starts when the `stdin` part begins and reads it as it arrives. A body that stops before its closing boundary cancels the line and answers `400`. With `?background=true`, the whole upload is read before the `202`.
+
+```bash
+curl -s http://127.0.0.1:8765/v1/workspaces/demo/shell \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"command": "ls / | wc -l"}'
+```
+
+### Call a tool
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/{tool}`
+
+<ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
+
+The body is the tool's input:
+
+| Tool | Required | Optional |
+| --- | --- | --- |
+| `read` | `path` | `offset`, `limit` |
+| `write` | `path`, `content` | |
+| `edit` | `path`, `old_string`, `new_string` | `replace_all` |
+| `ls` | `path` | |
+| `grep` | `pattern`, `path` | `ignore_case`, `fixed_strings`, `include`, `context`, `files_with_matches`, `count`, `max_count` |
+| `glob` | `pattern` | `path` |
+
+Answers `{text, is_error}`. A tool that fails is still `200`, with `is_error` set.
+
+## Jobs
+
+Every shell line is a job: `pending`, `running`, then `done`, `failed` or `canceled`.
+
+### List jobs
+
+<Badge color="blue">GET</Badge> `/v1/jobs`
+
+<ParamField query="workspace_id" type="string">Only this workspace's jobs.</ParamField>
+
+### Get a job
+
+<Badge color="blue">GET</Badge> `/v1/jobs/{job_id}`
+
+### Wait for a job
+
+<Badge color="green">POST</Badge> `/v1/jobs/{job_id}/wait`
+
+<ParamField body="timeout_s" type="number">Seconds to wait. A timeout answers the job as it is, without canceling it.</ParamField>
+
+### Cancel a job
+
+<Badge color="red">DELETE</Badge> `/v1/jobs/{job_id}`
+
+## Asks
+
+### List asks
+
+<Badge color="blue">GET</Badge> `/v1/workspaces/{id}/asks`
+
+<ParamField query="session_id" type="string">Only this session's asks.</ParamField>
+<ParamField query="all" type="boolean" default="false">Include settled ones.</ParamField>
+
+### Answer an ask
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/asks/{ask_id}`
+
+<ParamField body="answer" type="string" required>`allow` or `deny`.</ParamField>
+<ParamField body="scope" type="string" default="once">`once`, or `session` to allow every matching line in the session.</ParamField>

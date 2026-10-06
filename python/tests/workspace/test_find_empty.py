@@ -21,7 +21,6 @@ async def _setup() -> Workspace:
 
 
 def test_empty_matches_empty_files_and_dirs() -> None:
-
     async def _go():
         ws = await _setup()
         r = await ws.shell("find /data -empty", session_id="s")
@@ -36,7 +35,6 @@ def test_empty_matches_empty_files_and_dirs() -> None:
 
 
 def test_empty_with_type_d() -> None:
-
     async def _go():
         ws = await _setup()
         r = await ws.shell("find /data -type d -empty", session_id="s")
@@ -46,7 +44,6 @@ def test_empty_with_type_d() -> None:
 
 
 def test_empty_with_type_f() -> None:
-
     async def _go():
         ws = await _setup()
         r = await ws.shell("find /data -type f -empty", session_id="s")

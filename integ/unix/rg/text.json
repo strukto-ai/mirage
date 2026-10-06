@@ -1,0 +1,149 @@
+{
+  "cases": [
+    {
+      "id": "rg_a_prints_a_nul_line_raw",
+      "seq": 15200141,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'needle\\000tail\\n' > /data/fcB_nul.txt; rg -a needle /data/fcB_nul.txt | od -An -tx1; rg --text -c needle /data/fcB_nul.txt; rg -c needle /data/fcB_nul.txt; rg -l needle /data/fcB_nul.txt; rg --binary --no-binary -c needle /data/fcB_nul.txt; rg -a --no-text -l needle /data/fcB_nul.txt; rm -f /data/fcB_nul.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " 6e 65 65 64 6c 65 00 74 61 69 6c 0a\n1\n1\n/data/fcB_nul.txt\n1\n/data/fcB_nul.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "a",
+        "text",
+        "no_text",
+        "binary",
+        "no_binary",
+        "c",
+        "l"
+      ]
+    },
+    {
+      "id": "rg_names_a_binary_match_by_its_notice",
+      "seq": 15800046,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/crbn && cd /data/crbn && printf 'needle\\000tail\\n' > a && printf 'needle\\nx\\000y\\n' > b && printf 'x\\000y\\nneedle\\n' > c && printf 'plain needle\\n' > t; rg needle a; echo rc=$?; rg -n needle b; rg -c needle c; rg -j1 needle a b t; rg -o needle b; rg -v zz b; rg -A1 needle b; printf 'needle\\000x\\n' | rg needle; rg -j1 --heading needle a t; rg -a -c needle a; cd / && rm -r /data/crbn",
+      "expect": {
+        "exit": 0,
+        "stdout": "binary file matches (found \"\\0\" byte around offset 6)\nrc=0\nbinary file matches (found \"\\0\" byte around offset 8)\n1\na: binary file matches (found \"\\0\" byte around offset 6)\nb: binary file matches (found \"\\0\" byte around offset 8)\nt:plain needle\nbinary file matches (found \"\\0\" byte around offset 8)\nbinary file matches (found \"\\0\" byte around offset 8)\nbinary file matches (found \"\\0\" byte around offset 8)\nbinary file matches (found \"\\0\" byte around offset 6)\na: binary file matches (found \"\\0\" byte around offset 6)\n\nt\nplain needle\n1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "a",
+        "c",
+        "o",
+        "v",
+        "A",
+        "heading"
+      ]
+    },
+    {
+      "id": "rg_walk_skips_a_binary_file_unless_binary",
+      "seq": 15800047,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/crbw && cd /data/crbw && printf 'needle\\000tail\\n' > a && printf 'needle\\nx\\000y\\n' > b && printf 'plain needle\\n' > t; rg -j1 --sort path needle /data/crbw; echo rc=$?; rg --sort path -c needle /data/crbw; rg --sort path -l needle /data/crbw; rg --sort path --files-without-match needle /data/crbw; echo rc=$?; rg -j1 --sort path --binary needle /data/crbw; rg -j1 --sort path -a -c needle /data/crbw; rm t; rg -q needle /data/crbw; echo rc=$?; cd / && rm -r /data/crbw",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/crbw/t:plain needle\nrc=0\n/data/crbw/t:1\n/data/crbw/t\nrc=0\n/data/crbw/a: binary file matches (found \"\\0\" byte around offset 6)\n/data/crbw/b: binary file matches (found \"\\0\" byte around offset 8)\n/data/crbw/t:plain needle\n/data/crbw/a:1\n/data/crbw/b:1\n/data/crbw/t:1\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "binary",
+        "a",
+        "c",
+        "l",
+        "files-without-match",
+        "q"
+      ]
+    },
+    {
+      "id": "rg_finds_a_nul_past_the_first_backend_chunk",
+      "seq": 15800084,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/rgb8 && printf 'needle\\n' > /data/rgb8/f && printf '%010000d\\n' 0 | tr 0 x >> /data/rgb8/f && printf 'a\\0b\\n' >> /data/rgb8/f && rg needle /data/rgb8/f; echo rc=$?; rg needle /data/rgb8; echo rc=$?; rg -c needle /data/rgb8/f; echo rc=$?; rg -l needle /data/rgb8; echo rc=$?; rm -r /data/rgb8",
+      "expect": {
+        "exit": 0,
+        "stdout": "binary file matches (found \"\\0\" byte around offset 10009)\nrc=0\nrc=1\n1\nrc=0\nrc=1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

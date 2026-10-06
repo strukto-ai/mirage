@@ -33,6 +33,24 @@
         "stdout": "",
         "stderr": ""
       }
+    },
+    {
+      "id": "split_dash_operand_reads_stdin",
+      "seq": 15300316,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf 'a\\nb\\nc\\n' | split -l 2 - /data/fcC_d; echo rc=$?; cat /data/fcC_daa; echo '|'; cat /data/fcC_dab; rm -f /data/fcC_daa /data/fcC_dab",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\na\nb\n|\nc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l"
+      ]
     }
   ]
 }

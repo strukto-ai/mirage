@@ -15,14 +15,17 @@
 import { canonicalize } from '../../../../commands/builtin/generic/realpath.ts'
 import { missingOperandError } from '../../../../commands/spec/usage.ts'
 import { dispatchStat, dotRefusal, typedSpec } from '../../../../commands/builtin/utils/paths.ts'
+import { gnuPhrase } from '../../../../errors/posix.ts'
 import { PathSpec } from '../../../../types.ts'
 import { PolicyDenied } from '../../../../policy/index.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
+import { fsErrorLine, fsStrerror, walkRefusal } from '../../../../utils/errors.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
-import { fail, operandText, result, splitFlags } from '../shared.ts'
+import { fail, operandText, parseLine, result } from '../shared.ts'
 import { operandAbs } from './ln.ts'
 import type { Result } from '../types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 // Any filesystem answer other than a target: a refusal (session view or
 // policy), EINVAL (not a link), ENOENT (absent, which is what a hidden
@@ -35,30 +38,60 @@ function readlinkRefused(err: unknown): boolean {
   return typeof (err as { code?: unknown }).code === 'string'
 }
 
+// The last canonicalizing flag decides how much of the path must exist, in
+// the mode letters canonicalize takes ('' is -f). Mirrors Python's
+// CANONICAL_MODES.
+const CANONICAL_MODES: Readonly<Record<string, string>> = {
+  canonicalize: '',
+  canonicalize_existing: 'e',
+  canonicalize_missing: 'm',
+}
+
+// readlink's operands as received: every word that is not an option, the
+// words after `--` included. None of its options takes a value. Mirrors
+// Python's operand_words.
+export function operandWords(args: readonly (string | PathSpec)[]): (string | PathSpec)[] {
+  const words: (string | PathSpec)[] = []
+  let options = true
+  for (const arg of args) {
+    const text = operandText(arg)
+    if (options && text === '--') options = false
+    else if (!(options && text.startsWith('-') && text !== '-')) words.push(arg)
+  }
+  return words
+}
+
 // Print a symlink's target, GNU readlink semantics.
 //
 // The three canonicalizing flags differ only in how much of the resolved
 // path has to exist: -m requires nothing, -f requires every component
 // but the last, and -e requires all of it. A path that falls short
-// prints nothing and exits 1.
+// prints nothing and exits 1, and says why under -v (the last of -q, -s
+// and -v wins).
 export async function handleReadlink(
   namespace: Namespace,
   dispatch: DispatchFn,
   session: SessionState,
   args: (string | PathSpec)[],
 ): Promise<Result> {
-  const [flags, operands] = splitFlags(args, 'fenm')
+  const [, fl, refused] = parseLine('readlink', args, session.cwd)
+  if (refused !== null) return refused
+  const operands = operandWords(args)
   if (operands.length === 0) {
     const error = missingOperandError('readlink', null)
     return fail('readlink', `${error.message}\n`, error.exitCode)
   }
-  // The last of -e, -f and -m wins, as in GNU readlink.
-  const typed = args
-    .slice(0, args.length - operands.length)
-    .map(operandText)
-    .join('')
-  const last = typed.match(/[efm]/g)?.pop()
-  const mode = last === undefined ? null : last === 'f' ? '' : last
+  const canon = fl
+    .typedOrder('canonicalize', 'canonicalize_existing', 'canonicalize_missing')
+    .at(-1)
+  const mode = canon === undefined ? null : (CANONICAL_MODES[canon] ?? null)
+  const verbose = fl.typedOrder('quiet', 'silent', 'verbose').at(-1) === 'verbose'
+  const errors: string[] = []
+  let newline = !fl.asBool('no_newline')
+  if (operands.length > 1 && !newline) {
+    errors.push('readlink: ignoring --no-newline with multiple arguments\n')
+    newline = true
+  }
   const follow = (v: string): string => namespace.follow(v)
   const readlink = (v: string): string | null => namespace.readlink(v)
   const lines: string[] = []
@@ -70,7 +103,7 @@ export async function handleReadlink(
     // and admission policies decide whether this session may read the
     // target at all, so a link operand clears it even under -f, -e and -m.
     // EINVAL (not a link), a refusal and a failed walk all land on GNU
-    // readlink's silent exit 1.
+    // readlink's exit 1, said only under -v.
     try {
       if (mode !== null) {
         if (namespace.isLink(absOp)) await dispatch('readlink', PathSpec.fromStrPath(absOp))
@@ -82,25 +115,35 @@ export async function handleReadlink(
             false,
             readlink,
             dispatchStat(dispatch),
+            session.visibility,
           ),
         )
         continue
       }
-      if (
-        spec.walkError !== null ||
-        (await dotRefusal(dispatchStat(dispatch), spec, follow)) !== null
-      ) {
-        exitCode = 1
-        continue
-      }
+      const refusal =
+        spec.walkError !== null
+          ? walkRefusal(spec)
+          : await dotRefusal(dispatchStat(dispatch), spec, follow)
+      if (refusal !== null) throw refusal
       const [found] = await dispatch('readlink', PathSpec.fromStrPath(absOp))
       lines.push(found as string)
     } catch (err) {
       if (!readlinkRefused(err)) throw err
       exitCode = 1
+      if (verbose) {
+        const line = fsErrorLine('readlink', spec.rawPath, err)
+        const code = (err as { code?: unknown }).code
+        errors.push(
+          fsStrerror(err) === null && code === 'EINVAL'
+            ? `${line.trimEnd()}: ${gnuPhrase('EINVAL')}\n`
+            : line,
+        )
+      }
     }
   }
-  if (lines.length === 0) return result('readlink', { exitCode })
-  const text = flags.has('n') ? lines.join('') : lines.map((l) => l + '\n').join('')
-  return result('readlink', { out: new TextEncoder().encode(text), exitCode })
+  const end = newline ? (fl.asBool('zero') ? '\0' : '\n') : ''
+  const stderr = errors.join('')
+  if (lines.length === 0) return result('readlink', { exitCode, stderr })
+  const text = lines.map((l) => l + end).join('')
+  return result('readlink', { out: encodeText(text), exitCode, stderr })
 }

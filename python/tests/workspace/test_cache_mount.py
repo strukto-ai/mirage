@@ -12,12 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.constants import SCOPE_ERROR
-from mirage.core.disk.read import read_bytes
+from mirage.core.disk.read import read
 from mirage.core.disk.readdir import readdir
 from mirage.io.types import IOResult
 from mirage.types import MountMode, PathSpec, ReadPolicy, ReadSpec
@@ -39,7 +41,7 @@ async def stat_zzz_disk(
     **_extra: object,
 ) -> tuple[bytes | None, IOResult]:
     paths = await resolve_glob(accessor, paths, index)
-    raw = await read_bytes(accessor, paths[0])
+    raw = await read(accessor, paths[0])
     return b"CUSTOM DISK STAT %d\n" % len(raw), IOResult(
         reads={paths[0].mount_path: raw}, cache=[paths[0].mount_path]
     )
@@ -215,3 +217,105 @@ async def test_a_guarded_cp_leaves_the_entry_it_read_past(tmp_path):
     assert served == "v1\n", (
         "the guarded walk overwrote the entry it read past"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "cached", "stored"),
+    [
+        ("cat /d/f; printf 'z\\n' >> /d/f", None, b"b\na\nz\n"),
+        ("awk 1 /d/f | tee -a /d/f > /dev/null", None, b"b\na\nb\na\n"),
+        ("sort -o /d/f /d/f; printf 'z\\n' >> /d/f", None, b"a\nb\nz\n"),
+        ("printf 'q\\n' | tee /d/f >> /d/f", None, b"q\nq\n"),
+        ("printf 'q\\n' | tee /d/f >> /d/f 2>> /d/f", None, b"q\nq\n"),
+        ("cat /d/f; sort -o /d/f /d/f", b"a\nb\n", b"a\nb\n"),
+        ("cat /d/f | sort -o /d/f", b"a\nb\n", b"a\nb\n"),
+    ],
+)
+async def test_a_line_touching_a_file_twice_caches_only_a_whole_file(
+    line, cached, stored
+):
+    """An append, or a read before a write, leaves no entry; a whole write
+    after a read is kept."""
+    ram = RAMVFS()
+    ram.caches_reads = True
+    ws = Workspace({"/d": ram}, mode=MountMode.WRITE)
+    await ws.shell("printf 'b\\na\\n' > /d/f")
+    await (await ws.shell("cat /d/f")).materialize_stdout()
+    await (await ws.shell(line)).materialize_stdout()
+    entry = await ws.cache.get("/d/f")
+    out = await (await ws.shell("cat /d/f")).materialize_stdout()
+    await ws.close()
+    assert (entry, out) == (cached, stored)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("caching", "line"),
+    [
+        (True, "cat /d/big | head -c 1; printf 'z\\n' >> /d/big"),
+        (False, "cat /d/big | head -c 1"),
+    ],
+)
+async def test_a_read_given_up_on_leaves_the_mount_free_to_unmount(
+    caching, line
+):
+    """A read the line gave up on is closed, or unmount waits on it."""
+    ram = RAMVFS()
+    ram.caches_reads = caching
+    ws = Workspace({"/d": ram}, mode=MountMode.WRITE)
+    await ws.shell("seq 1 200000 > /d/big")
+    await (await ws.shell(line)).materialize_stdout()
+    await asyncio.wait_for(ws.unmount("/d"), 10)
+    await ws.close()
+
+
+def _count_drops(ws: Workspace, path: str) -> list[str]:
+    """Record every prefix walk of the file cache and the mount's index.
+
+    Args:
+        ws (Workspace): the workspace whose stores to watch.
+        path (str): any path on the mount whose index to watch.
+    """
+    drops: list[str] = []
+    cache = ws.cache
+    index = ws._namespace.try_mount_for(path).index_store
+    real_evict = cache.evict_prefix
+    real_invalidate = index.invalidate_prefix
+
+    async def evict_prefix(prefix, **kwargs):
+        drops.append(f"body:{prefix}")
+        await real_evict(prefix, **kwargs)
+
+    async def invalidate_prefix(key, **kwargs):
+        drops.append(f"index:{key}")
+        await real_invalidate(key, **kwargs)
+
+    cache.evict_prefix = evict_prefix
+    index.invalidate_prefix = invalidate_prefix
+    return drops
+
+
+@pytest.mark.asyncio
+async def test_mv_of_a_file_keeps_every_other_cached_read():
+    # `mv` of a plain file has nothing beneath it, so the backend's rename
+    # walks neither store, and the warm read of another folder survives. A
+    # folder `mv` still takes its subtree under the old name.
+    ram = RAMVFS()
+    ram.caches_reads = True
+    ws = Workspace({"/m/": ram}, mode=MountMode.WRITE)
+    await ws.shell("echo f > /m/f && mkdir /m/dir && echo x > /m/dir/x")
+    await (await ws.shell("cat /m/dir/x")).stdout_str()
+    assert await ws.cache.exists("/m/dir/x")
+    drops = _count_drops(ws, "/m/f")
+    await ws.shell("mv /m/f /m/g")
+    # The spies are what tell narrowed from not: a file has nothing cached
+    # beneath it, so the old subtree drop removed no body either. The warm
+    # read surviving guards the other way, against a drop wider than /m/f.
+    assert drops == []
+    assert await ws.cache.exists("/m/dir/x")
+    assert await (await ws.shell("cat /m/g")).stdout_str() == "f\n"
+    await ws.shell("mv /m/dir /m/dir2")
+    assert not await ws.cache.exists("/m/dir/x")
+    assert (await ws.shell("cat /m/dir/x")).exit_code != 0
+    assert await (await ws.shell("cat /m/dir2/x")).stdout_str() == "x\n"

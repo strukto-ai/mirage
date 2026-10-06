@@ -17,11 +17,9 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
-import {
-  hiddenPathsIntersect,
-  pathAllowed,
-  pathRulesActive,
-} from '../../../context/session_context.ts'
+import { IOResult, type SizedRun } from '../../../io/types.ts'
+import { pathsScoped } from '../../../ops/namespace_view.ts'
+import { pathVisible } from '../../../utils/hidden.ts'
 import {
   ZERO_LENGTH_NAME,
   fsStrerror,
@@ -32,9 +30,11 @@ import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { respellRaw } from '../../../utils/path.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { formatRecords } from '../utils/output.ts'
-import { humanSize } from '../utils/formatting.ts'
+import { scaledSize } from '../utils/formatting.ts'
 import { quoteText } from '../../quote.ts'
-import type { LinkView, MountView, StatPath } from '../../../ops/types.ts'
+import { INTMAX } from '../constants.ts'
+import type { LinkView, MountView, NamespaceView, StatPath } from '../../../ops/types.ts'
+import type { Visibility } from '../../../types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
 import type { DuEntries } from '../../../vfs/types.ts'
@@ -48,21 +48,22 @@ const DEPTH_OCT = /^[+-]?0[0-7]*$/
 const DEPTH_DEC = /^[+-]?[1-9][0-9]*$/
 
 /**
- * Read a `--max-depth` value the way GNU's `xstrtoul` does.
+ * Read a `--max-depth` value the way GNU's `xstrtoimax` does.
  *
- * That is C `strtoul` with base 0: a `0x` prefix is hexadecimal, a bare
+ * That is C `strtoimax` with base 0: a `0x` prefix is hexadecimal, a bare
  * leading `0` is octal (so `010` is 8 and `09` is invalid), anything else is
- * decimal. Surrounding whitespace is not allowed.
+ * decimal, and a value outside `intmax_t` overflows. Surrounding whitespace
+ * is not allowed.
  */
 export function parseDepth(text: string): number | null {
-  const negative = text.startsWith('-')
   const body = text.replace(/^[+-]/, '')
-  let value: number
-  if (DEPTH_HEX.test(text)) value = Number.parseInt(body.slice(2), 16)
-  else if (DEPTH_OCT.test(text)) value = Number.parseInt(body, 8)
-  else if (DEPTH_DEC.test(text)) value = Number.parseInt(body, 10)
+  let magnitude: bigint
+  if (DEPTH_HEX.test(text)) magnitude = BigInt(`0x${body.slice(2)}`)
+  else if (DEPTH_OCT.test(text)) magnitude = BigInt(`0o${body}`)
+  else if (DEPTH_DEC.test(text)) magnitude = BigInt(body)
   else return null
-  return negative && value !== 0 ? -value : value
+  const value = text.startsWith('-') ? -magnitude : magnitude
+  return value >= -INTMAX - 1n && value <= INTMAX ? Number(value) : null
 }
 
 /** The parsed `du` command line. */
@@ -93,9 +94,18 @@ export interface DuOutput {
    * does for a tree it could not fully account for.
    */
   exitCode: number
+  /**
+   * Each readable operand's measurement; null when one was only summed (`-s`,
+   * or a backend that can only produce a size).
+   */
+  runs: SizedRun[] | null
 }
 
 const TRUNCATED_NOTE = 'du: walk stopped early: the reported sizes are incomplete'
+
+function line(size: number, human: boolean, label: string): string {
+  return `${scaledSize(size, null, human)}\t${label}`
+}
 
 /**
  * Validate a `du` command line the way GNU does, before any I/O.
@@ -159,7 +169,11 @@ function cwdSpec(cwd: string, mountPrefix?: string): PathSpec {
 /**
  * Whether an operand holds anything, for the unstattable case.
  */
-async function duHasContent(computeEntries: ComputeEntries, path: PathSpec): Promise<boolean> {
+async function duHasContent(
+  vis: Visibility | undefined,
+  computeEntries: ComputeEntries,
+  path: PathSpec,
+): Promise<boolean> {
   try {
     const [entries] = await computeEntries(path)
     // The visibility filter is what makes this safe to ask after the
@@ -167,7 +181,7 @@ async function duHasContent(computeEntries: ComputeEntries, path: PathSpec): Pro
     // accessor, which knows nothing of hides, so counting its raw answer
     // would confirm a walled-off subtree's parent. Entries are lifted onto
     // virtual paths first, since that is the space a hide is written in.
-    return toVirtual(entries, path).some(([leaf]) => pathAllowed(leaf))
+    return toVirtual(entries, path).some(([leaf]) => pathVisible(vis, leaf))
   } catch {
     // This runs only after stat already failed, to tell an implicit
     // directory from an absent path. Backends raise their own error types
@@ -178,26 +192,6 @@ async function duHasContent(computeEntries: ComputeEntries, path: PathSpec): Pro
   }
 }
 
-/**
- * Split the operands into the ones du can read and the ones it cannot.
- *
- * GNU names every operand it fails to stat, keeps going with the rest, and
- * exits 1. With no operand at all it measures the working directory.
- *
- * A failed stat is not proof of absence, and du runs bound to one backend, so
- * its own stat cannot see two things that make a path a real directory: a
- * mount nested below it and a symlink below it are both namespace state, held
- * in another VFS or in no VFS at all. `statPath` is the channel that
- * knows, because it resolves through the dispatcher rather than one accessor,
- * and it is the same probe `find` classifies its start point with. SessionState
- * filtering rides along with it: a mount the session may not see contributes
- * no directory here, so absence stays the answer for it.
- *
- * `hasContent` is the second channel behind that, for a backend that never
- * materialises a directory entry for its own mount root (redis is one) while
- * the subtree below it is full. It counts only what the session may see, so
- * it cannot re-open what the first channel closed.
- */
 const ENOENT_TEXT = 'No such file or directory'
 
 /**
@@ -228,6 +222,26 @@ async function duOperandExists(
   return hasContent !== undefined && (await hasContent(path))
 }
 
+/**
+ * Split the operands into the ones du can read and the ones it cannot.
+ *
+ * GNU names every operand it fails to stat, keeps going with the rest, and
+ * exits 1. With no operand at all it measures the working directory.
+ *
+ * A failed stat is not proof of absence, and du runs bound to one backend, so
+ * its own stat cannot see two things that make a path a real directory: a
+ * mount nested below it and a symlink below it are both namespace state, held
+ * in another VFS or in no VFS at all. `statPath` is the channel that
+ * knows, because it resolves through the dispatcher rather than one accessor,
+ * and it is the same probe `find` classifies its start point with. SessionState
+ * filtering rides along with it: a mount the session may not see contributes
+ * no directory here, so absence stays the answer for it.
+ *
+ * `hasContent` is the second channel behind that, for a backend that never
+ * materialises a directory entry for its own mount root (redis is one) while
+ * the subtree below it is full. It counts only what the session may see, so
+ * it cannot re-open what the first channel closed.
+ */
 async function duOperands(
   paths: PathSpec[],
   cwd: string,
@@ -277,7 +291,17 @@ async function duOperands(
       if (!isMissingPath(err)) throw err
       stattable = false
     }
-    if (!(await duOperandExists(path, stattable, hasContent, statPath))) {
+    let exists: boolean
+    try {
+      exists = await duOperandExists(path, stattable, hasContent, statPath)
+    } catch (err) {
+      // The door refuses to stat it: GNU names the errno it got
+      // (`du: cannot access 'P': Permission denied`).
+      if ((err as { code?: string }).code !== 'EACCES') throw err
+      missing.push([path.rawPath, fsStrerror(err) ?? 'Permission denied'])
+      continue
+    }
+    if (!exists) {
       missing.push([path.rawPath, ENOENT_TEXT])
       continue
     }
@@ -462,20 +486,21 @@ async function duOne(
   path: PathSpec,
   computeSize: ComputeSize,
   computeEntries: ComputeEntries,
-  fmt: (size: number) => string,
   flags: DuFlags,
   links: LinkView | null,
   mounts: MountView | null,
   directories?: () => readonly string[],
-): Promise<[string[], number]> {
+  ns?: NamespaceView,
+): Promise<[string[], number, SizedRun | null]> {
   const label = path.rawPath
+  const vis = ns?.visibility
 
   const linkRow = links?.statAt(path.virtual) ?? null
   if (linkRow !== null) {
     // GNU du does not follow a symlink operand without -L; the operand
     // is the link, and it accounts for the link alone.
     const size = linkRow.size ?? 0
-    return [[`${fmt(size)}\t${label}`], size]
+    return [[line(size, flags.h, label)], size, { leaves: [[path.virtual, size]], directories: [] }]
   }
 
   const roots = mounts?.descendants(path.virtual) ?? []
@@ -483,19 +508,13 @@ async function duOne(
   if (roots.length > 0) leaves = dropShadowed(leaves, roots)
   const linkTotal = leaves.reduce((acc, [, size]) => acc + size, 0)
 
-  if (
-    flags.s &&
-    !flags.S &&
-    roots.length === 0 &&
-    !hiddenPathsIntersect(path.virtual) &&
-    !pathRulesActive()
-  ) {
+  if (flags.s && !flags.S && roots.length === 0 && !pathsScoped(ns, [path])) {
     // The one-total fast path trusts the backend's own sum, which a
     // session hiding paths cannot: hidden leaves would be counted into
     // a total their names never justify, so that session takes the
     // entries walk below instead.
     const total = (await computeSize(path)) + linkTotal
-    return [[`${fmt(total)}\t${label}`], total]
+    return [[line(total, flags.h, label)], total, null]
   }
 
   const [raw, rawTotal] = await computeEntries(path)
@@ -505,18 +524,26 @@ async function duOne(
   const dirs = (directories?.() ?? []).filter(
     (d) =>
       norm(d).startsWith(under) &&
-      pathAllowed(d) &&
+      pathVisible(vis, d) &&
       !roots.some((r) => norm(d) === r || norm(d).startsWith(r + '/')),
   )
-  if (raw.length === 0 && leaves.length === 0 && dirs.length === 0) {
+  const walked = (directories?.() ?? []).some((d) => norm(d) === rootKey)
+  if (raw.length === 0 && leaves.length === 0 && dirs.length === 0 && !walked) {
     // A backend that can only produce a size degrades to one total; it
-    // cannot enumerate, so shadowed keys cannot be excluded either.
+    // cannot enumerate, so shadowed keys cannot be excluded either. A
+    // walk that opened the operand already said all it can: an empty
+    // directory, or one a rule refused, which a second walk would
+    // report twice.
     const fallback = await computeSize(path)
-    return [[`${fmt(fallback)}\t${label}`], fallback]
+    return [
+      [line(fallback, flags.h, label)],
+      fallback,
+      fallback === 0 ? { leaves: [], directories: [] } : null,
+    ]
   }
 
   let entries = toVirtual(raw, path).concat(leaves)
-  const visible = entries.filter(([leaf]) => pathAllowed(leaf))
+  const visible = entries.filter(([leaf]) => pathVisible(vis, leaf))
   if (visible.length !== entries.length) {
     // Same honesty rule as shadowed leaves: the total is the sum of
     // what the session may see, never the backend's own number.
@@ -529,19 +556,20 @@ async function duOne(
     entries = dropShadowed(entries, roots)
     total = entries.reduce((acc, [, size]) => acc + size, 0)
   }
+  const run: SizedRun = { leaves: entries, directories: dirs }
   // A file operand walks to itself. GNU prints it once, with or without -a,
   // never as a leaf line plus a roll-up line. GNU scopes -S to directories, so
   // a file operand keeps its own size in both its row and the grand total.
   const first = entries[0]
   if (entries.length === 1 && first !== undefined && norm(first[0]) === rootKey) {
-    return [[`${fmt(first[1])}\t${label}`], total]
+    return [[line(first[1], flags.h, label)], total, run]
   }
   // -S changes what the operand's own row counts, not what the operand
   // contributes to -c: GNU's grand total stays recursive (coreutils 9.7,
   // `du -bSc dir` prints `3 dir` then `6 total`).
   const own = flags.S ? separateTotal(entries, path.virtual) : total
   if (flags.s) {
-    return [[`${fmt(own)}\t${label}`], total]
+    return [[line(own, flags.h, label)], total, run]
   }
 
   const rows = rollup(entries, path.virtual, {
@@ -555,81 +583,28 @@ async function duOne(
     path.virtual,
     label,
   )
-  const lines = rows.map(([, size], i) => `${fmt(size)}\t${shown[i] ?? ''}`)
-  lines.push(`${fmt(own)}\t${label}`)
-  return [lines, total]
-}
-
-/**
- * Run one whole `du` invocation, from raw flags to rendered bytes.
- *
- * Every caller needs the same three steps in the same order: validate the
- * flags before touching I/O, split the operands into readable and unreadable,
- * then render. Keeping them here means a backend wrapper is wiring only, and
- * the three steps cannot drift apart per backend.
- */
-export async function runDu(
-  paths: PathSpec[],
-  opts: CommandOpts,
-  resolveGlob: (targets: PathSpec[]) => Promise<PathSpec[]>,
-  stat: (p: PathSpec) => Promise<unknown>,
-  computeSize: ComputeSize,
-  computeEntries: ComputeEntries,
-  truncated?: () => boolean,
-  unreadable?: () => readonly string[],
-  directories?: () => readonly string[],
-): Promise<DuOutput> {
-  const flags = parseFlags(opts)
-  // -L dereferences: the operand was already rewritten at dispatch, and
-  // withholding the link table stops the links below it from being
-  // counted as entries in their own right, which is what GNU does (it
-  // follows each one and finds the target already accounted for). A
-  // link pointing outside the operand's own subtree is undercounted;
-  // GNU would traverse into it.
-  const links = new FlagView(opts.flags, specOf('du')).asBool('L') ? null : (opts.ns?.links ?? null)
-  const { present, missing } = await duOperands(
-    paths,
-    opts.cwd,
-    resolveGlob,
-    stat,
-    (p) => duHasContent(computeEntries, p),
-    opts.mountPrefix,
-    links,
-    opts.statPath ?? null,
-  )
-  return duGeneric(
-    present,
-    flags,
-    computeSize,
-    computeEntries,
-    missing,
-    truncated,
-    links,
-    opts.ns?.mounts ?? null,
-    unreadable,
-    directories,
-  )
+  const lines = rows.map(([, size], i) => line(size, flags.h, shown[i] ?? ''))
+  lines.push(line(own, flags.h, label))
+  return [lines, total, run]
 }
 
 /**
  * Render `du` output for a list of operands.
  *
- * `computeEntries` reports mount-relative (path, size) pairs plus the total;
- * pass `undefined` on backends that can only produce a size, which makes both
- * `-a` and the per-directory lines degrade to one total. `missing` names the
- * operands that could not be read: GNU reports each and exits 1 but still
- * prints the rest. `truncated` is read after the walks to ask whether any of
- * them hit its entry cap. `mounts` marks the descendant boundaries: leaves
- * under one are shadowed and dropped from every row and total (see
- * `dropShadowed`). `unreadable` is read after the walks for the directories a
- * walk could not open (a rule refused them below the operand): GNU names each
- * one, counts what it could, and exits 1; the line is spelled as the operand
- * was typed, and follows the unreadable-operand lines since those are known
- * before any walk. `directories` is read after each operand's walk for every
- * directory it met, so one no file points at (empty, or refused) still gets
- * GNU's row.
+ * `computeEntries` reports mount-relative (path, size) pairs plus the total.
+ * `missing` names the operands that could not be read: GNU reports each and
+ * exits 1 but still prints the rest. `truncated` is read after the walks to
+ * ask whether any of them hit its entry cap. `mounts` marks the descendant
+ * boundaries: leaves under one are shadowed and dropped from every row and
+ * total (see `dropShadowed`). `unreadable` is read after the walks for the
+ * directories a walk could not open (a rule refused them below the operand):
+ * GNU names each one, counts what it could, and exits 1; the line is spelled
+ * as the operand was typed, and follows the unreadable-operand lines since
+ * those are known before any walk. `directories` is read after each operand's
+ * walk for every directory it met, so one no file points at (empty, or
+ * refused) still gets GNU's row.
  */
-export async function duGeneric(
+export async function du(
   paths: PathSpec[],
   flags: DuFlags,
   computeSize: ComputeSize,
@@ -640,28 +615,30 @@ export async function duGeneric(
   mounts: MountView | null = null,
   unreadable?: () => readonly string[],
   directories?: () => readonly string[],
+  ns?: NamespaceView,
 ): Promise<DuOutput> {
-  const fmt = (size: number): string => (flags.h ? humanSize(size) : String(size))
-
   const lines: string[] = []
   let grand = 0
+  let runs: SizedRun[] | null = []
   for (const root of paths) {
-    const [block, total] = await duOne(
+    const [block, total, run] = await duOne(
       root,
       computeSize,
       computeEntries,
-      fmt,
       flags,
       links,
       mounts,
       directories,
+      ns,
     )
     lines.push(...block)
     grand += total
+    if (run === null) runs = null
+    else runs?.push(run)
   }
   // GNU still prints the grand total when every operand failed ("0 total"), so
   // this stays outside the loop guard.
-  if (flags.c) lines.push(`${fmt(grand)}\ttotal`)
+  if (flags.c) lines.push(line(grand, flags.h, 'total'))
 
   const notes = flags.warning === undefined ? [] : [flags.warning]
   notes.push(
@@ -680,7 +657,67 @@ export async function duGeneric(
   }
   const stderr =
     notes.length > 0 ? new TextEncoder().encode(`${notes.join('\n')}\n`) : new Uint8Array(0)
-  return { stdout: formatRecords(lines), stderr, exitCode }
+  return { stdout: formatRecords(lines), stderr, exitCode, runs }
+}
+
+/**
+ * Run one whole `du` invocation, from raw flags to rendered bytes.
+ *
+ * Every caller needs the same three steps in the same order: validate the
+ * flags before touching I/O, split the operands into readable and unreadable,
+ * then render. Keeping them here means a backend wrapper is wiring only, and
+ * the three steps cannot drift apart per backend.
+ *
+ * -L dereferences: the operand was already rewritten at dispatch, and
+ * withholding the link table stops the links below it from being counted as
+ * entries in their own right, which is what GNU does (it follows each one and
+ * finds the target already accounted for). A link pointing outside the
+ * operand's own subtree is undercounted; GNU would traverse into it. The last
+ * of -L and -P decides, as it does in GNU du.
+ */
+export async function duGeneric(
+  paths: PathSpec[],
+  opts: CommandOpts,
+  resolveGlob: (targets: PathSpec[]) => Promise<PathSpec[]>,
+  stat: (p: PathSpec) => Promise<unknown>,
+  computeSize: ComputeSize,
+  computeEntries: ComputeEntries,
+  truncated?: () => boolean,
+  unreadable?: () => readonly string[],
+  directories?: () => readonly string[],
+): Promise<[Uint8Array, IOResult]> {
+  const flags = parseFlags(opts)
+  const links =
+    new FlagView(opts.flags, specOf('du')).typedOrder('L', 'P').at(-1) === 'L'
+      ? null
+      : (opts.ns?.links ?? null)
+  const { present, missing } = await duOperands(
+    paths,
+    opts.cwd,
+    resolveGlob,
+    stat,
+    (p) => duHasContent(opts.ns?.visibility, computeEntries, p),
+    opts.mountPrefix,
+    links,
+    opts.statPath ?? null,
+  )
+  const out = await du(
+    present,
+    flags,
+    computeSize,
+    computeEntries,
+    missing,
+    truncated,
+    links,
+    opts.ns?.mounts ?? null,
+    unreadable,
+    directories,
+    opts.ns,
+  )
+  return [
+    out.stdout,
+    new IOResult({ stderr: out.stderr, exitCode: out.exitCode, sizedRuns: out.runs }),
+  ]
 }
 
 // Spell a walked path as the operand it lies under was typed.

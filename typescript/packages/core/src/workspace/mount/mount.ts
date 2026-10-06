@@ -27,6 +27,7 @@ import type {
   ExecContext,
   RegisteredCommand,
 } from '../../commands/config.ts'
+import { STDIN_DASH_COMMANDS, STDIN_DASH_LEADING } from '../../commands/spec/constants.ts'
 import { hasInjectedVersion } from '../../commands/spec/standard.ts'
 import { ROOT_CWD } from '../../commands/constants.ts'
 import type { OpKwargs } from '../../ops/registry.ts'
@@ -77,6 +78,7 @@ import {
 import { dispatchStat, linkFollow } from '../../commands/builtin/utils/paths.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 type CmdKey = string
 type OpKey = string
@@ -575,7 +577,7 @@ export class MountEntry {
           null,
           new IOResult({
             exitCode: 127,
-            stderr: new TextEncoder().encode(`${cmdName}: command not found`),
+            stderr: encodeText(`${cmdName}: command not found`),
           }),
         ]
       }
@@ -596,7 +598,22 @@ export class MountEntry {
           dotted: p.dotted,
           walkError: p.walkError,
         })
-      const prefixedPaths = paths.map(stamp)
+      // A stdin `-` routed nowhere, so it rides on whichever mount runs the
+      // line, beside the operands that chose it.
+      const stdinSlots = STDIN_DASH_COMMANDS.has(cmdName)
+        ? (STDIN_DASH_LEADING.get(cmdName) ?? paths.length)
+        : 0
+      const prefixedPaths = paths.map((p, index) =>
+        index < stdinSlots && p.rawPath === '-'
+          ? new PathSpec({
+              virtual: `${mountPrefix}/-`,
+              directory: p.directory,
+              resolved: p.resolved,
+              vfsPath: '-',
+              rawPath: p.rawPath,
+            })
+          : stamp(p),
+      )
       // Stamp this mount's backend key onto path-shaped flag values so
       // backend reads can address them: a single PathSpec (awk -f, tar -f)
       // or a list (repeated grep -f, jq's --rawfile pairs). Everything else
@@ -682,9 +699,7 @@ export class MountEntry {
                           null,
                           new IOResult({
                             exitCode: 1,
-                            stderr: new TextEncoder().encode(
-                              `${cmdName}: read-only mount at ${this.prefix}\n`,
-                            ),
+                            stderr: encodeText(`${cmdName}: read-only mount at ${this.prefix}\n`),
                           }),
                         ]
                       }
@@ -854,7 +869,7 @@ export function wrapOpStream(result: unknown, mountId: string, activity: VFSActi
 // handed back, so a deferred backend read attributes its record the same
 // way an eager one does. Dedup by identity: a stream that appears both as the
 // primary stdout and in IOResult.reads/writes is wrapped once.
-// Mirrors python's _wrap_cmd_streams.
+// Mirrors python's _wrap_mount_streams.
 function wrapMountStreams(
   result: [ByteSource | null, IOResult],
   mountId: string,

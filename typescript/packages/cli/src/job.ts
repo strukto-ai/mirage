@@ -31,7 +31,8 @@ export function registerJobCommands(program: Command): void {
       const c = buildClient()
       await c.ensureRunning({ allowSpawn: false })
       const path =
-        '/v1/jobs' + (opts.workspace !== undefined ? `?workspaceId=${opts.workspace}` : '')
+        '/v1/jobs' +
+        (opts.workspace !== undefined ? `?workspace_id=${encodeURIComponent(opts.workspace)}` : '')
       emit(await handleResponse(await c.request('GET', path)))
     })
 
@@ -56,7 +57,7 @@ export function registerJobCommands(program: Command): void {
       const c = buildClient()
       await c.ensureRunning({ allowSpawn: false })
       const body: Record<string, unknown> = {}
-      if (opts.timeout !== undefined) body.timeoutS = Number(opts.timeout)
+      if (opts.timeout !== undefined) body.timeout_s = Number(opts.timeout)
       const response = await handleResponse(
         await c.request('POST', `/v1/jobs/${encodeURIComponent(id)}/wait`, {
           body: JSON.stringify(body),

@@ -526,6 +526,43 @@
         "stdout": "Tue Mar  5 07:08:09 UTC 2024\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "date_multiple_output_formats_any_pair",
+      "seq": 15500501,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "date -d '2024-03-05T07:08:09.5Z' --rfc-3339=s -Is; echo rc=$?; date -d '2024-03-05T07:08:09.5Z' -I -R a b; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\n",
+        "stderr": "date: multiple output formats specified\ndate: multiple output formats specified\n"
+      },
+      "flags": [
+        "d",
+        "rfc-3339",
+        "I",
+        "R"
+      ]
     }
   ]
 }

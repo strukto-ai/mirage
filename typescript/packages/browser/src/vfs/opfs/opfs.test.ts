@@ -20,7 +20,7 @@ import { size as duSizeCore } from '../../core/opfs/du/index.ts'
 import { exists as existsCore } from '../../core/opfs/exists.ts'
 import { find as findCore } from '../../core/opfs/find.ts'
 import { rmR as rmRCore } from '../../core/opfs/rm.ts'
-import { stream as streamCore } from '../../core/opfs/stream.ts'
+import { readStream as streamCore } from '../../core/opfs/stream.ts'
 import { installFakeNavigator, makeMockRoot, spec } from '../../test-utils.ts'
 import { OPFSVFS } from './opfs.ts'
 

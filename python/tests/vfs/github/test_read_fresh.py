@@ -12,13 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+
 import aiohttp
 import pytest
 
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.tree import fetch_tree
-from mirage.types import HiddenPaths, MountMode, ReadPolicy, ReadSpec
+from mirage.types import (
+    HiddenPaths,
+    MountMode,
+    ReadPolicy,
+    ReadSpec,
+    Visibility,
+)
 from mirage.vfs.github import GitHubVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs
@@ -150,7 +157,7 @@ async def test_a_warm_probe_does_not_bypass_a_sessions_hidden_path():
         try:
             assert await _out(ws, f"cat {PATH}") == OLD
             session = ws.create_session("hidden")
-            session.hidden_paths = HiddenPaths(paths=(PATH,))
+            session.visibility = Visibility(paths=HiddenPaths(paths=(PATH,)))
             result = await ws.shell(f"cat {PATH}", session_id="hidden")
             assert await result.materialize_stdout() == b""
             assert result.exit_code == 1

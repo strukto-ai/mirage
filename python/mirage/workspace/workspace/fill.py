@@ -22,6 +22,7 @@ from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import fetch_secret
 from mirage.secrets.summary import field_summary
 from mirage.secrets.types import ResolvedSource
+from mirage.shell.bytes import decode_text
 from mirage.shell.constants import SHOPT_DEFAULTS
 from mirage.shell.parse import (
     arith_reads,
@@ -73,7 +74,7 @@ def _defined_bodies(node: TSNodeLike) -> dict[str, list[TSNodeLike]]:
             body = current.child_by_field_name("body")
             text = name_node.text if name_node is not None else None
             if text and body is not None:
-                out.setdefault(text.decode(), []).append(body)
+                out.setdefault(decode_text(text), []).append(body)
         stack.extend(current.named_children)
     return out
 
@@ -270,7 +271,7 @@ def _assignment_masks(stmt: TSNodeLike) -> frozenset[str] | None:
             return None
         if _replacement_blocked(part):
             return None
-        names.add(text.decode())
+        names.add(decode_text(text))
     return frozenset(names)
 
 
@@ -317,13 +318,13 @@ def _unset_masks(stmt: TSNodeLike) -> frozenset[str] | None:
     for child in stmt.named_children:
         if child.type == "word":
             text = child.text
-            if not text or text.decode() not in ("-v", "--"):
+            if not text or decode_text(text) not in ("-v", "--"):
                 return None
         elif child.type == "variable_name":
             text = child.text
             if not text:
                 return None
-            names.add(text.decode())
+            names.add(decode_text(text))
         else:
             return None
     return frozenset(names)
@@ -617,7 +618,7 @@ def _wanted(
     return frozenset((wanted & pending.keys()) - masked)
 
 
-def _pending(session: SessionState) -> dict[str, ManagedRef]:
+def _pending_of(session: SessionState) -> dict[str, ManagedRef]:
     """The session's unfetched managed names, hidden ones excluded.
 
     A hidden name never fetches at all: the snapshot filters it and
@@ -630,7 +631,7 @@ def _pending(session: SessionState) -> dict[str, ManagedRef]:
     for name, var in session.vars.items():
         if var.managed is None or var.value is not None:
             continue
-        if var_hidden(session.hidden_vars, name):
+        if var_hidden(session.visibility, name):
             continue
         out[name] = var.managed
     return out
@@ -665,7 +666,7 @@ def fill_names(
         writes_gated (bool): a policy hooks ``pre_session``, so no
             assignment or unset is trusted to land (``masked_names``).
     """
-    pending = _pending(session)
+    pending = _pending_of(session)
     if not pending:
         return frozenset()
     if whole:
@@ -712,7 +713,7 @@ async def fill_env(
     """
     if not names:
         return
-    pending = _pending(session)
+    pending = _pending_of(session)
     records = {name: session.vars[name] for name in pending}
     groups: dict[tuple[str, str], list[str]] = {}
     for name in sorted(names & pending.keys()):

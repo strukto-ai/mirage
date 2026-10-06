@@ -78,7 +78,7 @@ async def test_plain_path_denies_the_whole_subtree_and_nothing_beside_it():
 async def test_slashless_glob_matches_any_name_component():
     policy = RulePolicy(CommandRule(reason="keys", paths=("*.key",)))
     deny = await policy.pre_command(_ctx("cat", [_path("/a/b.key/c")]))
-    assert deny == Deny("/a/b.key/c: keys", DenyScope.OPERAND)
+    assert deny == Deny("keys", DenyScope.OPERAND, path="/a/b.key/c")
     assert await policy.pre_command(_ctx("cat", [_path("/a/b.keyx")])) is None
     op = OpsContext(
         op="read", path=_path("/x/y.key"), write=False, prefix="/x/"
@@ -119,7 +119,9 @@ async def test_rule_policy_matches_command_and_path():
         _ctx("rm", [_path("/data/prod/x.txt", raw="prod/x.txt")])
     )
     assert deny is not None
-    assert deny == Deny("prod/x.txt: prod is protected", DenyScope.OPERAND)
+    assert deny == Deny(
+        "prod is protected", DenyScope.OPERAND, path="prod/x.txt"
+    )
     assert (
         await policy.pre_command(_ctx("rm", [_path("/data/dev/x.txt")]))
         is None

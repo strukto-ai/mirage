@@ -139,3 +139,18 @@ export async function resolveEntry<A extends Accessor>(
       : null
   return entryOrWarm(index, virtualKey, warm)
 }
+
+/** Resolve the index entry `up` levels above the path. Mirrors Python's `ancestor_entry`. */
+export async function ancestorEntry<A extends Accessor>(
+  readdir: ReaddirFn<A>,
+  accessor: A,
+  path: PathSpec,
+  index: IndexCacheStore | undefined,
+  up: number,
+): Promise<IndexEntry | null> {
+  let virtual = rstripSlash(path.virtual)
+  for (let i = 0; i < up; i++) virtual = virtual.split('/').slice(0, -1).join('/')
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
+  const spec = new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, prefix) })
+  return resolveEntry(readdir, accessor, spec, index)
+}

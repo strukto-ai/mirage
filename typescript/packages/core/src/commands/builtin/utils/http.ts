@@ -139,10 +139,14 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
           controller.abort()
         }, timeoutMs)
   try {
-    let headers: Record<string, string> = {
-      'User-Agent': DEFAULT_USER_AGENT,
-      ...(options.headers ?? {}),
-    }
+    // Header names are case-insensitive, so a `user-agent` the caller set
+    // replaces the default rather than riding beside it.
+    const given = options.headers ?? {}
+    let headers: Record<string, string> = Object.keys(given).some(
+      (name) => name.toLowerCase() === 'user-agent',
+    )
+      ? { ...given }
+      : { 'User-Agent': DEFAULT_USER_AGENT, ...given }
     const follow = options.followRedirects !== false
     // Redirects are followed by hand so every hop stays observable, the way
     // httpx keeps `response.history` for the python twin; one deadline

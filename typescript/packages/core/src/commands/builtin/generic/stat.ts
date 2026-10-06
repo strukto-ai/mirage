@@ -14,25 +14,29 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { operandStat } from '../utils/operands.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import {
+  CapacityState,
   DEVICE_NUMBERS_KEY,
   FileType,
   LINK_TARGET_KEY,
+  type CapacityResult,
   type FileStat,
   type PathSpec,
 } from '../../../types.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
 import { isoTimestamp, isoToEpoch } from '../../../utils/dates.ts'
-import { fsErrorLine, isFsError } from '../../../utils/errors.ts'
+import { fsErrorLine, fsStrerror, isFsError } from '../../../utils/errors.ts'
+import { shellQuoteAlways } from '../../../utils/quote.ts'
 import { contentSize, deviceRdev, isDir } from '../../../utils/stat_view.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { lsModeString } from '../utils/formatting.ts'
+import { fullIsoTime, lsModeString } from '../utils/formatting.ts'
 import { groupName, identityOf, ownerName, type Identity } from '../utils/identity.ts'
 import { formatRecords } from '../utils/output.ts'
 import { missingOperandError } from '../../spec/usage.ts'
-
-const ENC = new TextEncoder()
+import { encodeText } from '../../../shell/bytes.ts'
 
 const TYPE_LABELS: Partial<Record<FileType, string>> = {
   [FileType.DIRECTORY]: 'directory',
@@ -68,7 +72,47 @@ function epoch(iso: string | null): string {
 }
 
 const STR_DIRECTIVES = new Set(['n', 'N', 'F'])
-const FORMAT_FLAGS = new Set(['#', '0', ' ', '+', '-'])
+const FORMAT_FLAGS = new Set(["'", '-', '+', ' ', '#', '0', 'I'])
+
+// The directives GNU knows (coreutils 9.7). It prints any other as a bare
+// '?', which no width pads; one it knows that a VFS cannot answer is padded
+// like the value it stands for.
+const KNOWN = new Set([...Array.from('aAbBCdDfFgGhimnNorRstTuUwWxXyYzZ%'), 'Hd', 'Ld', 'Hr', 'Lr'])
+
+// The placeholders for a value that is not known, which a 0 flag pads with
+// spaces rather than zeros.
+const PLACEHOLDERS = new Set(['-', '?'])
+
+// The conversions %H and %L split into a device's major and minor; in
+// file-system mode they are no prefix at all.
+const DEVICE_HALVES = 'dr'
+
+// GNU's file-system report (coreutils 9.7 stat -f), in its directives.
+const FS_LAYOUT = [
+  '  File: "%n"',
+  '    ID: %-8i Namelen: %-7l Type: %T',
+  'Block size: %-10s Fundamental block size: %S',
+  'Blocks: Total: %-10b Free: %-10f Available: %a',
+  'Inodes: Total: %-10c Free: %d',
+].join('\n')
+
+// A mount reports its capacity in bytes; -f counts it in 1K blocks, the
+// unit df reports in.
+const FS_BLOCK = 1024
+
+const FS_STRINGS = new Set(['n', 'T'])
+
+const FS_KNOWN = new Set('abcdfilnsStT%')
+
+const FS_COUNTS = new Set('abcdf')
+
+const FS_STDIN = "using '-' to denote standard input does not work in file system mode"
+
+type StatfsFn = (p: PathSpec) => Promise<[string, CapacityResult]>
+
+// What -f reports outside a workspace: nothing is known about the file
+// system that holds a path.
+const NO_FILE_SYSTEM: [string, CapacityResult] = ['-', { state: CapacityState.UNKNOWN }]
 
 interface FormatDirective {
   end: number
@@ -92,13 +136,18 @@ const ESCAPE_NAMES: Record<string, string> = {
   '\r': '\\r',
 }
 
-// Whether GNU spells a character as a $'..' escape.
+// Whether GNU spells a character as a $'..' escape: a control character, or
+// any byte past ASCII, as the C locale prints it.
 function needsEscape(char: string): boolean {
-  return char < ' ' || char === '\x7f'
+  return char < ' ' || char >= '\x7f'
 }
 
+// Spell one character the way bash's $'..' does, a character past ASCII as
+// the octal escape of each of its UTF-8 bytes.
 function escapeChar(char: string): string {
-  return ESCAPE_NAMES[char] ?? '\\' + char.charCodeAt(0).toString(8).padStart(3, '0')
+  const named = ESCAPE_NAMES[char]
+  if (named !== undefined) return named
+  return Array.from(encodeText(char), (byte) => '\\' + byte.toString(8).padStart(3, '0')).join('')
 }
 
 // Whether a name holding an apostrophe still fits in double quotes. GNU only
@@ -126,7 +175,7 @@ function singleQuoted(name: string): string {
       // A leading escape keeps the empty quotes GNU emits; a trailing one does not.
       if (index === 0) parts.push("''")
       let text = ''
-      for (let at = index; at < end; at += 1) text += escapeChar(name.charAt(at))
+      for (const char of name.slice(index, end)) text += escapeChar(char)
       parts.push("$'" + text + "'")
     } else {
       parts.push("'" + name.slice(index, end).replaceAll("'", "'\\''") + "'")
@@ -146,21 +195,22 @@ function quoteName(name: string): string {
   return singleQuoted(name)
 }
 
+// Apply GNU printf flags, width and precision to a rendered directive; a
+// precision cuts short only a directive that prints a string (`text`).
 function applyFlags(
   value: string,
   flags: string,
   width: string,
   precision: string | undefined,
-  spec: string,
+  text: boolean,
 ): string {
-  if (flags.includes('#') && spec === 'a' && !value.startsWith('0')) value = '0' + value
-  if (precision !== undefined && STR_DIRECTIVES.has(spec)) {
+  if (precision !== undefined && text) {
     value = precision === '' ? '' : value.slice(0, Number(precision))
   }
   if (width !== '' && value.length < Number(width)) {
     const w = Number(width)
     if (flags.includes('-')) value = value.padEnd(w)
-    else if (flags.includes('0')) value = value.padStart(w, '0')
+    else if (flags.includes('0') && !PLACEHOLDERS.has(value)) value = value.padStart(w, '0')
     else value = value.padStart(w)
   }
   return value
@@ -181,13 +231,13 @@ function directiveValue(
   if (spec === 'f') return (typeBits(s) | effectiveMode(s)).toString(16)
   if (spec === 'u' || spec === 'U') return ownerName(s.uid, identity)
   if (spec === 'g' || spec === 'G') return groupName(s.gid, identity)
-  if (spec === 'x') return s.atime ?? s.modified ?? ''
+  if (spec === 'x') return statTime(s.atime ?? s.modified)
   if (spec === 'X') return epoch(s.atime ?? s.modified)
-  if (spec === 'y') return s.modified ?? ''
+  if (spec === 'y') return statTime(s.modified)
   if (spec === 'Y') return epoch(s.modified)
-  if (spec === 'z') return s.ctime ?? '-'
+  if (spec === 'z') return statTime(s.ctime)
   if (spec === 'Z') return epoch(s.ctime)
-  if (spec === 'w') return s.birthtime ?? '-'
+  if (spec === 'w') return statTime(s.birthtime)
   if (spec === 'W') return epoch(s.birthtime)
   if (spec === 'B') return '512'
   const device = s.extra[DEVICE_NUMBERS_KEY]
@@ -225,20 +275,59 @@ function renderDirective(
   name: string,
   identity: Identity | null,
 ): string {
+  if (!KNOWN.has(d.spec)) return '?'
   if (d.spec === 'N') {
     // GNU formats the name and a symlink's target as two separate fields,
     // so a width pads each one rather than the joined line.
     const bare = d.flags === '' && d.width === '' && d.precision === undefined
     return nameParts(s, name, bare)
-      .map((part) => applyFlags(part, d.flags, d.width, d.precision, d.spec))
+      .map((part) => applyFlags(part, d.flags, d.width, d.precision, true))
       .join(' -> ')
   }
+  let value = directiveValue(d.spec, s, name, identity)
+  if (d.flags.includes('#') && d.spec === 'a' && !value.startsWith('0')) value = '0' + value
+  return applyFlags(value, d.flags, d.width, d.precision, STR_DIRECTIVES.has(d.spec))
+}
+
+// A byte count as 1K blocks, rounded up like df, or '-' when unknown.
+function fsBlocks(nbytes: number | null | undefined): string {
+  return nbytes === null || nbytes === undefined ? '-' : String(Math.ceil(nbytes / FS_BLOCK))
+}
+
+// One file-system directive's value. A mount has no file system ID, name
+// limit, type number or transfer size, so those print '?'. Its counts print
+// '-' unless it reports a quota, as df shows them.
+function fsValue(spec: string, kind: string, cap: CapacityResult, name: string): string {
+  if (spec === '%') return '%'
+  if (spec === 'n') return name
+  if (spec === 'T') return kind
+  if (spec === 'S') return String(FS_BLOCK)
+  if (!FS_COUNTS.has(spec)) return '?'
+  if (cap.state !== CapacityState.QUOTA) return '-'
+  if (spec === 'b') return fsBlocks(cap.total)
+  if (spec === 'a') return fsBlocks(cap.available)
+  if (spec === 'f') {
+    if (cap.total == null || cap.used == null) return '-'
+    return fsBlocks(cap.total - cap.used)
+  }
+  if (spec === 'c') return cap.inodes == null ? '-' : String(cap.inodes)
+  if (cap.inodes == null || cap.inodesUsed == null) return '-'
+  return String(cap.inodes - cap.inodesUsed)
+}
+
+function renderFsDirective(
+  d: FormatDirective,
+  kind: string,
+  cap: CapacityResult,
+  name: string,
+): string {
+  if (!FS_KNOWN.has(d.spec)) return '?'
   return applyFlags(
-    directiveValue(d.spec, s, name, identity),
+    fsValue(d.spec, kind, cap, name),
     d.flags,
     d.width,
     d.precision,
-    d.spec,
+    FS_STRINGS.has(d.spec),
   )
 }
 
@@ -246,14 +335,10 @@ function isAsciiDigit(char: string | undefined): boolean {
   return char !== undefined && char >= '0' && char <= '9'
 }
 
-function isConversion(char: string | undefined): boolean {
-  return (
-    char === '%' ||
-    (char !== undefined && ((char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z')))
-  )
-}
-
-function parseFormatDirective(fmt: string, start: number): FormatDirective | null {
+// Scan one directive starting at a `%`. Any character converts, and one GNU
+// does not know prints '?'; `halves` are the conversions an H or L prefix
+// takes.
+function parseFormatDirective(fmt: string, start: number, halves: string): FormatDirective | null {
   let cursor = start + 1
   let flags = ''
   while (cursor < fmt.length && FORMAT_FLAGS.has(fmt[cursor] ?? '')) {
@@ -277,18 +362,23 @@ function parseFormatDirective(fmt: string, start: number): FormatDirective | nul
     }
   }
 
+  if (cursor >= fmt.length) return null
   const first = fmt.charAt(cursor)
-  if (!isConversion(first)) return null
   let spec = first
   cursor += 1
-  if ((first === 'H' || first === 'L') && isConversion(fmt[cursor])) {
+  if (
+    (first === 'H' || first === 'L') &&
+    cursor < fmt.length &&
+    halves.includes(fmt.charAt(cursor))
+  ) {
     spec += fmt.charAt(cursor)
     cursor += 1
   }
   return { end: cursor, flags, width, precision, spec }
 }
 
-function formatStat(fmt: string, s: FileStat, name: string, identity: Identity | null): string {
+// Expand a format string, each directive through `render`.
+function format(fmt: string, halves: string, render: (d: FormatDirective) => string): string {
   const parts: string[] = []
   let cursor = 0
   while (cursor < fmt.length) {
@@ -298,30 +388,29 @@ function formatStat(fmt: string, s: FileStat, name: string, identity: Identity |
       break
     }
     parts.push(fmt.slice(cursor, start))
-    const directive = parseFormatDirective(fmt, start)
+    const directive = parseFormatDirective(fmt, start, halves)
     if (directive === null) {
       parts.push('%')
       cursor = start + 1
       continue
     }
-    parts.push(renderDirective(directive, s, name, identity))
+    parts.push(render(directive))
     cursor = directive.end
   }
   return parts.join('')
 }
 
+function formatStat(fmt: string, s: FileStat, name: string, identity: Identity | null): string {
+  return format(fmt, DEVICE_HALVES, (d) => renderDirective(d, s, name, identity))
+}
+
 // The fraction of a second as the backend spelled it, so both hosts print
 // the digits the stamp carries rather than what their clock type keeps.
-const FRACTION = /\d\d:\d\d:\d\d\.(\d+)/
 
 /** A known timestamp in GNU's layout, in UTC, or '-' when unknown. A naive
  * stamp is UTC, as everywhere else a backend time is read. */
 function statTime(value: string | null): string {
-  const seconds = isoTimestamp(value)
-  if (seconds === null || value === null) return '-'
-  const whole = new Date(Math.floor(seconds) * 1000).toISOString().slice(0, 19).replace('T', ' ')
-  const fraction = (FRACTION.exec(value)?.[1] ?? '').padEnd(9, '0').slice(0, 9)
-  return `${whole}.${fraction} +0000`
+  return isoTimestamp(value) === null ? '-' : fullIsoTime(value)
 }
 
 /** GNU coreutils 9.7's default layout, with unknown fields marked. A VFS has
@@ -352,17 +441,88 @@ function renderStat(s: FileStat, name: string, identity: Identity | null): strin
   ].join('\n')
 }
 
+// Report the file system each operand is on, GNU `stat -f`. The operand stat
+// settles that a path exists first, so a missing one fails in the words a
+// plain stat would find for it; `statfs` is null outside a workspace.
+async function fileSystems(
+  paths: PathSpec[],
+  fmt: string,
+  probe: (p: PathSpec) => Promise<FileStat>,
+  statfs: StatfsFn | null,
+): Promise<CommandFnResult> {
+  const lines: string[] = []
+  let err = ''
+  for (const p of paths) {
+    if (p.rawPath === '-') {
+      err += `stat: ${FS_STDIN}\n`
+      continue
+    }
+    let found: [string, CapacityResult]
+    try {
+      await probe(p)
+      found = statfs !== null ? await statfs(p) : NO_FILE_SYSTEM
+    } catch (e) {
+      if (!isFsError(e)) throw e
+      const strerror = fsStrerror(e)
+      err +=
+        `stat: cannot read file system information for ${shellQuoteAlways(p.rawPath)}` +
+        `${strerror !== null ? `: ${strerror}` : ''}\n`
+      continue
+    }
+    const [kind, cap] = found
+    lines.push(format(fmt, '', (d) => renderFsDirective(d, kind, cap, p.rawPath)))
+  }
+  const io = new IOResult({
+    exitCode: err === '' ? 0 : 1,
+    stderr: err === '' ? null : encodeText(err),
+  })
+  if (lines.length === 0) return [null, io]
+  return [formatRecords(lines), io]
+}
+
+// statfs through the op door.
+async function dispatchedStatfs(
+  dispatch: DispatchFn,
+  path: PathSpec,
+): Promise<[string, CapacityResult]> {
+  const [result] = (await dispatch('statfs', path)) as [[string, CapacityResult], unknown]
+  return result
+}
+
+interface StatFlags {
+  readonly format: string | null
+  readonly fileSystem: boolean
+  readonly deref: boolean
+}
+
+function parseFlags(bag: Record<string, FlagValue>): StatFlags {
+  const fl = new FlagView(bag, specOf('stat'))
+  return {
+    format: fl.asStr('format') ?? null,
+    fileSystem: fl.asBool('file_system'),
+    deref: fl.asBool('dereference'),
+  }
+}
+
 export async function statGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stat: (p: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('stat'))
+  const parsed = parseFlags(opts.flags)
   if (paths.length === 0) throw missingOperandError('stat', null)
-  const fmt = fl.asStr('c') ?? fl.asStr('f') ?? null
+  const fmt = parsed.format
+  if (parsed.fileSystem) {
+    const dispatch = opts.dispatch
+    const probe = (p: PathSpec): Promise<FileStat> =>
+      operandStat(p, stat, opts.statPath, opts.ns?.mounts, opts.ns?.links)
+    const statfs: StatfsFn | null =
+      dispatch !== undefined ? (p) => dispatchedStatfs(dispatch, p) : null
+    return fileSystems(paths, fmt ?? FS_LAYOUT, probe, statfs)
+  }
   const lines: string[] = []
   let err = ''
-  const links = fl.asBool('L') ? null : (opts.ns?.links ?? null)
+  const links = parsed.deref ? null : (opts.ns?.links ?? null)
   const identity = identityOf(opts)
   for (const p of paths) {
     // GNU stat lstats: a symlink operand reports the link itself, not
@@ -394,7 +554,7 @@ export async function statGeneric(
   }
   const io = new IOResult({
     exitCode: err === '' ? 0 : 1,
-    stderr: err === '' ? null : ENC.encode(err),
+    stderr: err === '' ? null : encodeText(err),
   })
   if (lines.length === 0) return [null, io]
   const out: ByteSource = formatRecords(lines)

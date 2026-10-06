@@ -14,10 +14,15 @@
 
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { Runtime } from '@struktoai/mirage-core/runtime/base'
-import { ScriptSource } from '@struktoai/mirage-core/runtime/routing/index'
+import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMNamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/ram'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
+import { normalizeCacheConfig } from '@struktoai/mirage-core/cache/file/config'
+import {
+  normalizeIndexConfig,
+  type RedisIndexConfig,
+} from '@struktoai/mirage-core/cache/index/config'
 import { buildFileCache } from '@struktoai/mirage-core/workspace/workspace/cache'
 import { SandlockRuntime } from './runtime/sandbox/sandlock/runtime.ts'
 import { DiskNamespaceStore } from './workspace/mount/namespace/disk.ts'
@@ -1363,6 +1368,37 @@ describe.each(ACCEPTED_FIXTURES)('shared acceptance fixture: %s', (fixture) => {
   })
 })
 
+describe('shared acceptance fixture cache and index blocks', () => {
+  // The same keys are held a second time, camelCase, by the code door
+  // in core; a key accepted here and refused there would load a config
+  // the workspace then refuses to build.
+  const mountIndexes = (config: Record<string, unknown>): unknown[] =>
+    Object.values((config.mounts ?? {}) as Record<string, { index?: unknown }>)
+      .map((block) => block.index)
+      .filter((index) => index != null)
+  const cases = ACCEPTED_FIXTURES.flatMap((fixture) => fixtureCases(fixture)).filter(
+    ({ config }) => config.cache != null || config.index != null || mountIndexes(config).length > 0,
+  )
+
+  it('has a redis cache case and a redis index case', () => {
+    const types = cases.map(({ config }) => [
+      (config.cache as { type?: unknown } | undefined)?.type,
+      (config.index as { type?: unknown } | undefined)?.type,
+    ])
+    expect(types.some(([cache]) => cache === 'redis')).toBe(true)
+    expect(types.some(([, index]) => index === 'redis')).toBe(true)
+  })
+
+  it.each(cases)('builds the cache and index of $name', ({ config }) => {
+    const { cache, index, mounts } = loadWorkspaceConfig(config)
+    if (cache != null) expect(() => normalizeCacheConfig(cache)).not.toThrow()
+    if (index != null) expect(() => normalizeIndexConfig(index)).not.toThrow()
+    for (const { index: own } of Object.values(mounts)) {
+      if (own != null) expect(() => normalizeIndexConfig(own)).not.toThrow()
+    }
+  })
+})
+
 describe('env block', () => {
   it('parses literal and managed entries, ${VAR} interpolated', () => {
     const cfg = loadWorkspaceConfig(
@@ -1605,4 +1641,50 @@ it.each([
   { profiles: { research: { command_limits: { head: { max_line: 2 } } } } },
 ])('rejects bad command limit fields', (block) => {
   expect(() => loadWorkspaceConfig({ mounts: { '/data': { vfs: 'ram' } }, ...block })).toThrow()
+})
+
+// The workspace index is Redis at 73, so a mount that took any of it would
+// show; the code door from `new Mount(vfs, { index })` on is tested in core.
+describe('mount index block', () => {
+  const REDIS_URL = 'redis://127.0.0.1:1/0'
+
+  it.each([
+    ['ram', { type: 'ram', ttl: 37 }, { type: 'ram', ttl: 37 }],
+    [
+      'redis',
+      { type: 'redis', ttl: 41, url: REDIS_URL, key_prefix: 't:' },
+      { type: 'redis', ttl: 41, url: REDIS_URL, keyPrefix: 't:' },
+    ],
+    ['replaces-whole', { type: 'ram' }, { type: 'ram' }],
+    ['null', null, undefined],
+  ])('becomes its mount index (%s)', async (_id, block, built) => {
+    const args = await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        index: { type: 'redis', ttl: 73, key_prefix: 'w:' },
+        mounts: { '/a': { vfs: 'ram', index: block }, '/b': { vfs: 'ram' } },
+      }),
+    )
+    expect(args.mounts['/a']?.options.index).toEqual(built)
+    expect(args.mounts['/b']?.options).not.toHaveProperty('index')
+  })
+
+  // The CLI posts the snake_case document the check returns and the daemon
+  // loads it; camelizing the mount index in the check would send
+  // `keyPrefix`, which the daemon refuses.
+  it('posts the checked document unchanged', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mirage-mount-index-'))
+    try {
+      const file = join(root, 'w.yaml')
+      writeFileSync(file, 'mounts:\n  /d: {vfs: ram, index: {type: redis, key_prefix: "t:"}}\n')
+      const wire = checkWorkspaceConfigFile(file)
+      expect((wire.mounts as Record<string, { index: unknown }>)['/d']?.index).toEqual({
+        type: 'redis',
+        key_prefix: 't:',
+      })
+      const args = await configToWorkspaceArgs(loadWorkspaceConfig(wire))
+      expect((args.mounts['/d']?.options.index as RedisIndexConfig).keyPrefix).toBe('t:')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 })

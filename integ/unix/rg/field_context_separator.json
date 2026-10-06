@@ -1,0 +1,79 @@
+{
+  "cases": [
+    {
+      "id": "rg_field_separators_label_match_and_context_lines",
+      "seq": 15200111,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "rg -n -A1 --field-context-separator '|' world /data/a.txt; rg -H -n -B1 --field-context-separator='\\x3d' --field-match-separator ': ' world /data/a.txt; rg --field-context-separator '\\t' -n -A1 world /data/a.txt | od -An -tx1",
+      "expect": {
+        "exit": 0,
+        "stdout": "2:world\n3|foo\n/data/a.txt=1=hello\n/data/a.txt: 2: world\n 32 3a 77 6f 72 6c 64 0a 33 09 66 6f 6f 0a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "field_context_separator",
+        "field_match_separator",
+        "n",
+        "A",
+        "B",
+        "H"
+      ]
+    },
+    {
+      "id": "rg_field_separators_may_be_empty",
+      "seq": 15200112,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "rg -n -b -C1 --field-context-separator '' bar /data/a.txt; rg -n --field-match-separator '' world /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "312foo\n4:16:bar\n520baz\n2world\n",
+        "stderr": ""
+      },
+      "flags": [
+        "field_context_separator",
+        "field_match_separator",
+        "n",
+        "b",
+        "C"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "rmdir_ignore_fail_on_non_empty_drops_only_that_refusal",
+      "seq": 15000061,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fc0i/d && printf x > /data/fc0i/f && rmdir --ignore-fail-on-non-empty /data/fc0i; echo rc=$?; (cd /data && rmdir -p --ignore-fail-on-non-empty fc0i/d); echo rc=$?; ls /data/fc0i; rmdir --ignore-fail-on-non-empty /data/fc0i/f; echo rc=$?; rmdir /data/fc0i; echo rc=$?; rm -rf /data/fc0i",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrc=0\nf\nrc=1\nrc=1\n",
+        "stderr": "rmdir: failed to remove '/data/fc0i/f': Not a directory\nrmdir: failed to remove '/data/fc0i': Directory not empty\n"
+      },
+      "flags": [
+        "ignore-fail-on-non-empty",
+        "p"
+      ]
+    }
+  ]
+}

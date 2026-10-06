@@ -20,6 +20,7 @@ import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import { handleCommandBuiltin } from '../command/command.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import type { JobConsole } from '../../../../shell/console/index.ts'
+import type { JobTable } from '../../../../shell/job_table/index.ts'
 import { fsStrerror } from '../../../../utils/errors.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -108,6 +109,7 @@ export async function handleExecPath(
   namespace: Namespace,
   stdin: ByteSource | null = null,
   sink?: JobConsole,
+  jobTable?: JobTable,
 ): Promise<Result> {
   let script: string
   try {
@@ -149,6 +151,7 @@ export async function handleExecPath(
       stdin,
       interp,
       sink,
+      jobTable,
     )
   }
   const line = [...words, path, ...args].map(quoteWord).join(' ')

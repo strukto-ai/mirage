@@ -93,7 +93,6 @@ def test_sandbox_id_is_required():
 
 @pytest.mark.asyncio
 async def test_api_key_reaches_the_client(monkeypatch):
-
     class FakeSdkConfig:
         def __init__(self, api_key=None) -> None:
             self.api_key = api_key

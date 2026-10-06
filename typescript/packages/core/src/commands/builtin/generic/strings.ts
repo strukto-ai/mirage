@@ -14,6 +14,7 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -42,6 +43,15 @@ function extractStrings(data: Uint8Array, minLen: number): string[] {
   return out
 }
 
+interface StringsFlags {
+  readonly minLen: number
+}
+
+function parseFlags(bag: Record<string, FlagValue>): StringsFlags {
+  const fl = new FlagView(bag, specOf('strings'))
+  return { minLen: fl.asInt('n') ?? 4 }
+}
+
 export async function stringsGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
@@ -49,8 +59,7 @@ export async function stringsGeneric(
 ): Promise<CommandFnResult> {
   // binutils strings never reads `-` as stdin; only /dev/stdin is.
   stream = stdinStream(stream, opts.stdin, false, false)
-  const fl = new FlagView(opts.flags, specOf('strings'))
-  const minLen = fl.asInt('n') ?? 4
+  const { minLen } = parseFlags(opts.flags)
   // Each operand is scanned independently and the matches concatenate in
   // operand order, like GNU strings.
   if (paths.length > 0) {

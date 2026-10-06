@@ -176,8 +176,8 @@ const createTree = withRepo(async (ctx, repo) => {
 // The commit is born dangling: it advances no ref, because in git creating a
 // commit and moving a branch onto it are two steps, and a client that stages
 // several before touching any ref depends on that. `parents` is read from the
-// body as the API states it (first parent only, which is all a linear fake
-// needs); absent, the default branch's head stands in. What it changed is its
+// body as the API states it, every one in order, so a merge names both of its
+// parents; absent, the default branch's head stands in. What it changed is its
 // tree against its parent's, which every reader derives. The tree is any id
 // the fake reported, and one no write has staged yet, a seeded branch's or
 // one directory's, is staged here so the commit can be read back on its own.
@@ -199,12 +199,9 @@ const createCommit = withRepo(async (ctx, repo) => {
   // how the API spells a root commit, and re-parenting one onto the branch
   // head would change both its sha and its ancestry. Only an ABSENT field
   // falls back to where the default branch currently points.
-  const parents = body.parents
-  const parent = Array.isArray(parents)
-    ? typeof parents[0] === 'string'
-      ? parents[0]
-      : ''
-    : await visibleHeadOf(ctx.db, ctx.tenant, repo, repo.defaultBranch)
+  const parents = Array.isArray(body.parents)
+    ? body.parents.filter((sha): sha is string => typeof sha === 'string')
+    : [await visibleHeadOf(ctx.db, ctx.tenant, repo, repo.defaultBranch)]
   const commit = await recordCommit(
     ctx.db,
     ctx.tenant,
@@ -213,7 +210,7 @@ const createCommit = withRepo(async (ctx, repo) => {
     repo.defaultBranch,
     tree,
     { author, committer },
-    parent,
+    parents,
     false,
   )
   return { status: 201, body: gitCommitJson(repo.fullName, commit, tree) }
@@ -294,7 +291,8 @@ const createRef = withRepo(async (ctx, repo) => {
 // and neither case needs a rule of its own. A move that would abandon
 // anything is refused unless the body says `force`, and the test is exact:
 // a fast forward is one where the branch's current head is still reachable by
-// walking first parents back from the requested commit.
+// walking any parent back from the requested commit, so a merge of the
+// branch fast-forwards it.
 const updateRef = withRepo(async (ctx, repo) => {
   const ref = stripSlash(param(ctx, 'ref'))
   const name = ref.startsWith('heads/') ? ref.slice('heads/'.length) : ''

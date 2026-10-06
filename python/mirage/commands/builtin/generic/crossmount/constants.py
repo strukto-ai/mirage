@@ -13,6 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic.crossmount.types import Cmd
+from mirage.commands.builtin.generic_bind.builders import BUILDERS
+
+# Generic bindings already declare their IO. They run once
+# against dispatcher-backed IO unless the command has a native composition.
+DISPATCH_BUILDERS = {b.name: b for b in BUILDERS}
 
 STREAM_COMMANDS = frozenset({Cmd.CAT, Cmd.NL, Cmd.CUT})
 # The stream commands that read their input as lines: GNU ends a file's
@@ -25,7 +30,6 @@ FANOUT_COMMANDS = frozenset(
         Cmd.REV,
         Cmd.HEAD,
         Cmd.TAIL,
-        Cmd.DU,
         Cmd.FILE,
         Cmd.MD5,
         Cmd.MD5SUM,
@@ -42,29 +46,9 @@ FANOUT_COMMANDS = frozenset(
         Cmd.UNLINK,
         Cmd.TOUCH,
         Cmd.MKDIR,
-        Cmd.TEE,
     }
 )
 RELAY_COMMANDS = frozenset(
-    {
-        Cmd.CP,
-        Cmd.MV,
-        Cmd.DIFF,
-        Cmd.CMP,
-        Cmd.PASTE,
-        Cmd.COMM,
-        Cmd.JOIN,
-        Cmd.TAR,
-        Cmd.UNZIP,
-        Cmd.ZIP,
-        Cmd.LS,
-        Cmd.SORT,
-        Cmd.WC,
-        Cmd.AWK,
-        Cmd.SED,
-        Cmd.REALPATH,
-        Cmd.GREP,
-        Cmd.RG,
-    }
-)
+    {Cmd.CP, Cmd.MV, Cmd.TEE, Cmd.TAR, Cmd.UNZIP, Cmd.ZIP, Cmd.LS, Cmd.SED}
+) | (DISPATCH_BUILDERS.keys() - STREAM_COMMANDS - FANOUT_COMMANDS)
 CROSS_MOUNT_COMMANDS = STREAM_COMMANDS | FANOUT_COMMANDS | RELAY_COMMANDS

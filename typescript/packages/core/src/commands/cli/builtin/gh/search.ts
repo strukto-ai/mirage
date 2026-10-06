@@ -1,6 +1,6 @@
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { JsonValue } from '../../../../types.ts'
-import { csvValues, ghTransport, jsonFields, typedOut, textOut } from './accessor.ts'
+import { csvValues, ghBool, ghTransport, jsonFields, textOut, typedOut } from './accessor.ts'
 import {
   SEARCH_ALIASES,
   SEARCH_BOOLEAN,
@@ -24,8 +24,7 @@ function quote(value: string): string {
   return /[\s"]/.test(value) ? JSON.stringify(value) : value
 }
 function boolean(fl: FlagView, name: string): boolean {
-  name = name.replaceAll('-', '_')
-  return fl.asBool(name) || fl.asStr(name.replaceAll('-', '_')) === 'true'
+  return ghBool(fl, name.replaceAll('-', '_'))
 }
 
 function query(kind: string, words: readonly string[], fl: FlagView): string {

@@ -1,0 +1,42 @@
+{
+  "cases": [
+    {
+      "id": "sha384sum_z_ends_each_line_with_nul",
+      "seq": 15600745,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha384sum -z /data/a.txt /data/b.txt | tr '\\0' '|'; echo; sha384sum --zero /data/b.txt | tr '\\0' '|'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "53ca6807a9cc7686b87cbae6e96a06fecfbbe81780ce301280b3b834fc241dfca0a3eb4c487fdd24674af230967f3a9d  /data/a.txt|da1443aa6d6c8f8fbc8b8c0586db81efcae552eac235992d5caead121c0605fc0b2007a3afd3397415bfd9351e1ba179  /data/b.txt|\nda1443aa6d6c8f8fbc8b8c0586db81efcae552eac235992d5caead121c0605fc0b2007a3afd3397415bfd9351e1ba179  /data/b.txt|\n",
+        "stderr": ""
+      },
+      "flags": [
+        "z",
+        "zero"
+      ]
+    }
+  ]
+}

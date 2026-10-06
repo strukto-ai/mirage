@@ -25,7 +25,6 @@ _ps = PathSpec.from_str_path
 
 
 def _cat_sync(backend, path):
-
     async def _collect():
         return b"".join([c async for c in read_stream(backend.accessor, path)])
 

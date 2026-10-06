@@ -73,19 +73,18 @@ def _run(coro):
 
 
 def test_rm_refuses_mount_root():
-
+    # Without -r a mount root is a directory first, as GNU says of a mount
+    # point (coreutils 9.7).
     async def go():
         ws = _ws_two_mounts()
         r = await _exec(ws, "rm /r2")
         assert r.exit_code == 1
-        assert b"Device or resource busy" in (r.stderr or b"")
-        assert b"/r2" in (r.stderr or b"")
+        assert r.stderr == b"rm: cannot remove '/r2': Is a directory\n"
 
     _run(go())
 
 
 def test_rmdir_refuses_mount_root():
-
     async def go():
         ws = _ws_two_mounts()
         r = await _exec(ws, "rmdir /r2")
@@ -97,7 +96,6 @@ def test_rmdir_refuses_mount_root():
 
 
 def test_rm_rf_refuses_mount_root():
-
     async def go():
         ws = _ws_two_mounts()
         r = await _exec(ws, "rm -rf /r2")
@@ -108,7 +106,6 @@ def test_rm_rf_refuses_mount_root():
 
 
 def test_rm_rf_refuses_mount_root_with_trailing_slash():
-
     async def go():
         ws = _ws_two_mounts()
         r = await _exec(ws, "rm -rf /r2/")
@@ -119,7 +116,6 @@ def test_rm_rf_refuses_mount_root_with_trailing_slash():
 
 
 def test_rm_inside_mount_still_works():
-
     async def go():
         ws = _ws_two_mounts()
         await _exec(ws, "touch /r2/file")
@@ -130,7 +126,6 @@ def test_rm_inside_mount_still_works():
 
 
 def test_rm_rf_inside_mount_still_works():
-
     async def go():
         ws = _ws_two_mounts()
         await _exec(ws, "mkdir /r2/sub")
@@ -142,7 +137,6 @@ def test_rm_rf_inside_mount_still_works():
 
 
 def test_rm_does_not_remove_mount_after_refusal():
-
     async def go():
         ws = _ws_two_mounts()
         await _exec(ws, "touch /r2/keep")
@@ -159,7 +153,6 @@ def test_rm_does_not_remove_mount_after_refusal():
 
 
 def test_mv_refuses_mount_root_as_source():
-
     async def go():
         ws = _ws_two_mounts()
         r = await _exec(ws, "mv /r2 /elsewhere")
@@ -185,7 +178,6 @@ def test_mv_into_mount_root_is_allowed():
 
 
 def test_mkdir_refuses_existing_mount_root():
-
     async def go():
         ws = _ws_two_mounts()
         r = await _exec(ws, "mkdir /r2")
@@ -208,7 +200,6 @@ def test_mkdir_dash_p_on_mount_root_is_idempotent():
 
 
 def test_mkdir_inside_mount_is_allowed():
-
     async def go():
         ws = _ws_two_mounts()
         r = await _exec(ws, "mkdir /r2/newdir")
@@ -221,7 +212,6 @@ def test_mkdir_inside_mount_is_allowed():
 
 
 def test_touch_refuses_mount_root():
-
     async def go():
         ws = _ws_two_mounts()
         r = await _exec(ws, "touch /r2")
@@ -232,7 +222,6 @@ def test_touch_refuses_mount_root():
 
 
 def test_touch_inside_mount_is_allowed():
-
     async def go():
         ws = _ws_two_mounts()
         r = await _exec(ws, "touch /r2/newfile")
@@ -245,7 +234,6 @@ def test_touch_inside_mount_is_allowed():
 
 
 def test_ln_refuses_mount_root_as_link_name():
-
     async def go():
         ws = _ws_two_mounts()
         await _exec(ws, "touch /ram/source")
@@ -257,7 +245,6 @@ def test_ln_refuses_mount_root_as_link_name():
 
 
 def test_ln_s_refuses_mount_root_as_link_name():
-
     async def go():
         ws = _ws_two_mounts()
         r = await _exec(ws, "ln -sT /ram/source /r2")
@@ -287,7 +274,6 @@ def test_ln_inside_a_single_mount_is_not_blocked_by_guard():
 
 
 def test_rm_refuses_nested_mount_root():
-
     async def go():
         ws = _ws_nested()
         r = await _exec(ws, "rm -rf /data/inner")
@@ -298,7 +284,6 @@ def test_rm_refuses_nested_mount_root():
 
 
 def test_rm_inside_nested_mount_still_works():
-
     async def go():
         ws = _ws_nested()
         await _exec(ws, "touch /data/inner/x")
@@ -309,7 +294,6 @@ def test_rm_inside_nested_mount_still_works():
 
 
 def test_rm_inside_outer_mount_still_works():
-
     async def go():
         ws = _ws_nested()
         await _exec(ws, "touch /data/outer-file")
@@ -339,7 +323,6 @@ def test_find_root_lists_mounts_at_depth_one():
 
 
 def test_find_root_descends_into_each_mount():
-
     async def go():
         ws = _ws_two_mounts()
         await _exec(ws, "touch /r2/a")
@@ -435,7 +418,6 @@ def test_find_maxdepth_skips_too_deep_mount():
 
 
 def test_grep_recursive_root_fans_out():
-
     async def go():
         ws = _ws_two_mounts()
         await _exec(ws, "sh -c 'echo needle > /r2/a.txt'")
@@ -451,7 +433,6 @@ def test_grep_recursive_root_fans_out():
 
 
 def test_du_root_fans_out():
-
     async def go():
         ws = _ws_two_mounts()
         await _exec(ws, "sh -c 'echo content > /r2/file'")
@@ -489,7 +470,6 @@ def test_ls_root_still_lists_mounts():
 
 
 def test_rm_interactive_flags_are_accepted_noops():
-
     async def go():
         ws = _ws_two_mounts()
         await _exec(ws, "touch /r2/a /r2/b")
@@ -502,7 +482,6 @@ def test_rm_interactive_flags_are_accepted_noops():
 
 
 def test_rm_one_file_system_removes_within_mount():
-
     async def go():
         ws = _ws_two_mounts()
         await _exec(ws, "mkdir -p /r2/d")
@@ -516,22 +495,28 @@ def test_rm_one_file_system_removes_within_mount():
 
 
 def test_rm_no_preserve_root_still_cannot_remove_mount_root():
-    # mirage protection is structural: --no-preserve-root does not disable it.
+    # mirage protection is structural: --no-preserve-root does not disable
+    # it, and / gets GNU's own failsafe first (coreutils 9.7).
     async def go():
         ws = _ws_two_mounts()
-        for cmd in (
-            "rm --preserve-root -rf /",
-            "rm --no-preserve-root -rf /r2",
+        for cmd, refusal in (
+            (
+                "rm --preserve-root -rf /",
+                b"rm: it is dangerous to operate recursively on '/'\n"
+                b"rm: use --no-preserve-root to override this failsafe\n",
+            ),
+            (
+                "rm --no-preserve-root -rf /r2",
+                b"rm: cannot remove '/r2': Device or resource busy\n",
+            ),
         ):
             r = await _exec(ws, cmd)
-            assert r.exit_code == 1
-            assert b"Device or resource busy" in (r.stderr or b"")
+            assert (r.exit_code, r.stderr) == (1, refusal)
 
     _run(go())
 
 
 def test_rm_capital_i_not_invalid_option():
-
     async def go():
         ws = _ws_two_mounts()
         await _exec(ws, "touch /r2/a")

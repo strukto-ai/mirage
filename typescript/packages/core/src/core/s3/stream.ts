@@ -30,7 +30,7 @@ function concatChunks(a: Uint8Array, b: Uint8Array): Uint8Array {
   return out
 }
 
-export async function* stream(accessor: S3Accessor, path: PathSpec): AsyncIterable<Uint8Array> {
+export async function* readStream(accessor: S3Accessor, path: PathSpec): AsyncIterable<Uint8Array> {
   const virtual = path.virtual
   const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   const rawPath =
@@ -136,7 +136,7 @@ async function windowFromStream(
   const pieces: Uint8Array[] = []
   let seen = 0
   let total = 0
-  for await (const chunk of stream(accessor, path)) {
+  for await (const chunk of readStream(accessor, path)) {
     const chunkEnd = seen + chunk.byteLength
     if (chunkEnd > offset) {
       const piece = chunk.subarray(

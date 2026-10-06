@@ -1,0 +1,195 @@
+{
+  "cases": [
+    {
+      "id": "stats_a_file_and_a_directory",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "filesystem": {
+        "monty": {
+          "stat": true
+        },
+        "wasi": {
+          "stat": true
+        },
+        "pyodide": {
+          "stat": true
+        },
+        "quickjs": {
+          "stat": true
+        }
+      },
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "in\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "script": {
+            "python": "path/py/stat.py",
+            "js": "path/js/stat.js"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "file 5 32768\ndir 16384\nmissing\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "stat_of_the_root",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "a\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nfrom pathlib import Path\nprint('os', oct(os.stat('/').st_mode & 0o170000))\nprint('pathlib', oct(Path('/').stat().st_mode & 0o170000))\nprint('nlink', os.stat('/').st_nlink)",
+            "js": "const [st, e] = os.stat('/')\nconsole.log('os', e, (st.mode & os.S_IFMT).toString(8))\nconsole.log('nlink', st.nlink)"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "os 0o40000\npathlib 0o40000\nnlink 2\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "os 0 40000\nnlink 2\n"
+            }
+          },
+          "expect_on": {
+            "pyodide": {
+              "stdout": "os 0o40000\npathlib 0o40000\nnlink 1\n"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "stat_survives_a_refused_read_of_the_same_directory",
+      "note": "WASI's filestat carries a file type and no permission bits, so a guest on wasi or the python host's quickjs (qjs-wasi) reads a directory's mode as 0o40000.",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "sub/inner.txt": "inner\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "script": {
+            "python": "path/py/stat_after_read.py"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "row survived 0o40755\nis_dir True\nexists True\n"
+          },
+          "expect_on": {
+            "wasi": {
+              "stdout": "row survived 0o40000\nis_dir True\nexists True\n"
+            }
+          }
+        },
+        {
+          "program": {
+            "js": "const [before] = os.stat('/data/sub')\nconst f = std.open('/data/sub', 'r')\nconsole.log(f === null ? 'refused' : 'opened')\nconst [after] = os.stat('/data/sub')\nconsole.log('row survived', before.mode === after.mode && before.mtime === after.mtime, after.mode.toString(8))"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "opened\nrow survived true 40755\n"
+          },
+          "expect_on": {
+            "quickjs@python": {
+              "stdout": "opened\nrow survived true 40000\n"
+            }
+          }
+        },
+        {
+          "program": {
+            "js": "const f = std.open('/data/sub', 'r')\nconsole.log(f.read(new ArrayBuffer(4), 0, 0), JSON.stringify(f.readAsString(0)), f.error())\nconsole.log(JSON.stringify(f.readAsString()), f.error())\nf.clearerr()\nconsole.log(f.error())\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "0 \"\" false\n\"\" true\nfalse\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "stat_result_is_a_sequence",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nst = os.stat('/data/seed.txt')\nprint(st[6], st[0] == st.st_mode, len(st), list(st)[6])"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "5 True 10 5\n"
+          },
+          "expect_on": {
+            "monty@typescript": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "'stat_result' object is not subscriptable"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

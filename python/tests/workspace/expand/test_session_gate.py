@@ -70,7 +70,8 @@ async def test_every_session_writer_clears_the_gate(
 ):
     result = await guarded.shell(line)
     assert result.exit_code != 0, f"{line!r} was not refused"
-    assert b"not yours to set" in (result.stderr or b""), line
+    assert result.refusal is not None, line
+    assert "not yours to set" in result.refusal.reason, line
     assert await value_of(guarded, name) == b"[]", f"{line!r} wrote anyway"
 
 
@@ -100,7 +101,7 @@ async def test_a_subscripted_printf_target_clears_the_gate(guarded):
     # could not refuse.
     result = await guarded.shell("printf -v 'AWS_KEY[0]' %s x")
     assert result.exit_code != 0
-    assert b"not yours to set" in (result.stderr or b"")
+    assert result.refusal and "not yours to set" in result.refusal.reason
     read = await guarded.shell('echo "[${AWS_KEY[0]}]"')
     assert (read.stdout or b"").strip() == b"[]"
 
@@ -132,6 +133,6 @@ async def test_refused_offset_does_not_expand_length(guarded):
         'v=abcdef; echo "${v:(AWS_LIMIT=1):${OTHER:=2}}"'
     )
     assert result.exit_code == 1
-    assert b"not yours to set" in (result.stderr or b"")
+    assert result.refusal and "not yours to set" in result.refusal.reason
     assert await value_of(guarded, "AWS_LIMIT") == b"[]"
     assert await value_of(guarded, "OTHER") == b"[]"

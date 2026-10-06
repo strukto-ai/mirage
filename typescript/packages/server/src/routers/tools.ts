@@ -17,33 +17,21 @@ import {
   fromJsonSchema,
   type JsonSchemaType,
 } from '@modelcontextprotocol/server'
-import {
-  EDIT_INPUT,
-  GLOB_INPUT,
-  GREP_INPUT,
-  LS_INPUT,
-  READ_INPUT,
-  WRITE_INPUT,
-} from '@struktoai/mirage-agents/tool_descriptions'
 import type { FastifyInstance } from 'fastify'
 import type { McpDoor } from '../mcp/http.ts'
+import { TOOLS } from '../mcp/server.ts'
 
 export interface ToolsRoutesDeps {
   mcp: McpDoor
 }
 
-const INPUTS = {
-  read: READ_INPUT,
-  write: WRITE_INPUT,
-  edit: EDIT_INPUT,
-  ls: LS_INPUT,
-  grep: GREP_INPUT,
-  glob: GLOB_INPUT,
-}
+const INPUTS: ReadonlyMap<string, JsonSchemaType> = new Map(
+  TOOLS.filter((tool) => tool.name !== 'shell').map((tool) => [tool.name, tool.inputSchema]),
+)
 
 interface ToolResponse {
   text: string
-  isError: boolean
+  is_error: boolean
 }
 
 /**
@@ -57,27 +45,28 @@ async function callTool(
   mcp: McpDoor,
   workspaceId: string,
   name: string,
+  input: JsonSchemaType,
   args: unknown,
   sessionId: string | null,
+  account: string | null,
 ): Promise<{ status: number; body: ToolResponse | { detail: string } }> {
-  const input = INPUTS[name as keyof typeof INPUTS]
-  const checked = await fromJsonSchema(input as JsonSchemaType)['~standard'].validate(args)
+  const checked = await fromJsonSchema(input)['~standard'].validate(args)
   if (checked.issues !== undefined) {
     const why = checked.issues.map((issue) => issue.message).join('; ')
     return { status: 400, body: { detail: `Invalid arguments for tool ${name}: ${why}` } }
   }
-  const tools = await mcp.tools(workspaceId, sessionId)
+  const tools = await mcp.tools(workspaceId, sessionId, account)
   if (typeof tools === 'string') return { status: 404, body: { detail: tools } }
   try {
     const result = await tools.call(name, args as Record<string, unknown>)
     return {
       status: 200,
-      body: { text: result.content[0]?.text ?? '', isError: result.isError === true },
+      body: { text: result.content[0]?.text ?? '', is_error: result.isError === true },
     }
   } catch (err) {
     return {
       status: 200,
-      body: { text: err instanceof Error ? err.message : String(err), isError: true },
+      body: { text: err instanceof Error ? err.message : String(err), is_error: true },
     }
   }
 }
@@ -88,8 +77,8 @@ async function callTool(
  * `shell` keeps its own route.
  */
 export function registerToolsRoutes(app: FastifyInstance, deps: ToolsRoutesDeps): void {
-  for (const name of Object.keys(INPUTS)) {
-    app.post<{ Params: { wsId: string }; Querystring: { sessionId?: string } }>(
+  for (const [name, input] of INPUTS) {
+    app.post<{ Params: { wsId: string }; Querystring: { session_id?: string } }>(
       `/v1/workspaces/:wsId/${name}`,
       { bodyLimit: DEFAULT_MAX_REQUEST_BODY_SIZE },
       async (req, reply) => {
@@ -97,8 +86,10 @@ export function registerToolsRoutes(app: FastifyInstance, deps: ToolsRoutesDeps)
           deps.mcp,
           req.params.wsId,
           name,
+          input,
           req.body,
-          req.query.sessionId ?? null,
+          req.query.session_id ?? null,
+          req.account,
         )
         return reply.status(status).send(body)
       },

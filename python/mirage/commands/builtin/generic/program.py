@@ -13,6 +13,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.core.jq import load_failure
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import decode_text
 from mirage.types import FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, eisdir, fs_error_line, fs_strerror
 
@@ -198,14 +199,14 @@ async def prepare_program(
         out[PATTERN_KEYS[name]] = [] if pattern is None else [pattern]
     elif name == "sed":
         expressions = iter(fl.as_list("e"))
-        scripts = iter(data.decode(errors="replace") for data in pieces)
+        scripts = iter(decode_text(data) for data in pieces)
         out["e"] = [
             next(expressions) if kind == "e" else next(scripts)
             for kind, _ in fl.occurrences("e", "f")
         ]
     else:
         texts = [
-            "\n".join(data.decode(errors="replace") for data in pieces),
+            "\n".join(decode_text(data) for data in pieces),
             *texts,
         ]
     return texts, out, source if consumed else stdin, None

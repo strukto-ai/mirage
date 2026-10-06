@@ -253,7 +253,6 @@ def test_unlink_evicts_the_cache_even_when_the_delete_raises(accessor):
 
 
 def test_remove_prefix_evicts_the_subtree_even_when_the_walk_raises(accessor):
-
     async def run():
         driver = replace(make_driver(FakeStore()), delete_prefix=_boom)
         with pytest.raises(RuntimeError):

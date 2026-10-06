@@ -15,6 +15,7 @@
 import { constants as osConstants } from 'node:os'
 
 import { classify } from '@struktoai/mirage-core/errors/index'
+import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import type { FsCondition } from '@struktoai/mirage-core/errors/index'
 
 // Positive POSIX errno values. FUSE callbacks want them negated; other
@@ -47,7 +48,6 @@ const CONDITION_ERRNO: Record<FsCondition, number> = {
   EPERM: osConstants.errno.EPERM,
   ENOTEMPTY,
   EXDEV,
-  CROSS_MOUNT: EXDEV,
   ENOTSUP: osConstants.errno.ENOTSUP,
   ELOOP: osConstants.errno.ELOOP,
   EINVAL,
@@ -77,9 +77,14 @@ const MESSAGE_ERRNO: [string[], number][] = [
  * this adapter only renders the condition in host numbers. A stamped code
  * outside the vocabulary is passed through in the host's own numbering
  * (Python's raw OSError.errno passthrough), and the message needles are a
- * last resort for unstamped errors, not a classification channel.
+ * last resort for unstamped errors, not a classification channel. A kernel
+ * mount and SFTP can hand back only the number, so a policy's reason for
+ * a refusal goes to the operator log here.
  */
 export function classifyErrno(err: unknown): number {
+  if (err instanceof PolicyDenied && err.refusal !== null) {
+    console.info(`policy ${err.refusal.policy} refused ${err.virtualPath}: ${err.refusal.reason}`)
+  }
   const condition = classify(err)
   if (condition !== null) return CONDITION_ERRNO[condition]
   const code = (err as { code?: string }).code

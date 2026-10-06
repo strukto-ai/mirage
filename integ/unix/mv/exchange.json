@@ -176,6 +176,42 @@
         "gdrive-folder",
         "box"
       ]
+    },
+    {
+      "id": "mv_b_n_conflict_leaves_both_files",
+      "seq": 15600204,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcF_m4 && echo a > /data/fcF_m4/a && echo b > /data/fcF_m4/b && mv -b -n /data/fcF_m4/a /data/fcF_m4/b; echo rc=$?; cat /data/fcF_m4/a /data/fcF_m4/b; rm -r /data/fcF_m4",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\na\nb\n",
+        "stderr": "mv: cannot combine --backup with --exchange, -n, or --update=none-fail\nTry 'mv --help' for more information.\n"
+      },
+      "flags": [
+        "b",
+        "n"
+      ]
     }
   ]
 }

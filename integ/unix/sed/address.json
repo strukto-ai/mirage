@@ -475,6 +475,40 @@
         "stdout": "a\n>\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "sed_address_bre_escapes_and_unterminated_regex",
+      "seq": 15300003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\na+b\\naab\\ny\\n' | sed '/a\\+b/d'; printf 'x\\na/b\\nmid\\nc/d\\ny\\n' | sed '/a\\/b/,/c\\/d/d'; printf 'x\\n' | sed '/a\\/b'; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\na+b\ny\nx\ny\nrc=1\n",
+        "stderr": "sed: -e expression #1, char 5: unterminated address regex\n"
+      }
     }
   ]
 }

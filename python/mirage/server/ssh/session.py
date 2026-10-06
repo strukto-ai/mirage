@@ -24,11 +24,10 @@ from asyncssh.connection import SSHConnection
 
 from mirage import Workspace
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
-from mirage.server.ssh.constants import PROFILE_OPTION
+from mirage.server.ssh.constants import ACCOUNT_OPTION, PROFILE_OPTION
 from mirage.server.ssh.stream import (
     ChannelInput,
     ChannelOutput,
-    LoopStdin,
     Mark,
     Send,
     decode,
@@ -36,6 +35,7 @@ from mirage.server.ssh.stream import (
     encode,
     loop_sender,
 )
+from mirage.server.stdin import LoopStdin
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.executor.statement import record_status
 
@@ -43,9 +43,12 @@ logger = logging.getLogger(__name__)
 
 AGENT_ID = "ssh"
 INTERRUPTED = 130
-PROMPT = "mirage:{cwd}$ "
 FALLBACK_PROMPT = "mirage$ "
 LOGIN_HOME = "/"
+
+
+def prompt(cwd: str) -> str:
+    return f"mirage:{cwd}$ "
 
 
 def new_session_id() -> str:
@@ -90,6 +93,30 @@ def login_env(process: asyncssh.SSHServerProcess[str]) -> dict[str, str]:
     return env
 
 
+def _key_option(conn: SSHConnection, option: str, what: str) -> str | None:
+    """The one value the login's authorized key gives ``option``.
+
+    Args:
+        conn (SSHConnection): the authenticated login's connection.
+        option (str): the authorized_keys option to read.
+        what (str): what the value names, for the refusal.
+
+    Raises:
+        TypeError: ``conn`` is not the server side of a connection.
+        ValueError: the option is bare, empty or given more than once.
+    """
+    if not isinstance(conn, asyncssh.SSHServerConnection):
+        raise TypeError("a key's option is read off a server connection")
+    values = conn.get_key_option(option)
+    if values is None:
+        return None
+    names = values if isinstance(values, list) else [values]
+    name = names[0] if len(names) == 1 else None
+    if not isinstance(name, str) or not name:
+        raise ValueError(f"{option} must name exactly one {what}")
+    return name
+
+
 def key_profile(conn: SSHConnection) -> str | None:
     """The profile the login's authorized key is bound to, if any.
 
@@ -99,21 +126,73 @@ def key_profile(conn: SSHConnection) -> str | None:
 
     Args:
         conn (SSHConnection): the authenticated login's connection.
-
-    Raises:
-        TypeError: ``conn`` is not the server side of a connection.
-        ValueError: the option is bare, empty or given more than once.
     """
-    if not isinstance(conn, asyncssh.SSHServerConnection):
-        raise TypeError("a key's profile is read off a server connection")
-    values = conn.get_key_option(PROFILE_OPTION)
-    if values is None:
+    return _key_option(conn, PROFILE_OPTION, "profile")
+
+
+class TunnelSSHServer(asyncssh.SSHServer):
+    """Admits a login the HTTPS route already authenticated.
+
+    The route checked the caller's token and that its account may use
+    the workspace its URL names, so the login needs no key. It may only
+    name that workspace: another username is asked for a method this
+    server offers none of, and is refused.
+
+    Args:
+        workspace_id (str): the workspace the route admitted.
+        account (str | None): the caller's account; None when the
+            server's auth mode names none.
+    """
+
+    def __init__(self, workspace_id: str, account: str | None) -> None:
+        self.workspace_id = workspace_id
+        self.account = account
+
+    def begin_auth(self, username: str) -> bool:
+        return username != self.workspace_id
+
+    def password_auth_supported(self) -> bool:
+        return False
+
+
+def key_account(conn: SSHConnection) -> str | None:
+    """The account the login belongs to, if any.
+
+    A login the HTTPS route carried runs as the account its token
+    named. Otherwise the key's line in authorized_keys names it with
+    ``mirage-account="<name>"``; the account may open only the
+    workspaces it owns. A key without the option has no account.
+
+    Args:
+        conn (SSHConnection): the authenticated login's connection.
+    """
+    if isinstance(conn, asyncssh.SSHServerConnection):
+        owner = conn.get_owner()
+        if isinstance(owner, TunnelSSHServer):
+            return owner.account
+    return _key_option(conn, ACCOUNT_OPTION, "account")
+
+
+def login_entry(
+    registry: WorkspaceRegistry, conn: SSHConnection, workspace_id: str
+) -> WorkspaceEntry | None:
+    """The workspace a login may open, else None.
+
+    One rule for every channel kind: the key's account must be allowed
+    the workspace its username names. A key whose account option is
+    malformed opens nothing.
+
+    Args:
+        registry (WorkspaceRegistry): the daemon's workspaces.
+        conn (SSHConnection): the authenticated login's connection.
+        workspace_id (str): the workspace the username names.
+    """
+    try:
+        account = key_account(conn)
+    except ValueError as exc:
+        logger.warning("ssh: refusing %s: %s", workspace_id, exc)
         return None
-    names = values if isinstance(values, list) else [values]
-    name = names[0] if len(names) == 1 else None
-    if not isinstance(name, str) or not name:
-        raise ValueError(f"{PROFILE_OPTION} must name exactly one profile")
-    return name
+    return registry.visible(workspace_id, account)
 
 
 async def open_session(
@@ -187,7 +266,7 @@ async def run_line(
         )
     except MirageAbortError:
         return INTERRUPTED
-    await deliver(io.stdout, io.stderr, send)
+    await deliver(io, send)
     return io.exit_code
 
 
@@ -234,10 +313,7 @@ class ShellChannel:
         self._entry = entry
         self._session_id = session_id
         self._process = process
-        # asyncssh's line editor, which echoes and turns Ctrl-C into a
-        # break, starts only for a pty with a terminal type, so a pty
-        # without one is served as the plain stream it effectively is.
-        self._tty = bool(process.term_type)
+        self._tty = process.term_type is not None
         self._input = ChannelInput(process)
         self._output = ChannelOutput(process, self._tty)
         self._running: concurrent.futures.Future[int] | None = None
@@ -260,7 +336,7 @@ class ShellChannel:
         if not self._live():
             return FALLBACK_PROMPT
         cwd = self._entry.runner.ws.get_session(self._session_id).cwd
-        return PROMPT.format(cwd=cwd)
+        return prompt(cwd)
 
     async def serve(self) -> int:
         """Run the channel to its end.
@@ -393,11 +469,13 @@ async def handle_process(
         )
         process.exit(1)
         return
-    if workspace_id not in registry:
+    entry = login_entry(
+        registry, process.channel.get_connection(), workspace_id
+    )
+    if entry is None:
         process.stderr.write(f"mirage: no such workspace: {workspace_id}\n")
         process.exit(1)
         return
-    entry = registry.get(workspace_id)
     session_id = new_session_id()
     runner = entry.runner
     try:

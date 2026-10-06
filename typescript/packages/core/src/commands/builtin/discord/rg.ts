@@ -46,7 +46,7 @@ async function* discordStream(
   yield await discordRead(accessor, p, index)
 }
 
-async function rgCommand(
+async function rg(
   accessor: DiscordAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -129,5 +129,5 @@ export const DISCORD_RG = command({
   name: 'rg',
   vfs: VFSName.DISCORD,
   spec: specOf('rg'),
-  fn: rgCommand,
+  fn: rg,
 })

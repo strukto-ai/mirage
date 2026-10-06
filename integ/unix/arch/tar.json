@@ -1116,6 +1116,298 @@
         "stdout": "hello\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "arch_tar_z_cut_inside_the_archive_lists_the_whole_members",
+      "seq": 15000070,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(mkdir -p /data/fc0z && cd /data/fc0z && echo 'H4sIAAAAAAAAA+3TwQrCMAzG8Z7zFH0CSdut79Oh4qFQqBXFp7fsqDBPmw7+PwgJ5BICXzq0RzPr0i4Ow9y7964a1LjRxz756INRp6P3xurKd81u15aqtaaWsviHb/udupxyLnIvNR/lXIpMqfZ6yq/v' | base64 -d > c.tgz && tar -tzf c.tgz; echo rc=$?; tar -xOzf c.tgz; echo rc=$?; cd / && rm -rf /data/fc0z)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a.txt\nrc=2\nrc=2\n",
+        "stderr": "\ngzip: stdin: unexpected end of file\ntar: Unexpected EOF in archive\ntar: Error is not recoverable: exiting now\n\ngzip: stdin: unexpected end of file\ntar: Unexpected EOF in archive\ntar: Unexpected EOF in archive\ntar: Error is not recoverable: exiting now\n"
+      },
+      "flags": [
+        "t",
+        "z",
+        "x",
+        "O"
+      ]
+    },
+    {
+      "id": "arch_tar_cut_inside_member_data_stops_at_that_member",
+      "seq": 15000071,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(mkdir -p /data/fc0u && cd /data/fc0u && echo 'H4sIAAAAAAACA0vKTGegNTAAAjMTEzANBOi0obmpAYOhqZGZgaGxkYExUJ2hgZGxOYOCAQMdQGlxSWKRggJDUX5+CT51hOSHKKgcBaOAxgAAf/TZXGQEAAA=' | base64 -d | gzip -d > c.tar && tar -tf c.tar; echo rc=$?; tar -xOf c.tar | wc -c; tar -xf c.tar; echo rc=$?; wc -c < big; cd / && rm -rf /data/fc0u)",
+      "expect": {
+        "exit": 0,
+        "stdout": "big\nrc=2\n512\nrc=2\n512\n",
+        "stderr": "tar: Unexpected EOF in archive\ntar: Error is not recoverable: exiting now\ntar: Unexpected EOF in archive\ntar: Unexpected EOF in archive\ntar: Error is not recoverable: exiting now\ntar: Unexpected EOF in archive\ntar: Unexpected EOF in archive\ntar: Error is not recoverable: exiting now\n"
+      },
+      "flags": [
+        "t",
+        "x",
+        "O"
+      ]
+    },
+    {
+      "id": "arch_tar_cut_at_a_header_ends_the_archive",
+      "seq": 15000072,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(mkdir -p /data/fc0h && cd /data/fc0h && echo 'H4sIAAAAAAACA0vUK6koYaAtMAACMxMTMA0E6LSBgbEBg6GpkRmQZWRmZMxgYGhgamTEoGDAQAdQWlySWKSgwFCUn483HAjJD1GQkZqTk89Vnl+Uk8KVlp/PlZRYBMRVXAyjYEQAAE+lvMAABAAA' | base64 -d | gzip -d > c.tar && tar -tf c.tar; echo rc=$?; tar -xOf c.tar; echo rc=$?; cd / && rm -rf /data/fc0h)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a.txt\nrc=0\nhello\nworld\nfoo\nbar\nbaz\nrc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "x",
+        "O"
+      ]
+    },
+    {
+      "id": "arch_tar_z_damaged_trailer_misses_no_member_and_extracts",
+      "seq": 15100501,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(mkdir -p /data/fcA_tz && cd /data/fcA_tz && printf '\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\xed\\xd3\\x41\\x0a\\xc3\\x20\\x10\\x85\\x61\\xd7\\x3d\\x85\\x27\\xa8\\xda\\x38\\x7a\\x9e\\x04\\x85\\x2e\\x02\\x42\\x6a\\xa1\\xc7\\xaf\\x64\\x99\\x42\\xba\\x32\\x34\\xf4\\xff\\x36\\x33\\x30\\xb3\\x7b\\xbc\\x64\\x54\\x77\\xb6\\x89\\x22\\xeb\\x6c\\xb6\\x73\\xdd\\x9d\\xdc\\x44\\x42\\x18\\x86\\xa1\\xfd\\x39\\x6b\\x9d\\x57\\x5a\\xd4\\x01\\x9e\\x8f\\x3a\\x2e\\x5a\\xab\\xa5\\x94\\xba\\xf7\\xf7\\xed\\x7e\\x52\\xc9\\x8c\\xd7\\xfa\\xaa\\xdd\\xf3\\x0f\\xde\\xef\\xe4\\x1f\\xb6\\xf9\\xc7\\xe8\\x94\\xb6\\xe4\\xdf\\xdd\\x3d\\xcf\\x73\\xb9\\x28\\xfc\\xa9\\x64\\xa6\\x1f\\xe8\\xbf\\xff\\xec\\xbf\\xa5\\xff\\x47\\x98\\x72\\xa6\\xfd\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x9c\\xdc\\x1b\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00' > crc.tgz && tar -tzf crc.tgz nomatch; echo rc=$?; tar -xzf crc.tgz; echo rc=$?; cat d/a.txt d/b.txt; cd / && rm -r /data/fcA_tz)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\nhello\nbee\n",
+        "stderr": "\ngzip: stdin: invalid compressed data--crc error\n\ngzip: stdin: invalid compressed data--length error\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n\ngzip: stdin: invalid compressed data--crc error\n\ngzip: stdin: invalid compressed data--length error\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
+      },
+      "flags": [
+        "t",
+        "x",
+        "z"
+      ]
+    },
+    {
+      "id": "arch_tar_z_parse_error_keeps_the_gzip_failure",
+      "seq": 15100502,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(mkdir -p /data/fcA_tp && cd /data/fcA_tp && printf %s H4sIAAAAAAACE8vLL1FIVChJLOICAAAAAAAAAAAA | base64 -d > small.tgz && tar -xzf small.tgz; echo rc=$?; ls; printf %s H4sIAAAAAAAAA6uoGAWjYBSMVAAAAAAAAAAAAAA= | base64 -d > big.tgz && tar -tzf big.tgz; echo rc=$?; cd / && rm -r /data/fcA_tp)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nsmall.tgz\nrc=2\n",
+        "stderr": "\ngzip: stdin: invalid compressed data--crc error\n\ngzip: stdin: invalid compressed data--length error\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n\ngzip: stdin: invalid compressed data--crc error\n\ngzip: stdin: invalid compressed data--length error\ntar: This does not look like a tar archive\ntar: Skipping to next header\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
+      },
+      "flags": [
+        "t",
+        "x",
+        "z"
+      ]
+    },
+    {
+      "id": "arch_tar_keeps_an_empty_directory_through_a_round_trip",
+      "seq": 15100503,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(mkdir -p /data/fcA_td/d/empty /data/fcA_td/out && cd /data/fcA_td && echo x > d/a.txt && echo k > out/.keep && tar -cf a.tar d && tar -tf a.tar | sort && tar -xf a.tar -C out && find out -type d | sort; cd / && rm -r /data/fcA_td)",
+      "expect": {
+        "exit": 0,
+        "stdout": "d/\nd/a.txt\nd/empty/\nout\nout/d\nout/d/empty\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "t",
+        "x",
+        "C"
+      ]
+    },
+    {
+      "id": "arch_tar_archives_the_operands_it_can_read",
+      "seq": 15100504,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(mkdir -p /data/fcA_tm/d && cd /data/fcA_tm && echo x > d/a.txt && tar -cf a.tar nope d; echo rc=$?; tar -tf a.tar; cd / && rm -r /data/fcA_tm)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nd/\nd/a.txt\n",
+        "stderr": "tar: nope: Cannot stat: No such file or directory\ntar: Exiting with failure status due to previous errors\n"
+      },
+      "flags": [
+        "c",
+        "t"
+      ]
+    },
+    {
+      "id": "arch_tar_stores_symlinks_as_links",
+      "seq": 15100506,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(mkdir -p /data/fcA_ts/d && cd /data/fcA_ts && echo alpha > d/a.txt && ln -s a.txt d/link.txt && ln -s /data/fcA_ts/d/a.txt link && tar -cf a.tar d link && tar -tvf a.tar | grep -- ' -> ' | awk '{print $1, $(NF-2), $(NF-1), $NF}'; cd / && rm -r /data/fcA_ts)",
+      "expect": {
+        "exit": 0,
+        "stdout": "lrwxrwxrwx d/link.txt -> a.txt\nlrwxrwxrwx link -> /data/fcA_ts/d/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "t",
+        "v"
+      ]
+    },
+    {
+      "id": "arch_tar_h_reports_a_link_operand_whose_target_is_gone",
+      "seq": 15100507,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(mkdir -p /data/fcA_th && cd /data/fcA_th && ln -s /data/fcA_th/nope gone && tar -chf c.tar gone; rc=$?; cd / && rm -r /data/fcA_th; exit $rc)",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "tar: gone: Cannot stat: No such file or directory\ntar: Exiting with failure status due to previous errors\n"
+      },
+      "flags": [
+        "c",
+        "h"
+      ]
+    },
+    {
+      "id": "arch_tar_exclude_matches_whole_trailing_components",
+      "seq": 15100508,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(mkdir -p /data/fcA_te/d/sub && cd /data/fcA_te && echo a > d/a.txt && echo c > d/abc.txt && echo b > d/sub/b.txt && tar -cf 1.tar --exclude sub/b.txt d && tar -tf 1.tar | sort && echo -- && tar -cf 2.tar --exclude bc.txt d && tar -tf 2.tar | sort && echo -- && tar -cf 3.tar --exclude '*/b.txt' d && tar -tf 3.tar | sort; cd / && rm -r /data/fcA_te)",
+      "expect": {
+        "exit": 0,
+        "stdout": "d/\nd/a.txt\nd/abc.txt\nd/sub/\n--\nd/\nd/a.txt\nd/abc.txt\nd/sub/\nd/sub/b.txt\n--\nd/\nd/a.txt\nd/abc.txt\nd/sub/\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "t",
+        "exclude"
+      ]
+    },
+    {
+      "id": "arch_tar_drops_through_the_last_dotdot",
+      "seq": 15100509,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(mkdir -p /data/fcA_tx/w/x /data/fcA_tx/w/y && echo 3 > /data/fcA_tx/w/y/f3 && cd /data/fcA_tx/w && tar -cf ../1.tar x/../y/f3 && tar -tf ../1.tar && (cd x && tar -cf ../../2.tar ../../w/y/f3) && tar -tf ../2.tar && tar -cf ../3.tar /data/../data/fcA_tx/w/y/f3 && tar -tf ../3.tar && tar -cf ../4.tar y/.. && tar -tf ../4.tar | sort; cd / && rm -r /data/fcA_tx)",
+      "expect": {
+        "exit": 0,
+        "stdout": "y/f3\nw/y/f3\ndata/fcA_tx/w/y/f3\n./\nx/\ny/\ny/f3\n",
+        "stderr": "tar: Removing leading `x/../' from member names\ntar: Removing leading `../../' from member names\ntar: Removing leading `/data/../' from member names\ntar: Removing leading `y/..' from member names\ntar: Removing leading `y/../' from member names\n"
+      },
+      "flags": [
+        "c",
+        "t"
+      ]
+    },
+    {
+      "id": "arch_tar_names_a_dropped_slash_once_per_operand",
+      "seq": 15100512,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(mkdir -p /data/fcA_tw/d/e && echo 1 > /data/fcA_tw/d/a && echo 2 > /data/fcA_tw/d/e/b && tar -cf /data/fcA_tw/x.tar /data/fcA_tw/d; echo rc=$?; tar -tf /data/fcA_tw/x.tar | sort; rm -r /data/fcA_tw)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\ndata/fcA_tw/d/\ndata/fcA_tw/d/a\ndata/fcA_tw/d/e/\ndata/fcA_tw/d/e/b\n",
+        "stderr": "tar: Removing leading `/' from member names\n"
+      },
+      "flags": [
+        "c",
+        "t"
+      ]
+    },
+    {
+      "id": "arch_tar_leaves_the_archive_out_of_itself",
+      "seq": 15100513,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(mkdir -p /data/fcA_ty/d && cd /data/fcA_ty && echo a > d/a.txt && echo stale > d/old.tar && tar -cf d/old.tar d; echo rc=$?; tar -tf d/old.tar | sort; cd / && rm -r /data/fcA_ty)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nd/\nd/a.txt\n",
+        "stderr": "tar: d/old.tar: archive cannot contain itself; not dumped\n"
+      },
+      "flags": [
+        "c",
+        "t"
+      ]
+    },
+    {
+      "id": "arch_tar_z_cut_inside_member_data_writes_the_blocks_that_arrived",
+      "seq": 15700001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(mkdir -p /data/fcR_tz && cd /data/fcR_tz && echo 'H4sIAAAAAAACA+3NMQqDUBAE0D2KR5D48T4aQWzV3D+fkELstXDfa2aYZsZljqu1VV/KL6tzlkP/7315ddG0cYPPtg9rvYycBlIbSe0=' | base64 -d > c.tgz && tar -xOzf c.tgz > o; echo rc=$?; tr -s ab < o; echo; wc -c < o; tar -xzf c.tgz; echo rc=$?; tr -s ab < big; echo; wc -c < big; cd / && rm -rf /data/fcR_tz)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nab\n1024\nrc=2\nab\n1024\n",
+        "stderr": "\ngzip: stdin: unexpected end of file\ntar: Unexpected EOF in archive\ntar: Unexpected EOF in archive\ntar: Error is not recoverable: exiting now\n\ngzip: stdin: unexpected end of file\ntar: Unexpected EOF in archive\ntar: Unexpected EOF in archive\ntar: Error is not recoverable: exiting now\n"
+      },
+      "flags": [
+        "x",
+        "O",
+        "z",
+        "f"
+      ]
     }
   ]
 }

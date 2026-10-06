@@ -14,8 +14,8 @@
 
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 
 export function create(accessor: OPFSAccessor, path: PathSpec): Promise<void> {
-  return writeBytes(accessor, path, new Uint8Array())
+  return write(accessor, path, new Uint8Array())
 }

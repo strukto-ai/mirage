@@ -13,69 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { homedir } from 'node:os'
-import { join, resolve, sep } from 'node:path'
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import {
-  PathOutsideRootError,
-  mirageHome,
-  pidFilePath,
-  resolveWithinRoot,
-  snapshotRootPath,
-  stateRootPath,
-  validatePathSegment,
-  versionRootPath,
-} from './paths.ts'
-
-describe('resolveWithinRoot', () => {
-  const root = `${sep}srv${sep}snapshots`
-
-  it('accepts a relative path under the root', () => {
-    expect(resolveWithinRoot(root, 'seed.tar')).toBe(join(root, 'seed.tar'))
-  })
-
-  it('accepts an absolute path inside the root', () => {
-    const inside = join(root, 'nested', 'a.tar')
-    expect(resolveWithinRoot(root, inside)).toBe(inside)
-  })
-
-  it('returns the root itself', () => {
-    expect(resolveWithinRoot(root, '.')).toBe(root)
-  })
-
-  it('rejects traversal escaping the root', () => {
-    expect(() => resolveWithinRoot(root, '../../etc/passwd')).toThrow(PathOutsideRootError)
-  })
-
-  it('rejects an absolute path outside the root', () => {
-    expect(() => resolveWithinRoot(root, `${sep}etc${sep}passwd`)).toThrow(PathOutsideRootError)
-  })
-
-  it('rejects a sibling that shares the root prefix', () => {
-    expect(() => resolveWithinRoot(root, `${sep}srv${sep}snapshots-evil${sep}x`)).toThrow(
-      PathOutsideRootError,
-    )
-  })
-})
-
-describe('validatePathSegment', () => {
-  it('accepts safe segments', () => {
-    expect(validatePathSegment('ws_abc123')).toBe('ws_abc123')
-    expect(validatePathSegment('a.b-c_d')).toBe('a.b-c_d')
-  })
-
-  it('rejects empty, dot, and dotdot', () => {
-    expect(() => validatePathSegment('')).toThrow(PathOutsideRootError)
-    expect(() => validatePathSegment('.')).toThrow(PathOutsideRootError)
-    expect(() => validatePathSegment('..')).toThrow(PathOutsideRootError)
-  })
-
-  it('rejects separators and other unsafe characters', () => {
-    expect(() => validatePathSegment('a/b')).toThrow(PathOutsideRootError)
-    expect(() => validatePathSegment('a\\b')).toThrow(PathOutsideRootError)
-    expect(() => validatePathSegment('a b')).toThrow(PathOutsideRootError)
-    expect(() => validatePathSegment('a$b')).toThrow(PathOutsideRootError)
-  })
-})
+import { mirageHome, pidFilePath, stateRootPath } from './paths.ts'
 
 describe('mirageHome', () => {
   it('defaults to ~/.mirage', () => {
@@ -99,18 +39,14 @@ describe('pidFilePath', () => {
   })
 })
 
-describe('root defaults follow mirageHome', () => {
-  it('version, snapshot, and state roots', () => {
+describe('the state root follows mirageHome', () => {
+  it('defaults under the home', () => {
     const env = { MIRAGE_HOME: '/data/mirage' }
-    expect(versionRootPath(undefined, env)).toBe(join('/data/mirage', 'repos'))
-    expect(snapshotRootPath(undefined, env)).toBe(join('/data/mirage', 'snapshots'))
     expect(stateRootPath(undefined, env)).toBe(join('/data/mirage', 'state'))
   })
 
   it('explicit argument wins over home', () => {
     const env = { MIRAGE_HOME: '/data/mirage' }
-    expect(versionRootPath('/explicit/repos', env)).toBe(resolve('/explicit/repos'))
-    expect(snapshotRootPath('/explicit/snaps', env)).toBe(resolve('/explicit/snaps'))
     expect(stateRootPath('/explicit/state', env)).toBe(resolve('/explicit/state'))
   })
 })

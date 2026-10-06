@@ -140,7 +140,7 @@
       "command": "find /data/guard -type f; ls /data/guard/nodir; echo code=$?",
       "expect": {
         "exit": 0,
-        "stdout": "/data/guard/g.txt\n/data/guard/sub/g.txt\n/data/guard/sub/s.txt\n/data/guard/t1.txt\n/data/guard/t2.txt\ncode=2\n",
+        "stdout": "/data/guard/g.txt\n/data/guard/sub/g.txt\n/data/guard/sub/s.txt\n/data/guard/sub/sub/s.txt\n/data/guard/t1.txt\n/data/guard/t2.txt\ncode=2\n",
         "stderr": "ls: cannot access '/data/guard/nodir': No such file or directory\n"
       }
     },
@@ -204,7 +204,7 @@
       "command": "ls /data/guard/sub",
       "expect": {
         "exit": 0,
-        "stdout": "g.txt\ns.txt\n",
+        "stdout": "g.txt\ns.txt\nsub\n",
         "stderr": ""
       }
     },

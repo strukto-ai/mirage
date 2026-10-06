@@ -159,7 +159,7 @@ async def test_a_deny_rule_speaks_by_scope_and_by_where_it_was_written():
     # Operand-scoped rule: the operand as typed, in the GNU voice.
     assert await policy.pre_command(
         _ctx("rm", "x", paths=(_path("/repo/x", raw="x"),), cwd="/repo")
-    ) == Deny("x: no deletes in the repo", DenyScope.OPERAND)
+    ) == Deny("no deletes in the repo", DenyScope.OPERAND, path="x")
     assert (
         await policy.pre_command(
             _ctx("rm", "/scratch/x", paths=(_path("/scratch/x"),))
@@ -169,7 +169,7 @@ async def test_a_deny_rule_speaks_by_scope_and_by_where_it_was_written():
     # A pure path rule refuses any command that names the path.
     assert await policy.pre_command(
         _ctx("cat", "/repo/locked/a", paths=(_path("/repo/locked/a"),))
-    ) == Deny("/repo/locked/a: frozen", DenyScope.OPERAND)
+    ) == Deny("frozen", DenyScope.OPERAND, path="/repo/locked/a")
 
 
 @pytest.mark.asyncio
@@ -188,7 +188,7 @@ async def test_the_deeper_anchor_wins_and_deny_breaks_a_tie():
     )
     assert await policy.pre_command(
         _ctx("rm", "/repo/sealed/y", paths=(_path("/repo/sealed/y"),))
-    ) == Deny("/repo/sealed/y: sealed", DenyScope.OPERAND)
+    ) == Deny("sealed", DenyScope.OPERAND, path="/repo/sealed/y")
     # Outside the deeper rule's anchor the shallow one is what is left.
     assert await policy.pre_command(
         _ctx("rm", "/repo/x", paths=(_path("/repo/x"),))
@@ -243,7 +243,7 @@ async def test_an_unrelated_entry_does_not_lend_a_rule_its_depth():
     )
     assert await policy.pre_command(
         _ctx("cat", "/repo/private/x", paths=(_path("/repo/private/x"),))
-    ) == Deny("/repo/private/x: private", DenyScope.OPERAND)
+    ) == Deny("private", DenyScope.OPERAND, path="/repo/private/x")
     # The unrelated entry still speaks where it does anchor.
     answer = await policy.pre_command(
         _ctx("cat", "/else/very/deep/x", paths=(_path("/else/very/deep/x"),))
@@ -370,3 +370,13 @@ async def test_seeded_in_a_policies_chain_after_the_builtins():
         "history is read-only here", policy="PermissionsPolicy"
     )
     assert policies.wants("pre_ops")
+
+
+@pytest.mark.asyncio
+async def test_speaks_at_the_op_door_only_through_a_pure_path_rule():
+    p = _policy()
+    assert await p.wants_for("pre_ops", "s")
+    assert not await p.wants_for("pre_ops", "rev")
+    assert not await p.wants_for("pre_ops", "nobody")
+    assert await p.wants_for("pre_command", "rev")
+    assert not await Policies([p]).wants_for("pre_ops", "rev")

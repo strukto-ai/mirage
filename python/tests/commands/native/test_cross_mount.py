@@ -19,7 +19,7 @@ from unittest.mock import patch
 import pytest
 
 from mirage.core.ram.mkdir import mkdir
-from mirage.core.ram.write import write_bytes as mem_write
+from mirage.core.ram.write import write as mem_write
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
@@ -34,7 +34,6 @@ from tests.commands.native.conftest import (
 
 
 def _run(ws, cmd):
-
     async def _inner():
         io = await ws.shell(cmd)
         return await io.stdout_str()

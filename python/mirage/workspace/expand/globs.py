@@ -15,8 +15,10 @@
 import dataclasses
 import posixpath
 
+from mirage.context import session_visibility
 from mirage.ops.config import NamespaceLinks
 from mirage.ops.namespace_view import child_mount_names, namespace_names
+from mirage.shell.bytes import encode_text
 from mirage.shell.constants import SHOPT_DEFAULTS
 from mirage.shell.errors import DiscardSignal
 from mirage.types import FileStat, FileType, PathSpec
@@ -93,9 +95,10 @@ def _namespace_children(
     a glob that stops at one backend misses both: a nested mount's keys
     live in another VFS, and no VFS stores a link. This is the
     union ``merge_readdir`` already applies to a listing, filtered by the
-    glob segment with the same matcher backends use, and session-filtered
-    by ``namespace_names`` so a scoped session never learns an ungranted
-    mount's name from an expansion.
+    glob segment with the same matcher backends use, and filtered by the
+    bound session's visibility, as the backend's own matches are, so a
+    scoped session never learns an ungranted mount's name from an
+    expansion.
 
     Args:
         registry (MountRegistry): registry holding the mount table.
@@ -108,7 +111,10 @@ def _namespace_children(
     return [
         f"{base}/{name}"
         for name in namespace_names(
-            [m.prefix for m in registry.mounts()], links, directory
+            session_visibility(),
+            [m.prefix for m in registry.mounts()],
+            links,
+            directory,
         )
         if glob_name_matches(name, matcher)
     ]
@@ -674,7 +680,7 @@ async def resolve_globs(
                     if opts.failglob:
                         word = unmark_globs(typed.raw_path)
                         raise DiscardSignal(
-                            f"bash: no match: {word}\n".encode()
+                            encode_text(f"bash: no match: {word}\n")
                         )
                     if not opts.nullglob:
                         result.append(
@@ -736,10 +742,11 @@ async def expand_boundary_globs(
         links (NamespaceLinks | None): the namespace symlink table.
     """
     prefixes = [m.prefix for m in registry.mounts()]
+    vis = session_visibility()
     if not any(
         isinstance(p, PathSpec)
         and p.pattern
-        and child_mount_names(prefixes, _glob_head(p))
+        and child_mount_names(vis, prefixes, _glob_head(p))
         for p in parts
     ):
         return parts
@@ -748,7 +755,7 @@ async def expand_boundary_globs(
         if (
             isinstance(item, PathSpec)
             and item.pattern
-            and child_mount_names(prefixes, _glob_head(item))
+            and child_mount_names(vis, prefixes, _glob_head(item))
         ):
             out.extend(await resolve_globs([item], registry, links=links))
         else:

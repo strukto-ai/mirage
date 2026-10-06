@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { pathAllowed } from '../context/session_context.ts'
 import { normDir, rstripSlash } from '../utils/slash.ts'
-import { FileStat, FileType } from '../types.ts'
+import { FileStat, FileType, type PathSpec, type Visibility } from '../types.ts'
+import { pathVisible } from '../utils/hidden.ts'
 import type { NamespaceLinks } from './config.ts'
+import type { NamespaceView } from './types.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 
 /**
@@ -36,13 +37,17 @@ import { compareCodePoints } from '../utils/sort.ts'
  * ancestor whose only mount or link the session hides, a directory that
  * answers ENOENT to every verb applied to it.
  */
-export function visibleChildSegments(paths: Iterable<string>, parent: string): string[] {
+export function visibleChildSegments(
+  vis: Visibility | null,
+  paths: Iterable<string>,
+  parent: string,
+): string[] {
   const norm = normDir(parent)
   const out = new Set<string>()
   for (const path of paths) {
     if (!path.startsWith(norm)) continue
     const name = path.slice(norm.length).split('/', 1)[0] ?? ''
-    if (name === '' || out.has(name) || !pathAllowed(path)) continue
+    if (name === '' || out.has(name) || !pathVisible(vis, path)) continue
     out.add(name)
   }
   return [...out].sort(compareCodePoints)
@@ -57,7 +62,11 @@ export function visibleChildSegments(paths: Iterable<string>, parent: string): s
  * from a listing. Hidden names (leading dot) are included; presentation
  * filtering is the consumer's job, exactly as for backend entries.
  */
-export function childMountNames(prefixes: readonly string[], parent: string): string[] {
+export function childMountNames(
+  vis: Visibility | null,
+  prefixes: readonly string[],
+  parent: string,
+): string[] {
   const norm = normDir(parent)
   const below: string[] = []
   for (const prefix of prefixes) {
@@ -65,7 +74,7 @@ export function childMountNames(prefixes: readonly string[], parent: string): st
     if (p === norm || !p.startsWith(norm)) continue
     below.push(rstripSlash(p))
   }
-  return visibleChildSegments(below, parent)
+  return visibleChildSegments(vis, below, parent)
 }
 
 /**
@@ -80,9 +89,9 @@ export function childMountNames(prefixes: readonly string[], parent: string): st
  * not the segment, so a namespace-only ancestor whose only link the
  * session hides is not named either.
  */
-function linkNames(links: NamespaceLinks | null, parent: string): string[] {
+function linkNames(vis: Visibility | null, links: NamespaceLinks | null, parent: string): string[] {
   if (links === null) return []
-  return visibleChildSegments(links.symlinkTargets().keys(), parent)
+  return visibleChildSegments(vis, links.symlinkTargets().keys(), parent)
 }
 
 /**
@@ -94,13 +103,14 @@ function linkNames(links: NamespaceLinks | null, parent: string): string[] {
  * about what a directory holds.
  */
 export function namespaceNames(
+  vis: Visibility | null,
   prefixes: readonly string[],
   links: NamespaceLinks | null,
   parent: string,
 ): string[] {
-  return [...new Set([...childMountNames(prefixes, parent), ...linkNames(links, parent)])].sort(
-    compareCodePoints,
-  )
+  return [
+    ...new Set([...childMountNames(vis, prefixes, parent), ...linkNames(vis, links, parent)]),
+  ].sort(compareCodePoints)
 }
 
 /**
@@ -114,6 +124,7 @@ export function namespaceNames(
  * paths).
  */
 export function mergeReaddir(
+  vis: Visibility | null,
   entries: readonly string[],
   prefixes: readonly string[],
   links: NamespaceLinks | null,
@@ -122,7 +133,7 @@ export function mergeReaddir(
   const present = new Set(entries.map((e) => stripEntry(e)))
   const base = rstripSlash(parent)
   const merged = [...entries]
-  for (const name of namespaceNames(prefixes, links, parent)) {
+  for (const name of namespaceNames(vis, prefixes, links, parent)) {
     if (present.has(name)) continue
     present.add(name)
     merged.push(`${base}/${name}`)
@@ -145,14 +156,15 @@ function stripEntry(entry: string): string {
  * re-throws the backend's miss.
  */
 export function namespaceListing(
+  vis: Visibility | null,
   prefixes: readonly string[],
   links: NamespaceLinks | null,
   parent: string,
 ): string[] | null {
-  if (namespaceNames(prefixes, links, parent).length === 0) {
+  if (namespaceNames(vis, prefixes, links, parent).length === 0) {
     return null
   }
-  return mergeReaddir([], prefixes, links, parent)
+  return mergeReaddir(vis, [], prefixes, links, parent)
 }
 
 /**
@@ -163,11 +175,35 @@ export function namespaceListing(
  * or `os.walk` and `Path.is_dir` break on it.
  */
 export function namespaceStat(
+  vis: Visibility | null,
   prefixes: readonly string[],
   links: NamespaceLinks | null,
   path: string,
 ): FileStat | null {
-  if (namespaceListing(prefixes, links, path) === null) return null
+  if (namespaceListing(vis, prefixes, links, path) === null) return null
   const name = stripEntry(path)
   return new FileStat({ name: name === '' ? '/' : name, type: FileType.DIRECTORY })
+}
+
+/**
+ * Whether a hide, a path rule or a preOps policy judges anything a
+ * command's operands reach, so a native walk that classifies the raw
+ * tree gives way to the checked one.
+ *
+ * Per operand, not per session: a hidden `.env` under `/repo` must not
+ * force `find` on `/s3` off its native op. `ns` is the command's
+ * namespace view, whose `scoped` answers per path (none judges
+ * nothing); `prefix` is the mount root, judged in place of a glob
+ * operand.
+ */
+export function pathsScoped(
+  ns: NamespaceView | undefined,
+  paths: readonly PathSpec[],
+  prefix = '',
+): boolean {
+  const scoped = ns?.scoped
+  return (
+    scoped !== undefined &&
+    paths.some((path) => scoped(path.pattern !== null ? prefix || '/' : path.virtual))
+  )
 }

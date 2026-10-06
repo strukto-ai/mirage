@@ -230,15 +230,16 @@ def whole_line(source: str, multi_line: bool) -> str:
     return f"{line_start(multi_line)}(?:{source}){line_end(multi_line)}"
 
 
-def whole_word(source: str) -> str:
-    """ripgrep's -w: ``\\b{start-half}(?:...)\\b{end-half}``, Unicode.
+def whole_word(source: str, unicode: bool = True) -> str:
+    """ripgrep's -w: ``\\b{start-half}(?:...)\\b{end-half}``.
 
     Args:
         source (str): the host source.
+        unicode (bool): Unicode word characters, off under --no-unicode.
     """
     return (
-        f"{boundary('start-half', True)}(?:{source})"
-        f"{boundary('end-half', True)}"
+        f"{boundary('start-half', unicode)}(?:{source})"
+        f"{boundary('end-half', unicode)}"
     )
 
 
@@ -896,7 +897,10 @@ def combine(left: CharSet, right: CharSet, op: str | None) -> CharSet:
 
 
 def translate_rust(
-    patterns: list[str], ignore_case: bool = False, multi_line: bool = False
+    patterns: list[str],
+    ignore_case: bool = False,
+    multi_line: bool = False,
+    unicode: bool = True,
 ) -> HostRegex:
     """Translate a ripgrep pattern list into this host's regex dialect.
 
@@ -905,6 +909,8 @@ def translate_rust(
         ignore_case (bool): -i, or -S over an all-lowercase pattern.
         multi_line (bool): ``^``/``$`` also match at a ``\\n`` inside
             the subject (--null-data).
+        unicode (bool): Unicode mode, off under --no-unicode, the way
+            a leading ``(?-u)`` turns it off.
 
     Returns:
         HostRegex: host source matching exactly what ripgrep's default
@@ -914,8 +920,12 @@ def translate_rust(
         RustRegexError: ripgrep refuses the pattern.
     """
     display = display_of(patterns)
-    if ignore_case and not INLINE_CASE.search(display):
-        source = RustTranslator(display, Flags(m=multi_line)).translate()
+    # The host folds Unicode letters, so only a Unicode pattern hands it
+    # the folding; without Unicode the translator folds ASCII alone.
+    if ignore_case and unicode and not INLINE_CASE.search(display):
+        source = RustTranslator(
+            display, Flags(m=multi_line, u=unicode)
+        ).translate()
         return HostRegex(source, True)
-    flags = Flags(i=ignore_case, m=multi_line)
+    flags = Flags(i=ignore_case, m=multi_line, u=unicode)
     return HostRegex(RustTranslator(display, flags).translate())

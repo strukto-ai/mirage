@@ -14,7 +14,7 @@
 
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
-import { emit, handleResponse } from './output.ts'
+import { emit, fail, handleResponse } from './output.ts'
 import { loadDaemonSettings } from './settings.ts'
 
 function buildClient() {
@@ -69,7 +69,7 @@ export function registerSessionCommands(program: Command): void {
       const c = buildClient()
       await c.ensureRunning({ allowSpawn: false })
       const body: Record<string, unknown> = {}
-      if (opts.id !== undefined) body.sessionId = opts.id
+      if (opts.id !== undefined) body.session_id = opts.id
       if (opts.mount !== undefined && opts.mount.length > 0) {
         body.mounts = parseMountModes(opts.mount)
       }
@@ -112,8 +112,46 @@ export function registerSessionCommands(program: Command): void {
         ),
       )
     })
+
+  sess
+    .command('cancel')
+    .description("Cancel the session's running and queued commands.")
+    .argument('<wsId>')
+    .argument('<sessionId>')
+    .action(async (wsId: string, sessionId: string) => {
+      const c = buildClient()
+      await c.ensureRunning({ allowSpawn: false })
+      emit(
+        await handleResponse(
+          await c.request(
+            'POST',
+            `/v1/workspaces/${encodeURIComponent(wsId)}/sessions/${encodeURIComponent(sessionId)}/cancel`,
+          ),
+        ),
+      )
+    })
+
+  sess
+    .command('kill')
+    .description("Kill the session's background jobs; the session stays open.")
+    .argument('<wsId>')
+    .argument('<sessionId>')
+    .action(async (wsId: string, sessionId: string) => {
+      const c = buildClient()
+      await c.ensureRunning({ allowSpawn: false })
+      emit(
+        await handleResponse(
+          await c.request(
+            'POST',
+            `/v1/workspaces/${encodeURIComponent(wsId)}/sessions/${encodeURIComponent(sessionId)}/kill`,
+          ),
+        ),
+      )
+    })
+
   sess
     .command('update')
+    .description("Replace the session's profile; its cwd, env and history stay.")
     .argument('<wsId>')
     .argument('<sessionId>')
     .option('-p, --profile <name>', "Replace the live session's profile.")
@@ -124,9 +162,8 @@ export function registerSessionCommands(program: Command): void {
         sessionId: string,
         opts: { profile?: string; defaultProfile?: boolean },
       ) => {
-        if ((opts.profile === undefined) === (opts.defaultProfile !== true)) {
-          throw new Error('choose --profile or --default-profile')
-        }
+        if ((opts.profile === undefined) === (opts.defaultProfile !== true))
+          fail('choose --profile or --default-profile', 2)
         const c = buildClient()
         await c.ensureRunning({ allowSpawn: false })
         emit(

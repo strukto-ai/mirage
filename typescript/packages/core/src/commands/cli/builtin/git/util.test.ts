@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { BadConfigValueError } from './errors.ts'
-import { configSection, gitBool, splitMarked, withoutSection } from './util.ts'
+import { configSection, gitBool, maybeBool, splitMarked, withoutSection } from './util.ts'
 import { walk } from '../../walk.ts'
 import { GIT } from './index.ts'
 
@@ -150,4 +150,17 @@ describe('withoutSection over continued values', () => {
     expect(withoutSection(text, 'branch', 'c3').split('keep2').length).toBe(2)
     expect(withoutSection(text, 'branch', 'c4').endsWith('# see \\\n')).toBe(true)
   })
+})
+
+it.each([
+  ['true', true],
+  ['On', true],
+  ['', false],
+  ['no', false],
+  ['2', true],
+  ['0', false],
+  ['1k', true],
+  ['full', null],
+])('maybeBool reads words and numbers: %s', (value, parsed) => {
+  expect(maybeBool(value)).toBe(parsed)
 })

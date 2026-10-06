@@ -12,22 +12,63 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.runtime.handles.flush import plan_flush
+from mirage.runtime.handles.types import FlushStep
 
 
-def test_plan_flush_sends_a_tail_when_the_handle_only_extended():
-    assert plan_flush(3, 3, b"abcXYZ") == ("append", b"XYZ")
-
-
-def test_plan_flush_sends_the_whole_file_when_history_was_rewritten():
-    assert plan_flush(3, 0, b"ZZZdef") == ("write", b"ZZZdef")
-
-
-def test_plan_flush_sends_the_whole_file_for_a_new_one():
-    # base_len 0 means create or truncate: there is nothing to extend,
-    # and the mount may not have the file at all yet.
-    assert plan_flush(0, 0, b"fresh") == ("write", b"fresh")
-
-
-def test_plan_flush_sends_the_whole_file_when_the_buffer_shrank():
-    assert plan_flush(6, 6, b"abc") == ("write", b"abc")
+@pytest.mark.parametrize(
+    ("facts", "steps"),
+    [
+        pytest.param(
+            {"base_len": 0, "runs": [(0, b"ab"), (3, b"c")], "size": 4},
+            [
+                FlushStep("pwrite", data=b"ab", offset=0),
+                FlushStep("pwrite", data=b"c", offset=3),
+            ],
+            id="a-created-file-sends-only-its-ranges",
+        ),
+        pytest.param(
+            {"runs": [(3, b"XYZ")], "size": 6},
+            [FlushStep("append", data=b"XYZ")],
+            id="a-range-at-the-end-goes-as-an-append",
+        ),
+        pytest.param(
+            {"base_len": 0, "runs": [(0, b"x")], "size": 1, "appending": True},
+            [FlushStep("append", data=b"x")],
+            id="an-append-mode-handle-appends-even-to-an-empty-file",
+        ),
+        pytest.param(
+            {"runs": [(0, b"a"), (2, b"c")]},
+            [
+                FlushStep("pwrite", data=b"a", offset=0),
+                FlushStep("pwrite", data=b"c", offset=2),
+            ],
+            id="edits-go-as-pwrites-in-order",
+        ),
+        pytest.param(
+            {"base_len": 6, "cut": 2, "runs": [(4, b"z")], "size": 8},
+            [
+                FlushStep("truncate", length=2),
+                FlushStep("pwrite", data=b"z", offset=4),
+                FlushStep("truncate", length=8),
+            ],
+            id="a-cut-comes-first-and-growth-last",
+        ),
+        pytest.param(
+            {"size": 5},
+            [FlushStep("truncate", length=5)],
+            id="growth-alone-is-one-truncate",
+        ),
+    ],
+)
+def test_plan_flush(facts, steps):
+    base = {
+        "base_len": 3,
+        "runs": [],
+        "cut": None,
+        "size": 3,
+        "appending": False,
+    }
+    assert plan_flush(**{**base, **facts}) == steps

@@ -17,7 +17,9 @@ import type { MountView } from '../../../ops/types.ts'
 import type { FileStat } from '../../../types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
 import { eacces, enoent } from '../../../utils/errors.ts'
-import { mountParentReaddir, mountParentStat, resolveScript, splitReadable } from './operands.ts'
+import { splitReadable } from './operands.ts'
+import { resolveScript } from './paths.ts'
+import { mountParentReaddir, mountParentStat } from './wrap.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
 function spec(virtual: string): PathSpec {

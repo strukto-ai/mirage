@@ -29,12 +29,12 @@ describe.each(NATIVE_BACKENDS)('native stat (%s backend)', (kind) => {
     }
   })
 
-  it("stat -f '%s' produces output", async () => {
+  it("stat -f -c '%T' names the backend", async () => {
     const env = makeEnv(kind)
     try {
       env.createFile('f.txt', ENC.encode('hello'))
-      const result = await env.mirage("stat -f '%s' /data/f.txt")
-      expect(result.trim().length).toBeGreaterThan(0)
+      const result = await env.mirage("stat -f -c '%n %T' /data/f.txt")
+      expect(result.trim()).toBe(`/data/f.txt ${kind}`)
     } finally {
       await env.cleanup()
     }

@@ -52,9 +52,9 @@ export function registerDocumentsRoutes(app: FastifyInstance, deps: DocumentsRou
               }
             : {}),
           handler: async (req, reply) => {
-            if (!deps.registry.has(req.params.wsId))
-              return reply.status(404).send({ detail: 'workspace not found' })
-            const ws = deps.registry.get(req.params.wsId).runner.ws
+            const entry = deps.registry.visible(req.params.wsId, req.account)
+            if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
+            const ws = entry.runner.ws
             await ws.ensureSessionsLoaded()
             const sessionId = req.params.sessionId ?? req.query.session_id
             if (

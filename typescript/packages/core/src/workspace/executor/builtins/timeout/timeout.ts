@@ -14,6 +14,7 @@
 
 import { versionLine } from '../../../../commands/spec/standard.ts'
 import { quoteText } from '../../../../commands/quote.ts'
+import { STRTOD, strtodDouble } from '../../../../commands/builtin/utils/strtod.ts'
 import { renderHelp } from '../../../../commands/spec/help.ts'
 import { SHELL_SPECS, parseShellOptions } from '../../../../commands/spec/shell.ts'
 import {
@@ -46,11 +47,9 @@ import {
   STOP_SIGNALS,
 } from './constants.ts'
 import { concat } from '../../../../io/cachable_iterator.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 const SYNOPSIS = 'timeout [OPTION] DURATION COMMAND [ARG]...'
-
-const FLOAT =
-  /^[ \t\n\v\f\r]*([+-]?)(0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?|\.[0-9a-fA-F]+)(?:[pP][+-]?[0-9]+)?|(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|[iI][nN][fF](?:[iI][nN][iI][tT][yY])?|[nN][aA][nN](?:\([0-9A-Za-z_]*\))?)/
 
 const LONG = /^[ \t\n\v\f\r]*[+-]?[0-9]+$/
 
@@ -66,8 +65,6 @@ const SIGNUM_BOUND = SIGRTMAX
 
 const TIMED_OUT: unique symbol = Symbol('timed-out')
 
-const ENCODER = new TextEncoder()
-
 function refuse(stderr: Uint8Array, exitCode = 125): Result {
   return [
     null,
@@ -79,20 +76,12 @@ function refuse(stderr: Uint8Array, exitCode = 125): Result {
 function usageError(message: string): Result {
   // GNU timeout reserves 125 for its own failures; 124 means the
   // command was killed at the deadline.
-  return refuse(ENCODER.encode(`timeout: ${message}\n${usageHint('timeout')}\n`))
+  return refuse(encodeText(`timeout: ${message}\n${usageHint('timeout')}\n`))
 }
 
 /** GNU's report of a command timeout finds nothing to run for. */
 export function timeoutMissing(name: string): string {
   return `timeout: failed to run command '${quoteText(name)}': No such file or directory\n`
-}
-
-function hexFloat(body: string): number {
-  const match = /^0[xX]([0-9a-fA-F]*)(?:\.([0-9a-fA-F]*))?(?:[pP]([+-]?[0-9]+))?$/.exec(body)
-  const whole = match?.[1] ?? ''
-  const fraction = match?.[2] ?? ''
-  const mantissa = parseInt(`${whole}${fraction}` || '0', 16)
-  return mantissa * 2 ** (Number(match?.[3] ?? '0') - 4 * fraction.length)
 }
 
 /**
@@ -103,20 +92,11 @@ function hexFloat(body: string): number {
  * suffix letter may follow, and a negative or NaN interval is refused.
  */
 export function parseDuration(raw: string): number | null {
-  const match = FLOAT.exec(raw)
+  const match = STRTOD.exec(raw)
   if (match === null) return null
-  const sign = match[1] ?? ''
-  const body = match[2] ?? ''
   const multiplier = UNIT_SECONDS[raw.slice(match[0].length)]
   if (multiplier === undefined) return null
-  const lowered = body.toLowerCase()
-  if (lowered.startsWith('nan')) return null
-  let value = lowered.startsWith('0x')
-    ? hexFloat(body)
-    : lowered.startsWith('inf')
-      ? Infinity
-      : Number(body)
-  if (sign === '-') value = -value
+  const value = strtodDouble(match)
   if (!(value >= 0)) return null
   return (value === 0 ? 0 : value) * multiplier
 }
@@ -260,14 +240,14 @@ export async function handleTimeout(
     if (name === 'help') {
       const text = renderHelp('timeout', SHELL_SPECS.timeout, [], undefined, SYNOPSIS)
       return [
-        yieldBytes(ENCODER.encode(text)),
+        yieldBytes(encodeText(text)),
         new IOResult(),
         new ExecutionNode({ command: 'timeout', exitCode: 0 }),
       ]
     }
     if (name === 'version') {
       return [
-        yieldBytes(ENCODER.encode(versionLine('timeout'))),
+        yieldBytes(encodeText(versionLine('timeout'))),
         new IOResult(),
         new ExecutionNode({ command: 'timeout', exitCode: 0 }),
       ]
@@ -296,13 +276,13 @@ export async function handleTimeout(
   if (parse.needsValue !== null) return refuse(...missingValueError('timeout', parse.needsValue))
   const [raw, ...command] = parse.operands
   if (raw === undefined || command.length === 0) {
-    return refuse(ENCODER.encode(`${usageHint('timeout')}\n`))
+    return refuse(encodeText(`${usageHint('timeout')}\n`))
   }
   const seconds = parseDuration(raw)
   if (seconds === null) return usageError(`invalid time interval '${quoteText(raw)}'`)
   const name = command[0] ?? ''
   if (registry !== null && !execs(name, session, registry)) {
-    return refuse(ENCODER.encode(timeoutMissing(name)), 127)
+    return refuse(encodeText(timeoutMissing(name)), 127)
   }
 
   const drained: Uint8Array[] = []
@@ -419,7 +399,7 @@ async function ended(
     : source instanceof Uint8Array
       ? source
       : new Uint8Array()
-  const tail = ENCODER.encode(said.join(''))
+  const tail = encodeText(said.join(''))
   const stderr = concat([head, tail])
   const partial = concat(drained)
   return [

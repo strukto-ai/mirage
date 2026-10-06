@@ -13,7 +13,7 @@
     "                                                       the shell door, as the reviewer",
     "reviewer  shell     cat /repo/secrets/key.pem          [1] cat: /repo/secrets/key.pem: No such file or directory",
     "                                                       the reviewer's profile hides the directory",
-    "editor    shell     cat /repo/secrets/key.pem          [1] cat: /repo/secrets/key.pem: keys are never read by hand",
+    "editor    shell     cat /repo/secrets/key.pem          [1] cat: /repo/secrets/key.pem: Permission denied",
     "                                                       the editor's rule denies the file by name",
     "reviewer  vfs.read  /repo/secrets/key.pem              ENOENT",
     "                                                       the op door, the same hide, the same answer",

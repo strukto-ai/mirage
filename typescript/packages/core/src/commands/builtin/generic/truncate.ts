@@ -10,11 +10,13 @@ import {
 } from '../../../utils/errors.ts'
 import { isDir } from '../../../utils/stat_view.ts'
 import { UsageError } from '../../errors.ts'
+import { quoteText } from '../../quote.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { sizeSuffixes } from '../utils/size_suffix.ts'
 import { absentDestStrerror } from '../utils/paths.ts'
+import { encodeText } from '../../../shell/bytes.ts'
 
 // GNU truncate's letter set differs from split's and od's: lowercase
 // g/k/m/t are accepted, b is not (pinned against coreutils 9.7).
@@ -50,15 +52,17 @@ function parseSize(value: string, current: number): number {
     .find((unit) => raw.endsWith(unit))
   const numeric = suffix === undefined ? raw : raw.slice(0, -suffix.length)
   // GNU quotes what xdectoimax saw: the remainder past the skipped
-  // whitespace and mode character, sign included (`<abc` says 'abc').
-  if (!DIGITS.test(numeric)) throw new UsageError(`truncate: Invalid number: '${remainder}'`, 1)
+  // whitespace and mode character, sign included (`<abc` says 'abc'),
+  // escaped the way its quote() escapes a word.
+  const shown = quoteText(remainder)
+  if (!DIGITS.test(numeric)) throw new UsageError(`truncate: Invalid number: '${shown}'`, 1)
   // off_t is signed, so the bound is 2**63 - 1 upward but 2**63 downward
   // (`-s -8E` reduces to zero while `-s 8E` is too large). BigInt keeps the
   // boundary exact where doubles round 2**63 - 1 up to 2**63.
   const magnitude = BigInt(numeric) * BigInt(suffix === undefined ? 1 : (UNITS[suffix] ?? 1))
   if (magnitude > OFF_T_MAX + (sign === '-' ? 1n : 0n)) {
     throw new UsageError(
-      `truncate: Invalid number: '${remainder}': Value too large for defined data type`,
+      `truncate: Invalid number: '${shown}': Value too large for defined data type`,
       1,
     )
   }
@@ -80,7 +84,6 @@ function parseSize(value: string, current: number): number {
 // "Is a directory" and nothing is created. The size is read first here only
 // because a relative spec needs it, so for a slashed operand a stat that
 // misses is not the verdict; the truncate op answers, as the open would.
-const ENC = new TextEncoder()
 
 export interface TruncateFlags {
   readonly size: string
@@ -126,7 +129,7 @@ export async function truncateGeneric(
   const err = errors.join('')
   return [
     null,
-    new IOResult({ exitCode: err === '' ? 0 : 1, stderr: err === '' ? null : ENC.encode(err) }),
+    new IOResult({ exitCode: err === '' ? 0 : 1, stderr: err === '' ? null : encodeText(err) }),
   ]
 }
 

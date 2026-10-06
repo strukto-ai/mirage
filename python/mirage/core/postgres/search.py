@@ -179,13 +179,11 @@ async def search_entity(
                 rendered_bytes += len(line.encode()) + 1
                 if rendered_bytes > max_bytes:
                     raise efbig(rows_path)
-                if matcher.search(line):
+                if matcher(line):
                     lines.append(line)
             return lines
     data = await read_rows(accessor, schema, entity, path=rows_path)
-    return [
-        line for line in data.decode().split("\n")[:-1] if matcher.search(line)
-    ]
+    return [line for line in data.decode().split("\n")[:-1] if matcher(line)]
 
 
 async def search_entity_metadata(
@@ -230,7 +228,7 @@ async def search_entity_metadata(
     for name, doc in docs:
         rendered = orjson.dumps(doc, option=orjson.OPT_INDENT_2).decode()
         for line in rendered.splitlines():
-            if matcher.search(line):
+            if matcher(line):
                 lines.append(f"{schema}/{kind}/{entity}/{name}:{line}")
     return lines
 

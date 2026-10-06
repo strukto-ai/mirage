@@ -12,11 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { enotsup } from '@struktoai/mirage-core/utils/errors'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { read } from './read.ts'
-import { writeBytes } from './write.ts'
+import { joinRoot, openForWrite, stripPrefix } from './utils.ts'
 
 export async function truncate(
   accessor: SSHAccessor,
@@ -25,17 +27,25 @@ export async function truncate(
   noCreate = false,
 ): Promise<void> {
   if (noCreate) throw enotsup('ssh', 'truncate --no-create', p)
-  let data: Uint8Array
+  const timer = startOp()
+  const sftp = await accessor.sftp()
+  const remote = joinRoot(accessor.config.root ?? '/', stripPrefix(p))
+  const handle = await openForWrite(sftp, remote, p)
   try {
-    data = await read(accessor, p)
-  } catch (err) {
-    if ((err as { code?: string }).code === 'ENOENT') {
-      data = new Uint8Array(0)
-    } else {
-      throw err
-    }
+    await new Promise<void>((resolveFn, rejectFn) => {
+      sftp.fsetstat(handle, { size: length }, (err) => {
+        if (err) rejectFn(err)
+        else resolveFn()
+      })
+    })
+  } finally {
+    await new Promise<void>((resolveFn, rejectFn) => {
+      sftp.close(handle, (err) => {
+        if (err) rejectFn(err)
+        else resolveFn()
+      })
+    })
   }
-  const out = new Uint8Array(length)
-  out.set(data.subarray(0, Math.min(data.byteLength, length)))
-  await writeBytes(accessor, p, out)
+  record('truncate', p.virtual, VFSName.SSH, 0, timer)
+  await invalidateAfterWrite(p)
 }

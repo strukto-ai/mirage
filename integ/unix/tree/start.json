@@ -101,6 +101,74 @@
     "stdout": "/data/nope  [error opening dir]\n\n0 directories, 0 files\n",
     "stderr": ""
    }
-  }
- ]
+  },
+    {
+      "id": "tree_start_under_a_file_is_missing",
+      "seq": 15300403,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "tree /data/a.txt/x; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt/x  [error opening dir]\n\n0 directories, 0 files\nrc=2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tree_draws_every_operand_under_one_summary",
+      "seq": 15800082,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/treo/sub/deep && printf 'deep\\n' > /data/treo/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/treo/sub/nested.txt && tree /data/nosuch /data/treo/sub; echo rc=$?; tree /data/treo/sub /data/nosuch; echo rc=$?; tree /data/a.txt /data/treo/sub; echo rc=$?; rm -r /data/treo",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/nosuch  [error opening dir]\n/data/treo/sub\n|-- deep\n|   `-- deeper.txt\n`-- nested.txt\n\n2 directories, 2 files\nrc=2\n/data/treo/sub\n|-- deep\n|   `-- deeper.txt\n`-- nested.txt\n/data/nosuch  [error opening dir]\n\n2 directories, 2 files\nrc=2\n/data/a.txt  [error opening dir]\n/data/treo/sub\n|-- deep\n|   `-- deeper.txt\n`-- nested.txt\n\n2 directories, 3 files\nrc=0\n",
+        "stderr": ""
+      }
+    }
+  ]
 }

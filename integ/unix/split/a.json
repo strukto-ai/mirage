@@ -34,6 +34,45 @@
         "a",
         "l"
       ]
+    },
+    {
+      "id": "split_a_zero_signed_and_refused_widths",
+      "seq": 15300307,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/fcC_sa && (cd /data/fcC_sa && printf 'a\\nb\\n' > in && split -a 0 -l 1 in z && split -a +3 -l 1 in p && split -a +0 -l 1 in w && split -a 1k in q 2>&1; echo rc=$?; split -a abc -l 1 in r 2>&1; echo rc=$?; ls | tr '\\n' ' '; echo); rm -r /data/fcC_sa",
+      "expect": {
+        "exit": 0,
+        "stdout": "split: invalid suffix length: '1k'\nrc=1\nsplit: invalid suffix length: 'abc'\nrc=1\nin paaa paab waa wab zaa zab \n",
+        "stderr": ""
+      },
+      "flags": [
+        "a",
+        "l"
+      ]
+    },
+    {
+      "id": "split_a_fixed_width_exhausts_and_keeps_written_chunks",
+      "seq": 15300308,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/fcC_se && (cd /data/fcC_se && printf '%027d' 0 > in && split -b 1 -a 1 in x; echo rc=$?; ls x* | wc -l; ls x* | tail -n 1; printf 'qqq' > q && split -b 1 --numeric-suffixes=98 q n; echo rc=$?; ls n*); rm -r /data/fcC_se",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n26\nxz\nrc=1\nn98\nn99\n",
+        "stderr": "split: output file suffixes exhausted\nsplit: output file suffixes exhausted\n"
+      },
+      "flags": [
+        "a",
+        "b",
+        "numeric-suffixes"
+      ]
     }
   ]
 }

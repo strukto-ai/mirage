@@ -1,0 +1,113 @@
+---
+title: MCP
+description: Connect Claude Code, Cursor, VS Code or Codex to a workspace.
+icon: /images/mcp-icon.svg
+---
+
+Every workspace on the Mirage server is an [MCP](https://modelcontextprotocol.io) server at:
+
+```
+http://127.0.0.1:8765/v1/workspaces/{id}/mcp
+```
+
+## Connect
+
+On your own machine, let the client launch `mirage mcp`. It starts the server if needed and sends your token.
+
+<Tabs>
+  <Tab title="Claude Code">
+    ```bash
+    claude mcp add mirage -- mirage mcp -w demo
+    ```
+  </Tab>
+  <Tab title="Cursor">
+    ```json .cursor/mcp.json
+    {
+      "mcpServers": {
+        "mirage": { "command": "mirage", "args": ["mcp", "-w", "demo"] }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="VS Code">
+    ```json .vscode/mcp.json
+    {
+      "servers": {
+        "mirage": { "type": "stdio", "command": "mirage", "args": ["mcp", "-w", "demo"] }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Codex">
+    ```toml ~/.codex/config.toml
+    [mcp_servers.mirage]
+    command = "mirage"
+    args = ["mcp", "-w", "demo"]
+    ```
+  </Tab>
+</Tabs>
+
+For a server elsewhere, give the client the URL and a token:
+
+<Tabs>
+  <Tab title="Claude Code">
+    ```bash
+    claude mcp add --transport http mirage https://mirage.example.com/v1/workspaces/demo/mcp \
+      --header "Authorization: Bearer $MIRAGE_TOKEN"
+    ```
+  </Tab>
+  <Tab title="Cursor">
+    ```json .cursor/mcp.json
+    {
+      "mcpServers": {
+        "mirage": {
+          "url": "https://mirage.example.com/v1/workspaces/demo/mcp",
+          "headers": { "Authorization": "Bearer ${env:MIRAGE_TOKEN}" }
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="VS Code">
+    ```json .vscode/mcp.json
+    {
+      "servers": {
+        "mirage": {
+          "type": "http",
+          "url": "https://mirage.example.com/v1/workspaces/demo/mcp",
+          "headers": { "Authorization": "Bearer ${env:MIRAGE_TOKEN}" }
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Codex">
+    ```toml ~/.codex/config.toml
+    [mcp_servers.mirage]
+    url = "https://mirage.example.com/v1/workspaces/demo/mcp"
+    bearer_token_env_var = "MIRAGE_TOKEN"
+    ```
+  </Tab>
+</Tabs>
+
+## Auth
+
+The endpoint takes the same bearer token as the [HTTP API](/home/access/http#auth). `mirage mcp` reads it from `MIRAGE_TOKEN` or `~/.mirage/auth_token`. The server does not offer OAuth sign-in, so a client must send the header.
+
+## Tools
+
+| Tool | Does |
+| --- | --- |
+| `shell` | Run a bash line. |
+| `read` | Read a file, or a range of its lines. |
+| `write` | Write a file. |
+| `edit` | Replace a string in a file. |
+| `ls` | List a directory. |
+| `grep` | Search file contents. |
+| `glob` | Find paths by pattern. |
+
+Their inputs are listed under [Call a tool](/home/access/http#call-a-tool). `read`, `ls`, `grep` and `glob` are marked read-only.
+
+## Sessions
+
+Calls run in the workspace's default session. To use another, add `?session_id=<id>` to the URL, or `-s <id>` to `mirage mcp`. The session's [profile](/home/permissions) applies as it does to a shell line: a path hidden from `cat` is hidden from `read`. Command rules apply only to `shell`, `ls` and `grep`.

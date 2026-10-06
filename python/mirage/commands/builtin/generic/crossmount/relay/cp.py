@@ -18,7 +18,7 @@ from functools import partial
 from typing import Any, Callable
 
 from mirage.commands.builtin.generic.cp import TransferLinks, parse_flags
-from mirage.commands.builtin.generic.cp import cp as generic_cp
+from mirage.commands.builtin.generic.cp import cp_generic as generic_cp
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import (
     flat_scopes,
@@ -27,6 +27,7 @@ from mirage.commands.builtin.generic.crossmount.utils import (
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.io.types import ByteSource
 from mirage.ops.types import LinkSubtree, MountView, NamespaceView
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec, PrimitiveCopy
@@ -86,6 +87,7 @@ async def run_cp(
     storage_key: Callable[[PathSpec], str] | None = None,
     ns: NamespaceView | None = None,
     cwd: str = "/",
+    stdin: ByteSource | None = None,
 ) -> CrossResult:
     """Copy operands that span mounts via the shared generic cp.
 
@@ -103,6 +105,7 @@ async def run_cp(
             that does not follow them recreates by name.
         cwd (str): The working directory a typed link source resolves
             against.
+        stdin (ByteSource | None): where ``-i`` reads its answers.
     """
     fl = FlagView(flag_kwargs, spec=SPECS["cp"])
     primitives = transfer_primitives(dispatch)
@@ -123,7 +126,7 @@ async def run_cp(
         mkdir=primitives["mkdir"],
         readdir=primitives["readdir"],
     )
-    return await generic_cp(
+    out, io = await generic_cp(
         flat_scopes(scopes),
         stat=primitives["stat"],
         strategy=strategy,
@@ -136,8 +139,16 @@ async def run_cp(
                 cwd=cwd,
                 relay=strategy,
                 relay_stat=primitives["stat"],
+                visibility=ns.visibility if ns is not None else None,
             )
             if links is not None
             else None
         ),
+        stdin=stdin,
     )
+    # Every read went through the dispatcher, whose cold read keeps what
+    # the file cache may hold; listing a read path again would keep a
+    # filetype renderer's output there, which cat would then print. A
+    # written path stays listed.
+    io.cache = [p for p in io.cache if p not in io.reads]
+    return out, io

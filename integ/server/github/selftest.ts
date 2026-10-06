@@ -1430,6 +1430,222 @@ async function reviewAncestry(at: string): Promise<void> {
   )
 }
 
+// A merge names every parent, and every walk follows each of them: the
+// listing reaches what only the second parent reaches, a branch merged into
+// another reads as behind it, `^2` names the second parent, and a ref moves
+// onto the merge as a fast forward. GraphQL's `history` lists what the REST
+// listing lists, and a path's history drops a merge that took one side's
+// version, with the side it did not take. The fixture states the octocat
+// history GitHub answers for `octocat/Hello-World` (2026-09-30, its GraphQL
+// answers 2026-10-03); the rest is built through the git data API.
+async function mergeHistory(at: string): Promise<void> {
+  const shas = (body: JsonValue): JsonValue[] =>
+    (body as JsonValue[]).map((row) => field(row, 'sha'))
+  const run = 'merge-history'
+  const base = `${at}/_run/${run}`
+  await post(`${base}/reset`, { run, tenants: [TENANT], fixture: 'merges' })
+  const hello = `${base}/repos/octocat/Hello-World`
+  const merge = '7fd1a60b01f91b314f59955a4e4d4e80d8edf11d'
+  const side = '762941318ee16e59dabbacb1b4049eec22f0d303'
+  const first = '553c2077f0edc3d5dc5d17262f6aa498e69d6f8e'
+  eq(
+    'a fixture merge lists the commit only its second parent reaches',
+    shas(await get(`${hello}/commits?sha=master`)),
+    [merge, side, first],
+  )
+  eq(
+    'a fixture merge names both parents in order',
+    shas(field(await get(`${hello}/commits/${merge}`), 'parents')),
+    [first, side],
+  )
+  const merged = await get(`${hello}/compare/${side}...master`)
+  eq(
+    'a branch merged into the base is behind it, not diverged',
+    [field(merged, 'status'), field(merged, 'ahead_by'), field(merged, 'behind_by')],
+    ['ahead', 1, 0],
+  )
+  eq('^2 names the second parent', field(await get(`${hello}/commits/master^2`), 'sha'), side)
+  eq('~1 follows the first parent', field(await get(`${hello}/commits/master~1`), 'sha'), first)
+  eq('^3 names nothing', (await send('GET', `${hello}/commits/master^3`)).status, 422)
+  const graph = async (query: string): Promise<JsonValue> =>
+    field(field((await send('POST', `${base}/graphql`, { query })).body, 'data'), 'repository')
+  const history = (args: string): string =>
+    `defaultBranchRef { name prefix target { __typename oid ... on Commit { ` +
+    `history(${args}) { totalCount pageInfo { hasNextPage endCursor } nodes { oid } } } } }`
+  const listed = (repository: JsonValue): JsonValue =>
+    field(field(field(repository, 'defaultBranchRef'), 'target'), 'history')
+  const read = await graph(
+    `{ repository(owner: "octocat", name: "Hello-World") { ${history('first: 2')} } }`,
+  )
+  const oids = (connection: JsonValue): JsonValue[] =>
+    (field(connection, 'nodes') as JsonValue[]).map((node) => field(node, 'oid'))
+  eq(
+    'GraphQL history reaches what only the second parent reaches',
+    [field(listed(read), 'totalCount'), oids(listed(read))],
+    [3, [merge, side]],
+  )
+  eq(
+    'defaultBranchRef names its namespace and its head',
+    [
+      field(field(read, 'defaultBranchRef'), 'prefix'),
+      field(field(field(read, 'defaultBranchRef'), 'target'), '__typename'),
+    ],
+    ['refs/heads/', 'Commit'],
+  )
+  const cursor = field(field(listed(read), 'pageInfo'), 'endCursor')
+  const rest = await graph(
+    `{ repository(owner: "octocat", name: "Hello-World") { ` +
+      `${history(`first: 2, after: ${JSON.stringify(cursor)}`)} } }`,
+  )
+  eq('GraphQL history pages on', oids(listed(rest)), [first])
+  const bounded = await graph(
+    `{ repository(owner: "octocat", name: "Hello-World") { defaultBranchRef { target { ` +
+      `... on Commit { since: history(since: "2012-01-01T00:00:00Z") { nodes { oid } } ` +
+      `until: history(until: "2011-01-27T00:00:00Z") { nodes { oid } } } } } } }`,
+  )
+  const target = field(field(bounded, 'defaultBranchRef'), 'target')
+  eq(
+    'GraphQL history is bounded by commit date',
+    [field(target, 'since'), field(target, 'until')],
+    [{ nodes: [{ oid: merge }] }, { nodes: [{ oid: first }] }],
+  )
+  const refs = await graph(
+    `{ repository(owner: "octocat", name: "Hello-World") { ` +
+      `short: ref(qualifiedName: "master") { name prefix } ` +
+      `full: ref(qualifiedName: "refs/heads/master") { name prefix } ` +
+      `partial: ref(qualifiedName: "heads/master") { name } ` +
+      `missing: ref(qualifiedName: "nosuch") { name } } }`,
+  )
+  eq('ref() reads a short name, a full one, and nothing else', refs, {
+    short: { name: 'master', prefix: 'refs/heads/' },
+    full: { name: 'master', prefix: 'refs/heads/' },
+    partial: null,
+    missing: null,
+  })
+
+  const built = `${at}/_run/merge-built`
+  await post(`${built}/reset`, { run: 'merge-built', tenants: [TENANT], fixture: 'v1' })
+  const repo = `${built}/repos/${REPO}`
+  const root = field(field(await get(`${repo}/git/ref/heads/main`), 'object'), 'sha')
+  await post(`${repo}/git/refs`, { ref: 'refs/heads/topic', sha: root })
+  const onTopic = await send('PUT', `${repo}/contents/topic.txt`, {
+    message: 'On topic',
+    content: Buffer.from('topic\n').toString('base64'),
+    branch: 'topic',
+  })
+  const topic = field(field(onTopic.body, 'commit'), 'sha')
+  const onMain = await send('PUT', `${repo}/contents/main.txt`, {
+    message: 'On main',
+    content: Buffer.from('main\n').toString('base64'),
+    branch: 'main',
+  })
+  const tip = field(field(onMain.body, 'commit'), 'sha')
+  const tree = field(field(await get(`${repo}/git/commits/${String(tip)}`), 'tree'), 'sha')
+  const made = await post(`${repo}/git/commits`, {
+    message: 'Merge topic',
+    tree,
+    parents: [tip, topic],
+  })
+  const sha = field(made.body, 'sha')
+  eq('POST git/commits keeps every parent it is given', shas(field(made.body, 'parents')), [
+    tip,
+    topic,
+  ])
+  eq(
+    'GET git/commits reads every parent back',
+    shas(field(await get(`${repo}/git/commits/${String(sha)}`), 'parents')),
+    [tip, topic],
+  )
+  eq(
+    'a ref moves onto a merge of itself as a fast forward',
+    (await send('PATCH', `${repo}/git/refs/heads/main`, { sha })).status,
+    200,
+  )
+  eq(
+    'the branch lists both sides of its merge',
+    shas(await get(`${repo}/commits?sha=main`)).slice(0, 3),
+    [sha, tip, topic],
+  )
+  const behind = await get(`${repo}/compare/main...topic`)
+  eq(
+    'the merged branch is behind the branch it was merged into',
+    [field(behind, 'status'), field(behind, 'ahead_by'), field(behind, 'behind_by')],
+    ['behind', 0, 2],
+  )
+  const sameSecond = { name: 'Tie', email: 'tie@example.com', date: '2026-01-01T00:00:00Z' }
+  const treeWith = async (base: JsonValue, names: string[]): Promise<JsonValue> =>
+    field(
+      (
+        await post(`${repo}/git/trees`, {
+          base_tree: base,
+          tree: names.map((path) => ({ path, mode: '100644', type: 'blob', content: `${path}\n` })),
+        })
+      ).body,
+      'sha',
+    )
+  const commitOf = async (
+    message: string,
+    tree: JsonValue,
+    parents: JsonValue[],
+  ): Promise<JsonValue> =>
+    field(
+      (
+        await post(`${repo}/git/commits`, {
+          message,
+          tree,
+          parents,
+          author: sameSecond,
+          committer: sameSecond,
+        })
+      ).body,
+      'sha',
+    )
+  const rootTree = field(field(await get(`${repo}/git/commits/${String(root)}`), 'tree'), 'sha')
+  const shared = await commitOf('shared', rootTree, [root])
+  const onBase = await commitOf('on base', await treeWith(rootTree, ['y.txt']), [shared])
+  const left = await commitOf('left', await treeWith(rootTree, ['x.txt']), [shared])
+  const right = await commitOf('right', await treeWith(rootTree, ['y.txt', 'z.txt']), [onBase])
+  const tied = await commitOf('merge', await treeWith(rootTree, ['x.txt', 'y.txt', 'z.txt']), [
+    left,
+    right,
+  ])
+  await post(`${repo}/git/refs`, { ref: 'refs/heads/tie-base', sha: onBase })
+  await post(`${repo}/git/refs`, { ref: 'refs/heads/tie-head', sha: tied })
+  const tie = await get(`${repo}/compare/tie-base...tie-head`)
+  eq(
+    'the merge base is the shared commit no other shared commit reaches, dates tied',
+    [
+      field(tie, 'ahead_by'),
+      field(tie, 'behind_by'),
+      ((field(tie, 'files') ?? []) as JsonValue[]).map((f) => field(f, 'filename')),
+    ],
+    [3, 0, ['x.txt', 'z.txt']],
+  )
+  eq(
+    "a path's history follows the side a merge took it from",
+    shas(await get(`${repo}/commits?sha=main&path=main.txt`)),
+    [tip],
+  )
+  eq(
+    "a path's history drops the side a merge did not take",
+    shas(await get(`${repo}/commits?sha=main&path=topic.txt`)),
+    [],
+  )
+  const [owner, name] = REPO.split('/')
+  const pathed = await send('POST', `${built}/graphql`, {
+    query:
+      `{ repository(owner: "${String(owner)}", name: "${String(name)}") { ` +
+      `ref(qualifiedName: "main") { target { ... on Commit { ` +
+      `kept: history(path: "main.txt") { nodes { oid } } ` +
+      `dropped: history(path: "topic.txt") { totalCount } } } } } }`,
+  })
+  eq(
+    "GraphQL history reads a path's history the same way",
+    field(field(field(field(pathed.body, 'data'), 'repository'), 'ref'), 'target'),
+    { kept: { nodes: [{ oid: tip }] }, dropped: { totalCount: 0 } },
+  )
+}
+
 async function refIdentity(at: string): Promise<void> {
   const run = 'ref-identity'
   const base = `${at}/_run/${run}`
@@ -1814,6 +2030,24 @@ async function listsProfilesAndForks(at: string): Promise<void> {
     [202, 'integ-user/repo-v1'],
   )
   const fork = `${base}/repos/integ-user/repo-v1`
+  await branchOff(fork, 'side', 'side.txt')
+  const narrow = await send('POST', `${fork}/forks`, {
+    name: 'narrow',
+    organization: 'acme',
+    default_branch_only: true,
+  })
+  eq(
+    'organization names the account the fork lands in',
+    field(narrow.body, 'full_name'),
+    'acme/narrow',
+  )
+  eq(
+    'default_branch_only copies the default branch alone',
+    items((await send('GET', `${base}/repos/acme/narrow/branches`)).body).map((b) =>
+      field(b, 'name'),
+    ),
+    ['main'],
+  )
   eq(
     'it shares its source history',
     field(field((await send('GET', `${fork}/git/ref/heads/main`)).body, 'object'), 'sha'),
@@ -2644,6 +2878,7 @@ async function main(): Promise<void> {
   try {
     await refIdentity(at)
     await reviewAncestry(at)
+    await mergeHistory(at)
     await emptyRepository(at)
     await seededHistory(at)
     await supersededBlobs(at)

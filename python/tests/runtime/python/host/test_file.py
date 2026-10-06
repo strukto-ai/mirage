@@ -138,7 +138,7 @@ class TestMirageFile:
         with pytest.raises(ValueError, match="closed file"):
             f.write("late")
 
-    @pytest.mark.parametrize("mode", ["", "rw", "rr", "r++", "rbt"])
+    @pytest.mark.parametrize("mode", ["", "rw", "rr", "wx", "r++", "rbt"])
     def test_invalid_mode_is_rejected(self, mode):
         ops, _ = make_ops_with_dir()
         with pytest.raises(ValueError, match="invalid mode"):
@@ -158,6 +158,28 @@ class TestMirageFile:
             f.write("changed")
         assert _read(ops, "/data/dir/f.txt") == b"changedl"
 
+    def test_w_plus_truncates_at_open_and_reads_back_its_writes(self):
+        ops, _ = make_ops_with_dir()
+        _write(ops, "/data/dir/f.txt", b"original")
+        with MirageFile(ops, "/data/dir/f.txt", "w+") as f:
+            assert _read(ops, "/data/dir/f.txt") == b""
+            f.write("fresh")
+            f.seek(0)
+            assert f.read() == "fresh"
+        assert _read(ops, "/data/dir/f.txt") == b"fresh"
+
+    def test_a_plus_writes_at_the_end_after_a_seek(self):
+        ops, _ = make_ops_with_dir()
+        _write(ops, "/data/dir/f.txt", b"one\n")
+        with MirageFile(ops, "/data/dir/f.txt", "a+") as f:
+            f.seek(0)
+            assert f.read() == "one\n"
+            f.seek(0)
+            f.write("two\n")
+            f.seek(0)
+            assert f.read() == "one\ntwo\n"
+        assert _read(ops, "/data/dir/f.txt") == b"one\ntwo\n"
+
     def test_flush_persists_before_close(self):
         ops, _ = make_ops_with_dir()
         f = MirageFile(ops, "/data/dir/f.txt", "w")
@@ -166,16 +188,14 @@ class TestMirageFile:
         assert _read(ops, "/data/dir/f.txt") == b"visible"
         f.close()
 
-    @pytest.mark.parametrize("mode", ["x", "wx"])
-    def test_exclusive_mode_creates_once(self, mode):
+    def test_exclusive_mode_creates_once(self):
+        mode = "x"
         ops, _ = make_ops_with_dir()
         with MirageFile(ops, "/data/dir/f.txt", mode) as f:
             f.write("new")
         assert _read(ops, "/data/dir/f.txt") == b"new"
         with pytest.raises(FileExistsError):
             MirageFile(ops, "/data/dir/f.txt", mode)
-        # wx carries the truncate fact too; exclusivity must win, so a
-        # refused open leaves the existing content untouched.
         assert _read(ops, "/data/dir/f.txt") == b"new"
 
     def test_exclusive_mode_refuses_a_dangling_link(self):

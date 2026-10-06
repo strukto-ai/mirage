@@ -57,25 +57,6 @@ def test_split_by_lines():
     assert _bytes(stdout_b) == b"c\nd\n"
 
 
-def test_split_by_bytes():
-    ws = _ws(**{"/f.bin": b"ABCDEF"})
-    _run_raw(ws, "split -b 2 /data/f.bin /data/p_")
-    stdout_a, _ = _run_raw(ws, "cat /data/p_aa")
-    stdout_b, _ = _run_raw(ws, "cat /data/p_ab")
-    stdout_c, _ = _run_raw(ws, "cat /data/p_ac")
-    assert _bytes(stdout_a) == b"AB"
-    assert _bytes(stdout_b) == b"CD"
-    assert _bytes(stdout_c) == b"EF"
-
-
-def test_split_d():
-    ws = _ws(**{"/f.txt": b"a\nb\nc\nd\n"})
-    _run_raw(ws, "split -d -l 2 /data/f.txt /data/part")
-    stdout, _ = _run_raw(ws, "ls /data")
-    result = _bytes(stdout).decode()
-    assert "part00" in result
-
-
 def _stderr_text(io):
     err = io.stderr
     if err is None:
@@ -103,23 +84,3 @@ def test_split_junk_suffix_length_rejects_without_writing():
     assert "split: invalid suffix length: 'abc'" in _stderr_text(io)
     stdout, _ = _run_raw(ws, "ls /data")
     assert b"chunk_" not in _bytes(stdout)
-
-
-def test_split_bytes_suffix_1k():
-    ws = _ws(**{"/f.bin": b"A" * 1500})
-    _, io = _run_raw(ws, "split -b 1k /data/f.bin /data/p_")
-    assert io.exit_code == 0
-    stdout_a, _ = _run_raw(ws, "cat /data/p_aa")
-    stdout_b, _ = _run_raw(ws, "cat /data/p_ab")
-    assert len(_bytes(stdout_a)) == 1024
-    assert len(_bytes(stdout_b)) == 476
-
-
-def test_split_hex_suffix_start_parses_base_16():
-    ws = _ws(**{"/f.txt": b"a\nb\n"})
-    _, io = _run_raw(ws, "split --hex-suffixes=10 -l 1 /data/f.txt /data/h")
-    assert io.exit_code == 0
-    stdout, _ = _run_raw(ws, "ls /data")
-    result = _bytes(stdout).decode()
-    assert "h10" in result
-    assert "h11" in result

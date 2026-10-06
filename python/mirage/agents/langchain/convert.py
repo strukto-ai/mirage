@@ -14,8 +14,8 @@
 
 from deepagents.backends.protocol import ExecuteResponse, FileInfo, GrepMatch
 
-from mirage.agents.io_text import decode, with_refusal
 from mirage.io.types import IOResult
+from mirage.workspace.tools.io_text import decode, with_refusal
 
 
 def io_to_execute_response(io: IOResult) -> ExecuteResponse:

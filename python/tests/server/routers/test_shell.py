@@ -15,8 +15,12 @@
 import asyncio
 import base64
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
+import httpx
 import pytest
+import uvicorn
 from httpx import ASGITransport, AsyncClient
 
 from mirage.server import build_app
@@ -178,6 +182,7 @@ async def test_shell_background_returns_job_id_immediately():
         body = r.json()
         assert body["job_id"].startswith("job_")
         assert body["workspace_id"] == wid
+        assert r.headers["X-Mirage-Job-Id"] == body["job_id"]
 
 
 @pytest.mark.asyncio
@@ -379,3 +384,247 @@ async def test_unknown_job_404():
     ) as client:
         r = await client.get("/v1/jobs/job_doesnotexist")
         assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_a_caller_that_drops_cancels_its_foreground_job(tmp_path):
+    app = build_app(idle_grace_seconds=10.0, pid_file=tmp_path / "daemon.pid")
+    server = uvicorn.Server(
+        uvicorn.Config(
+            app, host="127.0.0.1", port=0, log_level="warning", ws="none"
+        )
+    )
+    task = asyncio.create_task(server.serve())
+    while not server.started:
+        await asyncio.sleep(0.01)
+    port = server.servers[0].sockets[0].getsockname()[1]
+    base = f"http://127.0.0.1:{port}"
+    try:
+        async with AsyncClient(base_url=base) as client:
+            wid = await _create_workspace(client)
+            with pytest.raises(httpx.TimeoutException):
+                await client.post(
+                    f"/v1/workspaces/{wid}/shell",
+                    json={"command": "sleep 20"},
+                    timeout=0.5,
+                )
+            status = ""
+            for _ in range(100):
+                jobs = (
+                    await client.get("/v1/jobs", params={"workspace_id": wid})
+                ).json()
+                status = jobs[0]["status"]
+                if status == "canceled":
+                    break
+                await asyncio.sleep(0.05)
+        assert status == "canceled"
+    finally:
+        server.should_exit = True
+        await task
+
+
+BOUNDARY = "mirage-test-boundary"
+
+
+def _part(name: str, filename: str | None = None) -> bytes:
+    disposition = f'form-data; name="{name}"'
+    if filename is not None:
+        disposition += f'; filename="{filename}"'
+    return (
+        f"--{BOUNDARY}\r\nContent-Disposition: {disposition}\r\n\r\n".encode()
+    )
+
+
+def _request_part(command: str) -> bytes:
+    return (
+        _part("request") + json.dumps({"command": command}).encode() + b"\r\n"
+    )
+
+
+END = f"\r\n--{BOUNDARY}--\r\n".encode()
+MULTIPART = {"content-type": f"multipart/form-data; boundary={BOUNDARY}"}
+
+
+@asynccontextmanager
+async def _served() -> AsyncIterator[AsyncClient]:
+    server = uvicorn.Server(
+        uvicorn.Config(
+            build_app(idle_grace_seconds=10.0),
+            host="127.0.0.1",
+            port=0,
+            log_level="warning",
+            ws="none",
+        )
+    )
+    task = asyncio.create_task(server.serve())
+    while not server.started:
+        await asyncio.sleep(0.01)
+    port = server.servers[0].sockets[0].getsockname()[1]
+    try:
+        async with AsyncClient(
+            base_url=f"http://127.0.0.1:{port}", timeout=10
+        ) as client:
+            yield client
+    finally:
+        server.should_exit = True
+        await task
+
+
+@pytest.mark.asyncio
+async def test_stdin_streams_into_a_running_line():
+    async with _served() as client:
+        wid = await _create_workspace(client)
+        running = asyncio.Event()
+
+        async def body() -> AsyncIterator[bytes]:
+            yield _request_part("cat > /out.txt") + _part("stdin", "stdin.bin")
+            yield b"first\n"
+            await asyncio.wait_for(running.wait(), 5)
+            yield b"second\n" + END
+
+        async def watch() -> None:
+            while True:
+                jobs = (
+                    await client.get("/v1/jobs", params={"workspace_id": wid})
+                ).json()
+                if any(j["status"] == "running" for j in jobs):
+                    running.set()
+                    return
+                await asyncio.sleep(0.02)
+
+        watcher = asyncio.create_task(watch())
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell", content=body(), headers=MULTIPART
+        )
+        await watcher
+        assert r.status_code == 200, r.text
+        read = await client.post(
+            f"/v1/workspaces/{wid}/shell", json={"command": "cat /out.txt"}
+        )
+        assert read.json()["stdout"] == "first\nsecond\n"
+
+
+@pytest.mark.asyncio
+async def test_a_line_that_stops_reading_still_answers():
+    async with _served() as client:
+        wid = await _create_workspace(client)
+
+        async def body() -> AsyncIterator[bytes]:
+            yield _request_part("head -c 3") + _part("stdin", "stdin.bin")
+            for _ in range(64):
+                yield b"abcdefgh" * 8192
+            yield END
+
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell", content=body(), headers=MULTIPART
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["stdout"] == "abc"
+
+
+@pytest.mark.asyncio
+async def test_a_line_starts_before_its_stdin_sends_a_byte():
+    async with _served() as client:
+        wid = await _create_workspace(client)
+        running = asyncio.Event()
+
+        async def body() -> AsyncIterator[bytes]:
+            yield _request_part("cat > /out.txt") + _part("stdin", "stdin.bin")
+            await asyncio.wait_for(running.wait(), 5)
+            yield b"late\n" + END
+
+        async def watch() -> None:
+            while True:
+                jobs = (
+                    await client.get("/v1/jobs", params={"workspace_id": wid})
+                ).json()
+                if any(j["status"] == "running" for j in jobs):
+                    running.set()
+                    return
+                await asyncio.sleep(0.02)
+
+        watcher = asyncio.create_task(watch())
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell", content=body(), headers=MULTIPART
+        )
+        await watcher
+        assert r.status_code == 200, r.text
+
+
+@pytest.mark.asyncio
+async def test_a_body_that_stops_before_its_last_boundary_is_refused():
+    async with _served() as client:
+        wid = await _create_workspace(client)
+        r = await asyncio.wait_for(
+            client.post(
+                f"/v1/workspaces/{wid}/shell",
+                content=_request_part("cat")
+                + _part("stdin", "stdin.bin")
+                + b"abc",
+                headers=MULTIPART,
+            ),
+            10,
+        )
+        assert r.status_code == 400, r.text
+        assert r.json()["detail"] == "multipart body ended early"
+
+
+@pytest.mark.asyncio
+async def test_stdin_reads_whole_however_the_body_is_split():
+    async with _served() as client:
+        wid = await _create_workspace(client)
+        stdin = f"a\r\n--{BOUNDARY[:5]}\r\r\n-\r\n--{BOUNDARY[:-1]}\r".encode()
+        whole = (
+            _request_part("cat") + _part("stdin", "stdin.bin") + stdin + END
+        )
+
+        async def body() -> AsyncIterator[bytes]:
+            for i in range(0, len(whole), 3):
+                yield whole[i : i + 3]
+
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell", content=body(), headers=MULTIPART
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["stdout"] == stdin.decode()
+
+
+@pytest.mark.asyncio
+async def test_part_headers_past_the_bound_are_refused():
+    app = build_app(idle_grace_seconds=10.0)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        wid = await _create_workspace(client)
+        body = (
+            f"--{BOUNDARY}\r\nX-Pad: {'x' * 20000}\r\n".encode()
+            + _request_part("true")[len(f"--{BOUNDARY}\r\n") :]
+            + END[2:]
+        )
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell", content=body, headers=MULTIPART
+        )
+        assert r.status_code == 400, r.text
+        assert r.json()["detail"] == (
+            "bad multipart body: Maximum header size exceeded"
+        )
+
+
+@pytest.mark.asyncio
+async def test_stdin_before_the_request_part_is_refused():
+    app = build_app(idle_grace_seconds=10.0)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        wid = await _create_workspace(client)
+        body = (
+            _part("stdin", "stdin.bin")
+            + b"abc\r\n"
+            + _request_part("cat")
+            + END[2:]
+        )
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell", content=body, headers=MULTIPART
+        )
+        assert r.status_code == 400, r.text
+        assert "before 'stdin'" in r.json()["detail"]

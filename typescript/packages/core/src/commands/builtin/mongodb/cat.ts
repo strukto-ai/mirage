@@ -24,7 +24,7 @@ import { catGeneric } from '../generic/cat.ts'
 
 const resolveGlob = resolveGlobOf(IO)
 
-async function catCommand(
+async function cat(
   accessor: MongoDBAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -45,5 +45,5 @@ export const MONGODB_CAT = command({
   name: 'cat',
   vfs: VFSName.MONGODB,
   spec: specOf('cat'),
-  fn: catCommand,
+  fn: cat,
 })

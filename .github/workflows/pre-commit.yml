@@ -156,9 +156,9 @@ jobs:
             exit "$rc"
           }
 
+      # Writes the manifests to `.cache/spec/`, where the config door
+      # parity step below reads the rename map.
       - name: Live spec parity
-        env:
-          MIRAGE_SPEC_DIR: ${{ runner.temp }}/mirage-spec
         run: |
           ./python/.venv/bin/python scripts/gen_specs.py
           node --experimental-strip-types typescript/scripts/gen-specs.ts
@@ -202,6 +202,9 @@ jobs:
       # a case is normally just deleted from its `targets`, which turns a
       # divergence into an omission nobody can see. This fails when a case
       # file drops a target its siblings still exercise.
+      - name: Cross-mount command coverage
+        run: ./python/.venv/bin/python integ/runners/tools/check_crossmount_coverage.py --selftest
+
       - name: Case target coverage
         run: ./python/.venv/bin/python integ/runners/tools/check_case_targets.py --strict
 

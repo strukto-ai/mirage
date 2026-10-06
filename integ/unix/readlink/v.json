@@ -1,0 +1,41 @@
+{
+  "cases": [
+    {
+      "id": "readlink_v_q_and_s_the_last_wins",
+      "seq": 15000050,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -s a.txt /data/fc0l; readlink -v /data/fc0l /data/a.txt /data/fc0nope; echo rc=$?; readlink -vq /data/fc0nope; echo rc=$?; readlink -qv /data/fc0nope; echo rc=$?; readlink --verbose -s /data/fc0nope; echo rc=$?; readlink -e /data/fc0nope -v; echo rc=$?; rm -f /data/fc0l",
+      "expect": {
+        "exit": 0,
+        "stdout": "a.txt\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "readlink: /data/a.txt: Invalid argument\nreadlink: /data/fc0nope: No such file or directory\nreadlink: /data/fc0nope: No such file or directory\nreadlink: /data/fc0nope: No such file or directory\n"
+      },
+      "flags": [
+        "v",
+        "verbose",
+        "q",
+        "s"
+      ]
+    }
+  ]
+}

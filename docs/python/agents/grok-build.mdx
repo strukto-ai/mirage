@@ -1,35 +1,51 @@
 ---
 title: Grok Build
-description: Run Grok Build against any Python Mirage workspace by mounting it as a real filesystem via FUSE.
-icon: terminal
+description: Connect Grok Build to a Mirage workspace through the CLI or a FUSE mount.
+icon: /images/grok-logo.svg
 ---
 
-[Grok Build](https://x.ai/cli) can use Mirage through either an installable [TypeScript plugin](/typescript/agents/grok-build) or a FUSE mount. The Python integration [FUSE-mounts](/python/setup/fuse) a workspace as a normal host directory, so Grok's built-in filesystem and shell tools operate on Mirage without a separate tool server.
+| Way | Grok Build gets | Needs |
+| --- | --- | --- |
+| [CLI](#cli) | Mirage's seven tools, beside its own | Node.js 20.10 or newer |
+| [FUSE](#fuse) | its own tools, on the workspace as a folder | a [FUSE driver](/home/setup/fuse) |
 
 ## Install
 
 ```bash
-uv add 'mirage-ai[fuse]'
+uv tool install 'mirage-ai[fuse]'
 ```
 
-Install Grok Build separately.
+Install [Grok Build](https://x.ai/cli) separately; its command is `grok`.
 
-## Usage
+## Workspace
 
-```python
-from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.vfs.ram import RAMVFS
-
-with Workspace(
-    {"/": Mount(RAMVFS(), mode=MountMode.WRITE, backend=MountBackend.FUSE)}) as ws:
-    print(f"cd {ws.fuse_mountpoint} && grok")
-    input("Press Enter when done...")
+```yaml .mirage/workspace.yaml
+mode: write
+mounts:
+  /:
+    vfs: ram
+    backend: fuse                 # FUSE only
+    mountpoint: /tmp/mirage-demo  # FUSE only
+  /s3:
+    vfs: s3
+    mode: read
+    config:
+      bucket: my-bucket
 ```
 
-The mountpoint behaves like a regular directory. Start `grok` there and its built-in file and shell tools dispatch through Mirage's ops layer.
+## CLI
 
-## FUSE or plugin?
+```bash
+grok plugin install strukto-ai/mirage
+```
 
-Use Python FUSE when you want Grok's built-in tools to see Mirage as an ordinary directory. This requires an OS FUSE driver and does not add Mirage's agent-level stale-write check.
+The plugin runs `mirage mcp` through `npx` on your project's `.mirage/workspace.yaml`, so Grok gets `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob`, and a skill on how to use them. Open `/plugins` in `grok` to check that it is on.
 
-Use the [TypeScript plugin](/typescript/agents/grok-build) when you want named Mirage tools, Pi-style stale-write protection, and Grok plugin installation. The plugin uses Mirage's standard MCP adapter internally.
+## FUSE
+
+```bash
+mirage workspace create .mirage/workspace.yaml --id demo
+cd /tmp/mirage-demo && grok
+```
+
+Every file and shell call Grok makes goes through Mirage: `/tmp/mirage-demo/s3` is the bucket. `mirage workspace delete demo` unmounts it. On macOS the daemon holds one FUSE mount at a time.

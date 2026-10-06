@@ -25,7 +25,7 @@ import { readToken, resolveUrl } from './hub.ts'
 import { isMissing } from './read.ts'
 
 /** Stream a bucket file from the Hub, stamped with its ETag. */
-export async function* stream(
+export async function* readStream(
   accessor: HfBucketsAccessor,
   path: PathSpec,
   _index?: IndexCacheStore,

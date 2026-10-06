@@ -1,0 +1,56 @@
+{
+  "cases": [
+    {
+      "id": "rg_ignore_switches_change_nothing_without_ignore_files",
+      "seq": 15200151,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcB_ni/sub && printf 'hit\\n' > /data/fcB_ni/a.txt && printf 'hit\\n' > /data/fcB_ni/sub/b.txt && rg -l --sort path --no-ignore --ignore --no-ignore-dot --ignore-dot --no-ignore-exclude --ignore-exclude --no-ignore-files --ignore-files --no-ignore-global --ignore-global --no-ignore-messages --ignore-messages --no-ignore-parent --ignore-parent --no-ignore-vcs --ignore-vcs --no-require-git --require-git --ignore-file-case-insensitive --no-ignore-file-case-insensitive hit /data/fcB_ni; rm -rf /data/fcB_ni",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fcB_ni/a.txt\n/data/fcB_ni/sub/b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "no_ignore",
+        "ignore",
+        "no_ignore_dot",
+        "ignore_dot",
+        "no_ignore_exclude",
+        "ignore_exclude",
+        "no_ignore_files",
+        "ignore_files",
+        "no_ignore_global",
+        "ignore_global",
+        "no_ignore_messages",
+        "ignore_messages",
+        "no_ignore_parent",
+        "ignore_parent",
+        "no_ignore_vcs",
+        "ignore_vcs",
+        "no_require_git",
+        "require_git",
+        "ignore_file_case_insensitive",
+        "no_ignore_file_case_insensitive"
+      ]
+    }
+  ]
+}

@@ -264,13 +264,18 @@ function compared(
 }
 
 /**
- * Both operands naming the one stdin, as diffutils 3.10 answers it.
+ * Both operands naming the one stdin, as diffutils 3.10 answers it for stdin
+ * redirected from a regular file.
  *
- * The same file at the same offset is equal unread. Otherwise cmp skips on
- * the one descriptor twice, so the first file reads what is left past both
- * skips and the second reads nothing, and closing the descriptor a second
- * time fails: that line and exit 2 follow whatever the comparison said, -s
- * included. Mirrors Python's _one_stdin_twice.
+ * One name at one skip is equal unread. Otherwise cmp skips on the one
+ * descriptor twice, so the files sit at the first skip and at the sum of
+ * both, and are equal unread when those match. -s then answers 1 unread when
+ * the bytes left past each position differ within -n. Otherwise the first
+ * file reads what is left past both skips and the second reads nothing, and
+ * closing the descriptor a second time fails: that line and exit 2 follow
+ * whatever the comparison said. A pipe fails both seeks, which GNU takes for
+ * one position, so it answers 0 where this answers as the file. Mirrors
+ * Python's _one_stdin_twice.
  */
 async function oneStdinTwice(
   read: (p: PathSpec) => AsyncIterable<Uint8Array>,
@@ -278,8 +283,17 @@ async function oneStdinTwice(
   skip: readonly [number, number],
   parsed: Compared,
 ): Promise<[ByteSource | null, IOResult]> {
-  if (skip[0] === skip[1]) return [null, new IOResult()]
+  if (skip[0] === skip[1] || skip[1] === 0) return [null, new IOResult()]
   const data = await materialize(read(p))
+  const left = [
+    Math.max(data.byteLength - skip[0], 0),
+    Math.max(data.byteLength - skip[0] - skip[1], 0),
+  ]
+  if (parsed.silent && left[0] !== left[1]) {
+    if (parsed.limit === null || Math.min(...left) < parsed.limit) {
+      return [null, new IOResult({ exitCode: 1 })]
+    }
+  }
   const [out, io] = compared(
     data.slice(skip[0] + skip[1]),
     new Uint8Array(),

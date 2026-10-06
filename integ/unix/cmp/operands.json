@@ -407,6 +407,37 @@
         "stdout": "",
         "stderr": ""
       }
+    },
+    {
+      "id": "cmp_missing_operand_names_an_option_with_its_value",
+      "seq": 15600601,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cmp -i3; echo rc=$?; cmp --ignore-initial=3; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\n",
+        "stderr": "cmp: missing operand after '-i3'\ncmp: Try 'cmp --help' for more information.\ncmp: missing operand after '--ignore-initial=3'\ncmp: Try 'cmp --help' for more information.\n"
+      }
     }
   ]
 }

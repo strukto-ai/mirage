@@ -15,7 +15,10 @@
 import pytest
 
 from mirage.commands.cli.builtin.git.discover import discover
-from mirage.commands.cli.builtin.git.errors import AmbiguousArgumentError
+from mirage.commands.cli.builtin.git.errors import (
+    AmbiguousArgumentError,
+    PathNotInRevisionError,
+)
 from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.cli.builtin.git.revparse import (
     object_at,
@@ -227,7 +230,10 @@ async def test_a_bare_object_id_is_itself(workspace):
 async def test_a_path_the_tree_lacks_is_unresolvable(workspace):
     location = await discover(*repo_facts(workspace), "/repo")
     repo = await open_repo(workspace.dispatch, location)
-    with pytest.raises(AmbiguousArgumentError):
+    with pytest.raises(
+        PathNotInRevisionError,
+        match="path 'nosuch' does not exist in 'HEAD'",
+    ):
         resolve_object(repo, "HEAD:nosuch")
 
 
@@ -290,13 +296,12 @@ async def test_a_bare_tag_id_is_the_tag_object(git_rw):
 
 
 @pytest.mark.asyncio
-async def test_a_tag_name_still_peels_where_an_id_does_not(git_rw):
+async def test_a_tag_name_stands_for_the_tag_itself(git_rw):
     await git_rw.shell("git -C /repo tag -a v1 -m annotated")
     location = await discover(*repo_facts(git_rw), "/repo")
     repo = await open_repo(git_rw.dispatch, location)
-    # The split is git's own and is observable: a name resolves as a
-    # commit-ish, an id as itself.
-    assert resolve_object(repo, "v1").type_name == b"commit"
+    assert resolve_object(repo, "v1").type_name == b"tag"
+    assert resolve_object(repo, "v1^{}").type_name == b"commit"
 
 
 @pytest.mark.asyncio

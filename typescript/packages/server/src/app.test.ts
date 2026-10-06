@@ -85,7 +85,7 @@ describe('buildApp ssh door', () => {
     vi.stubEnv('MIRAGE_SSH_PORT', '')
     const app = buildApp()
     await app.ready()
-    expect(app.ssh.config).toBeNull()
+    expect(app.ssh.config.port).toBeNull()
     expect(app.ssh.listener).toBeNull()
     await app.close()
   })

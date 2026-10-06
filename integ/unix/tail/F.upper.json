@@ -1,0 +1,158 @@
+{
+  "cases": [
+    {
+      "id": "tail_F_and_f_take_the_later_follow_mode",
+      "seq": 15400014,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for o in '-F -f' '-f -F' '--follow=descriptor -F' '-F --follow=descriptor' '--follow=name --retry'; do tail -n1 $o /data/a.txt | head -n1; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "baz\nbaz\nbaz\nbaz\nbaz\n",
+        "stderr": "tail: warning: --retry only effective for the initial open\ntail: warning: --retry only effective for the initial open\n"
+      },
+      "flags": [
+        "F",
+        "f",
+        "follow",
+        "retry"
+      ]
+    },
+    {
+      "id": "tail_F_waits_for_names_to_appear_and_return",
+      "seq": 15400015,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rm -f /data/fcD_A; printf 'b\\n' > /data/fcD_B; tail -F -s 0.1 /data/fcD_A /data/fcD_B | { head -n 2; printf 'born\\n' > /data/fcD_A; head -n 3; (rm /data/fcD_B; sleep 3; printf 'cc\\n' > /data/fcD_B) & head -n 3; wait $!; }; echo rc=$?; rm -f /data/fcD_A /data/fcD_B",
+      "expect": {
+        "exit": 0,
+        "stdout": "==> /data/fcD_B <==\nb\n\n==> /data/fcD_A <==\nborn\n\n==> /data/fcD_B <==\ncc\nrc=0\n",
+        "stderr": "tail: cannot open '/data/fcD_A' for reading: No such file or directory\ntail: '/data/fcD_A' has appeared;  following new file\ntail: '/data/fcD_B' has become inaccessible: No such file or directory\ntail: '/data/fcD_B' has appeared;  following new file\n"
+      },
+      "flags": [
+        "F",
+        "s"
+      ]
+    },
+    {
+      "id": "tail_F_announces_a_directory_turned_file_as_appeared",
+      "seq": 15400016,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcD_D; printf k > /data/fcD_D/k; printf 'b\\n' > /data/fcD_B2; tail -F -s 0.1 /data/fcD_D /data/fcD_B2 | { grep -m1 '^b$'; (rm -r /data/fcD_D; sleep 3; printf 'born\\nEND\\n' > /data/fcD_D) & grep -m1 '^END$'; wait $!; }; echo rc=$?; rm -rf /data/fcD_D /data/fcD_B2",
+      "expect": {
+        "exit": 0,
+        "stdout": "b\nEND\nrc=0\n",
+        "stderr": "tail: error reading '/data/fcD_D': Is a directory\ntail: /data/fcD_D: cannot follow end of this type of file\ntail: '/data/fcD_D' has appeared;  following new file\n"
+      },
+      "flags": [
+        "F",
+        "s"
+      ]
+    },
+    {
+      "id": "tail_F_refuses_to_follow_stdin_by_name",
+      "seq": 15400017,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nb\\n' | tail -F; echo rc=$?; printf 'a\\nb\\n' | tail --follow=name; echo rc=$?; printf 'a\\nb\\n' | tail -n1 --follow=descriptor -F; echo rc=$?; printf 'a\\nb\\n' | timeout 2 tail -F -n1 /data/a.txt -; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "tail: cannot follow '-' by name\ntail: cannot follow '-' by name\ntail: cannot follow '-' by name\ntail: cannot follow '-' by name\n"
+      },
+      "flags": [
+        "F",
+        "follow"
+      ]
+    }
+  ]
+}

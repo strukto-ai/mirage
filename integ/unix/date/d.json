@@ -278,6 +278,145 @@
         "stdout": "pm|pm|   pm|PM|%v|%_v|70|01|%E\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "date_d_quotes_control_and_quote_bytes",
+      "seq": 15500502,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for d in $'x\\001' $'x\\177' \"x'\" 'x\\'; do date -d \"$d\"; echo rc=$?; done 2>&1",
+      "expect": {
+        "exit": 0,
+        "stdout": "date: invalid date 'x\\001'\nrc=1\ndate: invalid date 'x\\177'\nrc=1\ndate: invalid date 'x\\''\nrc=1\ndate: invalid date 'x\\\\'\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d"
+      ]
+    },
+    {
+      "id": "date_d_empty_expression_is_today_at_midnight",
+      "seq": 15500503,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "date -u -d '' +%T; date -u -d '   ' +%T; test \"$(date -u -d '' +%F)\" = \"$(date -u +%F)\" && echo today",
+      "expect": {
+        "exit": 0,
+        "stdout": "00:00:00\n00:00:00\ntoday\n",
+        "stderr": ""
+      },
+      "flags": [
+        "u",
+        "d"
+      ]
+    },
+    {
+      "id": "date_more_gnu_format_specifiers",
+      "seq": 15500504,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "date -u -d '2026-08-16T13:45:30Z' '+%h|%k|%l|%V|%U|%W|%G|%g|%c|%x|%X|%n|%t'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Aug|13| 1|33|33|32|2026|26|Sun Aug 16 13:45:30 2026|08/16/26|13:45:30|\n|\t\n",
+        "stderr": ""
+      },
+      "flags": [
+        "u",
+        "d"
+      ]
+    },
+    {
+      "id": "date_d_bare_relative_expression_is_a_date",
+      "seq": 15500505,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "date -u -d '24 hours ago' +%F | grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "u",
+        "d"
+      ]
     }
   ]
 }

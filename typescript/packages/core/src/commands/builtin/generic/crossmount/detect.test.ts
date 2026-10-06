@@ -16,28 +16,36 @@ import { describe, expect, it } from 'vitest'
 import { MountMode, PathSpec } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { MountRegistry } from '../../../../workspace/mount/registry.ts'
-import { CROSS_MOUNT_COMMANDS, RELAY_COMMANDS, STREAM_COMMANDS } from './constants.ts'
+import {
+  CROSS_MOUNT_COMMANDS,
+  FANOUT_COMMANDS,
+  RELAY_COMMANDS,
+  STREAM_COMMANDS,
+} from './constants.ts'
 import { isCrossMount, strategyFor } from './detect.ts'
 import { Cmd, Strategy } from './types.ts'
 
 describe('strategyFor — mirrors tests/commands/builtin/generic/crossmount/test_detect.py', () => {
-  it('keeps the two membership-tested sets disjoint and cross-mount capable', () => {
-    // FANOUT is `detect`'s fallthrough rather than a set it consults, so
-    // the only overlap that can change an answer is stream-vs-relay.
-    expect([...STREAM_COMMANDS].some((name) => RELAY_COMMANDS.has(name))).toBe(false)
-    for (const name of [...STREAM_COMMANDS, ...RELAY_COMMANDS]) {
-      expect(CROSS_MOUNT_COMMANDS.has(name)).toBe(true)
-    }
+  it('assigns every command to exactly one strategy', () => {
+    const names = [...STREAM_COMMANDS, ...FANOUT_COMMANDS, ...RELAY_COMMANDS]
+    expect(new Set(names).size).toBe(names.length)
+    for (const name of Object.values(Cmd)) expect(names).toContain(name)
+    expect(CROSS_MOUNT_COMMANDS).toEqual(new Set(names))
+  })
+
+  it('rejects unregistered commands', () => {
+    expect(() => strategyFor('unknown')).toThrow('Unsupported cross-mount command: unknown')
   })
 
   it.each([
     [Strategy.STREAM, [Cmd.CAT, Cmd.NL, Cmd.CUT]],
-    [Strategy.FANOUT, [Cmd.HEAD, Cmd.SHA256SUM, Cmd.RM, Cmd.TEE, Cmd.REV]],
+    [Strategy.FANOUT, [Cmd.HEAD, Cmd.SHA256SUM, Cmd.RM, Cmd.REV]],
     [
       Strategy.RELAY,
       [
         Cmd.CP,
         Cmd.MV,
+        Cmd.TEE,
         Cmd.DIFF,
         Cmd.CMP,
         Cmd.SORT,

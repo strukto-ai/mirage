@@ -1,0 +1,83 @@
+{
+  "cases": [
+    {
+      "id": "stat_f_reports_the_file_system",
+      "seq": 15000096,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "statvfs"
+      ],
+      "command": "printf 'x\\n' > {mount}/sffs.txt; stat -f {mount}/sffs.txt | sed 's/: .*//'; (cd {mount} && stat -L --file-system --format='%n|%5q|%Hd|%.3n|%%|%-4l.' sffs.txt | sed 's/[0-9?]* *[.]$/N./'); echo rc=$?; stat -f {mount}/sffs_nope {mount}/sffs.txt -c '%n'; echo rc=$?; stat -f -; echo rc=$?; rm {mount}/sffs.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "  File\n    ID\nBlock size\nBlocks\nInodes\nsffs.txt|?|?d|sff|%|N.\nrc=0\n{mount}/sffs.txt\nrc=1\nrc=1\n",
+        "stderr": "stat: cannot read file system information for '{mount}/sffs_nope': No such file or directory\nstat: using '-' to denote standard input does not work in file system mode\n"
+      },
+      "flags": [
+        "f",
+        "c",
+        "L"
+      ]
+    },
+    {
+      "id": "stat_f_empty_format_prints_a_blank_record",
+      "seq": 15700007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "statvfs"
+      ],
+      "command": "printf 'x\\n' > {mount}/sfe.txt; stat -f -c '' {mount}/sfe.txt | wc -c; stat -f --format= {mount}/sfe.txt {mount}/sfe.txt | wc -c; stat -c '' {mount}/sfe.txt | wc -c; rm {mount}/sfe.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n2\n1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f",
+        "c"
+      ]
+    }
+  ]
+}

@@ -326,8 +326,10 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--no-encoding' }),
       new Option({ long: '--no-pre' }),
       new Option({ long: '--unicode' }),
+      new Option({ long: '--no-unicode' }),
       new Option({ long: '--pcre2-unicode' }),
       new Option({ long: '--no-pcre2-unicode' }),
+      new Option({ long: '--auto-hybrid-regex' }),
       new Option({ long: '--no-auto-hybrid-regex' }),
       // Accepted no-op like grep --color (#471), with ripgrep's
       // required value.

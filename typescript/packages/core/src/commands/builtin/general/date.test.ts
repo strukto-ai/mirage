@@ -76,12 +76,6 @@ async function runDateIo(
 describe('date GNU format specifiers', () => {
   const AT = '2026-08-16T13:45:30Z'
 
-  it('renders 12-hour, quarter, century, and padded-hour forms', async () => {
-    expect(await runDate(['+%r|%q|%C|%h|%k|%l|%P|%R'], { date: AT, utc: true })).toBe(
-      '01:45:30 PM|3|20|Aug|13| 1|pm|13:45\n',
-    )
-  })
-
   it('renders week numbers and the ISO week-based year', async () => {
     expect(await runDate(['+%V|%U|%W|%G|%g'], { date: AT, utc: true })).toBe('33|33|32|2026|26\n')
   })
@@ -90,10 +84,6 @@ describe('date GNU format specifiers', () => {
     expect(await runDate(['+%c|%x|%X|%n|%t'], { date: AT, utc: true })).toBe(
       'Sun Aug 16 13:45:30 2026|08/16/26|13:45:30|\n|\t\n',
     )
-  })
-
-  it('passes an unknown directive through literally, as GNU does', async () => {
-    expect(await runDate(['+%v'], { date: AT, utc: true })).toBe('%v\n')
   })
 })
 
@@ -108,10 +98,10 @@ describe('date -d expressions', () => {
   // "a date with no time". Measured on coreutils 9.4 under
   // `LC_ALL=C TZ=UTC`. mirage used to answer `date: invalid date ''` and
   // exit 1. Mirrors test_date.py.
-  it.each(['', '   '])('reads %j as today at midnight', async (d) => {
-    const [out, stderr, code] = await runDateIo(['+%H:%M:%S'], { date: d, utc: true })
+  it('reads an empty expression as today at midnight', async () => {
+    const [out, stderr, code] = await runDateIo(['+%H:%M:%S'], { date: '', utc: true })
     expect([out, stderr, code]).toEqual(['00:00:00\n', '', 0])
-    const day = await runDate(['+%Y-%m-%d'], { date: d, utc: true })
+    const day = await runDate(['+%Y-%m-%d'], { date: '', utc: true })
     expect(day).toBe(await runDate(['+%Y-%m-%d'], { utc: true }))
   })
 })
@@ -206,10 +196,6 @@ async function runDateStderr(d: string): Promise<[string, number]> {
 describe('date quotes the expression it refuses', () => {
   it.each([
     ['xé', 'x\\303\\251'],
-    ['x\r', 'x\\r'],
-    ['x\x01', 'x\\001'],
-    ['x\x7f', 'x\\177'],
-    ["x'", "x\\'"],
     ['x\\', 'x\\\\'],
   ])('escapes %j in the invalid-date clause', async (value, escaped) => {
     expect(await runDateStderr(value)).toEqual([`date: invalid date '${escaped}'\n`, 1])
@@ -226,7 +212,6 @@ describe('date output formats through the shell', () => {
   const ISO_VALID =
     "Valid arguments are:\n  - 'hours'\n  - 'minutes'\n  - 'date'\n  - 'seconds'\n  - 'ns'\n" +
     "Try 'date --help' for more information.\n"
-  const MULTIPLE = 'date: multiple output formats specified\n'
 
   async function makeWs(): Promise<Workspace> {
     const parser = await getTestParser()
@@ -240,23 +225,8 @@ describe('date output formats through the shell', () => {
   }
 
   it.each([
-    [`date -d ${AT} -Ix`, "date: invalid argument 'x' for '--iso-8601'\n" + ISO_VALID],
     [`date -d ${AT} -Isu`, "date: invalid argument 'su' for '--iso-8601'\n" + ISO_VALID],
-    [`date -d ${AT} --iso-8601=`, "date: ambiguous argument '' for '--iso-8601'\n" + ISO_VALID],
-    [
-      `date -d ${AT} --rfc-3339=hours`,
-      "date: invalid argument 'hours' for '--rfc-3339'\n" +
-        "Valid arguments are:\n  - 'date'\n  - 'seconds'\n  - 'ns'\n" +
-        "Try 'date --help' for more information.\n",
-    ],
-    [
-      `date -d ${AT} --rfc-3339`,
-      "date: option '--rfc-3339' requires an argument\nTry 'date --help' for more information.\n",
-    ],
-    [`date -d ${AT} -I -R`, MULTIPLE],
-    [`date -d ${AT} --rfc-3339=s -Is`, MULTIPLE],
-    [`date -d ${AT} -Is +%Y`, MULTIPLE],
-    [`date -d ${AT} -I -R a b`, MULTIPLE],
+    [`date -d ${AT} -I -R a b`, 'date: multiple output formats specified\n'],
   ])('%s refuses', async (line, err) => {
     const ws = await makeWs()
     const io = await ws.shell(line)

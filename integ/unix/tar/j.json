@@ -1,0 +1,80 @@
+{
+  "cases": [
+    {
+      "id": "tar_j_lists_and_extracts_a_bzip2_archive",
+      "seq": 15100001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_j && cd /data/fcA_j && printf %s 'QlpoOTFBWSZTWVnkP3QAAKh/gMmQAEBAAf+AIAAAhHsBnsAEKCAAdBtUKaZDBA2j1AJ5QSUgA00AAAD7kmqaTqEmYJJkaBIodXWStE58Yp1IkIYA2sLDYeNniUKoQLJNSBAtTK+5RT12oZdVTUnJ0NB6Mch2ptpKcZQiSJqZ0kplpcIS/i7kinChILPIfug=' | base64 -d > a.tbz && tar -tjf a.tbz && tar -xOjf a.tbz fcA/b.txt && tar --list --bzip2 --file=a.tbz fcA/a.txt && tar -tf a.tbz fcA/b.txt && tar -xjf a.tbz && cat fcA/a.txt; rc=$?; cd / && rm -r /data/fcA_j; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "fcA/\nfcA/a.txt\nfcA/b.txt\ntwo\nfcA/a.txt\nfcA/b.txt\none\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "x",
+        "j",
+        "O"
+      ]
+    },
+    {
+      "id": "tar_j_refuses_what_is_not_bzip2",
+      "seq": 15100003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tar -tjf /data/a.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "bzip2: (stdin) is not a bzip2 file.\ntar: Child returned status 2\ntar: Error is not recoverable: exiting now\n"
+      },
+      "flags": [
+        "t",
+        "j"
+      ]
+    }
+  ]
+}

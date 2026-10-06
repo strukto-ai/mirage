@@ -13,13 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import errno
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from mirage.commands.spec.types import ValueType
-from mirage.context.session_context import session_path_allowed
 from mirage.io.types import ByteSource
 from mirage.policy import (
     Abandoned,
@@ -31,22 +29,25 @@ from mirage.policy import (
     Deny,
     HandOff,
     Pending,
-    PolicyDenied,
     Scope,
     ask_rule,
+    policy_denied,
     refusal_of,
     render_deny,
     render_pending,
 )
+from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.policy.match import (
     Outcome,
     has_rules,
+    io_reach,
     io_refusal,
     reads_args,
     scopes_paths,
 )
 from mirage.runtime.routing import command_nodes
 from mirage.shell import parse
+from mirage.shell.bytes import encode_text
 from mirage.shell.helpers import (
     get_parts,
     get_redirects,
@@ -57,7 +58,7 @@ from mirage.shell.helpers import (
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import RedirectKind
 from mirage.types import PathSpec, Refusal
-from mirage.utils.hidden import is_glob
+from mirage.utils.hidden import is_glob, path_visible
 from mirage.utils.path import resolve_path
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.executor.builtins.links.links import follow_paths
@@ -143,8 +144,9 @@ class Admitted:
     paths the gate already judged pass, since the line was admitted on
     them; every other entry is judged by ``io_refusal`` under the same
     precedence the gate applied to the line, and a refusal is the op
-    door's ``PolicyDenied`` (EACCES, the reason, the path), which every
-    command renders as GNU's ``Permission denied``.
+    door's ``PolicyDenied`` (EACCES, the path, the reason on its
+    record), which every command renders as GNU's ``Permission
+    denied``.
 
     Args:
         rules (AdmissionRules | None): the session's admission rules.
@@ -154,7 +156,10 @@ class Admitted:
             under a grant for: the one the door answered for this
             line, and the session's standing ones.
         scoped (bool): whether a path rule in force reads this
-            command's paths (``EntryGate.scoped``).
+            command's paths, or a pre_ops policy speaks for its session
+            (``EntryGate.scoped``).
+        ops_judged (bool): whether a coded or scripted pre_ops policy
+            speaks for the session, which judges every path.
     """
 
     rules: AdmissionRules | None
@@ -162,6 +167,17 @@ class Admitted:
     judged: frozenset[str]
     granted: tuple[CommandRule, ...]
     scoped: bool
+    ops_judged: bool = False
+
+    def scopes(self, virtual: str) -> bool:
+        """Whether anything at or under this path could be refused for
+        the running command: a coded or scripted pre_ops policy judges
+        every path, and a rule in force any path its scope could cover.
+
+        Args:
+            virtual (str): absolute virtual path of a walk's start point.
+        """
+        return self.ops_judged or io_reach(self.rules, self.tokens, virtual)
 
     def check(self, virtual: str) -> None:
         """Raise ``PolicyDenied`` when a rule in force refuses this entry
@@ -172,7 +188,9 @@ class Admitted:
         """
         reason = self._refusal(virtual)
         if reason is not None:
-            raise PolicyDenied(errno.EACCES, reason, virtual)
+            raise policy_denied(
+                Deny(reason, policy=PermissionsPolicy.__name__), virtual
+            )
 
     def refuses(self, virtual: str) -> bool:
         """Whether a rule in force refuses this entry for the running
@@ -299,7 +317,8 @@ def _seen(
     return tuple(
         p
         for p in specs
-        if p.virtual not in unread and session_path_allowed(session, p.virtual)
+        if p.virtual not in unread
+        and path_visible(session.visibility, p.virtual)
     )
 
 
@@ -352,7 +371,7 @@ async def gate(
     """
     tool = intrinsic or is_tool(name, session)
     if tool and not listed(name, session):
-        return Refused(f"{name}: command not found\n".encode(), 127)
+        return Refused(encode_text(f"{name}: command not found\n"), 127)
     tokens, program = program_tokens(registry, name, args, session.cwd)
     implied = (
         default_cwd_operand(
@@ -496,12 +515,16 @@ async def admit(
         if isinstance(asked, Ask):
             granted.insert(0, ask_rule(ctx, asked))
         rules = session.commands
+        ops_judged = await registry.policies.wants_for(
+            "pre_ops", session.session_id
+        )
         return Admitted(
             rules=rules,
             tokens=ctx.tokens,
             judged=frozenset(_norm(p.virtual) for p in ctx.paths),
             granted=tuple(granted),
-            scoped=scopes_paths(rules, name),
+            scoped=scopes_paths(rules, name) or ops_judged,
+            ops_judged=ops_judged,
         )
     err, code = (
         render_pending(name, action)

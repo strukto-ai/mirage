@@ -99,7 +99,6 @@ async def _github() -> AsyncIterator[Harness]:
 
 
 def _hf(name: str, segment: str) -> Callable[[], AsyncIterator[Harness]]:
-
     @asynccontextmanager
     async def harness() -> AsyncIterator[Harness]:
         repo = (segment, "acme/widget")

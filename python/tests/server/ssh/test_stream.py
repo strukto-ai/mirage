@@ -20,17 +20,21 @@ from typing import Any
 import asyncssh
 import pytest
 
+from mirage.io.types import IOResult
 from mirage.server.ssh import stream
+from mirage.server.ssh.constants import REFUSAL_WINDOW
 from mirage.server.ssh.stream import (
     ChannelInput,
     ChannelOutput,
-    LoopStdin,
+    LineDiscipline,
     Mark,
     decode,
     deliver,
     encode,
     loop_sender,
 )
+from mirage.server.stdin import LoopStdin
+from mirage.types import Refusal
 
 Step = str | BaseException
 
@@ -75,11 +79,14 @@ class FakeWriter:
 
 
 class FakeProcess:
-    def __init__(self, steps: list[Step]) -> None:
+    def __init__(
+        self, steps: list[Step], term_type: str | None = None
+    ) -> None:
         self.stdin = FakeStdin(steps)
         self.stdout = FakeWriter()
         self.stderr = FakeWriter()
         self.channel = None
+        self.term_type = term_type
 
 
 async def _started(
@@ -188,9 +195,82 @@ async def test_pump_stops_reading_once_the_buffer_is_full(monkeypatch):
     await source.close()
 
 
+def _discipline(text: str) -> tuple[list[str], str, list[str]]:
+    lines: list[str] = []
+    marks: list[str] = []
+    echo: list[bytes] = []
+    LineDiscipline(
+        echo.append,
+        lambda data: lines.append(data.decode()),
+        lambda: marks.append("interrupt"),
+        lambda: marks.append("eof"),
+    ).feed(text.encode())
+    return lines, b"".join(echo).decode(), marks
+
+
+def test_discipline_echoes_and_hands_over_a_line_at_enter():
+    lines, echo, _ = _discipline("ls -l\r")
+    assert (lines, echo) == (["ls -l\n"], "ls -l\r\n")
+
+
+def test_discipline_treats_crlf_as_one_enter():
+    assert _discipline("a\r\nb\n")[0] == ["a\n", "b\n"]
+
+
+def test_discipline_erases_one_code_point_per_backspace():
+    lines, echo, _ = _discipline("café\x7f\x7fe\r")
+    assert lines == ["cae\n"]
+    assert echo.endswith("\b \b\b \be\r\n")
+
+
+def test_discipline_erases_the_whole_line_on_ctrl_u():
+    assert _discipline("wrong\x15ok\r")[0] == ["ok\n"]
+
+
+def test_discipline_drops_the_half_typed_line_on_ctrl_c():
+    lines, _, marks = _discipline("half\x03next\r")
+    assert (lines, marks) == (["next\n"], ["interrupt"])
+
+
+def test_discipline_reports_ctrl_d_only_on_an_empty_line():
+    assert _discipline("\x04")[2] == ["eof"]
+    assert _discipline("x\x04\r")[2] == []
+
+
+def test_discipline_swallows_escape_sequences():
+    assert _discipline("a\x1b[Ab\x1bOPc\r")[0] == ["abc\n"]
+
+
+def test_discipline_bounds_a_line_and_rings_past_it():
+    lines, echo, _ = _discipline("x" * (stream.MAX_TERMINAL_LINE + 1) + "\r")
+    assert lines == ["x" * stream.MAX_TERMINAL_LINE + "\n"]
+    assert echo.endswith("\x07\r\n")
+
+
+@pytest.mark.asyncio
+async def test_a_pty_without_a_terminal_type_is_cooked_here():
+    process = FakeProcess(["ab\x7fc\r", "\x04"], term_type="")
+    source = ChannelInput(process)
+    source.start()
+    assert await source.readline() == b"ac\n"
+    assert await source.readline() is Mark.EOF
+    assert "".join(process.stdout.data) == "ab\b \bc\r\n"
+
+
+@pytest.mark.asyncio
+async def test_output_on_a_pty_without_a_terminal_type_is_crlf():
+    bare, typed = FakeProcess([], term_type=""), FakeProcess([], "xterm")
+    await ChannelOutput(bare, tty=True).write(b"a\nb\n")
+    await ChannelOutput(typed, tty=True).write(b"a\nb\n")
+    assert (bare.stdout.data, typed.stdout.data) == (
+        ["a\r\nb\r\n"],
+        ["a\nb\n"],
+    )
+
+
 @pytest.mark.asyncio
 async def test_output_folds_stderr_into_stdout_on_a_terminal():
-    plain, tty = FakeProcess([]), FakeProcess([])
+    plain, tty = FakeProcess([]), FakeProcess([], term_type="xterm")
     await ChannelOutput(plain, tty=False).write(b"err", stderr=True)
     await ChannelOutput(tty, tty=True).write(b"err", stderr=True)
     assert (plain.stdout.data, plain.stderr.data) == ([], ["err"])
@@ -210,8 +290,50 @@ async def test_deliver_streams_stdout_then_stderr():
     async def send(data: bytes, is_stderr: bool) -> None:
         sent.append((data, is_stderr))
 
-    await deliver(_two_chunks(), b"warn", send)
+    await deliver(IOResult(stdout=_two_chunks(), stderr=b"warn"), send)
     assert sent == [(b"one", False), (b"two", False), (b"warn", True)]
+
+
+_W = REFUSAL_WINDOW
+_SAID = b"rm: cannot remove '/data': Device or resource busy\n"
+_BUSY = "cannot remove '/data': Device or resource busy"
+_MORE = b"y" * (_W * 4)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stdout,stderr,reason,said",
+    [
+        (b"", b"rm: cannot remove 'x': Permission denied\n", "sealed", False),
+        # A mount root's EBUSY lets the rest of the line run, so its
+        # diagnostic can sit at either end of a long output, or end
+        # right at the first window with its newline the next byte.
+        (_MORE, _MORE + _SAID, _BUSY, True),
+        (_MORE, _SAID + _MORE, _BUSY, True),
+        (_MORE, b"f" * (_W - len(_SAID)) + b"\n" + _SAID + _MORE, _BUSY, True),
+        # A long line cut right after the reason's words says nothing.
+        (
+            b"a" * (_W - 8) + b": sealed" + b"z" * 64 + b"\n",
+            b"",
+            "sealed",
+            False,
+        ),
+    ],
+    ids=["appended", "end", "start", "window_edge", "cut_line"],
+)
+async def test_deliver_appends_the_refusal_unless_the_output_says_why(
+    stdout: bytes, stderr: bytes, reason: str, said: bool
+):
+    sent: list[tuple[bytes, bool]] = []
+
+    async def send(data: bytes, is_stderr: bool) -> None:
+        sent.append((data, is_stderr))
+
+    refusal = Refusal(kind="deny", reason=reason, scope="operand")
+    io = IOResult(stdout=stdout, stderr=stderr, exit_code=1, refusal=refusal)
+    await deliver(io, send)
+    line = (f"policy denied: {reason}\n".encode(), True)
+    assert (sent[-1] == line) is not said
 
 
 def _run_other_loop(

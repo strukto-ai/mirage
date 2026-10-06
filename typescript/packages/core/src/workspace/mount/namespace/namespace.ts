@@ -29,6 +29,7 @@ import type { MountEntry } from '../mount.ts'
 import { RAMNamespaceStore } from './ram.ts'
 import type { NamespaceStore, NodeFields } from './store.ts'
 import type { MountRegistry } from '../registry.ts'
+import { encodeText } from '../../../shell/bytes.ts'
 
 // Per-path namespace metadata. Two roles, distinguished by `target`: a
 // target-bearing entry is an authoritative symlink (the link exists only
@@ -73,7 +74,7 @@ function linkStat(name: string, meta: NodeMeta): FileStat {
   const target = meta.target ?? ''
   return new FileStat({
     name,
-    size: new TextEncoder().encode(target).length,
+    size: encodeText(target).length,
     modified: meta.mtime !== undefined ? epochToIso(meta.mtime) : null,
     type: FileType.SYMLINK,
     ...(meta.uid !== undefined ? { uid: meta.uid } : {}),

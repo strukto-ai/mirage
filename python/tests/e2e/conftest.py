@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 from mirage.core.ram.mkdir import mkdir as mem_mkdir
-from mirage.core.ram.write import write_bytes as mem_write
+from mirage.core.ram.write import write as mem_write
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
@@ -255,7 +255,6 @@ def memory_create_file(vfs: RAMVFS, path: str, content: bytes):
 
 
 def run(ws: Workspace, cmd: str) -> str:
-
     async def _run():
         io = await ws.shell(cmd)
         return await io.stdout_str()

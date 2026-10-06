@@ -145,6 +145,26 @@
         "stdout": "ok\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "truncate_open_a_trailing_slash_is_a_directory",
+      "seq": 15500106,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/fcE_to && printf ab > /data/fcE_to/reg && truncate -s 4 /data/fcE_to/missing/ /data/fcE_to/reg/ /data/fcE_to/nodir/x /data/fcE_to/new; echo rc=$?; ls /data/fcE_to; wc -c < /data/fcE_to/new; truncate -c -s 4 /data/fcE_to/gone/; echo rc=$?; rm -rf /data/fcE_to",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nnew\nreg\n4\nrc=0\n",
+        "stderr": "truncate: cannot open '/data/fcE_to/missing/' for writing: Is a directory\ntruncate: cannot open '/data/fcE_to/reg/' for writing: Is a directory\ntruncate: cannot open '/data/fcE_to/nodir/x' for writing: No such file or directory\n"
+      },
+      "flags": [
+        "s",
+        "c"
+      ]
     }
   ]
 }

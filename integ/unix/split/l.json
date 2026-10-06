@@ -79,6 +79,24 @@
       "flags": [
         "l"
       ]
+    },
+    {
+      "id": "split_l_refused_counts_and_a_signed_count",
+      "seq": 15300303,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "for v in abc 0 1k; do split -l \"$v\" /data/a.txt /data/fcC_x 2>&1; echo rc=$?; done; printf 'a\\nb\\nc\\n' > /data/fcC_lin; split -l +2 /data/fcC_lin /data/fcC_l && cat /data/fcC_laa; echo '|'; cat /data/fcC_lab; rm /data/fcC_lin /data/fcC_laa /data/fcC_lab",
+      "expect": {
+        "exit": 0,
+        "stdout": "split: invalid number of lines: 'abc'\nrc=1\nsplit: invalid number of lines: '0'\nrc=1\nsplit: invalid number of lines: '1k'\nrc=1\na\nb\n|\nc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l"
+      ]
     }
   ]
 }

@@ -1,0 +1,218 @@
+{
+  "cases": [
+    {
+      "id": "rename_reaches_the_mount",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "d/a.txt": "xy\n",
+              "cross.txt": "keep\n"
+            }
+          },
+          "/other": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "from pathlib import Path\nPath('/data/d/a.txt').rename('/data/d/b.txt')\nprint(Path('/data/d/b.txt').stat().st_size, Path('/data/d/a.txt').exists())",
+            "js": "console.log(os.rename('/data/d/a.txt', '/data/d/b.txt'), os.stat('/data/d/b.txt')[0].size, os.stat('/data/d/a.txt')[1])"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "3 False\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "0 3 44\n"
+            }
+          }
+        },
+        {
+          "command": "cat /data/d/b.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "xy\n"
+          }
+        },
+        {
+          "program": {
+            "python": "import os, shutil\nos.rename('/data/d/b.txt', '/data/d/c.txt')\nos.replace('/data/d/c.txt', '/data/d/e.txt')\nshutil.move('/data/d/e.txt', '/data/d/f.txt')",
+            "js": "console.log(os.rename('/data/d/b.txt', '/data/d/c.txt'), os.rename('/data/d/c.txt', '/data/d/e.txt'), os.rename('/data/d/e.txt', '/data/d/f.txt'))"
+          },
+          "expect": {
+            "python": {
+              "exit": 0
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "0 0 0\n"
+            }
+          },
+          "expect_on": {
+            "monty": {
+              "exit": 1,
+              "stderr_contains": "No module named 'shutil'"
+            }
+          }
+        },
+        {
+          "command": "ls /data/d",
+          "expect": {
+            "exit": 0,
+            "stdout": "f.txt\n"
+          },
+          "expect_on": {
+            "monty": {
+              "stdout": "b.txt\n"
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\ntry:\n    Path('/data/zz').rename('/data/yy')\nexcept OSError as e:\n    print(type(e).__name__)",
+            "js": "console.log(os.rename('/data/zz', '/data/yy'))"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "-44\n"
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\ntry:\n    Path('/data/cross.txt').rename('/other/cross.txt')\nexcept OSError as e:\n    try:\n        import errno\n    except ImportError:\n        print(type(e).__name__)\n    else:\n        print(errno.errorcode[e.errno])",
+            "js": "console.log(os.rename('/data/cross.txt', '/other/cross.txt'))"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "EXDEV\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "-75\n"
+            }
+          },
+          "expect_on": {
+            "monty": {
+              "stdout": "OSError\n"
+            }
+          }
+        },
+        {
+          "command": "cat /data/cross.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "keep\n"
+          }
+        },
+        {
+          "command": "ls /other",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\nPath('/data/cross.txt').rename('/data/moved.txt')\nPath('/data/moved.txt').unlink()",
+            "js": "console.log(os.rename('/data/cross.txt', '/data/moved.txt'), os.remove('/data/moved.txt'))"
+          },
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "ls /data",
+          "expect": {
+            "exit": 0,
+            "stdout": "d\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "rename_into_a_nested_mount_is_exdev",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "top.txt": "top\n"
+            }
+          },
+          "/data/inner": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\ntry:\n    os.rename('/data/top.txt', '/data/inner/moved.txt')\n    print('renamed')\nexcept OSError as e:\n    try:\n        import errno\n    except ImportError:\n        print(type(e).__name__)\n    else:\n        print(errno.errorcode[e.errno])",
+            "js": "console.log(os.rename('/data/top.txt', '/data/inner/moved.txt'))"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "EXDEV\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "-75\n"
+            }
+          },
+          "expect_on": {
+            "monty": {
+              "stdout": "OSError\n"
+            }
+          }
+        },
+        {
+          "command": "cat /data/top.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "top\n"
+          }
+        },
+        {
+          "command": "ls /data/inner",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        }
+      ]
+    }
+  ]
+}

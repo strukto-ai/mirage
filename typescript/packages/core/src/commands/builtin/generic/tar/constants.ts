@@ -56,6 +56,31 @@ export const EMPTY_PIPE: Readonly<Partial<Record<CompressionKind, readonly strin
     gzip: ['', 'gzip: stdin: unexpected end of file'],
     xz: ['xz: (stdin): File format not recognized'],
   })
+// The child decompressor's refusal of an input that does not start with its
+// magic, by compression: the magic, the line, the child's status, and whether
+// an empty input is refused the same way (bzip2 1.0.8 answers an empty or cut
+// input with a paragraph of recovery advice mirage does not reproduce; xz
+// 5.8.1 refuses an empty one in these words). Mirrors Python's FOREIGN_INPUT.
+export const FOREIGN_INPUT: Readonly<
+  Partial<
+    Record<CompressionKind, { magic: Uint8Array; line: string; status: number; emptyToo: boolean }>
+  >
+> = Object.freeze({
+  bzip2: {
+    magic: new Uint8Array([0x42, 0x5a, 0x68]),
+    line: 'bzip2: (stdin) is not a bzip2 file.',
+    status: 2,
+    emptyToo: false,
+  },
+  xz: {
+    magic: new Uint8Array([0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00]),
+    line: 'xz: (stdin): File format not recognized',
+    status: 1,
+    emptyToo: true,
+  },
+})
+// What GNU says when a member's data runs past the end of the archive.
+export const UNEXPECTED_EOF = 'tar: Unexpected EOF in archive'
 export const INVALID_ARCHIVE = [
   'tar: This does not look like a tar archive',
   'tar: Skipping to next header',

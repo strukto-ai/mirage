@@ -65,9 +65,9 @@ SPECS: dict[str, CommandSpec] = {
     ),
     "stat": CommandSpec(
         options=(
-            Option(short="-c", type="str"),
-            Option(short="-f", type="str"),
-            Option(short="-L"),
+            Option(short="-c", long="--format", type="str"),
+            Option(short="-f", long="--file-system"),
+            Option(short="-L", long="--dereference"),
         ),
         rest=Operand(type="path"),
     ),

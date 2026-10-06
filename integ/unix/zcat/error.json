@@ -203,6 +203,38 @@
         "stdout": "hello world\n",
         "stderr": "\ngzip: stdin: invalid compressed data--crc error\n"
       }
+    },
+    {
+      "id": "zcat_stops_at_the_first_fatal_input",
+      "seq": 15100231,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_gf && cd /data/fcA_gf && printf '' > e.gz && (printf hello | gzip; printf x) > x.gz && (printf hello | gzip; printf '\\037') > y.gz && zcat e.gz nope.gz; echo rc=$?; zcat x.gz nope.gz; echo \" rc=$?\"; printf 'hi\\n' | gzip | zcat y.gz nope.gz -; echo \" rc=$?\"; cd / && rm -r /data/fcA_gf)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nhello rc=1\nhello rc=1\n",
+        "stderr": "\ngzip: e.gz: unexpected end of file\n\ngzip: x.gz: unexpected end of file\n\ngzip: y.gz: unexpected end of file\n"
+      }
     }
   ]
 }

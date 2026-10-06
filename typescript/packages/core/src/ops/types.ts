@@ -14,7 +14,7 @@
 
 import type { ShellValue } from '../shell/variable.ts'
 import type { VarAttr } from '../shell/variable.ts'
-import type { FileStat } from '../types.ts'
+import type { FileStat, Visibility } from '../types.ts'
 
 export type StatOverlay = (path: string, stat: FileStat) => FileStat
 
@@ -50,15 +50,13 @@ export type ChildMounts = (parent: string) => string[]
 // that must account for the whole subtree therefore has to be told, the
 // same way `LinkView` tells it about symlinks.
 //
-// Traversal commands that render independent lines (find, grep -r) get
-// this for free from the executor's fan-out, which reruns them per mount
-// and concatenates the output. A command whose output is one binary
-// object (tar, zip) cannot be merged that way, so it reads the
-// boundaries here and says what it did with them. du is in between: its
-// lines concatenate, but its per-directory totals are sums that already
-// counted the parent backend's shadowed keys by the time any line filter
-// runs, so it reads the boundaries here too and excludes a descendant's
-// subtree while accounting.
+// A walk that spans mounts (find, du over a nested mount) lets each mount's
+// own command answer for its part and composes the parts (find's rows, du's
+// measurement); ls -R runs once over the dispatcher, whose listings already
+// name the mounts below. Each part, like any command bound to one backend
+// (tar, zip, du -x), reads the boundaries here and says what it did with
+// them: du excludes a descendant's subtree while accounting, since its
+// totals would otherwise count the parent backend's shadowed keys.
 //
 // Two questions, two methods, because one name for both is what let a
 // hidden mount reach a user. **Avoiding** a boundary needs every mount
@@ -80,6 +78,10 @@ export interface MountView {
   // The mount serving a path, so a walker can tell "still mine" from
   // "another backend" before it tries to read something it cannot.
   rootOf(path: string): string
+  // The du walk budget of the mount serving a path (its VFS's
+  // `maxDuEntries`, null for no cap), so a walk that crosses mounts charges
+  // each entry to its own backend's allowance.
+  maxDuEntries?(path: string): number | null
 }
 
 // The session-plane facts a command may consult, as one injected object.
@@ -183,4 +185,16 @@ export interface NamespaceView {
   // claimed the workspace. What an owner-rendering command prints in the
   // owner column for an entry whose backend reports no uid.
   user?: string
+  // The running session's hides and shows; absent when unrestricted.
+  visibility?: Visibility
+  // Whether anything at or under a path is judged; a native walk yields.
+  scoped?: (virtual: string) => boolean
 }
+
+/**
+ * Run one facade op as a session: `(sessionId, run) => result`, null
+ * naming the workspace's default session as it is when the op runs.
+ * The workspace supplies it, so the facade binds the session the way a
+ * shell line does without holding the session manager itself.
+ */
+export type SessionBind = <T>(sessionId: string | null, run: () => Promise<T>) => Promise<T>

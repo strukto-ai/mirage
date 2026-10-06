@@ -33,9 +33,7 @@
         "stdout": "1\n4\n0\nrc=1\n3\n",
         "stderr": ""
       },
-      "flags": [
-        "c"
-      ]
+      "flags": ["c", "count_matches", "include_zero"]
     },
     {
       "id": "rg_prefilter_folded_count",
@@ -178,6 +176,112 @@
         "stdout": "rc=1\n/data/a.txt:1\nrc=0\n/data/a.txt:hello\nhello\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "rg_c_stdin_without_a_match_prints_nothing",
+      "seq": 15200011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'bar\\nbaz\\n' | rg -c foo; echo rc=$?; printf 'bar\\n' | rg -c --include-zero foo; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n0\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "include_zero"
+      ]
+    },
+    {
+      "id": "rg_c_include_zero_last_wins",
+      "seq": 15200012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "rg -c --include-zero --no-include-zero zzz /data/a.txt; echo rc=$?; rg -j1 -c --no-include-zero --include-zero zzz /data/a.txt /data/b.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n/data/a.txt:0\n/data/b.txt:0\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "include_zero",
+        "no_include_zero",
+        "j"
+      ]
+    },
+    {
+      "id": "rg_c_l_output_mode_is_the_last",
+      "seq": 15200013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "rg -j1 -l -c hello /data/a.txt /data/b.txt; echo rc=$?; rg -j1 -c -l hello /data/a.txt /data/b.txt; rg -l --count-matches o /data/a.txt; rg --count-matches -l o /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt:1\nrc=0\n/data/a.txt\n4\n/data/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l",
+        "c",
+        "count_matches",
+        "j"
+      ]
     }
   ]
 }

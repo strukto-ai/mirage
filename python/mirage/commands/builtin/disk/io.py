@@ -22,7 +22,7 @@ from mirage.core.disk.exists import exists as _exists
 from mirage.core.disk.find import find as _find
 from mirage.core.disk.mkdir import mkdir as _mkdir
 from mirage.core.disk.pwrite import pwrite as _pwrite
-from mirage.core.disk.read import read_bytes as _read
+from mirage.core.disk.read import read as _read
 from mirage.core.disk.read import read_range as _read_range
 from mirage.core.disk.readdir import readdir as _readdir
 from mirage.core.disk.rename import rename as _rename
@@ -33,7 +33,7 @@ from mirage.core.disk.stat import stat as _stat
 from mirage.core.disk.stream import read_stream as _read_stream
 from mirage.core.disk.truncate import truncate as _truncate
 from mirage.core.disk.unlink import unlink as _unlink
-from mirage.core.disk.write import write_bytes as _write
+from mirage.core.disk.write import write as _write
 from mirage.vfs.adapter import VFSAdapter
 from mirage.vfs.types import DuOps, NativeReadOps, ReadOps, WriteOps
 

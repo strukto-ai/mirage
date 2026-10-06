@@ -91,9 +91,11 @@ export type BridgeOpAttrs = SetAttrFields & {
   parents?: boolean
   create?: boolean
   replace?: boolean
-  /** A ranged read: where it starts and how long it is. */
+  /** A ranged read, or where a pwrite lands: where it starts and how long it is. */
   offset?: number
   size?: number
+  /** The length a truncate leaves. */
+  length?: number
   /** A read of the stored bytes rather than a rendering. */
   raw?: boolean
 }
@@ -113,6 +115,7 @@ export type BridgeDispatchFn = (
     | 'read'
     | 'write'
     | 'append'
+    | 'pwrite'
     | 'readdir'
     | 'stat'
     | 'create'
@@ -318,4 +321,75 @@ export interface RuntimeOptions<C extends RuntimeConfig = Record<string, unknown
    * capability: it can only refuse lines the captures already allow.
    */
   script?: RouteScript
+}
+
+/**
+ * Script source arriving from a workspace config, not from code.
+ *
+ * The programmatic API takes functions; a yaml `script:`/`policy:`
+ * value references a `.py` file whose content is embedded here at
+ * load. The source sees ctx as a dict and its LAST EXPRESSION is the
+ * verdict. It runs on the policy engine (monty today; a sandbox
+ * runtime is a candidate door later).
+ */
+export class ScriptSource {
+  /**
+   * `language` names the script's language ("python" or "js"), stamped
+   * from the file extension at config load; the programmatic default
+   * is "python". The policy engine prefers a matching evaluator.
+   *
+   * `module` says the source is an ES module (a `.mjs` file), so a js
+   * engine must run it in module mode or `import` and top-level
+   * `await` fail. It is stamped from the extension at load beside
+   * `language`, since the path is gone once the source is embedded.
+   * Inert for policy scripts: a module has no completion value, and
+   * their contract is the last expression.
+   */
+  constructor(
+    readonly source: string,
+    readonly language: RuntimeLanguage = 'python',
+    readonly module = false,
+  ) {}
+}
+
+/** One directory entry as the mounts report it. */
+export interface VFSEntry {
+  path: string
+  size: number
+  isDir: boolean
+  // A namespace symlink. Marked so a whole-tree preload can skip it:
+  // stat follows links, so a directory link would otherwise read as a
+  // plain directory and a cyclic one would recurse the walk forever.
+  isLink?: boolean
+  // The stat's mode and stamp, absent on a row that carries no stat.
+  // A backend that slash-marks its directories is listed without one,
+  // which is the whole point of the mark, and so is an entry the
+  // listing did not classify, so the row says "not known" rather than
+  // inventing a default the guest cannot tell from an answer. A row
+  // that did stat carries both, so a guest seeding a whole tree from
+  // one listing needs no second stat per file.
+  mode?: number
+  mtimeMs?: number
+  // Encoded logical major:minor; present only for a character device.
+  rdev?: number
+}
+
+/** One path's metadata, in the shape every guest encoder needs. */
+export interface VFSStat {
+  size: number
+  isDir: boolean
+  // Milliseconds here and nanoseconds in python, on purpose: epoch
+  // nanoseconds are past 2**53, so a number cannot hold them exactly.
+  mtimeMs: number
+  // The full st_mode, type bits included, so a chmod the shell made is
+  // what a guest's stat reports. A guest that has no mode field on its
+  // own wire (preview1's filestat carries only a filetype) reads the
+  // type bits and drops the rest. `isDir` and `isLink` are this
+  // field's type bits spelled out; mode is the authority.
+  mode: number
+  // Only ever set for a stat the caller asked not to follow, since
+  // every other answer is the target's.
+  isLink?: boolean
+  // Encoded logical major:minor; present only for a character device.
+  rdev?: number
 }

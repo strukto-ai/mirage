@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { underPath } from '../utils/key_prefix.ts'
+
 export type Stamp = readonly [epoch: number, key: number]
 
 /**
@@ -31,11 +33,12 @@ export type Stamp = readonly [epoch: number, key: number]
  * contract both hosts share, and the guard that keeps a future await from
  * silently reopening the window.
  *
- * Two counters, because invalidations have two reaches. The store-wide
- * epoch answers `clear` and a prefix eviction, whose victims cannot be
- * enumerated (a fill in flight has no entry yet). The per-key counter
- * answers a removal of one key, so a large fill for one key is not
- * thrown away because an unrelated key was removed. Per-key counters
+ * Two counters, because invalidations have different reaches. The
+ * store-wide epoch answers `clear`. The per-key counter answers a removal
+ * of one key and a prefix eviction, so a large fill is not thrown away
+ * because an unrelated key or folder was dropped. A prefix eviction can
+ * name its victims although a fill in flight has no entry yet: every
+ * writer registers here in `enter` before it waits. Per-key counters
  * exist only while a writer for that key is in flight, which bounds the
  * map by concurrent writers, not by every key ever removed.
  */
@@ -69,6 +72,17 @@ export class Invalidation {
   /** Record a removal of `key` for the writers in flight on it. */
   invalidate(key: string): void {
     if (this.writers.has(key)) this.keys.set(key, (this.keys.get(key) ?? 0) + 1)
+  }
+
+  /**
+   * Record a prefix eviction for the writers in flight under it, matched
+   * as the stores match it (`startsWith`), sparing the excluded roots.
+   */
+  invalidatePrefix(prefix: string, excluded: readonly string[] = []): void {
+    for (const key of this.writers.keys()) {
+      if (key.startsWith(prefix) && !excluded.some((root) => underPath(key, root)))
+        this.keys.set(key, (this.keys.get(key) ?? 0) + 1)
+    }
   }
 
   /** Record an invalidation whose victims cannot be enumerated. */

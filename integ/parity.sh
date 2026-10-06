@@ -3,8 +3,8 @@
 # Python CLI and the TypeScript CLI, records normalized results per language,
 # then asserts (1) the two languages produce identical results and (2) the
 # results match the expected values. Covers subshell isolation, sessions,
-# per-session mount modes, asks (list-asks/allow/deny), git-backed
-# versioning, and fuse config wiring. Mounts are RAM only (no redis/minio), but
+# per-session mount modes, asks (list-asks/allow/deny), workspace get, list
+# and clone, and fuse config wiring. Mounts are RAM only (no redis/minio), but
 # the fuse case creates a `backend: fuse` workspace, which is a REAL kernel
 # mount on both hosts -- so this needs libfuse and /dev/fuse, same as
 # fuse/cli_fuse.sh.
@@ -85,8 +85,8 @@ no_ls_time() { sed -E 's/ [A-Z][a-z]{2} +[0-9]+ [0-9]{2}:[0-9]{2} / /'; }
 serr() { jq -r '.stderr // .result.stderr // empty'; }
 # The reason a refused line carries beside bash's bare `Permission denied`.
 sreason() { jq -r '.refusal.reason // .result.refusal.reason // empty'; }
-sexit() { jq -r '.exit_code // .exitCode // .result.exit_code // empty'; }
-verdict() { jq -r 'if (.exit_code // .exitCode // .result.exit_code // 1) == 0 then "allowed" else "denied" end'; }
+sexit() { jq -r '.exit_code // .result.exit_code // empty'; }
+verdict() { jq -r 'if (.exit_code // .result.exit_code // 1) == 0 then "allowed" else "denied" end'; }
 
 # Run the full battery against one CLI; emit one "key=value" line per probe.
 probe() {
@@ -197,36 +197,16 @@ probe() {
   echo "ask.drained=$($cli workspace list-asks aw </dev/null | jq 'length')"
   $cli workspace delete aw >/dev/null 2>&1 </dev/null || true
 
-  # ── versioning: commit/branch/log/clone/checkout/diff (git-backed) ──
+  # ── workspaces: get, list, and clone the live state ──
   $cli workspace delete vw >/dev/null 2>&1 </dev/null || true
   $cli workspace create "$YAML" --id vw >/dev/null </dev/null
   $cli shell -w vw -c 'echo one > /a.txt' </dev/null >/dev/null
-  $cli workspace commit vw -m first </dev/null >/dev/null
-  $cli workspace branch vw feature </dev/null >/dev/null    # feature @ first
-  $cli shell -w vw -c 'echo two > /a.txt' </dev/null >/dev/null
-  $cli workspace commit vw -m second </dev/null >/dev/null  # main @ second
-  echo "version.log=$($cli workspace log vw </dev/null | jq -r '[.[].message] | join(",")')"
-  echo "version.branch_log=$($cli workspace log vw -b feature </dev/null | jq -r '[.[].message] | join(",")')"
   echo "ws.get_mounts=$($cli workspace get vw </dev/null | jq -r '[.mounts[].prefix] | join(",")')"
   echo "ws.list_has_vw=$($cli workspace list </dev/null | jq -r 'if (map(.id) | index("vw")) != null then "yes" else "no" end')"
-
-  # clone live state (two), and clone from the first commit (one)
   $cli workspace delete vwc >/dev/null 2>&1 </dev/null || true
   $cli workspace clone vw --id vwc </dev/null >/dev/null
   echo "clone.content=$($cli shell -w vwc -c 'cat /a.txt' </dev/null | sout)"
   $cli workspace delete vwc >/dev/null 2>&1 </dev/null || true
-  local first
-  first="$($cli workspace log vw </dev/null | jq -r '.[-1].id')"
-  $cli workspace delete vwa >/dev/null 2>&1 </dev/null || true
-  $cli workspace clone vw --id vwa --at "$first" </dev/null >/dev/null
-  echo "clone.at_first=$($cli shell -w vwa -c 'cat /a.txt' </dev/null | sout)"
-  $cli workspace delete vwa >/dev/null 2>&1 </dev/null || true
-
-  $cli workspace checkout vw "$first" </dev/null >/dev/null 2>&1
-  echo "version.checkout_first=$($cli shell -w vw -c 'cat /a.txt' </dev/null | sout)"
-  $cli workspace checkout vw main </dev/null >/dev/null 2>&1
-  $cli shell -w vw -c 'echo three > /a.txt' </dev/null >/dev/null
-  echo "version.diff=$($cli workspace diff vw </dev/null | jq -rc '{added,modified,deleted}')"
   $cli workspace delete vw >/dev/null 2>&1 </dev/null || true
 
   # ── fuse: backend:fuse config is accepted and the workspace operates ──
@@ -308,14 +288,9 @@ expect "ask.deny_outcome" "deny"
 expect "ask.denied_err" "rm: Permission denied"
 expect "ask.denied_reason" "removal needs sign-off"
 expect "ask.drained" "0"
-expect "version.log" "second,first"
-expect "version.branch_log" "first"
 expect "ws.get_mounts" "/"
 expect "ws.list_has_vw" "yes"
-expect "clone.content" "two"
-expect "clone.at_first" "one"
-expect "version.checkout_first" "one"
-expect 'version.diff' '{"added":[],"modified":["a.txt"],"deleted":[]}'
+expect "clone.content" "one"
 expect "fuse.operates" "alive"
 expect "sym.readlink" "/data/s.txt"
 expect "sym.cat_follow" "sym1"
@@ -334,4 +309,4 @@ if [ "$fail" != "0" ]; then
   exit 1
 fi
 echo
-echo "CLI feature parity OK (subshell, sessions, session modes, asks, versioning, fuse; py == ts)."
+echo "CLI feature parity OK (subshell, sessions, session modes, asks, workspaces, fuse; py == ts)."

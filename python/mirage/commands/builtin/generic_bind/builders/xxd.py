@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.xxd import xxd_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
     CommandIO,
+    Operation,
     bound_op,
     resolve_or_empty,
 )
@@ -38,6 +41,9 @@ async def xxd(
         list(texts),
         opts,
         bound_op(ops.read_stream, accessor, opts.index),
+        bound_op(ops.read_bytes, accessor, opts.index),
+        partial(ops.require(Operation.WRITE), accessor),
+        partial(ops.pwrite, accessor) if ops.pwrite is not None else None,
     )
 
 

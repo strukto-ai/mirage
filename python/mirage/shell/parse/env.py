@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.shell.bytes import decode_text
 from mirage.shell.parse.constants import (
     CD_ANCHORS,
     DECL_PRINTER_HEADS,
@@ -38,13 +39,13 @@ def _declaration_parts(
     head = ""
     if node.children:
         text = node.children[0].text
-        head = text.decode() if text else ""
+        head = decode_text(text) if text else ""
     flags: list[str] = []
     operands: list[TSNodeLike] = []
     for child in node.children[1:]:
         if child.type == "word":
             text = child.text
-            word = text.decode() if text else ""
+            word = decode_text(text) if text else ""
             if word.startswith("-"):
                 flags.append(word)
             else:
@@ -174,7 +175,7 @@ def _prefix_assignment_names(node: TSNodeLike) -> frozenset[str]:
             continue
         text = name_node.text
         if text:
-            out.add(text.decode())
+            out.add(decode_text(text))
     return frozenset(out)
 
 
@@ -215,7 +216,7 @@ def env_reads(node: TSNodeLike) -> tuple[bool, frozenset[str], frozenset[str]]:
         if n.type == "command":
             name_node = n.child_by_field_name("name")
             text = name_node.text if name_node is not None else None
-            head = text.decode() if text else ""
+            head = decode_text(text) if text else ""
             prefix = _prefix_assignment_names(n)
             skipped: frozenset[str] | None = None
             if head == "env":
@@ -253,7 +254,7 @@ def env_reads(node: TSNodeLike) -> tuple[bool, frozenset[str], frozenset[str]]:
                     if operand.type == "variable_name":
                         text = operand.text
                         if text:
-                            names.add(text.decode())
+                            names.add(decode_text(text))
                     elif operand.type != "variable_assignment":
                         selected = True
             if selected:

@@ -31,6 +31,7 @@ import { CD_OPTIONS, CD_USAGE } from './constants.ts'
 import { splitModeOptions } from './dirs.ts'
 import { classifyBarePath } from '../../../expand/classify/index.ts'
 import { homeDir } from '../../../session/shell_dirs.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 function cdpathSearchable(target: string): boolean {
   if (target.startsWith('/') || target.startsWith('./') || target.startsWith('../')) {
@@ -166,7 +167,7 @@ export async function handleCd(
     }
     return cdSuccess(session, resolved, logical, spelled, raw, printPath || announce)
   }
-  const err = new TextEncoder().encode(error ?? `bash: cd: ${named}: No such file or directory\n`)
+  const err = encodeText(error ?? `bash: cd: ${named}: No such file or directory\n`)
   return [
     null,
     new IOResult({ exitCode: 1, stderr: err }),
@@ -190,7 +191,7 @@ function cdSuccess(
   printPath: boolean,
 ): Result {
   changeDir(session, resolved, logical)
-  const out = printPath ? new TextEncoder().encode(`${spelled}\n`) : null
+  const out = printPath ? encodeText(`${spelled}\n`) : null
   return [out, new IOResult(), new ExecutionNode({ command: `cd ${raw}`, exitCode: 0 })]
 }
 
@@ -209,7 +210,7 @@ export async function cdBuiltin(call: BuiltinCall): Promise<Result> {
   } = splitModeOptions([...call.argv.operands], CD_OPTIONS, shellPhysical)
   const links = namespace.symlinkTargets()
   if (bad !== null) {
-    const err = new TextEncoder().encode(`bash: cd: -${bad}: invalid option\n${CD_USAGE}`)
+    const err = encodeText(`bash: cd: -${bad}: invalid option\n${CD_USAGE}`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),
@@ -217,7 +218,7 @@ export async function cdBuiltin(call: BuiltinCall): Promise<Result> {
     ]
   }
   if (cdOperands.length > 1) {
-    const err = new TextEncoder().encode('bash: cd: too many arguments\n')
+    const err = encodeText('bash: cd: too many arguments\n')
     return [
       null,
       new IOResult({ exitCode: 1, stderr: err }),
@@ -227,7 +228,7 @@ export async function cdBuiltin(call: BuiltinCall): Promise<Result> {
   if (cdOperands.length === 0) {
     const home = homeDir(session)
     if (home === null) {
-      const err = new TextEncoder().encode('bash: cd: HOME not set\n')
+      const err = encodeText('bash: cd: HOME not set\n')
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),
@@ -250,7 +251,7 @@ export async function cdBuiltin(call: BuiltinCall): Promise<Result> {
   if (rawStr === '-') {
     const old = session.env.OLDPWD
     if (!old) {
-      const err = new TextEncoder().encode('bash: cd: OLDPWD not set\n')
+      const err = encodeText('bash: cd: OLDPWD not set\n')
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),

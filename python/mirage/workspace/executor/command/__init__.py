@@ -12,7 +12,28 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.workspace.executor.command.command import handle_command
-from mirage.workspace.executor.command.run import run_on_mount
+import importlib
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mirage.workspace.executor.command.command import handle_command
+    from mirage.workspace.executor.command.run import run_on_mount
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.workspace.executor.command.command": ("handle_command",),
+    "mirage.workspace.executor.command.run": ("run_on_mount",),
+}
+_MODULE_OF = {
+    name: module for module, names in _EXPORTS.items() for name in names
+}
 
 __all__ = ["handle_command", "run_on_mount"]
+
+
+def __getattr__(name: str) -> Any:
+    module = _MODULE_OF.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(importlib.import_module(module), name)
+    globals()[name] = value
+    return value

@@ -30,6 +30,7 @@ import { arithRefusal, isValidName, readonlyRefusal, refusal } from '../shared.t
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { ANSI_C_ESCAPES, BARE_KEY_RE, CONTROL_RE, SUBSCRIPT_RE } from './constants.ts'
 import type { Result } from '../types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 export async function premark(
   view: SessionView,
@@ -96,7 +97,7 @@ export async function storeStagedArrays(
   for (const { name, append, items } of arrays) {
     if (view.isReadonly(name)) {
       if (fatal) {
-        throw new DiscardSignal(new TextEncoder().encode(`bash: ${name}: readonly variable\n`))
+        throw new DiscardSignal(encodeText(`bash: ${name}: readonly variable\n`))
       }
       return readonlyRefusal(cmd, name)
     }
@@ -274,7 +275,7 @@ export function identifierRefusal(cmd: string, word: string): string | null {
  * `export GOOD=1 1BAD=x GOOD2=2` exports both good names.
  */
 export function identifierFailure(cmd: string, errors: string[]): Result {
-  const err = new TextEncoder().encode(`${errors.join('\n')}\n`)
+  const err = encodeText(`${errors.join('\n')}\n`)
   return [
     null,
     new IOResult({ exitCode: 1, stderr: err }),
@@ -295,7 +296,7 @@ export function identifierFailure(cmd: string, errors: string[]): Result {
  * one: reporting it as declared would leak it.
  */
 export function declareLine(session: SessionState, name: string): string | null {
-  if (varHidden(session.hiddenVars, name)) return null
+  if (varHidden(session.visibility, name)) return null
   const v = sessionEntry(session.vars, name)
   if (v === undefined) return null
   const letters = attrLetters(v)
@@ -332,9 +333,8 @@ export function handleDeclarePrint(names: string[], session: SessionState): Resu
     if (line === null) errors.push(`bash: declare: ${name}: not found`)
     else lines.push(line)
   }
-  const enc = new TextEncoder()
-  const out = lines.length > 0 ? enc.encode(`${lines.join('\n')}\n`) : new Uint8Array()
-  const err = errors.length > 0 ? enc.encode(`${errors.join('\n')}\n`) : undefined
+  const out = lines.length > 0 ? encodeText(`${lines.join('\n')}\n`) : new Uint8Array()
+  const err = errors.length > 0 ? encodeText(`${errors.join('\n')}\n`) : undefined
   const code = errors.length > 0 ? 1 : 0
   return [
     out,
@@ -349,7 +349,7 @@ export function handleDeclarePrint(names: string[], session: SessionState): Resu
 
 /** The `unset` refusal for a function `readonly -f` froze. */
 export function readonlyFunctionUnset(name: string): Result {
-  const err = new TextEncoder().encode(`bash: unset: ${name}: cannot unset: readonly function\n`)
+  const err = encodeText(`bash: unset: ${name}: cannot unset: readonly function\n`)
   return [
     null,
     new IOResult({ exitCode: 1, stderr: err }),
@@ -374,7 +374,7 @@ export function readonlyFunctions(session: SessionState, names: readonly string[
       .filter((name) => name in session.functions)
       .sort(compareCodePoints)
       .map((name) => `declare -fr ${name}`)
-    const out = new TextEncoder().encode(lines.length > 0 ? `${lines.join('\n')}\n` : '')
+    const out = encodeText(lines.length > 0 ? `${lines.join('\n')}\n` : '')
     return [out, new IOResult(), new ExecutionNode({ command: 'readonly', exitCode: 0 })]
   }
   const errors: string[] = []
@@ -386,7 +386,7 @@ export function readonlyFunctions(session: SessionState, names: readonly string[
     session.readonlyFunctions.add(name)
   }
   if (errors.length > 0) {
-    const err = new TextEncoder().encode(`${errors.join('\n')}\n`)
+    const err = encodeText(`${errors.join('\n')}\n`)
     return [
       null,
       new IOResult({ exitCode: 1, stderr: err }),
@@ -422,7 +422,7 @@ export function handleDeclareFunctions(
     if (flags.has('F')) lines.push(names.length > 0 ? name : `declare -f ${name}`)
     else lines.push(functionText(name, session.functions[name] as TSNodeLike[]))
   }
-  const out = new TextEncoder().encode(lines.length > 0 ? `${lines.join('\n')}\n` : '')
+  const out = encodeText(lines.length > 0 ? `${lines.join('\n')}\n` : '')
   const code = missing ? 1 : 0
   return [
     out,

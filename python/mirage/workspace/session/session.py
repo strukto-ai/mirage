@@ -28,6 +28,7 @@ from mirage.policy.types import (
 from mirage.process.config import ProcessPermissions
 from mirage.secrets.config import EnvVar
 from mirage.shell.array import ShellArray
+from mirage.shell.console import JobOutput, Terminal
 from mirage.shell.constants import (
     BIN_PREFIX,
     IFS_DEFAULT,
@@ -36,6 +37,7 @@ from mirage.shell.constants import (
     SHELL_ARGV0,
 )
 from mirage.shell.descriptors import Descriptor, StreamOwner
+from mirage.shell.job_table import JobWaits
 from mirage.shell.types import FunctionBody
 from mirage.shell.variable import (
     ManagedRef,
@@ -46,12 +48,14 @@ from mirage.shell.variable import (
     with_value,
 )
 from mirage.types import (
+    DEFAULT_VISIBILITY,
     HiddenPaths,
     HiddenVars,
     Limit,
     MountMode,
     ShowEntry,
     ShownPaths,
+    Visibility,
 )
 from mirage.workspace.abort import StatusWriter
 from mirage.workspace.session.constants import (
@@ -304,14 +308,10 @@ class SessionState:
     # exactly what mirage's 644/755 defaults for a new entry are.
     umask: int = 0o022
     mount_modes: dict[str, MountMode] | None = None
-    # Per-session visibility narrowing, siblings of mount_modes: None
-    # means unrestricted, the doors enforce (data door for paths, the
-    # session door for vars), fork carries them, to_dict serializes.
-    hidden_paths: HiddenPaths | None = None
-    # The show half of the path axis: re-opened subtrees and per-subtree
-    # modes, resolved against hidden_paths by anchor depth.
-    shown_paths: ShownPaths | None = None
-    hidden_vars: HiddenVars | None = None
+    # What exists for this session: the profile's hides, shows, hidden
+    # variables, process scope and allow list, compiled once. The views
+    # and the op boundary read it; fork carries it, to_dict serializes.
+    visibility: Visibility = DEFAULT_VISIBILITY
     # The operator's reasons for grouped hides: never rendered to the
     # agent (a reason on ENOENT would confirm the path exists),
     # persisted so the host's read-back doors survive a restart.
@@ -347,6 +347,11 @@ class SessionState:
     # sets it to the script file it is running, or to the name given after
     # `-c`, and restores it afterwards.
     script_name: str | None = None
+    exit_trap: str | None = None
+    exit_trap_inherited: bool = False
+    tty: Terminal = field(default_factory=Terminal, repr=False)
+    job_output: JobOutput | None = field(default=None, repr=False)
+    job_waits: JobWaits | None = field(default=None, repr=False)
     # Transient `set -e` marker: True when the failure just returned
     # came from a short-circuited &&/|| branch or a `!`-negated command,
     # which bash exempts from errexit. Reset on every node execution.
@@ -373,6 +378,7 @@ class SessionState:
     # word being scanned, plus the OPTIND value that offset belongs to.
     # A caller resetting OPTIND (e.g. to 1) makes the seen value stale,
     # which restarts the scan, matching bash's internal char pointer.
+    _trap_status: int | None = field(default=None, repr=False)
     _getopts_pos: int = field(default=1, repr=False)
     _getopts_optind: int | None = field(default=None, repr=False)
     # Command-substitution tracking for assignment statements: how many
@@ -494,18 +500,19 @@ class SessionState:
             data["mount_modes"] = {
                 prefix: mode.value for prefix, mode in self.mount_modes.items()
             }
-        if self.hidden_paths is not None:
+        vis = self.visibility
+        if vis.paths is not None:
             data["hidden_paths"] = {
-                "paths": list(self.hidden_paths.paths),
-                "patterns": list(self.hidden_paths.patterns),
+                "paths": list(vis.paths.paths),
+                "patterns": list(vis.paths.patterns),
             }
-        if self.shown_paths is not None:
+        if vis.shown is not None:
             data["shown_paths"] = {
                 "entries": [
                     {"path": e.path}
                     if e.mode is None
                     else {"path": e.path, "mode": e.mode.value}
-                    for e in self.shown_paths.entries
+                    for e in vis.shown.entries
                 ]
             }
         if self.hide_reasons:
@@ -513,10 +520,10 @@ class SessionState:
                 {"patterns": list(g.patterns), "reason": g.reason}
                 for g in self.hide_reasons
             ]
-        if self.hidden_vars is not None:
+        if vis.vars is not None:
             data["hidden_vars"] = {
-                "names": list(self.hidden_vars.names),
-                "patterns": list(self.hidden_vars.patterns),
+                "names": list(vis.vars.names),
+                "patterns": list(vis.vars.patterns),
             }
         if self.commands is not None:
             data["commands"] = commands_to_dict(self.commands)
@@ -582,38 +589,15 @@ class SessionState:
         decisions = data.get("decisions")
         limits = data.get("command_limits")
         processes = data.get("processes")
-        if (
-            modes is not None
-            or paths is not None
-            or shown is not None
-            or reasons is not None
-            or vars_ is not None
-            or commands is not None
-            or script is not None
-            or decisions is not None
-            or limits is not None
-            or processes is not None
-        ):
-            data = dict(data)
+        data = {
+            key: value
+            for key, value in data.items()
+            if key not in ("hidden_paths", "shown_paths", "hidden_vars")
+        }
         if modes is not None:
             data["mount_modes"] = {
                 prefix: MountMode(mode) for prefix, mode in modes.items()
             }
-        if paths is not None:
-            data["hidden_paths"] = HiddenPaths(
-                paths=tuple(paths.get("paths", ())),
-                patterns=tuple(paths.get("patterns", ())),
-            )
-        if shown is not None:
-            data["shown_paths"] = ShownPaths(
-                entries=tuple(
-                    ShowEntry(
-                        path=e["path"],
-                        mode=MountMode(e["mode"]) if "mode" in e else None,
-                    )
-                    for e in shown.get("entries", ())
-                )
-            )
         if reasons is not None:
             data["hide_reasons"] = tuple(
                 HideReason(
@@ -621,11 +605,6 @@ class SessionState:
                     reason=g.get("reason", ""),
                 )
                 for g in reasons
-            )
-        if vars_ is not None:
-            data["hidden_vars"] = HiddenVars(
-                names=tuple(vars_.get("names", ())),
-                patterns=tuple(vars_.get("patterns", ())),
             )
         if commands is not None:
             data["commands"] = commands_from_dict(commands)
@@ -640,6 +619,51 @@ class SessionState:
             }
         if processes is not None:
             data["processes"] = ProcessPermissions.model_validate(processes)
+        if (
+            paths is not None
+            or shown is not None
+            or vars_ is not None
+            or processes is not None
+            or commands is not None
+        ):
+            rules = data.get("commands")
+            data["visibility"] = Visibility(
+                paths=(
+                    HiddenPaths(
+                        paths=tuple(paths.get("paths", ())),
+                        patterns=tuple(paths.get("patterns", ())),
+                    )
+                    if paths is not None
+                    else None
+                ),
+                shown=(
+                    ShownPaths(
+                        entries=tuple(
+                            ShowEntry(
+                                path=e["path"],
+                                mode=(
+                                    MountMode(e["mode"])
+                                    if "mode" in e
+                                    else None
+                                ),
+                            )
+                            for e in shown.get("entries", ())
+                        )
+                    )
+                    if shown is not None
+                    else None
+                ),
+                vars=(
+                    HiddenVars(
+                        names=tuple(vars_.get("names", ())),
+                        patterns=tuple(vars_.get("patterns", ())),
+                    )
+                    if vars_ is not None
+                    else None
+                ),
+                processes=data.get("processes", ProcessPermissions()).list,
+                commands=rules.allow if rules is not None else None,
+            )
         return cls(**data)
 
     @property

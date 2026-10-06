@@ -22,6 +22,7 @@ export const SPECS: Record<string, CommandSpec> = {
         short: '-H',
         long: '--header',
         type: 'str',
+        multiple: true,
         description: 'Add a custom header to the request.',
       }),
       new Option({
@@ -40,7 +41,38 @@ export const SPECS: Record<string, CommandSpec> = {
         short: '-d',
         long: '--data',
         type: 'str',
+        multiple: true,
         description: 'Send the given data as the request body.',
+      }),
+      new Option({
+        long: '--data-binary',
+        type: 'str',
+        multiple: true,
+        description: 'Send the data exactly as given, a file unchanged.',
+      }),
+      new Option({
+        long: '--data-raw',
+        type: 'str',
+        multiple: true,
+        description: 'Send the data with no special meaning for @.',
+      }),
+      new Option({
+        long: '--data-urlencode',
+        type: 'str',
+        multiple: true,
+        description: 'Send the data URL-encoded.',
+      }),
+      new Option({
+        long: '--json',
+        type: 'str',
+        multiple: true,
+        description: 'Send the data as JSON.',
+      }),
+      new Option({
+        short: '-u',
+        long: '--user',
+        type: 'str',
+        description: 'Send the user and password for basic auth.',
       }),
       new Option({
         short: '-F',

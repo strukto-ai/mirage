@@ -1,0 +1,57 @@
+{
+  "requires": {
+    "python": [
+      "env:MIRAGE_WASI_HOME"
+    ],
+    "typescript": []
+  },
+  "cases": [
+    {
+      "id": "script_directory_heads_sys_path",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "wasi",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "app/file.py": "print(__file__)\n",
+              "app/imp.py": "import sys\nprint(repr(sys.path[0]))\nimport helper\n",
+              "app/helper.py": "print('helper imported')\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/app/imp.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "'/ram/app'\nhelper imported\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -P /ram/app/imp.py",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "ModuleNotFoundError: No module named 'helper'"
+          }
+        },
+        {
+          "command": "cd /ram && python3 ./app/file.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "/ram/./app/file.py\n",
+            "stderr": ""
+          }
+        }
+      ]
+    }
+  ]
+}

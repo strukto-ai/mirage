@@ -33,6 +33,74 @@
         "stdout": "SHADOW\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "cmd_run_restores_function_after_success",
+      "seq": 503030,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'cat() { echo restored; }; printf \"payload\\n\" | command cat; cat'",
+      "expect": {
+        "exit": 0,
+        "stdout": "payload\nrestored\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cmd_run_restores_function_after_failure",
+      "seq": 503031,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'cat() { echo restored; }; command cat {mount}/command-no-such-file 2>/dev/null; echo rc=$?; cat'",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrestored\n",
+        "stderr": ""
+      }
     }
   ]
 }

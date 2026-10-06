@@ -56,7 +56,6 @@ def test_captures_override():
 
 
 def test_script_stored():
-
     def wants(ctx):
         return True
 

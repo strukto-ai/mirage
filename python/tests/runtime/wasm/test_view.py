@@ -156,7 +156,9 @@ class FakeVFS(RuntimeVFS):
                 raise FileNotFoundError(path)
             # The real door merges child-mount names into readdir; the
             # double rides the same helper so it cannot drift from it.
-            return sorted(merge_readdir(out, self.prefixes(), None, path))
+            return sorted(
+                merge_readdir(None, out, self.prefixes(), None, path)
+            )
         if op == "symlink":
             self.links[path] = kwargs["target"]
             return None

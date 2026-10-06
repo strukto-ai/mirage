@@ -25,6 +25,7 @@ import { SET_QUOTED_CHARS } from '../constants.ts'
 import { bashDeclareQuote } from '../declare/declare.ts'
 import { CONTROL_RE } from '../declare/constants.ts'
 import type { BuiltinCall, Result } from '../types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 /**
  * A value as bash's bare `set` prints it.
@@ -54,7 +55,7 @@ export function handleSet(
     const entries = Object.entries(visibleEnv(session))
     entries.sort(([a], [b]) => compareCodePoints(a, b))
     const lines = entries.map(([k, v]) => `${k}=${listedValue(v)}`)
-    const out = new TextEncoder().encode(`${lines.join('\n')}\n`)
+    const out = encodeText(`${lines.join('\n')}\n`)
     return [out, new IOResult(), new ExecutionNode({ command: 'set', exitCode: 0 })]
   }
   let i = 0
@@ -85,7 +86,7 @@ export function handleSet(
       // Without this a typo — or an option mirage has yet to wire, as
       // `physical` once was — reads as success.
       if (!SET_OPTION_NAMES.has(option)) {
-        const err = new TextEncoder().encode(`bash: set: ${option}: invalid option name\n`)
+        const err = encodeText(`bash: set: ${option}: invalid option name\n`)
         return [
           null,
           new IOResult({ exitCode: 2, stderr: err }),
@@ -124,7 +125,7 @@ function optionListing(session: SessionState, plus: boolean): Uint8Array {
       lines.push(`${name.padEnd(15)}\t${on ? 'on' : 'off'}`)
     }
   }
-  return new TextEncoder().encode(`${lines.join('\n')}\n`)
+  return encodeText(`${lines.join('\n')}\n`)
 }
 
 /** The `set` arm. */

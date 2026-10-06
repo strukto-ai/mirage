@@ -535,6 +535,40 @@
         "hel",
         "vers"
       ]
+    },
+    {
+      "id": "shell_timeout_cancels_before_write",
+      "seq": 1300100,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "timeout 0.02 sh -c 'sleep 0.08; echo BAD > {mount}/timeout-late'; echo $?; sleep 0.12; test -e {mount}/timeout-late; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "124\n1\n",
+        "stderr": ""
+      }
     }
   ]
 }

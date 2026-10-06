@@ -16,6 +16,7 @@ import asyncio
 import logging
 
 from mirage.process.supervisor import ProcessSupervisor
+from mirage.shell.bytes import encode_text
 from mirage.shell.console import (
     KILLED_OUTCOME,
     Channel,
@@ -113,7 +114,7 @@ async def _settle(run: JobRunner, job: Job) -> int:
             return 1
         job.status = JobStatus.COMPLETED
         job.exit_code = 1
-        await job.console.emit(Channel.STDERR, str(exc).encode())
+        await job.console.emit(Channel.STDERR, encode_text(str(exc)))
         await job.console.finish(exit_outcome(1))
         return 1
     if job.status != JobStatus.RUNNING:
@@ -153,6 +154,7 @@ class JobTable:
         self,
         console_factory: ConsoleFactory | None = None,
         processes: ProcessSupervisor | None = None,
+        parent: "JobTable | None" = None,
     ) -> None:
         """Create a table, optionally choosing where consoles live.
 
@@ -170,16 +172,38 @@ class JobTable:
                 client per job) is invisible to the embedder; a console
                 still outlives its table entry, so ``reap`` never closes
                 one.
+            processes (ProcessSupervisor | None): where the jobs run.
+            parent (JobTable | None): the table of the shell a ``$( )``
+                is part of, whose jobs ``jobs`` still lists there, as
+                bash's does; its ``wait`` and ``kill`` reach none of them.
         """
+        self.parent = parent
         self.processes = processes or ProcessSupervisor()
         self._jobs: dict[str, dict[int, Job]] = {}
         self._next_ids: dict[str, int] = {}
         self._console_factory = console_factory
         self._factory_consoles: list[JobConsole] = []
+        # The table whose ``close_consoles`` releases what the factory
+        # builds for this one: itself, or the table a child came from.
+        self._console_owner: JobTable = self
         # Jobs `disown` removed from the table while they still run. The
         # shell no longer lists, waits for or reports them, but the
         # workspace still owns their tasks, so teardown can stop them.
         self._disowned: list[Job] = []
+
+    def child(self, parent: "JobTable | None" = None) -> "JobTable":
+        """A table for a child shell (``bash -c``, a script, ``( )``,
+        ``$( )``): a job list of its own on the same processes, whose
+        jobs get their consoles from this table's factory, released at
+        teardown with this table's.
+
+        Args:
+            parent (JobTable | None): the table a ``$( )`` still lists
+                in ``jobs``.
+        """
+        table = JobTable(self._console_factory, self.processes, parent)
+        table._console_owner = self._console_owner
+        return table
 
     def submit(
         self,
@@ -240,7 +264,7 @@ class JobTable:
                 console = JobConsole()
             else:
                 console = self._console_factory(job_id)
-                self._factory_consoles.append(console)
+                self._console_owner._factory_consoles.append(console)
             job = Job(
                 id=job_id,
                 command=command,
@@ -274,6 +298,17 @@ class JobTable:
 
     def list_jobs(self, session_id: str = "") -> list[Job]:
         return list(self._jobs.get(session_id, {}).values())
+
+    def listing(self, session_id: str = "") -> list[Job]:
+        """The jobs ``jobs`` shows: a ``$( )``'s caller's, then its own.
+
+        Args:
+            session_id (str): the session whose jobs to list.
+        """
+        inherited = (
+            self.parent.listing(session_id) if self.parent is not None else []
+        )
+        return inherited + self.list_jobs(session_id)
 
     def running_jobs(self, session_id: str = "") -> list[Job]:
         return [
@@ -445,10 +480,10 @@ class JobTable:
     def reap(self, job_id: int, session_id: str = "") -> None:
         """Remove one job from its session's list.
 
-        What a targeted ``wait``/``fg`` does after adopting the job's
-        output, matching GNU bash, where a job waited on by id is
-        deleted from the job list. Leaving it would let a later bare
-        ``wait`` snapshot the same console and print the output twice.
+        What a targeted ``wait``/``fg`` does once the job has ended,
+        matching GNU bash, where a job waited on by id is deleted from
+        the job list, so a later ``jobs`` or ``wait %N`` no longer finds
+        it.
 
         Args:
             job_id (int): the job to remove.

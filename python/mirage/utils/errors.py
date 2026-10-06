@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
+import os
 from collections.abc import Awaitable, Callable
 
 from mirage.types import PathSpec
@@ -274,6 +275,11 @@ def enotempty(path: str | PathSpec) -> OSError:
     return OSError(errno.ENOTEMPTY, "Directory not empty", _virtual_of(path))
 
 
+def no_xattr(path: str | PathSpec) -> OSError:
+    code = getattr(errno, "ENOATTR", errno.ENODATA)
+    return OSError(code, os.strerror(code), _virtual_of(path))
+
+
 def exdev(path: str | PathSpec) -> OSError:
     return OSError(errno.EXDEV, "Invalid cross-device link", _virtual_of(path))
 
@@ -367,7 +373,9 @@ async def listing_error(
     That premise is exactly what a flat store breaks: ram and redis rename
     without creating the destination's ancestors, so they can hold
     ``/missing/a.txt`` with ``/missing`` absent, where resolution stops and
-    the answer is ENOENT. Those call ``readdir_error`` directly.
+    the answer is ENOENT. Those call ``readdir_error`` directly. The walk
+    ends at the listed path itself, which the first probe has already
+    found is not a file, so it is not asked again.
     Mirrors TS ``listingError``.
 
     Args:
@@ -379,9 +387,16 @@ async def listing_error(
         is_dir (Callable[[str], Awaitable[bool]]): Probe reporting whether a
             mount-local path exists as a directory.
     """
-    if key.strip("/") and await is_file(key):
+    leaf = key.strip("/")
+    if not leaf:
+        return await readdir_error(path, key, is_file, is_dir)
+    if await is_file(key):
         return enotdir(path)
-    return await readdir_error(path, key, is_file, is_dir)
+
+    async def is_file_above(component: str) -> bool:
+        return component.strip("/") != leaf and await is_file(component)
+
+    return await readdir_error(path, key, is_file_above, is_dir)
 
 
 def enotsup(
@@ -491,8 +506,24 @@ _CANNOT_OPEN = "cannot open {quoted} for reading: {strerror}"
 # EINVAL, so a tac there says ``read error: Invalid argument``.
 FAILURE_WORDING: dict[str, tuple[str | None, str | None]] = {
     "csplit": (_CANNOT_OPEN, None),
+    "du": ("cannot access {quoted}: {strerror}", None),
+    "find": ("{quoted}: {strerror}", "{quoted}: {strerror}"),
     "fmt": (_CANNOT_OPEN, None),
     "head": (_CANNOT_OPEN, "error reading {quoted}: {strerror}"),
+    "ls": ("cannot access {quoted}: {strerror}", None),
+    "mkdir": (
+        "cannot create directory {quoted}: {strerror}",
+        "cannot create directory {quoted}: {strerror}",
+    ),
+    "rev": ("cannot open {bare}: {strerror}", None),
+    "rm": (
+        "cannot remove {quoted}: {strerror}",
+        "cannot remove {quoted}: {strerror}",
+    ),
+    "rmdir": (
+        "failed to remove {quoted}: {strerror}",
+        "failed to remove {quoted}: {strerror}",
+    ),
     "sed": (
         "can't read {bare}: {strerror}",
         "read error on {bare}: {strerror}",
@@ -507,6 +538,10 @@ FAILURE_WORDING: dict[str, tuple[str | None, str | None]] = {
         "{shown}: read error: {strerror}",
     ),
     "tail": (_CANNOT_OPEN, "error reading {quoted}: {strerror}"),
+    "touch": (
+        "cannot touch {quoted}: {strerror}",
+        "cannot touch {quoted}: {strerror}",
+    ),
     "truncate": (
         "cannot open {quoted} for writing: {strerror}",
         "cannot open {quoted} for writing: {strerror}",
@@ -639,13 +674,15 @@ def format_fs_error(
     """
     if fs_strerror(exc) is None:
         message = str(exc)
-        if message.startswith(f"{cmd_name}: "):
-            return f"{message}\n".encode()
-        return f"{cmd_name}: {message}\n".encode()
+        if not message.startswith(f"{cmd_name}: "):
+            message = f"{cmd_name}: {message}"
+        return f"{message}\n".encode("utf-8", "surrogateescape")
     path = error_path(exc)
     if paths:
         for p in paths:
             if p.virtual == path:
                 path = p.raw_path
                 break
-    return fs_error_line(cmd_name, path, exc).encode()
+    return fs_error_line(cmd_name, path, exc).encode(
+        "utf-8", "surrogateescape"
+    )

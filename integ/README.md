@@ -20,12 +20,59 @@ implementations cannot drift apart.
   Some fakes carry a selftest (`pnpm run <name>:selftest`; the list is the
   `*:selftest` scripts in `package.json`); linear and trello have none, and
   the battery is what exercises them.
-- `tools/`: the tool corpus. One JSON list of tool calls (`shell`, `read`,
-  `write`, `edit`, `ls`, `grep`, `glob`) and their answers, run in-app by
-  `tools/run.py` and `tools/run.ts` and through every daemon door (HTTP
-  routes, CLI verbs, MCP over HTTP, SSH) on both hosts by `doors.py`.
+- `access/`: every way into a workspace (in-app, HTTP, the CLI, MCP over
+  HTTP and `mirage mcp`, RPC over HTTP and `mirage rpc`, SSH) under every
+  deployment (`dev`, the CLI's own daemon; `token` and `jwt`, the server as a
+  service runs it, with a mock Clerk-shaped issuer), on both hosts.
+  `cases.json` holds the suites and the ops table (which access has which
+  operation, the matrix on `docs/home/access/overview.mdx`); every case pins
+  the in-app answer, and every other access must give it. `run.py` also
+  checks auth per deployment, the CLI's daemon lifecycle and config, and
+  gates that every HTTP route and CLI command was exercised. `inapp.ts` is
+  the in-app access on TypeScript.
 - `prisma/`: one schema per kit fake.
 - `fixtures/`: the seed data cases assume.
+
+The `unix/{grep,zgrep,sed,awk,tr}/bytes.json` cases pin C-locale byte
+semantics against `debian:stable-slim` at digest
+`sha256:5bc3287b25407c965a30f38e32603dc253a3869e1b12a21ac09bfc27fd8b13ce`
+(GNU grep 3.11, sed 4.9, mawk 1.3.4). Literal UTF-8, shell byte escapes,
+command-specific escapes, and `-f` program files must address the same
+bytes. Matching, string positions, and `tr` sets count bytes; a partial
+character or invalid UTF-8 byte survives output unchanged. These commands
+use this deterministic C-locale contract; `rg` retains its Unicode regex
+semantics. `unix/{grep,zgrep,sed,expr}/locale.json` pin the other side on the
+same image: when `LC_ALL`, `LC_CTYPE` or `LANG` names a UTF-8 codeset, those
+commands match and count whole characters, and neither `.` nor a negated
+bracket matches an invalid byte.
+
+## Cross-mount commands
+
+`crossmount/<command>/<behavior>.json` owns one command's scenarios; a
+checksum folder takes the executable's name (`sha256sum/`). `alias/`,
+`nested/`, `readonly/`, `service/` and `program/` own the topology, policy,
+command-service and program scenarios that span commands, and `seed/` the
+fixtures later cases read. Keep a case's ID, `seq` and targets when moving
+it: both runners sort the whole corpus by `seq`.
+
+Routing lives in the mirrored `crossmount/types` and `crossmount/constants`
+modules. Every routed command belongs to exactly one strategy, and a command
+outside them fails explicitly rather than falling into one:
+
+| Strategy  | Commands                                                                                              | Contract                                                                      |
+| --------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Stream    | cat, nl, cut                                                                                          | One command stream over the operands in order.                                |
+| Fanout    | rev, head, tail, file, md5, the `sha*sum`s, stat, strings, tac, find, rm, rmdir, unlink, touch, mkdir | Each operand runs on its own mount; diagnostics and status combine.           |
+| Relay     | cp, mv, tee, tar, unzip, zip, ls, sed, and every other generic builder (`DISPATCH_BUILDERS`)          | One generic sees every operand and reaches each mount through the dispatcher. |
+| Namespace | chmod, chown, chgrp, getfattr, setfattr, ln, readlink                                                 | Answered above the backends, with no cross-mount implementation of its own.   |
+
+`runners/tools/check_crossmount_coverage.py --selftest` requires, for every
+command the routing table names (`CROSS_MOUNT_COMMANDS`, every generic
+builder included) plus the namespace commands, a success case in that
+command's folder whose run of it names paths on both `/data` and `/data2`
+(directly, or through a symlink the line makes), asserts all three result
+channels, and targets RAM and disk; it also rejects duplicate IDs. It is a registration floor, not proof of every option or
+backend.
 
 ## Runs and tenants
 
@@ -92,7 +139,7 @@ of waiting for it.
 flowchart LR
     PY["python/**"] --> core & data
     TSX["typescript/**"] --> ts & data & database
-    IN["integ/**"] --> core & ts & data
+    IN["integ/**<br/>command JSON + crossmount coverage gate"] --> core & ts & data
     D["data/**"] --> core
     DB["mongodb · postgres · chroma · qdrant<br/>python layers, integ/vfs/&lt;name&gt;,<br/>integ/runners, targets.json"] --> database
     OB["langfuse · jaeger layers<br/>integ/vfs/observability, seeds,<br/>integ/runners, targets.json"] --> observability
@@ -170,6 +217,21 @@ does not silently skip them. Each run uses a unique S3 bucket and Redis key
 prefix; the bucket and Slack fixture are cleaned up, while Redis keys are
 discarded with the service container.
 
+The `command-service` core target exercises ordinary VFS command registration
+with a backend that refuses dispatcher byte reads. Search must reach its
+registered `grep`/`rg` handlers, including filters, depth, sorting and links.
+The target combines nested service mounts, a regular RAM mount, a child that
+serves metadata without search commands, and hidden descendants.
+`crossmount/service/native.json` also covers repeated operands, quiet stopping,
+errors, an existing custom aggregate registration, and one CLI invocation
+through dispatch doors. A barrier proves native read preparation is bounded to
+four invocations; stream cases check partial failures, timeout cleanup and early
+pipe closure. Mutation commands and shared stdin retain serial execution.
+The program cases cover program files read across mounts (`grep -f`, `sed -f`,
+`awk -f`, `jq --rawfile`). Both core shards discover this target from the
+manifest; the shared parity job also compares it and `ram-nested`. The existing `python/**`, `typescript/**`, and `integ/**`
+filters cover these modules and cases.
+
 ## Running locally
 
 The `unix/cp` and `unix/mv` cases use GNU coreutils 9.7 as their transfer
@@ -195,4 +257,4 @@ it) and `MIRAGE_QUICKJS_HOME` pointing at the quickjs-ng WASI build for the
 scripted target. If a pinned port is taken locally, copy `ci/fakes.json` and
 move that one entry.
 
-Generated-document cases live in `session/documents.json`. The shared runner applies `session_profiles` (create or update) and `documents` (kind, exact path, optional session) before the shell command. The cases run on RAM, disk, S3, S3 with a prefix, Redis, and registered Git and Airtable CLIs. `doors.py` checks the HTTP and host CLI getters/bindings, per-call MCP session selection over HTTP and stdio, live profile changes, and SSH confinement. FUSE core and kernel probes hold an open document handle across profile changes, check rendered sizes and read-only behavior, and read session-scoped skills.
+Generated-document cases live in `session/documents.json`. The shared runner applies `session_profiles` (create or update) and `documents` (kind, exact path, optional session) before the shell command. The cases run on RAM, disk, S3, S3 with a prefix, Redis, and registered Git and Airtable CLIs. The `session_admin` suite in `access/cases.json` checks the in-app, HTTP and CLI getters and bindings and a live profile change on both hosts. FUSE core and kernel probes hold an open document handle across profile changes, check rendered sizes and read-only behavior, and read session-scoped skills.

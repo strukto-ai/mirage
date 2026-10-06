@@ -28,7 +28,7 @@ import { setCwd } from '../session/shell_dirs.ts'
 import { gateRestoredVars } from '../session/state.ts'
 import type { CLIInstall } from '../cli/types.ts'
 import { CLISpec } from '../../commands/cli/types.ts'
-import { ScriptSource } from '../../runtime/routing/types.ts'
+import { ScriptSource } from '../../runtime/types.ts'
 
 /**
  * Per-name overrides for restoring installed CLIs: a plain mapping is a
@@ -57,7 +57,8 @@ import {
   RAMConsoleStore,
   exitOutcome,
 } from '../../shell/console/index.ts'
-import { type ReadSpec, DEFAULT_READ_SPEC, MountMode } from '../../types.ts'
+import { type ReadSpec, DEFAULT_READ_SPEC, MountMode, VFSName } from '../../types.ts'
+import { readFileBytes } from './fs.ts'
 import { resolveReadSpec } from '../mount/read_policy.ts'
 import { Mount } from '../mount/spec.ts'
 import { VERSION } from '../../version.ts'
@@ -479,7 +480,8 @@ export async function withRebuiltMounts(
  * the state has nothing to drop. It sits behind the gate because the
  * callers used to clear before calling, and a refused checkout then
  * still sent every cached read back to an origin that may have moved.
- * Mirrors Python `apply_state_dict`.
+ * The target's VFS.md and SKILL.md bindings are dropped, since a
+ * snapshot never carries them. Mirrors Python `apply_state_dict`.
  */
 export async function applyStateDict(
   ws: Workspace,
@@ -488,6 +490,10 @@ export async function applyStateDict(
 ): Promise<void> {
   checkFormatVersion(state)
   const [sessions, seed] = await gateRestoredState(ws, state)
+  // A snapshot holds no document bindings, so a load into a live
+  // workspace drops its own: one left in place would shadow a file the
+  // snapshot restores at the same path.
+  await ws.documents.clear()
   if (options.replaceCache === true) await ws.cache.clear()
   for (const m of state.mounts) {
     // Exact-prefix lookup, mirroring Python: a snapshot prefix the new
@@ -506,8 +512,14 @@ export async function applyStateDict(
       continue
     }
     if (vfsStateRequiresOverride(m.vfs_state)) continue
+    // A disk restored into a fresh RAM mount (`restoresAsFreshRAM`) takes
+    // the disk's state in RAM's shape.
+    const vfsState =
+      m.vfs_state.type === VFSName.DISK && mount.vfs.name !== VFSName.DISK
+        ? await diskStateAsRam(m.vfs_state as unknown as Record<string, unknown>)
+        : m.vfs_state
     // No cast, for the same reason as toStateDict above.
-    await Promise.resolve(mount.vfs.loadState(m.vfs_state as RAMVFSState))
+    await Promise.resolve(mount.vfs.loadState(vfsState as RAMVFSState))
   }
   await restoreSessions(ws, state, sessions)
   // The env template is constructor state the rebuilt workspace was
@@ -576,6 +588,7 @@ async function restoreSessions(
   // and the discovery record's pointer follows it. A state without the
   // pointer (older commit metas) keeps the live default, mirroring the
   // Python None-guard.
+  ws.forgetReads()
   if (state.default_session_id != null) {
     await ws.adoptDefaultSession(state.default_session_id)
   }
@@ -669,4 +682,28 @@ function restoreJobs(ws: Workspace, state: WorkspaceStateDict): void {
       }),
     )
   }
+}
+
+/**
+ * A disk mount's state as a RAM mount takes it: absolute keys, every
+ * parent directory, each mode as an attribute, and bytes for each file
+ * the disk state names by host path.
+ */
+async function diskStateAsRam(vfsState: Record<string, unknown>): Promise<RAMVFSState> {
+  const files: Record<string, Uint8Array> = {}
+  const attrs: Record<string, { mode: number }> = {}
+  const dirs = new Set<string>(['/'])
+  const modes = (vfsState.modes as Record<string, number> | undefined) ?? {}
+  for (const [rel, data] of Object.entries(
+    (vfsState.files as Record<string, Uint8Array | string> | undefined) ?? {},
+  )) {
+    const key = `/${rel}`
+    files[key] = typeof data === 'string' ? await readFileBytes(data) : data
+    const mode = modes[rel]
+    if (mode !== undefined) attrs[key] = { mode }
+    for (let at = key.lastIndexOf('/'); at > 0; at = key.lastIndexOf('/', at - 1)) {
+      dirs.add(key.slice(0, at))
+    }
+  }
+  return { type: VFSName.RAM, files, dirs: [...dirs], attrs }
 }

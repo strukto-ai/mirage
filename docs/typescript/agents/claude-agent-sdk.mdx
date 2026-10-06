@@ -1,6 +1,6 @@
 ---
 title: Claude Agent SDK
-description: Run @anthropic-ai/claude-agent-sdk against a Mirage workspace via an in-process MCP server exposing execute, read, write, edit, ls, and grep tools.
+description: Run @anthropic-ai/claude-agent-sdk against a Mirage workspace through an in-process MCP server of Mirage's tools.
 icon: /images/claude-logo.svg
 ---
 
@@ -26,14 +26,11 @@ pnpm add @struktoai/mirage-agents @struktoai/mirage-browser @anthropic-ai/claude
 `buildOptions` wires a workspace into ready-to-use query options: it registers the Mirage MCP server, restricts the agent to Mirage's tools, and injects a system prompt describing the mounted paths.
 
 ```ts
-import { MountMode, OpsRegistry, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { buildOptions } from '@struktoai/mirage-agents/claude-agent-sdk'
 
-const ram = new RAMVFS()
-const ops = new OpsRegistry()
-for (const op of ram.ops()) ops.register(op)
-const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
 
 for await (const msg of query({
   prompt: "Write /hello.txt with 'hi from mirage', then cat it.",
@@ -59,15 +56,7 @@ const options = {
 
 ## Tools
 
-| Tool | Maps to |
-| --- | --- |
-| `shell` | `Workspace.shell()`, the full shell pipeline (cat, grep, find, pipe, ...). |
-| `read` | Line-paginated file read with `offset` and `limit`. |
-| `write` | Write a file. An existing file must be read in full first, and the write fails if it changed since. |
-| `edit` | Replace a string in an existing file. |
-| `ls` | List a directory. |
-| `grep` | Recursive `grep -rn` through the shell, with GNU's `-i`, `-F`, `--include`, `-C`, `-l`, `-c` and `-m` as `ignore_case`, `fixed_strings`, `include`, `context`, `files_with_matches`, `count` and `max_count`. |
-| `glob` | Find files matching a pathname pattern (`**/*.py`), as `Workspace.glob` expands it. |
+The server serves the session's seven tools, [`session.tools`](/typescript/access/in-app#session-tools): `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob`, named `mcp__mirage__<tool>` in the SDK.
 
 ## Exports
 

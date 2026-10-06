@@ -15,10 +15,23 @@
 import pytest
 
 from mirage.runtime.handles import parse_mode
+from mirage.runtime.handles.mode import OpenMode
 from mirage.runtime.open import apply_open
 from mirage.runtime.types import VFSStat
 
 F = "/data/f"
+# C fopen's "wx", what a QuickJS or WASI guest opens with: exclusive
+# creation that also carries the truncate fact, which exclusivity must
+# outrank so a refused open leaves the content alone.
+WX = OpenMode(
+    readable=False,
+    writable=True,
+    truncate=True,
+    append=False,
+    create=True,
+    exclusive=True,
+    binary=False,
+)
 
 
 class World:
@@ -72,21 +85,22 @@ class World:
         ("a", {"files": [F]}, [], True, None),
         ("a", {}, [("create", F)], False, None),
         ("a", {"implied": [F]}, [], False, IsADirectoryError),
-        ("wx", {"files": [F]}, [], False, FileExistsError),
-        ("wx", {"links": [F]}, [], False, FileExistsError),
-        ("wx", {"implied": [F]}, [], False, FileExistsError),
-        ("wx", {}, [("create", F)], False, None),
+        (WX, {"files": [F]}, [], False, FileExistsError),
+        (WX, {"links": [F]}, [], False, FileExistsError),
+        (WX, {"implied": [F]}, [], False, FileExistsError),
+        (WX, {}, [("create", F)], False, None),
     ],
 )
 def test_an_open_lands_its_modes_effect_before_any_byte_moves(
     mode, world, effect, kept, refusal
 ):
     surface = World(**world)
+    facts = parse_mode(mode) if isinstance(mode, str) else mode
     if refusal is None:
-        assert (apply_open(surface, F, parse_mode(mode)) is not None) == kept
+        assert (apply_open(surface, F, facts) is not None) == kept
     else:
         with pytest.raises(refusal):
-            apply_open(surface, F, parse_mode(mode))
+            apply_open(surface, F, facts)
     assert surface.effects == effect
 
 

@@ -15,7 +15,7 @@
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { PathSpec } from '../../types.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { queryMatcher, type Searcher } from '../hierarchy/search.ts'
+import { queryMatcher, type LineMatcher, type Searcher } from '../hierarchy/search.ts'
 import { buildCollectionSchemaJson, buildDatabaseJson } from './_schema_json.ts'
 import { listCollections, listDatabases } from './client.ts'
 import { entityKind } from './scope.ts'
@@ -34,10 +34,10 @@ import { EntityKind, KIND_TO_DIR } from './types.ts'
 
 const DEC = new TextDecoder()
 
-function matched(rel: string, text: string, matcher: RegExp): string[] {
+function matched(rel: string, text: string, matcher: LineMatcher): string[] {
   const lines = text.split('\n')
   if (lines[lines.length - 1] === '') lines.pop()
-  return lines.filter((line) => matcher.test(line)).map((line) => `${rel}:${line}`)
+  return lines.filter((line) => matcher(line)).map((line) => `${rel}:${line}`)
 }
 
 async function entityLines(
@@ -45,7 +45,7 @@ async function entityLines(
   database: string,
   kind: EntityKind,
   name: string,
-  matcher: RegExp,
+  matcher: LineMatcher,
 ): Promise<string[]> {
   const rel = `${database}/${KIND_TO_DIR[kind]}/${name}`
   const docs = `${rel}/documents.jsonl`
@@ -69,7 +69,7 @@ async function kindLines(
   accessor: MongoDBAccessor,
   database: string,
   kind: EntityKind,
-  matcher: RegExp,
+  matcher: LineMatcher,
 ): Promise<string[]> {
   const lines: string[] = []
   for (const name of await listCollections(accessor, database, kind)) {
@@ -83,7 +83,7 @@ async function kindLines(
 async function databaseLines(
   accessor: MongoDBAccessor,
   database: string,
-  matcher: RegExp,
+  matcher: LineMatcher,
 ): Promise<string[]> {
   const payload = stringifyDoc(
     (await buildDatabaseJson(accessor, database)) as unknown as Record<string, unknown>,

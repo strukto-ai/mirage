@@ -27,6 +27,7 @@ import {
   repositoryFields,
   setRepoTopics,
   viewRepo,
+  type RepoRef,
 } from '../../../../core/github/repo.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { UsageError } from '../../../errors.ts'
@@ -35,6 +36,7 @@ import type { CLIInvocation } from '../../types.ts'
 import {
   camel,
   csvValues,
+  ghBool,
   ghRepo,
   ghTransport,
   jsonFields,
@@ -398,14 +400,14 @@ export async function createCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   if (parts.length > 2 || parts.some((part) => part === '')) {
     throw new Error(`invalid repository name: "${spec}"`)
   }
-  if (fl.asBool('public') && fl.asBool('private')) {
+  if (ghBool(fl, 'public') && ghBool(fl, 'private')) {
     throw new Error('--public and --private are mutually exclusive')
   }
   const owner = parts.length === 2 ? parts[0] : undefined
   const body: Record<string, unknown> = {
     name: parts.at(-1) ?? '',
-    private: fl.asBool('private'),
-    auto_init: fl.asBool('add_readme'),
+    private: ghBool(fl, 'private'),
+    auto_init: ghBool(fl, 'add_readme'),
   }
   const description = fl.asStr('description')
   const homepage = fl.asStr('homepage')
@@ -415,12 +417,38 @@ export async function createCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   return textOut(`${textValue(created.url)}\n`)
 }
 
+/**
+ * `gh repo fork`. gh clones a fork, or adds a remote for one, into the local
+ * checkout, which a workspace does not have: `--clone` is refused, and so is
+ * `--remote` without a repository, where it would name that checkout. gh
+ * ignores `--remote` beside a repository, and `--clone=false` or
+ * `--remote=false` asks for what this fork does anyway.
+ */
 export async function fork(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
+  const org = fl.asStr('org')
+  if (org === '') throw new Error('--org cannot be blank')
+  if (fl.asStr('remote_name') === '') throw new Error('--remote-name cannot be blank')
+  if (ghBool(fl, 'clone')) {
+    throw new Error('--clone is not supported: there is no local checkout to clone into')
+  }
+  if (ghBool(fl, 'remote') && inv.texts[0] === undefined) {
+    throw new Error('--remote is not supported: there is no local checkout to add a remote to')
+  }
   const transport = ghTransport(inv.config)
-  const source = ghRepo(inv.config, inv.texts[0])
+  let source: RepoRef
+  try {
+    source = ghRepo(inv.config, inv.texts[0])
+  } catch (err) {
+    if (inv.texts[0] === undefined || !(err instanceof Error)) throw err
+    throw new Error(`did not understand argument: ${err.message}`)
+  }
   const name = fl.asStr('fork_name') ?? undefined
-  const forked = (await forkRepo(transport, source, name)) as { full_name?: string }
+  const body: Record<string, unknown> = {}
+  if (name !== undefined) body.name = name
+  if (org !== undefined) body.organization = org
+  if (ghBool(fl, 'default_branch_only')) body.default_branch_only = true
+  const forked = (await forkRepo(transport, source, body)) as { full_name?: string }
   const full = forked.full_name ?? `${await login(transport)}/${name ?? source.repo}`
   return textOut(`✓ Created fork ${full}\n`)
 }
@@ -455,7 +483,7 @@ export async function editCmd(inv: CLIInvocation): Promise<CommandFnResult> {
     if (field.kind === 'value') {
       body[field.field] = fl.asStr(dest)
     } else {
-      const enabled = fl.asBool(dest) || fl.asStr(dest) === 'true'
+      const enabled = ghBool(fl, dest)
       if (field.kind === 'security') {
         security[field.field] = { status: enabled ? 'enabled' : 'disabled' }
       } else {
@@ -465,7 +493,7 @@ export async function editCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   }
   const adds = csvValues(fl.asList('add_topic'))
   const removes = csvValues(fl.asList('remove_topic'))
-  const accepted = fl.asBool('accept_visibility_change_consequences')
+  const accepted = ghBool(fl, 'accept_visibility_change_consequences')
   const named =
     Object.keys(body).length + Object.keys(security).length + adds.length + removes.length > 0
   if (!named && !accepted) {
@@ -505,7 +533,7 @@ export async function editCmd(inv: CLIInvocation): Promise<CommandFnResult> {
  */
 export async function deleteCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
-  const confirmed = fl.asBool('yes') || fl.asBool('confirm')
+  const confirmed = ghBool(fl, 'yes') || ghBool(fl, 'confirm')
   const spec = inv.texts[0]
   if (spec === undefined && confirmed) {
     throw new UsageError(
@@ -518,7 +546,7 @@ export async function deleteCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   const named = spec ?? ''
   const ref = ghRepo(inv.config, named.includes('/') ? named : `${await login(transport)}/${named}`)
   await deleteRepo(transport, ref)
-  const warning = fl.asBool('confirm')
+  const warning = ghBool(fl, 'confirm')
     ? 'Flag --confirm has been deprecated, use `--yes` instead\n'
     : ''
   return [new Uint8Array(0), new IOResult({ stderr: new TextEncoder().encode(warning) })]

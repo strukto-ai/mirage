@@ -12,33 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.usage import (
-    missing_operand_error,
-    unknown_option_error,
-)
+from mirage.commands.spec.usage import missing_operand_error
 from mirage.runtime.types import DispatchFn
-from mirage.types import PathSpec, word_text
+from mirage.types import PathSpec
 from mirage.workspace.executor.builtins.metadata.metadata import (
-    apply_attrs,
-    apply_link_attrs,
+    change_owner,
     parse_owner,
-    resolve_operand,
-    walk_owned,
 )
-from mirage.workspace.executor.builtins.shared import (
-    expand_operands,
-    fail,
-    finish,
-    operand_text,
-    split_value_flags,
-)
+from mirage.workspace.executor.builtins.shared import fail, parse_line
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.session import SessionState
 
 
 async def handle_chown(
     namespace: Namespace,
     dispatch: DispatchFn,
+    session: SessionState,
     args: list[str | PathSpec],
 ) -> Result:
     """chown OWNER[:GROUP] FILE...: set ownership via setattr.
@@ -52,53 +42,20 @@ async def handle_chown(
     Args:
         namespace (Namespace): addressing authority.
         dispatch (DispatchFn): op dispatcher.
+        session (SessionState): session whose cwd resolves operands.
         args (list[str | PathSpec]): args after the command name.
     """
-    flags, _values, operands, bad = split_value_flags(args, "Rvfh", "")
-    if bad is not None:
-        message, code = unknown_option_error("chown", bad)
-        return fail("chown", message.decode(), code)
-    if len(operands) < 2:
-        last = word_text(operands[0]) if operands else None
+    parsed, fl, refused = parse_line("chown", args, session.cwd)
+    if refused is not None:
+        return refused
+    if not parsed.texts or not parsed.paths:
+        last = parsed.texts[0] if parsed.texts else None
         error = missing_operand_error("chown", last)
         return fail("chown", f"{error}\n", error.exit_code)
-    owner_text = operand_text(operands[0])
+    owner_text = parsed.texts[0]
     uid, gid = parse_owner(owner_text)
     if uid is None and gid is None:
         return fail("chown", f"chown: invalid spec: '{owner_text}'\n", 1)
-
-    recursive = "R" in flags
-    no_deref = recursive or "h" in flags
-    errors: list[str] = []
-    for target in await expand_operands(namespace, operands[1:]):
-        if no_deref and namespace.is_link(target.virtual):
-            await apply_link_attrs(
-                dispatch, "chown", target, errors, uid=uid, gid=gid
-            )
-            continue
-        found = await resolve_operand(
-            namespace, dispatch, "chown", target, errors
-        )
-        if found is None:
-            continue
-        resolved, stat = found
-        if recursive:
-            paths, links = await walk_owned(
-                namespace, dispatch, resolved, stat
-            )
-        else:
-            paths, links = [resolved], []
-        for path in paths:
-            await apply_attrs(
-                dispatch, "chown", path, errors, uid=uid, gid=gid
-            )
-        for link in links:
-            await apply_link_attrs(
-                dispatch,
-                "chown",
-                PathSpec.from_str_path(link),
-                errors,
-                uid=uid,
-                gid=gid,
-            )
-    return finish("chown", errors)
+    return await change_owner(
+        namespace, dispatch, session, "chown", fl, parsed.paths, uid, gid
+    )

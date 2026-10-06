@@ -27,6 +27,7 @@ from mirage.bridge.sync import run_async_from_sync
 from mirage.context import reset_current_session, set_current_session
 from mirage.fuse.platform.macos import is_macos_metadata
 from mirage.ops import Ops
+from mirage.policy.match import skipped_at_op_doors
 from mirage.runtime.handles import ChunkedHandle, FileTable, write_runs
 from mirage.runtime.handles.constants import READ_CHUNK
 from mirage.types import FileStat, FileType
@@ -96,6 +97,21 @@ class MountCore:
     ) -> None:
         self._ops = ops
         self._session = session
+        skipped = (
+            skipped_at_op_doors(session.commands)
+            if session is not None
+            else ()
+        )
+        if session is not None and skipped:
+            # This door sees ops, never a line, so the profile's
+            # command-level rules have nothing here to judge.
+            logger.warning(
+                "session %s: a door that sees only ops (a kernel mount, "
+                "SFTP, codex-exec's file calls) cannot apply %s; path "
+                "rules, hides and modes still hold",
+                session.session_id,
+                "; ".join(skipped),
+            )
         self._now = time.time_ns()
         self._root = root_prefix.rstrip("/")
         self._handles: FileTable[Handle] = FileTable()

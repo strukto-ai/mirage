@@ -47,7 +47,7 @@ import {
   toStateDict,
 } from './snapshot/state.ts'
 import type { MountSnapshot } from './snapshot/types.ts'
-import { ScriptSource } from '../runtime/routing/types.ts'
+import { ScriptSource } from '../runtime/types.ts'
 import { ExecutionNode } from './types.ts'
 import { Workspace } from './workspace/workspace.ts'
 
@@ -840,9 +840,9 @@ describe('applyStateDict and the deployment', () => {
     expect(compiled).not.toBeNull()
     const restored = target.getSession('s2')
     expect(restored.profile).toBe('default')
-    expect(restored.commands).toBe(compiled?.commands)
-    expect(restored.script).toBe(compiled?.script)
-    expect(target.sessionManager.scriptOf('s2')).toBe(compiled?.script)
+    expect(restored.commands).toBe(compiled?.policies.commands)
+    expect(restored.script).toBe(compiled?.policies.script)
+    expect(target.sessionManager.scriptOf('s2')).toBe(compiled?.policies.script)
     expect(restored.env.PUBLIC_A).toBe('1')
     const refused = await target.shell('rm /data/f.txt', { sessionId: 's2' })
     expect(refused.exitCode).toBe(126)

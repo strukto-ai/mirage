@@ -22,6 +22,7 @@ from mirage.commands.spec.usage import (
     unknown_option_error,
 )
 from mirage.errors import POSIX, FsCondition, classify
+from mirage.shell.bytes import decode_text
 from mirage.types import PathSpec
 from mirage.workspace.executor.builtins.shared import result
 from mirage.workspace.executor.builtins.types import Result
@@ -68,7 +69,7 @@ def attr_usage_refusal(
         message, _ = missing_value_error(cmd, parsed.needs_value_options[0])
     if message is None:
         return None
-    line = message.decode().split("\n", 1)[0]
+    line = decode_text(message).split("\n", 1)[0]
     return result(cmd, exit_code=2, stderr=f"{line}\n{usage}")
 
 

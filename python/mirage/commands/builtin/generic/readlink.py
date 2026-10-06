@@ -48,10 +48,10 @@ class ReadlinkFlags:
 def parse_flags(flags: Mapping[str, FlagValue]) -> ReadlinkFlags:
     fl = FlagView(flags, spec=SPECS["readlink"])
     return ReadlinkFlags(
-        canonicalize=fl.as_bool("f"),
-        canonicalize_existing=fl.as_bool("e"),
-        canonicalize_missing=fl.as_bool("m"),
-        no_newline=fl.as_bool("n"),
+        canonicalize=fl.as_bool("canonicalize"),
+        canonicalize_existing=fl.as_bool("canonicalize_existing"),
+        canonicalize_missing=fl.as_bool("canonicalize_missing"),
+        no_newline=fl.as_bool("no_newline"),
     )
 
 

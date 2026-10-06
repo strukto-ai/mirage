@@ -1,0 +1,167 @@
+{
+  "cases": [
+    {
+      "id": "a_appends_without_truncating",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "in\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "f = open('/data/seed.txt', 'a')\nf.write('more\\n')\nf.close()",
+            "js": "const f = std.open('/data/seed.txt', 'a')\nf.puts('more\\n')\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "ops_absent": [
+              "truncate /data/seed.txt"
+            ]
+          }
+        },
+        {
+          "command": "cat /data/seed.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "seed\nmore\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_creates_then_appends",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "in\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "f = open('/data/log.txt', 'a')\nf.write('one\\n')\nf.close()",
+            "js": "const f = std.open('/data/log.txt', 'a')\nf.puts('one\\n')\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "ops_contain": [
+              "create /data/log.txt"
+            ]
+          }
+        },
+        {
+          "program": {
+            "python": "f = open('/data/log.txt', 'a')\nf.write('two\\n')\nf.close()",
+            "js": "const f = std.open('/data/log.txt', 'a')\nf.puts('two\\n')\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "ops_contain": [
+              "append /data/log.txt"
+            ],
+            "ops_absent": [
+              "create /data/log.txt",
+              "truncate /data/log.txt"
+            ]
+          },
+          "expect_on": {
+            "s3": {
+              "ops_contain": [
+                "write /data/log.txt"
+              ]
+            }
+          }
+        },
+        {
+          "command": "cat /data/log.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "one\ntwo\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "appends_from_three_opens_all_land",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "log.txt": "a"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "for part in ['b', 'c', 'd']:\n    with open('/data/log.txt', 'a') as f:\n        f.write(part)",
+            "js": "for (const part of ['b', 'c', 'd']) {\n  const w = std.open('/data/log.txt', 'a')\n  w.puts(part)\n  w.close()\n}"
+          },
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "cat /data/log.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "abcd"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -29,9 +29,7 @@
         "stdout": "/data/r4/code.py:    return 42\n/data/r4/code.py:    return 42\n/data/r4/code.py:    return 42\n/data/r4/code.js:function main() { return 42; }\n/data/r4/code.js:function main() { return 42; }\nrc=1\npy: *.py, *.pyi\n",
         "stderr": ""
       },
-      "flags": [
-        "type"
-      ]
+      "flags": ["type", "t", "T", "type_add", "type_list"]
     },
     {
       "id": "rg_type_does_not_filter_a_named_file",

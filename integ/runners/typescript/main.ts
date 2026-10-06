@@ -18,10 +18,10 @@ import { resolveReadSpec } from '@struktoai/mirage-core/workspace/mount/read_pol
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { ConcurrencyLimiter } from '@struktoai/mirage-core/concurrency/limiter'
 import { ADAPTERS, openConsistency } from './adapters/index.ts'
-import type { Case, EmitRow, ServiceEnv, Target, TargetRunner } from './harness.ts'
+import type { EmitRow, ServiceEnv, Target, TargetRunner } from './harness.ts'
+import { bindMount, compare, ruleReasons, runCase, type Case } from './execution.ts'
 import {
   Report,
-  compare,
   planRun,
   integRoot,
   loadCases,
@@ -30,9 +30,6 @@ import {
   missingEnv,
   mountReadOf,
   parseAllowSkip,
-  bindMount,
-  ruleReasons,
-  runCase,
   runConsistencyCase,
   seedFixture,
   seedMountRoot,
@@ -198,6 +195,10 @@ export async function runTarget(
   // from reading as covered.
   if (target.console !== undefined && target.mounts[0].vfs !== 'ram') {
     throw new Error(`target ${target.id}: console targets ride ram mounts`)
+  }
+  // The cache block is wired into the ram opener alone, for the same reason.
+  if (target.cache !== undefined && target.mounts[0].vfs !== 'ram') {
+    throw new Error(`target ${target.id}: cache targets ride ram mounts`)
   }
   // The secrets env block is wired into the ram opener alone, for the
   // console block's reason: a target that declares one on an opener

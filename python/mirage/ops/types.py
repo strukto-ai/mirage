@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from mirage.shell.variable import ShellValue, VarAttr
-from mirage.types import FileStat
+from mirage.types import FileStat, Visibility
 
 StatOverlay = Callable[[str, FileStat], FileStat]
 # Stat one virtual path through the workspace rather than one backend, so
@@ -147,15 +147,14 @@ class MountView:
     walker that must account for the whole subtree therefore has to be
     told, the same way ``LinkView`` tells it about symlinks.
 
-    Traversal commands that render independent lines (find, grep -r)
-    get this for free from the executor's fan-out, which reruns them per
-    mount and concatenates the output. A command whose output is one
-    binary object (tar, zip) cannot be merged that way, so it reads the
-    boundaries here and says what it did with them. du is in between:
-    its lines concatenate, but its per-directory totals are sums that
-    already counted the parent backend's shadowed keys by the time any
-    line filter runs, so it reads the boundaries here too and excludes a
-    descendant's subtree while accounting.
+    A walk that spans mounts (find, du over a nested mount) lets each
+    mount's own command answer for its part and composes the parts
+    (find's rows, du's measurement); ls -R runs once over the
+    dispatcher, whose listings already name the mounts below. Each
+    part, like any command bound to one backend (tar, zip, du -x),
+    reads the boundaries here and says what it did with them: du
+    excludes a descendant's subtree while accounting, since its totals
+    would otherwise count the parent backend's shadowed keys.
 
     Two questions, two methods, because one name for both is what let a
     hidden mount reach a user. **Avoiding** a boundary needs every mount
@@ -182,6 +181,10 @@ class MountView:
     # The mount serving a path, so a walker can tell "still mine" from
     # "another backend" before it tries to read something it cannot.
     root_of: MountRoot
+    # The du walk budget of the mount serving a path (its VFS's
+    # ``max_du_entries``, None for no cap), so a walk that crosses mounts
+    # charges each entry to its own backend's allowance.
+    max_du_entries: Callable[[str], int | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -232,7 +235,7 @@ class NamespaceView:
     field it wants, so there is no signature for the dispatcher to
     inspect and no registry to keep in step. Fields default to None so
     a unit test constructs only what it exercises; inside a workspace
-    the dispatcher fills all five.
+    the dispatcher fills them all.
     """
 
     # The symlink facts; None when the namespace holds no links, which
@@ -248,6 +251,10 @@ class NamespaceView:
     # claimed the workspace. What an owner-rendering command prints in
     # the owner column for an entry whose backend reports no uid.
     user: str | None = None
+    # The running session's hides and shows; None when unrestricted.
+    visibility: Visibility | None = None
+    # Whether anything at or under a path is judged; a native walk yields.
+    scoped: Callable[[str], bool] | None = None
 
 
 # Run one facade op as a session: ``(session_id, run) -> result``, None

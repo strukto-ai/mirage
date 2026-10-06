@@ -319,6 +319,42 @@
         "stdout": "rc=1\nt1\nrc=0\nt2\nt1\n",
         "stderr": "cp: will not overwrite just-created '/data/r10ld/l' with '/data/r10ly/l'\n"
       }
+    },
+    {
+      "id": "cp_P_and_d_keep_a_link_reached_through_a_linked_directory",
+      "seq": 15600008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/fcF_l/dir /data/fcF_l/w && printf 'x\\n' > /data/fcF_l/a.txt && ln -s ../a.txt /data/fcF_l/dir/al && ln -s dir /data/fcF_l/dl && cp -P /data/fcF_l/dl/al /data/fcF_l/w/x && cp -d /data/fcF_l/dl/al /data/fcF_l/w/y && readlink /data/fcF_l/w/x /data/fcF_l/w/y && ls -F /data/fcF_l/w; rm -r /data/fcF_l",
+      "expect": {
+        "exit": 0,
+        "stdout": "../a.txt\n../a.txt\nx@\ny@\n",
+        "stderr": ""
+      },
+      "flags": [
+        "P",
+        "d"
+      ]
     }
   ]
 }

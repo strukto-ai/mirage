@@ -21,10 +21,14 @@ from mirage.commands.builtin.utils.stream import (
     stdin_stream,
 )
 from mirage.commands.config import CommandOpts
+from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.usage import usage_exit_code, usage_hint
+from mirage.io.stream import ensure_stream
 from mirage.io.types import ByteSource, IOResult
+from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 from mirage.utils.errors import WALK_ERRORS, fs_strerror
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
@@ -44,6 +48,70 @@ class ChecksumFlags:
     warn: bool = False
 
 
+# The options GNU refuses outside --check, in the order it checks them.
+_CHECK_ONLY = (
+    ("ignore_missing", "--ignore-missing"),
+    ("status", "--status"),
+    ("warn", "--warn"),
+    ("quiet", "--quiet"),
+    ("strict", "--strict"),
+)
+
+
+def _read_mode(fl: FlagView) -> str | None:
+    """The last of -b, -t and --tag (which reads in binary mode), as
+    GNU's option loop leaves its one mode.
+
+    Args:
+        fl (FlagView): The command's flags.
+    """
+    order = fl.typed_order("binary", "text", "tag")
+    return order[-1] if order else None
+
+
+def _refuse_conflicts(fl: FlagView, name: str) -> None:
+    """Refuse the combinations GNU refuses after its option loop, in its
+    order (coreutils 9.7 digest.c).
+
+    Args:
+        fl (FlagView): The command's flags.
+        name (str): The invoked command.
+
+    Raises:
+        UsageError: a combination GNU refuses.
+    """
+
+    def refuse(message: str) -> UsageError:
+        return UsageError(
+            f"{name}: {message}\n{usage_hint(name)}", usage_exit_code(name)
+        )
+
+    mode = _read_mode(fl)
+    check = fl.as_bool("check")
+    tag = fl.as_bool("tag")
+    if tag and mode == "text":
+        raise refuse("--tag does not support --text mode")
+    if check and fl.as_bool("zero"):
+        raise refuse(
+            "the --zero option is not supported when verifying checksums"
+        )
+    if check and tag:
+        raise refuse(
+            "the --tag option is meaningless when verifying checksums"
+        )
+    if check and mode is not None:
+        raise refuse(
+            "the --binary and --text options are meaningless when "
+            "verifying checksums"
+        )
+    for flag, word in _CHECK_ONLY:
+        if not check and fl.as_bool(flag):
+            raise refuse(
+                f"the {word} option is meaningful only when verifying "
+                "checksums"
+            )
+
+
 def parse_flags(flags: Mapping[str, FlagValue], name: str) -> ChecksumFlags:
     """Parse the shared ``*sum`` flag set against one command's spec.
 
@@ -51,11 +119,15 @@ def parse_flags(flags: Mapping[str, FlagValue], name: str) -> ChecksumFlags:
         flags (Mapping[str, FlagValue]): The raw flag bag.
         name (str): The invoked command (md5sum, sha256sum, ...), whose
             spec validates the names; all five declare the same set.
+
+    Raises:
+        UsageError: a combination GNU refuses.
     """
     fl = FlagView(flags, spec=SPECS[name])
+    _refuse_conflicts(fl, name)
     return ChecksumFlags(
         check=fl.as_bool("check"),
-        binary=fl.as_bool("binary"),
+        binary=_read_mode(fl) in ("binary", "tag"),
         tag=fl.as_bool("tag"),
         zero=fl.as_bool("zero"),
         strict=fl.as_bool("strict"),
@@ -173,7 +245,36 @@ def _resolve_check_target(
         virtual=virtual,
         directory=virtual,
         vfs_path=mount_key(virtual, mount_prefix),
+        raw_path=filename,
     )
+
+
+def door_reader(
+    dispatch: DispatchFn,
+    stream: Callable[[PathSpec], AsyncIterator[bytes]],
+) -> Callable[[PathSpec], AsyncIterator[bytes]]:
+    """Read a path through the workspace's door, on whatever mount holds
+    it: a checksum list names files anywhere, not on the list's mount.
+
+    A stdin name (``-``, ``/dev/stdin``) reads the command's input
+    through ``stream``, on the cursor the list itself reads from.
+
+    Args:
+        dispatch (DispatchFn): the workspace's op dispatcher.
+        stream (Callable[[PathSpec], AsyncIterator[bytes]]): the
+            command's stdin-aware reader.
+    """
+
+    async def read(path: PathSpec) -> AsyncIterator[bytes]:
+        if is_stdin(path):
+            async for chunk in stream(path):
+                yield chunk
+            return
+        data, _ = await dispatch("read", path)
+        async for chunk in ensure_stream(data):
+            yield chunk
+
+    return read
 
 
 def _count_noun(count: int, singular: str, plural: str) -> str:
@@ -388,7 +489,7 @@ async def checksum(
     if paths:
         return _hash_multi(
             paths, read_stream, factory, algorithm, binary, tag, zero
-        ), IOResult(cache=[p.mount_path for p in paths if not is_stdin(p)])
+        ), IOResult()
     source = resolve_source(stdin)
     return _hash_stream(
         source, "-", factory, algorithm, binary, tag, zero
@@ -434,7 +535,11 @@ async def checksum_generic(
             factory=factory,
             algorithm=algorithm,
             read_bytes=materialized_read(stream),
-            read_stream=normalized_read(stream),
+            read_stream=(
+                door_reader(opts.dispatch, normalized_read(stream))
+                if opts.dispatch is not None
+                else normalized_read(stream)
+            ),
             stdin=opts.stdin,
             check=True,
             strict=parsed.strict,

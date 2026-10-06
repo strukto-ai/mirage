@@ -1,0 +1,43 @@
+{
+  "cases": [
+    {
+      "id": "od_j_refusals_name_the_argument",
+      "seq": 15500302,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "for v in 5c 1g 1t 08 0x 0x10000000000000000; do od -j \"$v\" /data/a.txt; echo rc=$?; done 2>&1",
+      "expect": {
+        "exit": 0,
+        "stdout": "od: invalid suffix in -j argument '5c'\nrc=1\nod: invalid suffix in -j argument '1g'\nrc=1\nod: invalid suffix in -j argument '1t'\nrc=1\nod: invalid suffix in -j argument '08'\nrc=1\nod: invalid suffix in -j argument '0x'\nrc=1\nod: -j argument '0x10000000000000000' too large\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "j"
+      ]
+    },
+    {
+      "id": "od_j_reads_radix_suffix_and_sign",
+      "seq": 15500303,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/fcE_od && seq 1 3000 > /data/fcE_od/f && for v in 64 0x10 010 0 3k 1KiB 1KB 2b 010K +10 ' 10' +0x10 +010 +10K; do od -A d -t c -j \"$v\" -N 1 /data/fcE_od/f | head -n 1; done; rm -rf /data/fcE_od",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000064   5\n0000016   9\n0000008   5\n0000000   1\n0003072   7\n0001024   2\n0001000   2\n0001024   2\n0008192  \\n\n0000010   6\n0000010   6\n0000016   9\n0000008   5\n0010240   7\n",
+        "stderr": ""
+      },
+      "flags": [
+        "j",
+        "A",
+        "t",
+        "N"
+      ]
+    }
+  ]
+}

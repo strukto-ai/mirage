@@ -146,22 +146,20 @@ export function parseFlags(bag: Record<string, FlagValue>): SortFlags {
   let output: PathSpec | null = null
   // Each -o is the next word typed, and GNU compares two by that word
   // (STREQ), so `-o ./out -o out` names two outputs even though they are one
-  // file. A line parsed for a cross-mount strategy keeps the resolved
-  // strings, compared as they are. Mirrors sort.py.
+  // file. Mirrors sort.py.
   const typed = fl.asPaths('output')
   let next = 0
   for (const [dest, value] of fl.occurrences('key', 'output', 'c', 'C', 'check')) {
     if (dest === 'key' && typeof value === 'string') {
       parseKeydef(value, NO_MODS, false)
     } else if (dest === 'output') {
-      for (const word of typeof value === 'string' ? [value] : []) {
-        const path = typed[next] ?? PathSpec.fromStrPath(word)
-        next += 1
-        if (output !== null && path.rawPath !== output.rawPath) {
-          throw new UsageError(MULTIPLE_OUTPUTS)
-        }
-        output = path
+      const path = typed[next]
+      next += 1
+      if (path === undefined) continue
+      if (output !== null && path.rawPath !== output.rawPath) {
+        throw new UsageError(MULTIPLE_OUTPUTS)
       }
+      output = path
     } else if (dest === 'check' || value === true) {
       const letter = checkMode(value, dest)
       if (mode !== null && letter !== mode) throw new UsageError(CHECK_MODES_CONFLICT)

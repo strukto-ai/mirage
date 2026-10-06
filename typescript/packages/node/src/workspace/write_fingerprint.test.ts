@@ -108,9 +108,11 @@ describe('object-store write fingerprint (mocked S3)', () => {
     const ws = makeWorkspace(FRESH)
     try {
       await ws.shell('tee /s3/x.txt <<< hello')
+      // Only the read is counted: tee probes its output before it writes.
+      mock.calls.clear()
       const read = await ws.shell('cat /s3/x.txt')
       expect(DEC.decode(read.stdout)).toBe('hello\n')
-      expect(mock.calls.get('HeadObject') ?? 0).toBeGreaterThanOrEqual(1)
+      expect(mock.calls.get('HeadObject') ?? 0).toBe(1)
       expect(mock.calls.get('GetObject') ?? 0).toBe(0)
     } finally {
       await ws.close()

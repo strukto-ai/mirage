@@ -16,9 +16,11 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { loginPath, writeLogin, type Login } from './credentials.ts'
 import {
   DEFAULT_DAEMON_URL,
   getConfig,
+  isLocalUrl,
   listConfig,
   loadDaemonSettings,
   resolvedConfig,
@@ -27,6 +29,18 @@ import {
 } from './settings.ts'
 
 const ABSENT_FILE = '/nonexistent/auth_token'
+
+function storedLogin(url: string): Login {
+  return {
+    url,
+    access_token: 'from-login',
+    logged_in_at: Date.now() / 1000,
+    refresh_token: null,
+    expires_at: null,
+    client_id: null,
+    token_endpoint: null,
+  }
+}
 
 describe('loadDaemonSettings', () => {
   it('returns defaults when env unset and no file', () => {
@@ -63,7 +77,7 @@ describe('loadDaemonSettings', () => {
       const tokenFile = join(dir, 'auth_token')
       writeFileSync(tokenFile, 'from-file')
       const s = loadDaemonSettings({
-        env: {},
+        env: { MIRAGE_HOME: dir },
         configPath: '/nonexistent/config.toml',
         tokenFile,
       })
@@ -71,6 +85,87 @@ describe('loadDaemonSettings', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it('a remote URL never takes the token file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-settings-'))
+    try {
+      const tokenFile = join(dir, 'auth_token')
+      writeFileSync(tokenFile, 'from-file')
+      const s = loadDaemonSettings({
+        env: { MIRAGE_DAEMON_URL: 'https://mirage.example.com' },
+        configPath: '/nonexistent/config.toml',
+        tokenFile,
+      })
+      expect(s.authToken).toBe('')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('takes a login made for this URL before the token file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-settings-'))
+    try {
+      const tokenFile = join(dir, 'auth_token')
+      writeFileSync(tokenFile, 'from-file')
+      writeLogin(storedLogin('http://127.0.0.1:8765'), loginPath({ MIRAGE_HOME: dir }))
+      const s = loadDaemonSettings({
+        env: { MIRAGE_HOME: dir, MIRAGE_DAEMON_URL: 'http://127.0.0.1:8765/' },
+        configPath: '/nonexistent/config.toml',
+        tokenFile,
+      })
+      expect(s.authToken).toBe('')
+      expect(s.login?.access_token).toBe('from-login')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('never sends a login to another server', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-settings-'))
+    try {
+      writeLogin(storedLogin('https://other.example.com'), loginPath({ MIRAGE_HOME: dir }))
+      const s = loadDaemonSettings({
+        env: { MIRAGE_HOME: dir, MIRAGE_DAEMON_URL: 'https://mirage.example.com' },
+        configPath: '/nonexistent/config.toml',
+        tokenFile: ABSENT_FILE,
+      })
+      expect(s.authToken).toBe('')
+      expect(s.login).toBeUndefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('takes a set token before the login', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-settings-'))
+    try {
+      writeLogin(storedLogin('https://mirage.example.com'), loginPath({ MIRAGE_HOME: dir }))
+      const s = loadDaemonSettings({
+        env: {
+          MIRAGE_HOME: dir,
+          MIRAGE_DAEMON_URL: 'https://mirage.example.com',
+          MIRAGE_TOKEN: 'from-env',
+        },
+        configPath: '/nonexistent/config.toml',
+        tokenFile: ABSENT_FILE,
+      })
+      expect(s.authToken).toBe('from-env')
+      expect(s.login).toBeUndefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it.each([
+    ['http://127.0.0.1:8765', true],
+    ['http://localhost:9100', true],
+    ['http://[::1]:8765', true],
+    ['https://mirage.example.com', false],
+    ['http://10.0.0.5:8765', false],
+    ['not a url', false],
+  ])('isLocalUrl(%s) is %s', (url, local) => {
+    expect(isLocalUrl(url)).toBe(local)
   })
 
   it('reads the exact configPath even when the basename is not config.toml', () => {

@@ -13,7 +13,7 @@ from mirage.commands.builtin.tail_counts import (
     parse_seconds,
 )
 from mirage.commands.builtin.utils.constants import STDIN_HEADER_NAME
-from mirage.commands.builtin.utils.operands import operands_io, split_readable
+from mirage.commands.builtin.utils.operands import operands_io, split_opened
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
     operand_label,
@@ -31,14 +31,16 @@ from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import argmatch_error
 from mirage.io.stream import async_chain, ensure_stream
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import encode_text
 from mirage.types import FileType, PathSpec, PolymorphicReadFn, StatFn
 from mirage.utils.errors import FS_ERRORS, fs_error_line, fs_strerror
+from mirage.utils.quote import shell_quote
 
 DEFAULT_SLEEP_INTERVAL = 1.0
 # GNU's `follow_mode_string`, in declaration order.
 FOLLOW_ARGS = ("descriptor", "name")
 # A bound byte-window reader, called as ``read_range(path, offset=, size=)``.
-ReadRangeFn = Callable[..., Awaitable[bytes]]
+ReadRange = Callable[..., Awaitable[bytes]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +72,9 @@ class TailFlags:
 RETRY_IGNORED = (
     b"tail: warning: --retry ignored; --retry is useful only when following\n"
 )
+RETRY_INITIAL = b"tail: warning: --retry only effective for the initial open\n"
+# A name is what -F follows, and standard input has none.
+STDIN_BY_NAME = b"tail: cannot follow '-' by name\n"
 # What a waited-for name is announced as when it turns up: a missing file
 # has appeared, an untailable one (a directory) has become accessible.
 APPEARED = "has appeared;  following new file"
@@ -134,10 +139,13 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TailFlags:
     if error is not None:
         raise ValueError(error)
     follow, by_name, retry = _follow_flags(fl)
+    # The last of -q and -v decides, as in GNU tail.
+    order = fl.typed_order("q", "v")
+    headers = order[-1] if order else None
     return TailFlags(
         counts=parse_counts(n_raw, c_raw),
-        quiet=fl.as_bool("q"),
-        verbose=fl.as_bool("v"),
+        quiet=headers == "q",
+        verbose=headers == "v",
         follow=follow,
         follow_name=by_name,
         retry=retry,
@@ -237,6 +245,7 @@ def tail_multi(
     from_line: int | None = None,
     from_byte: int | None = None,
     show_headers: bool = False,
+    unread: frozenset[str] = frozenset(),
 ) -> AsyncIterator[bytes]:
     """Run tail over multiple already-resolved paths.
 
@@ -254,6 +263,8 @@ def tail_multi(
         paths (list[PathSpec]): Resolved paths; only ``.virtual`` is read.
         read (Callable[..., Any]): Bound reader called as ``read(path)``;
             returns bytes, an awaitable of bytes, or an async byte iterator.
+        unread (frozenset[str]): operands that opened but do not read (a
+            directory): each prints its header and nothing else.
     """
     cached = cache_aware_read(read)
     return _tail_multi(
@@ -264,6 +275,7 @@ def tail_multi(
         from_line=from_line,
         from_byte=from_byte,
         show_headers=show_headers,
+        unread=unread,
     )
 
 
@@ -276,13 +288,16 @@ async def _tail_multi(
     from_line: int | None = None,
     from_byte: int | None = None,
     show_headers: bool = False,
+    unread: frozenset[str] = frozenset(),
 ) -> AsyncIterator[bytes]:
     for i, p in enumerate(paths):
         if show_headers:
             header = f"==> {operand_label(p, STDIN_HEADER_NAME)} <==\n"
             if i > 0:
                 header = "\n" + header
-            yield header.encode()
+            yield encode_text(header)
+        if p.virtual in unread:
+            continue
         source = read(p)
         if inspect.isawaitable(source):
             source = await source
@@ -305,7 +320,7 @@ def _note(io: IOResult, message: str) -> None:
         message (str): the ``tail: ...`` line, newline included.
     """
     prior = io.stderr if isinstance(io.stderr, bytes) else b""
-    io.stderr = prior + message.encode()
+    io.stderr = prior + encode_text(message)
 
 
 async def _counted(source: Any, box: list[int]) -> AsyncIterator[bytes]:
@@ -324,7 +339,7 @@ async def _counted(source: Any, box: list[int]) -> AsyncIterator[bytes]:
 
 async def _window(
     read: Callable[..., Any],
-    read_range: ReadRangeFn | None,
+    read_range: ReadRange | None,
     path: PathSpec,
     offset: int,
     size: int,
@@ -333,7 +348,7 @@ async def _window(
 
     Args:
         read (Callable[..., Any]): whole-file reader, the fallback.
-        read_range (ReadRangeFn | None): the backend's byte window, if
+        read_range (ReadRange | None): the backend's byte window, if
             it has one.
         path (PathSpec): the file.
         offset (int): where the last poll ended.
@@ -359,7 +374,7 @@ async def _whole(read: Callable[..., Any], path: PathSpec) -> bytes:
 
 async def _catch_up(
     read: Callable[..., Any],
-    read_range: ReadRangeFn | None,
+    read_range: ReadRange | None,
     io: IOResult,
     p: PathSpec,
     size: int | None,
@@ -372,7 +387,7 @@ async def _catch_up(
 
     Args:
         read (Callable[..., Any]): bound whole-file reader.
-        read_range (ReadRangeFn | None): the backend's byte window, if
+        read_range (ReadRange | None): the backend's byte window, if
             it has one.
         io (IOResult): the result a truncation notice lands on.
         p (PathSpec): the file.
@@ -401,12 +416,14 @@ async def _follow(
     pending: list[tuple[PathSpec, str]],
     *,
     read: Callable[..., Any],
-    read_range: ReadRangeFn | None,
+    read_range: ReadRange | None,
     stat: StatFn,
     counts: TailCounts,
     show_headers: bool,
     flags: TailFlags,
     io: IOResult,
+    unread: frozenset[str] = frozenset(),
+    only_stdin: bool = False,
 ) -> AsyncIterator[bytes]:
     """Print each operand's tail, then keep printing what it gains.
 
@@ -448,23 +465,38 @@ async def _follow(
     State is per operand, not per path: ``tail -f f f`` prints what
     ``f`` gains twice, under a header each time, as GNU does.
 
+    Standard input is printed once and never followed: POSIX has tail
+    ignore -f on a pipe, and GNU extends that to every ``-`` operand. A
+    line that named nothing else has nothing left to wait for, so it
+    ends there, without ``no files remaining``.
+
     Args:
         paths (list[PathSpec]): the operands that opened.
         pending (list[tuple[PathSpec, str]]): the ones ``--retry`` waits
             for, each with the notice that announces it.
         read (Callable[..., Any]): bound whole-file reader.
-        read_range (ReadRangeFn | None): bound byte-window reader.
+        read_range (ReadRange | None): bound byte-window reader.
         stat (StatFn): bound stat.
         counts (TailCounts): what the first print shows.
         show_headers (bool): the ``==> name <==`` rule.
         flags (TailFlags): the parsed flags.
         io (IOResult): the result the notices are appended to.
+        unread (frozenset[str]): operands that opened but do not read (a
+            directory): each prints its header, and none is followed.
+        only_stdin (bool): every operand is standard input.
     """
     positions: dict[int, int] = {}
     active = list(enumerate(paths))
     waiting = [(len(paths) + i, p, how) for i, (p, how) in enumerate(pending)]
     last: int | None = None
     for slot, p in list(active):
+        if p.virtual in unread:
+            if show_headers:
+                header = f"==> {operand_label(p, STDIN_HEADER_NAME)} <==\n"
+                yield encode_text(("\n" if last is not None else "") + header)
+            last = slot
+            active.remove((slot, p))
+            continue
         box = [0]
         try:
             chunks = [
@@ -492,17 +524,28 @@ async def _follow(
             continue
         if show_headers:
             header = f"==> {operand_label(p, STDIN_HEADER_NAME)} <==\n"
-            yield (("\n" if last is not None else "") + header).encode()
+            yield encode_text(("\n" if last is not None else "") + header)
         last = slot
         for chunk in chunks:
             yield chunk
         positions[slot] = box[0]
+    active = [(slot, p) for slot, p in active if not is_stdin(p)]
+    if only_stdin:
+        return
     while active or waiting:
         await asyncio.sleep(flags.interval)
         for slot, p, how in list(waiting):
             try:
                 found = await stat(p)
             except FS_ERRORS:
+                # The name is gone now, so whatever stands there next
+                # has appeared, whatever stood there before.
+                if how != APPEARED:
+                    waiting[waiting.index((slot, p, how))] = (
+                        slot,
+                        p,
+                        APPEARED,
+                    )
                 continue
             if found.type is FileType.DIRECTORY:
                 continue
@@ -526,11 +569,16 @@ async def _follow(
                 # A path that went away, whether its stat failed or the
                 # read right after it did (a rotation between the two).
                 # Only name-following notices; under a descriptor
-                # --retry covers the initial open alone, as in GNU.
+                # --retry covers the initial open alone, as in GNU,
+                # which words the loss as an inaccessible name only
+                # when it means to wait for the name to come back.
                 if flags.follow_name:
                     _note(
                         io,
                         f"tail: '{p.raw_path}' has become inaccessible: "
+                        f"{fs_strerror(exc)}\n"
+                        if flags.retry
+                        else f"tail: {shell_quote(p.raw_path)}: "
                         f"{fs_strerror(exc)}\n",
                     )
                     active.remove((slot, p))
@@ -557,7 +605,7 @@ async def _follow(
             if data:
                 if show_headers and last != slot:
                     label = operand_label(p, STDIN_HEADER_NAME)
-                    yield f"\n==> {label} <==\n".encode()
+                    yield encode_text(f"\n==> {label} <==\n")
                 last = slot
                 yield data
     _note(io, "tail: no files remaining\n")
@@ -618,7 +666,7 @@ async def tail_generic(
     opts: CommandOpts,
     stat: StatFn,
     stream: PolymorphicReadFn,
-    read_range: ReadRangeFn | None = None,
+    read_range: ReadRange | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run tail over resolved operands, GNU semantics; mirrors tailGeneric.
 
@@ -634,7 +682,7 @@ async def tail_generic(
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
-        read_range (ReadRangeFn | None): Bound byte-window reader
+        read_range (ReadRange | None): Bound byte-window reader
             called as ``read_range(path, offset, size)``, for a follow
             that only wants what the file gained; None reads whole.
     """
@@ -644,32 +692,38 @@ async def tail_generic(
         parsed = parse_flags(opts.flags)
     except UsageError as exc:
         return None, IOResult(
-            exit_code=exc.exit_code, stderr=f"{exc}\n".encode()
+            exit_code=exc.exit_code, stderr=encode_text(f"{exc}\n")
         )
     except ValueError as exc:
-        return None, IOResult(exit_code=1, stderr=str(exc).encode())
+        return None, IOResult(exit_code=1, stderr=encode_text(str(exc)))
     counts = parsed.counts
-    # GNU warns first, then tails as if --retry were not there.
+    if (
+        parsed.follow
+        and parsed.follow_name
+        and (not paths or any(is_stdin(p) for p in paths))
+    ):
+        return None, IOResult(exit_code=1, stderr=STDIN_BY_NAME)
+    # GNU warns first, then tails as if --retry were not there; a
+    # descriptor it follows only after the initial open says so too.
     retry_warning = (
-        RETRY_IGNORED if parsed.retry and not parsed.follow else b""
+        RETRY_IGNORED
+        if parsed.retry and not parsed.follow
+        else RETRY_INITIAL
+        if parsed.retry and not parsed.follow_name
+        else b""
     )
     if paths:
         show_headers = (parsed.verbose or len(paths) > 1) and not parsed.quiet
-        readable, err = await split_readable(paths, stat, "tail")
+        opened, unread, err = await split_opened(paths, stat, "tail")
         io = operands_io(err)
         if retry_warning:
             io.stderr = retry_warning + (
                 io.stderr if isinstance(io.stderr, bytes) else b""
             )
         if parsed.follow:
-            if parsed.retry and not parsed.follow_name:
-                io.stderr = (
-                    b"tail: warning: --retry only effective for "
-                    b"the initial open\n"
-                    + (io.stderr if isinstance(io.stderr, bytes) else b"")
-                )
+            readable = [p for p in opened if p.virtual not in unread]
             pending = await _unfollowable(paths, readable, stat, parsed, io)
-            if not readable and not pending:
+            if not readable and not pending and not (show_headers and opened):
                 _note(io, "tail: no files remaining\n")
                 io.exit_code = 1
                 return None, io
@@ -677,7 +731,7 @@ async def tail_generic(
             # cache: what it is polling for is exactly the change the
             # cached body does not have yet.
             return _follow(
-                readable,
+                opened,
                 pending,
                 read=stream,
                 read_range=read_range,
@@ -686,17 +740,20 @@ async def tail_generic(
                 show_headers=show_headers,
                 flags=parsed,
                 io=io,
+                unread=unread,
+                only_stdin=all(is_stdin(p) for p in paths),
             ), io
-        if not readable:
+        if not opened:
             return None, io
         return tail_multi(
-            readable,
+            opened,
             read=stream,
             n=counts.lines,
             c=counts.byte_count,
             from_line=counts.from_line,
             from_byte=counts.from_byte,
             show_headers=show_headers,
+            unread=unread,
         ), io
     source = resolve_source(opts.stdin)
     body = tail(
@@ -708,5 +765,7 @@ async def tail_generic(
     )
     if parsed.verbose and not parsed.quiet:
         # -v heads a stdin nobody named with the name it gives `-`.
-        body = async_chain([f"==> {STDIN_HEADER_NAME} <==\n".encode(), body])
+        body = async_chain(
+            [encode_text(f"==> {STDIN_HEADER_NAME} <==\n"), body]
+        )
     return body, IOResult(stderr=retry_warning or None)

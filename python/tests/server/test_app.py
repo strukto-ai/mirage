@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
 
 import asyncssh
@@ -19,7 +20,12 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from mirage.server import app as app_module
-from mirage.server.app import _remove_pid_file, _write_pid_file, build_app
+from mirage.server.app import (
+    _remove_pid_file,
+    _watch_exit,
+    _write_pid_file,
+    build_app,
+)
 from mirage.server.daemon_config import DaemonConfigError
 from mirage.server.env import ENV_HOME
 from mirage.server.ssh.config import SSHConfig
@@ -35,8 +41,8 @@ def test_build_app_pid_file_explicit_wins(tmp_path):
 def test_build_app_roots_follow_mirage_home(monkeypatch, tmp_path):
     monkeypatch.setenv(ENV_HOME, str(tmp_path))
     app = build_app()
-    assert app.state.pid_file == tmp_path / "daemon.pid"
-    assert app.state.snapshot_root == tmp_path / "snapshots"
+    assert app.state.pid_file is None
+    assert app.state.on_idle_exit is None
     assert app.state.state_root == tmp_path / "state"
 
 
@@ -50,6 +56,20 @@ def test_write_and_remove_pid_file_creates_parents(tmp_path):
 
 def test_remove_pid_file_missing_is_quiet(tmp_path):
     _remove_pid_file(tmp_path / "does_not_exist.pid")
+
+
+@pytest.mark.asyncio
+async def test_watch_exit_calls_the_hook_once_the_event_is_set():
+    event = asyncio.Event()
+    calls: list[str] = []
+    watcher = asyncio.create_task(
+        _watch_exit(event, lambda: calls.append("exit"))
+    )
+    await asyncio.sleep(0)
+    assert calls == []
+    event.set()
+    await watcher
+    assert calls == ["exit"]
 
 
 def test_build_app_rejects_unknown_config_key(monkeypatch, tmp_path):
@@ -78,7 +98,7 @@ def _ssh_config(tmp_path, key: asyncssh.SSHKey) -> SSHConfig:
 
 def test_build_app_keeps_the_ssh_door_shut_by_default(tmp_path):
     app = build_app(pid_file=tmp_path / "daemon.pid")
-    assert app.state.ssh_config is None
+    assert app.state.ssh_config.port is None
 
 
 @pytest.mark.asyncio

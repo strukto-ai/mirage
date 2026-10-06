@@ -36,6 +36,81 @@
       "flags": [
         "c"
       ]
+    },
+    {
+      "id": "tr_complement_long_form",
+      "seq": 15500402,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abc123' | tr --complement 0-9 _",
+      "expect": {
+        "exit": 0,
+        "stdout": "___123",
+        "stderr": ""
+      },
+      "flags": [
+        "complement"
+      ]
+    },
+    {
+      "id": "tr_cd_keeps_only_the_set",
+      "seq": 15500403,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'Hello World 123\\n' | tr -cd a-z",
+      "expect": {
+        "exit": 0,
+        "stdout": "elloorld",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "d"
+      ]
     }
   ]
 }

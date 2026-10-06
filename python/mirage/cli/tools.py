@@ -109,7 +109,7 @@ def edit_cmd(
         False, "--replace-all", help="Replace every occurrence."
     ),
 ) -> None:
-    """Replace a string in a file read first."""
+    """Replace a string in an existing file."""
     call_tool(
         workspace_id,
         session_id,

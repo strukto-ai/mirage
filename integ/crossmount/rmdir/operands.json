@@ -1,0 +1,62 @@
+{
+  "cases": [
+    {
+      "id": "xm_rmdir_both_mounts",
+      "seq": 9900015,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir /data/xm_rmd /data2/xm_rmd && rmdir /data/xm_rmd /data2/xm_rmd && test ! -d /data/xm_rmd && test ! -d /data2/xm_rmd && echo removed",
+      "expect": {
+        "exit": 0,
+        "stdout": "removed\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_rmdir_continues_after_missing",
+      "seq": 9900016,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir /data2/xm_rmd_after && rmdir /data/xm_rmd_missing /data2/xm_rmd_after; echo status:$?; test ! -d /data2/xm_rmd_after && echo removed",
+      "expect": {
+        "exit": 0,
+        "stdout": "status:1\nremoved\n",
+        "stderr": "rmdir: failed to remove '/data/xm_rmd_missing': No such file or directory\n"
+      }
+    }
+  ]
+}

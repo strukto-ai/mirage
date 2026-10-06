@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "chown_option_errors_and_options_after_operands",
+      "seq": 15000022,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "chown --bogus 0 /data/a.txt; echo rc=$?; chown -R --dereference 0 /data/sub; echo rc=$?; chown -Q 0 /data/a.txt; echo rc=$?; chown 0; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "chown: unrecognized option '--bogus'\nTry 'chown --help' for more information.\nchown: -R --dereference requires either -H or -L\nchown: invalid option -- 'Q'\nTry 'chown --help' for more information.\nchown: missing operand after '0'\nTry 'chown --help' for more information.\n"
+      }
+    }
+  ]
+}

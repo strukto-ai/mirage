@@ -23,7 +23,7 @@ from mirage.core.hf_buckets.hub import (
     read_token,
     resolve_url,
 )
-from mirage.core.hf_buckets.read import read_bytes
+from mirage.core.hf_buckets.read import read
 from mirage.core.hf_hub.client import HfHubError
 from mirage.types import PathSpec
 from mirage.vfs.hf_buckets.config import HfBucketsConfig
@@ -74,7 +74,6 @@ def test_a_trailing_slash_endpoint_is_not_doubled():
 
 
 def _rows(answer):
-
     async def post(*_args, **kwargs):
         post.bodies.append(_args[2] if len(_args) > 2 else kwargs)
         return answer
@@ -223,7 +222,7 @@ async def test_the_token_reaches_both_bucket_routes(token, sent):
         acc = make_accessor({"a.txt": b"x"}, hub=hub, token=token)
         try:
             assert await fetch_row(acc, "a.txt") is not None
-            await read_bytes(acc, PathSpec.from_str_path("/a.txt"))
+            await read(acc, PathSpec.from_str_path("/a.txt"))
         finally:
             await acc.close()
     assert hub.auth["bucket_paths_info"] == [sent]

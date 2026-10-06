@@ -1,0 +1,165 @@
+---
+title: CLI
+description: Every mirage command, the same in the Python and TypeScript packages.
+icon: /images/mirage-icon-light.svg
+---
+
+`mirage` is a client of the server's [HTTP routes](/home/access/http), with the same commands in Python and TypeScript. When its `url` is on this machine, it starts a server on first use; a remote `url` is never started.
+
+## Install
+
+<CodeGroup>
+```bash script
+curl -fsSL https://strukto.ai/mirage/install.sh | sh
+```
+
+```bash pip
+pip install mirage-ai
+```
+
+```bash uv
+uv tool install mirage-ai
+```
+
+```bash npm
+npm install -g @struktoai/mirage-cli
+```
+</CodeGroup>
+
+## Quickstart
+
+```bash
+mirage workspace create workspace.yaml --id demo   # starts the server
+mirage shell -w demo -c 'ls / | head'
+mirage grep -w demo -i error /
+mirage workspace delete demo
+```
+
+`workspace.yaml` is a [workspace config](/home/yaml).
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success. |
+| `1` | A tool command's tool failed, or the server could not be reached. |
+| `2` | A usage error, a bad config, or a refusal from the server. |
+| `130` | The line was interrupted with Ctrl-C or canceled. |
+| `N` | `shell`, `job wait` and `job get` exit with the line's own status. |
+
+## Run lines and tools
+
+`-w` names the workspace and `-s` the session, the default one when absent.
+
+| Command | Does |
+| --- | --- |
+| `mirage shell -w ID -c LINE [--cwd PATH] [--bg]` | Run a line. Piped stdin streams to it, Ctrl-C cancels it, and `--bg` returns a job id at once. |
+| `mirage read -w ID PATH [--offset N] [--limit N]` | Read a file. |
+| `mirage write -w ID PATH [--content TEXT]` | Write a file, from stdin without `--content`. |
+| `mirage edit -w ID PATH OLD NEW [--replace-all]` | Replace a string in a file. |
+| `mirage ls -w ID PATH` | List a directory. |
+| `mirage grep -w ID PATTERN PATH [-i] [-F] [-l] [-c] [-m N] [-C N] [--include GLOB]` | Search file contents. |
+| `mirage glob -w ID PATTERN [PATH]` | Find paths by pattern. |
+
+### `mirage mcp`
+
+`mirage mcp [CONFIG] [-w ID] [-s SESSION]` serves a session's [MCP](/home/access/mcp) tools on stdio. `mirage rpc` takes the same arguments and serves [RPC](/home/access/rpc). `mirage ssh-proxy ID` carries [SSH](/home/access/ssh#over-https) to workspace `ID` over the server's HTTPS port, for ssh's `ProxyCommand`.
+
+With `-w`, it serves a workspace the server already holds. Otherwise it creates one from `CONFIG`, from `MIRAGE_MCP_CONFIG` (`MIRAGE_RPC_CONFIG`) or `MIRAGE_CONFIG`, or from a `workspace.yaml` found walking up from the working directory. It deletes that workspace when the client disconnects, unless the config names a `workspace_id`.
+
+## Workspaces
+
+| Command | Does |
+| --- | --- |
+| `mirage workspace create CONFIG [--id ID]` | Create a workspace from a YAML or JSON config. |
+| `mirage workspace list` | List workspaces. |
+| `mirage workspace get ID [--verbose]` | Show mounts and sessions. |
+| `mirage workspace delete ID` | Close a workspace and delete its state. |
+| `mirage workspace close ID` | Close a workspace and keep its state for the same id. |
+| `mirage workspace cancel ID` | Cancel the running lines of every session. |
+| `mirage workspace kill ID` | Kill the background jobs of every session. |
+| `mirage workspace clone SRC [--id ID]` | Copy a workspace. |
+| `mirage workspace snapshot ID FILE.tar` | Save it to a tar here: the server sends the tar back, on this machine or another. |
+| `mirage workspace snapshot ID --key KEY` | Save it to the server's [snapshot store](/home/snapshot#an-s3-like-store) instead. |
+| `mirage workspace load FILE.tar [CONFIG] [--id ID]` | Restore a tar from here, uploading it. `CONFIG` gives back the credentials the snapshot left out. |
+| `mirage workspace load --key KEY [CONFIG] [--id ID]` | Restore one from the server's snapshot store. |
+| `mirage workspace vfs-md ID [--session S] [--path PATH] [--profile P]` | Print the [VFS.md](/home/workspace#vfs-md-and-skill-md), or expose it as a live file at `PATH`. |
+| `mirage workspace skill-md ID [--session S] [--path PATH] [--profile P]` | The same for SKILL.md. |
+
+### Asks
+
+| Command | Does |
+| --- | --- |
+| `mirage workspace list-asks ID [--session S] [--all]` | List pending [asks](/home/permissions#asks). |
+| `mirage workspace allow ID ASK [--scope once\|session]` | Allow one. |
+| `mirage workspace deny ID ASK` | Deny one. |
+
+## Sessions
+
+| Command | Does |
+| --- | --- |
+| `mirage session create ID [--id S] [-p PROFILE] [-m /prefix:mode]...` | Add a session under a [profile](/home/permissions), with mounts narrowed to `r`, `rw` or `rwx`. |
+| `mirage session list ID` | List sessions. |
+| `mirage session delete ID S` | Close a session. |
+| `mirage session cancel ID S` | Cancel the session's running lines. |
+| `mirage session kill ID S` | Kill the session's background jobs. |
+| `mirage session update ID S (-p PROFILE \| --default-profile)` | Replace the session's profile; its cwd, env and history stay. |
+
+## Jobs
+
+| Command | Does |
+| --- | --- |
+| `mirage job list [-w ID]` | List jobs. |
+| `mirage job get JOB` | Show one job and its result. |
+| `mirage job wait JOB [--timeout SECONDS]` | Wait for a job to finish. |
+| `mirage job cancel JOB` | Cancel a job. |
+
+## Daemon
+
+The server the CLI starts. It exits 30 seconds after its last workspace is deleted, and logs to `~/.mirage/daemon.log`.
+
+| Command | Does |
+| --- | --- |
+| `mirage daemon status` | Show PID, uptime and workspace count. |
+| `mirage daemon stop` | Close its workspaces and exit. |
+| `mirage daemon restart [--eager]` | Stop it; the next command, or `--eager`, starts a new one. Workspaces are lost. |
+| `mirage daemon kill` | Kill it. A last resort. |
+
+## Log in
+
+A server in `jwt` mode, such as a hosted one, needs a login. Point the CLI at it and log in once:
+
+```bash
+mirage config set url https://mirage.example.com
+mirage login
+```
+
+`mirage login` asks the server where to sign in, opens your browser there, and waits. If you are already signed in, the browser comes straight back. The CLI then keeps the tokens in `~/.mirage/login.json`, readable only by you. A machine with no browser can use `mirage login --token TOKEN` instead, which keeps a token you paste once the server accepts it; `--token -` reads it from stdin, so it stays out of your shell history.
+
+| Command | Does |
+| --- | --- |
+| `mirage login [--token TOKEN]` | Log in to the server `url` points at. |
+| `mirage whoami` | Show the account and the date to log in again by. |
+| `mirage logout` | Forget the login. |
+
+- Every command sends the login's token, `ssh-proxy` included, but only to the server it was made for. `MIRAGE_TOKEN` or `auth_token` wins over it.
+- The CLI refreshes the token when it ends, and asks you to log in again 30 days after you signed in. A running `mcp` or `rpc` relay asks for it on every request, so it keeps working past a refresh.
+- A server that publishes no login, such as the one the CLI starts on your machine, needs none, and `mirage login` says so.
+
+## Config
+
+`mirage config set|get|unset|list` edits `~/.mirage/config.toml`. An environment variable wins over the file. Changes apply on the next start.
+
+| Key | Env var | Default |
+| --- | --- | --- |
+| `url` | `MIRAGE_DAEMON_URL` | `http://127.0.0.1:8765` |
+| `port` | `MIRAGE_DAEMON_PORT` | the `url`'s port |
+| `auth_token` | `MIRAGE_TOKEN` | your [login](#log-in) for this `url`, else `~/.mirage/auth_token` for a local `url` |
+| `auth_mode` | `MIRAGE_AUTH_MODE` | `local` |
+| `allowed_hosts` | `MIRAGE_ALLOWED_HOSTS` | `127.0.0.1,localhost,::1` |
+| `idle_grace_seconds` | `MIRAGE_IDLE_GRACE_SECONDS` | `30` |
+| `ssh_*` | `MIRAGE_SSH_*` | see [SSH](/home/access/ssh#settings) |
+| `jwt_*` | `MIRAGE_JWT_*` | see [Auth](/home/access/http#auth) |
+| `login_client_id` | `MIRAGE_LOGIN_CLIENT_ID` | see [CLI login](/home/access/http#cli-login) |
+
+`MIRAGE_HOME` moves everything under `~/.mirage`.

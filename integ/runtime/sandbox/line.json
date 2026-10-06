@@ -1,0 +1,57 @@
+{
+  "cases": [
+    {
+      "id": "echo",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "smolvm",
+        "apple_container"
+      ],
+      "steps": [
+        {
+          "command": "echo hi-from-box",
+          "expect": {
+            "exit": 0,
+            "stdout": "hi-from-box\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "exit_code",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "smolvm",
+        "apple_container"
+      ],
+      "steps": [
+        {
+          "command": "sh -c 'exit 7'",
+          "expect": {
+            "exit": 7
+          }
+        }
+      ]
+    },
+    {
+      "id": "quoting",
+      "runtimes": [
+        "ssh",
+        "e2b"
+      ],
+      "steps": [
+        {
+          "command": "printf '%s\\n' \"it's\" 'two  spaces'",
+          "expect": {
+            "exit": 0,
+            "stdout": "it's\ntwo  spaces\n"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -12,33 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.usage import (
-    missing_operand_error,
-    unknown_option_error,
-)
+from mirage.commands.spec.usage import missing_operand_error
 from mirage.runtime.types import DispatchFn
-from mirage.types import PathSpec, word_text
+from mirage.types import PathSpec
 from mirage.workspace.executor.builtins.metadata.metadata import (
-    apply_attrs,
-    apply_link_attrs,
+    change_owner,
     parse_group,
-    resolve_operand,
-    walk_owned,
 )
-from mirage.workspace.executor.builtins.shared import (
-    expand_operands,
-    fail,
-    finish,
-    operand_text,
-    split_value_flags,
-)
+from mirage.workspace.executor.builtins.shared import fail, parse_line
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.session import SessionState
 
 
 async def handle_chgrp(
     namespace: Namespace,
     dispatch: DispatchFn,
+    session: SessionState,
     args: list[str | PathSpec],
 ) -> Result:
     """chgrp GROUP FILE...: set group ownership via setattr.
@@ -52,48 +42,20 @@ async def handle_chgrp(
     Args:
         namespace (Namespace): addressing authority.
         dispatch (DispatchFn): op dispatcher.
+        session (SessionState): session whose cwd resolves operands.
         args (list[str | PathSpec]): args after the command name.
     """
-    flags, _values, operands, bad = split_value_flags(args, "Rvfh", "")
-    if bad is not None:
-        message, code = unknown_option_error("chgrp", bad)
-        return fail("chgrp", message.decode(), code)
-    if len(operands) < 2:
-        last = word_text(operands[0]) if operands else None
+    parsed, fl, refused = parse_line("chgrp", args, session.cwd)
+    if refused is not None:
+        return refused
+    if not parsed.texts or not parsed.paths:
+        last = parsed.texts[0] if parsed.texts else None
         error = missing_operand_error("chgrp", last)
         return fail("chgrp", f"{error}\n", error.exit_code)
-    group_text = operand_text(operands[0])
+    group_text = parsed.texts[0]
     gid = parse_group(group_text)
     if gid is None:
         return fail("chgrp", f"chgrp: invalid group: '{group_text}'\n", 1)
-
-    recursive = "R" in flags
-    no_deref = recursive or "h" in flags
-    errors: list[str] = []
-    for target in await expand_operands(namespace, operands[1:]):
-        if no_deref and namespace.is_link(target.virtual):
-            await apply_link_attrs(dispatch, "chgrp", target, errors, gid=gid)
-            continue
-        found = await resolve_operand(
-            namespace, dispatch, "chgrp", target, errors
-        )
-        if found is None:
-            continue
-        resolved, stat = found
-        if recursive:
-            paths, links = await walk_owned(
-                namespace, dispatch, resolved, stat
-            )
-        else:
-            paths, links = [resolved], []
-        for path in paths:
-            await apply_attrs(dispatch, "chgrp", path, errors, gid=gid)
-        for link in links:
-            await apply_link_attrs(
-                dispatch,
-                "chgrp",
-                PathSpec.from_str_path(link),
-                errors,
-                gid=gid,
-            )
-    return finish("chgrp", errors)
+    return await change_owner(
+        namespace, dispatch, session, "chgrp", fl, parsed.paths, None, gid
+    )

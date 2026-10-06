@@ -64,6 +64,37 @@
         "stdout": "rc=1\nrc=1\n",
         "stderr": "readlink: missing operand\nTry 'readlink --help' for more information.\nreadlink: missing operand\nTry 'readlink --help' for more information.\n"
       }
+    },
+    {
+      "id": "readlink_option_errors",
+      "seq": 15000053,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "readlink -Q /data/a.txt; echo rc=$?; readlink --bogus /data/a.txt; echo rc=$?; readlink --canon /data/a.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\n",
+        "stderr": "readlink: invalid option -- 'Q'\nTry 'readlink --help' for more information.\nreadlink: unrecognized option '--bogus'\nTry 'readlink --help' for more information.\nreadlink: option '--canon' is ambiguous; possibilities: '--canonicalize' '--canonicalize-existing' '--canonicalize-missing'\nTry 'readlink --help' for more information.\n"
+      }
     }
   ]
 }

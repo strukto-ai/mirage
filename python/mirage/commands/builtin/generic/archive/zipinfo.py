@@ -339,7 +339,7 @@ def _kind_flags(row: ZipRow) -> str:
     return first + second
 
 
-def _compressed(row: ZipRow) -> int:
+def _compressed_of(row: ZipRow) -> int:
     """Compressed bytes as zipinfo counts them: minus an encryption header.
 
     Args:
@@ -363,7 +363,9 @@ def render_row(row: ZipRow, fmt: ZipinfoRows) -> str:
     host = HOSTS[min(row.host, len(HOSTS) - 1)]
     line = f"{_attribs(row)} {host} {row.size:>8} {_kind_flags(row)}"
     if fmt == "medium":
-        percent = int((compression_ratio(row.size, _compressed(row)) + 5) / 10)
+        percent = int(
+            (compression_ratio(row.size, _compressed_of(row)) + 5) / 10
+        )
         line += f"{percent:>3}%"
     elif fmt == "long":
         line += f" {row.csize:>8}"
@@ -418,7 +420,7 @@ def render_totals(rows: list[ZipRow]) -> str:
         rows (list[ZipRow]): the entries that were listed.
     """
     uncompressed = sum(r.size for r in rows)
-    compressed = sum(_compressed(r) for r in rows)
+    compressed = sum(_compressed_of(r) for r in rows)
     ratio = compression_ratio(uncompressed, compressed)
     sign = "-" if ratio < 0 else ""
     ratio = abs(ratio)
@@ -494,7 +496,7 @@ def render_verbose(
     parts.append(VERBOSE_HEADER.encode())
     for row in rows:
         year, month, day, hour, minute, _ = row.date_time
-        csize = _compressed(row)
+        csize = _compressed_of(row)
         parts.append(
             f"{row.size:>8}  {_list_method(row):<7}{csize:>8} "
             f"{_saved(row.size, csize):>4} {year:04d}-{month:02d}-"
@@ -504,7 +506,7 @@ def render_verbose(
         if not quiet:
             parts.append(_comment(row.comment))
     size = sum(r.size for r in rows)
-    csize = sum(_compressed(r) for r in rows)
+    csize = sum(_compressed_of(r) for r in rows)
     plural = "" if len(rows) == 1 else "s"
     parts.append(
         f"{VERBOSE_RULE}{size:>8}         {csize:>8} "

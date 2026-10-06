@@ -382,6 +382,25 @@ describe('JobTable.popCompleted', () => {
     expect(stores.every((s) => s.closed)).toBe(true)
   })
 
+  it('a child table builds consoles its owner releases', async () => {
+    const stores: RAMConsoleStore[] = []
+    const factory = (): JobConsole => {
+      const store = new RAMConsoleStore()
+      stores.push(store)
+      return new JobConsole(store)
+    }
+    const jt = new JobTable(factory)
+    const child = jt.child().child(jt)
+    const j = child.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
+    expect(child.processes).toBe(jt.processes)
+    expect(child.parent).toBe(jt)
+    expect(jt.listJobs()).toEqual([])
+    await child.wait(j.id)
+    await jt.closeConsoles()
+    expect(stores).toHaveLength(1)
+    expect(stores.every((s) => s.closed)).toBe(true)
+  })
+
   it('closeConsoles leaves default consoles alone', async () => {
     const jt = new JobTable()
     const j = jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
@@ -608,4 +627,23 @@ it('factory failure never enters the job runner', async () => {
   expect(table.listJobs()).toEqual([])
   expect(table.processes.live()).toEqual([])
   expect(entered).toEqual([1])
+})
+
+it("a substitution lists its caller's jobs before its own", () => {
+  const caller = new JobTable()
+  const outer = caller.submit({
+    command: 'outer',
+    run: quiet,
+    abort: new AbortController(),
+    cwd: '/',
+  })
+  const innerTable = new JobTable(null, caller.processes, caller)
+  const inner = innerTable.submit({
+    command: 'inner',
+    run: quiet,
+    abort: new AbortController(),
+    cwd: '/',
+  })
+  expect(innerTable.listing()).toEqual([outer, inner])
+  expect(innerTable.listJobs()).toEqual([inner])
 })

@@ -56,6 +56,22 @@ EMPTY_PIPE = {
     ":gz": ("", "gzip: stdin: unexpected end of file"),
     ":xz": ("xz: (stdin): File format not recognized",),
 }
+# The child decompressor's refusal of an input that does not start with
+# its magic, by compression: the magic, the line, the child's status, and
+# whether an empty input is refused the same way (bzip2 1.0.8 answers an
+# empty or cut input with a paragraph of recovery advice mirage does not
+# reproduce; xz 5.8.1 refuses an empty one in these words).
+FOREIGN_INPUT = {
+    ":bz2": (b"BZh", "bzip2: (stdin) is not a bzip2 file.", 2, False),
+    ":xz": (
+        b"\xfd7zXZ\x00",
+        "xz: (stdin): File format not recognized",
+        1,
+        True,
+    ),
+}
+# What GNU says when a member's data runs past the end of the archive.
+UNEXPECTED_EOF = "tar: Unexpected EOF in archive"
 INVALID_ARCHIVE = (
     "tar: This does not look like a tar archive",
     "tar: Skipping to next header",

@@ -197,7 +197,7 @@ def restart_cmd(
         {
             "restarted": True,
             "spawned_fresh": False,
-            "note": "next workspace --create will auto-spawn",
+            "note": "next workspace create will auto-spawn",
         },
         human=_format_restart,
     )

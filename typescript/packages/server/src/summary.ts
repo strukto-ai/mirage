@@ -60,10 +60,10 @@ export function describeVfs(vfs: BaseVFS): string {
 async function buildInternals(ws: Workspace): Promise<WorkspaceInternals> {
   const cache = ws.cache
   return {
-    cacheBytes: cache.cacheSize,
-    cacheEntries: cache.cacheEntries ?? null,
-    historyLength: (await ws.history()).length,
-    inFlightJobs: ws.jobTable.allJobs().length,
+    cache_bytes: cache.cacheSize,
+    cache_entries: cache.cacheEntries ?? null,
+    history_length: (await ws.history()).length,
+    in_flight_jobs: ws.jobTable.allJobs().length,
   }
 }
 
@@ -73,9 +73,9 @@ export function makeBrief(entry: WorkspaceEntry): WorkspaceBrief {
   return {
     id: entry.id,
     mode: mounts[0]?.mode ?? 'read',
-    mountCount: mounts.length,
-    sessionCount: ws.listSessions().length,
-    createdAt: entry.createdAt,
+    mount_count: mounts.length,
+    session_count: ws.listSessions().length,
+    created_at: entry.createdAt,
   }
 }
 
@@ -89,15 +89,15 @@ export async function makeDetail(entry: WorkspaceEntry, verbose = false): Promis
     description: describeVfs(m.vfs),
   }))
   const sessions: SessionSummary[] = ws.listSessions().map((s) => ({
-    sessionId: s.sessionId,
+    session_id: s.sessionId,
     cwd: s.cwd,
   }))
   const fuseMountpoints = (ws as { fuseMountpoints?: Record<string, string> }).fuseMountpoints ?? {}
   return {
     id: entry.id,
     mode: mounts[0]?.mode ?? 'read',
-    createdAt: entry.createdAt,
-    fuseMountpoints,
+    created_at: entry.createdAt,
+    fuse_mountpoints: fuseMountpoints,
     mounts: mountSummaries,
     sessions,
     internals: verbose ? await buildInternals(ws) : null,

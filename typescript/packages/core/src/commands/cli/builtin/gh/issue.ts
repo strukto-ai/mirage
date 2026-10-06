@@ -31,6 +31,7 @@ import {
   bodyValue,
   camel,
   csvValues,
+  ghBool,
   ghTransport,
   jsonFields,
   repoFor,
@@ -204,7 +205,7 @@ export async function viewCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   return typedOut(
     row,
     fl,
-    fl.asBool('comments') ? commentsText(comments ?? []) : viewText(row),
+    ghBool(fl, 'comments') ? commentsText(comments ?? []) : viewText(row),
     ISSUE_FIELDS,
   )
 }
@@ -297,7 +298,7 @@ export async function commentsFor(
   ref: { owner: string; repo: string },
   number: number,
 ): Promise<Record<string, unknown>[] | null> {
-  if (!fl.asBool('comments')) return null
+  if (!ghBool(fl, 'comments')) return null
   const rows = await issueComments(ghTransport(inv.config), ref, number)
   return rows.map((row) => ({
     ...row,

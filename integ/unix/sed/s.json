@@ -1,0 +1,145 @@
+{
+  "cases": [
+    {
+      "id": "sed_s_directory_operand_ends_the_run",
+      "seq": 15300001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcC_sd/d && printf 'x\\n' > /data/fcC_sd/d/keep && printf 'one\\ntwo\\nthree\\n' > /data/fcC_sd/f && printf 'L1\\nL2\\n' > /data/fcC_sd/g && sed -n p /data/fcC_sd/f /data/fcC_sd/d /data/fcC_sd/g; echo rc=$?; sed -n -s 'n;p' /data/fcC_sd/f /data/fcC_sd/d /data/fcC_sd/g; echo rc=$?; rm -r /data/fcC_sd",
+      "expect": {
+        "exit": 0,
+        "stdout": "one\ntwo\nthree\nrc=4\ntwo\nrc=4\n",
+        "stderr": "sed: read error on /data/fcC_sd/d: Is a directory\nsed: read error on /data/fcC_sd/d: Is a directory\n"
+      },
+      "flags": [
+        "n",
+        "s"
+      ]
+    },
+    {
+      "id": "sed_n_lookahead_skips_a_directory_operand",
+      "seq": 15300002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcC_sl/d && printf 'x\\n' > /data/fcC_sl/d/keep && printf 'one\\ntwo\\nthree\\n' > /data/fcC_sl/f && printf 'L1\\nL2\\n' > /data/fcC_sl/g && sed -n 'n;p' /data/fcC_sl/f /data/fcC_sl/d /data/fcC_sl/g; echo rc=$?; rm -r /data/fcC_sl",
+      "expect": {
+        "exit": 0,
+        "stdout": "two\nL1\nrc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "sed_s_case_conversion",
+      "seq": 15300009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo 'hello world' | sed 's/.*/\\U&/;s/\\(O\\) \\(W\\)/\\L\\1\\E \\2/'; echo 'hello world' | sed 's/\\w\\+/\\u&/g'; echo 'hELLO' | sed 's/.*/\\u\\L&/'; echo 'hello' | sed 's/.*/\\L\\u&/'; echo 'ab' | sed 's/\\(x*\\)\\(a\\)/\\u\\1\\2/'; echo 'abc' | sed 's/abc/\\u\\lX/'",
+      "expect": {
+        "exit": 0,
+        "stdout": "HELLo WORLD\nHello World\nhello\nHello\nAb\nx\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sed_s_case_escape_drops_a_carried_one_shot",
+      "seq": 15300010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo a | sed 's/\\(x*\\)a/\\u\\1\\Lz/'; echo a | sed 's/\\(x*\\)a/\\l\\1\\UZz/'; echo ab | sed 's/\\(x*\\)a\\(b\\)/\\u\\1\\E\\2/'; echo ab | sed 's/\\(x*\\)a/\\u\\1\\l\\1\\Uq/'; echo ab | sed 's/\\(x*\\)\\(y*\\)\\(a\\)/\\u\\1\\2\\3/'",
+      "expect": {
+        "exit": 0,
+        "stdout": "z\nZZ\nb\nQb\nab\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

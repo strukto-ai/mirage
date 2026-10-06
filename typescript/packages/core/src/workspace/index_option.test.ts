@@ -13,11 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { IndexType } from '../cache/index/config.ts'
+import { type IndexConfig, IndexType, type RedisIndexConfig } from '../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../cache/index/ram.ts'
+import { MountMode, ReadPolicy, type ReadSpec } from '../types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Mount } from './mount/spec.ts'
 import { Workspace } from './workspace/workspace.ts'
+
+const FRESH: ReadSpec = { policy: ReadPolicy.FRESH, ttl: 600 }
 
 describe('Workspace index option', () => {
   it('applies the workspace index config to mounts', async () => {
@@ -44,5 +47,75 @@ describe('Workspace index option', () => {
     )
     expect(ws.mount('/data').indexStore.ttl).toBe(7)
     await ws.close()
+  })
+
+  it('gives every mount the snake_case spelling of a workspace index field', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        index: {
+          type: IndexType.REDIS,
+          url: 'redis://127.0.0.1:1/0',
+          key_prefix: 't1:',
+        } as IndexConfig,
+      },
+    )
+    ws.addMount('/late', new RAMVFS())
+    expect((ws.mount('/data').indexConfig as RedisIndexConfig).keyPrefix).toBe('t1:')
+    expect((ws.mount('/late').indexConfig as RedisIndexConfig).keyPrefix).toBe('t1:')
+    await ws.close()
+  })
+
+  it('takes the snake_case spelling of a per-mount index field', async () => {
+    const index = {
+      type: IndexType.REDIS,
+      url: 'redis://127.0.0.1:1/0',
+      key_prefix: 't2:',
+    } as IndexConfig
+    const ws = new Workspace({ '/data': new Mount(new RAMVFS(), { index }) })
+    expect((ws.mount('/data').indexConfig as RedisIndexConfig).keyPrefix).toBe('t2:')
+    await ws.close()
+  })
+
+  // Both checks would refuse this; the first one ends construction, and the
+  // caller should be told about the typo rather than the bound it never reached.
+  it('names an unknown workspace index field before judging the read policy', () => {
+    expect(
+      () =>
+        new Workspace(
+          { '/data': new Mount(new RAMVFS(), { read: { policy: ReadPolicy.BOUNDED, ttl: 0 } }) },
+          { index: { ttll: 5 } as IndexConfig },
+        ),
+    ).toThrow(/"ttll"/)
+  })
+
+  it('runs and judges an added mount on the index it names', async () => {
+    const ws = new Workspace({}, { index: { type: IndexType.RAM, ttl: 73 } })
+    try {
+      const entry = ws.addMount('/b', new RAMVFS(), MountMode.READ, undefined, null, { ttl: 37 })
+      expect(entry.indexStore.ttl).toBe(37)
+      // A zero index leaves RAM no listing cache under the workspace's 73,
+      // so fresh is refused.
+      expect(() =>
+        ws.addMount('/d', new RAMVFS(), MountMode.READ, FRESH, null, { ttl: 0 }),
+      ).toThrow(/'\/d'.*caches reads or listings/)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Two mounts of one instance run one store, the first one's, as in the
+  // constructor: an alias's own index goes unused and fresh is judged on the
+  // shared 37 (RAM keeps no listings of its own).
+  it('shares the first mount index with an added alias', async () => {
+    const ram = new RAMVFS()
+    const ws = new Workspace({ '/a': new Mount(ram, { index: { ttl: 37 } }) })
+    try {
+      const alias = ws.addMount('/b', ram, MountMode.READ, FRESH, null, { ttl: 0 })
+      expect(alias.indexStore).toBe(ws.mount('/a').indexStore)
+      expect(alias.read.policy).toBe(ReadPolicy.FRESH)
+    } finally {
+      await ws.close()
+    }
   })
 })

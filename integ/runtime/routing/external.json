@@ -1,0 +1,476 @@
+{
+  "cases": [
+    {
+      "id": "public_process_capability",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          "processbox"
+        ]
+      },
+      "steps": [
+        {
+          "command": "native-tool 'a b' '$(echo literal)' '' | grep native-tool > /ram/argv.json",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "cat /ram/argv.json",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"native-tool\",\"a b\",\"$(echo literal)\",\"\"]\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "external_script_pipeline_stage",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          {
+            "name": "processbox",
+            "script": "ctx['command'] == 'native-tool' and not ctx['builtin']"
+          },
+          {
+            "name": "monty",
+            "captures": []
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "echo ok | native-tool",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"native-tool\"]\n"
+          }
+        },
+        {
+          "command": "echo ok | denied-tool",
+          "expect": {
+            "exit": 126,
+            "stderr": "denied-tool: no runtime accepted this line\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "external_capture_path_policy",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          {
+            "name": "processbox",
+            "captures": [
+              "cat",
+              "grep"
+            ]
+          }
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "secret\n",
+              "public.txt": "public\n"
+            }
+          }
+        },
+        "profiles": {
+          "default": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "protected",
+                  "commands": {
+                    "cat": [
+                      "/ram/secret.txt"
+                    ],
+                    "grep": [
+                      "/ram/secret.txt"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /ram",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "cat secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "cat: secret.txt: Permission denied\n"
+          }
+        },
+        {
+          "command": "cat s*.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "cat: secret.txt: Permission denied\n"
+          }
+        },
+        {
+          "command": "grep secret.txt public*.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"grep\",\"secret.txt\",\"public.txt\"]\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "external_capture_expands_text_slot_globs",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          {
+            "name": "processbox",
+            "captures": [
+              "grep",
+              "python3"
+            ]
+          }
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "a\n",
+              "b.txt": "b\n",
+              "secret.txt": "secret\n",
+              ".hidden.txt": "hidden\n",
+              "x=1": "one\n"
+            }
+          }
+        },
+        "profiles": {
+          "default": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "protected",
+                  "commands": {
+                    "grep": [
+                      "/ram/secret.txt"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /ram",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 s.py *.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"python3\",\"s.py\",\"a.txt\",\"b.txt\",\"secret.txt\"]\n"
+          }
+        },
+        {
+          "command": "python3 -c p /ram/?.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"python3\",\"-c\",\"p\",\"/ram/a.txt\",\"/ram/b.txt\"]\n"
+          }
+        },
+        {
+          "command": "python3 s.py .*.txt x=*",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"python3\",\"s.py\",\".hidden.txt\",\"x=1\"]\n"
+          }
+        },
+        {
+          "command": "python3 s.py '*.txt' \\*.txt *.none",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"python3\",\"s.py\",\"*.txt\",\"*.txt\",\"*.none\"]\n"
+          }
+        },
+        {
+          "command": "grep *.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "grep: secret.txt: Permission denied\n"
+          }
+        },
+        {
+          "command": "grep s*.txt a.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"grep\",\"secret.txt\",\"a.txt\"]\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "interpreter_script_path_policy",
+      "note": "An interpreter's script operand is a file the runtime reads on its own machine, so the gate types it as a path and a path rule refuses it before the line is handed over, whatever option run precedes it. The words after the script, and every operand once -c, -m or -e named the program, are the program's argv and reach the runtime as typed. A lone dash selects stdin and carries no path, while ./-, absolute dash filenames and stdin redirects still name protected files.",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          {
+            "name": "processbox",
+            "captures": [
+              "python",
+              "python3",
+              "js",
+              "node"
+            ]
+          }
+        ],
+        "mounts": {
+          "/vault": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "default": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "credentials are never read by hand",
+                  "paths": [
+                    "/vault/*"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /vault/steal.py",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "python3: /vault/steal.py: Permission denied\n"
+          }
+        },
+        {
+          "command": "node /vault/steal.js",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "node: /vault/steal.js: Permission denied\n"
+          }
+        },
+        {
+          "command": "python3 -u /vault/steal.py",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "python3: /vault/steal.py: Permission denied\n"
+          }
+        },
+        {
+          "command": "python3 -W ignore -- /vault/steal.py",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "python3: /vault/steal.py: Permission denied\n"
+          }
+        },
+        {
+          "command": "cd /vault",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 steal.py",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "python3: steal.py: Permission denied\n"
+          }
+        },
+        {
+          "command": "node steal.js",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "node: steal.js: Permission denied\n"
+          }
+        },
+        {
+          "command": "python3 -c 'print(1)' steal.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"python3\",\"-c\",\"print(1)\",\"steal.py\"]\n"
+          }
+        },
+        {
+          "command": "python3 -m json.tool steal.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"python3\",\"-m\",\"json.tool\",\"steal.py\"]\n"
+          }
+        },
+        {
+          "command": "node -e 1 steal.js",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"node\",\"-e\",\"1\",\"steal.js\"]\n"
+          }
+        },
+        {
+          "command": "python - /vault/arg",
+          "stdin": "print(1)\n",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"python\",\"-\",\"/vault/arg\"]\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -u -- - -c x",
+          "stdin": "print(1)\n",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"python3\",\"-u\",\"--\",\"-\",\"-c\",\"x\"]\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "js -- - /vault/arg",
+          "stdin": "print(1)\n",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"js\",\"--\",\"-\",\"/vault/arg\"]\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node - -e x",
+          "stdin": "print(1)\n",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"node\",\"-\",\"-e\",\"x\"]\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python -- ./-",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "python: ./-: Permission denied\n"
+          }
+        },
+        {
+          "command": "python3 -- /vault/-",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "python3: /vault/-: Permission denied\n"
+          }
+        },
+        {
+          "command": "js -- ./-",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "js: ./-: Permission denied\n"
+          }
+        },
+        {
+          "command": "node -- /vault/-",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "node: /vault/-: Permission denied\n"
+          }
+        },
+        {
+          "command": "python3 - < /vault/secret.py",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "/vault/secret.py: Permission denied\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "native_captures_preserve_shell_builtins",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          {
+            "name": "processbox",
+            "captures": [
+              "cd",
+              "export",
+              "echo",
+              "pwd",
+              "printf",
+              "type",
+              "python3",
+              "node"
+            ]
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "cd /ram; export BUILTIN_VALUE=kept; printf \"%s\\n\" \"$BUILTIN_VALUE\"; echo shell; pwd; type -a echo",
+          "expect": {
+            "exit": 0,
+            "stdout": "kept\nshell\n/ram\necho is a shell builtin\necho is /usr/bin/echo\n"
+          }
+        },
+        {
+          "command": "python3 --version",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"python3\",\"--version\"]\n"
+          }
+        },
+        {
+          "command": "node --version",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"node\",\"--version\"]\n"
+          }
+        }
+      ]
+    }
+  ]
+}

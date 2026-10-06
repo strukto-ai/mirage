@@ -1,6 +1,11 @@
 {
- "baseline": 4918,
+ "baseline": 4074,
  "modules": {
+  "ops/registry": {
+   "typescript_only": {
+    "OpsRegistry": "Python keeps each mount's op table on its Mount (`Mount._ops`, `register_op`, the filetype-then-VFS cascade); TypeScript holds one OpsRegistry on the Workspace and scopes entries per VFS. Same lookup, held in a different place."
+   }
+  },
   "ops/generic/factory": {
    "python_only": {
     "_make_pwrite": "Python builds every emitted op through a named `_make_*` closure builder; TypeScript writes the same closure inline in makeGenericOps, as it does for the module's older builders.",
@@ -9,15 +14,7 @@
   },
   "core/github/tree": {
    "python_only": {
-    "fetch_head": "The head fetch sits beside each host's tree fetch: fetch_tree is in core/github/tree.py, fetchTree in core/github/client.ts.",
-    "_head_of": "The head fetch sits beside each host's tree fetch: fetch_tree is in core/github/tree.py, fetchTree in core/github/client.ts.",
-    "_match_tree_to_index": "TypeScript makes the same tree-older-than-index check inline in ensureLiveTree."
-   }
-  },
-  "core/github/client": {
-   "typescript_only": {
-    "fetchHead": "The head fetch sits beside each host's tree fetch: fetch_tree is in core/github/tree.py, fetchTree in core/github/client.ts.",
-    "headOf": "The head fetch sits beside each host's tree fetch: fetch_tree is in core/github/tree.py, fetchTree in core/github/client.ts."
+    "_match_tree_to_index": "TypeScript makes the same tree-older-than-index check inline in ensureTree."
    }
   },
   "core/hf_hub/client": {
@@ -62,44 +59,249 @@
   },
   "server/mcp/server": {
    "typescript_only": {
-    "createMirageMcpServer": "Python's lowlevel Server takes list and call handlers, so MirageMcpServer is a class that holds the tool table and answers both. TypeScript's McpServer registers each tool itself, so a factory registers the table and returns the server.",
-    "withSession": "TypeScript converts each JSON schema at registration through this helper; Python augments the static MCP Tool list with the same per-call session selector."
+    "createMirageMcpServer": "Python's lowlevel Server takes list and call handlers, so MirageMcpServer is a class that holds the tool table and answers both. TypeScript's McpServer registers each tool itself, so a factory registers the table and returns the server."
    }
   },
-  "server/ssh/mcp": {
+  "cli/rpc": {
    "python_only": {
-    "ChannelWriter": "The SDK's stdio transport awaits write and flush on its stdout, and asyncssh writes synchronously and drains, so Python adapts the channel's stdout. TypeScript's StdioServerTransport takes the ssh2 channel, a Node stream, as it is."
+    "rpc_cmd": "Typer registers one function per verb, so the rpc verb is a module-level `rpc_cmd`; the TypeScript CLI builds the same verb on a commander program inside registerRpcCommand."
+   },
+   "typescript_only": {
+    "registerRpcCommand": "Typer registers one function per verb, so the rpc verb is a module-level `rpc_cmd`; the TypeScript CLI builds the same verb on a commander program inside registerRpcCommand."
+   }
+  },
+  "server/rpc/server": {
+   "typescript_only": {
+    "MirageRpcServerOptions": "Python's MirageRpcServer takes its session, tool table, name and version as keyword arguments; the TypeScript constructor takes them as one options object, as MirageMcpServerOptions does for the MCP server."
+   }
+  },
+  "cli/shell": {
+   "python_only": {
+    "_Pipe": "The TypeScript CLI builds the streamed multipart body in DaemonClient.requestUpload (cli/client.ts); Python hands httpx the parts, with stdin wrapped so httpx sends it chunked.",
+    "_upload": "The TypeScript CLI builds the streamed multipart body in DaemonClient.requestUpload (cli/client.ts); Python hands httpx the parts, with stdin wrapped so httpx sends it chunked."
+   }
+  },
+  "server/routers/shell": {
+   "python_only": {
+    "_finish_upload": "TypeScript keeps it as ShellUpload.finish.",
+    "_parse_json_body": "TypeScript parses a JSON body inline with ShellBodySchema.",
+    "_read_all": "TypeScript reads a background upload whole through readPart."
+   },
+   "typescript_only": {
+    "ShellUpload": "Python holds the upload's reader task and its stdin as locals of the route.",
+    "readPart": "Python's reader feeds the stdin part inline, in _read_shell_body.",
+    "refuse": "Python raises HTTPException, which FastAPI answers."
+   }
+  },
+  "server/stdin": {
+   "python_only": {
+    "LoopStdin": "A Python line runs on the workspace runner's loop and its input lives on the server's, so each read hops loops; TypeScript has one loop.",
+    "StdinSource": "The input LoopStdin reads; TypeScript has no loop hop."
+   }
+  },
+  "server/ssh/stream": {
+   "python_only": {
+    "edited": "asyncssh's line editor runs only for a pty with a terminal type, so Python runs LineDiscipline for the rest; ssh2 has no editor, so every TypeScript pty runs it."
+   },
+   "typescript_only": {
+    "DisciplineSink": "Python's LineDiscipline takes the sink's three callbacks as arguments."
+   }
+  },
+  "server/multipart": {
+   "typescript_only": {
+    "MultipartError": "Python refuses a body with FastAPI's HTTPException.",
+    "headerParam": "Python reads header parameters with python-multipart's parse_options_header."
+   }
+  },
+  "workspace/snapshot/api": {
+   "python_only": {
+    "_s3_accessor": "Python's S3 client is the optional 's3' extra, so its accessor is built behind the install hint; TypeScript's S3 SDK is a core dependency.",
+    "_Counted": "Python streams the tar into the caller's file-like target through tarfile, which needs tell(), and counts the bytes as they pass; TypeScript builds the tar in memory and takes its length."
+   }
+  },
+  "commands/builtin/generic/tar/tar": {
+   "python_only": {
+    "ZeroTail": "Python reads archives through tarfile, which refuses a stream that ends inside a member's data; ZeroTail feeds it zeros past the cut. TypeScript parses the blocks itself and sees the short member directly."
+   }
+  },
+  "commands/builtin/general/curl": {
+   "typescript_only": {
+    "UNRESERVED": "TypeScript percent-encodes --data-urlencode by hand against RFC 3986's unreserved set, since encodeURIComponent also keeps !'()*; Python's quote(safe=\"\") keeps exactly that set already."
+   }
+  },
+  "runtime/handles/file_handle": {
+   "typescript_only": {
+    "LINE_SCAN": "QuickJS on TypeScript reads a line through the handle itself, a window at a time; a Python guest reads lines through CPython's io layer over the handle, so Python has no window."
+   }
+  },
+  "workspace/executor/jobs": {
+   "typescript_only": {
+    "JobCopy": "A JS promise cannot be cancelled, so a TypeScript job races each write it passes on against its kill signal; Python's cancelled job task unwinds at the same await on its own."
    }
   },
   "cli/session": {
    "python_only": {
-    "update_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/doors.py."
+    "cancel_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerSessionCommands.",
+    "kill_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerSessionCommands.",
+    "update_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access."
    }
   },
   "cli/workspace": {
    "python_only": {
-    "_document_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/doors.py.",
-    "skill_md_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/doors.py.",
-    "vfs_md_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/doors.py."
+    "cancel_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands.",
+    "close_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands.",
+    "kill_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands.",
+    "_document_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
+    "skill_md_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
+    "vfs_md_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access."
    }
   },
-  "server/routers/documents": {
+  "server/auth/middleware": {
    "python_only": {
-    "document": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/doors.py.",
-    "get_document": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/doors.py.",
-    "put_document": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/doors.py."
-   },
-   "typescript_only": {
-    "DocumentParams": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/doors.py.",
-    "DocumentQuery": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/doors.py.",
-    "DocumentsRoutesDeps": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/doors.py.",
-    "registerDocumentsRoutes": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/doors.py."
+    "_admit": "Python records the caller's account on the ASGI scope in one helper its three admit paths share; the Fastify hook sets req.account inline."
    }
   },
   "server/routers/sessions": {
    "python_only": {
-    "UpdateSessionRequest": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/doors.py.",
-    "update_session": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/doors.py."
+    "_require_session": "The session lookup the delete, cancel and kill routes share; TypeScript's is sessionWorkspace, declared inside registerSessionsRoutes.",
+    "cancel_session_lines": "FastAPI routes are module functions; Fastify registers the same handler inline in registerSessionsRoutes.",
+    "kill_session_jobs": "FastAPI routes are module functions; Fastify registers the same handler inline in registerSessionsRoutes.",
+    "UpdateSessionRequest": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
+    "update_session": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access."
+   }
+  },
+  "server/routers/workspaces": {
+   "python_only": {
+    "_require_entry": "The account check every workspace route shares, raising 404; TypeScript calls registry.visible inline and answers 404 in each route.",
+    "cancel_workspace_lines": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
+    "close_workspace": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
+    "kill_workspace_jobs": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
+    "run_capture": "Python runs a capture on the workspace runner and turns EBUSY into a 409 in one helper; TypeScript awaits the capture inline and asks isBusy."
+   },
+   "typescript_only": {
+    "isBusy": "TypeScript awaits a capture inline and asks isBusy for the EBUSY that answers 409; Python's run_capture does both."
+   }
+  },
+  "server/schemas": {
+   "python_only": {
+    "CancelLinesResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal.",
+    "KillJobsResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal."
+   }
+  },
+  "workspace/snapshot/state": {
+   "typescript_only": {
+    "diskStateAsRam": "Only TypeScript restores a disk mount into a fresh RAM mount (restoresAsFreshRAM, where no disk root can be rebuilt), so only it converts a disk state to RAM's shape."
+   }
+  },
+  "workspace/snapshot/tar_io": {
+   "python_only": {
+    "_stage_disk_files": "Each host stages a restore's disk mount files on disk: Python extracts them once the manifest is read, in _stage_disk_files; TypeScript finds their references with diskFileRefs while it streams the tar."
+   },
+   "typescript_only": {
+    "diskFileRefs": "Each host stages a restore's disk mount files on disk: Python extracts them once the manifest is read, in _stage_disk_files; TypeScript finds their references with diskFileRefs while it streams the tar."
+   }
+  },
+  "workspace/dispatcher/dispatcher": {
+   "typescript_only": {
+    "AdmitWrite": "TypeScript names the function type of the workspace's write admission hook; Python annotates the Dispatcher parameter inline as a Callable."
+   }
+  },
+  "cli/ssh": {
+   "python_only": {
+    "ssh_proxy_cmd": "Typer commands are module functions; commander registers the same command inline in registerSshProxyCommand."
+   },
+   "typescript_only": {
+    "registerSshProxyCommand": "commander registers a command through a function; Typer's is the module function ssh_proxy_cmd."
+   }
+  },
+  "server/routers/ssh": {
+   "python_only": {
+    "ssh_tunnel": "FastAPI routes are module functions; Fastify registers the same handler inline in registerSshRoutes."
+   },
+   "typescript_only": {
+    "SshParams": "Fastify types a route's path parameters with an interface; FastAPI reads them from the handler's arguments.",
+    "SshRoutesDeps": "Fastify routes take their dependencies as an object; FastAPI routes read them off app.state.",
+    "registerSshRoutes": "Fastify registers routes through a function; FastAPI's route is the module function ssh_tunnel."
+   }
+  },
+  "server/ssh/constants": {
+   "python_only": {
+    "TUNNEL_CHUNK": "Python's route reads the SSH server's side of a socket pair in chunks; TypeScript pipes a ws stream, which chunks for itself.",
+    "TUNNEL_MODULE": "Python loads asyncssh's module by path, so a server without the ssh extra starts; TypeScript imports the module dynamically by its literal path."
+   }
+  },
+  "server/ssh/server": {
+   "typescript_only": {
+    "Admit": "ssh2 takes a login decision as a callback, typed here; asyncssh asks a server object (MirageSSHServer, TunnelSSHServer).",
+    "admitTunnel": "ssh2 admits a tunneled login through a callback; asyncssh's twin is the TunnelSSHServer class in session."
+   }
+  },
+  "server/ssh/session": {
+   "python_only": {
+    "TunnelSSHServer": "asyncssh admits a login through a server object, and key_account reads the tunnel's account off it; ssh2's twin is the admitTunnel callback in server."
+   }
+  },
+  "server/ssh/types": {
+   "python_only": {
+    "SSHTunnel": "Python types the connection its lazily loaded tunnel returns; TypeScript's serveTunnel resolves when the connection ends.",
+    "ServeTunnel": "Python types serve_tunnel for the route that loads it by path; TypeScript imports it and keeps its own signature."
+   }
+  },
+  "cli/login": {
+   "python_only": {
+    "login_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
+    "logout_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
+    "whoami_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
+    "QuietHandler": "Python's http.server serves through a handler class, whose access log is silenced here; Node's createServer takes the handler as a function and logs nothing."
+   },
+   "typescript_only": {
+    "registerLoginCommands": "commander registers commands through a function; Typer's are the module functions login_cmd, logout_cmd and whoami_cmd."
+   }
+  },
+  "server/routers/oauth": {
+   "python_only": {
+    "protected_resource": "FastAPI routes are module functions; Fastify registers the same handler inline in registerOAuthRoutes."
+   },
+   "typescript_only": {
+    "OAuthDeps": "Fastify routes take their dependencies as an object; FastAPI routes read them off app.state.",
+    "registerOAuthRoutes": "Fastify registers routes through a function; FastAPI's route is the module function protected_resource."
+   }
+  },
+  "cache/file/config": {
+   "typescript_only": {
+    "CacheConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
+    "RedisCacheConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
+    "normalizeCacheConfig": "Python checks the config when the model is built; a TypeScript config is a plain object, so the Workspace checks it here, through parseConfigWithSchema, when it is built."
+   }
+  },
+  "cache/index/config": {
+   "typescript_only": {
+    "IndexConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
+    "RedisIndexConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
+    "normalizeIndexConfig": "Python checks the config when the model is built; a TypeScript config is a plain object, so the Workspace checks it here, through parseConfigWithSchema, when it is built."
+   }
+  },
+  "vfs/secrets": {
+   "typescript_only": {
+    "refuseRepeatedFields": "Python's models take one spelling of a field, so a second spelling is an extra field pydantic refuses; a TypeScript config takes either spelling, so the code door refuses one field named in both."
+   }
+  },
+  "config": {
+   "typescript_only": {
+    "validateIndexValues": "Python checks an index block's values through its pydantic models (str url and key_prefix, StrictFloat ttl); the TypeScript loader has no model for the block, so it checks the values by hand at the same door."
+   }
+  },
+  "server/routers/documents": {
+   "python_only": {
+    "document": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
+    "get_document": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
+    "put_document": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access."
+   },
+   "typescript_only": {
+    "DocumentParams": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
+    "DocumentQuery": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
+    "DocumentsRoutesDeps": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
+    "registerDocumentsRoutes": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access."
    }
   }
  }

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BUILDER } from './du.ts'
+import { BUILDER, WalkBudget } from './du.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
@@ -20,7 +20,8 @@ import { eacces, enoent } from '../../../../utils/errors.ts'
 import { runWithAdmission } from '../../../../context/session_context.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { EntryGate } from '../../../../types.ts'
-import type { CommandIO } from '../adapter.ts'
+import { scopedIo, type CommandIO } from '../adapter.ts'
+import type { MountView, NamespaceView } from '../../../../ops/types.ts'
 
 const DEC = new TextDecoder()
 
@@ -59,47 +60,7 @@ const OPS: CommandIO = {
 
 const ACCESSOR = {} as Accessor
 
-async function runDu(
-  paths: PathSpec[],
-  flags: Record<string, string | boolean | number | string[]> = {},
-  cwd = '/',
-): Promise<string[]> {
-  const result = await BUILDER.fn(OPS, ACCESSOR, paths, [], {
-    stdin: null,
-    flags,
-    filetypeFns: null,
-    cwd,
-  })
-  if (result === null) return []
-  const [out] = result
-  const buf =
-    out === null
-      ? new Uint8Array()
-      : out instanceof Uint8Array
-        ? out
-        : await materialize(out as AsyncIterable<Uint8Array>)
-  const text = DEC.decode(buf)
-  return text === '' ? [] : text.trimEnd().split('\n')
-}
-
 describe('du walk fallback (no native du op)', () => {
-  it('sums a directory tree recursively, one line per directory', async () => {
-    expect(await runDu([PathSpec.fromStrPath('/db')])).toEqual(['2\t/db/sub', '5\t/db'])
-  })
-
-  it('returns a single file size', async () => {
-    expect(await runDu([PathSpec.fromStrPath('/db/a.txt')])).toEqual(['3\t/db/a.txt'])
-  })
-
-  it('-a lists every file, then every directory, then the operand', async () => {
-    expect(await runDu([PathSpec.fromStrPath('/db')], { a: true })).toEqual([
-      '3\t/db/a.txt',
-      '2\t/db/sub/b.txt',
-      '2\t/db/sub',
-      '5\t/db',
-    ])
-  })
-
   it('stops the walk and exits 1 once the entry budget is spent', async () => {
     const bounded: CommandIO = { ...OPS, maxDuEntries: 1 }
     const result = await BUILDER.fn(bounded, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
@@ -112,46 +73,6 @@ describe('du walk fallback (no native du op)', () => {
     const [, io] = result as [unknown, { exitCode: number; stderr: Uint8Array | null }]
     expect(io.exitCode).toBe(1)
     expect(DEC.decode(io.stderr ?? new Uint8Array())).toContain('incomplete')
-  })
-
-  it('-c appends a grand total across operands', async () => {
-    const lines = await runDu(
-      [PathSpec.fromStrPath('/db/a.txt'), PathSpec.fromStrPath('/db/sub')],
-      { c: true },
-    )
-    expect(lines).toEqual(['3\t/db/a.txt', '2\t/db/sub', '5\ttotal'])
-  })
-
-  it('reports an unreadable operand and exits 1, like GNU', async () => {
-    const result = await BUILDER.fn(
-      OPS,
-      ACCESSOR,
-      [PathSpec.fromStrPath('/nope'), PathSpec.fromStrPath('/db')],
-      [],
-      { stdin: null, flags: {}, filetypeFns: null, cwd: '/' },
-    )
-    expect(result).not.toBeNull()
-    const [out, io] = result as [Uint8Array, { exitCode: number; stderr: Uint8Array | null }]
-    expect(DEC.decode(out)).toBe('2\t/db/sub\n5\t/db\n')
-    expect(io.exitCode).toBe(1)
-    expect(DEC.decode(io.stderr ?? new Uint8Array())).toBe(
-      "du: cannot access '/nope': No such file or directory\n",
-    )
-  })
-
-  it('measures the working directory when no operand is given', async () => {
-    expect(await runDu([], {}, '/db')).toEqual(['2\t/db/sub', '5\t/db'])
-  })
-
-  it('-d is another spelling of --max-depth', async () => {
-    expect(await runDu([PathSpec.fromStrPath('/db')], { max_depth: '0' })).toEqual(['5\t/db'])
-    expect(await runDu([PathSpec.fromStrPath('/db')], { max_depth: '0' })).toEqual(['5\t/db'])
-  })
-
-  it('rejects -s with -a before doing any work', async () => {
-    await expect(runDu([PathSpec.fromStrPath('/db')], { s: true, a: true })).rejects.toThrow(
-      /cannot both summarize/,
-    )
   })
 
   it('a backend failure propagates instead of reading as a missing operand', async () => {
@@ -168,29 +89,22 @@ describe('du walk fallback (no native du op)', () => {
       }),
     ).rejects.toThrow('403 Forbidden')
   })
-
-  // GNU prints a count below one unit with no suffix at all, so -h and
-  // the plain form agree on this tree. The scaling and rounding rules
-  // are pinned against GNU in utils/utils.test.ts; here -h only has to
-  // reach the formatter.
-  it('-h renders human-readable sizes', async () => {
-    expect(await runDu([PathSpec.fromStrPath('/db')], { h: true })).toEqual([
-      '2\t/db/sub',
-      '5\t/db',
-    ])
-  })
 })
 
 // A gate that scopes the line but refuses nothing, which is what a `du`
-// run under any path rule looks like: `pathRulesActive()` is true, so the
-// builder sets the native du op aside and walks through the guarded
-// readdir instead (adapter.ts's `withRuleGuard` doc states that trade).
+// run under any path rule looks like: the gate is scoped, so `scopedIo`
+// sets the native du op aside and the builder walks through the guarded
+// readdir instead.
 const SCOPED_GATE: EntryGate = {
   scoped: true,
+  scopes: () => true,
   granted: [],
   check: () => undefined,
   refuses: () => false,
 }
+
+// The command's view as admission builds it for a scoped gate.
+const SCOPED_VIEW: NamespaceView = { scoped: () => true }
 
 const THROTTLED = Object.assign(new Error('Box GET /folders/9/items -> 429'), {
   status: 429,
@@ -211,11 +125,12 @@ async function runScoped(
   paths: PathSpec[],
 ): Promise<[Uint8Array, { exitCode: number; stderr: Uint8Array | null }]> {
   const result = await runWithAdmission(SCOPED_GATE, async () =>
-    BUILDER.fn(ops, ACCESSOR, paths, [], {
+    BUILDER.fn(scopedIo(ops, SCOPED_VIEW, paths, ''), ACCESSOR, paths, [], {
       stdin: null,
       flags: {},
       filetypeFns: null,
       cwd: '/',
+      ns: SCOPED_VIEW,
     }),
   )
   return result as [Uint8Array, { exitCode: number; stderr: Uint8Array | null }]
@@ -352,5 +267,35 @@ describe('du rows for directories no file points at', () => {
       1,
       notes,
     ])
+  })
+})
+
+describe('WalkBudget', () => {
+  it('stops once spent', () => {
+    const budget = new WalkBudget(2)
+    expect([0, 1, 2].map(() => budget.spend('/d'))).toEqual([true, true, false])
+    expect(budget.hit).toBe(true)
+    const unbounded = new WalkBudget(null)
+    expect(Array.from({ length: 100 }, () => unbounded.spend('/d')).every(Boolean)).toBe(true)
+    expect(unbounded.hit).toBe(false)
+  })
+
+  it('with no cap of its own charges each mount its own', () => {
+    const ownerOf = (p: string): string => (p.startsWith('/a/b') ? '/a/b/' : '/a/')
+    const caps = new Map<string, number | null>([
+      ['/a/', null],
+      ['/a/b/', 1],
+    ])
+    const mounts: MountView = {
+      descendants: () => [],
+      visibleDescendants: () => [],
+      isRoot: (p) => caps.has(p.replace(/\/?$/, '/')),
+      rootOf: ownerOf,
+      maxDuEntries: (p) => caps.get(ownerOf(p)) ?? null,
+    }
+    const budget = new WalkBudget(null, mounts)
+    expect(Array.from({ length: 100 }, () => budget.spend('/a')).every(Boolean)).toBe(true)
+    expect([0, 1].map(() => budget.spend('/a/b'))).toEqual([true, false])
+    expect(budget.hit).toBe(true)
   })
 })

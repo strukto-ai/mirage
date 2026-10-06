@@ -16,7 +16,6 @@ import type {
   MongoCollectionSpec,
   MongoDriver,
   MongoFindOptions,
-  MongoIndexAccess,
   MongoIterOptions,
 } from '@struktoai/mirage-core/core/mongodb/_driver'
 import type { EntityKind } from '@struktoai/mirage-core/core/mongodb/types'
@@ -36,7 +35,6 @@ interface MongoProxyRequest {
     | 'iterDocuments'
     | 'countDocuments'
     | 'listIndexes'
-    | 'getIndexStats'
   database?: string
   collection?: string
   kind?: EntityKind | null
@@ -141,14 +139,6 @@ export class HttpMongoDriver implements MongoDriver {
   listIndexes(database: string, collection: string): Promise<Record<string, unknown>[]> {
     return this.post<Record<string, unknown>[]>({
       op: 'listIndexes',
-      database,
-      collection,
-    })
-  }
-
-  getIndexStats(database: string, collection: string): Promise<Record<string, MongoIndexAccess>> {
-    return this.post<Record<string, MongoIndexAccess>>({
-      op: 'getIndexStats',
       database,
       collection,
     })

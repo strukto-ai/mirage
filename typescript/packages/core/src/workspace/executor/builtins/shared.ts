@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../../commands/spec/builtins.ts'
+import { FlagView } from '../../../commands/spec/flag_view.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { SessionView } from '../../../ops/types.ts'
 import type { PolicyDenied } from '../../../policy/errors.ts'
@@ -22,10 +24,11 @@ import { resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { ExecutionNode } from '../../types.ts'
+import { optionError, parseFlags } from '../command/flags.ts'
+import type { ParsedCommand } from '../command/types.ts'
 import { COUNT_WORD_RE, IDENTIFIER_RE } from './constants.ts'
 import type { Result } from './types.ts'
-
-const ENC = new TextEncoder()
+import { decodeText, encodeText } from '../../../shell/bytes.ts'
 
 interface ResultInit {
   out?: Uint8Array | null
@@ -45,7 +48,7 @@ interface ResultInit {
 export function result(cmd: string, init: ResultInit = {}): Result {
   const exitCode = init.exitCode ?? 0
   const err =
-    init.stderr !== undefined && init.stderr !== '' ? ENC.encode(init.stderr) : new Uint8Array()
+    init.stderr !== undefined && init.stderr !== '' ? encodeText(init.stderr) : new Uint8Array()
   const io = init.io ?? new IOResult()
   io.exitCode = exitCode
   if (err.length > 0) io.stderr = err
@@ -77,6 +80,32 @@ export function finish(cmd: string, errors: string[], io?: IOResult): Result {
 }
 
 /**
+ * Parse a builtin's words with its spec, the way getopt_long does: options
+ * may follow operands until `--`, long options take their unique
+ * abbreviations, and a bad one is refused in GNU's words with the `Try`
+ * line. The operands keep the PathSpecs the classifier made. Mirrors
+ * Python's parse_line.
+ *
+ * @param cmd - the builtin's name.
+ * @param args - the classified words after the name.
+ * @param cwd - the session working directory.
+ */
+export function parseLine(
+  cmd: string,
+  args: readonly (string | PathSpec)[],
+  cwd: string,
+): [ParsedCommand, FlagView, Result | null] {
+  const spec = specOf(cmd)
+  const parsed = parseFlags(args, spec, cmd, cwd)
+  const refused = optionError(cmd, parsed)
+  if (refused !== null) {
+    const [message, code] = refused
+    return [parsed, new FlagView({}, spec), fail(cmd, decodeText(message), code)]
+  }
+  return [parsed, new FlagView(parsed.flagKwargs, spec), null]
+}
+
+/**
  * A non-path operand's text (a mode or owner spec the classifier may have
  * wrapped as a path).
  *
@@ -95,44 +124,6 @@ export function operandText(arg: string | PathSpec): string {
 export function absPath(arg: string | PathSpec, cwd: string): string {
   if (arg instanceof PathSpec) return arg.virtual
   return resolvePath(arg, cwd)
-}
-
-function allKnown(chars: string, known: string): boolean {
-  for (const c of chars) if (!known.includes(c)) return false
-  return true
-}
-
-/**
- * Split leading single-letter flags, permissively.
- *
- * A token containing any unknown letter is kept as an operand instead of
- * erroring (`ln`/`readlink` behavior).
- *
- * @param args - args after the command name.
- * @param known - accepted single-letter flags.
- * @returns [flags, operands].
- */
-export function splitFlags(
-  args: (string | PathSpec)[],
-  known: string,
-): [Set<string>, (string | PathSpec)[]] {
-  const flags = new Set<string>()
-  const operands: (string | PathSpec)[] = []
-  let parsing = true
-  for (const arg of args) {
-    const s = operandText(arg)
-    if (parsing && s === '--') {
-      parsing = false
-      continue
-    }
-    if (parsing && s !== '-' && s.length >= 2 && s.startsWith('-') && allKnown(s.slice(1), known)) {
-      for (const c of s.slice(1)) flags.add(c)
-      continue
-    }
-    parsing = false
-    operands.push(arg)
-  }
-  return [flags, operands]
 }
 
 export interface SplitValueFlags {
@@ -262,7 +253,7 @@ export function requireView(state: SessionView | null): SessionView {
 
 /** Render a policy denial in the builtin's own voice. */
 export function refusal(cmd: string, err: PolicyDenied): Result {
-  const encoded = new TextEncoder().encode(`${err.message}\n`)
+  const encoded = encodeText(`${err.message}\n`)
   return [
     null,
     new IOResult({ exitCode: 1, stderr: encoded }),
@@ -272,7 +263,7 @@ export function refusal(cmd: string, err: PolicyDenied): Result {
 
 /** Render the shell's own readonly refusal, checked before the door. */
 export function readonlyRefusal(cmd: string, name: string): Result {
-  const encoded = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
+  const encoded = encodeText(`bash: ${name}: readonly variable\n`)
   return [
     null,
     new IOResult({ exitCode: 1, stderr: encoded }),
@@ -291,7 +282,7 @@ export function readonlyRefusal(cmd: string, name: string): Result {
  * without a builtin name.
  */
 export function arithRefusal(cmd: string, err: ArithError): Result {
-  const encoded = new TextEncoder().encode(`bash: ${cmd}: ${err.message}\n`)
+  const encoded = encodeText(`bash: ${cmd}: ${err.message}\n`)
   return [
     null,
     new IOResult({ exitCode: 1, stderr: encoded }),
@@ -316,7 +307,7 @@ export function isCountWord(word: string): boolean {
 
 /** A shell builtin's diagnostic in bash's voice. Mirrors Python's builtin_error. */
 export function builtinError(name: string, message: string): Uint8Array {
-  return new TextEncoder().encode(`bash: ${name}: ${message}\n`)
+  return encodeText(`bash: ${name}: ${message}\n`)
 }
 
 /**
@@ -330,4 +321,15 @@ export function numericOperands(args: readonly string[]): readonly string[] {
 /** A count word's value modulo 256, the status bash keeps of it. */
 export function statusOf(word: string): number {
   return Number(((BigInt(word.trim()) % 256n) + 256n) % 256n)
+}
+
+/**
+ * The byte `read -d` and `mapfile -d` stop at. Bash takes the first byte of
+ * the argument, not its first character (bash 5.2: `-d é` stops at 0xc3,
+ * `-d $'\xff'` at the raw byte); an empty argument is NUL and no `-d` is a
+ * newline. Mirrors Python's record_delimiter.
+ */
+export function recordDelimiter(text: string | null): number {
+  if (text === null) return 10
+  return encodeText(text)[0] ?? 0
 }

@@ -15,6 +15,8 @@
 import type { Policy } from '../base.ts'
 import type { Action, CommandContext, Deny } from '../types.ts'
 import { isCreateMode } from '../../commands/builtin/generic/tar/mode.ts'
+import { expandTableLong } from '../../commands/spec/compile.ts'
+import { GNU_LONG_OPTIONS } from '../../commands/spec/long_options.ts'
 import type { PathSpec } from '../../types.ts'
 
 /**
@@ -80,6 +82,77 @@ export function hasParentsFlag(argv: readonly string[]): boolean {
   return false
 }
 
+/**
+ * What an rm line asks of a directory operand, by raw token scan: recurse
+ * (-r, -R), remove an empty one (-d), and keep `/` out of a recursive
+ * removal, which is the default; the last of --preserve-root and
+ * --no-preserve-root wins. A long word is read against rm's whole table, so
+ * an abbreviation counts too. Mirrors Python's rm_options.
+ */
+export function rmOptions(argv: readonly string[]): [boolean, boolean, boolean] {
+  let recursive = false
+  let emptyDir = false
+  let preserve = true
+  for (const tok of argv) {
+    if (tok === '-') continue
+    if (tok === '--') break
+    if (tok.startsWith('--')) {
+      const name = expandTableLong(GNU_LONG_OPTIONS.rm ?? [], tok.split('=', 1)[0] ?? tok)
+      const only = name.length === 1 ? name[0] : undefined
+      if (only === '--recursive') recursive = true
+      else if (only === '--dir') emptyDir = true
+      else if (only === '--preserve-root') preserve = true
+      else if (only === '--no-preserve-root') preserve = false
+      continue
+    }
+    if (tok.startsWith('-')) {
+      recursive ||= tok.includes('r') || tok.includes('R')
+      emptyDir ||= tok.includes('d')
+    }
+  }
+  return [recursive, emptyDir, preserve]
+}
+
+// An operand as fts hands it back: two or more trailing slashes trimmed to
+// one, so `///` reads `/` while `//` stays.
+export function ftsName(raw: string): string {
+  let end = raw.length
+  if (end > 2 && raw.endsWith('/')) {
+    while (end > 1 && raw[end - 2] === '/') end -= 1
+  }
+  return raw.slice(0, end)
+}
+
+/**
+ * rm's refusal of a mount root, in GNU rm's order and words: a recursive `.`
+ * or `..` is skipped before anything is looked at, a directory without -r or
+ * -d is not removed at all, and a recursive `/` meets the root failsafe; only
+ * what is left reaches the mountpoint and is busy. Mirrors Python's
+ * rm_root_refusal.
+ */
+export function rmRootRefusal(
+  path: PathSpec,
+  recursive: boolean,
+  emptyDir: boolean,
+  preserve: boolean,
+): string {
+  const raw = path.rawPath
+  const last = raw.replace(/\/+$/, '').split('/').at(-1) ?? ''
+  if (recursive && (last === '.' || last === '..')) {
+    return `refusing to remove '.' or '..' directory: skipping '${raw}'`
+  }
+  if (!recursive && !emptyDir) return `cannot remove '${raw}': Is a directory`
+  if (recursive && preserve && path.virtual.replaceAll('/', '') === '') {
+    const shown = ftsName(raw)
+    const named = shown === '/' ? "'/'" : `'${shown}' (same as '/')`
+    return (
+      `it is dangerous to operate recursively on ${named}\n` +
+      'rm: use --no-preserve-root to override this failsafe'
+    )
+  }
+  return `cannot remove '${raw}': Device or resource busy`
+}
+
 // Every mount-root refusal is about one operand and speaks in the
 // command's own voice: the door prefixes the command name and picks the
 // exit code from the operand table (1, tar 2).
@@ -136,15 +209,15 @@ export class MountRootPolicy implements Policy {
     const cmd = ctx.command
     const operands = ctx.operands ?? ctx.paths
 
-    if (cmd === 'rm' || cmd === 'rmdir') {
+    if (cmd === 'rm') {
+      const root = firstRoot(namesRoot, ctx.paths)
+      if (root === null) return null
+      return deny(rmRootRefusal(root, ...rmOptions(ctx.argv)))
+    }
+
+    if (cmd === 'rmdir') {
       for (const p of ctx.paths) {
-        if (namesRoot(p)) {
-          return deny(
-            cmd === 'rmdir'
-              ? `failed to remove '${p.virtual}': Device or resource busy`
-              : `cannot remove '${p.virtual}': Device or resource busy`,
-          )
-        }
+        if (namesRoot(p)) return deny(`failed to remove '${p.virtual}': Device or resource busy`)
       }
       return null
     }

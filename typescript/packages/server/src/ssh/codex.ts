@@ -23,6 +23,14 @@ import { errnoError } from '@struktoai/mirage-node/fuse/errors'
 import type { ServerChannel } from 'ssh2'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import {
+  RPC_INTERNAL_ERROR,
+  RPC_INVALID_PARAMS,
+  RPC_INVALID_REQUEST,
+  RPC_METHOD_NOT_FOUND,
+  RPC_NOT_FOUND,
+  RPC_PARSE_ERROR,
+} from '../rpc/constants.ts'
+import {
   CODEX_AGENT_ID,
   CODEX_CTRL_C,
   CODEX_CTRL_D,
@@ -35,15 +43,16 @@ import {
   CODEX_SHELL_NAME,
   CODEX_SHELL_PATH,
   CODEX_TERMINATED,
-  RPC_INTERNAL_ERROR,
-  RPC_INVALID_PARAMS,
-  RPC_INVALID_REQUEST,
-  RPC_METHOD_NOT_FOUND,
-  RPC_NOT_FOUND,
-  RPC_PARSE_ERROR,
 } from './constants.ts'
 import { CodexRPCError } from './errors.ts'
-import { keyProfile, loginEnv, newSessionId, openSession, type ChannelRequest } from './session.ts'
+import {
+  keyProfile,
+  loginEntry,
+  loginEnv,
+  newSessionId,
+  openSession,
+  type ChannelRequest,
+} from './session.ts'
 import { ChannelInput, ChannelOutput, Mark } from './stream.ts'
 
 type Message = Record<string, JsonValue>
@@ -889,11 +898,11 @@ export async function serveCodex(
   channel: ServerChannel,
   request: ChannelRequest,
 ): Promise<void> {
-  if (!registry.has(request.username)) {
+  const entry = loginEntry(registry, request.username, request.account)
+  if (entry === null) {
     refuse(channel, `no such workspace: ${request.username}`)
     return
   }
-  const entry = registry.get(request.username)
   const sessionId = newSessionId()
   try {
     await openSession(entry.runner.ws, sessionId, loginEnv(request), keyProfile(request.profile))

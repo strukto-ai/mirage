@@ -14,14 +14,15 @@
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
-import { withPathGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
+import { pathsScoped } from '../../../ops/namespace_view.ts'
+import type { NamespaceView } from '../../../ops/types.ts'
+import { withCommandGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
 import { IO } from './io.ts'
-import { ensureLiveTree } from '../../../core/github/tree.ts'
+import { ensureTree } from '../../../core/github/tree.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { IOResult } from '../../../io/types.ts'
-import { DEFAULT_MAX_DU_ENTRIES, runDu } from '../generic/du.ts'
+import { DEFAULT_MAX_DU_ENTRIES, duGeneric } from '../generic/du.ts'
 import { WalkBudget, walkEntries, walkSize } from '../generic_bind/builders/du.ts'
 import type { DuEntries } from '../../../vfs/types.ts'
 import { stripSlash } from '../../../utils/slash.ts'
@@ -58,7 +59,16 @@ function subtree(accessor: GitHubAccessor, path: PathSpec): [DuEntries, string[]
   return [[blobs, total], directories]
 }
 
-async function duCommand(
+/** Whether du walks the subtree through the command guards rather than
+ * summing the tree it already holds: a truncated tree names only some paths,
+ * and under a hide or a path rule the raw sum would count what the session
+ * cannot see and never report a refused directory. Mirrors Python's
+ * `_walked`. */
+function walked(accessor: GitHubAccessor, ns: NamespaceView | undefined, path: PathSpec): boolean {
+  return accessor.truncated || pathsScoped(ns, [path])
+}
+
+async function du(
   accessor: GitHubAccessor,
   paths: PathSpec[],
   _texts: string[],
@@ -69,10 +79,9 @@ async function duCommand(
   // after du has validated its flags: an invalid line must cost no fetch.
   // Once per line, so one du reads one tree.
   let probe: Promise<void> | undefined
-  const live = (): Promise<void> =>
-    (probe ??= ensureLiveTree(accessor, idx, opts.mountPrefix ?? ''))
+  const live = (): Promise<void> => (probe ??= ensureTree(accessor, idx, opts.mountPrefix ?? ''))
   const budget = new WalkBudget(IO.maxDuEntries ?? DEFAULT_MAX_DU_ENTRIES)
-  const out = await runDu(
+  return duGeneric(
     paths,
     opts,
     async (targets) => {
@@ -84,17 +93,18 @@ async function duCommand(
       return IO.stat(accessor, p, idx)
     },
     // A truncated tree names only some paths and is never refetched, so it
-    // is walked folder by folder, as a backend with no tree would be.
+    // is walked folder by folder, as a backend with no tree would be; so is
+    // a subtree under a hide or a path rule (`walked`).
     async (p) => {
       await live()
-      if (accessor.truncated)
-        return walkSize(withPolicyGuard(withPathGuards(IO)), accessor, idx, budget, p)
+      if (walked(accessor, opts.ns, p))
+        return walkSize(withCommandGuards(withPolicyGuard(IO)), accessor, idx, budget, p)
       return subtree(accessor, p)[0][1]
     },
     async (p) => {
       await live()
-      if (accessor.truncated)
-        return walkEntries(withPolicyGuard(withPathGuards(IO)), accessor, idx, budget, p)
+      if (walked(accessor, opts.ns, p))
+        return walkEntries(withCommandGuards(withPolicyGuard(IO)), accessor, idx, budget, p)
       const [entries, directories] = subtree(accessor, p)
       const mount = mountPrefixOf(p.virtual, p.vfsPath)
       budget.directories.push(...directories.map((d) => `${mount}${d}`))
@@ -104,12 +114,11 @@ async function duCommand(
     () => budget.unreadable,
     () => budget.directories,
   )
-  return [out.stdout, new IOResult({ stderr: out.stderr, exitCode: out.exitCode })]
 }
 
 export const GITHUB_DU = command({
   name: 'du',
   vfs: VFSName.GITHUB,
   spec: specOf('du'),
-  fn: duCommand,
+  fn: du,
 })

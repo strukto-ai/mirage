@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "chmod_option_errors_and_options_after_operands",
+      "seq": 15000013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "chmod --bogus 644 /data/a.txt; echo rc=$?; chmod -Q 644 /data/a.txt; echo rc=$?; chmod --recursive=x 644 /data/a.txt; echo rc=$?; chmod 644 /data/a.txt --verb; echo rc=$?; chmod; echo rc=$?; chmod -v 644; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nmode of '/data/a.txt' retained as 0644 (rw-r--r--)\nrc=0\nrc=1\nrc=1\n",
+        "stderr": "chmod: unrecognized option '--bogus'\nTry 'chmod --help' for more information.\nchmod: invalid option -- 'Q'\nTry 'chmod --help' for more information.\nchmod: option '--recursive' doesn't allow an argument\nTry 'chmod --help' for more information.\nchmod: missing operand\nTry 'chmod --help' for more information.\nchmod: missing operand after '644'\nTry 'chmod --help' for more information.\n"
+      }
+    }
+  ]
+}

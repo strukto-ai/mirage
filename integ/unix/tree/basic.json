@@ -99,6 +99,38 @@
         "stdout": ".\n`-- d\n    `-- f\n\n2 directories, 1 file\n.\n`-- d\n    `-- f\n\n2 directories, 1 file\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "tree_empty_directory_counts_nothing",
+      "seq": 15300402,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/fcC_e && tree /data/fcC_e; echo rc=$?; rm -r /data/fcC_e",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fcC_e\n\n0 directories, 0 files\nrc=0\n",
+        "stderr": ""
+      }
     }
   ]
 }

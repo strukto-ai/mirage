@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { invalidateSubtree } from '../../cache/context.ts'
+import { invalidateAfterMove } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent, enotempty } from '../../utils/errors.ts'
 import { deleteFile, listFiles, patchFile } from '../google/drive.ts'
@@ -48,8 +48,13 @@ async function renameImpl(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec
     body: { name },
     ...(move ? { addParents: dstParentId, removeParents: srcParentId } : {}),
   })
-  await invalidateSubtree(dst)
-  await invalidateSubtree(src)
+  // A folder carries a subtree under both names. dst also loses one when
+  // the move replaced an empty folder there, whose name may still have
+  // cached children; a non-empty one refused above.
+  const folder = isFolder(srcNode)
+  const replacedFolder = dstNode !== null && isFolder(dstNode)
+  await invalidateAfterMove(dst, folder || replacedFolder)
+  await invalidateAfterMove(src, folder)
 }
 
 export const rename = eaccesOnDenied(renameImpl)

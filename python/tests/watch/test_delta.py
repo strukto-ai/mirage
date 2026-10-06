@@ -74,7 +74,6 @@ async def test_delete_detected():
 
 @pytest.mark.asyncio
 async def test_metadata_carries_size_and_modified():
-
     async def _walk(root: PathSpec) -> AsyncIterator[WalkEntry]:
         yield WalkEntry(
             virtual="/nc/a.txt",

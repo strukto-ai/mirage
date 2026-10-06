@@ -35,7 +35,7 @@ async def touch(
     texts: list[str],
     opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
-    c = FlagView(opts.flags, spec=SPECS["touch"]).as_bool("c")
+    c = FlagView(opts.flags, spec=SPECS["touch"]).as_bool("no_create")
     if not ops.is_mounted(accessor) or not paths:
         raise UsageError(
             f"touch: missing file operand\n{usage_hint('touch')}", 1

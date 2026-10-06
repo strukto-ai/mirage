@@ -92,7 +92,6 @@ def test_preview1_numbering_is_the_wasi_libc_table():
         FsCondition.EPERM: 63,
         FsCondition.ENOTEMPTY: 55,
         FsCondition.EXDEV: 75,
-        FsCondition.CROSS_MOUNT: 44,
         FsCondition.ENOTSUP: 58,
         FsCondition.ELOOP: 32,
         FsCondition.EINVAL: 28,
@@ -101,17 +100,6 @@ def test_preview1_numbering_is_the_wasi_libc_table():
         FsCondition.EROFS: 69,
         FsCondition.NO_XATTR: 58,
     }
-
-
-def test_cross_mount_is_deliberately_noent_on_this_wire():
-    # Finding 8: each mount is its own preopen to a WASI guest, so a
-    # rename between two of them reads as a destination that is not
-    # there. pathlib's EXDEV is the monty dialect's answer, not this
-    # one's. The table row IS the decision; do not "fix" it to 75.
-    assert wasi_errno(FsCondition.CROSS_MOUNT) == wasi_errno(
-        FsCondition.ENOENT
-    )
-    assert wasi_errno(FsCondition.CROSS_MOUNT) != wasi_errno(FsCondition.EXDEV)
 
 
 def test_link_refusal_is_the_shared_decision_in_preview1_numbers():

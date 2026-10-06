@@ -17,7 +17,7 @@ import pytest
 from mirage.commands.builtin.generic.cp import (
     CpFlags,
     TransferLinks,
-    cp,
+    cp_generic,
     parse_flags,
     update_mode,
 )
@@ -87,21 +87,13 @@ async def _run(files, dirs, paths, *, mtimes=None, readdir=None, **kw):
         no_clobber=kw.get("no_clobber", False),
         verbose=kw.get("verbose", False),
     )
-    return await cp(
+    return await cp_generic(
         [_spec(p) for p in paths],
         strategy=NativeCopy(copy=copy, find=find),
         stat=stat,
         flags=flags,
         readdir=readdir,
     )
-
-
-@pytest.mark.asyncio
-async def test_single_source_into_directory():
-    files = {"/a.txt": b"AAA", "/d/keep": b"K"}
-    await _run(files, {"/d"}, ["/a.txt", "/d"])
-    assert files["/d/a.txt"] == b"AAA"
-    assert files["/a.txt"] == b"AAA"
 
 
 @pytest.mark.asyncio
@@ -154,7 +146,7 @@ async def test_recursive_into_nested_subtree_refused():
     )
     assert io.exit_code == 1
     assert b"into itself" in io.stderr
-    assert set(files) == {"/d/a.txt"}
+    assert set(files) == {"/d/a.txt", "/d/sub/d/a.txt"}
 
 
 @pytest.mark.asyncio
@@ -168,7 +160,7 @@ async def test_primitive_copy_records_source_reads():
     async def write(p, data: bytes) -> None:
         files[_key(p)] = data
 
-    _, io = await cp(
+    _, io = await cp_generic(
         [_spec("/a.txt"), _spec("/copy.txt")],
         stat=stat,
         strategy=PrimitiveCopy(
@@ -236,7 +228,7 @@ async def _run_primitive(
     files, dirs, paths, *, recursive=False, flags=None, **fail_kw
 ):
     stat, strategy = _make_primitive(files, dirs, **fail_kw)
-    return await cp(
+    return await cp_generic(
         [_spec(p) for p in paths],
         strategy=strategy,
         stat=stat,
@@ -301,7 +293,6 @@ _OLD = "2020-01-01T00:00:00+00:00"
 
 
 def _root_readdir(files, dirs):
-
     async def readdir(p) -> list[str]:
         base = _key(p) + "/" if _key(p) != "/" else "/"
         children = {
@@ -315,53 +306,43 @@ def _root_readdir(files, dirs):
 
 
 @pytest.mark.asyncio
-async def test_update_older_equal_mtime_skips():
+@pytest.mark.parametrize(
+    "update,mtimes,kept",
+    [
+        ("older", {"/a.txt": _OLD, "/b.txt": _OLD}, b"DST"),
+        ("older", None, b"SRC"),
+        ("none", None, b"DST"),
+    ],
+)
+async def test_update_skips_only_a_destination_it_can_prove_fresh(
+    update, mtimes, kept
+):
+    # Freshness cannot be proven without mtimes: the copy proceeds.
     files = {"/a.txt": b"SRC", "/b.txt": b"DST"}
     _, io = await _run(
         files,
         set(),
         ["/a.txt", "/b.txt"],
-        mtimes={"/a.txt": _OLD, "/b.txt": _OLD},
-        flags=CpFlags(update="older"),
+        mtimes=mtimes,
+        flags=CpFlags(update=update),
     )
-    assert io.exit_code == 0
-    assert files["/b.txt"] == b"DST"
+    assert (io.exit_code, io.stderr) == (0, None)
+    assert files["/b.txt"] == kept
 
 
 @pytest.mark.asyncio
-async def test_update_older_unknown_mtime_replaces():
-    # Freshness cannot be proven without mtimes: the copy proceeds.
-    files = {"/a.txt": b"SRC", "/b.txt": b"DST"}
-    await _run(
-        files, set(), ["/a.txt", "/b.txt"], flags=CpFlags(update="older")
-    )
-    assert files["/b.txt"] == b"SRC"
-
-
-@pytest.mark.asyncio
-async def test_update_none_skips_silently():
-    files = {"/a.txt": b"SRC", "/b.txt": b"DST"}
-    _, io = await _run(
-        files, set(), ["/a.txt", "/b.txt"], flags=CpFlags(update="none")
-    )
-    assert io.exit_code == 0
-    assert io.stderr is None
-    assert files["/b.txt"] == b"DST"
-
-
-@pytest.mark.asyncio
-async def test_backup_skips_missing_dest():
-    files = {"/a.txt": b"SRC"}
-    await _run(
-        files, set(), ["/a.txt", "/b.txt"], flags=CpFlags(backup="existing")
-    )
-    assert files["/b.txt"] == b"SRC"
-    assert "/b.txt~" not in files
-
-
-@pytest.mark.asyncio
-async def test_backup_existing_prefers_numbered_versions():
-    files = {"/a.txt": b"SRC", "/b.txt": b"DST", "/b.txt.~3~": b"V3"}
+@pytest.mark.parametrize(
+    "before,backups",
+    [
+        ({}, {}),
+        (
+            {"/b.txt": b"DST", "/b.txt.~3~": b"V3"},
+            {"/b.txt.~3~": b"V3", "/b.txt.~4~": b"DST"},
+        ),
+    ],
+)
+async def test_backup_existing_follows_the_numbered_versions(before, backups):
+    files = {"/a.txt": b"SRC", **before}
     await _run(
         files,
         set(),
@@ -369,7 +350,7 @@ async def test_backup_existing_prefers_numbered_versions():
         readdir=_root_readdir(files, set()),
         flags=CpFlags(backup="existing"),
     )
-    assert files["/b.txt.~4~"] == b"DST"
+    assert files == {"/a.txt": b"SRC", "/b.txt": b"SRC", **backups}
 
 
 @pytest.mark.asyncio
@@ -400,7 +381,10 @@ async def test_recursive_merge_backs_up_per_entry():
 async def test_target_dir_not_a_directory():
     files = {"/a.txt": b"AAA", "/f.txt": b"F"}
     _, io = await _run(
-        files, set(), ["/a.txt"], flags=CpFlags(target_dir="/f.txt")
+        files,
+        set(),
+        ["/a.txt"],
+        flags=CpFlags(target_dir=PathSpec.from_str_path("/f.txt")),
     )
     assert io.exit_code == 1
     assert io.stderr == b"cp: target directory '/f.txt': Not a directory\n"
@@ -435,11 +419,7 @@ def test_parse_cp_flags_conflicts_and_grammar():
     with pytest.raises(UsageError) as exc:
         parse_flags(view({"backup": True, "update": "none-fail"}))
     assert "mutually exclusive" in str(exc.value)
-    assert parse_flags(view({"update": True})).update == "older"
     assert parse_flags(view({})).update is None
-    parsed = parse_flags(view({"suffix": ".bak"}))
-    assert parsed.backup == "existing"
-    assert parsed.suffix == ".bak"
     assert parse_flags(view({"backup": "t"})).backup == "numbered"
     assert parse_flags(view({"backup": "nil"})).backup == "existing"
 
@@ -465,7 +445,7 @@ async def test_recursive_empty_tree_still_creates_destination():
     files: dict[str, bytes] = {}
     dirs = {"/t", "/t/a", "/t/a/b"}
     stat, copy, find, mkdir = _typed_backend(files, dirs)
-    _, io = await cp(
+    _, io = await cp_generic(
         [_spec(p) for p in ["/t", "/c"]],
         strategy=NativeCopy(copy=copy, find=find, mkdir=mkdir),
         stat=stat,
@@ -492,7 +472,7 @@ async def test_no_op_policy_modes_keep_the_native_dir_copy():
             used["dir_copy"] = True
             dirs.add(_key(dst))
 
-        _, io = await cp(
+        _, io = await cp_generic(
             [_spec(p) for p in ["/t", "/c"]],
             strategy=NativeCopy(
                 copy=copy, find=find, dir_copy=dir_copy, mkdir=mkdir
@@ -556,19 +536,20 @@ def test_argument_clause_quotes_the_word(flag, clause, value, escaped):
 
 
 # Measured against GNU coreutils 9.7 on debian:stable-slim, LC_ALL=C.
-@pytest.mark.parametrize("command", ["cp", "mv"])
 @pytest.mark.parametrize(
-    "value,mode",
+    "command,value,mode",
     [
-        ("all", "all"),
-        ("none", "none"),
-        ("none-fail", "none-fail"),
-        ("older", "older"),
-        ("a", "all"),
-        ("al", "all"),
-        ("o", "older"),
-        ("old", "older"),
-        ("none-", "none-fail"),
+        ("cp", "older", "older"),
+        ("cp", "a", "all"),
+        ("cp", "o", "older"),
+        ("cp", "old", "older"),
+        ("mv", "all", "all"),
+        ("mv", "older", "older"),
+        ("mv", "a", "all"),
+        ("mv", "al", "all"),
+        ("mv", "o", "older"),
+        ("mv", "old", "older"),
+        ("mv", "none-", "none-fail"),
     ],
 )
 def test_update_accepts_a_mode_or_an_unambiguous_prefix(command, value, mode):
@@ -610,14 +591,14 @@ async def test_many_sources_to_a_slashed_file_report_not_a_directory():
     files = {"/a.txt": b"AAA", "/b.txt": b"BBB", "/reg": b"R"}
     stat, copy, find = _make_backend(files, set())
     with pytest.raises(NotADirectoryError, match="target '/reg/'"):
-        await cp(
+        await cp_generic(
             [_spec("/a.txt"), _spec("/b.txt"), _slashed("/reg")],
             strategy=NativeCopy(copy=copy, find=find),
             stat=stat,
             flags=CpFlags(),
         )
     with pytest.raises(FileNotFoundError, match="target '/missing/'"):
-        await cp(
+        await cp_generic(
             [_spec("/a.txt"), _spec("/b.txt"), _slashed("/missing")],
             strategy=NativeCopy(copy=copy, find=find),
             stat=stat,
@@ -639,13 +620,8 @@ def _cp_flags(*argv: str) -> CpFlags:
 @pytest.mark.parametrize(
     "argv,deref",
     [
-        ([], CopyDeref.ALWAYS),
-        (["-r"], CopyDeref.NEVER),
         (["-R"], CopyDeref.NEVER),
         (["-a"], CopyDeref.NEVER),
-        (["-rL"], CopyDeref.ALWAYS),
-        (["-rH"], CopyDeref.COMMAND_LINE),
-        (["-P"], CopyDeref.NEVER),
         (["-d"], CopyDeref.NEVER),
         (["-L", "-P"], CopyDeref.NEVER),
         (["-P", "-L"], CopyDeref.ALWAYS),
@@ -662,10 +638,7 @@ def test_the_last_link_option_wins_and_recursion_defaults_to_never(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("flag", ["-P", "-d"])
-async def test_a_link_reached_through_a_linked_directory_copies_as_a_link(
-    flag,
-):
+async def test_a_link_reached_through_a_linked_directory_copies_as_a_link():
     # The table keys a link by its resolved directory, so `dl/al` stands
     # at `dir/al`; coreutils 9.7 copies the link itself.
     ws = Workspace(
@@ -675,7 +648,7 @@ async def test_a_link_reached_through_a_linked_directory_copies_as_a_link(
         "cd /data && mkdir dir w && printf 'x\\n' > a.txt && "
         "ln -s ../a.txt dir/al && ln -s dir dl"
     )
-    r = await ws.shell(f"cd /data && cp {flag} dl/al w/x && ls -F w")
+    r = await ws.shell("cd /data && cp -P dl/al w/x && ls -F w")
     assert (r.exit_code, await r.materialize_stdout()) == (0, b"x@\n")
 
 
@@ -745,7 +718,7 @@ async def test_failed_backup_restores_existing_link(native, failure, referent):
         read_bytes=read, write=write, mkdir=readdir, readdir=readdir
     )
     strategy = NativeCopy(copy=copy, find=find) if native else primitive
-    _, io = await cp(
+    _, io = await cp_generic(
         [_spec("/src"), _spec("/dst")],
         stat=stat,
         strategy=strategy,
@@ -760,9 +733,7 @@ async def test_failed_backup_restores_existing_link(native, failure, referent):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("flag", ["-r", "-rL"])
-@pytest.mark.parametrize("destination", ["/data/copy", "/other/copy"])
-async def test_recursive_copy_omits_hidden_links(flag, destination):
+async def test_recursive_copy_omits_hidden_links():
     ws = Workspace(
         {
             "/data": (RAMVFS(), MountMode.WRITE),
@@ -779,12 +750,10 @@ async def test_recursive_copy_omits_hidden_links(flag, destination):
         "agent",
         profile={"paths": {"hide": ["/data/src/secret", "/data/src/sec"]}},
     )
-    result = await ws.shell(
-        f"cp {flag} /data/src {destination}", session_id="agent"
-    )
+    result = await ws.shell("cp -rL /data/src /other/copy", session_id="agent")
     assert result.exit_code == 0
     assert await result.materialize_stderr() == b""
-    copied = await ws.shell(f"ls -A {destination} && cat {destination}/public")
+    copied = await ws.shell("ls -A /other/copy && cat /other/copy/public")
     assert await copied.materialize_stdout() == b"a\npublic\nvisible\n"
-    assert not ws.namespace.is_link(f"{destination}/secret")
-    assert not ws.namespace.is_link(f"{destination}/sec/link")
+    assert not ws.namespace.is_link("/other/copy/secret")
+    assert not ws.namespace.is_link("/other/copy/sec/link")

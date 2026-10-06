@@ -14,12 +14,25 @@
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Protocol
 
 
 class Channel(str, Enum):
     STDOUT = "stdout"
     STDERR = "stderr"
     CONTROL = "control"
+
+
+class OwnedStream(Protocol):
+    """A stream a level owns, written by name rather than by channel.
+
+    A copy of a level's stdout or stderr (``3>&1``) keeps naming it after
+    the level rebinds its own. A console that keeps no streams writes it
+    on its channel.
+    """
+
+    @property
+    def channel(self) -> Channel: ...
 
 
 @dataclass(frozen=True, slots=True)

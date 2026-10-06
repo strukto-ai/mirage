@@ -493,4 +493,12 @@ describe('recursive metadata flags (-R)', () => {
     expect(err).toBe("chmod: cannot access '/data/nope': No such file or directory\n")
     await ws.close()
   })
+
+  it('chmod -R walks a deep tree', async () => {
+    const [ws] = await makeWs()
+    const deep = '/data' + '/d'.repeat(300)
+    await run(ws, `mkdir -p ${deep} && touch ${deep}/f`)
+    expect(await run(ws, `chmod -R 700 /data/d && stat -c %a ${deep}/f`)).toEqual([0, '700\n', ''])
+    await ws.close()
+  })
 })

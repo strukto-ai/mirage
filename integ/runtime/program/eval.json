@@ -1,0 +1,26 @@
+{
+  "cases": [
+    {
+      "id": "eval",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "local"
+      ],
+      "steps": [
+        {
+          "command": {
+            "python": "python3 -c \"print(6 * 7)\"",
+            "js": "node -e \"console.log(6 * 7)\""
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n"
+          }
+        }
+      ]
+    }
+  ]
+}

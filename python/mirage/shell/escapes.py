@@ -14,7 +14,7 @@
 
 import shlex
 
-from mirage.shell.bytes import byte_char
+from mirage.shell.bytes import byte_char, decode_text, encode_text
 
 # The ANSI-C escape table $'...' shares with bash's strtrans.c. \e/\E
 # are here although printf lacks them; \c takes an argument here while
@@ -119,6 +119,20 @@ def code_point_text(value: int) -> str:
     return "".join(byte_char(b) for b in _u32_utf8(value))
 
 
+def _as_text(out: list[str]) -> str:
+    """The decoded pieces as text, a byte run read back as its characters.
+
+    bash builds a $'...' word as bytes, so ``\\xc3\\xa9`` is the two bytes
+    of an é and names the same file as a typed one. The escapes arrive one
+    raw byte at a time, so the joined word is read back once: a run that is
+    valid UTF-8 becomes its characters and any other byte stays raw.
+
+    Args:
+        out (list[str]): the decoded pieces, raw bytes as their escapes.
+    """
+    return decode_text(encode_text("".join(out)))
+
+
 def decode_ansi_c(content: str) -> str:
     """Decode the body of a $'...' word to the text it names.
 
@@ -157,7 +171,7 @@ def decode_ansi_c(content: str) -> str:
             value = int(content[i + 1 : end], 8)
             # \400 is 256: the mask lands on NUL, which truncates too.
             if value & 0xFF == 0:
-                return "".join(out)
+                return _as_text(out)
             out.append(byte_char(value))
             i = end
             continue
@@ -169,7 +183,7 @@ def decode_ansi_c(content: str) -> str:
                 continue
             value = int(digits, 16)
             if value == 0:
-                return "".join(out)
+                return _as_text(out)
             out.append(byte_char(value))
             i = end
             continue
@@ -181,7 +195,7 @@ def decode_ansi_c(content: str) -> str:
                 continue
             value = int(digits, 16)
             if value == 0:
-                return "".join(out)
+                return _as_text(out)
             out.append(code_point_text(value))
             i = end
             continue
@@ -198,12 +212,12 @@ def decode_ansi_c(content: str) -> str:
                 i += 1
             value = 0x7F if operand == "?" else ord(operand.upper()) & 0x1F
             if value == 0:
-                return "".join(out)
+                return _as_text(out)
             out.append(chr(value))
             continue
         out.append(char + marker)
         i += 2
-    return "".join(out)
+    return _as_text(out)
 
 
 def unescape_unquoted(text: str) -> str:

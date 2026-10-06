@@ -21,7 +21,7 @@ from mirage.accessor.base import NOOPAccessor
 from mirage.cache.index import NULL_INDEX
 from mirage.context import reset_current_session, set_current_session
 from mirage.shell.escapes import unescape_unquoted
-from mirage.types import FileStat, FileType, HiddenPaths, PathSpec
+from mirage.types import FileStat, FileType, HiddenPaths, PathSpec, Visibility
 from mirage.utils import glob_walk
 from mirage.utils.glob_walk import (
     DEFAULT_MAX_GLOB_MATCHES,
@@ -121,7 +121,6 @@ def test_glob_pattern_makes_a_marked_char_literal():
 
 
 def test_mark_escaped_globs_reads_backslashes_like_bash():
-
     def marked(text: str) -> bool:
         return has_glob(unescape_unquoted(mark_escaped_globs(text)))
 
@@ -422,7 +421,8 @@ async def test_make_resolve_glob_index_defaults_to_null():
 @pytest.mark.asyncio
 async def test_resolve_glob_with_drops_hidden_matches():
     sess = SessionState(
-        session_id="narrowed", hidden_paths=HiddenPaths(patterns=("*.json",))
+        session_id="narrowed",
+        visibility=Visibility(paths=HiddenPaths(patterns=("*.json",))),
     )
     token = set_current_session(sess)
     try:
@@ -440,7 +440,8 @@ async def test_resolve_glob_with_drops_hidden_matches():
 @pytest.mark.asyncio
 async def test_resolve_glob_with_all_hidden_falls_back_to_literal():
     sess = SessionState(
-        session_id="narrowed", hidden_paths=HiddenPaths(patterns=("*.json",))
+        session_id="narrowed",
+        visibility=Visibility(paths=HiddenPaths(patterns=("*.json",))),
     )
     token = set_current_session(sess)
     try:

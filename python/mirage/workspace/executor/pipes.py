@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import Callable
 from functools import partial
 from typing import Any
 
@@ -24,13 +25,14 @@ from mirage.io.stream import (
     discard_io,
     discard_streams,
 )
-from mirage.io.types import ByteSource, materialize
+from mirage.io.types import ByteSource, materialize, settled
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
-from mirage.shell.console import JobConsole
+from mirage.shell.console import JobConsole, JobOutput
 from mirage.shell.console.pipe import PipeConsole
 from mirage.shell.console.types import Channel
 from mirage.shell.constants import (
@@ -40,7 +42,7 @@ from mirage.shell.constants import (
 )
 from mirage.shell.descriptors import ENCLOSING, Recorder
 from mirage.shell.errors import ExitSignal, PipeClosed, ReturnSignal
-from mirage.shell.job_table import JobTable
+from mirage.shell.job_table import JobTable, JobWaits
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec
@@ -55,6 +57,11 @@ from mirage.workspace.executor.statement import (
     record_status,
     statement_output,
     statement_stdin,
+)
+from mirage.workspace.executor.traps import (
+    end_shell,
+    inherit_exit_trap,
+    run_exit_trap,
 )
 from mirage.workspace.session import (
     SessionState,
@@ -72,8 +79,13 @@ async def handle_pipe(
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     processes: ProcessSupervisor | None = None,
+    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Connect commands via pipes: stdout -> stdin."""
+    """Connect commands via pipes: stdout -> stdin.
+
+    Each stage is a child shell, which runs its own EXIT action through
+    ``execute_fn`` when it ends.
+    """
     # Reassociated pipelines can enter here without execute_node resetting
     # the parent. An exemption belongs to the preceding statement only;
     # the caller applies this pipeline's own negation after it finishes.
@@ -89,6 +101,7 @@ async def handle_pipe(
 
     async def run_segment(i: int, cmd: TSNodeLike) -> int:
         child = children[i]
+        inherit_exit_trap(child)
         child.terminal_output = (
             session.terminal_output and i == len(commands) - 1
         )
@@ -97,16 +110,35 @@ async def handle_pipe(
         input_stream = stdin if i == 0 else pipes[i - 1].stream()
         io = IOResult()
         child_exec = ExecutionNode()
+        stage_stack = (call_stack or CallStack()).fork()
+        # A job a stage before the last starts writes into the pipe, and
+        # the reader sees end of input only once the job has closed it.
+        waits = None
+        if i < len(commands) - 1:
+            piped = i < len(stderr_flags) and stderr_flags[i]
+            waits = JobWaits(
+                JobOutput(output),
+                frozenset({Channel.STDOUT, Channel.STDERR})
+                if piped
+                else frozenset({Channel.STDOUT}),
+            )
+            child.job_output = waits.output
+            child.job_waits = waits
+        rest = session.job_output or session.tty.jobs
         try:
-            stdout, io, child_exec = await execute_node(
-                cmd,
+            stdout, io, child_exec = await end_shell(
+                execute_fn,
                 child,
                 input_stream,
-                (call_stack or CallStack()).fork(),
-                sink=output,
+                stage_stack,
+                execute_node(
+                    cmd, child, input_stream, stage_stack, sink=output
+                ),
             )
             await pump(output, Channel.STDOUT, stdout)
             await pump(output, Channel.STDERR, io.stderr)
+            if waits is not None:
+                await waits.join(rest)
         except PipeClosed:
             io.exit_code = 141
         except UNWINDING as sig:
@@ -115,6 +147,8 @@ async def handle_pipe(
             io.exit_code = unwound.exit_code
             await pump(output, Channel.STDOUT, unwound.stdout)
             await pump(output, Channel.STDERR, unwound.stderr)
+            if waits is not None:
+                await waits.join(rest)
         except BaseException as error:
             output.end(error)
             raise
@@ -142,7 +176,7 @@ async def handle_pipe(
             try:
                 process = processes.start(
                     session_id=session.session_id,
-                    command=(cmd.text or b"").decode(),
+                    command=decode_text(cmd.text or b""),
                     cwd=PathSpec.from_str_path(session.cwd),
                     parent_pid=session.process_id,
                     run=partial(run_segment, i, cmd),
@@ -198,8 +232,14 @@ async def handle_pipe(
         stderr_bytes = await materialize(io.stderr)
         if stderr_bytes:
             merged_stderr_parts.append(stderr_bytes)
+        merged_reads = {
+            p: v
+            for p, v in merged_reads.items()
+            if p not in io.writes or not settled(v)
+        }
         merged_reads.update(io.reads)
         merged_writes.update(io.writes)
+        merged_cache = [p for p in merged_cache if p not in io.writes]
         merged_cache.extend(io.cache)
 
     if merged_stderr_parts:
@@ -279,6 +319,7 @@ async def handle_subshell(
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
     sink: JobConsole | None = None,
+    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute body in isolated env.
 
@@ -302,8 +343,12 @@ async def handle_subshell(
             it finishes; the body is a shell of its own, which routes
             what it wrote to its terminal through a copy, so a program
             nested in it (``$( )``, ``eval``) leaves that to it.
+        execute_fn (Callable[..., Any] | None): runs the subshell's own
+            EXIT action as it ends.
     """
     saved = session.snapshot()
+    inherit_exit_trap(session)
+    session.job_output = JobOutput(session.job_output or session.tty.jobs)
     session._line_open = True
     # A child shell: `shift` or `set --` in it leaves the caller's
     # parameters alone, and it runs in none of the caller's loops.
@@ -367,10 +412,16 @@ async def handle_subshell(
             child_stdin = statement_stdin(session, stdin, bound)
             recorder = Recorder()
             enclosing = ENCLOSING.set(recorder)
+            jobs = session.job_output
+            held = jobs.recorder
             try:
-                stdout, io, last_exec = await execute_node(
-                    child, session, child_stdin, call_stack, sink=recorder
-                )
+                jobs.recorder = recorder
+                try:
+                    stdout, io, last_exec = await execute_node(
+                        child, session, child_stdin, call_stack, sink=recorder
+                    )
+                finally:
+                    jobs.recorder = held
             except (ExitSignal, ReturnSignal) as sig:
                 # A subshell is its own shell: exit (or ${var:?}) ends
                 # the subshell only, becoming its exit status, and so
@@ -421,6 +472,31 @@ async def handle_subshell(
             ):
                 merged_io.exit_code = io.exit_code
                 break
+        # The EXIT action is the subshell's: its `wait` and `jobs` see the
+        # subshell's jobs, not the caller's.
+        if execute_fn is not None and job_table is not None:
+            execute_fn = partial(execute_fn, job_table=job_table)
+        cleanup = await run_exit_trap(
+            execute_fn, session, merged_io.exit_code, stdin, call_stack
+        )
+        if cleanup is not None:
+            merged_io = await land(
+                [
+                    (channel, data, False)
+                    for channel, data in (
+                        (Channel.STDOUT, await cleanup.materialize_stdout()),
+                        (Channel.STDERR, await cleanup.materialize_stderr()),
+                    )
+                    if data
+                ],
+                sink,
+                all_stdout,
+                merged_io,
+            )
+            merged_io.exit_code = cleanup.exit_code
+            last_exec = ExecutionNode(
+                command="()", exit_code=cleanup.exit_code
+            )
         if len(all_stdout) == 1:
             return all_stdout[0], merged_io, last_exec
         combined = async_chain(all_stdout) if all_stdout else None

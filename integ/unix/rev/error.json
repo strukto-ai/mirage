@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "rev_missing_operand_cannot_open",
+      "seq": 15000001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rev /data/nope.txt /data/b.txt; echo rc=$?; rev /data/b.txt /data/sub/nope; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n2\n3\nrc=1\n1\n2\n3\nrc=1\n",
+        "stderr": "rev: cannot open /data/nope.txt: No such file or directory\nrev: cannot open /data/sub/nope: No such file or directory\n"
+      }
+    }
+  ]
+}

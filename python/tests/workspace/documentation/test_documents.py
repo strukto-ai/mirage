@@ -19,6 +19,8 @@ import pytest
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.spec.types import Operand, Option
+from mirage.workspace.snapshot.keys import StateKey
+from mirage.workspace.snapshot.state import apply_state_dict, to_state_dict
 
 
 async def cli(inv):
@@ -190,4 +192,43 @@ async def test_copy_excludes_live_documents():
     await clone.vfs_md("/VFS.md")
     assert b"Virtual filesystem" in await clone.vfs.read("/VFS.md")
     await clone.close()
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_link_above_the_name_binds_where_reads_land():
+    ws = workspace()
+    await ws.vfs.mkdir("/data/guides")
+    linked = await ws.shell("ln -s /data/guides /guides")
+    assert linked.exit_code == 0
+    markdown = (await ws.vfs_md("/guides/VFS.md")).encode()
+    assert await ws.vfs.read("/guides/VFS.md") == markdown
+    assert await ws.vfs.read("/data/guides/VFS.md") == markdown
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_in_place_load_drops_bindings_for_the_restored_file():
+    source = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    await source.vfs.write("/data/VFS.md", b"restored\n")
+    state = await to_state_dict(source)
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.vfs_md("/data/VFS.md")
+    await apply_state_dict(ws, state)
+    assert await ws.vfs.read("/data/VFS.md") == b"restored\n"
+    await ws.vfs_md("/VFS.md")
+    assert b"Virtual filesystem" in await ws.vfs.read("/VFS.md")
+    await source.close()
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_the_snapshot_audit_leaves_bindings_out():
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    session = await ws.session("a")
+    unbound = (await to_state_dict(ws))[StateKey.LIVE_ONLY_MOUNTS]
+    await ws.vfs_md("/VFS.md")
+    await session.skill_md("/SKILL.md")
+    state = await to_state_dict(ws)
+    assert state[StateKey.LIVE_ONLY_MOUNTS] == unbound
     await ws.close()

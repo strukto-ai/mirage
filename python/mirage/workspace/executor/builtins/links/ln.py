@@ -36,11 +36,13 @@ from mirage.commands.spec.usage import (
     unknown_option_error,
     usage_hint,
 )
-from mirage.context import path_allowed
+from mirage.context import session_visibility
 from mirage.io.stream import materialize
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import FileStat, FileType, PathSpec, word_text
 from mirage.utils.errors import FS_ERRORS, DotWalkLoop, fs_strerror
+from mirage.utils.hidden import path_visible
 from mirage.utils.path import CycleError, dotted_spelling
 from mirage.workspace.executor.builtins.shared import abs_path, fail, result
 from mirage.workspace.executor.builtins.types import Result
@@ -152,20 +154,20 @@ def option_refusal(parsed: ParsedArgs) -> tuple[str, int] | None:
     ):
         token, candidates = parsed.ambiguous_options[0]
         msg, code = ambiguous_option_error("ln", token, candidates)
-        return msg.decode(), code
+        return decode_text(msg), code
     if parsed.invalid_options:
         if parsed.option_error_kinds[:1] == ["unexpected_value"]:
             msg, code = unexpected_value_error("ln", parsed.invalid_options[0])
         else:
             msg, code = unknown_option_error("ln", parsed.invalid_options[0])
-        return msg.decode(), code
+        return decode_text(msg), code
     if parsed.ambiguous_options:
         token, candidates = parsed.ambiguous_options[0]
         msg, code = ambiguous_option_error("ln", token, candidates)
-        return msg.decode(), code
+        return decode_text(msg), code
     if parsed.needs_value_options:
         msg, code = missing_value_error("ln", parsed.needs_value_options[0])
-        return msg.decode(), code
+        return decode_text(msg), code
     return None
 
 
@@ -234,7 +236,9 @@ def _visible_link(namespace: Namespace, virtual: str) -> bool:
         namespace (Namespace): the link table.
         virtual (str): absolute virtual path.
     """
-    return path_allowed(virtual) and namespace.is_link(virtual)
+    return path_visible(session_visibility(), virtual) and namespace.is_link(
+        virtual
+    )
 
 
 def _follow_visible(namespace: Namespace, virtual: str) -> str:
@@ -245,7 +249,11 @@ def _follow_visible(namespace: Namespace, virtual: str) -> str:
         namespace (Namespace): the link table.
         virtual (str): absolute virtual path.
     """
-    return namespace.follow(virtual) if path_allowed(virtual) else virtual
+    return (
+        namespace.follow(virtual)
+        if path_visible(session_visibility(), virtual)
+        else virtual
+    )
 
 
 def operand_abs(namespace: Namespace, arg: str | PathSpec, cwd: str) -> str:
@@ -263,7 +271,9 @@ def operand_abs(namespace: Namespace, arg: str | PathSpec, cwd: str) -> str:
         cwd (str): session working directory.
     """
     virtual = abs_path(arg, cwd)
-    if isinstance(arg, PathSpec) or not path_allowed(virtual):
+    if isinstance(arg, PathSpec) or not path_visible(
+        session_visibility(), virtual
+    ):
         return virtual
     try:
         return posixpath.normpath(
@@ -297,7 +307,7 @@ def _walk_verdict(
     if word_text(word) == "":
         return _ENOENT_TEXT
     virtual = abs_path(word, cwd)
-    if not path_allowed(virtual):
+    if not path_visible(session_visibility(), virtual):
         return None
     trimmed = virtual.rstrip("/") or "/"
     try:
@@ -684,7 +694,9 @@ async def make_link(
             if refusal is not None:
                 errors.append(refusal)
                 return
-    if path_allowed(plan.link_abs) and namespace.is_mount_root(plan.link_abs):
+    if path_visible(
+        session_visibility(), plan.link_abs
+    ) and namespace.is_mount_root(plan.link_abs):
         errors.append(f"ln: failed to create {kind} '{typed}': File exists\n")
         return
     link_spec = PathSpec.from_str_path(plan.link_abs)
@@ -934,7 +946,7 @@ async def handle_ln(
         )
     return result(
         "ln",
-        out="".join(out).encode() or None,
+        out=encode_text("".join(out)) or None,
         exit_code=1 if errors else 0,
         stderr="".join(errors) or None,
     )

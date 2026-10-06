@@ -15,10 +15,13 @@
 import asyncio
 import logging
 import time
+from functools import partial
 
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.types import CLIInvocation, CLISpec
+from mirage.io import IOResult
 from mirage.policy import resolve_producer
 from mirage.policy.builtin import output_cap as sg
 from mirage.runtime.python import LocalRuntime
@@ -319,6 +322,47 @@ async def test_job_table_reports_completed_bg_without_wait(restore_defaults):
     assert jobs[0].exit_code == 124
     stderr = await jobs[0].console.snapshot(Channel.STDERR)
     assert b"sleep: timed out" in stderr
+
+
+async def _record(
+    seen: list[str], name: str, inv: CLIInvocation
+) -> tuple[None, IOResult]:
+    seen.append(name)
+    return None, IOResult()
+
+
+@pytest.mark.asyncio
+async def test_a_killed_subshell_stops_its_exit_action():
+    ws = _ws()
+    reached: list[str] = []
+    for name in ("started", "reached"):
+        ws.register_cli(
+            name, CLISpec(name=name, fn=partial(_record, reached, name))
+        )
+    running = asyncio.create_task(
+        ws.shell('(trap "started; sleep 0.3; reached" EXIT; true); echo after')
+    )
+
+    def subshell():
+        return next(
+            (
+                p
+                for p in ws.job_table.processes.live()
+                if p.info.command.startswith("(trap")
+            ),
+            None,
+        )
+
+    deadline = time.monotonic() + 3
+    while subshell() is None:
+        assert time.monotonic() < deadline, "the subshell never started"
+        await asyncio.sleep(0.005)
+    await asyncio.sleep(0.05)
+    subshell().terminate()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+    await asyncio.sleep(0.6)
+    assert reached == ["started"]
 
 
 @pytest.mark.asyncio

@@ -15,6 +15,7 @@
 import { GitHubApiError, type GitHubTransport } from './client.ts'
 import { GRAPHQL_PATH } from './constants.ts'
 import { decodeBase64 } from '../../utils/base64.ts'
+import { stripSlash } from '../../utils/slash.ts'
 import { githubPages } from './paginate.ts'
 
 export interface RepoRef {
@@ -22,11 +23,64 @@ export interface RepoRef {
   repo: string
 }
 
+// go-gh's IsURL: a word that starts `git@` or with a scheme a git remote uses
+// names a repository by URL rather than as `[HOST/]OWNER/REPO`.
+const URL_PREFIXES = ['git@', 'ssh:', 'git+ssh:', 'git:', 'http:', 'git+https:', 'https:']
+// The schemes go-gh leaves alone before it reads an scp-style `host:path`.
+const PROTOCOLS = [...URL_PREFIXES.slice(1), 'ftp:', 'ftps:', 'file:']
+
 /**
- * gh's `[HOST/]OWNER/REPO`: the host is optional and leading, so the owner and
- * the repository are always the last two segments. Taking the first two
- * instead read `github.com/acme/tools` as owner `github.com`, repo `acme` --
- * a different repository, reported as success.
+ * A repository URL as go-gh's ParseURL reads it: `git@HOST:OWNER/REPO.git` is
+ * scp syntax for `ssh://`, and a URL with no host is refused.
+ */
+function urlOf(spec: string): URL {
+  let raw = spec
+  if (
+    !PROTOCOLS.some((prefix) => raw.startsWith(prefix)) &&
+    raw.includes(':') &&
+    !raw.includes('\\')
+  )
+    raw = `ssh://${raw.replace(':', '/')}`
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new Error('no hostname detected')
+  }
+  if (url.hostname === '') throw new Error('no hostname detected')
+  return url
+}
+
+/** The host a repository argument names, null for `OWNER/REPO`. */
+export function repoHost(spec: string): string | null {
+  if (URL_PREFIXES.some((prefix) => spec.startsWith(prefix))) return urlOf(spec).hostname
+  const parts = spec.split('/')
+  return parts.length === 3 ? (parts[0] ?? '').toLowerCase() : null
+}
+
+/**
+ * A repository named by URL, read as go-gh's ParseURL and RepoInfoFromURL
+ * read it: the path must be exactly two segments once its slashes are
+ * trimmed, and `.git` comes off the name.
+ */
+function repoFromUrl(spec: string): RepoRef {
+  const url = urlOf(spec)
+  let path = url.pathname
+  if (url.protocol === 'ssh:' && path.startsWith('//')) path = path.slice(1)
+  const parts = stripSlash(path).split('/')
+  const [owner, name] = parts
+  if (parts.length !== 2 || owner === undefined || name === undefined) {
+    throw new Error(`invalid path: ${path}`)
+  }
+  return { owner, repo: name.replace(/\.git$/, '') }
+}
+
+/**
+ * The repository a word names, as gh reads it: a URL (`https://HOST/OWNER/REPO`,
+ * `git@HOST:OWNER/REPO.git`) or `[HOST/]OWNER/REPO`. The host is optional and
+ * leading, so the owner and the repository are always the last two segments.
+ * Taking the first two instead read `github.com/acme/tools` as owner
+ * `github.com`, repo `acme` -- a different repository, reported as success.
  *
  * Args:
  *   spec (string): the repository as the line spelled it.
@@ -35,14 +89,17 @@ export interface RepoRef {
  *   RepoRef: the owner and repository names.
  */
 export function parseRepo(spec: string): RepoRef {
+  if (URL_PREFIXES.some((prefix) => spec.startsWith(prefix))) return repoFromUrl(spec)
   const parts = spec.split('/')
-  const repo = parts.pop()
-  const owner = parts.pop()
-  if (owner === undefined || repo === undefined || owner === '' || repo === '') {
-    throw new Error(`expected the "[HOST/]OWNER/REPO" format, got "${spec}"`)
-  }
+  const owner = parts[parts.length - 2]
+  const repo = parts[parts.length - 1]
   // One more segment is a host; two is not a repository any spelling reaches.
-  if (parts.length > 1) {
+  if (
+    (parts.length !== 2 && parts.length !== 3) ||
+    parts.some((part) => part === '') ||
+    owner === undefined ||
+    repo === undefined
+  ) {
     throw new Error(`expected the "[HOST/]OWNER/REPO" format, got "${spec}"`)
   }
   return { owner, repo }
@@ -178,12 +235,12 @@ export async function readReadme(transport: GitHubTransport, ref: RepoRef): Prom
   return new TextDecoder().decode(decodeBase64(content))
 }
 
+/** Fork a repository: `body` carries the request's `name`, `organization` and `default_branch_only`. */
 export function forkRepo(
   transport: GitHubTransport,
   ref: RepoRef,
-  name?: string,
+  body: Record<string, unknown> = {},
 ): Promise<unknown> {
-  const body = name === undefined ? {} : { name }
   return transport.request('POST', `/repos/${ref.owner}/${ref.repo}/forks`, body)
 }
 

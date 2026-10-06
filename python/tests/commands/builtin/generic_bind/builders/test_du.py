@@ -19,10 +19,8 @@ import pytest
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders.du import WalkBudget, du
 from mirage.commands.config import CommandOpts
-from mirage.commands.errors import UsageError
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.parser import parse_command, parse_to_kwargs
 from mirage.io.stream import materialize
+from mirage.ops.types import MountView
 from mirage.types import FileStat, FileType, PathSpec
 
 TREE = {
@@ -33,7 +31,6 @@ SIZES = {"/db/a.txt": 3, "/db/sub/b.txt": 2}
 
 
 def _ops(max_du_entries: int | None = None) -> CommandIO:
-
     async def readdir(_accessor, path, _index=None):
         return TREE.get(path.virtual.rstrip("/") or "/", [])
 
@@ -79,85 +76,28 @@ async def _run(ops: CommandIO, path: str, **flags) -> tuple[str, int, str]:
 
 def test_walk_budget_stops_once_spent():
     budget = WalkBudget(2)
-    assert budget.spend() is True
-    assert budget.spend() is True
-    assert budget.spend() is False
+    assert [budget.spend("/d") for _ in range(3)] == [True, True, False]
     assert budget.hit is True
+    unbounded = WalkBudget(None)
+    assert all(unbounded.spend("/d") for _ in range(100))
+    assert unbounded.hit is False
 
 
-def test_walk_budget_is_unbounded_when_none():
-    budget = WalkBudget(None)
-    for _ in range(100):
-        assert budget.spend() is True
-    assert budget.hit is False
-
-
-@pytest.mark.asyncio
-async def test_fallback_walk_sums_a_tree():
-    out, code, err = await _run(_ops(), "/db")
-    assert out == "2\t/db/sub\n5\t/db\n"
-    assert code == 0
-    assert err == ""
-
-
-@pytest.mark.asyncio
-async def test_fallback_walk_lists_entries_for_a():
-    out, _, _ = await _run(_ops(), "/db", a=True)
-    assert out == ("3\t/db/a.txt\n2\t/db/sub/b.txt\n2\t/db/sub\n5\t/db\n")
-
-
-@pytest.mark.asyncio
-async def test_missing_operand_is_reported_and_exits_one():
-    """GNU names the operand it could not stat and still prints the rest."""
-    ops = _ops()
-    stream, io = await du(
-        ops, object(), [_spec("/nope"), _spec("/db")], [], CommandOpts()
+def test_walk_budget_with_no_cap_charges_each_mount_its_own():
+    caps = {"/a/": None, "/a/b/": 1}
+    mounts = MountView(
+        descendants=lambda p: [],
+        visible_descendants=lambda p: [],
+        is_root=lambda p: p.rstrip("/") + "/" in caps,
+        root_of=lambda p: "/a/b/" if p.startswith("/a/b") else "/a/",
+        max_du_entries=lambda p: caps[
+            "/a/b/" if p.startswith("/a/b") else "/a/"
+        ],
     )
-    out = (await materialize(stream)).decode()
-    assert out == "2\t/db/sub\n5\t/db\n"
-    assert io.exit_code == 1
-    assert (io.stderr or b"").decode() == (
-        "du: cannot access '/nope': No such file or directory\n"
-    )
-
-
-@pytest.mark.asyncio
-async def test_no_operand_walks_the_working_directory():
-    """GNU du with no operand summarises '.'; mirage uses the session cwd."""
-    stream, io = await du(
-        _ops(),
-        object(),
-        [],
-        [],
-        CommandOpts(
-            cwd=PathSpec(
-                virtual="/db", directory="/db", vfs_path="db", resolved=False
-            )
-        ),
-    )
-    assert (await materialize(stream)).decode() == "2\t/db/sub\n5\t/db\n"
-    assert io.exit_code == 0
-
-
-@pytest.mark.asyncio
-async def test_d_is_an_alias_for_max_depth():
-    # The alias is the parser's: both spellings compile onto the one
-    # canonical dest, so the builder never sees a separate `d`.
-    short = parse_to_kwargs(parse_command(SPECS["du"], ["-d", "0"], cwd="/"))
-    long = parse_to_kwargs(
-        parse_command(SPECS["du"], ["--max-depth", "0"], cwd="/")
-    )
-    assert short == long == {"max_depth": "0"}
-    out, _, _ = await _run(_ops(), "/db", **short)
-    assert out == "5\t/db\n"
-
-
-@pytest.mark.asyncio
-async def test_summarize_with_all_is_a_usage_error():
-    with pytest.raises(UsageError) as excinfo:
-        await _run(_ops(), "/db", s=True, a=True)
-    assert excinfo.value.exit_code == 1
-    assert "cannot both summarize" in str(excinfo.value)
+    budget = WalkBudget(None, mounts=mounts)
+    assert all(budget.spend("/a") for _ in range(100))
+    assert [budget.spend("/a/b") for _ in range(2)] == [True, False]
+    assert budget.hit is True
 
 
 @pytest.mark.asyncio

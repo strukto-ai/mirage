@@ -136,6 +136,19 @@ export async function invalidateSubtree(path: string | PathSpec): Promise<void> 
 }
 
 /**
+ * Report one end of a backend rename.
+ *
+ * A renamed folder strands everything cached beneath both of its names, so
+ * it takes {@link invalidateSubtree}. A renamed file has nothing beneath it
+ * and takes {@link invalidateAfterUnlink}, which spares the walk of every
+ * store. The caller passes `folder: true` whenever it cannot tell, and for
+ * a destination the backend may have replaced a non-empty folder at.
+ */
+export async function invalidateAfterMove(path: string | PathSpec, folder: boolean): Promise<void> {
+  await (folder ? invalidateSubtree(path) : invalidateAfterUnlink(path))
+}
+
+/**
  * Run `op`, then `evict`, also when `op` fails.
  *
  * An op that fails partway (a paginated delete, a folder copy that merged

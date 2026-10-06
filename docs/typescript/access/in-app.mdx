@@ -1,0 +1,329 @@
+---
+title: In-app
+description: The TypeScript classes your app calls to run a workspace, each with an example.
+icon: cube
+---
+
+Call these when your agent runs in the same process as the workspace. Every other way in ends in the same calls.
+
+## Workspace
+
+```ts
+import { Workspace } from '@struktoai/mirage-node'
+```
+
+```ts
+class Workspace {
+  constructor(
+    mounts: Record<string, VFS>,
+    options?: WorkspaceOptions,
+  )
+}
+```
+
+One terminal over the backends mounted at each prefix.
+
+<ResponseField name="mounts" type="Record<string, VFS>" required>
+  The backend at each prefix, such as `{ '/': new RAMVFS(), '/s3': new S3VFS(config) }`.
+</ResponseField>
+<ResponseField name="options.mode" type="MountMode" default="MountMode.READ">
+  The mode a mount gets when it sets none: `READ`, `WRITE` or `EXEC`.
+</ResponseField>
+<ResponseField name="options.profiles" type="Record<string, SessionProfile>">
+  Named [profiles](/home/permissions) a session can be created under.
+</ResponseField>
+<ResponseField name="options.profile" type="string">
+  The profile a session gets when it names none.
+</ResponseField>
+<ResponseField name="options.policies" type="Policy[]">
+  [Policies](/home/policy-engine) every line passes through.
+</ResponseField>
+<ResponseField name="options.onAsk" type="AskHandler">
+  Answers an ask while the line waits. Without one, asks wait in [`ws.decisions`](#ws-decisions).
+</ResponseField>
+
+The other options (`cache`, `index`, `store`, `runtimes`, `clis`, `env`, `secrets`, `commandLimits`, ...) are the [top-level YAML keys](/home/yaml#top-level), in camelCase.
+
+```ts
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace(
+  { '/': new RAMVFS() },
+  { mode: MountMode.WRITE },
+)
+```
+
+### ws.session
+
+```ts
+ws.session(sessionId, { profile?, mounts? }): Promise<Session>
+```
+
+The [`Session`](#session) every call below runs as. It creates the session when the id is new and adopts it when it exists. `profile` and `mounts` apply only on create, and throw for an existing session. `ws.createSession` is the same call without the handle.
+
+```ts
+const session = await ws.session('agent')
+```
+
+### ws.listSessions, ws.closeSession
+
+```ts
+ws.listSessions(): SessionState[]
+ws.closeSession(sessionId): Promise<void>
+```
+
+List the sessions, or close one: its lines are cancelled and its jobs end. The default session cannot be closed.
+
+<Expandable title="SessionState">
+  <ResponseField name="sessionId" type="string" />
+  <ResponseField name="cwd" type="string">The working directory.</ResponseField>
+  <ResponseField name="env" type="Readonly<Record<string, string>>">The exported variables.</ResponseField>
+  <ResponseField name="profile" type="string | null">The profile it was created under.</ResponseField>
+  <ResponseField name="mountModes" type="ReadonlyMap<string, MountMode> | null">Its mount modes, when narrower than the workspace's.</ResponseField>
+  <ResponseField name="lastExitCode" type="number">`$?`.</ResponseField>
+  <ResponseField name="createdAt" type="number">Unix time, in seconds.</ResponseField>
+</Expandable>
+
+```ts
+console.log(ws.listSessions().map((s) => s.sessionId))
+await ws.closeSession('agent')
+```
+
+### ws.cancel, ws.kill
+
+```ts
+ws.cancel(sessionId?): Promise<number>
+ws.kill(sessionId?): Promise<number>
+```
+
+Stop a session's work, or every session's with no id, and leave the sessions open. `cancel` cancels the running and queued lines, whichever way they came in, and resolves once they have ended; each rejects with an `AbortError`. `kill` kills the background jobs (`cmd &`) and the processes runtimes started. Each answers how many it stopped.
+
+```ts
+await ws.cancel('agent')
+await ws.kill()
+```
+
+### ws.snapshot, Workspace.load
+
+```ts
+ws.snapshot(): Promise<Uint8Array>
+ws.snapshot(target, { s3? }): Promise<number>
+Workspace.load(source, { s3?, ... }): Promise<Workspace>
+```
+
+Save the workspace to a tar and rebuild it from one. With no target, `snapshot` answers the tar's bytes; with one, its size. `target` and `source` are a path, or an object key with `s3`; `source` can also be the bytes. While it captures, new lines and file writes wait, and running ones get 30 seconds to end, else it rejects with an `EBUSY` error; a path target streams disk mount files rather than holding them whole. See [Snapshots](/home/snapshot) for what a tar holds.
+
+```ts
+const tar = await ws.snapshot()
+const restored = await Workspace.load(tar)
+```
+
+### ws.copy
+
+```ts
+ws.copy(): Promise<Workspace>
+```
+
+A deep copy, without a tar in between. RAM and disk mounts are copied, so a write in the copy never reaches the original; a disk mount's copy lives in a new temporary directory. Sessions, history and profiles come along. Remote backends such as S3 or Redis are shared, so a write through the copy reaches the same bucket. Policies are not copied.
+
+```ts
+const fork = await ws.copy()
+```
+
+### ws.decisions
+
+```ts
+ws.decisions.pending(sessionId?): Decision[]
+ws.decisions.answer(
+  decisionId, outcome, scope?, note?
+): Promise<void>
+```
+
+The [asks](/home/permissions#asks) waiting for a host. Each one belongs to the session that ran the line: `pending()` lists every session's, `pending('agent')` one session's, and an answer never reaches another session. `outcome` is `Outcome.ALLOW` or `Outcome.DENY`. `Scope.ONCE`, the default, answers the one line, so its retry runs or is refused; `Scope.SESSION` allows every line the rule covers for the rest of that session.
+
+<Expandable title="Decision">
+  <ResponseField name="id" type="string">The id to answer it by.</ResponseField>
+  <ResponseField name="sessionId" type="string">The session that ran the line.</ResponseField>
+  <ResponseField name="agentId" type="string" />
+  <ResponseField name="command" type="string">The command name.</ResponseField>
+  <ResponseField name="argv" type="readonly string[]">The words after the name, expanded.</ResponseField>
+  <ResponseField name="cwd" type="string" />
+  <ResponseField name="paths" type="readonly string[]">The paths the line names.</ResponseField>
+  <ResponseField name="reason" type="string">The rule's reason.</ResponseField>
+  <ResponseField name="outcome" type="Outcome | null">The answer; `null` while it waits.</ResponseField>
+  <ResponseField name="scope" type="Scope" />
+  <ResponseField name="note" type="string">What the host said when answering.</ResponseField>
+</Expandable>
+
+```ts
+import { Outcome } from '@struktoai/mirage-node'
+
+for (const ask of ws.decisions.pending()) {
+  await ws.decisions.answer(ask.id, Outcome.ALLOW)
+}
+```
+
+### ws.close
+
+```ts
+ws.close(): Promise<void>
+```
+
+Stops its jobs and closes its mounts. Sessions and history stay in the workspace's store.
+
+## Session
+
+```ts
+import { Session } from '@struktoai/mirage-node'
+```
+
+```ts
+class Session {
+  constructor(workspace: Workspace, sessionId: string)
+}
+```
+
+One session's handle, from [`ws.session`](#ws-session). Every call on it answers under the session's [profile](/home/permissions), working directory and environment. `ws.shell`, `ws.glob`, `ws.vfs` and `ws.tools` are the same calls as the workspace's default session.
+
+<ResponseField name="sessionId" type="string" />
+<ResponseField name="state" type="SessionState">The session's record, as [`ws.listSessions`](#ws-listsessions-ws-closesession) answers it.</ResponseField>
+<ResponseField name="vfs" type="Ops">The file API, below.</ResponseField>
+<ResponseField name="tools" type="MirageToolOperations">The agent tools, below.</ResponseField>
+
+### session.shell
+
+```ts
+session.shell(
+  command, { stdin?, cwd?, env?, signal?, record? },
+): Promise<ExecuteResult>
+```
+
+Runs a shell line as the session. A non-zero exit is a result, not an exception.
+
+<ResponseField name="stdin" type="Uint8Array | AsyncIterable<Uint8Array>">
+  The line's stdin. An async iterable streams it.
+</ResponseField>
+<ResponseField name="cwd" type="string">
+  A working directory for this line only. A `cd` in the line does not leak.
+</ResponseField>
+<ResponseField name="env" type="Record<string, string>">
+  Variables for this line only.
+</ResponseField>
+<ResponseField name="signal" type="AbortSignal">
+  Aborting it stops the line, which throws an `AbortError`.
+</ResponseField>
+<ResponseField name="record" type="boolean" default="true">
+  `false` keeps the line out of history.
+</ResponseField>
+
+<Expandable title="ExecuteResult">
+  <ResponseField name="exitCode" type="number" />
+  <ResponseField name="stdoutText" type="string">The output as text. `stdout` is the bytes.</ResponseField>
+  <ResponseField name="stderrText" type="string">The error output as text. `stderr` is the bytes.</ResponseField>
+  <ResponseField name="refusal" type="Refusal | null">
+    Why the line did not run, or `null`.
+    <Expandable title="Refusal">
+      <ResponseField name="kind" type="string">`deny` for a refusal, `pending` for an ask nobody answered, `failed` for a policy that raised.</ResponseField>
+      <ResponseField name="reason" type="string">The rule's or the policy's words.</ResponseField>
+      <ResponseField name="policy" type="string">The policy class that refused; empty for an ask.</ResponseField>
+      <ResponseField name="scope" type="string">`command` or `operand`.</ResponseField>
+      <ResponseField name="askId" type="string | null">The ask's id, for `pending`.</ResponseField>
+    </Expandable>
+  </ResponseField>
+</Expandable>
+
+```ts
+const stdin = new TextEncoder().encode('a\nb\n')
+const result = await session.shell('wc -l', { stdin })
+console.log(result.exitCode, result.stdoutText)
+```
+
+### session.glob
+
+```ts
+session.glob(pattern): Promise<string[]>
+```
+
+The paths a pattern matches, as the session sees them.
+
+```ts
+const paths = await session.glob('/src/**/*.ts')
+```
+
+### session.vfs
+
+The file API, run as the session. Paths are absolute, bytes are `Uint8Array`. A failure throws an `Error` whose `code` is the POSIX name, as Node's `fs` does: `ENOENT`, `EACCES`, `EROFS`.
+
+| Call | Answers |
+| --- | --- |
+| `read(path, { offset, size })` | The bytes, whole or a range. |
+| `write(path, data)`, `append(path, data)` | Nothing. |
+| `stat(path, undefined, { nofollow })` | A `FileStat`. |
+| `readdir(path)` | The full path of each entry. |
+| `exists(path)` | `true` or `false`. |
+| `mkdir(path)`, `rmdir(path)`, `unlink(path)` | Nothing. |
+| `rename(src, dst)` | Nothing. |
+| `truncate(path, length)` | Nothing. |
+
+<Expandable title="FileStat">
+  <ResponseField name="name" type="string" />
+  <ResponseField name="type" type="FileType">`FILE`, `DIRECTORY`, `SYMLINK` or `CHAR_DEVICE`.</ResponseField>
+  <ResponseField name="size" type="number | null">The bytes a read answers; `null` when unknown.</ResponseField>
+  <ResponseField name="modified" type="string | null">ISO 8601.</ResponseField>
+  <ResponseField name="content" type="ContentType | null">A file's content shape, such as `text`.</ResponseField>
+  <ResponseField name="mode" type="number | null">The permission bits.</ResponseField>
+  <ResponseField name="uid, gid" type="number | string | null" />
+  <ResponseField name="atime, ctime, birthtime" type="string | null" />
+  <ResponseField name="fingerprint, revision" type="string | null">The backend's ETag and version, when it has them.</ResponseField>
+  <ResponseField name="extra" type="Record<string, unknown>">Backend-specific fields.</ResponseField>
+</Expandable>
+
+```ts
+const data = new TextEncoder().encode('hello\n')
+await session.vfs.write('/notes.txt', data)
+const bytes = await session.vfs.read('/notes.txt')
+console.log(new TextDecoder().decode(bytes))
+```
+
+### session.tools
+
+```ts
+session.tools.shell(command, signal?): Promise<ToolResult>
+session.tools.read(path, offset?, limit?): Promise<ToolResult>
+session.tools.write(path, content): Promise<ToolResult>
+session.tools.edit(
+  path, oldString, newString, replaceAll?,
+): Promise<ToolResult>
+session.tools.ls(path, signal?): Promise<ToolResult>
+session.tools.grep(pattern, path, { ignoreCase?, ... }, signal?)
+session.tools.glob(pattern, path?): Promise<ToolResult>
+session.tools.call(name, args, signal?): Promise<ToolResult>
+```
+
+The seven agent tools, for a model rather than a program: every answer is text, and a failure is `isError`, never a throw. `call` takes a tool's name and its JSON input, the form an agent loop gets from the model. The session has one table, shared by every caller, so `write` and `edit` refuse a file the agent has not read in full, or one that changed since it read it.
+
+| Tool | Answers |
+| --- | --- |
+| `shell` | The line's stdout, stderr and exit status as one text. |
+| `read` | Numbered lines, `limit` of them from `offset`. |
+| `write` | Writes a new file; an existing one only after a full `read`. |
+| `edit` | Replaces `old_string` once, or everywhere with `replace_all`. |
+| `ls`, `grep` | `ls` and `grep -rn`, as text. |
+| `glob` | The files a pattern matches, one per line. |
+
+<Expandable title="ToolResult">
+  <ResponseField name="content" type="{ type: 'text', text: string }[]">The text handed back to the agent.</ResponseField>
+  <ResponseField name="isError" type="boolean | undefined">`true` when the call failed.</ResponseField>
+</Expandable>
+
+`readMedia(path)` answers an image or a PDF as media instead of numbered text, for adapters that hand media to the model. `@struktoai/mirage-core/workspace/tools/tool_descriptions` has each tool's description and JSON schema to hand the model, and the [agent adapters](/typescript/agents/index) wire the tools into each framework. `new MirageToolOperations(session, false)`, from `@struktoai/mirage-core/workspace/tools/tool_operations`, is a table without the read guard.
+
+```ts
+await session.tools.call('read', { path: '/notes.txt' })
+const result = await session.tools.call('edit', {
+  path: '/notes.txt',
+  old_string: 'hello',
+  new_string: 'hi',
+})
+console.log(result.content[0]?.text, result.isError === true)
+```

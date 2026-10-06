@@ -27,7 +27,7 @@ import {
   starsOf,
   metaOf,
   scope,
-  commitList,
+  branchCommits,
   commitsJson,
   repoByName,
   searchTree,
@@ -645,7 +645,7 @@ async function searchCommits(ctx: Ctx<C>): Promise<Reply> {
     if (q.has('repo') && !q.get('repo')?.includes(repo.fullName)) continue
     if (owners.length > 0 && !owners.includes(repo.owner.toLowerCase())) continue
     const repository = await repoJson(ctx.db, ctx.tenant, repo)
-    for (const row of await commitList(ctx.db, ctx.tenant, repo, repo.defaultBranch)) {
+    for (const row of await branchCommits(ctx.db, ctx.tenant, repo, repo.defaultBranch)) {
       if (!words.every((word) => row.message.toLowerCase().includes(word))) continue
       if (q.has('author') && !q.get('author')?.includes(row.authorLogin)) continue
       if (q.has('hash') && !row.sha.startsWith(q.get('hash')?.[0] ?? '')) continue

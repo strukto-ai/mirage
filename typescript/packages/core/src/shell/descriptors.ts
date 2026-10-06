@@ -15,10 +15,11 @@
 import { FD_BOTH, FD_CLOSE } from './constants.ts'
 import { SharedInput } from '../io/async_line_iterator.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
-import { type Channel, JobConsole } from './console/index.ts'
+import { type Channel, JobConsole, type OwnedStream, Terminal } from './console/index.ts'
 import type { PathSpec } from '../types.ts'
 import { ebadfStdin } from '../utils/errors.ts'
 import { RedirectKind, type Redirect } from './types.ts'
+import { encodeText } from './bytes.ts'
 
 /**
  * The first descriptor outside the signed 32-bit range, or null. Both slots count: the
@@ -46,7 +47,7 @@ export function unsupportedDescriptor(redirects: readonly Redirect[]): number | 
 
 /** Bash's error for a closed descriptor, without the line-number prefix. */
 export function badDescriptorLine(fd: number): Uint8Array {
-  return new TextEncoder().encode(`${String(fd)}: Bad file descriptor\n`)
+  return encodeText(`${String(fd)}: Bad file descriptor\n`)
 }
 
 /**
@@ -68,6 +69,8 @@ export class FileDescription {
   offset = 0
   source: FileInput | null = null
   emit: ((data: Uint8Array) => Promise<void>) | null = null
+  /** Settles when the last write through this description has. */
+  writing: Promise<void> = Promise.resolve()
   constructor(
     readonly scope: PathSpec,
     readonly append = false,
@@ -119,8 +122,9 @@ export class Recorder extends JobConsole {
     this.chunks.push([channel, data])
     return Promise.resolve()
   }
-  emitTo(stream: Inherited, data: Uint8Array): void {
-    this.chunks.push([stream, data])
+  override async emitTo(stream: OwnedStream, data: Uint8Array): Promise<void> {
+    if (stream instanceof Inherited) this.chunks.push([stream, data])
+    else await this.emit(stream.channel, data)
   }
 }
 
@@ -134,18 +138,20 @@ export const ENCLOSING = createAsyncContext<Recorder>()
 /**
  * Send bytes written to a stream another level owns toward it: up through
  * the sink, or the enclosing level's recorder when the level returns its
- * output as a value. A console that keeps no streams takes them on their
- * channel. False when there is nowhere above. Mirrors Python's deliver.
+ * output as a value or writes to a terminal of its own (a line's, a
+ * substitution's), which owns no stream above it. A console that keeps no
+ * streams takes them on their channel. False when there is nowhere above.
+ * Mirrors Python's deliver.
  */
 export async function deliver(
   sink: JobConsole | null,
   stream: Inherited,
   data: Uint8Array,
 ): Promise<boolean> {
-  const target = sink ?? ENCLOSING.getStore() ?? null
-  if (target instanceof Recorder) target.emitTo(stream, data)
-  else if (target !== null) await target.emit(stream.channel, data)
-  else return false
+  const target =
+    sink !== null && !(sink instanceof Terminal) ? sink : (ENCLOSING.getStore() ?? null)
+  if (target === null) return false
+  await target.emitTo(stream, data)
   return true
 }
 

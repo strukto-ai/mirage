@@ -1,4 +1,5 @@
-export type ProcessScope = 'session' | 'workspace'
+import type { ProcessScope } from '../types.ts'
+
 /**
  * How far past its own session a profile reaches into processes. A session
  * always sees and stops its own processes. `list` widens what `ps` and a

@@ -16,30 +16,30 @@ import { describe, expect, it } from 'vitest'
 import { exitCodeFromResponse } from './output.ts'
 
 describe('exitCodeFromResponse', () => {
-  it('returns 0 for kind:io with exitCode 0', () => {
-    expect(exitCodeFromResponse({ kind: 'io', exitCode: 0, stdout: '', stderr: '' })).toBe(0)
+  it('returns 0 for kind:io with exit_code 0', () => {
+    expect(exitCodeFromResponse({ kind: 'io', exit_code: 0, stdout: '', stderr: '' })).toBe(0)
   })
 
-  it('returns the exit code for kind:io with non-zero exitCode', () => {
-    expect(exitCodeFromResponse({ kind: 'io', exitCode: 1, stdout: '', stderr: '' })).toBe(1)
-    expect(exitCodeFromResponse({ kind: 'io', exitCode: 42, stdout: '', stderr: '' })).toBe(42)
-    expect(exitCodeFromResponse({ kind: 'io', exitCode: 127, stdout: '', stderr: '' })).toBe(127)
+  it('returns the exit code for kind:io with non-zero exit_code', () => {
+    expect(exitCodeFromResponse({ kind: 'io', exit_code: 1, stdout: '', stderr: '' })).toBe(1)
+    expect(exitCodeFromResponse({ kind: 'io', exit_code: 42, stdout: '', stderr: '' })).toBe(42)
+    expect(exitCodeFromResponse({ kind: 'io', exit_code: 127, stdout: '', stderr: '' })).toBe(127)
   })
 
   it('clamps exit codes above 255', () => {
-    expect(exitCodeFromResponse({ kind: 'io', exitCode: 300, stdout: '', stderr: '' })).toBe(255)
+    expect(exitCodeFromResponse({ kind: 'io', exit_code: 300, stdout: '', stderr: '' })).toBe(255)
   })
 
   it('clamps negative exit codes to 0', () => {
-    expect(exitCodeFromResponse({ kind: 'io', exitCode: -1, stdout: '', stderr: '' })).toBe(0)
+    expect(exitCodeFromResponse({ kind: 'io', exit_code: -1, stdout: '', stderr: '' })).toBe(0)
   })
 
   it('truncates non-integer exit codes', () => {
-    expect(exitCodeFromResponse({ kind: 'io', exitCode: 1.9, stdout: '', stderr: '' })).toBe(1)
+    expect(exitCodeFromResponse({ kind: 'io', exit_code: 1.9, stdout: '', stderr: '' })).toBe(1)
   })
 
   it('returns 0 for background submission envelope', () => {
-    expect(exitCodeFromResponse({ jobId: 'job_abc', workspaceId: 'ws', submittedAt: 0 })).toBe(0)
+    expect(exitCodeFromResponse({ job_id: 'job_abc', workspace_id: 'ws', submitted_at: 0 })).toBe(0)
   })
 
   it('returns 0 for kind:raw', () => {
@@ -49,9 +49,9 @@ describe('exitCodeFromResponse', () => {
   it('reads exit code from job detail envelope', () => {
     expect(
       exitCodeFromResponse({
-        jobId: 'job_x',
+        job_id: 'job_x',
         status: 'done',
-        result: { kind: 'io', exitCode: 7, stdout: '', stderr: '' },
+        result: { kind: 'io', exit_code: 7, stdout: '', stderr: '' },
         error: null,
       }),
     ).toBe(7)
@@ -60,7 +60,7 @@ describe('exitCodeFromResponse', () => {
   it('returns 0 for pending job (no result yet)', () => {
     expect(
       exitCodeFromResponse({
-        jobId: 'job_x',
+        job_id: 'job_x',
         status: 'pending',
         result: null,
         error: null,
@@ -71,7 +71,7 @@ describe('exitCodeFromResponse', () => {
   it('returns 0 for running job (no result yet)', () => {
     expect(
       exitCodeFromResponse({
-        jobId: 'job_x',
+        job_id: 'job_x',
         status: 'running',
         result: null,
         error: null,
@@ -82,7 +82,7 @@ describe('exitCodeFromResponse', () => {
   it('returns 2 for daemon-side failed job with no result', () => {
     expect(
       exitCodeFromResponse({
-        jobId: 'job_x',
+        job_id: 'job_x',
         status: 'failed',
         result: null,
         error: 'boom',
@@ -93,7 +93,7 @@ describe('exitCodeFromResponse', () => {
   it('returns 2 for canceled job with no result', () => {
     expect(
       exitCodeFromResponse({
-        jobId: 'job_x',
+        job_id: 'job_x',
         status: 'canceled',
         result: null,
         error: null,
@@ -104,9 +104,9 @@ describe('exitCodeFromResponse', () => {
   it('prefers inner result exit code over status-based fallback', () => {
     expect(
       exitCodeFromResponse({
-        jobId: 'job_x',
+        job_id: 'job_x',
         status: 'failed',
-        result: { kind: 'io', exitCode: 9, stdout: '', stderr: '' },
+        result: { kind: 'io', exit_code: 9, stdout: '', stderr: '' },
         error: null,
       }),
     ).toBe(9)
@@ -119,9 +119,9 @@ describe('exitCodeFromResponse', () => {
     expect(exitCodeFromResponse(42)).toBe(0)
   })
 
-  it('returns 0 when kind:io is present but exitCode is missing or non-numeric', () => {
+  it('returns 0 when kind:io is present but exit_code is missing or non-numeric', () => {
     expect(exitCodeFromResponse({ kind: 'io', stdout: '', stderr: '' })).toBe(0)
-    expect(exitCodeFromResponse({ kind: 'io', exitCode: 'one', stdout: '', stderr: '' })).toBe(0)
-    expect(exitCodeFromResponse({ kind: 'io', exitCode: NaN, stdout: '', stderr: '' })).toBe(0)
+    expect(exitCodeFromResponse({ kind: 'io', exit_code: 'one', stdout: '', stderr: '' })).toBe(0)
+    expect(exitCodeFromResponse({ kind: 'io', exit_code: NaN, stdout: '', stderr: '' })).toBe(0)
   })
 })

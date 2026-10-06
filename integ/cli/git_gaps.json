@@ -361,7 +361,7 @@
       "expect": {
         "exit": 129,
         "stdout": "",
-        "stderr": "error: unknown option `bogus'\n"
+        "stderr": "error: unknown option `bogus'\nusage: git for-each-ref [<options>] [<pattern>]\n   or: git for-each-ref [--points-at <object>]\n   or: git for-each-ref [--merged [<commit>]] [--no-merged [<commit>]]\n   or: git for-each-ref [--contains [<commit>]] [--no-contains [<commit>]]\n\n    -s, --shell           Quote fields suitably for shells\n    -p, --perl            Quote fields suitably for perl\n    --python              Quote fields suitably for python\n    --tcl                 Quote fields suitably for Tcl\n    --omit-empty          Print nothing, not even a newline, for an empty row\n    --count <n>           Show only the first <n> refs\n    --format <format>     Format each ref: %(fieldname) placeholders, as git for-each-ref\n    --exclude <pattern>   Leave out refs matching the pattern\n    --[no-]sort <key>     Sort on a field, - reversing it and version: comparing as versions\n    --contains[=<commit>] List only refs that contain the commit (HEAD if omitted)\n    --no-contains[=<commit>]\n                          List only refs that don't contain the commit (HEAD if omitted)\n    --merged[=<commit>]   List only refs reachable from the commit (HEAD if omitted)\n    --no-merged[=<commit>]\n                          List only refs not reachable from the commit (HEAD if omitted)\n    --points-at <object>  List only refs that point at the object\n    --ignore-case         Sort and match patterns case-insensitively\n    --stdin               Read ref patterns from stdin\n    --include-root-refs   Also list HEAD and the other root refs\n\n"
       }
     },
     {
@@ -600,6 +600,596 @@
         "exit": 0,
         "stdout": "Thu, 8 Jan 2026 14:45:00 +0000|2026-01-08|2026-01-08|1767883500\n",
         "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_decorate_oneline_stat",
+      "seq": 567800,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show --stat --oneline --decorate HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542 (HEAD -> main) add two\n numbers.txt | 1 +\n 1 file changed, 1 insertion(+)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_decorate_format_labels",
+      "seq": 567801,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show -s --decorate --format='%h %d %s' topic",
+      "expect": {
+        "exit": 0,
+        "stdout": "225f39c  (topic) add docs\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_decorate_full_names",
+      "seq": 567802,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show -s --decorate=full --oneline HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542 (HEAD -> refs/heads/main) add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_decorate_last_switch_wins",
+      "seq": 567803,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show -s --decorate --no-decorate --oneline HEAD; git -C /repo show -s --no-decorate --decorate=short --oneline HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542 add two\n8ef2542 (HEAD -> main) add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_decorate_unknown_style",
+      "seq": 567804,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show -s --decorate=bogus HEAD",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: invalid --decorate option: bogus\n"
+      }
+    },
+    {
+      "id": "git_log_decorate_full_medium",
+      "seq": 567805,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log -1 --decorate=full",
+      "expect": {
+        "exit": 0,
+        "stdout": "commit 8ef25423772bbfe671c8e285ae1d63991d59db19 (HEAD -> refs/heads/main)\nAuthor: Integ Author <integ@example.com>\nDate:   Thu Jan 8 14:45:00 2026 +0000\n\n    add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_pretty_oneline_full_id",
+      "seq": 567806,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show -s --pretty=oneline HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19 add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_decorate_config",
+      "seq": 567807,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "cp /repo/.git/config /repo/.git/config.orig && printf '[log]\\n\\tdecorate = full\\n' >> /repo/.git/config && git -C /repo show -s --oneline HEAD && git -C /repo log -1 --oneline --no-decorate && git -C /repo log -1 --format=%d topic; mv /repo/.git/config.orig /repo/.git/config",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542 (HEAD -> refs/heads/main) add two\n8ef2542 add two\n (refs/heads/topic)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_symbolic_ref_reads_head",
+      "seq": 567808,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo symbolic-ref HEAD && git -C /repo symbolic-ref --short HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "refs/heads/main\nmain\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_symbolic_ref_not_symbolic",
+      "seq": 567809,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo symbolic-ref refs/heads/main; echo rc=$?; git -C /repo symbolic-ref -q refs/heads/main; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=128\nrc=1\n",
+        "stderr": "fatal: ref refs/heads/main is not a symbolic ref\n"
+      }
+    },
+    {
+      "id": "git_symbolic_ref_refusals",
+      "seq": 567810,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo symbolic-ref HEAD main; git -C /repo symbolic-ref -d HEAD; git -C /repo symbolic-ref -m '' HEAD refs/heads/main; git -C /repo symbolic-ref",
+      "expect": {
+        "exit": 129,
+        "stdout": "",
+        "stderr": "fatal: Refusing to point HEAD outside of refs/\nfatal: deleting 'HEAD' is not allowed\nfatal: Refusing to perform update with empty message\nusage: git symbolic-ref [-m <reason>] <name> <ref>\n   or: git symbolic-ref [-q] [--short] [--no-recurse] <name>\n   or: git symbolic-ref --delete [-q] <name>\n\n    -q, --[no-]quiet      suppress error message for non-symbolic (detached) refs\n    -d, --[no-]delete     delete symbolic ref\n    --[no-]short          shorten ref output\n    --[no-]recurse        recursively dereference (default)\n    -m <reason>           reason of the update\n\n"
+      }
+    },
+    {
+      "id": "git_symbolic_ref_points_head_and_back",
+      "seq": 13470500,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "orig=$(git -C /repo symbolic-ref HEAD) && git -C /repo symbolic-ref -m 'to topic' HEAD refs/heads/topic && git -C /repo symbolic-ref --short HEAD && git -C /repo log -1 --format=%s && git -C /repo reflog -1 | cut -d' ' -f2- && git -C /repo symbolic-ref HEAD \"$orig\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "topic\nadd docs\nHEAD@{0}: to topic\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_symbolic_ref_chain_and_delete",
+      "seq": 13470501,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo symbolic-ref refs/y refs/heads/topic && git -C /repo symbolic-ref refs/x refs/y && git -C /repo symbolic-ref refs/x && git -C /repo symbolic-ref --no-recurse refs/x && git -C /repo symbolic-ref --short refs/x && git -C /repo symbolic-ref -d refs/x && git -C /repo symbolic-ref -d refs/y && ls /repo/.git/refs",
+      "expect": {
+        "exit": 0,
+        "stdout": "refs/heads/topic\nrefs/y\ntopic\nheads\ntags\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rev_parse_place_answers",
+      "seq": 567811,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo/docs && git rev-parse --show-toplevel --show-prefix --git-dir --is-inside-work-tree HEAD)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/repo\ndocs/\n/repo/.git\ntrue\n8ef25423772bbfe671c8e285ae1d63991d59db19\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rev_parse_inside_git_dir",
+      "seq": 567812,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo/.git && git rev-parse --git-dir --is-inside-work-tree --show-prefix)",
+      "expect": {
+        "exit": 0,
+        "stdout": ".\nfalse\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rev_parse_verify_short",
+      "seq": 567813,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo rev-parse --verify HEAD && git -C /repo rev-parse --short HEAD && git -C /repo rev-parse --short=12 HEAD~1",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef2542\n225f39c50d27\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rev_parse_verify_refusals",
+      "seq": 567814,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo rev-parse --verify nosuch; echo rc=$?; git -C /repo rev-parse --verify -q nosuch; echo rc=$?; git -C /repo rev-parse --verify HEAD topic",
+      "expect": {
+        "exit": 128,
+        "stdout": "rc=128\nrc=1\n",
+        "stderr": "fatal: Needed a single revision\nfatal: Needed a single revision\n"
+      }
+    },
+    {
+      "id": "git_rev_parse_abbrev_ref_names",
+      "seq": 567815,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo rev-parse --abbrev-ref HEAD topic refs/heads/main",
+      "expect": {
+        "exit": 0,
+        "stdout": "main\ntopic\nmain\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_refname_ambiguous_warns",
+      "seq": 567816,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag topic HEAD~2 && git -C /repo rev-parse topic && git -C /repo rev-parse -q topic && git -C /repo log -1 --format=%s topic && git -C /repo rev-parse --abbrev-ref=strict refs/heads/topic && git -C /repo rev-parse --abbrev-ref=loose refs/heads/topic; git -C /repo tag -d topic",
+      "expect": {
+        "exit": 0,
+        "stdout": "265ec3adb16a0c90ad09a180687677927b9d7b7f\n265ec3adb16a0c90ad09a180687677927b9d7b7f\nadd delta\nheads/topic\nheads/topic\nDeleted tag 'topic' (was 265ec3a)\n",
+        "stderr": "warning: refname 'topic' is ambiguous.\nwarning: refname 'topic' is ambiguous.\n"
+      }
+    },
+    {
+      "id": "git_refname_ambiguous_quiet_by_config",
+      "seq": 567817,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "cp /repo/.git/config /repo/.git/config.orig && printf '[core]\\n\\twarnAmbiguousRefs = false\\n' >> /repo/.git/config && git -C /repo tag topic HEAD~2 && git -C /repo rev-parse topic && git -C /repo rev-parse --abbrev-ref refs/heads/topic; git -C /repo tag -d topic; mv /repo/.git/config.orig /repo/.git/config",
+      "expect": {
+        "exit": 0,
+        "stdout": "265ec3adb16a0c90ad09a180687677927b9d7b7f\nheads/topic\nDeleted tag 'topic' (was 265ec3a)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_branch_ambiguous_start_refused",
+      "seq": 567818,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag topic HEAD~2 && git -C /repo branch nb topic; echo rc=$?; git -C /repo switch -c nb topic; echo rc=$?; git -C /repo checkout -b nb topic; echo rc=$?; git -C /repo rev-parse -q --verify refs/heads/nb; echo rc=$?; git -C /repo tag -d topic",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=128\nrc=128\nrc=128\nrc=1\nDeleted tag 'topic' (was 265ec3a)\n",
+        "stderr": "warning: refname 'topic' is ambiguous.\nfatal: ambiguous object name: 'topic'\nwarning: refname 'topic' is ambiguous.\nwarning: refname 'topic' is ambiguous.\nfatal: ambiguous object name: 'topic'\nwarning: refname 'topic' is ambiguous.\nwarning: refname 'topic' is ambiguous.\nfatal: ambiguous object name: 'topic'\n"
+      }
+    },
+    {
+      "id": "git_show_tag_block_and_objects",
+      "seq": 567819,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(export GIT_AUTHOR_NAME='Tag Ger' GIT_AUTHOR_EMAIL=tagger@example.com GIT_COMMITTER_NAME='Tag Ger' GIT_COMMITTER_EMAIL=tagger@example.com; git -C /repo tag -a v9 -m 'release nine' HEAD~1 && git -C /repo show -s --pretty=short v9 && git -C /repo show -s --oneline v9 HEAD HEAD~1 HEAD && git -C /repo show HEAD:docs HEAD~3:numbers.txt; git -C /repo tag -d v9 > /dev/null)",
+      "expect": {
+        "exit": 0,
+        "stdout": "tag v9\nTagger: Tag Ger <tagger@example.com>\n\nrelease nine\n\ncommit 225f39c50d27e015653a38d589474ce2880399e6\nAuthor: Integ Author <integ@example.com>\n\n    add docs\ntag v9\n\nrelease nine\n225f39c add docs\n8ef2542 add two\ntree HEAD:docs\n\nreadme.md\none\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rev_parse_path_errors",
+      "seq": 567820,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo rev-parse HEAD:nosuch; echo rc=$?; git -C /repo rev-parse HEAD~3:docs/readme.md; echo rc=$?; git -C /repo rev-parse :nosuch; echo rc=$?; git -C /repo rev-parse :2:letters.txt; echo rc=$?; git -C /repo rev-parse HEAD~3 nosuch; echo rc=$?; git -C /repo show HEAD:letters.txt/x",
+      "expect": {
+        "exit": 128,
+        "stdout": "HEAD:nosuch\nrc=128\nHEAD~3:docs/readme.md\nrc=128\n:nosuch\nrc=128\n:2:letters.txt\nrc=128\n98b4ffe0976edf04eebcc645df908f5a4f19e538\nnosuch\nrc=128\n",
+        "stderr": "fatal: path 'nosuch' does not exist in 'HEAD'\nfatal: path 'docs/readme.md' exists on disk, but not in 'HEAD~3'\nfatal: path 'nosuch' does not exist (neither on disk nor in the index)\nfatal: path 'letters.txt' is in the index, but not at stage 2\nhint: Did you mean ':0:letters.txt'?\nfatal: ambiguous argument 'nosuch': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\nfatal: path 'letters.txt/x' does not exist in 'HEAD'\n"
+      }
+    },
+    {
+      "id": "git_rev_parse_abbrev_ref_mode_refused",
+      "seq": 567821,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo rev-parse --abbrev-ref=bogus HEAD; echo rc=$?; git -C /repo rev-parse --abbrev-ref= HEAD",
+      "expect": {
+        "exit": 128,
+        "stdout": "rc=128\n",
+        "stderr": "fatal: unknown mode for --abbrev-ref: bogus\nfatal: unknown mode for --abbrev-ref: \n"
+      }
+    },
+    {
+      "id": "git_symbolic_ref_unknown_option",
+      "seq": 567822,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo symbolic-ref --bogus",
+      "expect": {
+        "exit": 129,
+        "stdout": "",
+        "stderr": "error: unknown option `bogus'\nusage: git symbolic-ref [-m <reason>] <name> <ref>\n   or: git symbolic-ref [-q] [--short] [--no-recurse] <name>\n   or: git symbolic-ref --delete [-q] <name>\n\n    -q, --[no-]quiet      suppress error message for non-symbolic (detached) refs\n    -d, --[no-]delete     delete symbolic ref\n    --[no-]short          shorten ref output\n    --[no-]recurse        recursively dereference (default)\n    -m <reason>           reason of the update\n\n"
+      }
+    },
+    {
+      "id": "git_checkout_prefers_branch_and_paths",
+      "seq": 567823,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/amb && cd /repo/amb || exit 1; git branch -q topic origin/topic && git tag topic HEAD~2 && git checkout topic && git rev-parse --abbrev-ref HEAD && git checkout -q --detach main && git rev-parse --abbrev-ref HEAD && git checkout -q main && printf 'x\\n' > numbers.txt && git checkout -- numbers.txt && git checkout topic -- numbers.txt && git status --short; cd /repo; rm -rf amb)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Your branch is up to date with 'origin/topic'.\nheads/topic\nHEAD\nM  numbers.txt\n",
+        "stderr": "warning: refname 'topic' is ambiguous.\nSwitched to branch 'topic'\nwarning: refname 'topic' is ambiguous.\n"
+      }
+    },
+    {
+      "id": "git_branch_reflog_and_allow_empty",
+      "seq": 567824,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/amb && cd /repo/amb || exit 1; git branch -q nb HEAD~1 && git reflog nb | cut -d' ' -f2- && git branch -q nb2 && git reflog nb2 | cut -d' ' -f2- && git commit -q -m nothing; echo rc=$?; git commit -q --allow-empty -m empty && git log -2 --format=%s && git diff --stat HEAD~1 HEAD; cd /repo; rm -rf amb)",
+      "expect": {
+        "exit": 0,
+        "stdout": "nb@{0}: branch: Created from HEAD~1\nnb2@{0}: branch: Created from main\nOn branch main\nYour branch is up to date with 'origin/main'.\n\nnothing to commit, working tree clean\nrc=1\nempty\nadd two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_dash_h_prints_the_usage_on_stdout",
+      "seq": 567825,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo reset -h",
+      "expect": {
+        "exit": 129,
+        "stdout": "usage: git reset [-q] [<commit>]\n   or: git reset [-q] [<tree-ish>] [--] <pathspec>...\n\n    -q, --quiet           Only report errors\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_root_refuses_an_unknown_option",
+      "seq": 567826,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git --bogus",
+      "expect": {
+        "exit": 129,
+        "stdout": "",
+        "stderr": "unknown option: --bogus\nusage: git [-v | --version] [--help] [-C <path>] [--git-dir=<path>]\n           [--work-tree=<path>] <command> [<args>]\n"
+      }
+    },
+    {
+      "id": "git_stash_refuses_an_unknown_option",
+      "seq": 567827,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo stash --bogus",
+      "expect": {
+        "exit": 129,
+        "stdout": "",
+        "stderr": "error: unknown option `bogus'\nusage: git stash list\n   or: git stash show [<diff-options>] [<stash>]\n\n"
+      }
+    },
+    {
+      "id": "git_remote_refuses_a_subcommand_it_lacks",
+      "seq": 567828,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo remote add origin https://example.com/r.git",
+      "expect": {
+        "exit": 129,
+        "stdout": "",
+        "stderr": "error: unknown subcommand: `add'\nusage: git remote [-v | --verbose]\n\n    -v, --verbose         Show remote URLs\n\n"
+      }
+    },
+    {
+      "id": "git_unknown_options_are_not_operands",
+      "seq": 567829,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo ls-files --bogus; git -C /repo show-ref --bogus; git -C /repo help --bogus; git -C /repo clone --bogus; git -C /repo fetch --bogus",
+      "expect": {
+        "exit": 129,
+        "stdout": "",
+        "stderr": "error: unknown option `bogus'\nusage: git ls-files [<options>] [<file>...]\n\n    -z                    Terminate paths with NUL\n    -s, --stage           Show staged object metadata\n    -c, --cached          Show cached files\n\nerror: unknown option `bogus'\nusage: git show-ref [--] [<pattern>...]\n\nerror: unknown option `bogus'\nusage: git help [<command>]\n\nerror: unknown option `bogus'\nusage: git clone [<options>] [--] <repo> [<dir>]\n\n    -q, --quiet           Print nothing but errors\n    -b, --branch <branch> Check out this branch or tag\n    -o, --origin <origin> Name the remote this instead of origin\n    -n, --no-checkout     Leave the working tree empty\n\nerror: unknown option `bogus'\nusage: git fetch [<options>] [<repository> [<refspec>...]]\n\n    -q, --quiet           Print nothing but errors\n    -v, --verbose         Also list unchanged refs\n    -p, --prune           Remove remote-tracking refs the remote no longer has\n    -t, --tags            Fetch every tag\n    -n, --no-tags         Follow no tags\n\n"
+      }
+    },
+    {
+      "id": "git_walkers_refuse_an_unknown_option_in_their_own_words",
+      "seq": 567830,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo diff --bogus 2>&1 | head -2; git -C /repo rev-list --bogus 2>&1 | head -1; git -C /repo shortlog --bogus 2>&1 | head -2; git -C /repo diff-tree --bogus HEAD 2>&1 | head -1; git -C /repo reflog --bogus",
+      "expect": {
+        "exit": 128,
+        "stdout": "error: invalid option: --bogus\nusage: git diff [<options>] [<commit>] [--] [<path>...]\nusage: git rev-list [<options>] <commit>... [--] [<path>...]\nerror: unknown option `--bogus'\nusage: git shortlog [<options>] [<revision-range>] [[--] <path>...]\nusage: git diff-tree [<options>] <tree-ish> [<path>...]\n",
+        "stderr": "fatal: unrecognized argument: --bogus\n"
+      }
+    },
+    {
+      "id": "git_option_values_are_refused_in_gits_words",
+      "seq": 567831,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo status --short=x; git -C /repo for-each-ref --format; git -C /repo commit -m; git -C /repo symbolic-ref --sho HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "main\n",
+        "stderr": "error: option `short' takes no value\nerror: option `format' requires a value\nerror: switch `m' requires a value\n"
+      }
+    },
+    {
+      "id": "git_rev_parse_words_each_ambiguous_name_in_turn",
+      "seq": 567832,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/amb && cd /repo/amb || exit 1; git tag main HEAD~1 && git branch -q topic origin/topic && git tag topic HEAD~2 && git rev-parse --abbrev-ref main HEAD topic; git rev-parse -q --abbrev-ref main topic; cd /repo; rm -rf amb)",
+      "expect": {
+        "exit": 0,
+        "stdout": "heads/main\n",
+        "stderr": "warning: refname 'main' is ambiguous.\nerror: refname 'main' is ambiguous\nwarning: refname 'topic' is ambiguous.\nerror: refname 'topic' is ambiguous\nerror: refname 'main' is ambiguous\nerror: refname 'topic' is ambiguous\n"
+      }
+    },
+    {
+      "id": "git_read_only_session_refuses_ref_and_index_writes",
+      "seq": 567833,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "session": "reader",
+      "command": "git -C /repo branch newb; echo $?; git -C /repo branch -D topic; echo $?; git -C /repo tag t9; echo $?; git -C /repo tag -a t10 -m x; echo $?; git -C /repo symbolic-ref HEAD refs/heads/topic; echo $?; git -C /repo switch -c sw; echo $?; git -C /repo checkout -q topic; echo $?; git -C /repo add letters.txt; echo $?; git -C /repo commit -m nothing; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "128\n1\n128\n128\n1\n128\n128\n128\n128\n",
+        "stderr": "fatal: cannot lock ref 'refs/heads/newb': Unable to create '/repo/.git/refs/heads/newb.lock': Read-only file system\nerror: could not delete reference refs/heads/topic: cannot lock ref 'refs/heads/topic': Unable to create '/repo/.git/refs/heads/topic.lock': Read-only file system\nfatal: cannot lock ref 'refs/tags/t9': Unable to create '/repo/.git/refs/tags/t9.lock': Read-only file system\nerror: unable to create temporary file: Read-only file system\nerror: unable to write tag file\nThe tag message has been left in .git/TAG_EDITMSG\nerror: cannot lock ref 'HEAD': Unable to create '/repo/.git/HEAD.lock': Read-only file system\nfatal: cannot lock ref 'refs/heads/sw': Unable to create '/repo/.git/refs/heads/sw.lock': Read-only file system\nfatal: Unable to create '/repo/.git/index.lock': Read-only file system\nfatal: Unable to create '/repo/.git/index.lock': Read-only file system\nfatal: Unable to create '/repo/.git/index.lock': Read-only file system\n"
+      }
+    },
+    {
+      "id": "git_read_only_session_refuses_init_and_clone",
+      "seq": 567834,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "session": "reader",
+      "command": "git -C /repo init; echo $?; git -C /repo init sub; echo $?; git -C /repo init docs; echo $?; git -C /repo clone /repo /repo/clone; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "128\n128\n1\n128\n",
+        "stderr": "error: could not lock config file /repo/.git/config: Read-only file system\nfatal: could not set 'core.repositoryformatversion' to '0'\nfatal: cannot mkdir sub: Read-only file system\n/repo/docs/.git: Read-only file system\nfatal: could not create work tree dir '/repo/clone': Read-only file system\n"
+      }
+    },
+    {
+      "id": "git_usage_refusals_reach_their_stream",
+      "seq": 567835,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log -h 2>/dev/null | head -1; git -C /repo diff -h 2>&1 >/dev/null | head -1; git -C /repo rev-list -h 2>/dev/null | head -1; git -C /repo rev-list 2>&1 >/dev/null | head -1; git -C /repo symbolic-ref -d 2>&1 >/dev/null | head -1; git -C /repo branch -l -d topic 2>&1 >/dev/null | head -1; git -C /repo clone 2>&1 >/dev/null | head -1; git -C /repo rev-list > /dev/null 2>&1; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "usage: git log [<options>] [<revision-range>] [[--] <path>...]\nusage: git diff [<options>] [<commit>] [--] [<path>...]\nusage: git rev-list [<options>] <commit>... [--] [<path>...]\nusage: git rev-list [<options>] <commit>... [--] [<path>...]\nusage: git symbolic-ref [-m <reason>] <name> <ref>\nusage: git branch [<options>] [-r | -a] [--merged] [--no-merged]\nfatal: You must specify a repository to clone.\n129\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_verbs_refuse_an_unknown_switch",
+      "seq": 567836,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout -Z 2>&1 | head -1; git -C /repo commit -Z 2>&1 | head -1; git -C /repo branch -Z 2>&1 | head -1; git -C /repo status --nosuch 2>&1 | head -1; git -C /repo status -Z 2>&1 | head -1; git -C /repo diff --zzz 2>&1 | head -1; git -C /repo diff --zzz HEAD 2>&1 | head -1; git -C /repo diff --cached --zzz 2>&1 | head -1; git -C /repo status -Z > /dev/null 2>&1; echo $?; git -C /repo diff --zzz HEAD > /dev/null 2>&1; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "error: unknown switch `Z'\nerror: unknown switch `Z'\nerror: unknown switch `Z'\nerror: unknown option `nosuch'\nerror: unknown switch `Z'\nerror: invalid option: --zzz\nusage: git diff [<options>] [<commit>] [--] [<path>...]\nusage: git diff [<options>] [<commit>] [--] [<path>...]\n129\n129\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_root_dash_h_prints_the_help",
+      "seq": 567837,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -h > /dev/null; echo $?; git -h | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\ngit: Content tracker\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_commit_and_reinit_leave_no_lock_behind",
+      "seq": 567838,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo commit -m nothing > /dev/null; echo $?; git init -q /repo; echo $?; find /repo/.git -maxdepth 1 -name '*.lock' | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n0\n0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_commit_and_reinit_refuse_a_lock_another_writer_holds",
+      "seq": 567839,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "touch /repo/.git/index.lock; git -C /repo commit -m nothing; echo $?; rm /repo/.git/index.lock; touch /repo/.git/config.lock; git init -q /repo; echo $?; rm /repo/.git/config.lock; find /repo/.git -maxdepth 1 -name '*.lock' | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "128\n128\n0\n",
+        "stderr": "fatal: Unable to create '/repo/.git/index.lock': File exists.\n\nAnother git process seems to be running in this repository, e.g.\nan editor opened by 'git commit'. Please make sure all processes\nare terminated then try again. If it still fails, a git process\nmay have crashed in this repository earlier:\nremove the file manually to continue.\nerror: could not lock config file /repo/.git/config: File exists\nfatal: could not set 'core.repositoryformatversion' to '0'\n"
       }
     }
   ]

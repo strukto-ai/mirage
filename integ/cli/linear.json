@@ -451,7 +451,7 @@
       "command": "man linear | head -1",
       "expect": {
         "exit": 0,
-        "stdout": "linear: Linear GraphQL API client\n",
+        "stdout": "usage: linear [-h] {team,issue,project,cycle,label,comment,user,document,search} ...\n",
         "stderr": ""
       }
     },
@@ -464,7 +464,7 @@
       "command": "man linear issue create | head -1",
       "expect": {
         "exit": 0,
-        "stdout": "linear issue create: Create an issue\n",
+        "stdout": "usage: linear issue create --team TEAM --title TITLE [--description DESCRIPTION] [-h]\n",
         "stderr": ""
       }
     },

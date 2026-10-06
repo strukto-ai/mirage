@@ -1,0 +1,126 @@
+{
+  "requires": {
+    "python": [
+      "env:MIRAGE_QUICKJS_HOME"
+    ],
+    "typescript": []
+  },
+  "cases": [
+    {
+      "id": "stdin_operand",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "default": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "sealed",
+                  "paths": [
+                    "/ram/*"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /ram",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "echo 'console.log(scriptArgs.join(\",\"))' | node - a b",
+          "expect": {
+            "exit": 0,
+            "stdout": "a,b\n"
+          }
+        },
+        {
+          "command": "echo 'console.log(\"stdin:\" + scriptArgs.join(\",\"))' | node - -e 'console.log(\"flag\")'",
+          "expect": {
+            "exit": 0,
+            "stdout": "stdin:-e,console.log(\"flag\")\n"
+          }
+        },
+        {
+          "command": "echo 'console.log(scriptArgs.join(\",\"))' | node - -m",
+          "expect": {
+            "exit": 0,
+            "stdout": "-m\n"
+          }
+        },
+        {
+          "command": "js -- - arg -e",
+          "stdin": "console.log(scriptArgs.join(\",\"))",
+          "expect": {
+            "exit": 0,
+            "stdout": "arg,-e\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "node_argv_is_typed_and_names_no_mount",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/w": {
+            "vfs": "ram",
+            "files": {
+              "a.js": "console.log(JSON.stringify(scriptArgs))\n",
+              "data/in.csv": "x\n"
+            }
+          },
+          "/t": {
+            "vfs": "ram",
+            "files": {
+              "q.txt": "from-t\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /w && node a.js data/in.csv ./data/in.csv",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"data/in.csv\",\"./data/in.csv\"]\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node /w/a.js /t/q.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"/t/q.txt\"]\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node -e 'console.log(JSON.stringify(scriptArgs))' /t/q.txt /w/data/in.csv",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"/t/q.txt\",\"/w/data/in.csv\"]\n",
+            "stderr": ""
+          }
+        }
+      ]
+    }
+  ]
+}

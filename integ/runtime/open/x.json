@@ -1,0 +1,207 @@
+{
+  "cases": [
+    {
+      "id": "x_refuses_an_existing_file",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "in\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "try:\n    open('/data/seed.txt', 'x').close()\n    print('opened')\nexcept OSError as e:\n    print(type(e).__name__)",
+            "js": "const f = std.open('/data/seed.txt', 'wx')\nif (f !== null) f.close()\nconsole.log(f === null ? 'refused' : 'opened')"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileExistsError\n",
+              "ops_absent": [
+                "create /data/seed.txt",
+                "truncate /data/seed.txt",
+                "write /data/seed.txt"
+              ]
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "refused\n",
+              "ops_absent": [
+                "create /data/seed.txt",
+                "truncate /data/seed.txt",
+                "write /data/seed.txt"
+              ]
+            }
+          },
+          "expect_on": {
+            "monty": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "exclusive creation mode is not supported"
+            }
+          }
+        },
+        {
+          "command": "cat /data/seed.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "seed\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "x_creates_a_missing_file",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "in\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "f = open('/data/fresh.txt', 'x')\nf.write('fresh')\nf.close()",
+            "js": "const f = std.open('/data/fresh.txt', 'wx')\nf.puts('fresh')\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "ops_contain": [
+              "create /data/fresh.txt"
+            ]
+          },
+          "expect_on": {
+            "monty": {
+              "exit": 1,
+              "ops_contain": [],
+              "stderr_contains": "exclusive creation mode is not supported"
+            }
+          }
+        },
+        {
+          "command": "cat /data/fresh.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "fresh"
+          },
+          "expect_on": {
+            "monty": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "No such file or directory"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "x_refuses_a_dangling_link",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "in\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "ln -s /data/gone /data/lnk",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "try:\n    open('/data/lnk', 'x').close()\n    print('opened')\nexcept OSError as e:\n    print(type(e).__name__)",
+            "js": "const f = std.open('/data/lnk', 'wx')\nif (f !== null) f.close()\nconsole.log(f === null ? 'refused' : 'opened')"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileExistsError\n",
+              "ops_absent": [
+                "create /data/lnk",
+                "create /data/gone"
+              ]
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "refused\n",
+              "ops_absent": [
+                "create /data/lnk",
+                "create /data/gone"
+              ]
+            }
+          },
+          "expect_on": {
+            "monty": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "exclusive creation mode is not supported"
+            },
+            "pyodide": {
+              "stdout": "opened\n",
+              "ops_absent": [
+                "create /data/lnk"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

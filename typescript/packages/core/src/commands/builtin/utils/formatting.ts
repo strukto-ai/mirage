@@ -19,9 +19,10 @@ import {
   type FileStat,
   type LsTimeKind,
 } from '../../../types.ts'
-import { strftime } from './strftime.ts'
+import { gnuStrftime } from './strftime.ts'
 import { UINTMAX } from '../constants.ts'
-import { UTC_ZONE } from '../../../utils/timezone.ts'
+import { UTC_ZONE, type Zone } from '../../../utils/timezone.ts'
+import { isoTimestamp } from '../../../utils/dates.ts'
 import { contentSize, isDir } from '../../../utils/stat_view.ts'
 import {
   DEFAULT_MODES,
@@ -293,17 +294,36 @@ function lsTimeString(modified: string | null | undefined, findRule = false): st
 // a date format, and one holding a newline names two, the first for a
 // time outside the recent window and the second for one inside it. An
 // unknown time renders the epoch, as the default style does.
+// The fraction of a second as the stamp spells it.
+const FRACTION = /\d\d:\d\d:\d\d\.(\d+)/
+
+/**
+ * A timestamp in GNU's full-iso layout, `%Y-%m-%d %H:%M:%S.%N %z`. The nine
+ * fraction digits are the ones the stamp spells, so both hosts print what the
+ * backend recorded rather than what their clock type keeps (a Python
+ * `datetime` stops at microseconds, a `Date` at milliseconds). The time reads
+ * in `zone`, UTC by default, and an unknown time is the epoch, as GNU renders
+ * a missing file's. Mirrors Python's `full_iso_time`.
+ */
+export function fullIsoTime(modified: string | null | undefined, zone: Zone = UTC_ZONE): string {
+  const seconds = isoTimestamp(modified)
+  const whole = new Date(Math.floor(seconds ?? 0) * 1000)
+  const digits = seconds !== null && modified ? (FRACTION.exec(modified)?.[1] ?? '') : ''
+  const fraction = digits.padEnd(9, '0').slice(0, 9)
+  return gnuStrftime(whole, `%Y-%m-%d %H:%M:%S.${fraction} %z`, zone)
+}
+
 export function styledTime(modified: string | null | undefined, style: string): string {
   if (style === 'locale') return lsTimeString(modified)
+  if (style === 'full-iso') return fullIsoTime(modified)
   const dt = parseWhen(modified) ?? EPOCH
-  if (style === 'full-iso') return strftime(dt, '%Y-%m-%d %H:%M:%S.%N %z', UTC_ZONE)
-  if (style === 'long-iso') return strftime(dt, '%Y-%m-%d %H:%M', UTC_ZONE)
+  if (style === 'long-iso') return gnuStrftime(dt, '%Y-%m-%d %H:%M', UTC_ZONE)
   const recent = isRecent(dt.getTime() / 1000, false)
-  if (style === 'iso') return strftime(dt, recent ? '%m-%d %H:%M' : '%Y-%m-%d ', UTC_ZONE)
+  if (style === 'iso') return gnuStrftime(dt, recent ? '%m-%d %H:%M' : '%Y-%m-%d ', UTC_ZONE)
   const fmt = style.slice(1)
   const cut = fmt.indexOf('\n')
-  if (cut === -1) return strftime(dt, fmt, UTC_ZONE)
-  return strftime(dt, recent ? fmt.slice(cut + 1) : fmt.slice(0, cut), UTC_ZONE)
+  if (cut === -1) return gnuStrftime(dt, fmt, UTC_ZONE)
+  return gnuStrftime(dt, recent ? fmt.slice(cut + 1) : fmt.slice(0, cut), UTC_ZONE)
 }
 
 // The timestamp an ls column shows for one row. A backend reports one

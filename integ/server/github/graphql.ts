@@ -22,9 +22,11 @@ import { ownedRepositories, repositoryNode } from './repos.ts'
 import { repoByName } from './store.ts'
 
 // The slice of the vendor's schema the clients here send: issue and pull
-// request comments, and every Repository, PullRequest and Issue field that
+// request comments, every Repository, PullRequest and Issue field that
 // `gh repo`, `gh pr` and `gh issue` `view/list --json` select, with the
-// argument and enum spellings gh 2.85 puts on the wire.
+// argument and enum spellings gh 2.85 puts on the wire, and a ref's commit
+// history (`ref`, `Ref.target`, `Commit.history`), which a `gh api graphql`
+// query reads and which lists what `GET /commits` lists.
 //
 // One departure: the vendor types an issue's `state` and a pull request's as
 // two enums, yet answers gh's IssueByNumber, which reads `state` through
@@ -82,7 +84,12 @@ const SCHEMA = buildSchema(`
   type RepositoryConnection { nodes: [Repository!]!, totalCount: Int!, pageInfo: PageInfo! }
   type Owner { id: ID!, login: String! }
   type Count { totalCount: Int! }
-  type Ref { name: String! }
+  scalar GitTimestamp
+  interface GitObject { oid: String! }
+  type Ref { name: String!, prefix: String!, target: GitObject }
+  type Tag implements GitObject { oid: String!, name: String!, message: String, target: GitObject! }
+  type Tree implements GitObject { oid: String! }
+  type Blob implements GitObject { oid: String! }
   type CodeOfConduct { key: String!, name: String!, url: String }
   type ContactLink { about: String!, name: String!, url: String! }
   type FundingLink { platform: String!, url: String! }
@@ -179,6 +186,7 @@ const SCHEMA = buildSchema(`
     projects(first: Int, states: [ProjectState!]): ProjectConnection!
     projectsV2(first: Int, query: String): ProjectV2Connection!
     issueOrPullRequest(number: Int!): IssueOrPullRequest
+    ref(qualifiedName: String!): Ref
   }
   union IssueOrPullRequest = Issue | PullRequest
   type Issue {
@@ -259,7 +267,7 @@ const SCHEMA = buildSchema(`
     authorEmail: String, commitBody: String, commitHeadline: String,
     mergeMethod: String!, enabledAt: String, enabledBy: Actor
   }
-  type Commit {
+  type Commit implements GitObject {
     oid: String!
     messageHeadline: String!
     messageBody: String!
@@ -267,7 +275,10 @@ const SCHEMA = buildSchema(`
     authoredDate: String!
     authors(first: Int): GitActorConnection!
     statusCheckRollup: StatusCheckRollup
+    history(first: Int, after: String, path: String, since: GitTimestamp,
+      until: GitTimestamp): CommitHistoryConnection!
   }
+  type CommitHistoryConnection { nodes: [Commit!]!, totalCount: Int!, pageInfo: PageInfo! }
   type GitActor { name: String, email: String, user: User }
   type GitActorConnection { nodes: [GitActor!]! }
   type PullRequestCommit { commit: Commit! }

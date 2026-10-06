@@ -101,6 +101,105 @@
       "flags": [
         "p"
       ]
+    },
+    {
+      "id": "unzip_p_selects_members_in_archive_order",
+      "seq": 15100701,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_uz/docProps /data/fcA_uz/xl/media && cd /data/fcA_uz && printf 'APP\\n' > docProps/app.xml && printf 'SHEET\\n' > xl/sheet1.xml && printf 'MEDIA\\n' > xl/media/img.bin && printf 'BOOK\\n' > xl/workbook.xml && zip -q book.zip docProps/app.xml xl/sheet1.xml xl/media/img.bin xl/workbook.xml && unzip -p book.zip xl/workbook.xml docProps/app.xml; echo rc=$?; unzip -p book.zip 'doc*'; unzip -p book.zip 'xl/*'; unzip -p book.zip '*.xml' xl/workbook.xml; echo rc=$?; unzip -p book.zip xl/workbook.xml xl/workbook.xml; echo rc=$?; unzip -lp book.zip docProps/app.xml; unzip -p book.zip; cd / && rm -r /data/fcA_uz)",
+      "expect": {
+        "exit": 0,
+        "stdout": "APP\nBOOK\nrc=0\nAPP\nSHEET\nMEDIA\nBOOK\nAPP\nSHEET\nBOOK\nrc=11\nBOOK\nrc=11\nAPP\nAPP\nSHEET\nMEDIA\nBOOK\n",
+        "stderr": "caution: filename not matched:  xl/workbook.xml\ncaution: filename not matched:  xl/workbook.xml\n"
+      },
+      "flags": [
+        "p",
+        "l"
+      ]
+    },
+    {
+      "id": "unzip_p_dir_entry_and_one_byte_wildcard",
+      "seq": 15100702,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_uq/xl && cd /data/fcA_uq && printf 'B\\n' > xl/b.txt && zip -q dirs.zip xl/ && unzip -p dirs.zip xl/; echo rc=$?; printf 'ACCENT\\n' > é.txt && printf 'AB\\n' > ab.txt && zip -q bytes.zip é.txt ab.txt && unzip -p bytes.zip '?.txt'; echo rc=$?; unzip -p bytes.zip '??.txt'; echo rc=$?; cd / && rm -r /data/fcA_uq)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrc=11\nACCENT\nAB\nrc=0\n",
+        "stderr": "caution: filename not matched:  ?.txt\n"
+      },
+      "flags": [
+        "p"
+      ]
+    },
+    {
+      "id": "unzip_p_serves_each_duplicate_name_its_own_data",
+      "seq": 15100703,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_up && printf %s 'UEsDBBQAAAAAACA8NF1kVNwMBgAAAAYAAAAHAAAAZHVwLnR4dEZJUlNUClBLAwQUAAAAAAAgPDRdrB4kAgcAAAAHAAAABwAAAGR1cC50eHRTRUNPTkQKUEsBAhQDFAAAAAAAIDw0XWRU3AwGAAAABgAAAAcAAAAAAAAAAAAAAIABAAAAAGR1cC50eHRQSwECFAMUAAAAAAAgPDRdrB4kAgcAAAAHAAAABwAAAAAAAAAAAAAAgAErAAAAZHVwLnR4dFBLBQYAAAAAAgACAGoAAABXAAAAAAA=' | base64 -d > /data/fcA_up/dup.zip && unzip -p /data/fcA_up/dup.zip dup.txt; echo rc=$?; rm -r /data/fcA_up)",
+      "expect": {
+        "exit": 0,
+        "stdout": "FIRST\nSECOND\nrc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "p"
+      ]
     }
   ]
 }

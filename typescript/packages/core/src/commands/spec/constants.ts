@@ -57,6 +57,54 @@ export const STDIN_SCRIPT_COMMANDS: ReadonlySet<string> = new Set([
   'node',
 ])
 
+// The commands that read standard input for a lone `-` operand, so the word
+// names no path and routes nowhere: `split - /data/x` runs on /data from any
+// working directory. Everywhere else (`touch -`, `rev -`) it is a file in the
+// working directory, and explicit `./-` always is.
+export const STDIN_DASH_COMMANDS: ReadonlySet<string> = new Set([
+  'awk',
+  'base64',
+  'cat',
+  'cmp',
+  'comm',
+  'csplit',
+  'cut',
+  'diff',
+  'expand',
+  'fmt',
+  'fold',
+  'grep',
+  'gunzip',
+  'gzip',
+  'head',
+  'join',
+  'md5sum',
+  'nl',
+  'od',
+  'paste',
+  'rg',
+  'sed',
+  'sha1sum',
+  'sha224sum',
+  'sha256sum',
+  'sha384sum',
+  'sha512sum',
+  'sort',
+  'split',
+  'tac',
+  'tail',
+  'unexpand',
+  'uniq',
+  'wc',
+  'xxd',
+  'zcat',
+])
+
+// How many leading operands may read standard input, for a command whose
+// later operands name outputs: split reads FILE and writes PREFIX, so
+// `split f -` writes `-aa` to the working directory (GNU coreutils 9.7).
+export const STDIN_DASH_LEADING: ReadonlyMap<string, number> = new Map([['split', 1]])
+
 // The name an operand goes by on a flag bag's tape. The tape records the
 // operands in scan order among the option occurrences, so a program can tell
 // which options were typed before each one. An operand has no dest, and no
@@ -75,8 +123,9 @@ export const OPERAND = ''
 // RETURN_IN_ORDER too, so `join a b c -a 3` refuses the extra operand before
 // the bad file number, and a missing-operand line names the line's last word
 // rather than its last operand: `join a.txt -t ,` is missing an operand after
-// ',' (coreutils 9.7).
-export const IN_ORDER_OPERANDS: ReadonlySet<string> = new Set(['jq', 'join'])
+// ',' (coreutils 9.7). Info-ZIP's unzip reads its words in order too: -x takes
+// every operand after it, up to a -d (UnZip 6.00).
+export const IN_ORDER_OPERANDS: ReadonlySet<string> = new Set(['jq', 'join', 'unzip'])
 
 // The option words an IN_ORDER_OPERANDS program's own loop reads by their
 // spelling, so the tape keeps each one where it was typed, as [SPELLED, word]
@@ -101,6 +150,16 @@ export const LETTER_OPTIONS: ReadonlySet<string> = new Set(['jq'])
 // The dash-led words such a program reads as options. A `--` word takes the
 // long-option branch before this is asked.
 export const DASH_LETTER = /^-[A-Za-z]/
+
+// The programs that read a dash followed by a digit or a point as a negative
+// number before each getopt call, and stop scanning options there: the word
+// and every word after it are operands. Measured on coreutils 9.7: `seq -1.5
+// 1` counts from -1.5, `seq -.5 .5` from -0.5, and `seq -1 -w 1` refuses -w
+// as LAST, while `seq -inf` is still the invalid option -i.
+export const NEGATIVE_NUMBER_OPERANDS: ReadonlySet<string> = new Set(['seq'])
+
+// The dash-led words such a program takes for a negative number.
+export const NEGATIVE_NUMBER = /^-[.0-9]/
 
 // The programs that compare a long option's whole word against their own
 // table, as strcmp does, `=` included, so `--name=value` is an unknown option,

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { RAMAccessor } from '../accessor/ram.ts'
 import { IO } from '../commands/builtin/ram/io.ts'
-import { writeBytes } from '../core/ram/write.ts'
+import { write } from '../core/ram/write.ts'
 import { MountMode, PathSpec } from '../types.ts'
 import { eacces } from '../utils/errors.ts'
 import { getTestParser, stderrStr, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
@@ -25,7 +25,7 @@ const PATH = new PathSpec({
 
 async function makeAccessor(): Promise<RAMAccessor> {
   const accessor = new RAMAccessor(new RAMStore())
-  await writeBytes(accessor, PATH, ENC.encode('hello\n'))
+  await write(accessor, PATH, ENC.encode('hello\n'))
   return accessor
 }
 
@@ -116,11 +116,11 @@ describe('VFSAdapter', () => {
     'holds optional writes to mount mode %s',
     async (mode) => {
       const accessor = await makeAccessor()
-      const write = vi.fn(writeBytes)
+      const spy = vi.fn(write)
       const vfs = new BaseVFS({
         name: 'custom',
         accessor,
-        io: new VFSAdapter({ read: READ, writes: { write } }),
+        io: new VFSAdapter({ read: READ, writes: { write: spy } }),
       })
       const ws = new Workspace(
         { '/nested/data': vfs },
@@ -129,7 +129,7 @@ describe('VFSAdapter', () => {
       try {
         const result = await ws.shell('echo changed > /nested/data/a.txt')
         expect(result.exitCode === 0).toBe(mode === MountMode.WRITE)
-        expect(write).toHaveBeenCalledTimes(mode === MountMode.WRITE ? 1 : 0)
+        expect(spy).toHaveBeenCalledTimes(mode === MountMode.WRITE ? 1 : 0)
         const refused = await ws.shell('rm /nested/data/a.txt')
         const reason = mode === MountMode.READ ? 'Read-only file system' : 'Operation not supported'
         expect(stderrStr(refused)).toBe(`rm: cannot remove '/nested/data/a.txt': ${reason}\n`)
@@ -176,6 +176,7 @@ it.each(['grep', 'rg'])(
                 ignore_case: false,
                 whole_word: false,
                 syntax: command === 'grep' ? 'basic' : 'rust',
+                ...(command === 'grep' ? { utf8: false } : {}),
               },
             },
           },

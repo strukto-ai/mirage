@@ -16,6 +16,7 @@ import { gnuPhrase } from '../errors/posix.ts'
 import { dropTrailingSegments, respellOne } from './path.ts'
 import { quotesOperands, shellQuote, shellQuoteAlways } from './quote.ts'
 import { rstripSlash, stripSlash } from './slash.ts'
+import { encodeText } from '../shell/bytes.ts'
 
 export interface FsError extends Error {
   code: string
@@ -214,7 +215,8 @@ export async function readdirError(
 // That premise is exactly what a flat store breaks: ram and redis rename without
 // creating the destination's ancestors, so they can hold `/missing/a.txt` with
 // `/missing` absent, where resolution stops and the answer is ENOENT. Those call
-// readdirError directly.
+// readdirError directly. The walk ends at the listed path itself, which the
+// first probe has already found is not a file, so it is not asked again.
 // Mirrors Python's listing_error.
 export async function listingError(
   path: string | { virtual: string; rawPath?: string },
@@ -222,8 +224,10 @@ export async function listingError(
   isFile: (p: string) => boolean | Promise<boolean>,
   isDir: (p: string) => boolean | Promise<boolean>,
 ): Promise<FsError> {
-  if (stripSlash(key) !== '' && (await isFile(key))) return enotdir(path)
-  return readdirError(path, key, isFile, isDir)
+  const leaf = stripSlash(key)
+  if (leaf === '') return readdirError(path, key, isFile, isDir)
+  if (await isFile(key)) return enotdir(path)
+  return readdirError(path, key, (p) => stripSlash(p) !== leaf && isFile(p), isDir)
 }
 
 /**
@@ -535,13 +539,27 @@ const CANNOT_OPEN = 'cannot open {quoted} for reading: {strerror}'
 export const FAILURE_WORDING: ReadonlyMap<string, readonly [string | null, string | null]> =
   new Map([
     ['csplit', [CANNOT_OPEN, null]],
+    ['du', ['cannot access {quoted}: {strerror}', null]],
+    ['find', ['{quoted}: {strerror}', '{quoted}: {strerror}']],
     ['fmt', [CANNOT_OPEN, null]],
     ['head', [CANNOT_OPEN, 'error reading {quoted}: {strerror}']],
+    ['ls', ['cannot access {quoted}: {strerror}', null]],
+    [
+      'mkdir',
+      [
+        'cannot create directory {quoted}: {strerror}',
+        'cannot create directory {quoted}: {strerror}',
+      ],
+    ],
+    ['rev', ['cannot open {bare}: {strerror}', null]],
+    ['rm', ['cannot remove {quoted}: {strerror}', 'cannot remove {quoted}: {strerror}']],
+    ['rmdir', ['failed to remove {quoted}: {strerror}', 'failed to remove {quoted}: {strerror}']],
     ['sed', ["can't read {bare}: {strerror}", 'read error on {bare}: {strerror}']],
     ['split', [CANNOT_OPEN, null]],
     ['stat', ['cannot statx {quoted}: {strerror}', 'cannot statx {quoted}: {strerror}']],
     ['tac', ['failed to open {quoted} for reading: {strerror}', '{shown}: read error: {strerror}']],
     ['tail', [CANNOT_OPEN, 'error reading {quoted}: {strerror}']],
+    ['touch', ['cannot touch {quoted}: {strerror}', 'cannot touch {quoted}: {strerror}']],
     [
       'truncate',
       [
@@ -655,5 +673,5 @@ export function formatFsError(
     const message = err instanceof Error ? err.message : String(err)
     line = message.startsWith(`${cmdName}: `) ? `${message}\n` : `${cmdName}: ${message}\n`
   }
-  return new TextEncoder().encode(line)
+  return encodeText(line)
 }

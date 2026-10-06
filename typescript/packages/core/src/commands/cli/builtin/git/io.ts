@@ -15,7 +15,7 @@
 import { FileType, LINK_TARGET_KEY, PathSpec } from '../../../../types.ts'
 import type { FileStat } from '../../../../types.ts'
 import { parent, posixNormpath } from '../../../../utils/path.ts'
-import { isMissingPath } from '../../../../utils/errors.ts'
+import { eexist, isEisdir, isEnotdir, isMissingPath } from '../../../../utils/errors.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { LinkView, MountView, StatPath } from '../../../../ops/types.ts'
 import { PERMISSION_BITS, SYMLINK_MODE } from './constants.ts'
@@ -200,7 +200,7 @@ export async function readOptional(dispatch: Dispatch, path: string): Promise<Ui
   try {
     return await readFile(dispatch, path)
   } catch (err) {
-    if (isMissingPath(err)) return null
+    if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return null
     throw err
   }
 }
@@ -211,7 +211,7 @@ export async function readNames(dispatch: Dispatch, path: string): Promise<strin
     const [entries] = await dispatch('readdir', PathSpec.fromStrPath(path))
     return [...((entries as string[] | null) ?? [])]
   } catch (err) {
-    if (isMissingPath(err)) return []
+    if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return []
     throw err
   }
 }
@@ -252,7 +252,7 @@ export async function ensureDir(dispatch: Dispatch, path: string): Promise<void>
       await dispatch('stat', PathSpec.fromStrPath(current))
       break
     } catch (err) {
-      if (!isMissingPath(err)) throw err
+      if (!(isMissingPath(err) || isEnotdir(err) || isEisdir(err))) throw err
       missing.push(current)
       current = parent(current)
     }
@@ -274,7 +274,7 @@ export async function isDirectory(dispatch: Dispatch, path: string): Promise<boo
     const [stat] = await dispatch('stat', PathSpec.fromStrPath(path))
     return (stat as { type?: string } | null)?.type === FileType.DIRECTORY
   } catch (err) {
-    if (isMissingPath(err)) return false
+    if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return false
     throw err
   }
 }
@@ -284,10 +284,28 @@ export async function exists(dispatch: Dispatch, path: string): Promise<boolean>
   try {
     await dispatch('stat', PathSpec.fromStrPath(path))
   } catch (err) {
-    if (isMissingPath(err)) return false
+    if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return false
     throw err
   }
   return true
+}
+
+/**
+ * Take a file's lock and let it go, as git does before rewriting it.
+ *
+ * git creates `<path>.lock` before it rewrites the index or the config, even
+ * when nothing in them changes, so a read-only repository refuses the verb there
+ * before it looks any further. Creating the lock and removing it is that
+ * refusal, and it leaves the file itself alone, so a write another session makes
+ * to it is never undone. A lock already there is another writer's, which git
+ * refuses and so does this (EEXIST), untouched. The look and the create are two
+ * ops, since the door has no exclusive create.
+ */
+export async function takeLock(dispatch: Dispatch, path: string): Promise<void> {
+  const lock = `${path}.lock`
+  if (await exists(dispatch, lock)) throw eexist(lock)
+  await dispatch('write', PathSpec.fromStrPath(lock), [new Uint8Array()])
+  await removeFile(dispatch, lock)
 }
 
 /** Write one virtual path, creating the directories above it. */
@@ -307,7 +325,7 @@ export async function removeFile(dispatch: Dispatch, path: string): Promise<void
   try {
     await dispatch('unlink', PathSpec.fromStrPath(path))
   } catch (err) {
-    if (!isMissingPath(err)) throw err
+    if (!(isMissingPath(err) || isEnotdir(err) || isEisdir(err))) throw err
   }
 }
 
@@ -533,7 +551,7 @@ export async function removeEmptyParents(
     try {
       await dispatch('rmdir', PathSpec.fromStrPath(current))
     } catch (err) {
-      if (!isMissingPath(err)) throw err
+      if (!(isMissingPath(err) || isEnotdir(err) || isEisdir(err))) throw err
       return
     }
     current = parent(current)

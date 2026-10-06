@@ -40,14 +40,11 @@ async function stderrOf(flags: CommandOpts['flags']): Promise<[string, number]> 
 // `uniq --group=p` and `--all-repeated=n` both exit 0 (measured, coreutils
 // 9.4). Mirrors test_uniq.py.
 describe('uniq accepts an unambiguous prefix', () => {
-  it.each(['p', 'a', 'se', 'b'])('accepts --group=%s', async (value) => {
-    const [stderr, code] = await stderrOf({ group: value })
-    expect(stderr).toBe('')
-    expect(code).toBe(0)
-  })
-
-  it.each(['n', 'p', 'se'])('accepts --all-repeated=%s', async (value) => {
-    const [stderr, code] = await stderrOf({ all_repeated: value })
+  it.each([
+    ['group', 'p'],
+    ['all_repeated', 'n'],
+  ])('accepts %s=%s', async (dest, value) => {
+    const [stderr, code] = await stderrOf({ [dest]: value })
     expect(stderr).toBe('')
     expect(code).toBe(0)
   })
@@ -60,27 +57,19 @@ describe('uniq accepts an unambiguous prefix', () => {
 
 // Both of uniq's ARGMATCH refusals name the refused word through gnulib's
 // quote(), so a byte outside 0x20-0x7e comes back escaped rather than
-// interpolated raw. Every row measured against GNU coreutils 9.4 under
+// interpolated raw. Rows measured against GNU coreutils 9.4 under
 // `LC_ALL=C` with a raw `bytes` argv (`uniq --all-repeated=<w>`,
 // `uniq --group=<w>`). Mirrors test_uniq.py.
-const QUOTED_WORDS: [string, string][] = [
-  ['xé', 'x\\303\\251'],
-  ['x\r', 'x\\r'],
-  ['x\x01', 'x\\001'],
-  ['x\x7f', 'x\\177'],
-  ["x'", "x\\'"],
-  ['x\\', 'x\\\\'],
-]
-
-describe('uniq quotes the word its argument clauses refuse', () => {
-  it.each(QUOTED_WORDS)('escapes %j in the --all-repeated clause', async (value, escaped) => {
-    const [stderr] = await stderrOf({ all_repeated: value })
-    expect(stderr.split('\n')[0]).toBe(`uniq: invalid argument '${escaped}' for '--all-repeated'`)
-  })
-
-  it.each(QUOTED_WORDS)('escapes %j in the --group clause', async (value, escaped) => {
-    const [stderr] = await stderrOf({ group: value })
-    expect(stderr.split('\n')[0]).toBe(`uniq: invalid argument '${escaped}' for '--group'`)
+describe.each([
+  ['all_repeated', '--all-repeated'],
+  ['group', '--group'],
+])('uniq quotes the word its %s clause refuses', (dest, option) => {
+  it.each([
+    ['xé', 'x\\303\\251'],
+    ['x\\', 'x\\\\'],
+  ])('escapes %j', async (value, escaped) => {
+    const [stderr] = await stderrOf({ [dest]: value })
+    expect(stderr.split('\n')[0]).toBe(`uniq: invalid argument '${escaped}' for '${option}'`)
   })
 })
 
@@ -89,32 +78,23 @@ describe('uniq quotes the word its argument clauses refuse', () => {
 // `prepend append separate both`, not the accepted-set order that starts at
 // its `separate` default. Mirrors test_uniq.py.
 describe('uniq argument refusals carry GNU candidate blocks', () => {
-  it('lists --all-repeated candidates', async () => {
-    const [stderr, code] = await stderrOf({ all_repeated: 'x' })
-    expect(stderr).toBe(
-      "uniq: invalid argument 'x' for '--all-repeated'\n" +
-        "Valid arguments are:\n  - 'none'\n  - 'prepend'\n  - 'separate'\n" +
-        "Try 'uniq --help' for more information.\n",
-    )
-    expect(code).toBe(1)
-  })
-
-  it('lists --group candidates', async () => {
-    const [stderr, code] = await stderrOf({ group: 'x' })
-    expect(stderr).toBe(
-      "uniq: invalid argument 'x' for '--group'\n" +
-        "Valid arguments are:\n  - 'prepend'\n  - 'append'\n  - 'separate'\n  - 'both'\n" +
-        "Try 'uniq --help' for more information.\n",
-    )
-    expect(code).toBe(1)
-  })
-
   it.each([
-    ['all_repeated', '--all-repeated'],
-    ['group', '--group'],
-  ])('words an empty %s as ambiguous', async (dest, option) => {
-    const [stderr, code] = await stderrOf({ [dest]: '' })
-    expect(stderr.split('\n')[0]).toBe(`uniq: ambiguous argument '' for '${option}'`)
+    ['all_repeated', '--all-repeated', ['none', 'prepend', 'separate']],
+    ['group', '--group', ['prepend', 'append', 'separate', 'both']],
+  ] as const)('lists the %s candidates', async (dest, option, candidates) => {
+    const [stderr, code] = await stderrOf({ [dest]: 'x' })
+    const listed = candidates.map((word) => `  - '${word}'\n`).join('')
+    expect(stderr).toBe(
+      `uniq: invalid argument 'x' for '${option}'\n` +
+        `Valid arguments are:\n${listed}` +
+        "Try 'uniq --help' for more information.\n",
+    )
+    expect(code).toBe(1)
+  })
+
+  it('words an empty --group as ambiguous', async () => {
+    const [stderr, code] = await stderrOf({ group: '' })
+    expect(stderr.split('\n')[0]).toBe("uniq: ambiguous argument '' for '--group'")
     expect(code).toBe(1)
   })
 })

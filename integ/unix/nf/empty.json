@@ -299,11 +299,45 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "rg -c o /data/a.txt ''",
+      "command": "rg -j1 -c o /data/a.txt ''",
       "expect": {
         "exit": 2,
         "stdout": "/data/a.txt:3\n",
         "stderr": "rg: : IO error for operation on : No such file or directory (os error 2)\n"
+      }
+    },
+    {
+      "id": "nf_empty_rg_beside_a_file_is_named_once",
+      "seq": 645,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rg -c o /data/a.txt ''",
+      "expect": {
+        "exit": 2,
+        "stdout": "/data/a.txt:3\n",
+        "stderr": "rg: : No such file or directory (os error 2)\n"
       }
     },
     {
@@ -333,7 +367,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(cd /data && rg o '' '')",
+      "command": "(cd /data && rg -j1 o '' '')",
       "expect": {
         "exit": 2,
         "stdout": "",

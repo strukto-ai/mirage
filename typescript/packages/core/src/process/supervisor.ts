@@ -1,9 +1,5 @@
-import {
-  DEFAULT_PROCESS_PERMISSIONS,
-  type ProcessPermissions,
-  type ProcessScope,
-} from './config.ts'
-import type { PathSpec } from '../types.ts'
+import { DEFAULT_PROCESS_PERMISSIONS, type ProcessPermissions } from './config.ts'
+import type { PathSpec, ProcessScope } from '../types.ts'
 import { ProcessHandle } from './handle.ts'
 import type { ProcessRunner, ProcessView } from './types.ts'
 

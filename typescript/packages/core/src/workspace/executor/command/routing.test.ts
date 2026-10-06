@@ -61,6 +61,14 @@ describe('routableScopes', () => {
     expect(routableScopes('cat', [a, assign, b])).toEqual([a, assign, b])
   })
 
+  it("keeps a dash that names an output: split's PREFIX", () => {
+    const src = new PathSpec({ virtual: '/m/in', directory: '/m', vfsPath: '', rawPath: '/m/in' })
+    const dash = new PathSpec({ virtual: '/m/-', directory: '/m', vfsPath: '', rawPath: '-' })
+    expect(routableScopes('split', [src, dash])).toEqual([src, dash])
+    expect(routableScopes('split', [dash, src])).toEqual([src])
+    expect(routableScopes('cat', [src, dash])).toEqual([src])
+  })
+
   it('keeps an awk line with an assignment operand on one mount', async () => {
     const ws = new Workspace(
       { '/data': new RAMVFS() },

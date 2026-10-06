@@ -90,6 +90,17 @@ def test_execute_records_exit_code_and_cwd():
     assert [e["exit_code"] for e in commands] == [0, 1]
 
 
+def test_execute_records_what_the_line_showed():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+
+    async def run() -> list[dict]:
+        await ws.shell("echo hi; echo err >&2")
+        return await ws.history()
+
+    commands = asyncio.run(run())
+    assert [e["stdout"] for e in commands] == ["hi\n"]
+
+
 def test_execute_records_op_source():
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     asyncio.run(ws.shell("echo hello > /data/test.txt"))

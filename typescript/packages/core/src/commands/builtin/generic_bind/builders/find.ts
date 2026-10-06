@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { hiddenPathsIntersect, pathRulesActive } from '../../../../context/session_context.ts'
+import { FlagView } from '../../../spec/flag_view.ts'
+import { specOf } from '../../../spec/builtins.ts'
+import { pathsScoped } from '../../../../ops/namespace_view.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { findGeneric } from '../../generic/find.ts'
 import type { PathSpec } from '../../../../types.ts'
@@ -42,12 +44,7 @@ export const BUILDER: Builder = {
     // off its native op. -empty takes the walk too: a native op judges a
     // directory from its own listing, and the object stores, ssh and gdrive
     // call every directory non-empty.
-    if (
-      find !== undefined &&
-      !texts.includes('-empty') &&
-      !pathRulesActive() &&
-      !resolved.some((p) => hiddenPathsIntersect(p.virtual))
-    ) {
+    if (find !== undefined && !texts.includes('-empty') && !pathsScoped(opts.ns, resolved)) {
       // -mtime must see namespace times (touch results, observed
       // writes), so local backends post-filter through the overlay-
       // aware stat instead of pushing the window into the core.
@@ -81,6 +78,9 @@ export function findWalk<A extends Accessor>(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const idx = opts.index ?? undefined
+  const flags = new FlagView(opts.flags, specOf('find'))
+  const bounded = flags.asBool('xdev') || flags.asBool('mount')
+  const mounts = opts.ns?.mounts
   // The walk classifies entries through stat (see walkFind). A directory the guarded readdir
   // refuses, and an entry whose stat fails, are collected here and
   // reported by the generic per start point.
@@ -96,7 +96,12 @@ export function findWalk<A extends Accessor>(
         {
           unreadable: closed,
           unstatted,
-          readdir: (spec, i) => ops.readdir(accessor, spec, i),
+          readdir: async (spec, i) =>
+            bounded &&
+            mounts !== undefined &&
+            mounts.rootOf(spec.virtual) !== mounts.rootOf(root.virtual)
+              ? []
+              : ops.readdir(accessor, spec, i),
           // -mtime must see namespace times (touch results, observed
           // writes on mtime-less backends), same as ls.
           stat: async (spec, i) => {

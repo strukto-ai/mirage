@@ -1,0 +1,40 @@
+{
+  "repos": [
+    {
+      "fullName": "octocat/Hello-World",
+      "owner": "octocat",
+      "name": "Hello-World",
+      "defaultBranch": "master",
+      "sourceDir": "github/hello-world",
+      "branches": [
+        {
+          "name": "master",
+          "headSha": "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
+        }
+      ],
+      "commits": [
+        {
+          "sha": "553c2077f0edc3d5dc5d17262f6aa498e69d6f8e",
+          "message": "first commit",
+          "authorLogin": "octocat",
+          "date": "2011-01-26T19:06:08Z"
+        },
+        {
+          "sha": "762941318ee16e59dabbacb1b4049eec22f0d303",
+          "parentSha": "553c2077f0edc3d5dc5d17262f6aa498e69d6f8e",
+          "message": "New line at end of file. --Signed off by Spaceghost",
+          "authorLogin": "Spaceghost",
+          "date": "2011-09-14T04:42:41Z"
+        },
+        {
+          "sha": "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d",
+          "parentSha": "553c2077f0edc3d5dc5d17262f6aa498e69d6f8e",
+          "otherParentsJson": ["762941318ee16e59dabbacb1b4049eec22f0d303"],
+          "message": "Merge pull request #6 from Spaceghost/patch-1",
+          "authorLogin": "octocat",
+          "date": "2012-03-06T23:06:50Z"
+        }
+      ]
+    }
+  ]
+}

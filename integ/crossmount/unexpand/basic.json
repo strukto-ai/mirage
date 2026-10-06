@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "xm_unexpand_across_mounts",
+      "seq": 963217,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '        a\\n' > /data/xm_rt_ux; printf '    b\\n' > /data2/xm_rt_ux; unexpand -t 4 /data/xm_rt_ux /data2/xm_rt_ux; rm /data/xm_rt_ux /data2/xm_rt_ux",
+      "expect": {
+        "exit": 0,
+        "stdout": "\t\ta\n\tb\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

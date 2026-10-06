@@ -75,11 +75,11 @@ def _patch(monkeypatch):
     async def fake_readme(config, ref):
         return README[0]
 
-    async def fake_fork(config, ref, name=None):
+    async def fake_fork(config, ref, body=None):
         return _record(
             method="POST",
             path=f"/repos/{ref.owner}/{ref.repo}/forks",
-            body={} if name is None else {"name": name},
+            body=body or {},
         )
 
     async def fake_rename(config, ref, name):
@@ -171,6 +171,7 @@ def test_registers_itself_under_the_grammar_gh_uses():
     assert cli_spec_for("gh") is GH
     assert [c.name for c in GH.subcommands] == [
         "auth",
+        "help",
         "version",
         "api",
         "issue",
@@ -226,7 +227,6 @@ def _path(value: str) -> PathSpec:
 
 
 def _doors(files: dict[str, bytes]) -> CLIDoors:
-
     async def dispatch(op, path, *args, **kwargs):
         assert op == "read"
         return files[path.virtual], None
@@ -290,7 +290,6 @@ def _graphql(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_json_repo_view_asks_graphql_for_the_fields_named(monkeypatch):
-
     async def unexpected_readme(config, ref):
         raise AssertionError("JSON output must not fetch README content")
 
@@ -496,6 +495,14 @@ async def test_forks_under_the_source_name_when_unnamed():
     _reset({"full_name": "me/r"})
     await fork(_inv(["o/r"]))
     assert CALLS[0]["body"] == {}
+
+
+@pytest.mark.asyncio
+async def test_refuses_a_remote_for_the_current_repository():
+    with pytest.raises(ValueError, match="--remote is not supported"):
+        await fork(
+            _inv([], {"remote": "true"}, GhConfig(token="t", repo="o/r"))
+        )
 
 
 @pytest.fixture()

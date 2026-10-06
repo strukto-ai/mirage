@@ -13,10 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import pytest
 
-from mirage.commands.builtin.generic.diff import diff
-from mirage.commands.errors import UsageError
-from mirage.io.stream import materialize
+from mirage.commands.builtin.generic.diff import (
+    DiffFlags,
+    c_escape,
+    diff,
+    switch_words,
+)
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.timezone import resolve_tz
 
 
 def _operand(raw: str, virtual: str) -> PathSpec:
@@ -30,20 +34,7 @@ def _operand(raw: str, virtual: str) -> PathSpec:
 
 DASH = _operand("-", "/d/-")
 DEV_STDIN = PathSpec.from_str_path("/dev/stdin", "")
-FILE = _operand("a.txt", "/d/a.txt")
-SUB = _operand("sub", "/d/sub")
-SUB2 = _operand("sub2", "/d/sub2")
-FILES = {
-    "/d/a.txt": b"hello\n",
-    "/d/sub/x": b"1\n",
-    "/d/sub2/x": b"2\n",
-    "/d/sub2/y": b"3\n",
-}
 DIRS = {"/d/sub": ["x"], "/d/sub2": ["x", "y"]}
-
-
-async def _read(path: PathSpec) -> bytes:
-    return FILES[path.virtual]
 
 
 async def _readdir(path: PathSpec) -> list[str]:
@@ -55,29 +46,8 @@ async def _stat(path: PathSpec) -> FileStat:
     return FileStat(name=path.virtual.rsplit("/", 1)[-1], type=kind)
 
 
-async def _run(paths: list[PathSpec], stdin: bytes | None = None, **flags):
-    out, io = await diff(
-        paths,
-        read_bytes=_read,
-        readdir_fn=_readdir,
-        stat_fn=_stat,
-        stdin=stdin,
-        **flags,
-    )
-    body = b"" if out is None else await materialize(out)
-    return body.decode(), (io.stderr or b"").decode(), io.exit_code
-
-
-@pytest.mark.asyncio
-async def test_unified_headers_name_the_operands_as_typed():
-    out, _, code = await _run([FILE, DEV_STDIN], b"x\n", u=True)
-    assert out.startswith("--- a.txt\n+++ /dev/stdin\n")
-    assert code == 1
-
-
 @pytest.mark.asyncio
 async def test_two_stdin_operands_are_one_file():
-
     async def unread(path: PathSpec) -> bytes:
         raise AssertionError(f"read {path.virtual}")
 
@@ -86,35 +56,139 @@ async def test_two_stdin_operands_are_one_file():
         read_bytes=unread,
         readdir_fn=_readdir,
         stat_fn=_stat,
+        flags=DiffFlags(),
         stdin=b"abc",
     )
     assert (out, io.exit_code) == (None, 0)
 
 
+def test_switch_words_keep_the_option_words_as_typed():
+    assert switch_words(["-ru", "--exclude", ".git", "a", "b", "-x*.log"]) == [
+        "-ru",
+        "--exclude",
+        ".git",
+        "-x*.log",
+    ]
+    assert switch_words(["--exclude=.git", "-r", "a", "--", "-b"]) == [
+        "--exclude=.git",
+        "-r",
+        "--",
+    ]
+    assert switch_words(["-rx", "pat", "-U", "1", "a", "b"]) == [
+        "-rx",
+        "pat",
+        "-U",
+        "1",
+    ]
+
+
+def test_c_escape_quotes_a_header_name_the_way_diffutils_does():
+    assert c_escape("plain/é\x7f") == "plain/é\x7f"
+    assert c_escape("sp ace") == '"sp ace"'
+    assert c_escape('t\tq"b\\') == '"t\\tq\\"b\\\\"'
+    assert c_escape("c\x01") == '"c\\001"'
+
+
 @pytest.mark.asyncio
-async def test_a_directory_against_a_dash_is_refused():
-    assert await _run([SUB, DASH], b"x\n") == (
-        "",
-        "diff: cannot compare '-' to a directory\n",
-        2,
+async def test_unified_headers_carry_each_side_mtime():
+    files = {"/d/a b": b"x\ny\n", "/d/c": b"x\nz\n"}
+
+    async def read(path: PathSpec) -> bytes:
+        return files[path.virtual]
+
+    async def stat(path: PathSpec) -> FileStat:
+        if path.virtual not in files:
+            raise FileNotFoundError(path.virtual)
+        return FileStat(
+            name=path.virtual,
+            type=FileType.FILE,
+            modified="2026-01-02T03:04:05Z",
+        )
+
+    pair = [_operand("a b", "/d/a b"), _operand("c", "/d/c")]
+    out, io = await diff(
+        pair,
+        read_bytes=read,
+        readdir_fn=_readdir,
+        stat_fn=stat,
+        flags=DiffFlags(unified=True),
+    )
+    assert io.exit_code == 1
+    assert isinstance(out, bytes)
+    assert out.splitlines()[:2] == [
+        b'--- "a b"\t2026-01-02 03:04:05.000000000 +0000',
+        b"+++ c\t2026-01-02 03:04:05.000000000 +0000",
+    ]
+    out, _ = await diff(
+        [pair[1], _operand("gone", "/d/gone")],
+        read_bytes=read,
+        readdir_fn=_readdir,
+        stat_fn=stat,
+        flags=DiffFlags(unified=True, new_file=True, new_first=True),
+    )
+    assert isinstance(out, bytes)
+    assert out.splitlines()[1] == (
+        b"+++ gone\t1970-01-01 00:00:00.000000000 +0000"
     )
 
 
 @pytest.mark.asyncio
-async def test_a_lone_operand_is_gnus_missing_operand_usage_error():
-    with pytest.raises(UsageError) as exc:
-        await _run([FILE])
-    assert str(exc.value) == (
-        "diff: missing operand after 'a.txt'\n"
-        "diff: Try 'diff --help' for more information."
+async def test_unified_headers_read_the_time_the_namespace_keeps():
+    async def read(path: PathSpec) -> bytes:
+        return b"x\n" if path.virtual == "/d/a" else b"y\n"
+
+    async def stat(path: PathSpec) -> FileStat:
+        return FileStat(
+            name=path.virtual,
+            type=FileType.FILE,
+            modified="2026-10-05T00:00:00Z",
+        )
+
+    async def stat_path(virtual: str) -> FileStat | None:
+        return FileStat(
+            name=virtual, type=FileType.FILE, modified="2021-06-15T12:00:00Z"
+        )
+
+    out, _ = await diff(
+        [_operand("a", "/d/a"), _operand("b", "/d/b")],
+        read_bytes=read,
+        readdir_fn=_readdir,
+        stat_fn=stat,
+        flags=DiffFlags(unified=True),
+        stat_path=stat_path,
     )
-    assert exc.value.exit_code == 2
+    assert isinstance(out, bytes)
+    assert out.splitlines()[0] == b"--- a\t2021-06-15 12:00:00.000000000 +0000"
 
 
 @pytest.mark.asyncio
-async def test_recursive_output_names_children_under_the_typed_operands():
-    assert await _run([SUB, SUB2], r=True) == (
-        "diff -r sub/x sub2/x\n1c1\n< 1\n---\n> 2\nOnly in sub2: y\n",
-        "",
-        1,
+async def test_unified_headers_read_in_the_tz_zone_with_every_digit():
+    async def read(path: PathSpec) -> bytes:
+        return b"x\n"
+
+    async def stat_path(virtual: str) -> FileStat | None:
+        return FileStat(
+            name=virtual,
+            type=FileType.FILE,
+            modified="2026-03-04T05:06:07.123456789Z",
+        )
+
+    async def missing(path: PathSpec) -> FileStat:
+        if path.virtual == "/d/gone":
+            raise FileNotFoundError(path.virtual)
+        return FileStat(name=path.virtual, type=FileType.FILE)
+
+    out, _ = await diff(
+        [_operand("a", "/d/a"), _operand("gone", "/d/gone")],
+        read_bytes=read,
+        readdir_fn=_readdir,
+        stat_fn=missing,
+        flags=DiffFlags(unified=True, new_file=True, new_first=True),
+        stat_path=stat_path,
+        zone=resolve_tz("Asia/Hong_Kong"),
     )
+    assert isinstance(out, bytes)
+    assert out.splitlines()[:2] == [
+        b"--- a\t2026-03-04 13:06:07.123456789 +0800",
+        b"+++ gone\t1970-01-01 08:00:00.000000000 +0800",
+    ]

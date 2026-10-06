@@ -28,7 +28,7 @@ from mirage.commands.cli.types import CLISpec
 from mirage.config import load_config
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import classify
-from mirage.policy import Policy
+from mirage.policy import Policy, PolicyDenied
 from mirage.policy.types import (
     CommandContext,
     Deny,
@@ -37,6 +37,7 @@ from mirage.policy.types import (
 )
 from mirage.process.types import SpawnRequest
 from mirage.runtime.types import ScriptSource
+from mirage.shell.console import Channel, JobConsole
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs, register_vfs
@@ -86,6 +87,22 @@ class RulePolicy(Policy):
         if ctx.key in self.rule.get("vars", []):
             return Deny(self.rule["reason"])
         return None
+
+
+class SlowSink(JobConsole):
+    """A caller streaming a line that takes a while over each chunk.
+
+    Args:
+        delay (float): seconds per chunk.
+    """
+
+    def __init__(self, delay: float) -> None:
+        super().__init__()
+        self.delay = delay
+
+    async def emit(self, channel: Channel, data: bytes) -> None:
+        await asyncio.sleep(self.delay)
+        await super().emit(channel, data)
 
 
 def profile_document(raw: dict[str, Any]) -> dict[str, Any]:
@@ -202,6 +219,11 @@ async def action(
         return child.pid
     elif op == "exec":
         cancel = asyncio.Event() if "cancel_after_ms" in step else None
+        sink = (
+            SlowSink(step["sink_delay_ms"] / 1000)
+            if "sink_delay_ms" in step
+            else None
+        )
         timer = (
             asyncio.get_running_loop().call_later(
                 step["cancel_after_ms"] / 1000, cancel.set
@@ -211,19 +233,27 @@ async def action(
         )
         try:
             result = await ws.shell(
-                step["command"], session_id=step.get("session"), cancel=cancel
+                step["command"],
+                session_id=step.get("session"),
+                cancel=cancel,
+                env=step.get("env"),
+                cwd=step.get("cwd"),
+                sink=sink,
             )
         except MirageAbortError:
             return {"aborted": True}
         finally:
             if timer is not None:
                 timer.cancel()
-        return {
+        value = {
             "exit_code": result.exit_code,
             "stdout": await result.stdout_str(),
             "stderr": await result.stderr_str(),
             "refusal": result.refusal.reason if result.refusal else None,
         }
+        if sink is not None:
+            value["streamed"] = (await sink.snapshot(Channel.STDOUT)).decode()
+        return value
     elif op == "concurrent":
         return list(
             await asyncio.gather(
@@ -261,6 +291,8 @@ async def run(case: dict[str, Any]) -> int:
                     actual["errno"] = errno.errorcode.get(exc.errno)
                 elif condition is not None:
                     actual["errno"] = condition.name
+                if isinstance(exc, PolicyDenied) and exc.refusal is not None:
+                    actual["reason"] = exc.refusal.reason
             expected = step.get("expect", {"value": None})
             if not matches(actual, expected):
                 raise AssertionError(

@@ -16,6 +16,7 @@ import type { ByteSource, IOResult } from '../../../io/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../shell/console/index.ts'
+import type { JobTable } from '../../../shell/job_table/index.ts'
 import type { ExecuteFn } from '../../expand/node.ts'
 import type { Argv } from '../../expand/argv.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
@@ -38,6 +39,7 @@ export type ExecuteStringFn = (
     signal?: AbortSignal
     sink?: JobConsole
     callStack?: CallStack
+    jobTable?: JobTable
   },
 ) => Promise<IOResult>
 
@@ -66,6 +68,8 @@ export interface BuiltinCall {
   namespace: Namespace
   executeFn: ExecuteFn
   sink?: JobConsole
+  /** The calling shell's jobs, for a nested shell to start a table of its own beside. */
+  jobTable?: JobTable
 }
 
 export type BuiltinFn = (call: BuiltinCall) => Promise<Result>

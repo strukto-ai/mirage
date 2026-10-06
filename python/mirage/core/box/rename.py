@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.box import BoxAccessor
-from mirage.cache.context import invalidate_subtree
+from mirage.cache.context import invalidate_after_move
 from mirage.core.box.api import (
     delete_file,
     delete_folder,
@@ -66,5 +66,9 @@ async def rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
         )
     else:
         await update_file(tm, item["id"], name=new_name, parent_id=dst_parent)
-    await invalidate_subtree(dst)
-    await invalidate_subtree(src)
+    # Only a folder has a subtree to drop, and only a positive "file"
+    # rules one out. The type checks above refused a file onto a folder,
+    # so dst held nothing below it unless the moved item is a folder.
+    folder = item.get("type") != "file"
+    await invalidate_after_move(dst, folder)
+    await invalidate_after_move(src, folder)

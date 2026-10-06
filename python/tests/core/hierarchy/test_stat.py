@@ -94,7 +94,6 @@ def test_invalid_shapes_are_enoent(accessor):
 
 
 def test_override_replaces_the_whole_shape(accessor):
-
     async def bespoke(
         accessor: FakeAccessor,
         match: ScopeMatch,
@@ -112,7 +111,6 @@ def test_override_replaces_the_whole_shape(accessor):
 
 
 def test_entry_stat_builds_from_the_resolved_entry(accessor):
-
     def from_entry(match, path, entry) -> FileStat:
         return FileStat(
             name=entry.vfs_name,

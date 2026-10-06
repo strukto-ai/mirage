@@ -19,12 +19,14 @@ from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.dropbox.api import get_metadata, list_folder
 from mirage.core.dropbox.client import DropboxApiError
+from mirage.core.dropbox.constants import CONTENT_HASH
+from mirage.core.dropbox.fingerprint import token_of
 from mirage.types import PathSpec
 from mirage.utils.errors import listing_error
 from mirage.utils.key_prefix import mount_prefix_of
 
 
-def _resource_type(entry: dict[str, Any]) -> str:
+def _resource_type_for(entry: dict[str, Any]) -> str:
     if entry.get(".tag") == "folder":
         return "dropbox/folder"
     return "dropbox/file"
@@ -97,13 +99,15 @@ async def readdir(
         filename = f["name"]
         modified = f.get("server_modified") or f.get("client_modified") or ""
         size = f.get("size")
+        token = None if is_dir else token_of(f.get(CONTENT_HASH))
         entry = IndexEntry(
             id=f.get("id") or f.get("path_display") or filename,
             name=filename,
-            resource_type=_resource_type(f),
+            resource_type=_resource_type_for(f),
             remote_time=modified,
             vfs_name=filename,
             size=size if not is_dir and isinstance(size, int) else None,
+            extra={} if token is None else {CONTENT_HASH: token},
         )
         entries.append((filename, entry, is_dir))
 

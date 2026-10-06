@@ -22,28 +22,28 @@ export interface MountSummary {
 export interface WorkspaceBrief {
   id: string
   mode: string
-  mountCount: number
-  sessionCount: number
-  createdAt: number
+  mount_count: number
+  session_count: number
+  created_at: number
 }
 
 export interface SessionSummary {
-  sessionId: string
+  session_id: string
   cwd: string
 }
 
 export interface WorkspaceInternals {
-  cacheBytes: number | null
-  cacheEntries: number | null
-  historyLength: number
-  inFlightJobs: number
+  cache_bytes: number | null
+  cache_entries: number | null
+  history_length: number
+  in_flight_jobs: number
 }
 
 export interface WorkspaceDetail {
   id: string
   mode: string
-  createdAt: number
-  fuseMountpoints: Record<string, string>
+  created_at: number
+  fuse_mountpoints: Record<string, string>
   sessions: SessionSummary[]
   mounts: MountSummary[]
   internals: WorkspaceInternals | null

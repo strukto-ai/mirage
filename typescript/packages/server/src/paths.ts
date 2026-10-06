@@ -13,17 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { homedir } from 'node:os'
-import { join, resolve, sep } from 'node:path'
+import { join, resolve } from 'node:path'
 import { ENV_HOME } from './env.ts'
-
-export class PathOutsideRootError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'PathOutsideRootError'
-  }
-}
-
-const SAFE_SEGMENT_RE = /^[A-Za-z0-9._-]+$/
 
 export function mirageHome(env: Record<string, string | undefined> = process.env): string {
   const override = env[ENV_HOME]
@@ -41,42 +32,10 @@ export function pidFilePath(
   return join(mirageHome(env), 'daemon.pid')
 }
 
-export function versionRootPath(
-  explicit?: string,
-  env: Record<string, string | undefined> = process.env,
-): string {
-  if (explicit !== undefined) return resolve(explicit)
-  return join(mirageHome(env), 'repos')
-}
-
-export function snapshotRootPath(
-  explicit?: string,
-  env: Record<string, string | undefined> = process.env,
-): string {
-  if (explicit !== undefined) return resolve(explicit)
-  return join(mirageHome(env), 'snapshots')
-}
-
 export function stateRootPath(
   explicit?: string,
   env: Record<string, string | undefined> = process.env,
 ): string {
   if (explicit !== undefined) return resolve(explicit)
   return join(mirageHome(env), 'state')
-}
-
-export function resolveWithinRoot(root: string, userPath: string): string {
-  const resolvedRoot = resolve(root)
-  const resolved = resolve(resolvedRoot, userPath)
-  if (resolved !== resolvedRoot && !resolved.startsWith(resolvedRoot + sep)) {
-    throw new PathOutsideRootError(`path escapes the configured root: ${userPath}`)
-  }
-  return resolved
-}
-
-export function validatePathSegment(segment: string): string {
-  if (segment === '.' || segment === '..' || !SAFE_SEGMENT_RE.test(segment)) {
-    throw new PathOutsideRootError(`invalid path segment: ${segment}`)
-  }
-  return segment
 }

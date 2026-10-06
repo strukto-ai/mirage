@@ -141,11 +141,6 @@ describe('RuntimeVFS transport', () => {
     expect(st).toEqual({ size: 8, isDir: false, mode: LINK_MODE, mtimeMs: 0, isLink: true })
   })
 
-  it('refuses an answer that is not a stat row', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve({ size: 4 }))
-    await expect(new RuntimeVFS(dispatch).stat('/ram/a.txt')).rejects.toThrow('bad shape')
-  })
-
   // A backend that slash-marks its directories has already said what the
   // entry is, so the door does not pay a stat to hear it again.
   it('takes a trailing slash as the answer and skips the stat', async () => {
@@ -311,11 +306,6 @@ describe('RuntimeVFS transport', () => {
     expect(out).toBe('../t.txt')
   })
 
-  it('refuses a readlink answer that is not a string', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(7))
-    await expect(new RuntimeVFS(dispatch).readlink('/ram/link')).rejects.toThrow(/expected string/)
-  })
-
   it('forwards setattr with the fields it was given', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
     await new RuntimeVFS(dispatch).setattr('/ram/f', { mode: 0o600, nofollow: true })
@@ -330,37 +320,20 @@ describe('RuntimeVFS transport', () => {
     await expect(new RuntimeVFS(dispatch).read('/x')).rejects.toThrow(/boom/)
   })
 
-  it('throws TypeError when read returns non-Uint8Array', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() =>
-      Promise.resolve('not bytes' as unknown as Uint8Array),
-    )
-    await expect(new RuntimeVFS(dispatch).read('/x')).rejects.toThrow(TypeError)
-  })
-
-  it('throws TypeError when readdir returns non-array', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() =>
-      Promise.resolve({ not: 'array' } as unknown as never[]),
-    )
-    await expect(new RuntimeVFS(dispatch).readdir('/x')).rejects.toThrow(TypeError)
-  })
-
-  it('throws TypeError when a readdir entry is not a name', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() =>
-      Promise.resolve([{ path: '/x' }] as unknown as never[]),
-    )
-    await expect(new RuntimeVFS(dispatch).readdir('/x')).rejects.toThrow(TypeError)
-  })
-
-  it('throws TypeError when write dispatch returns non-undefined', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve('unexpected' as unknown))
-    await expect(new RuntimeVFS(dispatch).write('/x', new Uint8Array([1]))).rejects.toThrow(
-      TypeError,
-    )
-  })
-
-  it('throws TypeError when stat returns a bad shape', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve({ size: 1 }))
-    await expect(new RuntimeVFS(dispatch).stat('/x')).rejects.toThrow(TypeError)
+  // A bridge answer of the wrong shape is a TypeError, never a value a
+  // guest encoder would then misread.
+  it.each<[string, unknown, (vfs: RuntimeVFS) => Promise<unknown>, RegExp]>([
+    ['read', 'not bytes', (vfs) => vfs.read('/x'), /./],
+    ['readdir', { not: 'array' }, (vfs) => vfs.readdir('/x'), /./],
+    ['a readdir entry', [{ path: '/x' }], (vfs) => vfs.readdir('/x'), /./],
+    ['write', 'unexpected', (vfs) => vfs.write('/x', new Uint8Array([1])), /./],
+    ['stat', { size: 4 }, (vfs) => vfs.stat('/ram/a.txt'), /bad shape/],
+    ['readlink', 7, (vfs) => vfs.readlink('/ram/link'), /expected string/],
+  ])('refuses a %s answer of the wrong shape', async (_op, answer, call, message) => {
+    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(answer as never))
+    const refused = call(new RuntimeVFS(dispatch))
+    await expect(refused).rejects.toThrow(TypeError)
+    await expect(refused).rejects.toThrow(message)
   })
 
   it('forwards create and truncate as their own ops, never a write', async () => {
@@ -483,22 +456,7 @@ describe('RuntimeVFS append', () => {
     expect(dispatch.mock.calls.map((c) => c[0])).toEqual(['append'])
   })
 
-  it('writes the whole file the caller supplied when the mount has no append', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>((op) => {
-      if (op === 'append') return Promise.reject(enotsup('s3', 'append', '/a/x'))
-      return Promise.resolve(undefined)
-    })
-    await new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).append(
-      '/a/x',
-      enc.encode('tail'),
-      enc.encode('headtail'),
-    )
-    const write = dispatch.mock.calls.find((c) => c[0] === 'write')
-    if (write?.[2] === undefined) throw new Error('unreachable')
-    expect(new TextDecoder().decode(write[2])).toBe('headtail')
-  })
-
-  it('reads the base itself when no whole file was supplied', async () => {
+  it('reads the base fresh when the mount has no append', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>((op) => {
       if (op === 'append') return Promise.reject(enotsup('s3', 'append', '/a/x'))
       if (op === 'read') return Promise.resolve(enc.encode('head'))
@@ -563,11 +521,12 @@ describe('RuntimeVFS append', () => {
   it('remembers a mount that declined, so it costs one failed dispatch', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>((op) => {
       if (op === 'append') return Promise.reject(enotsup('s3', 'append', '/a/x'))
+      if (op === 'read') return Promise.resolve(new Uint8Array())
       return Promise.resolve(undefined)
     })
     const vfs = new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a']))
-    await vfs.append('/a/x', enc.encode('1'), enc.encode('1'))
-    await vfs.append('/a/y', enc.encode('2'), enc.encode('2'))
+    await vfs.append('/a/x', enc.encode('1'))
+    await vfs.append('/a/y', enc.encode('2'))
     expect(dispatch.mock.calls.filter((c) => c[0] === 'append')).toHaveLength(1)
   })
 
@@ -577,42 +536,26 @@ describe('RuntimeVFS append', () => {
       return Promise.resolve(undefined)
     })
     await expect(
-      new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).append(
-        '/a/x',
-        enc.encode('t'),
-        enc.encode('t'),
-      ),
+      new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).append('/a/x', enc.encode('t')),
     ).rejects.toThrow(/read-only/)
     expect(dispatch.mock.calls.some((c) => c[0] === 'write')).toBe(false)
   })
 })
 
 describe('RuntimeVFS flush', () => {
-  it('sends a pure extension as an append', async () => {
+  it('sends each step of a plan in order', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
-    await new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).flush(
-      '/a/x',
-      3,
-      3,
-      enc.encode('abcXYZ'),
-    )
-    const call = dispatch.mock.calls[0]
-    if (call?.[2] === undefined) throw new Error('unreachable')
-    expect(call[0]).toBe('append')
-    expect(new TextDecoder().decode(call[2])).toBe('XYZ')
-  })
-
-  it('sends a rewrite as a whole-file write', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
-    await new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).flush(
-      '/a/x',
-      3,
-      0,
-      enc.encode('ZZZdef'),
-    )
-    const call = dispatch.mock.calls[0]
-    if (call?.[2] === undefined) throw new Error('unreachable')
-    expect(call[0]).toBe('write')
-    expect(new TextDecoder().decode(call[2])).toBe('ZZZdef')
+    await new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).flush('/a/x', [
+      { kind: 'truncate', length: 2 },
+      { kind: 'pwrite', data: enc.encode('z'), offset: 4 },
+      { kind: 'append', data: enc.encode('!') },
+      { kind: 'write', data: enc.encode('w') },
+    ])
+    expect(dispatch.mock.calls).toEqual([
+      ['truncate', '/a/x', undefined, undefined, { length: 2 }],
+      ['pwrite', '/a/x', enc.encode('z'), undefined, { offset: 4 }],
+      ['append', '/a/x', enc.encode('!')],
+      ['write', '/a/x', enc.encode('w')],
+    ])
   })
 })

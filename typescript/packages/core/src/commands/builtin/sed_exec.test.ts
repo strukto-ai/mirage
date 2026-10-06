@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { encodeText } from '../../shell/bytes.ts'
+import { byteView, fromByteView } from '../../shell/bytes.ts'
 import { SedMachine, listLine, type SedFileContent, type SedInput } from './sed_exec.ts'
 import { compileScript } from './sed_script.ts'
 
@@ -46,7 +46,10 @@ function run(
     files: new Map(Object.entries(opts.files ?? {})),
     readerFiles: new Map(Object.entries(opts.files ?? {})),
   })
-  machine.process(typeof inputs === 'string' ? [{ name: '-', text: inputs }] : inputs, true)
+  machine.process(
+    typeof inputs === 'string' ? [{ name: '-', text: byteView(inputs) }] : inputs,
+    true,
+  )
   const wfiles = new Map<string, string>()
   for (const [name, out] of machine.wfiles) wfiles.set(name, out.chunks.join(''))
   return {
@@ -213,7 +216,7 @@ describe('sed a, i and c text (GNU sed 4.9)', () => {
 
   it('writes numeric escapes above ASCII as raw bytes', () => {
     const out = sed('a [\\xff][\\d200][\\o377][\\x80][\\xc3\\xa9][\\o400]', 'x\n')
-    expect([...encodeText(out)]).toEqual(
+    expect([...fromByteView(out)]).toEqual(
       latin1Bytes('x\n[\xff][\xc8][\xff][\x80][\xc3\xa9][\x00]\n'),
     )
   })
@@ -405,6 +408,24 @@ it.each([
   expect(sed(script, text)).toBe(expected)
 })
 
+it.each([
+  ['s/.*/\\U&/', 'hello world\n', 'HELLO WORLD\n'],
+  ['s/\\w\\+/\\u&/g', 'hello world\n', 'Hello World\n'],
+  ['s/\\(o\\) \\(w\\)/\\U\\1\\E \\2/', 'hello world\n', 'hellO world\n'],
+  ['s/.*/\\u\\L&/', 'hELLO\n', 'hello\n'],
+  ['s/.*/\\L\\u&/', 'hELLO\n', 'Hello\n'],
+  ['s/\\(x*\\)\\(a\\)/\\u\\1\\2/', 'ab\n', 'Ab\n'],
+  ['s/abc/\\u\\lX/', 'abc\n', 'x\n'],
+  ['s/\\(x*\\)a/\\u\\1\\Lz/', 'a\n', 'z\n'],
+  ['s/\\(x*\\)a/\\l\\1\\UZz/', 'a\n', 'ZZ\n'],
+  ['s/\\(x*\\)a\\(b\\)/\\u\\1\\E\\2/', 'ab\n', 'b\n'],
+  ['s/\\(x*\\)a/\\u\\1\\l\\1\\Uq/', 'ab\n', 'Qb\n'],
+  ['s/\\(x*\\)\\(y*\\)\\(a\\)/\\u\\1\\2\\3/', 'ab\n', 'ab\n'],
+  ['s/.*/\\U&/', 'a\u00e9\n', byteView('A\u00e9\n')],
+])('case conversion: %s', (script, text, expected) => {
+  expect(sed(script, text)).toBe(expected)
+})
+
 describe('sed l (GNU sed 4.9)', () => {
   it('shows C escapes, a doubled backslash and octal for other bytes', () => {
     expect(listLine('a\tb\\c\x01', 70)).toBe('a\\tb\\\\c\\001$\n')
@@ -412,11 +433,11 @@ describe('sed l (GNU sed 4.9)', () => {
   })
 
   it('shows every byte of a multibyte character in octal', () => {
-    expect(listLine('café', 70)).toBe('caf\\303\\251$\n')
+    expect(listLine(byteView('café'), 70)).toBe('caf\\303\\251$\n')
   })
 
   it('shows a raw byte as itself in octal', () => {
-    expect(listLine(String.fromCharCode(0xdcff), 70)).toBe('\\377$\n')
+    expect(listLine(byteView(new Uint8Array([0xff])), 70)).toBe('\\377$\n')
   })
 
   it('folds at 69 characters and a backslash', () => {

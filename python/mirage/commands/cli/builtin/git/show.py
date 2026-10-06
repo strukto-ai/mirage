@@ -16,10 +16,15 @@ import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
-from dulwich.objects import Blob, Commit, ShaFile, Tree
+from dulwich.objects import Blob, Commit, ObjectID, ShaFile, Tag, Tree
 from dulwich.repo import BaseRepo
 
-from mirage.commands.cli.builtin.git.dates import date_clock, parse_date_mode
+from mirage.commands.cli.builtin.git.constants import HEAD
+from mirage.commands.cli.builtin.git.dates import (
+    date_clock,
+    parse_date_mode,
+    show_date,
+)
 from mirage.commands.cli.builtin.git.diff_output import (
     DiffFlags,
     commit_output,
@@ -27,34 +32,48 @@ from mirage.commands.cli.builtin.git.diff_output import (
     parse_diff_flags,
     renames_enabled,
 )
-from mirage.commands.cli.builtin.git.errors import GitError, NoWorkspaceError
+from mirage.commands.cli.builtin.git.errors import (
+    GitError,
+    NoWorkspaceError,
+    UsageError,
+)
 from mirage.commands.cli.builtin.git.format import (
     DEFAULT_DATE,
+    FULL_SHA,
     Decorations,
     LogFormat,
-    needs_decorations,
     oneline,
     preset_block,
     render_template,
 )
-from mirage.commands.cli.builtin.git.history import decorations, pretty_format
+from mirage.commands.cli.builtin.git.history import (
+    decoration_for,
+    decorations,
+    pretty_format,
+)
 from mirage.commands.cli.builtin.git.mailmap import load_mailmap, use_mailmap
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.pathspec import pathspec_patterns
+from mirage.commands.cli.builtin.git.ref_fields import ident_date
 from mirage.commands.cli.builtin.git.repo import config_bool
 from mirage.commands.cli.builtin.git.revparse import (
     resolve_commit,
     resolve_object,
 )
 from mirage.commands.cli.builtin.git.session import opened
-from mirage.commands.cli.builtin.git.types import DateMode, MailmapEntry
+from mirage.commands.cli.builtin.git.types import (
+    DateMode,
+    Decoration,
+    MailmapEntry,
+)
 from mirage.commands.cli.builtin.git.util import (
     check_operands,
-    escaped,
     fatal,
+    option_operand,
     revision_arg,
     split_marked,
     start_point,
+    verb_usage,
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
@@ -65,13 +84,29 @@ from mirage.shell.bytes import encode_text
 
 @dataclass(frozen=True, slots=True)
 class ShowFlags:
-    """The commit presentation and shared diff options."""
+    """The commit presentation and shared diff options.
+
+    Args:
+        diff (DiffFlags): the diff options.
+        pretty (LogFormat): how the commit renders.
+        abbrev_commit (bool): print an abbreviated id, which
+            ``--oneline`` implies and ``--pretty=oneline`` alone does
+            not.
+        date (DateMode): how dates render.
+        mailmap (tuple[MailmapEntry, ...]): the worktree ``.mailmap``.
+        use_mailmap (bool): map the header identities.
+        decorate (Decoration): how the commit is labelled with its refs;
+            parse_show_flags leaves it off, and ``decoration_for``
+            settles it once the repository's config can be read.
+    """
 
     diff: DiffFlags
     pretty: LogFormat
+    abbrev_commit: bool = False
     date: DateMode = DEFAULT_DATE
     mailmap: tuple[MailmapEntry, ...] = ()
     use_mailmap: bool = True
+    decorate: Decoration = Decoration.NONE
 
 
 def parse_show_flags(
@@ -99,6 +134,7 @@ def parse_show_flags(
         ),
         date=parse_date_mode(fl.as_str("date") or "default", date_clock(env)),
         pretty=pretty,
+        abbrev_commit=fl.as_bool("oneline"),
     )
 
 
@@ -111,7 +147,8 @@ def _header(
     trailing newline at all; ``tformat:`` terminates the entry even
     when it renders empty, except that an empty template prints
     nothing, matching ``log --format=``. Pinned against git 2.37 and
-    2.54.
+    2.54. A decorated preset labels the commit after its id, as ``log``
+    does.
 
     Args:
         commit (Commit): the commit being shown.
@@ -120,8 +157,15 @@ def _header(
         decor (Decorations | None): ref labels when the format asked.
     """
     fmt = flags.pretty
+    decorated = flags.decorate is not Decoration.NONE
     if fmt.kind == "oneline":
-        return f"{oneline(commit, width)}\n".encode()
+        length = width if flags.abbrev_commit else FULL_SHA
+        line = (
+            render_template("%h%d %s", commit, length, decor)
+            if decorated
+            else oneline(commit, length)
+        )
+        return f"{line}\n".encode()
     if fmt.kind in ("format", "tformat"):
         rendered = render_template(
             fmt.template or "", commit, width, decor, flags.date, flags.mailmap
@@ -129,50 +173,93 @@ def _header(
         if fmt.kind == "tformat":
             return encode_text(f"{rendered}\n") if fmt.template else b""
         return encode_text(rendered)
-    return (
-        "\n".join(
-            preset_block(
-                commit,
-                fmt.kind,
-                width,
-                flags.date,
-                flags.mailmap if flags.use_mailmap else (),
-            )
-        )
-        + "\n"
-    ).encode()
+    block = preset_block(
+        commit,
+        fmt.kind,
+        width,
+        flags.date,
+        flags.mailmap if flags.use_mailmap else (),
+    )
+    if decorated and block and block[0].startswith("commit "):
+        block[0] += render_template("%d", commit, width, decor)
+    return ("\n".join(block) + "\n").encode()
 
 
-def _render(
-    repo: BaseRepo,
-    revision: str,
-    obj: ShaFile,
-    flags: ShowFlags,
-    want_decor: bool,
-) -> bytes:
-    """Render a resolved revision's entry and diff, synchronously.
+def _tagger_lines(ident: str, flags: ShowFlags) -> str:
+    """The tagger as the format shows a person: nothing for oneline, the
+    date under medium, ``TaggerDate`` under fuller, and the name alone
+    otherwise.
 
-    Runs on a worker thread: peeling, walking the tree and reading
-    blobs all fetch through the dispatcher, so this must not sit on the
-    loop that answers those fetches. A commit that changes nothing the
-    pathspec names prints nothing at all.
+    Args:
+        ident (str): the tag's ``tagger`` header value.
+        flags (ShowFlags): the parsed invocation.
+    """
+    kind = flags.pretty.kind
+    marker = ident.find(" <")
+    close = ident.find(">", max(marker, 0))
+    date = ident_date(ident)
+    if kind == "oneline" or marker == -1 or close == -1 or date is None:
+        return ""
+    who = ident[: close + 1]
+    when = show_date(date[0], date[1], flags.date)
+    if kind == "medium":
+        return f"Tagger: {who}\nDate:   {when}\n"
+    if kind == "fuller":
+        return f"Tagger:     {who}\nTaggerDate: {when}\n"
+    return f"Tagger: {who}\n"
+
+
+def _tag_block(
+    repo: BaseRepo, tag: Tag, flags: ShowFlags
+) -> tuple[str, ShaFile]:
+    """What ``git show`` prints for an annotated tag ahead of the object
+    it points at, and that object.
+
+    ``tag <name>``, the tagger, then the rest of the tag from its blank
+    line on, which is its message as written, signature and all. Pinned
+    against git 2.50.1.
 
     Args:
         repo (BaseRepo): repository to read.
-        revision (str): the revision to show.
-        obj (ShaFile): the object the revision names.
+        tag (Tag): the annotated tag.
         flags (ShowFlags): the parsed invocation.
-        want_decor (bool): whether the format renders %d/%D.
     """
-    if isinstance(obj, Blob):
-        return obj.data
-    if isinstance(obj, Tree):
-        return f"tree {revision}\n\n".encode() + b"".join(
-            name + (b"/" if mode == 0o40000 else b"") + b"\n"
-            for name, mode, _ in obj.iteritems()
+    text = tag.as_raw_string().decode("utf-8", "surrogateescape")
+    end = text.find("\n\n")
+    fields = (text if end == -1 else text[:end]).split("\n")
+
+    def value(key: str) -> str:
+        return next(
+            (
+                line[len(key) + 1 :]
+                for line in fields
+                if line.startswith(f"{key} ")
+            ),
+            "",
         )
-    commit = resolve_commit(repo, revision)
-    decor = decorations(repo) if want_decor else None
+
+    block = f"tag {value('tag')}\n{_tagger_lines(value('tagger'), flags)}"
+    target = repo.object_store[ObjectID(value("object").encode())]
+    return block + ("" if end == -1 else text[end + 1 :]), target
+
+
+def _commit_entry(
+    repo: BaseRepo,
+    commit: Commit,
+    flags: ShowFlags,
+    decor: Decorations | None,
+) -> bytes:
+    """A commit's log entry and its diff against its parent.
+
+    A commit that changes nothing the pathspec names prints nothing at
+    all.
+
+    Args:
+        repo (BaseRepo): repository to read.
+        commit (Commit): the commit to show.
+        flags (ShowFlags): the parsed invocation.
+        decor (Decorations | None): ref labels when the format asked.
+    """
     header = _header(commit, flags, abbrev_for(repo), decor)
     bodies = commit_output(repo, commit, flags.diff)
     combined = len(commit.parents) > 1 and flags.diff.merge in (
@@ -190,10 +277,73 @@ def _render(
     )
 
 
-async def show(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
-    """Show one commit: its log entry, then its diff against its parent.
+def _render(
+    repo: BaseRepo,
+    objects: list[tuple[str, ShaFile]],
+    flags: ShowFlags,
+) -> bytes:
+    """Render every resolved object a line names, synchronously.
 
-    Operands after ``--`` are pathspecs, read once the revision has
+    Runs on a worker thread: peeling, walking the tree and reading
+    blobs all fetch through the dispatcher, so this must not sit on the
+    loop that answers those fetches. A blank line goes ahead of every
+    tag and tree but the first thing shown, and ahead of every later
+    commit unless the format ends each entry itself (oneline, tformat);
+    a blob takes none and counts for none, and a commit named twice
+    prints once.
+
+    Args:
+        repo (BaseRepo): repository to read.
+        objects (list[tuple[str, ShaFile]]): each name as typed and the
+            object it resolved to.
+        flags (ShowFlags): the parsed invocation.
+    """
+    decor = (
+        None
+        if flags.decorate is Decoration.NONE
+        else decorations(repo, flags.decorate)
+    )
+    terminated = flags.pretty.kind in ("oneline", "tformat")
+    parts: list[bytes] = []
+    shown_commits: set[bytes] = set()
+    shown_one = False
+    for name, obj in objects:
+        target = obj
+        while isinstance(target, Tag):
+            block, target = _tag_block(repo, target, flags)
+            parts.append(encode_text(("\n" if shown_one else "") + block))
+            shown_one = True
+        if isinstance(target, Blob):
+            parts.append(target.data)
+        elif isinstance(target, Tree):
+            parts.append(
+                (b"\n" if shown_one else b"")
+                + f"tree {name}\n\n".encode()
+                + b"".join(
+                    entry + (b"/" if mode == 0o40000 else b"") + b"\n"
+                    for entry, mode, _ in target.iteritems()
+                )
+            )
+            shown_one = True
+        elif isinstance(target, Commit) and target.id not in shown_commits:
+            shown_commits.add(target.id)
+            entry = _commit_entry(repo, target, flags, decor)
+            parts.append(
+                (b"\n" if shown_one and not terminated else b"") + entry
+            )
+            shown_one = True
+    return b"".join(parts)
+
+
+async def show(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
+    """Show each object a line names, in order.
+
+    A commit as its log entry and its diff against its parent, an
+    annotated tag as its own block ahead of what it points at, a tree as
+    its listing and a blob as its bytes. Every name resolves before
+    anything prints (pinned against git 2.50.1).
+
+    Operands after ``--`` are pathspecs, read once the revisions have
     resolved, as git reads them; they limit the diff to the paths they
     name.
 
@@ -211,7 +361,7 @@ async def show(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     try:
         if dispatch is None:
             raise NoWorkspaceError()
-        check_operands(texts, marked=escaped(inv.argv))
+        check_operands(inv, texts)
         revisions, paths = split_marked(tuple(texts), inv.argv)
         repo, location = await opened(fl, doors)
         parsed = parse_show_flags(
@@ -229,9 +379,14 @@ async def show(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                     dispatch, location, b"log", b"mailmap", True
                 ),
             ),
+            decorate=await decoration_for(
+                dispatch, location, fl, parsed.pretty
+            ),
         )
-        revision = revision_arg(revisions)
-        obj = await asyncio.to_thread(resolve_object, repo, revision)
+        objects = [
+            (name, await asyncio.to_thread(resolve_object, repo, name))
+            for name in revisions or (HEAD,)
+        ]
         parsed = replace(
             parsed,
             diff=replace(
@@ -239,14 +394,7 @@ async def show(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 pathspecs=pathspec_patterns(location, start_point(fl), paths),
             ),
         )
-        rendered = await asyncio.to_thread(
-            _render,
-            repo,
-            revision,
-            obj,
-            parsed,
-            needs_decorations(parsed.pretty),
-        )
+        rendered = await asyncio.to_thread(_render, repo, objects, parsed)
     except GitError as exc:
         return fatal(exc)
     return yield_bytes(rendered), IOResult()
@@ -295,6 +443,8 @@ async def diff_tree(
     try:
         if doors.dispatch is None:
             raise NoWorkspaceError()
+        if option_operand(inv, inv.texts) is not None:
+            raise UsageError("", verb_usage(inv))
         repo, location = await opened(fl, doors)
         fully = await config_bool(
             doors.dispatch, location, b"core", b"quotepath", True

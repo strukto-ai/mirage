@@ -1,0 +1,44 @@
+{
+  "cases": [
+    {
+      "id": "tar_one_file_system_archives_a_tree_without_mounts",
+      "seq": 15100021,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_o/d/sub && printf 'x\\n' > /data/fcA_o/d/sub/f && cd /data/fcA_o && tar -cv --one-file-system -f a.tar d && tar -tf a.tar; rc=$?; cd / && rm -r /data/fcA_o; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "d/\nd/sub/\nd/sub/f\nd/\nd/sub/\nd/sub/f\n",
+        "stderr": ""
+      },
+      "flags": [
+        "one_file_system",
+        "c",
+        "v",
+        "t"
+      ]
+    }
+  ]
+}

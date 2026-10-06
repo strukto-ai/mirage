@@ -18,11 +18,12 @@ import { FileType, type PathSpec } from '../../types.ts'
 import { invalidateSubtree } from '../../cache/context.ts'
 import { dbxFetch } from './client.ts'
 import { ensurePathSpec } from './_helpers.ts'
-import { isNotFound, notFoundError } from './errors.ts'
+import { isNotFound } from './errors.ts'
 import { backendPath, virtualPath } from './path.ts'
 import { listDirectoryContents } from './readdir.ts'
 import { stat } from './stat.ts'
 import { unlink } from './unlink.ts'
+import { enoent } from '../../utils/errors.ts'
 
 async function removeTreeRecurse(
   accessor: DatabricksVolumeAccessor,
@@ -57,7 +58,7 @@ export async function rmRecursive(
   try {
     await removeTreeRecurse(accessor, remoteRoot, removed)
   } catch (exc) {
-    if (isNotFound(exc)) throw notFoundError(p.virtual)
+    if (isNotFound(exc)) throw enoent(p.virtual)
     throw exc
   }
   await invalidateSubtree(p)

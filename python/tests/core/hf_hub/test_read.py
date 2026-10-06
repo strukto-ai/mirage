@@ -19,7 +19,7 @@ import pytest
 from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.hf_hub.client import HfHubError
-from mirage.core.hf_hub.read import read_bytes, resolve_entry, row_token
+from mirage.core.hf_hub.read import read, resolve_entry, row_token
 from mirage.observe.context import RecordingScope
 from tests.core.hf_hub.conftest import file_row, ps, seed
 
@@ -28,7 +28,7 @@ from tests.core.hf_hub.conftest import file_row, ps, seed
 @patch("mirage.core.hf_hub.read.hub_bytes_tagged")
 async def test_read_bytes_fetches_the_resolve_url(mock_bytes, loaded):
     mock_bytes.return_value = (b"hello", "")
-    assert await read_bytes(loaded, ps("a.txt")) == b"hello"
+    assert await read(loaded, ps("a.txt")) == b"hello"
     url = mock_bytes.await_args.args[1]
     assert url == "https://huggingface.co/acme/widget/resolve/main/a.txt"
     assert mock_bytes.await_args.args[2] is None
@@ -38,7 +38,7 @@ async def test_read_bytes_fetches_the_resolve_url(mock_bytes, loaded):
 @patch("mirage.core.hf_hub.read.hub_bytes_tagged")
 async def test_read_bytes_passes_a_byte_window(mock_bytes, loaded):
     mock_bytes.return_value = (b"he", "")
-    await read_bytes(loaded, ps("a.txt"), offset=0, size=2)
+    await read(loaded, ps("a.txt"), offset=0, size=2)
     window = mock_bytes.await_args.args[2]
     assert (window.offset, window.size) == (0, 2)
 
@@ -51,7 +51,7 @@ async def test_read_bytes_prefixes_the_repo_path(mock_bytes, prefixed):
 
     seed(prefixed, file_row("a.txt"))
     mock_bytes.return_value = (b"", "")
-    await read_bytes(prefixed, ps("a.txt"))
+    await read(prefixed, ps("a.txt"))
     assert mock_bytes.await_args.args[1].endswith(
         "/resolve/main/sub/dir/a.txt"
     )
@@ -63,20 +63,20 @@ async def test_read_of_a_missing_path_never_reaches_the_network(
     mock_bytes, loaded
 ):
     with pytest.raises(FileNotFoundError):
-        await read_bytes(loaded, ps("nope"))
+        await read(loaded, ps("nope"))
     mock_bytes.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_read_of_a_directory_is_eisdir(loaded):
     with pytest.raises(IsADirectoryError):
-        await read_bytes(loaded, ps("d"))
+        await read(loaded, ps("d"))
 
 
 @pytest.mark.asyncio
 async def test_read_of_the_mount_root_is_eisdir(loaded):
     with pytest.raises(IsADirectoryError):
-        await read_bytes(loaded, ps(""))
+        await read(loaded, ps(""))
 
 
 @pytest.mark.asyncio
@@ -95,7 +95,7 @@ async def test_read_records_the_virtual_path(mock_bytes, accessor):
     mock_bytes.return_value = (b"hello", "")
     scope = RecordingScope()
     try:
-        data = await read_bytes(accessor, ps("m/k.txt", "/m"))
+        data = await read(accessor, ps("m/k.txt", "/m"))
     finally:
         scope.close()
     assert data == b"hello"
@@ -163,7 +163,7 @@ async def test_read_stamps_the_oid_when_the_etag_names_the_row(
     mock_bytes.return_value = (b"hello", '"oid-a.txt"')
     scope = RecordingScope()
     try:
-        await read_bytes(accessor, ps("a.txt"))
+        await read(accessor, ps("a.txt"))
     finally:
         scope.close()
     assert [r.fingerprint for r in scope.records] == ["oid-a.txt"]
@@ -181,7 +181,7 @@ async def test_read_stamps_nothing_when_the_bytes_are_another_version(
     mock_bytes.return_value = (b"newer", '"another-version"')
     scope = RecordingScope()
     try:
-        await read_bytes(accessor, ps("a.txt"))
+        await read(accessor, ps("a.txt"))
     finally:
         scope.close()
     assert [r.fingerprint for r in scope.records] == [None]
@@ -192,7 +192,7 @@ async def test_a_read_of_a_repo_the_hub_refuses_is_permission_denied(accessor):
     refused = AsyncMock(side_effect=HfHubError("nope", 403))
     with patch("mirage.core.hf_hub.tree.hub_get_response", refused):
         with pytest.raises(PermissionError):
-            await read_bytes(accessor, ps("a.txt"), RAMIndexCacheStore())
+            await read(accessor, ps("a.txt"), RAMIndexCacheStore())
 
 
 @pytest.mark.asyncio
@@ -202,7 +202,7 @@ async def test_a_download_the_hub_refuses_is_permission_denied(loaded, status):
     refused = AsyncMock(side_effect=HfHubError("gated", status))
     with patch("mirage.core.hf_hub.read.hub_bytes_tagged", refused):
         with pytest.raises(PermissionError):
-            await read_bytes(loaded, ps("a.txt"))
+            await read(loaded, ps("a.txt"))
 
 
 @pytest.mark.asyncio
@@ -211,4 +211,4 @@ async def test_a_download_of_a_vanished_file_stays_a_hub_error(loaded):
     missing = AsyncMock(side_effect=HfHubError("gone", 404, "EntryNotFound"))
     with patch("mirage.core.hf_hub.read.hub_bytes_tagged", missing):
         with pytest.raises(HfHubError, match="gone"):
-            await read_bytes(loaded, ps("a.txt"))
+            await read(loaded, ps("a.txt"))

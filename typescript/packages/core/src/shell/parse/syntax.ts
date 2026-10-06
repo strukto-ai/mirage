@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { IOResult } from '../../io/types.ts'
+import { encodeText } from '../bytes.ts'
 import type { TSNodeLike } from '../types.ts'
 
 import {
@@ -24,30 +26,43 @@ import {
 /** Locate an open quote only in erroneous AST regions, leaving complete
  * strings, comments and heredoc bodies opaque. Mirrors Python. */
 export function findUnterminatedQuote(node: TSNodeLike): string | null {
-  if (node.isMissing && (node.type === "'" || node.type === '"')) return node.type
-  if (node.type === 'ansi_c_string') {
-    const before = node.text.slice(0, -1)
-    const slashes = /\\+$/.exec(before)?.[0].length ?? 0
-    return slashes % 2 !== 0 ? "'" : null
-  }
-  for (const child of node.children) {
-    const quote = findUnterminatedQuote(child)
-    if (quote !== null) return quote
-  }
-  if (node.type === 'ERROR') {
-    if (node.children.length === 0 && node.text.startsWith("'")) return "'"
-    if (node.children.filter((child) => child.type === '"').length % 2 !== 0) return '"'
+  const stack: [TSNodeLike, boolean][] = [[node, false]]
+  for (let entry = stack.pop(); entry !== undefined; entry = stack.pop()) {
+    const [current, visited] = entry
+    if (visited) {
+      // Diagnose an ERROR span only after its children, as before.
+      if (current.children.length === 0 && current.text.startsWith("'")) return "'"
+      if (current.children.filter((child) => child.type === '"').length % 2 !== 0) return '"'
+      continue
+    }
+    if (current.isMissing && (current.type === "'" || current.type === '"')) return current.type
+    if (current.type === 'ansi_c_string') {
+      const before = current.text.slice(0, -1)
+      const slashes = /\\+$/.exec(before)?.[0].length ?? 0
+      if (slashes % 2 !== 0) return "'"
+      continue
+    }
+    if (current.type === 'ERROR') stack.push([current, true])
+    const children = current.children
+    for (let i = children.length - 1; i >= 0; i -= 1) {
+      const child = children[i]
+      if (child !== undefined) stack.push([child, false])
+    }
   }
   return null
 }
 
-export function syntaxErrorMessage(offending: string, node: TSNodeLike): string {
+/** Exit 2 with the bash-style diagnostic for an unparsable line. */
+export function syntaxErrorResult(offending: string, node: TSNodeLike): IOResult {
   const quote = findUnterminatedQuote(node)
-  if (quote !== null) return 'mirage: unexpected EOF while looking for matching `' + quote + "'\n"
   const snippet = offending.trim()
-  return snippet.length > 0
-    ? `mirage: syntax error near '${snippet}'\n`
-    : 'mirage: syntax error in command\n'
+  const message =
+    quote !== null
+      ? 'mirage: unexpected EOF while looking for matching `' + quote + "'\n"
+      : snippet.length > 0
+        ? `mirage: syntax error near '${snippet}'\n`
+        : 'mirage: syntax error in command\n'
+  return new IOResult({ exitCode: 2, stderr: encodeText(message) })
 }
 
 // Locate a backtick substitution that is never closed. tree-sitter
@@ -215,10 +230,17 @@ function* strayReservedWords(
   }
 }
 
-function walkNamed(node: TSNodeLike): TSNodeLike[] {
-  const out: TSNodeLike[] = [node]
-  for (const child of node.namedChildren) out.push(...walkNamed(child))
-  return out
+function* walkNamed(node: TSNodeLike): Generator<TSNodeLike> {
+  // Malformed input can still contain deeply nested valid subtrees.
+  const stack = [node]
+  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
+    yield current
+    const children = current.namedChildren
+    for (let i = children.length - 1; i >= 0; i -= 1) {
+      const child = children[i]
+      if (child !== undefined) stack.push(child)
+    }
+  }
 }
 
 function isRecoveredQuotedHeredocEnd(previous: TSNodeLike | null, error: TSNodeLike): boolean {

@@ -1,0 +1,89 @@
+---
+title: RPC
+description: Drive a workspace session from a program over JSON-RPC 2.0.
+icon: brackets-curly
+---
+
+RPC is a workspace session's in-app API over [JSON-RPC 2.0](https://www.jsonrpc.org/specification). Each method is named after the call it makes: `shell` is `session.shell`, `vfs/read` is `session.vfs.read`. Use it when a program drives the terminal: it moves bytes, and gets a line's stdout, stderr and exit code apart.
+
+Every workspace on the Mirage server answers RPC at:
+
+```
+http://127.0.0.1:8765/v1/workspaces/{id}/rpc
+```
+
+## Connect
+
+<Tabs>
+  <Tab title="stdio">
+    `mirage rpc` reads one message per line on stdin and writes one answer per line on stdout. It starts the server if needed and sends your token.
+
+    ```bash
+    echo '{"jsonrpc": "2.0", "id": 1, "method": "shell", "params": {"command": "ls / | wc -l"}}' | mirage rpc -w demo
+    ```
+    ```json
+    {"jsonrpc": "2.0", "id": 1, "result": {"kind": "io", "exit_code": 0, "stdout": "3\n", "stderr": "", "refusal": null}}
+    ```
+  </Tab>
+  <Tab title="HTTP">
+    One message, or a batch, per `POST`. The answer is the body.
+
+    ```bash
+    curl -s http://127.0.0.1:8765/v1/workspaces/demo/rpc \
+      -H "Authorization: Bearer $MIRAGE_TOKEN" -H 'Content-Type: application/json' \
+      -d '{"jsonrpc": "2.0", "id": 1, "method": "vfs/stat", "params": {"path": "/data"}}'
+    ```
+  </Tab>
+</Tabs>
+
+Answers come back as calls finish, so match them by `id`.
+
+## Auth
+
+The same bearer token as the [HTTP API](/home/access/http#auth). `mirage rpc` reads it from `MIRAGE_TOKEN` or `~/.mirage/auth_token`.
+
+## Methods
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `initialize` | | `server_info`, `protocol_version`, `workspace_id`, `session_id`, `methods` |
+| `shell` | `command`, `cwd?`, `env?`, `stdin_base64?` | `exit_code`, `stdout`, `stderr`, `refusal` |
+| `glob` | `pattern` | `paths` |
+| `vfs/read` | `path`, `offset?`, `size?` | `data_base64` |
+| `vfs/write`, `vfs/append` | `path`, `data_base64` | `{}` |
+| `vfs/stat` | `path`, `nofollow?` | `name`, `type`, `size`, `modified`, `mode`, ... |
+| `vfs/readdir` | `path` | `entries` |
+| `vfs/exists` | `path` | `exists` |
+| `vfs/mkdir`, `vfs/rmdir`, `vfs/unlink` | `path` | `{}` |
+| `vfs/rename` | `src`, `dst` | `{}` |
+| `vfs/truncate` | `path`, `length` | `{}` |
+| `tools/list` | | `tools`, as MCP lists them |
+| `tools/call` | `name`, `arguments` | `text`, `is_error` |
+
+`?` marks an optional param. `initialize` creates nothing and is optional: it reports the server and the workspace and session this connection is bound to. Bytes travel base64 in the `*_base64` fields, and a message is at most 4 MiB, so stream larger stdin over [HTTP](/home/access/http#run-a-shell-line) or SSH. A non-zero exit is a result, not an error. The [tools](/home/access/mcp#tools) take the inputs listed under [Call a tool](/home/access/http#call-a-tool).
+
+## Sessions
+
+Calls run in the workspace's default session. To use another, add `?session_id=<id>` to the URL, or `-s <id>` to `mirage rpc`. The session's [profile](/home/permissions) applies to every method.
+
+## Cancel
+
+Send the notification `$/cancelRequest` with the id of a running request. That request answers `-32800`, and its job ends `canceled`. A dropped HTTP request cancels its calls too.
+
+```json
+{"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": 7}}
+```
+
+## Errors
+
+| Code | When |
+| --- | --- |
+| `-32700` | Not JSON. |
+| `-32600` | Not a JSON-RPC 2.0 request: no `"jsonrpc": "2.0"`, or no method. |
+| `-32601` | No such method. |
+| `-32602` | Bad params. |
+| `-32004` | No such path (`ENOENT`). |
+| `-32603` | Anything else, such as a refused path. |
+| `-32800` | Cancelled. |
+
+A file error carries `data: {"detail": "...", "errno": "EACCES"}`.

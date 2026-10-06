@@ -20,6 +20,7 @@ import pytest
 from mirage.cache.context import (
     active_cache_manager,
     evict_after,
+    invalidate_after_move,
     invalidate_after_unlink,
     invalidate_after_write,
     invalidate_ancestors,
@@ -80,6 +81,8 @@ async def _delegates() -> FakeManager:
     await invalidate_after_write(_spec("/a.txt"))
     await invalidate_after_unlink(_spec("/b.txt"))
     await invalidate_subtree(_spec("/c"))
+    await invalidate_after_move(_spec("/d"), True)
+    await invalidate_after_move(_spec("/e"), False)
     push_cache_manager(prev)
     return manager
 
@@ -87,8 +90,8 @@ async def _delegates() -> FakeManager:
 def test_delegates_to_active_manager():
     manager = _run(_delegates())
     assert [p.mount_path for p in manager.writes] == ["/a.txt"]
-    assert [p.mount_path for p in manager.unlinks] == ["/b.txt"]
-    assert [p.mount_path for p in manager.subtrees] == ["/c"]
+    assert [p.mount_path for p in manager.unlinks] == ["/b.txt", "/e"]
+    assert [p.mount_path for p in manager.subtrees] == ["/c", "/d"]
 
 
 async def _noop_without_manager() -> None:

@@ -1,0 +1,79 @@
+{
+  "cases": [
+    {
+      "id": "a_file_left_open_lands_at_exit",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nfd = os.open('/data/out.txt', os.O_WRONLY | os.O_CREAT)\nos.write(fd, b'kept')\nos._exit(0)",
+            "js": "const f = std.open('/data/out.txt', 'w')\nf.puts('kept')\nstd.exit(0)"
+          },
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "cat /data/out.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "kept"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_caught_exit_still_ends_the_program",
+      "runtimes": [
+        "wasi",
+        "pyodide"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\ntry:\n    os._exit(7)\nexcept BaseException:\n    pass\nopen('/data/after.txt', 'w').write('late')\nprint('after')"
+          },
+          "expect": {
+            "exit": 7,
+            "stdout": "",
+            "ops_absent": [
+              "create /data/after.txt"
+            ]
+          }
+        },
+        {
+          "command": "ls /data",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        }
+      ]
+    }
+  ]
+}

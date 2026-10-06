@@ -30,7 +30,7 @@ describe('summary', () => {
     expect(brief.mode).toBe('write')
     // /data/ plus the empty root anchor the workspace adds at / (no user /
     // mount). /dev and the history view are auto-prefixes and filtered out.
-    expect(brief.mountCount).toBe(2)
+    expect(brief.mount_count).toBe(2)
   })
 
   it('makeDetail emits mounts + sessions', async () => {

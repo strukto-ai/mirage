@@ -464,6 +464,81 @@
         "stdout": "a.txt\na.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "tar_without_f_writes_stdout_and_reads_stdin",
+      "seq": 15000073,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data && tar -c a.txt | tar -t; echo rc=$?; tar -c a.txt b.txt | tar -tv | wc -l; tar -cz b.txt | tar -tz; tar -c a.txt | tar -xO | head -2; tar -cv b.txt > /dev/null; echo rc=$?)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a.txt\nrc=0\n2\nb.txt\nhello\nworld\nrc=0\n",
+        "stderr": "b.txt\n"
+      },
+      "flags": [
+        "c",
+        "t",
+        "x",
+        "z",
+        "v",
+        "O"
+      ]
+    },
+    {
+      "id": "tar_without_f_refuses_an_empty_stdin",
+      "seq": 15000074,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf \"\" | tar -x; echo rc=$?; printf \"\" | tar -t; echo rc=$?; tar -t; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\nrc=2\n",
+        "stderr": "tar: This does not look like a tar archive\ntar: Exiting with failure status due to previous errors\ntar: This does not look like a tar archive\ntar: Exiting with failure status due to previous errors\ntar: This does not look like a tar archive\ntar: Exiting with failure status due to previous errors\n"
+      },
+      "flags": [
+        "t",
+        "x"
+      ]
+    },
+    {
+      "id": "tar_rejects_empty_and_long_non_archives",
+      "seq": 15100531,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tar -t --file=/data/empty.txt; echo rc=$?; tar -x --file=/data/empty.txt; echo rc=$?; printf '%01024d' 0 | tr 0 x | tar -tf -; echo rc=$?; printf '%01024d' 0 | tr 0 x | tar -xf -; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\nrc=2\nrc=2\n",
+        "stderr": "tar: This does not look like a tar archive\ntar: Exiting with failure status due to previous errors\ntar: This does not look like a tar archive\ntar: Exiting with failure status due to previous errors\ntar: This does not look like a tar archive\ntar: Skipping to next header\ntar: Exiting with failure status due to previous errors\ntar: This does not look like a tar archive\ntar: Skipping to next header\ntar: Exiting with failure status due to previous errors\n"
+      }
     }
   ]
 }

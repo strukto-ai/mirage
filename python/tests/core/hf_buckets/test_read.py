@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.core.hf_buckets.read import read_bytes
+from mirage.core.hf_buckets.read import read
 from mirage.core.hf_hub.client import HfHubError
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
@@ -26,7 +26,7 @@ SEED = b"name,age\nalice,30\n"
 async def _stamped(acc, path: str, **window) -> tuple[bytes, list]:
     scope = RecordingScope()
     try:
-        out = await read_bytes(acc, PathSpec.from_str_path(path), **window)
+        out = await read(acc, PathSpec.from_str_path(path), **window)
     finally:
         scope.close()
     return out, [r.fingerprint for r in scope.records]
@@ -35,14 +35,14 @@ async def _stamped(acc, path: str, **window) -> tuple[bytes, list]:
 @pytest.mark.asyncio
 async def test_read_bytes_whole_file(make_acc):
     acc = make_acc({"greet.txt": b"hello world"})
-    out = await read_bytes(acc, PathSpec.from_str_path("/greet.txt"))
+    out = await read(acc, PathSpec.from_str_path("/greet.txt"))
     assert out == b"hello world"
 
 
 @pytest.mark.asyncio
 async def test_read_bytes_offset_size_returns_slice(make_acc):
     acc = make_acc({"x": b"abcdef"})
-    out = await read_bytes(acc, PathSpec.from_str_path("/x"), offset=2, size=4)
+    out = await read(acc, PathSpec.from_str_path("/x"), offset=2, size=4)
     assert out == b"cdef"
 
 
@@ -50,13 +50,13 @@ async def test_read_bytes_offset_size_returns_slice(make_acc):
 async def test_read_bytes_missing_raises_filenotfound(make_acc):
     acc = make_acc({})
     with pytest.raises(FileNotFoundError):
-        await read_bytes(acc, PathSpec.from_str_path("/nope"))
+        await read(acc, PathSpec.from_str_path("/nope"))
 
 
 @pytest.mark.asyncio
 async def test_read_bytes_offset_only(make_acc):
     acc = make_acc({"x": b"abcdef"})
-    out = await read_bytes(acc, PathSpec.from_str_path("/x"), offset=3)
+    out = await read(acc, PathSpec.from_str_path("/x"), offset=3)
     assert out == b"def"
 
 
@@ -69,7 +69,7 @@ async def test_read_records_the_virtual_path(make_acc):
     )
     scope = RecordingScope()
     try:
-        out = await read_bytes(acc, spec)
+        out = await read(acc, spec)
     finally:
         scope.close()
     assert out == b"hello"
@@ -138,7 +138,7 @@ async def test_only_a_missing_entry_is_absent(
     acc = make_acc({"a.txt": SEED})
     fake_hub.fail["bucket_resolve"] = (status, code)
     with pytest.raises(raised) as info:
-        await read_bytes(acc, PathSpec.from_str_path("/a.txt"))
+        await read(acc, PathSpec.from_str_path("/a.txt"))
     # The raw error must not be an OSError either: every file tool reads
     # an OSError as a per-path verdict.
     assert (
@@ -156,7 +156,7 @@ async def test_the_mount_root_is_a_directory_even_under_a_prefix(
     # must not serve it.
     acc = make_acc({"pfx": b"stem", "pfx/a.txt": SEED}, key_prefix="pfx/")
     with pytest.raises(IsADirectoryError):
-        await read_bytes(acc, PathSpec.from_str_path("/"))
+        await read(acc, PathSpec.from_str_path("/"))
     assert fake_hub.count("bucket_resolve") == 0
 
 
@@ -166,7 +166,7 @@ async def test_a_directory_key_read_directly_is_absent(make_acc):
     # 2026-09-25).
     acc = make_acc({"d/x.txt": b"x"})
     with pytest.raises(FileNotFoundError):
-        await read_bytes(acc, PathSpec.from_str_path("/d"))
+        await read(acc, PathSpec.from_str_path("/d"))
 
 
 @pytest.mark.asyncio
@@ -186,28 +186,22 @@ async def test_a_window_past_eof_is_empty_and_stamps_nothing(
 @pytest.mark.asyncio
 async def test_a_prefixed_read_serves_the_prefixed_object(make_acc):
     acc = make_acc({"pfx/a.txt": SEED, "a.txt": b"decoy"}, key_prefix="pfx/")
-    assert await read_bytes(acc, PathSpec.from_str_path("/a.txt")) == SEED
+    assert await read(acc, PathSpec.from_str_path("/a.txt")) == SEED
     assert (
-        await read_bytes(
-            acc, PathSpec.from_str_path("/a.txt"), offset=5, size=3
-        )
+        await read(acc, PathSpec.from_str_path("/a.txt"), offset=5, size=3)
         == SEED[5:8]
     )
     # A write through opendal lands where an HTTP read looks.
     await acc._fake.write("b.txt", b"written")
     assert acc._fake.files["pfx/b.txt"] == b"written"
-    assert (
-        await read_bytes(acc, PathSpec.from_str_path("/b.txt")) == b"written"
-    )
+    assert await read(acc, PathSpec.from_str_path("/b.txt")) == b"written"
 
 
 @pytest.mark.asyncio
 async def test_a_name_that_needs_encoding_reads_whole(make_acc):
     acc = make_acc({"dir/Inkling_o (1)#.png": SEED})
     assert (
-        await read_bytes(
-            acc, PathSpec.from_str_path("/dir/Inkling_o (1)#.png")
-        )
+        await read(acc, PathSpec.from_str_path("/dir/Inkling_o (1)#.png"))
         == SEED
     )
 
@@ -221,13 +215,11 @@ async def test_a_zero_length_window_is_empty_but_still_checks_the_file(
     # still has to say whether the file is there, as opendal's open did.
     acc = make_acc({"a.txt": SEED})
     assert (
-        await read_bytes(
-            acc, PathSpec.from_str_path("/a.txt"), offset=3, size=0
-        )
+        await read(acc, PathSpec.from_str_path("/a.txt"), offset=3, size=0)
         == b""
     )
     assert fake_hub.count("bucket_resolve") == 1
     with pytest.raises(FileNotFoundError):
-        await read_bytes(
+        await read(
             acc, PathSpec.from_str_path("/missing.txt"), offset=0, size=0
         )

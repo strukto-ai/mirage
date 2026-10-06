@@ -89,11 +89,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cp /data/missing.txt /data/guard/g.txt /data/guard/sub",
+      "command": "cp /data/missing.txt /data/guard/g.txt /data/guard/sub; echo rc=$?; cp /data/missing.txt /data/missing.txt; echo rc=$?",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "cp: cannot stat '/data/missing.txt': No such file or directory\n"
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\n",
+        "stderr": "cp: cannot stat '/data/missing.txt': No such file or directory\ncp: cannot stat '/data/missing.txt': No such file or directory\n"
       }
     },
     {
@@ -103,7 +103,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "databricks",
+        "databricks-prefix"
       ],
       "command": "cp /data/guard/g.txt /data/guard/nodir/g.txt",
       "expect": {
@@ -172,7 +174,7 @@
       "command": "find /data/guard -type f",
       "expect": {
         "exit": 0,
-        "stdout": "/data/guard/g.txt\n/data/guard/sub/g.txt\n/data/guard/sub/s.txt\n",
+        "stdout": "/data/guard/g.txt\n/data/guard/sub/g.txt\n/data/guard/sub/s.txt\n/data/guard/sub/sub/s.txt\n",
         "stderr": ""
       }
     },
@@ -270,6 +272,22 @@
         "exit": 0,
         "stdout": "rc=1\nrc=1\nrc=1\nrc=1\n",
         "stderr": "cp: 'a.txt' and 'a.txt' are the same file\ncp: cannot copy a directory, 'r10g', into itself, 'r10g/s/r10g'\ncp: cannot overwrite non-directory 'a.txt' with directory 'r10g'\ncp: -r not specified; omitting directory 'r10g'\n"
+      }
+    },
+    {
+      "id": "guard_cp_same_file_through_its_directory",
+      "seq": 15600101,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/fcF_g1/sub && echo s > /data/fcF_g1/sub/s.txt && cp /data/fcF_g1/sub/s.txt /data/fcF_g1/sub; echo rc=$?; cat /data/fcF_g1/sub/s.txt; rm -r /data/fcF_g1",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\ns\n",
+        "stderr": "cp: '/data/fcF_g1/sub/s.txt' and '/data/fcF_g1/sub/s.txt' are the same file\n"
       }
     }
   ]

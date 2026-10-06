@@ -13,51 +13,52 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import Fastify from 'fastify'
-import multipart from '@fastify/multipart'
 import rateLimit from '@fastify/rate-limit'
-import { WorkspaceRegistry } from './registry.ts'
+import { DiskRecordClient } from '@struktoai/mirage-node'
+import { OWNERS_PREFIX, WorkspaceRegistry } from './registry.ts'
 import { JobTable } from './jobs.ts'
 import type { AuthConfig } from './auth/index.ts'
-import { registerAuth, resolveAuthConfig } from './auth/index.ts'
+import { AuthMode, registerAuth, resolveAuthConfig } from './auth/index.ts'
 import { isHostAllowed, resolveAllowedHosts } from './host_validation.ts'
 import { registerMcpRoutes } from './mcp/http.ts'
+import { registerRpcRoutes } from './rpc/http.ts'
 import { registerAsksRoutes } from './routers/asks.ts'
 import { registerShellRoutes } from './routers/shell.ts'
 import { registerToolsRoutes } from './routers/tools.ts'
 import { registerHealthRoutes } from './routers/health.ts'
 import { registerJobsRoutes } from './routers/jobs.ts'
 import { registerDocumentsRoutes } from './routers/documents.ts'
+import { registerOAuthRoutes } from './routers/oauth.ts'
 import { registerSessionsRoutes } from './routers/sessions.ts'
-import { registerVersionsRoutes } from './routers/versions.ts'
+import { registerSshRoutes } from './routers/ssh.ts'
 import { registerWorkspacesRoutes } from './routers/workspaces.ts'
 import { readDaemonTable, validateDaemonTable } from './daemon_config.ts'
-import {
-  mirageHome,
-  pidFilePath,
-  snapshotRootPath,
-  stateRootPath,
-  versionRootPath,
-} from './paths.ts'
+import { mirageHome, pidFilePath, stateRootPath } from './paths.ts'
+import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import { resolveSSHConfig, type SSHConfig } from './ssh/config.ts'
 import type { SSHDoor } from './ssh/types.ts'
-import { LocalBackend } from './version/backend.ts'
+import websocket from '@fastify/websocket'
 
 export interface BuildAppOptions {
   idleGraceSeconds?: number
   onIdleExit?: () => void
   allowedHosts?: readonly string[]
   authConfig?: AuthConfig
-  versionRoot?: string
-  snapshotRoot?: string
+  /**
+   * The S3-like store a snapshot request may name a key in. Undefined
+   * has none: a snapshot then only goes back to the caller, as the
+   * server never writes one to its own disk.
+   */
+  snapshotStore?: S3Config
   stateRoot?: string
   pidFile?: string
   /**
-   * The SSH door, opened when the app is ready and closed with it.
-   * Undefined resolves it from the `MIRAGE_SSH_*` env vars and the
-   * `ssh_*` config keys; it stays shut unless a port is set, and null
-   * keeps it shut regardless.
+   * The SSH settings: the TCP door opens when the app is ready and closes
+   * with it, and the HTTPS route carries SSH either way. Undefined resolves
+   * them from the `MIRAGE_SSH_*` env vars and the `ssh_*` config keys; the
+   * TCP door stays shut unless a port is set.
    */
-  sshConfig?: SSHConfig | null
+  sshConfig?: SSHConfig
 }
 
 export type MirageApp = ReturnType<typeof buildApp>
@@ -70,16 +71,17 @@ export function buildApp(options: BuildAppOptions = {}) {
   validateDaemonTable(readDaemonTable(mirageHome()))
   const startedAt = Date.now() / 1000
   const exitFn = options.onIdleExit ?? noop
+  const authConfig = options.authConfig ?? resolveAuthConfig()
+  const stateRoot = stateRootPath(options.stateRoot)
   const registry = new WorkspaceRegistry({
     ...(options.idleGraceSeconds !== undefined
       ? { idleGraceSeconds: options.idleGraceSeconds }
       : {}),
     onIdleExit: exitFn,
+    accountsRequired: authConfig.mode === AuthMode.Jwt,
+    owners: new DiskRecordClient(stateRoot, OWNERS_PREFIX),
   })
   const jobs = new JobTable()
-  const versionBackend = new LocalBackend(versionRootPath(options.versionRoot))
-  const snapshotRoot = snapshotRootPath(options.snapshotRoot)
-  const stateRoot = stateRootPath(options.stateRoot)
   const pidFile = pidFilePath(options.pidFile)
   const app = Fastify({ logger: false })
   void app.register(rateLimit, {
@@ -100,34 +102,39 @@ export function buildApp(options: BuildAppOptions = {}) {
       done()
     })
   }
-  const authConfig = options.authConfig ?? resolveAuthConfig()
   registerAuth(app, authConfig)
-  void app.register(multipart, {
-    limits: { fileSize: 10 * 1024 * 1024 * 1024 },
+  app.addContentTypeParser(/^multipart\//, (_req, _payload, done) => {
+    done(null)
   })
   registerHealthRoutes(app, { registry, startedAt, exit: exitFn })
-  registerWorkspacesRoutes(app, { registry, snapshotRoot, stateRoot, versionBackend })
-  registerVersionsRoutes(app, { registry, versionBackend })
+  registerOAuthRoutes(app, { auth: authConfig })
+  registerWorkspacesRoutes(app, { registry, stateRoot, snapshotStore: options.snapshotStore })
   registerSessionsRoutes(app, { registry })
   registerDocumentsRoutes(app, { registry })
   registerAsksRoutes(app, { registry })
   registerShellRoutes(app, { registry, jobs })
-  registerJobsRoutes(app, { jobs })
+  registerJobsRoutes(app, { jobs, registry })
   const mcp = registerMcpRoutes(app, registry, jobs)
+  registerRpcRoutes(app, registry, jobs, mcp)
   registerToolsRoutes(app, { mcp })
   const ssh: SSHDoor = {
-    config: options.sshConfig !== undefined ? options.sshConfig : resolveSSHConfig(),
+    config: options.sshConfig ?? resolveSSHConfig(),
     listener: null,
   }
+  void app.register(websocket)
+  void app.register((scope, _opts, done) => {
+    registerSshRoutes(scope, { registry, ssh })
+    done()
+  })
   const sshConfig = ssh.config
-  if (sshConfig !== null) {
+  if (sshConfig.port !== null) {
     // A configured door that cannot open (the port is taken, ssh2 is
     // missing) fails the start rather than leaving the daemon up without
     // the door its config asked for. Loaded on demand so a daemon with no
     // SSH never loads ssh2 or the node barrel the SFTP side needs.
     app.addHook('onReady', async () => {
       const { startSSHServer } = await import('./ssh/server.ts')
-      ssh.listener = await startSSHServer(registry, sshConfig, mcp)
+      ssh.listener = await startSSHServer(registry, sshConfig)
     })
   }
   app.addHook('onClose', async () => {
@@ -139,5 +146,5 @@ export function buildApp(options: BuildAppOptions = {}) {
       await registry.closeAll()
     }
   })
-  return Object.assign(app, { registry, jobs, versionBackend, pidFile, ssh, mcp })
+  return Object.assign(app, { registry, jobs, pidFile, ssh, mcp })
 }

@@ -17,12 +17,16 @@ import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/worksp
 
 interface IoResultDict {
   kind: 'io'
-  exitCode: number
+  exit_code: number
   stdout: string
   stderr: string
-  // Why the line did not run, null on every ordinary run; the reason a
-  // bash-voiced stderr leaves out.
-  refusal: Refusal | null
+  refusal: {
+    kind: Refusal['kind']
+    reason: string
+    policy: string
+    scope: Refusal['scope']
+    ask_id: string | null
+  } | null
 }
 
 interface RawResultDict {
@@ -36,10 +40,19 @@ export function ioResultToDict(result: unknown): ResultDict & JsonValue {
   if (result instanceof ExecuteResult) {
     return {
       kind: 'io',
-      exitCode: result.exitCode,
+      exit_code: result.exitCode,
       stdout: result.stdoutText,
       stderr: result.stderrText,
-      refusal: result.refusal === null ? null : { ...result.refusal },
+      refusal:
+        result.refusal === null
+          ? null
+          : {
+              kind: result.refusal.kind,
+              reason: result.refusal.reason,
+              policy: result.refusal.policy,
+              scope: result.refusal.scope,
+              ask_id: result.refusal.askId,
+            },
     }
   }
   return { kind: 'raw', value: String(result) }

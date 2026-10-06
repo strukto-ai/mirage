@@ -541,7 +541,7 @@
       "expect": {
         "exit": 1,
         "stdout": "1\n2\n",
-        "stderr": "rev: /data/pr/missing.txt: No such file or directory\n"
+        "stderr": "rev: cannot open /data/pr/missing.txt: No such file or directory\n"
       }
     },
     {

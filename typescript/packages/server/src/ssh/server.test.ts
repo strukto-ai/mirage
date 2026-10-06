@@ -20,8 +20,6 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '@struktoai/mirage-node'
 import ssh2, { type Client, type ConnectConfig } from 'ssh2'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { JobTable } from '../jobs.ts'
-import { McpDoor } from '../mcp/http.ts'
 import { WorkspaceRegistry } from '../registry.ts'
 import type { SSHConfig } from './config.ts'
 import { mintKeyPair } from './keys.ts'
@@ -43,7 +41,7 @@ function configIn(dir: string): SSHConfig {
 async function start(config: SSHConfig): Promise<SSHListener> {
   const registry = new WorkspaceRegistry({ idleGraceSeconds: 0 })
   registry.add(new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE }), 'demo')
-  const listener = await startSSHServer(registry, config, new McpDoor(registry, new JobTable()))
+  const listener = await startSSHServer(registry, config)
   listeners.push(listener)
   return listener
 }

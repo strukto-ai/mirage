@@ -12,9 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Buffer } from 'node:buffer'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Readable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 import { buildApp } from '../app.ts'
 
@@ -73,18 +75,18 @@ describe('execute router', () => {
         })
         expect(result.statusCode).toBe(background ? 202 : 200)
         if (background) {
-          const job = result.json<{ jobId: string }>()
-          const waited = await app.inject({ method: 'POST', url: `/v1/jobs/${job.jobId}/wait` })
+          const job = result.json<{ job_id: string }>()
+          const waited = await app.inject({ method: 'POST', url: `/v1/jobs/${job.job_id}/wait` })
           expect(waited.json<{ status: string }>().status).toBe('done')
         } else {
-          expect(result.json<{ exitCode: number }>().exitCode).toBe(0)
+          expect(result.json<{ exit_code: number }>().exit_code).toBe(0)
         }
         const read = await app.inject({
           method: 'POST',
           url: '/v1/workspaces/large-stdin/shell',
           payload: { command: 'base64 /work/input.bin' },
         })
-        expect(read.json<{ exitCode: number }>().exitCode).toBe(0)
+        expect(read.json<{ exit_code: number }>().exit_code).toBe(0)
         expect(Buffer.from(read.json<{ stdout: string }>().stdout, 'base64')).toEqual(stdin)
       } finally {
         await app.close()
@@ -101,9 +103,8 @@ describe('execute router', () => {
       await createWs(app, 'multipart-empty')
       for (const request of [undefined, '{broken', JSON.stringify({ command: 'wc -c' })]) {
         const form = new FormData()
-        // File first also covers clients whose multipart fields arrive out of order.
-        form.set('stdin', new Blob([]), 'stdin.bin')
         if (request !== undefined) form.set('request', request)
+        form.set('stdin', new Blob([]), 'stdin.bin')
         const upload = new Request('http://localhost', { method: 'POST', body: form })
         const result = await app.inject({
           method: 'POST',
@@ -116,7 +117,7 @@ describe('execute router', () => {
           expect(result.json<{ stdout: string }>().stdout.trim()).toBe('0')
         }
       }
-      const jobs = await app.inject({ method: 'GET', url: '/v1/jobs?workspaceId=multipart-empty' })
+      const jobs = await app.inject({ method: 'GET', url: '/v1/jobs?workspace_id=multipart-empty' })
       expect(jobs.json<unknown[]>()).toHaveLength(1)
     } finally {
       await app.close()
@@ -133,10 +134,10 @@ describe('execute router', () => {
     })
     expect(res.statusCode).toBe(200)
     expect(res.headers['x-mirage-job-id']).toMatch(/^job_/)
-    const body = res.json<{ kind: string; stdout: string; exitCode: number }>()
+    const body = res.json<{ kind: string; stdout: string; exit_code: number }>()
     expect(body.kind).toBe('io')
     expect(body.stdout.trim()).toBe('hi')
-    expect(body.exitCode).toBe(0)
+    expect(body.exit_code).toBe(0)
     await app.close()
   })
 
@@ -167,8 +168,8 @@ describe('execute router', () => {
       payload: { command: 'cat f.txt', cwd: '/sub' },
     })
     expect(res.statusCode).toBe(200)
-    const body = res.json<{ stdout: string; exitCode: number }>()
-    expect(body.exitCode).toBe(0)
+    const body = res.json<{ stdout: string; exit_code: number }>()
+    expect(body.exit_code).toBe(0)
     expect(body.stdout).toBe('nested')
     await app.close()
   })
@@ -188,22 +189,15 @@ describe('execute router', () => {
     await app.close()
   })
 
-  it('passes base64 stdin to command execution', async () => {
+  it('refuses a JSON stdin field; stdin travels as a multipart part', async () => {
     const app = buildApp()
     await createWs(app, 'estdin')
     const res = await app.inject({
       method: 'POST',
       url: '/v1/workspaces/estdin/shell',
-      payload: {
-        command: 'wc -l',
-        stdinBase64: Buffer.from('a\nb\nc\n').toString('base64'),
-      },
+      payload: { command: 'wc -l', stdinBase64: 'YQo=' },
     })
-    expect(res.statusCode).toBe(200)
-    const body = res.json<{ kind: string; stdout: string; exitCode: number }>()
-    expect(body.kind).toBe('io')
-    expect(body.stdout.trim()).toMatch(/^3\b/)
-    expect(body.exitCode).toBe(0)
+    expect(res.statusCode).toBe(400)
     await app.close()
   })
 
@@ -240,7 +234,7 @@ describe('execute router', () => {
       url: '/v1/workspaces/ewait/shell?background=true',
       payload: { command: 'echo hi' },
     })
-    const { jobId } = submit.json<{ jobId: string }>()
+    const { job_id: jobId } = submit.json<{ job_id: string }>()
     const res = await app.inject({ method: 'POST', url: `/v1/jobs/${jobId}/wait` })
     expect(res.statusCode).toBe(200)
     await app.close()
@@ -255,8 +249,9 @@ describe('execute router', () => {
       payload: { command: 'echo hi' },
     })
     expect(res.statusCode).toBe(202)
-    const body = res.json<{ jobId: string }>()
-    expect(body.jobId).toMatch(/^job_/)
+    const body = res.json<{ job_id: string }>()
+    expect(body.job_id).toMatch(/^job_/)
+    expect(res.headers['x-mirage-job-id']).toBe(body.job_id)
     await app.close()
   })
 
@@ -268,10 +263,10 @@ describe('execute router', () => {
       url: '/v1/workspaces/ew3/shell',
       payload: { command: 'echo hi' },
     })
-    const res = await app.inject({ method: 'GET', url: '/v1/jobs?workspaceId=ew3' })
-    const body = res.json<{ workspaceId: string }[]>()
+    const res = await app.inject({ method: 'GET', url: '/v1/jobs?workspace_id=ew3' })
+    const body = res.json<{ workspace_id: string }[]>()
     expect(body.length).toBeGreaterThan(0)
-    expect(body[0]?.workspaceId).toBe('ew3')
+    expect(body[0]?.workspace_id).toBe('ew3')
     await app.close()
   })
 
@@ -295,5 +290,246 @@ describe('execute router', () => {
     expect(res.statusCode).toBe(499)
     expect(res.json()).toEqual({ detail: 'job canceled' })
     await app.close()
+  })
+})
+
+describe('a foreground shell request', () => {
+  it('cancels its job when the caller drops it', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-shell-drop-'))
+    const app = buildApp({ allowedHosts: ['*'], pidFile: join(dir, 'daemon.pid') })
+    try {
+      await createWs(app, 'drop')
+      await app.listen({ host: '127.0.0.1', port: 0 })
+      const address = app.server.address()
+      if (address === null || typeof address === 'string') throw new Error('no port')
+      const base = `http://127.0.0.1:${String(address.port)}`
+      const stop = new AbortController()
+      const running = fetch(`${base}/v1/workspaces/drop/shell`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ command: 'sleep 20' }),
+        signal: stop.signal,
+      })
+      setTimeout(() => {
+        stop.abort()
+      }, 500)
+      await expect(running).rejects.toThrow()
+      let status = ''
+      for (let i = 0; i < 100; i++) {
+        const jobs = (await (await fetch(`${base}/v1/jobs?workspace_id=drop`)).json()) as {
+          status: string
+        }[]
+        status = jobs[0]?.status ?? ''
+        if (status === 'canceled') break
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      expect(status).toBe('canceled')
+    } finally {
+      await app.close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  const BOUNDARY = 'mirage-test-boundary'
+  const MULTIPART = { 'content-type': `multipart/form-data; boundary=${BOUNDARY}` }
+  const END = `\r\n--${BOUNDARY}--\r\n`
+
+  function part(name: string, filename?: string): string {
+    const disposition =
+      filename === undefined
+        ? `form-data; name="${name}"`
+        : `form-data; name="${name}"; filename="${filename}"`
+    return `--${BOUNDARY}\r\nContent-Disposition: ${disposition}\r\n\r\n`
+  }
+
+  function requestPart(command: string): string {
+    return `${part('request')}${JSON.stringify({ command })}\r\n`
+  }
+
+  async function served(app: ReturnType<typeof buildApp>, id: string): Promise<string> {
+    await createWs(app, id)
+    await app.listen({ host: '127.0.0.1', port: 0 })
+    const address = app.server.address()
+    if (address === null || typeof address === 'string') throw new Error('no port')
+    return `http://127.0.0.1:${String(address.port)}`
+  }
+
+  it('streams stdin into a running line', async () => {
+    const app = buildApp()
+    try {
+      const base = await served(app, 'streamed')
+      const text = new TextEncoder()
+      let running = false
+      const body = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          controller.enqueue(
+            text.encode(requestPart('cat > /out.txt') + part('stdin', 'stdin.bin')),
+          )
+          controller.enqueue(text.encode('first\n'))
+          for (let i = 0; i < 250 && !running; i++) {
+            const jobs = (await (await fetch(`${base}/v1/jobs?workspace_id=streamed`)).json()) as {
+              status: string
+            }[]
+            running = jobs.some((j) => j.status === 'running')
+            await new Promise((resolve) => setTimeout(resolve, 20))
+          }
+          controller.enqueue(text.encode(`second\n${END}`))
+          controller.close()
+        },
+      })
+      const res = await fetch(`${base}/v1/workspaces/streamed/shell`, {
+        method: 'POST',
+        headers: MULTIPART,
+        body,
+        duplex: 'half',
+      } as RequestInit)
+      expect(res.status).toBe(200)
+      expect(running).toBe(true)
+      const read = await fetch(`${base}/v1/workspaces/streamed/shell`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ command: 'cat /out.txt' }),
+      })
+      expect(((await read.json()) as { stdout: string }).stdout).toBe('first\nsecond\n')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('answers a line that stops reading its stdin', async () => {
+    const app = buildApp()
+    try {
+      const base = await served(app, 'stops')
+      const text = new TextEncoder()
+      const chunk = text.encode('abcdefgh'.repeat(8192))
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(text.encode(requestPart('head -c 3') + part('stdin', 'stdin.bin')))
+          for (let i = 0; i < 64; i++) controller.enqueue(chunk)
+          controller.enqueue(text.encode(END))
+          controller.close()
+        },
+      })
+      const res = await fetch(`${base}/v1/workspaces/stops/shell`, {
+        method: 'POST',
+        headers: MULTIPART,
+        body,
+        duplex: 'half',
+      } as RequestInit)
+      expect(res.status).toBe(200)
+      expect(((await res.json()) as { stdout: string }).stdout).toBe('abc')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('starts the line before its stdin sends a byte', async () => {
+    const app = buildApp()
+    try {
+      const base = await served(app, 'early')
+      const text = new TextEncoder()
+      let running = false
+      const body = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          controller.enqueue(
+            text.encode(requestPart('cat > /out.txt') + part('stdin', 'stdin.bin')),
+          )
+          for (let i = 0; i < 250 && !running; i++) {
+            const jobs = (await (await fetch(`${base}/v1/jobs?workspace_id=early`)).json()) as {
+              status: string
+            }[]
+            running = jobs.some((j) => j.status === 'running')
+            await new Promise((resolve) => setTimeout(resolve, 20))
+          }
+          controller.enqueue(text.encode(`late\n${END}`))
+          controller.close()
+        },
+      })
+      const res = await fetch(`${base}/v1/workspaces/early/shell`, {
+        method: 'POST',
+        headers: MULTIPART,
+        body,
+        duplex: 'half',
+      } as RequestInit)
+      expect(res.status).toBe(200)
+      expect(running).toBe(true)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('refuses a body that stops before its last boundary', async () => {
+    const app = buildApp()
+    try {
+      const base = await served(app, 'cut')
+      const res = await fetch(`${base}/v1/workspaces/cut/shell`, {
+        method: 'POST',
+        headers: MULTIPART,
+        body: `${requestPart('cat')}${part('stdin', 'stdin.bin')}abc`,
+      })
+      expect(res.status).toBe(400)
+      expect(((await res.json()) as { detail: string }).detail).toBe('multipart body ended early')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('reads stdin whole however the body is split', async () => {
+    const app = buildApp()
+    try {
+      await createWs(app, 'split')
+      const stdin = `a\r\n--${BOUNDARY.slice(0, 5)}\r\r\n-\r\n--${BOUNDARY.slice(0, -1)}\r`
+      const body = Buffer.from(`${requestPart('cat')}${part('stdin', 'stdin.bin')}${stdin}${END}`)
+      const chunks = Array.from({ length: Math.ceil(body.length / 3) }, (_, i) =>
+        body.subarray(i * 3, i * 3 + 3),
+      )
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/split/shell',
+        headers: MULTIPART,
+        payload: Readable.from(chunks),
+      })
+      expect(res.statusCode).toBe(200)
+      expect(res.json<{ stdout: string }>().stdout).toBe(stdin)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('refuses part headers past the bound', async () => {
+    const app = buildApp()
+    try {
+      await createWs(app, 'headers')
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/headers/shell',
+        headers: MULTIPART,
+        payload: `--${BOUNDARY}\r\nX-Pad: ${'x'.repeat(20000)}\r\n${requestPart('true').slice(`--${BOUNDARY}\r\n`.length)}${END.slice(2)}`,
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.json<{ detail: string }>().detail).toBe(
+        'bad multipart body: Maximum header size exceeded',
+      )
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('refuses stdin before the request part', async () => {
+    const app = buildApp()
+    try {
+      await createWs(app, 'order')
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/order/shell',
+        headers: MULTIPART,
+        payload: `${part('stdin', 'stdin.bin')}abc\r\n${requestPart('cat')}${END.slice(2)}`,
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.headers.connection).toBe('close')
+      expect(res.json<{ detail: string }>().detail).toContain("before 'stdin'")
+    } finally {
+      await app.close()
+    }
   })
 })

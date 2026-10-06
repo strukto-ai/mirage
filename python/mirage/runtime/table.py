@@ -138,7 +138,7 @@ def known_runtimes() -> list[str]:
 # registers pyodide (`DEFAULT_PYTHON` in runtime/table.ts), because
 # `@pydantic/monty` cannot answer builtin `open()` calls yet while
 # `pydantic-monty` can. Both are sandboxed; neither reaches the host.
-# Pinned by integ/runtime/defaults.json, which reads the split back
+# Pinned by integ/runtime/routing/defaults.json, which reads the split back
 # out of a default world on each host.
 DEFAULT_PYTHON: str = MontyRuntime.name
 

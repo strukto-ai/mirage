@@ -17,7 +17,7 @@ import hashlib
 
 import pytest
 
-from mirage.core.ram.read import read_bytes
+from mirage.core.ram.read import read
 from mirage.core.ram.stream import read_stream
 from mirage.types import FileType, PathSpec
 from tests.fixtures.driver_ops import ops
@@ -26,7 +26,6 @@ _ps = PathSpec.from_str_path
 
 
 def _cat_sync(backend, path):
-
     async def _collect():
         return b"".join([c async for c in read_stream(backend.accessor, path)])
 
@@ -140,7 +139,7 @@ def test_exists_false(memory_backend):
 
 def test_checksum_deterministic(memory_backend):
     asyncio.run(ops(memory_backend).write(_ps("/f.txt"), b"data"))
-    raw = asyncio.run(read_bytes(memory_backend.accessor, _ps("/f.txt")))
+    raw = asyncio.run(read(memory_backend.accessor, _ps("/f.txt")))
     c1 = hashlib.md5(raw).hexdigest()
     c2 = hashlib.md5(raw).hexdigest()
     assert c1 == c2

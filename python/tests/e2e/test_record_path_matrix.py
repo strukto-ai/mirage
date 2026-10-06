@@ -80,6 +80,9 @@ _GENERIC_OUT = [
 
 # Op sequences were measured by running SCRIPT on each backend; every path is
 # predicted as the operand's virtual path, never copied from the measurement.
+# echo touches no file of its own, so its redirect target is opened by
+# the one write of its output: `>` is one write, and `>>` on a backend
+# with a native append one append.
 # ram, disk and redis record nothing for same-mount cp/mv/rm/rmdir/rm -r.
 _NATIVE_APPEND = [
     ("write", K),
@@ -118,16 +121,19 @@ _S3 = [
     ("write", C),
 ]
 
-# ssh records nothing for >>, tee -a, cat (cached), cp, mv, rm, rmdir,
-# rm -r, split's streamed read or the op-door append.
+# ssh records nothing for cat (cached), cp, mv, rm, rmdir, rm -r or
+# split's streamed read.
 _SSH = [
     ("write", K),
+    ("append", K),
+    ("append", K),
     ("write", NEW),
     ("truncate", NEW),
     ("write", DF),
     *_GENERIC_OUT[:4],
     *_GENERIC_OUT[5:],
     ("create", C),
+    ("append", C),
 ]
 
 EXPECTED = {

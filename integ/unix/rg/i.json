@@ -33,9 +33,7 @@
         "stdout": "Hello World\nHELLO world\nhello WORLD\nHello World\nHELLO world\nhello WORLD\nHello World\nHello World\n",
         "stderr": ""
       },
-      "flags": [
-        "i"
-      ]
+      "flags": ["i", "s", "S"]
     },
     {
       "id": "rg_multi_dir",

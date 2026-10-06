@@ -1,0 +1,38 @@
+{
+  "optional": true,
+  "optional_reason": "Requires the Sandlock CLI and Linux Landlock ABI v6. Set MIRAGE_INTEG_SANDLOCK to run the same cases through both SDKs on a supported host.",
+  "requires": {
+    "python": [
+      "env:MIRAGE_INTEG_SANDLOCK"
+    ],
+    "typescript": [
+      "env:MIRAGE_INTEG_SANDLOCK"
+    ]
+  },
+  "cases": [
+    {
+      "id": "external_fallback_preserves_vfs_pipeline",
+      "world": {
+        "runtimes": [
+          "sandlock"
+        ]
+      },
+      "steps": [
+        {
+          "command": "getconf LONG_BIT | grep 64 > /ram/wordsize.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "cat /ram/wordsize.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "64\n"
+          }
+        }
+      ]
+    }
+  ]
+}

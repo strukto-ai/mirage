@@ -1,0 +1,25 @@
+{
+  "cases": [
+    {
+      "id": "split_x_hex_suffixes_and_start_values",
+      "seq": 15300312,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/fcC_sx && (cd /data/fcC_sx && printf 'ab' > in && printf 'a' > one && split -x -b 1 in y && split -b 1 --hex-suffixes=ff one h && split -b 1 --hex-suffixes=a one a && split -b 1 --hex-suffixes= in e && split -l 1 --hex-suffixes=zz in p 2>&1; echo rc=$?; ls | tr '\\n' ' '; echo); rm -r /data/fcC_sx",
+      "expect": {
+        "exit": 0,
+        "stdout": "split: 'zz': invalid start value for hexadecimal suffix\nTry 'split --help' for more information.\nrc=1\na0a e00 e01 hff in one y00 y01 \n",
+        "stderr": ""
+      },
+      "flags": [
+        "x",
+        "hex-suffixes",
+        "b",
+        "l"
+      ]
+    }
+  ]
+}

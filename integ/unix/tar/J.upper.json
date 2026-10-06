@@ -1,0 +1,117 @@
+{
+  "cases": [
+    {
+      "id": "tar_J_lists_and_extracts_an_xz_archive",
+      "seq": 15100011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_xz && cd /data/fcA_xz && printf %s '/Td6WFoAAATm1rRGBMCAAYBQIQEWAAAAAAAAALZMWvfgJ/8AeF0AMxjEIf2z4Qq5wmiDd/q5mnnDDYfMZK/5QkjHhJTEpr8w9/LwdJgKfz2XFl9g5ipo8PRZaBE2pnahFkJlgzPhZGwoEhKfrVm+9KMH4ADLDveNCJQgzdNKGuMDKvDKiFMRjn/AJuH6ol1IStYLwKYUHFRmUPoK536tAKQfwJJcUgZxAAGcAYBQAADes3QVscRn+wIAAAAABFla' | base64 -d > a.txz && tar -tJf a.txz && tar -xOJf a.txz fcA/b.txt && tar --list --xz --file=a.txz fcA/a.txt && tar -tf a.txz fcA/b.txt && tar -xJf a.txz && cat fcA/a.txt; rc=$?; cd / && rm -r /data/fcA_xz; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "fcA/\nfcA/a.txt\nfcA/b.txt\ntwo\nfcA/a.txt\nfcA/b.txt\none\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "x",
+        "J",
+        "O"
+      ]
+    },
+    {
+      "id": "tar_J_creates_an_xz_archive",
+      "seq": 15100012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_xz2 && cd /data/fcA_xz2 && tar -cJf a.txz -C /data a.txt b.txt && od -An -tx1 -N6 a.txz && tar -tJf a.txz && tar -xOJf a.txz b.txt; rc=$?; cd / && rm -r /data/fcA_xz2; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": " fd 37 7a 58 5a 00\na.txt\nb.txt\n1\n2\n3\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "J",
+        "C"
+      ]
+    },
+    {
+      "id": "tar_J_refuses_what_is_not_xz",
+      "seq": 15100013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tar -tJf /data/a.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "xz: (stdin): File format not recognized\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
+      },
+      "flags": [
+        "t",
+        "J"
+      ]
+    }
+  ]
+}

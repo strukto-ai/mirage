@@ -122,7 +122,6 @@ def github_config():
 
 @pytest.fixture
 def mock_github_api(monkeypatch):
-
     async def _fetch_default_branch(config, owner, repo, session=None):
         return MOCK_DEFAULT_BRANCH
 

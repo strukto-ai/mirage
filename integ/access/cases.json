@@ -1,0 +1,421 @@
+{
+ "description": "The access corpus. Every way into a workspace (in-app, HTTP, the CLI, MCP over HTTP and mirage mcp, RPC over HTTP and mirage rpc, SSH) must give the in-app answer for every case its protocol can express. The ops table says which accesses have which operation; it is the matrix on docs/home/access/overview.mdx. Each suite runs in order on a fresh workspace per access, built from the suite's config and setup lines; a suite's deployments, when given, are the only ones its server accesses run on. expect pins the in-app answer.",
+ "ops": {
+  "shell": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh", "ssh_proxy"],
+  "stdin": ["inapp", "http", "cli", "rpc", "rpc_stdio", "ssh", "ssh_proxy"],
+  "tool": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"],
+  "bytes": ["inapp", "rpc", "rpc_stdio", "ssh", "ssh_proxy"],
+  "cancel": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh", "ssh_proxy"],
+  "session": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"],
+  "workspace": ["inapp", "http", "cli"],
+  "session_admin": ["inapp", "http", "cli"],
+  "snapshot": ["inapp", "http", "cli"],
+  "ask": ["inapp", "http", "cli"],
+  "job": ["http", "cli"],
+  "auth": ["http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh", "ssh_proxy"],
+  "server": ["http"]
+ },
+ "matrix": {
+  "Create, list, delete workspaces": "workspace",
+  "Create, list, delete sessions": "session_admin",
+  "Run a line": "shell",
+  "Send stdin to a line": "stdin",
+  "Cancel a running line": "cancel",
+  "Cancel or kill all of a session's or workspace's work": "session_admin",
+  "VFS.md, SKILL.md and session profiles": "session_admin",
+  "The seven agent tools": "tool",
+  "File operations on bytes": "bytes",
+  "Snapshots": "snapshot",
+  "Asks": "ask",
+  "Jobs": "job"
+ },
+ "workspace": {
+  "mounts": {
+   "/": {
+    "vfs": "ram",
+    "mode": "write"
+   },
+   "/vault": {
+    "vfs": "ram",
+    "mode": "write"
+   }
+  },
+  "profiles": {
+   "guarded": {
+    "paths": {
+     "hide": ["/vault"]
+    },
+    "commands": {
+     "allow": ["cat", "ls", "echo", "rm"],
+     "deny": [
+      {
+       "reason": "no deletes here",
+       "commands": ["rm"]
+      }
+     ]
+    }
+   },
+   "asker": {
+    "commands": {
+     "ask": [
+      {
+       "reason": "removal needs sign-off",
+       "commands": ["rm"]
+      }
+     ]
+    }
+   },
+   "reader": {
+    "paths": {
+     "hide": ["/vault"]
+    }
+   }
+  }
+ },
+ "suites": [
+  {
+   "id": "shell",
+   "op": "shell",
+   "setup": ["mkdir -p /src", "printf 'Needle\\nhay\\n' > /src/a.py", "echo key > /vault/key.txt"],
+   "cases": [
+    {"id": "runs_a_line", "input": {"command": "echo hi"}, "expect": {"text": "hi\n", "is_error": false}},
+    {"id": "runs_a_pipeline", "input": {"command": "printf 'a\\nb\\nc\\n' | wc -l"}, "expect": {"text": "3\n", "is_error": false}},
+    {"id": "reports_a_failure", "input": {"command": "cat /src/none.txt"}, "expect": {"text": "cat: /src/none.txt: No such file or directory\n", "is_error": true}},
+    {"id": "reports_an_exit_status", "input": {"command": "exit 3"}, "expect": {"text": "", "is_error": true}},
+    {"id": "keeps_stdout_and_stderr", "input": {"command": "echo out; echo err >&2"}, "expect": {"text": "out\n\nerr\n", "is_error": false}},
+    {"id": "keeps_unicode", "input": {"command": "echo 'α β'"}, "expect": {"text": "α β\n", "is_error": false}},
+    {"id": "reads_a_file", "input": {"command": "grep -c e /src/a.py"}, "expect": {"text": "1\n", "is_error": false}},
+    {"id": "sees_every_mount", "input": {"command": "cat /vault/key.txt"}, "expect": {"text": "key\n", "is_error": false}}
+   ]
+  },
+  {
+   "id": "stdin",
+   "op": "stdin",
+   "setup": [],
+   "cases": [
+    {"id": "counts_bytes", "input": {"command": "wc -c", "stdin": "abc"}, "expect": {"text": "3\n", "is_error": false}},
+    {"id": "passes_lines_through", "input": {"command": "cat", "stdin": "line one\nline two\n"}, "expect": {"text": "line one\nline two\n", "is_error": false}},
+    {"id": "takes_empty_input", "input": {"command": "wc -l", "stdin": ""}, "expect": {"text": "0\n", "is_error": false}},
+    {"id": "keeps_every_byte", "input": {"command": "md5sum", "stdin": {"repeat": "α\u0000\r\n", "times": 240000}}, "expect": {"text": "87b85f6a2c70337c90a0a5f0a7a8fe10  -\n", "is_error": false}},
+    {"id": "matches_unicode_in_bulk", "input": {"command": "grep -o α | wc -l", "stdin": {"repeat": "α x\n", "times": 16000}}, "expect": {"text": "16000\n", "is_error": false}},
+    {"id": "streams_into_a_running_line", "accesses": ["inapp", "http", "cli", "ssh"], "input": {"command": "head -n 1", "stream": ["first\n", "second\n"]}, "expect": {"text": "first\n", "is_error": false}},
+    {"id": "starts_before_its_stdin_sends_a_byte", "accesses": ["inapp", "http", "cli", "ssh"], "input": {"command": "echo started", "stream": ["", "unread\n"]}, "expect": {"text": "started\n", "is_error": false}}
+   ]
+  },
+  {
+   "id": "tool",
+   "op": "tool",
+   "setup": ["mkdir -p /src/deep", "printf 'Needle\\nhay\\n' > /src/a.py", "printf 'needle\\n' > /src/b.txt", "printf 'x\\n' > /src/deep/c.py", "printf 'a.b\\naxb\\n' > /src/deep/dots.txt", "printf '1\\n2\\n3\\n' > /src/deep/three.txt"],
+   "cases": [
+    {"id": "shell_runs_a_line", "input": {"tool": "shell", "arguments": {"command": "echo hi"}}, "expect": {"text": "hi\n", "is_error": false}},
+    {"id": "shell_reports_a_failure", "input": {"tool": "shell", "arguments": {"command": "cat /src/none.txt"}}, "expect": {"text": "cat: /src/none.txt: No such file or directory\n", "is_error": true}},
+    {"id": "read_numbers_lines", "input": {"tool": "read", "arguments": {"path": "/src/a.py"}}, "expect": {"text": "     1\tNeedle\n     2\thay\n", "is_error": false}},
+    {"id": "read_takes_a_window", "input": {"tool": "read", "arguments": {"path": "/src/a.py", "offset": 1, "limit": 1}}, "expect": {"text": "     2\thay\n", "is_error": false}},
+    {"id": "read_reports_a_missing_file", "input": {"tool": "read", "arguments": {"path": "/src/none.txt"}}, "expect": {"text": "Error: file '/src/none.txt' not found", "is_error": true}},
+    {"id": "ls_lists_a_directory", "input": {"tool": "ls", "arguments": {"path": "/src"}}, "expect": {"text": "a.py\nb.txt\ndeep\n", "is_error": false}},
+    {"id": "grep_searches_recursively", "input": {"tool": "grep", "arguments": {"pattern": "needle", "path": "/src"}}, "expect": {"text": "/src/b.txt:1:needle\n", "is_error": false}},
+    {"id": "grep_ignores_case_in_included_files", "input": {"tool": "grep", "arguments": {"pattern": "needle", "path": "/src", "ignore_case": true, "include": "*.py"}}, "expect": {"text": "/src/a.py:1:Needle\n", "is_error": false}},
+    {"id": "grep_names_matching_files", "input": {"tool": "grep", "arguments": {"pattern": "e", "path": "/src", "files_with_matches": true}}, "expect": {"text": "/src/a.py\n/src/b.txt\n", "is_error": false}},
+    {"id": "grep_counts_matching_lines", "input": {"tool": "grep", "arguments": {"pattern": "e", "path": "/src/a.py", "count": true}}, "expect": {"text": "1\n", "is_error": false}},
+    {"id": "grep_reads_a_fixed_string", "input": {"tool": "grep", "arguments": {"pattern": "a.b", "path": "/src/deep", "fixed_strings": true}}, "expect": {"text": "/src/deep/dots.txt:1:a.b\n", "is_error": false}},
+    {"id": "grep_finding_nothing_is_not_an_error", "input": {"tool": "grep", "arguments": {"pattern": "zzz", "path": "/src"}}, "expect": {"text": "", "is_error": false}},
+    {"id": "glob_matches_any_depth", "input": {"tool": "glob", "arguments": {"pattern": "**/*.py", "path": "/src"}}, "expect": {"text": "/src/a.py\n/src/deep/c.py\n", "is_error": false}},
+    {"id": "glob_matches_one_level", "input": {"tool": "glob", "arguments": {"pattern": "*.py", "path": "/src"}}, "expect": {"text": "/src/a.py\n", "is_error": false}},
+    {"id": "glob_takes_an_absolute_pattern", "input": {"tool": "glob", "arguments": {"pattern": "/src/deep/*"}}, "expect": {"text": "/src/deep/c.py\n/src/deep/dots.txt\n/src/deep/three.txt\n", "is_error": false}},
+    {"id": "write_creates_parents", "input": {"tool": "write", "arguments": {"path": "/out/new.txt", "content": "one\n"}}, "expect": {"text": "Written: /out/new.txt", "is_error": false}},
+    {"id": "write_refuses_an_unread_file", "input": {"tool": "write", "arguments": {"path": "/src/b.txt", "content": "x\n"}}, "expect": {"text": "Error: file '/src/b.txt' exists; read all of it before overwriting it", "is_error": true}},
+    {"id": "read_before_overwriting", "input": {"tool": "read", "arguments": {"path": "/src/b.txt"}}, "expect": {"text": "     1\tneedle\n", "is_error": false}},
+    {"id": "write_overwrites_a_read_file", "input": {"tool": "write", "arguments": {"path": "/src/b.txt", "content": "pin\n"}}, "expect": {"text": "Written: /src/b.txt", "is_error": false}},
+    {"id": "read_a_few_lines", "input": {"tool": "read", "arguments": {"path": "/src/deep/three.txt", "limit": 1}}, "expect": {"text": "     1\t1\n", "is_error": false}},
+    {"id": "write_refuses_a_partly_read_file", "input": {"tool": "write", "arguments": {"path": "/src/deep/three.txt", "content": "x\n"}}, "expect": {"text": "Error: file '/src/deep/three.txt' exists; read all of it before overwriting it", "is_error": true}},
+    {"id": "edit_refuses_an_ambiguous_string", "input": {"tool": "edit", "arguments": {"path": "/src/a.py", "old_string": "e", "new_string": "E"}}, "expect": {"text": "Error: string appears 3 times. Pass replace_all=true", "is_error": true}},
+    {"id": "edit_replaces_every_occurrence", "input": {"tool": "edit", "arguments": {"path": "/src/a.py", "old_string": "e", "new_string": "E", "replace_all": true}}, "expect": {"text": "Edited: /src/a.py (3 occurrence(s))", "is_error": false}},
+    {"id": "shell_sees_the_edit", "input": {"tool": "shell", "arguments": {"command": "cat /src/a.py /src/b.txt"}}, "expect": {"text": "NEEdlE\nhay\npin\n", "is_error": false}},
+    {"id": "shell_moves_a_file_underneath", "input": {"tool": "shell", "arguments": {"command": "echo moved > /src/b.txt"}}, "expect": {"text": "", "is_error": false}},
+    {"id": "edit_refuses_a_stale_file", "input": {"tool": "edit", "arguments": {"path": "/src/b.txt", "old_string": "moved", "new_string": "x"}}, "expect": {"text": "Error: File changed since it was last read: /src/b.txt. Read the file again before modifying it.", "is_error": true}},
+    {"id": "shell_links_a_file", "input": {"tool": "shell", "arguments": {"command": "ln -s /src/a.py /src/link.py"}}, "expect": {"text": "", "is_error": false}},
+    {"id": "glob_follows_a_link_to_a_file", "input": {"tool": "glob", "arguments": {"pattern": "*.py", "path": "/src"}}, "expect": {"text": "/src/a.py\n/src/link.py\n", "is_error": false}}
+   ]
+  },
+  {
+   "id": "bytes",
+   "op": "bytes",
+   "setup": [],
+   "cases": [
+    {"id": "makes_a_directory", "input": {"call": "mkdir", "path": "/b"}, "expect": {}},
+    {"id": "writes_every_byte", "input": {"call": "write", "path": "/b/all.bin", "data_base64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w=="}, "expect": {}},
+    {"id": "reads_every_byte", "input": {"call": "read", "path": "/b/all.bin"}, "expect": {"data_base64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w=="}},
+    {"id": "stats_a_file", "input": {"call": "stat", "path": "/b/all.bin"}, "expect": {"type": "file", "size": 256}},
+    {"id": "lists_a_directory", "input": {"call": "readdir", "path": "/b"}, "expect": {"entries": ["/b/all.bin"]}},
+    {"id": "renames_a_file", "input": {"call": "rename", "src": "/b/all.bin", "dst": "/b/moved.bin"}, "expect": {}},
+    {"id": "reads_the_renamed_file", "input": {"call": "read", "path": "/b/moved.bin"}, "expect": {"data_base64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w=="}},
+    {"id": "copies_in", "input": {"call": "write", "path": "/b/copied.txt", "data_base64": "dmlhIHNjcAo=", "via": "scp"}, "expect": {}},
+    {"id": "copies_out", "input": {"call": "read", "path": "/b/copied.txt", "via": "scp"}, "expect": {"data_base64": "dmlhIHNjcAo="}},
+    {"id": "removes_a_file", "input": {"call": "unlink", "path": "/b/moved.bin"}, "expect": {}},
+    {"id": "reports_a_missing_file", "input": {"call": "read", "path": "/b/moved.bin"}, "expect": {"error": "ENOENT"}},
+    {"id": "lists_what_is_left", "input": {"call": "readdir", "path": "/b"}, "expect": {"entries": ["/b/copied.txt"]}}
+   ]
+  },
+  {
+   "id": "session",
+   "op": "session",
+   "session": {
+    "id": "agent",
+    "profile": "guarded"
+   },
+   "setup": ["echo key > /vault/key.txt", "echo open > /open.txt"],
+   "cases": [
+    {"id": "hides_what_the_profile_hides", "input": {"command": "cat /vault/key.txt"}, "expect": {"text": "cat: /vault/key.txt: No such file or directory\n", "is_error": true}},
+    {"id": "lists_without_the_hidden_mount", "input": {"command": "ls /"}, "expect": {"text": "dev\nopen.txt\nusr\n", "is_error": false}},
+    {"id": "reads_what_it_may", "input": {"command": "cat /open.txt"}, "expect": {"text": "open\n", "is_error": false}},
+    {"id": "has_no_unlisted_command", "input": {"command": "sort /open.txt"}, "expect": {"text": "sort: command not found\n", "is_error": true}},
+    {"id": "is_refused_a_denied_line", "input": {"command": "rm /open.txt"}, "expect": {"text": "rm: Permission denied\n", "is_error": true}, "expect_by_access": {"mcp": {"text": "rm: Permission denied\npolicy denied: no deletes here\n", "is_error": true}, "mcp_stdio": {"text": "rm: Permission denied\npolicy denied: no deletes here\n", "is_error": true}, "ssh": {"text": "rm: Permission denied\npolicy denied: no deletes here\n", "is_error": true}}}
+   ]
+  },
+  {
+   "id": "cancel",
+   "op": "cancel",
+   "setup": [],
+   "cases": [
+    {"id": "stops_a_running_line", "input": {"command": "sleep 30"}, "expect": {"text": "canceled"}}
+   ]
+  },
+  {
+   "id": "workspace",
+   "op": "workspace",
+   "cases": [
+    {"id": "creates", "input": {"step": "create", "id": "w1"}, "expect": {"text": "w1"}},
+    {"id": "runs_in_it", "input": {"step": "shell", "id": "w1", "command": "echo one > /f"}, "expect": {"text": "", "is_error": false}},
+    {"id": "lists", "input": {"step": "list"}, "expect": {"text": "w1"}},
+    {"id": "gets_its_mounts", "input": {"step": "mounts", "id": "w1"}, "expect": {"text": "/ /vault"}},
+    {"id": "gets_its_internals", "accesses": ["http", "cli"], "input": {"step": "internals", "id": "w1"}, "expect": {"text": "cache_bytes cache_entries"}},
+    {"id": "clones", "input": {"step": "clone", "id": "w1", "to": "w2"}, "expect": {"text": "w2"}},
+    {"id": "the_clone_has_the_file", "input": {"step": "shell", "id": "w2", "command": "cat /f"}, "expect": {"text": "one\n", "is_error": false}},
+    {"id": "starts_a_background_job", "input": {"step": "shell", "id": "w2", "command": "sleep 30 &"}, "expect": {"text": "", "is_error": false}},
+    {"id": "cancels_its_lines", "input": {"step": "cancel_lines", "id": "w2"}, "expect": {"text": "0"}},
+    {"id": "kills_its_jobs", "input": {"step": "kill_jobs", "id": "w2"}, "expect": {"text": "1"}},
+    {"id": "deletes", "input": {"step": "delete", "id": "w1"}, "expect": {"text": "deleted"}},
+    {"id": "lists_what_is_left", "input": {"step": "list"}, "expect": {"text": "w2"}},
+    {"id": "creates_a_third", "input": {"step": "create", "id": "w3"}, "expect": {"text": "w3"}},
+    {"id": "closes_it", "input": {"step": "close_workspace", "id": "w3"}, "expect": {"text": "closed"}},
+    {"id": "lists_without_it", "input": {"step": "list"}, "expect": {"text": "w2"}},
+    {"id": "deletes_the_clone", "input": {"step": "delete", "id": "w2"}, "expect": {"text": "deleted"}}
+   ]
+  },
+  {
+   "id": "session_admin",
+   "op": "session_admin",
+   "cases": [
+    {"id": "creates_the_workspace", "input": {"step": "create", "id": "w"}, "expect": {"text": "w"}},
+    {"id": "writes_a_hidden_file", "input": {"step": "shell", "id": "w", "command": "echo key > /vault/key.txt"}, "expect": {"text": "", "is_error": false}},
+    {"id": "creates_a_session", "input": {"step": "session_create", "id": "w", "session": "s1", "profile": "guarded"}, "expect": {"text": "s1"}},
+    {"id": "lists_sessions", "input": {"step": "session_list", "id": "w"}, "expect": {"text": "s1"}},
+    {"id": "the_session_has_its_profile", "input": {"step": "shell", "id": "w", "session": "s1", "command": "cat /vault/key.txt"}, "expect": {"text": "cat: /vault/key.txt: No such file or directory\n", "is_error": true}},
+    {"id": "deletes_the_session", "input": {"step": "session_delete", "id": "w", "session": "s1"}, "expect": {"text": "deleted"}},
+    {"id": "lists_what_is_left", "input": {"step": "session_list", "id": "w"}, "expect": {"text": ""}},
+    {"id": "describes_every_mount", "input": {"step": "document", "id": "w", "kind": "vfs"}, "expect": {"text": "/ /vault"}},
+    {"id": "previews_a_profile", "input": {"step": "document", "id": "w", "kind": "vfs", "profile": "reader"}, "expect": {"text": "/"}},
+    {"id": "creates_a_reading_session", "input": {"step": "session_create", "id": "w", "session": "s3", "profile": "reader"}, "expect": {"text": "s3"}},
+    {"id": "describes_the_sessions_mounts", "input": {"step": "document", "id": "w", "kind": "vfs", "session": "s3"}, "expect": {"text": "/"}},
+    {"id": "exposes_a_session_file", "input": {"step": "expose", "id": "w", "kind": "vfs", "session": "s3", "path": "/VFS.md"}, "expect": {"text": "exposed"}},
+    {"id": "the_session_reads_its_file", "input": {"step": "shell", "id": "w", "session": "s3", "command": "grep -c '^## ' /VFS.md"}, "expect": {"text": "1\n", "is_error": false}},
+    {"id": "no_other_session_sees_it", "input": {"step": "shell", "id": "w", "command": "cat /VFS.md"}, "expect": {"text": "cat: /VFS.md: No such file or directory\n", "is_error": true}},
+    {"id": "updates_the_sessions_profile", "input": {"step": "session_update", "id": "w", "session": "s3"}, "expect": {"text": "s3"}},
+    {"id": "the_file_follows_the_profile", "input": {"step": "shell", "id": "w", "session": "s3", "command": "grep -c '^## ' /VFS.md"}, "expect": {"text": "2\n", "is_error": false}},
+    {"id": "deletes_the_reading_session", "input": {"step": "session_delete", "id": "w", "session": "s3"}, "expect": {"text": "deleted"}},
+    {"id": "exposes_a_workspace_skill", "input": {"step": "expose", "id": "w", "kind": "skill", "path": "/SKILL.md"}, "expect": {"text": "exposed"}},
+    {"id": "every_session_reads_the_skill", "input": {"step": "shell", "id": "w", "command": "head -2 /SKILL.md"}, "expect": {"text": "---\nname: mirage\n", "is_error": false}},
+    {"id": "creates_another_session", "input": {"step": "session_create", "id": "w", "session": "s2", "profile": "asker"}, "expect": {"text": "s2"}},
+    {"id": "starts_a_job_in_it", "input": {"step": "shell", "id": "w", "session": "s2", "command": "sleep 30 &"}, "expect": {"text": "", "is_error": false}},
+    {"id": "cancels_the_sessions_lines", "input": {"step": "cancel_lines", "id": "w", "session": "s2"}, "expect": {"text": "0"}},
+    {"id": "kills_the_sessions_jobs", "input": {"step": "kill_jobs", "id": "w", "session": "s2"}, "expect": {"text": "1"}},
+    {"id": "deletes_the_workspace", "input": {"step": "delete", "id": "w"}, "expect": {"text": "deleted"}}
+   ]
+  },
+  {
+   "id": "snapshot",
+   "op": "snapshot",
+   "cases": [
+    {"id": "creates_the_workspace", "input": {"step": "create", "id": "w"}, "expect": {"text": "w"}},
+    {"id": "writes_a_file", "input": {"step": "shell", "id": "w", "command": "echo snap > /f"}, "expect": {"text": "", "is_error": false}},
+    {"id": "snapshots", "input": {"step": "snapshot", "id": "w", "name": "w.tar"}, "expect": {"text": "saved"}},
+    {"id": "loads", "input": {"step": "load", "name": "w.tar", "to": "loaded"}, "expect": {"text": "loaded"}},
+    {"id": "the_load_has_the_file", "input": {"step": "shell", "id": "loaded", "command": "cat /f"}, "expect": {"text": "snap\n", "is_error": false}},
+    {"id": "deletes_both", "input": {"step": "delete", "id": "w"}, "expect": {"text": "deleted"}},
+    {"id": "deletes_the_load", "input": {"step": "delete", "id": "loaded"}, "expect": {"text": "deleted"}}
+   ]
+  },
+  {
+   "id": "snapshot_store",
+   "op": "snapshot",
+   "deployments": ["token", "jwt"],
+   "cases": [
+    {"id": "creates_the_workspace", "input": {"step": "create", "id": "w"}, "expect": {"text": "w"}},
+    {"id": "writes_a_file", "input": {"step": "shell", "id": "w", "command": "echo stored > /f"}, "expect": {"text": "", "is_error": false}},
+    {"id": "puts_it_in_the_store", "input": {"step": "store_snapshot", "id": "w", "key": "w.tar"}, "expect": {"text": "saved"}},
+    {"id": "loads_it_from_the_store", "input": {"step": "store_load", "key": "w.tar", "to": "loaded"}, "expect": {"text": "loaded"}},
+    {"id": "the_load_has_the_file", "input": {"step": "shell", "id": "loaded", "command": "cat /f"}, "expect": {"text": "stored\n", "is_error": false}},
+    {"id": "deletes_both", "input": {"step": "delete", "id": "w"}, "expect": {"text": "deleted"}},
+    {"id": "deletes_the_load", "input": {"step": "delete", "id": "loaded"}, "expect": {"text": "deleted"}}
+   ]
+  },
+  {
+   "id": "ask",
+   "op": "ask",
+   "cases": [
+    {"id": "creates_the_workspace", "input": {"step": "create", "id": "w"}, "expect": {"text": "w"}},
+    {"id": "writes_a_file", "input": {"step": "shell", "id": "w", "command": "echo x > /f"}, "expect": {"text": "", "is_error": false}},
+    {"id": "creates_an_asking_session", "input": {"step": "session_create", "id": "w", "session": "agent", "profile": "asker"}, "expect": {"text": "agent"}},
+    {"id": "the_guarded_line_asks", "input": {"step": "shell", "id": "w", "session": "agent", "command": "rm /f"}, "expect": {"text": "rm: Permission denied\n", "is_error": true}},
+    {"id": "lists_the_ask", "input": {"step": "asks", "id": "w"}, "expect": {"text": "removal needs sign-off"}},
+    {"id": "allows_it", "input": {"step": "allow", "id": "w"}, "expect": {"text": "allowed"}},
+    {"id": "the_retry_passes", "input": {"step": "shell", "id": "w", "session": "agent", "command": "rm /f"}, "expect": {"text": "", "is_error": false}},
+    {"id": "the_file_is_gone", "input": {"step": "shell", "id": "w", "command": "ls /"}, "expect": {"text": "dev\nusr\nvault\n", "is_error": false}},
+    {"id": "no_ask_is_left", "input": {"step": "asks", "id": "w"}, "expect": {"text": ""}},
+    {"id": "writes_another_file", "input": {"step": "shell", "id": "w", "command": "echo y > /g"}, "expect": {"text": "", "is_error": false}},
+    {"id": "asks_again", "input": {"step": "shell", "id": "w", "session": "agent", "command": "rm /g"}, "expect": {"text": "rm: Permission denied\n", "is_error": true}},
+    {"id": "denies_it", "input": {"step": "deny", "id": "w"}, "expect": {"text": "denied"}},
+    {"id": "the_retry_is_refused", "input": {"step": "shell", "id": "w", "session": "agent", "command": "rm /g"}, "expect": {"text": "rm: Permission denied\n", "is_error": true}},
+    {"id": "deletes_the_workspace", "input": {"step": "delete", "id": "w"}, "expect": {"text": "deleted"}}
+   ]
+  },
+  {
+   "id": "job",
+   "op": "job",
+   "cases": [
+    {"id": "creates_the_workspace", "input": {"step": "create", "id": "w"}, "expect": {"text": "w"}},
+    {"id": "submits_in_the_background", "input": {"step": "background", "id": "w", "command": "echo hi"}, "expect": {"text": "submitted"}},
+    {"id": "waits_for_it", "input": {"step": "wait"}, "expect": {"text": "done", "stdout": "hi\n"}},
+    {"id": "gets_it", "input": {"step": "get"}, "expect": {"text": "done"}},
+    {"id": "lists_it", "input": {"step": "jobs", "id": "w"}, "expect": {"text": "echo hi"}},
+    {"id": "submits_a_long_line", "input": {"step": "background", "id": "w", "command": "sleep 30"}, "expect": {"text": "submitted"}},
+    {"id": "cancels_it", "input": {"step": "cancel"}, "expect": {"text": "canceling"}},
+    {"id": "waits_for_the_cancel", "input": {"step": "wait"}, "expect": {"text": "canceled", "stdout": ""}},
+    {"id": "deletes_the_workspace", "input": {"step": "delete", "id": "w"}, "expect": {"text": "deleted"}}
+   ]
+  }
+ ],
+ "auth": {
+  "http": {
+   "dev": {
+    "none": 401,
+    "local_token": 200,
+    "other_token": 401,
+    "fixed_token": 401,
+    "jwt_valid": 401,
+    "oauth_valid": 401
+   },
+   "token": {
+    "none": 401,
+    "other_token": 401,
+    "fixed_token": 200,
+    "jwt_valid": 401,
+    "oauth_valid": 401,
+    "opaque": 401
+   },
+   "jwt": {
+    "none": 401,
+    "other_token": 401,
+    "fixed_token": 401,
+    "jwt_valid": 200,
+    "oauth_valid": 200,
+    "oauth_wrong_audience": 401,
+    "jwt_expired": 401,
+    "jwt_wrong_issuer": 401,
+    "jwt_wrong_party": 401,
+    "jwt_no_party": 401,
+    "jwt_wrong_key": 401,
+    "jwt_alg_none": 401,
+    "jwt_hs256": 401,
+    "opaque": 401
+   }
+  },
+  "accesses": {
+   "valid": "ok",
+   "wrong": "refused"
+  }
+ },
+ "login": {
+  "description": "mirage login, whoami and logout per deployment, with a CLI home of its own and no token. dev and token publish no login (404); jwt publishes the issuer and client, and its browser is a user already signed in. On jwt the login then drives the CLI and SSH through ssh-proxy, refreshes an ended access token, and ends 30 days after sign-in. token takes a pasted token the server accepts.",
+  "dev": {
+   "resource": 404,
+   "login": "{url} publishes no login: a local daemon needs none, and a server with a shared token takes `mirage login --token`",
+   "whoami": 1,
+   "logout": "Not logged in."
+  },
+  "token": {
+   "resource": 404,
+   "login": "{url} publishes no login: a local daemon needs none, and a server with a shared token takes `mirage login --token`",
+   "login_wrong_token": 1,
+   "login_token": 0,
+   "whoami": null,
+   "list": "ok",
+   "logout": "Logged out of {url}.",
+   "after_logout": "daemon error 401: Unauthorized"
+  },
+  "jwt": {
+   "resource": 200,
+   "login": "Logged in to {url} as user_alice.",
+   "whoami": "user_alice",
+   "list": "ok",
+   "ssh_proxy": 0,
+   "ended_token": "ok",
+   "refreshed": true,
+   "after_30_days": "the login is 30 days old",
+   "logout": "Logged out of {url}.",
+   "after_logout": "daemon error 401: Unauthorized"
+  }
+ },
+ "server": {
+  "health_without_token": 200,
+  "unknown_host": 400,
+  "mcp_methods": {
+   "get": 405,
+   "delete": 405
+  },
+  "no_snapshot_store": [400, "this server has no snapshot store"],
+  "shutdown": {
+   "dev": 200,
+   "token": 200,
+   "jwt": 403
+  },
+  "after_shutdown": {
+   "dev": "exited",
+   "token": "serving",
+   "jwt": "serving"
+  }
+ },
+ "lifecycle": {
+  "status_without_daemon": "1",
+  "list_without_daemon": "1 not started",
+  "create_starts_the_daemon": "0 running",
+  "status_reports": "running=True workspaces=1",
+  "ssh_is_on": "ok\n",
+  "restart_stops": "stopped",
+  "restart_drops_workspaces": "b",
+  "restart_eager": "running 0",
+  "stop": "1 stopped",
+  "kill": "killed",
+  "idle_exit": "exited",
+  "mcp_unnamed": "2 1",
+  "mcp_named": "kept\nkept\n",
+  "mcp_unknown_session": "2",
+  "rpc_unnamed": "initialized 1 gone",
+  "config_set_get": "45",
+  "config_env_wins": "9 env MIRAGE_IDLE_GRACE_SECONDS",
+  "config_token_masked": "***",
+  "config_unset": "1",
+  "config_unknown_key": "2",
+  "config_port_moves": "answers",
+  "allowed_hosts_env_wins": "200",
+  "config_malformed": "2",
+  "remote_never_spawns": "1 not started",
+  "remote_gets_no_token_file": "no token sent",
+  "shell_exit_status": "3 3",
+  "unknown_workspace": "2",
+  "config_interpolates_cli_env": "write",
+  "missing_variable_fails_first": "2 not created",
+  "mcp_name_taken": "2 already exists",
+  "no_snapshot_store": "2"
+ }
+}

@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { dotglobActive, pathAllowed } from '../context/session_context.ts'
+import { dotglobActive, sessionVisibility } from '../context/session_context.ts'
+import { pathVisible } from './hidden.ts'
 import type { ChildMounts } from '../ops/types.ts'
 import { type FileStat, FileType, PathSpec } from '../types.ts'
 import { isFsError } from './errors.ts'
@@ -20,6 +21,8 @@ import { fnmatch } from './fnmatch.ts'
 import { rekey } from './key_prefix.ts'
 import { rstripSlash } from './slash.ts'
 import { compareCodePoints } from './sort.ts'
+import type { Accessor } from '../accessor/base.ts'
+import type { ReaddirOp, ResolveGlobOp, StatOp } from '../vfs/types.ts'
 
 export const GLOB_CHARS = ['*', '?', '[']
 
@@ -381,6 +384,7 @@ export async function resolveGlobWith<A, I>(
   targetStat?: TargetStat,
 ): Promise<PathSpec[]> {
   const result: PathSpec[] = []
+  const vis = sessionVisibility()
   for (const p of paths) {
     if (p.resolved) {
       result.push(p)
@@ -411,7 +415,7 @@ export async function resolveGlobWith<A, I>(
       // no matches and falls back to the literal word, exactly what bash
       // prints when nothing matched.
       let matched = (await expandPattern(readdir, accessor, word, index, children)).filter((m) =>
-        pathAllowed(m.virtual),
+        pathVisible(vis, m.virtual),
       )
       if (dirsOnly) {
         const kept: PathSpec[] = []
@@ -563,4 +567,15 @@ export async function expandPattern<A, I>(
         rawPath: spellMatch(raw, m.virtual, walked),
       }),
   )
+}
+
+export function makeResolveGlob<A extends Accessor = Accessor>(
+  readdir: ReaddirOp<A>,
+  maxGlobMatches: number = DEFAULT_MAX_GLOB_MATCHES,
+  children?: ChildMounts,
+  stat?: StatOp<A>,
+  targetStat?: TargetStat,
+): ResolveGlobOp<A> {
+  return async (accessor, paths, index) =>
+    resolveGlobWith(readdir, accessor, paths, index, maxGlobMatches, children, stat, targetStat)
 }

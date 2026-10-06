@@ -18,7 +18,7 @@ from enum import StrEnum
 from typing import Any, ClassVar, Protocol
 
 from mirage.runtime.types import ScriptSource
-from mirage.types import Limit, PathSpec, Producer, Refusal
+from mirage.types import Limit, MountMode, PathSpec, Producer, Refusal
 
 
 class MountRootQuery(Protocol):
@@ -37,11 +37,13 @@ class DenyScope(StrEnum):
 
     COMMAND refuses the whole line in bash's own words,
     ``<cmd>: Permission denied``, exit 126, and the reason rides the
-    result's ``refusal`` record instead. OPERAND refuses one operand
-    and keeps the GNU voice
-    ``<cmd>: <reason>`` (the reason names the operand, as
-    ``rm: cannot remove 'x': ...`` does), exit 1, or the command's own
-    fatal code where GNU differs (tar exits 2). The exit code and errno
+    result's ``refusal`` record instead. OPERAND refuses one operand,
+    exit 1, or the command's own fatal code where GNU differs (tar
+    exits 2): with ``Deny.path`` set it prints the command's own GNU
+    line for that operand and ``Permission denied``, the reason riding
+    the record; without it the reason is the diagnostic,
+    ``<cmd>: <reason>`` (a built-in that words a POSIX error, as
+    ``rm: cannot remove 'x': ...`` does). The exit code and errno
     derive from the plane and this scope, never from a number a policy
     picks, so a document deny and a coded one are indistinguishable.
     """
@@ -83,6 +85,12 @@ class Deny:
             stamped by the chain so no policy names itself.
         failed (bool): True when the chain refused on a policy's
             behalf because it raised.
+        error (OSError | None): an op refusal with a specific errno; None
+            uses the normal permission-denied error.
+        path (str | None): the operand an OPERAND refusal is about, as
+            typed: the door prints the command's own line for it and
+            ``Permission denied``, the reason riding the record. None
+            leaves the reason as the diagnostic.
     """
 
     kind: ClassVar[str] = "deny"
@@ -91,6 +99,28 @@ class Deny:
     scope: DenyScope = DenyScope.COMMAND
     policy: str = ""
     failed: bool = False
+    error: OSError | None = None
+    path: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Hide:
+    """Answer as though the path did not exist.
+
+    Outranks every other answer: a hidden path is absent, so there is
+    nothing left to allow, refuse or ask about. Never rendered as a
+    refusal: no reason, no ``refusal`` record, no explain line. The
+    door raises ``error`` as the terminal would for a missing name
+    (ENOENT, or EACCES for a create landing in a visible directory). The
+    built-in hide answers it; no coded hook returns one.
+
+    Args:
+        error (OSError): what the door raises.
+    """
+
+    kind: ClassVar[str] = "hide"
+
+    error: OSError
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +148,8 @@ class CommandRule:
     under that mount root.
 
     Args:
-        reason (str): why the command is refused, shown on stderr.
+        reason (str): why the command is refused, carried on the
+            result's refusal record.
         commands (tuple[str, ...]): command patterns the rule applies
             to; empty means every command. A path-scoped rule carries
             exactly one.
@@ -168,9 +199,9 @@ class Ruling:
             and on the DENY the allow list produces, which is not a
             rule and so has no reason of its own to print.
         matched_path (str | None): the operand a path-scoped rule
-            matched, as typed, which the GNU voice prints
-            (``rm: letters.txt: <reason>``); None when the rule reaches
-            the whole line.
+            matched, as typed, which the GNU line names
+            (``rm: cannot remove 'letters.txt': Permission denied``);
+            None when the rule reaches the whole line.
         source (str): where in the document the rule was written, for a
             host reading a decision: ``top`` or ``mounts./repo``. Empty
             on ALLOW, and ``commands.allow`` on the DENY the allow list
@@ -225,13 +256,13 @@ class Ask:
     rules: tuple[CommandRule, ...] = ()
 
 
-# The closed vocabulary of policy answers: a hook returns an Action to
-# state an opinion or None to stay silent. Deny refuses (first opinion
-# wins); Ask defers to the host (a Deny anywhere in the chain still
-# wins); Limit bounds (every opinion merges to the tightest,
-# Limit.aggr). Each hook accepts a fixed set of kinds (VALIDITY),
-# enforced loud.
-Action = Deny | Limit | Ask
+# The closed vocabulary of policy answers, ranked by kind: Hide (the
+# built-in's, the path is absent), then Deny (first opinion wins), then
+# Ask (defers to the host; a Deny anywhere in the chain still wins), then
+# Limit (every opinion merges to the tightest, Limit.aggr). A hook
+# returns an Action to state an opinion or None to stay silent; each
+# hook accepts a fixed set of kinds (VALIDITY), enforced loud.
+Action = Hide | Deny | Limit | Ask
 
 
 class Scope(StrEnum):
@@ -641,6 +672,10 @@ class OpsContext:
         session_id (str): the session the door serves, set by the door
             from the session it already resolves for hides and modes;
             empty for the unbound host view.
+        mode (MountMode | None): the owning mount's authorization ceiling,
+            None at a door that judges the mode itself.
+        create (bool): the op creates this path.
+        subtree (bool): the op mutates the path's descendants too.
     """
 
     op: str
@@ -648,6 +683,9 @@ class OpsContext:
     write: bool
     prefix: str
     session_id: str = ""
+    mode: MountMode | None = None
+    create: bool = False
+    subtree: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,0 +1,126 @@
+{
+  "cases": [
+    {
+      "id": "captured_program_pipeline",
+      "world": {
+        "runtimes": [
+          {
+            "name": "echobox"
+          },
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "nvidia-smi -L | grep box > /ram/output.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "cat /ram/output.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:nvidia-smi -L\n"
+          }
+        },
+        {
+          "command": "echo still-the-workspace",
+          "expect": {
+            "exit": 0,
+            "stdout": "still-the-workspace\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "external_fallback_keeps_mirage_commands",
+      "world": {
+        "runtimes": [
+          {
+            "name": "echobox",
+            "captures": [
+              "@external"
+            ]
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "native-tool --version | grep box > /ram/version.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "cat /ram/version.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:native-tool --version\n"
+          }
+        },
+        {
+          "command": "echo mirage",
+          "expect": {
+            "exit": 0,
+            "stdout": "mirage\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "external_fallback_is_no_program",
+      "world": {
+        "runtimes": [
+          {
+            "name": "echobox",
+            "captures": [
+              "gcc",
+              "@external"
+            ]
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "which native-tool; echo \"rc=$?\"; command -v native-tool; echo \"rc=$?\"; type -t native-tool; echo \"rc=$?\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=1\nrc=1\nrc=1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat /usr/bin/native-tool",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "cat: /usr/bin/native-tool: No such file or directory\n"
+          }
+        },
+        {
+          "command": "native-tool --version",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:native-tool --version\n"
+          }
+        },
+        {
+          "command": "which gcc; cat /usr/bin/gcc",
+          "expect": {
+            "exit": 0,
+            "stdout": "/usr/bin/gcc\n#!/bin/sh\n# gcc runs on the workspace's echobox runtime.\ncommand gcc \"$@\"\n",
+            "stderr": ""
+          }
+        }
+      ]
+    }
+  ]
+}

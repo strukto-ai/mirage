@@ -241,10 +241,10 @@
       "targets": [
         "ram-nested"
       ],
-      "command": "du /data/i*; du -x /data; du /data",
+      "command": "du /data/i*; du -x /data; du /data; du -a /data; du -s /data; du -c /data",
       "expect": {
         "exit": 0,
-        "stdout": "5\t/data/inner\n4\t/data\n5\t/data/inner\n9\t/data\n",
+        "stdout": "5\t/data/inner\n4\t/data\n5\t/data/inner\n9\t/data\n5\t/data/inner/leaf.txt\n5\t/data/inner\n4\t/data/top.txt\n9\t/data\n9\t/data\n5\t/data/inner\n9\t/data\n9\ttotal\n",
         "stderr": ""
       }
     },
@@ -434,6 +434,19 @@
       }
     },
     {
+      "id": "nest_namespace_ancestor_du_s",
+      "seq": 950036,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "du -s /ghost",
+      "expect": {
+        "exit": 0,
+        "stdout": "6\t/ghost\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "nest_mount_root_file_names_the_path",
       "note": "The file twin of seq 950029: a mount root reached under a namespace-only parent.",
       "seq": 950037,
@@ -504,6 +517,20 @@
         "exit": 1,
         "stdout": "",
         "stderr": "stat: cannot statx '/ghost': No such file or directory\n"
+      }
+    },
+    {
+      "id": "nest_hidden_mount_parent_du",
+      "seq": 950034,
+      "targets": [
+        "ram-nested"
+      ],
+      "session": "blind",
+      "command": "du /ghost",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "du: cannot access '/ghost': No such file or directory\n"
       }
     },
     {
@@ -1080,6 +1107,50 @@
       "expect": {
         "exit": 0,
         "stdout": "/data/g1\n/data/g1/deep\n/data/g1/deep/g.txt\n/data/g1/deep/gl\n/data/g2\n/data/g2/deep\n/data/g3\n/data/g3/g.txt\n/ghost/deep\n/ghost/deep/g.txt\n/ghost/deep/ghost\n/ghost/deep/ghost/deep\n/ghost/deep/gl\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_tree_depth_and_x_at_the_mount_root",
+      "seq": 15300404,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "tree -L 1 -P top.txt /data; echo rc=$?; tree -x -P leaf.txt /data/inner; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n|-- inner\n`-- top.txt\n\n2 directories, 1 file\nrc=0\n/data/inner\n`-- leaf.txt\n\n1 directory, 1 file\nrc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "L",
+        "P",
+        "x"
+      ]
+    },
+    {
+      "id": "nest_walk_names_a_link_once",
+      "seq": 950089,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "ln -s top.txt /data/xm_lnk && ln -s xm_loop /data/xm_loop && find /data -name 'xm_l*' | sort; ls -R /data >/dev/null; echo rc=$?; ls -RF /data | grep '^xm_l'; rm /data/xm_lnk /data/xm_loop",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/xm_lnk\n/data/xm_loop\nrc=0\nxm_lnk@\nxm_loop@\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_depth_limits_count_across_the_mount",
+      "seq": 950090,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "mkdir -p /data/xm_depth/a /data/inner/xm_depth/b/c; printf 1 > /data/xm_depth/a/f; printf 22 > /data/inner/xm_depth/b/c/g; find /data -mindepth 3 -maxdepth 4 -path '*xm_depth*' | sort; du -d 2 /data | grep xm_depth; du -c -s /data/inner/xm_depth /data/xm_depth; rm -r /data/xm_depth /data/inner/xm_depth",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/inner/xm_depth/b\n/data/inner/xm_depth/b/c\n/data/xm_depth/a/f\n2\t/data/inner/xm_depth\n1\t/data/xm_depth/a\n1\t/data/xm_depth\n2\t/data/inner/xm_depth\n1\t/data/xm_depth\n3\ttotal\n",
         "stderr": ""
       }
     }

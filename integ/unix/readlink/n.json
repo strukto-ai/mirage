@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "id": "readlink_n_is_ignored_with_several_operands",
+      "seq": 15000052,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -s a.txt /data/fc0l; readlink -n /data/fc0l /data/fc0l; echo rc=$?; readlink /data/fc0l --no-newline; echo; rm -f /data/fc0l",
+      "expect": {
+        "exit": 0,
+        "stdout": "a.txt\na.txt\nrc=0\na.txt\n",
+        "stderr": "readlink: ignoring --no-newline with multiple arguments\n"
+      },
+      "flags": [
+        "n",
+        "no-newline"
+      ]
+    }
+  ]
+}

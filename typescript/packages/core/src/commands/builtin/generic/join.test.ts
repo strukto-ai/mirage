@@ -17,7 +17,7 @@ import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import { CheckOrder, parseJoinFlags, type JoinFlags } from './join.ts'
+import { CheckOrder, parseFlags, type JoinFlags } from './join.ts'
 
 type Row = [string, string, string, string, string, number, string, string]
 
@@ -93,7 +93,7 @@ const DEFAULTS: JoinFlags = {
   files: [0, 1],
 }
 
-describe('parseJoinFlags', () => {
+describe('parseFlags', () => {
   it.each<[Record<string, string | boolean>, Partial<JoinFlags>]>([
     [{}, {}],
     [
@@ -119,7 +119,7 @@ describe('parseJoinFlags', () => {
     ],
     [{ nocheck_order: true }, { checkOrder: CheckOrder.DISABLED }],
   ])('%j', (flags, expected) => {
-    expect(parseJoinFlags(flags)).toEqual({ ...DEFAULTS, ...expected })
+    expect(parseFlags(flags)).toEqual({ ...DEFAULTS, ...expected })
   })
 })
 

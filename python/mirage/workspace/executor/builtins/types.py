@@ -22,6 +22,7 @@ from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
+from mirage.shell.job_table import JobTable
 from mirage.workspace.expand.argv import Argv
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -60,6 +61,8 @@ class BuiltinCall:
         sink (JobConsole | None): where a line the builtin runs in
             place (``eval``, ``source``, a nested shell) writes its
             statements as they finish, None to return them.
+        job_table (JobTable | None): the calling shell's jobs, for a
+            nested shell to start a table of its own beside.
     """
 
     argv: Argv
@@ -73,6 +76,7 @@ class BuiltinCall:
     namespace: Namespace
     execute_fn: Callable[..., Any]
     sink: JobConsole | None = None
+    job_table: JobTable | None = None
 
 
 BuiltinFn = Callable[[BuiltinCall], Awaitable[Result]]

@@ -66,6 +66,41 @@
         "stdout": "rc=1\n1\n2\n",
         "stderr": "mv: will not overwrite just-created '/data/r10md/a' with '/data/r10my/a'\n"
       }
+    },
+    {
+      "id": "mv_n_keeps_the_source_and_the_skipped_duplicate",
+      "seq": 15600201,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcF_m1/d /data/fcF_m1/x /data/fcF_m1/y /data/fcF_m1/e && echo NEW > /data/fcF_m1/a.txt && echo OLD > /data/fcF_m1/d/a.txt && mv -n /data/fcF_m1/a.txt /data/fcF_m1/d; echo rc=$?; cat /data/fcF_m1/d/a.txt /data/fcF_m1/a.txt; echo 1 > /data/fcF_m1/x/a && echo 2 > /data/fcF_m1/y/a && mv -n /data/fcF_m1/x/a /data/fcF_m1/y/a /data/fcF_m1/e; echo rc=$?; cat /data/fcF_m1/e/a /data/fcF_m1/y/a; test -e /data/fcF_m1/x/a; echo moved=$?; rm -r /data/fcF_m1",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nOLD\nNEW\nrc=0\n1\n2\nmoved=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
     }
   ]
 }

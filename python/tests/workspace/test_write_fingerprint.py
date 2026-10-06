@@ -121,6 +121,7 @@ def test_always_reads_a_written_path_from_cache():
             try:
                 io = await ws.shell("tee /s3/x.txt", stdin=b"hello\n")
                 await io.materialize_stdout()
+                client.calls.clear()
                 io2 = await ws.shell("cat /s3/x.txt")
                 return await io2.materialize_stdout()
             finally:
@@ -129,9 +130,10 @@ def test_always_reads_a_written_path_from_cache():
         served = asyncio.run(run())
 
     assert served == b"hello\n"
-    # One, not ">= 1": the routing reconcile, whose answer cat's own operand
-    # stat and the gate reuse. Its TypeScript twin asserts the same exact
-    # number.
+    # One, not ">= 1", counted over the read alone (tee probes its output
+    # before it writes): the routing reconcile, whose answer cat's own
+    # operand stat and the gate reuse. Its TypeScript twin asserts the same
+    # exact number.
     assert client.calls["head_object"] == 1, (
         "a `fresh` mount must consult the remote fingerprint on the read"
     )

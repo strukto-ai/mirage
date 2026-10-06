@@ -33,6 +33,40 @@
         "stdout": "1 alpha one\n2 beta\nalpha 1\nbeta 2\none 1\nthree 3\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xm_join_relay_reads_every_flag",
+      "seq": 16100003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'B 2\\nx 1\\n' > /data/r10xja && printf 'b y\\nC z\\n' > /data2/r10xjb && join -i -j 1 -a1 -a2 -e - -o 0,1.2,2.2 --nocheck-order /data/r10xja /data2/r10xjb; echo rc=$?; rm /data/r10xja /data2/r10xjb",
+      "expect": {
+        "exit": 0,
+        "stdout": "B 2 y\nC - z\nx 1 -\nrc=0\n",
+        "stderr": ""
+      }
     }
   ]
 }

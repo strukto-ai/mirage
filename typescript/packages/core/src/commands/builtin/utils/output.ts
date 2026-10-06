@@ -34,7 +34,7 @@ export async function prependStderr(io: IOResult, warnings: readonly string[]): 
 }
 
 // Records to output bytes, one per line, smuggled bytes put back. A line
-// that came through `decodeLine` holds a byte that is not valid UTF-8 as a
+// that came through `decodeText` holds a byte that is not valid UTF-8 as a
 // sentinel, and GNU grep and ripgrep print that byte as itself; a plain
 // TextEncoder turned it into U+FFFD, and the `printable` step that used to
 // stand in front of it did the same on purpose. Ordinary text encodes

@@ -22,9 +22,7 @@ import type { TSNodeLike } from './types.ts'
 import {
   braceExpands,
   byteOffset,
-  getCommandAssignments,
   getCommandName,
-  getDeclarationAssignments,
   getDeclarationKeyword,
   getCaseItems,
   getCforParts,
@@ -41,7 +39,6 @@ import {
   getRedirects,
   takeContinuation,
   getText,
-  getTestArgv,
   getWhileParts,
   isBackgrounded,
   literalWord,
@@ -358,39 +355,15 @@ describe('getIfBranches', () => {
 })
 
 describe('getDeclaration* / getCommandAssignments', () => {
-  it('getDeclarationAssignments collects VARIABLE_ASSIGNMENT children', () => {
-    const n = node('declaration_command', '', {
-      namedChildren: [
-        node(NT.VARIABLE_ASSIGNMENT, 'FOO=bar'),
-        node(NT.VARIABLE_ASSIGNMENT, 'BAZ=qux'),
-      ],
-    })
-    expect(getDeclarationAssignments(n)).toEqual(['FOO=bar', 'BAZ=qux'])
-  })
-
   it('getDeclarationKeyword is the first child type', () => {
     const n = node('declaration_command', '', {
       children: [node(NT.EXPORT, 'export', { isNamed: false })],
     })
     expect(getDeclarationKeyword(n)).toBe('export')
   })
-
-  it('getCommandAssignments matches VARIABLE_ASSIGNMENT', () => {
-    const n = node('command', '', {
-      namedChildren: [node(NT.VARIABLE_ASSIGNMENT, 'FOO=1'), node(NT.COMMAND_NAME, 'run')],
-    })
-    expect(getCommandAssignments(n)).toEqual(['FOO=1'])
-  })
 })
 
 describe('getTestArgv / getNegatedCommand / getFunction*', () => {
-  it('getTestArgv joins text of named children', () => {
-    const n = node('test_command', '', {
-      namedChildren: [node('word', '-f'), node('word', '/x')],
-    })
-    expect(getTestArgv(n)).toEqual(['-f', '/x'])
-  })
-
   it('getNegatedCommand returns the inner', () => {
     const inner = node('command', 'foo')
     const n = node('negated_command', '', { namedChildren: [inner] })

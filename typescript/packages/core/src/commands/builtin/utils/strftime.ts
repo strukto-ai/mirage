@@ -68,7 +68,7 @@ function isoWeekParts(year: number, month: number, day: number): [number, number
 // Render `fmt` for the instant `dt` on the wall clock `zone` shows for it:
 // the fields, `%z` and `%Z` all come from one reading of the zone, so a
 // rendering cannot mix a UTC field with a local offset.
-export function strftime(dt: Date, fmt: string, zone: Zone): string {
+export function gnuStrftime(dt: Date, fmt: string, zone: Zone): string {
   const parts = zone.parts(dt)
   const { year, month, day, hour, minute, second } = parts
   const dow = parts.weekday

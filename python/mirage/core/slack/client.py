@@ -48,7 +48,7 @@ def slack_headers(config: SlackConfig, method: str) -> dict[str, str]:
     }
 
 
-def _format_slack_error(method: str, data: dict[str, Any]) -> str:
+def _format_slack_error_message(method: str, data: dict[str, Any]) -> str:
     err = data.get("error", "unknown_error")
     base = f"Slack API error ({method}): {err}"
     if err != "missing_scope":
@@ -70,14 +70,14 @@ def _error_of(
     except ValueError:
         data = None
     if isinstance(data, dict):
-        return RuntimeError(_format_slack_error(method, data))
+        return RuntimeError(_format_slack_error_message(method, data))
     return RuntimeError(f"Slack API error ({method}): HTTP {resp.status}")
 
 
 def _checked(method: str, data: Any) -> dict[str, Any]:
     payload = data if isinstance(data, dict) else {}
     if not payload.get("ok"):
-        raise RuntimeError(_format_slack_error(method, payload))
+        raise RuntimeError(_format_slack_error_message(method, payload))
     return payload
 
 

@@ -18,6 +18,7 @@ from functools import cmp_to_key, partial
 from typing import TypeAlias
 
 from mirage.commands.builtin.errors import SortKeyError
+from mirage.commands.builtin.utils.strtod import STRTOD, strtod_double
 from mirage.commands.quote import quote_text
 
 
@@ -468,6 +469,18 @@ def _human_number(field: str) -> tuple[int, NumericKey]:
     return (-order if match[1] else order), _leading_number(field)
 
 
+def _parse_general_float(field: str) -> float | None:
+    """The number strtold reads at the start of a field, None for none.
+
+    The rest of the field is ignored, as GNU sort -g ignores it.
+
+    Args:
+        field (str): the key field.
+    """
+    found = STRTOD.match(field)
+    return None if found is None else strtod_double(found)
+
+
 def _transform(field: str, mods: KeyMods) -> _SortKey:
     if mods.dictionary:
         field = "".join(
@@ -484,10 +497,8 @@ def _transform(field: str, mods: KeyMods) -> _SortKey:
     if mods.numeric:
         return _leading_number(field)
     if mods.general_numeric:
-        stripped = field.lstrip()
-        try:
-            value = float(stripped)
-        except ValueError:
+        value = _parse_general_float(field)
+        if value is None:
             return (0, 0.0)
         if value != value:
             return (1, 0.0)

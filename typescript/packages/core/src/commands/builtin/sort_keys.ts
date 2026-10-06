@@ -15,6 +15,7 @@ import { compareCodePoints } from '../../utils/sort.ts'
 
 import { quoteText } from '../quote.ts'
 import { SortKeyError } from './errors.ts'
+import { STRTOD, strtodDouble } from './utils/strtod.ts'
 
 // sort.c's `unit_order`: the suffixes -h ranks, lowercase only for k.
 const UNIT_ORDERS: Record<string, number> = {
@@ -399,18 +400,11 @@ function isPrintingCharacter(char: string): boolean {
   return code > 31 && code !== 127
 }
 
+// The number strtold reads at the start of a field, null for none. The rest
+// of the field is ignored, as GNU sort -g ignores it.
 function parseGeneralFloat(field: string): number | null {
-  const trimmed = field.trim()
-  if (trimmed === '') return null
-  const collapsed = trimmed.replace(/(\d)_(?=\d)/g, '$1')
-  if (collapsed.includes('_')) return null
-  const lowered = collapsed.toLowerCase()
-  if (/^[+-]?(inf(inity)?|nan)$/.test(lowered)) {
-    if (lowered.endsWith('nan')) return Number.NaN
-    return lowered.startsWith('-') ? -Infinity : Infinity
-  }
-  if (!/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/.test(collapsed)) return null
-  return Number(collapsed)
+  const found = STRTOD.exec(field)
+  return found === null ? null : strtodDouble(found)
 }
 
 function transform(field: string, mods: KeyMods): SortKey {

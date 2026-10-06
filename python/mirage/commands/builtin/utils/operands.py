@@ -17,10 +17,11 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from functools import partial
 
-from mirage.commands.spec.usage import read_fail_exit
+from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.io.stream import ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.ops.types import LinkView, MountView, StatPath
+from mirage.shell.bytes import encode_text
 from mirage.types import (
     FileStat,
     FileType,
@@ -29,7 +30,13 @@ from mirage.types import (
     ReadBytesFn,
     StatFn,
 )
-from mirage.utils.errors import FS_ERRORS, DotWalkError, eisdir, fs_error_line
+from mirage.utils.errors import (
+    FS_ERRORS,
+    READ_FAILURES,
+    DotWalkError,
+    eisdir,
+    fs_error_line,
+)
 
 
 def mount_points(mounts: MountView | None, directory: str) -> list[str]:
@@ -176,14 +183,14 @@ async def split_readable_coded(
         if failure is None:
             readable.append(p)
             continue
-        err += fs_error_line(cmd_name, p, failure).encode()
+        err += encode_text(fs_error_line(cmd_name, p, failure))
         # A directory is gzip's warning and everything else its error, so
         # the directory yields to a code already recorded. Keyed on the
         # errno rather than on which branch reported it, because a keyed
         # backend raises EISDIR from the stat where an explicit directory
         # returns a row.
         if code == 0 or not isinstance(failure, IsADirectoryError):
-            code = read_fail_exit(cmd_name, failure)
+            code = read_fail_exit_code(cmd_name, failure)
     return readable, err, code
 
 
@@ -217,6 +224,51 @@ async def split_readable(
     """
     readable, err, _ = await split_readable_coded(paths, stat, cmd_name)
     return readable, err
+
+
+async def split_opened(
+    paths: list[PathSpec],
+    stat: StatFn,
+    cmd_name: str,
+) -> tuple[list[PathSpec], frozenset[str], bytes]:
+    """``split_readable`` for the commands that head each operand.
+
+    GNU head and tail open an operand before they read it, and a
+    directory opens: its ``==> name <==`` header prints and only the
+    read after it fails. So a directory keeps its place among the
+    opened operands, named in the unread set, while one that does not
+    open at all (a missing name) is dropped as ``split_readable`` drops
+    it.
+
+    Args:
+        paths (list[PathSpec]): Glob-resolved operands in command order.
+        stat (StatFn): Bound stat called as ``stat(path)``.
+        cmd_name (str): Command name for the stderr prefix.
+
+    Returns:
+        tuple[list[PathSpec], frozenset[str], bytes]: the operands that
+        open, in order; the virtual paths among them whose read fails;
+        and the stderr lines.
+    """
+    opened: list[PathSpec] = []
+    unread: set[str] = set()
+    err = b""
+    for p in paths:
+        failure: BaseException | None = None
+        try:
+            st = await stat(p)
+        except FS_ERRORS as exc:
+            failure = exc
+        else:
+            if getattr(st, "type", None) == FileType.DIRECTORY:
+                failure = eisdir(p)
+        if failure is not None:
+            err += encode_text(fs_error_line(cmd_name, p, failure))
+            if not isinstance(failure, READ_FAILURES):
+                continue
+            unread.add(p.virtual)
+        opened.append(p)
+    return opened, frozenset(unread), err
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,15 +315,13 @@ async def read_operands(
                 source = await source
             data = await materialize(source)
         except FS_ERRORS as exc:
-            err += fs_error_line(cmd_name, p, exc).encode()
+            err += encode_text(fs_error_line(cmd_name, p, exc))
             continue
         ok.append(ReadOperand(p, data))
     return ok, err
 
 
-def operands_io(
-    err: bytes, cache: list[str] | None = None, exit_code: int = 1
-) -> IOResult:
+def operands_io(err: bytes, exit_code: int = 1) -> IOResult:
     """IOResult carrying operand-split stderr lines.
 
     Exit ``exit_code`` when any operand failed, exit 0 otherwise; mirrors
@@ -281,13 +331,11 @@ def operands_io(
 
     Args:
         err (bytes): Concatenated stderr lines, ``b""`` for none.
-        cache (list[str] | None): Paths worth caching, if any.
         exit_code (int): The code to report when ``err`` is non-empty.
     """
     return IOResult(
         exit_code=0 if not err else exit_code,
         stderr=err or None,
-        cache=cache if cache is not None else [],
     )
 
 

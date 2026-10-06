@@ -25,6 +25,7 @@ import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { DIR_MODE, DIR_SIZE, FILE_MODE, mtimeMs } from '@struktoai/mirage-core/utils/stat_view'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
+import { skippedAtOpDoors } from '@struktoai/mirage-core/policy/match/rule'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import { errnoError } from './errors.ts'
 import { isMacosMetadata } from './platform/macos.ts'
@@ -118,6 +119,16 @@ export class MountCore {
     this.uid = typeof process.getuid === 'function' ? process.getuid() : 0
     this.gid = typeof process.getgid === 'function' ? process.getgid() : 0
     this.session = options.session ?? null
+    const skipped = this.session === null ? [] : skippedAtOpDoors(this.session.commands)
+    if (this.session !== null && skipped.length > 0) {
+      // This door sees ops, never a line, so the profile's command-level
+      // rules have nothing here to judge.
+      console.warn(
+        `session ${this.session.sessionId}: a door that sees only ops (a kernel mount, ` +
+          `SFTP, codex-exec's file calls) cannot apply ${skipped.join('; ')}; path rules, ` +
+          'hides and modes still hold',
+      )
+    }
   }
 
   // ── helpers ──────────────────────────────────────────────────────

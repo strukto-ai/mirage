@@ -14,8 +14,8 @@ from mirage.commands.spec.usage import (
     missing_required_error,
     missing_value_error,
     old_option_error,
-    read_fail_exit,
-    read_fail_exit_line,
+    read_fail_exit_code,
+    read_fail_exit_code_from_line,
     rg_unknown_flag,
     similar_rg_flags,
     unexpected_value_error,
@@ -209,13 +209,13 @@ def test_old_option_error_matches_gnu_tar_wording():
 
 def test_read_fail_exit_reads_the_code_off_the_command():
     # GNU's code for a failed read belongs to the command, not the errno.
-    assert read_fail_exit("cat", FileNotFoundError("/x")) == 1
-    assert read_fail_exit("sort", FileNotFoundError("/x")) == 2
-    assert read_fail_exit("sort", IsADirectoryError("/x")) == 2
-    assert read_fail_exit("unzip", FileNotFoundError("/x")) == 9
+    assert read_fail_exit_code("cat", FileNotFoundError("/x")) == 1
+    assert read_fail_exit_code("sort", FileNotFoundError("/x")) == 2
+    assert read_fail_exit_code("sort", IsADirectoryError("/x")) == 2
+    assert read_fail_exit_code("unzip", FileNotFoundError("/x")) == 9
     # A read the mount refuses to render whole (EFBIG) is a failed read too.
-    assert read_fail_exit("rg", efbig("/x")) == 2
-    assert read_fail_exit("cat", efbig("/x")) == 1
+    assert read_fail_exit_code("rg", efbig("/x")) == 2
+    assert read_fail_exit_code("cat", efbig("/x")) == 1
 
 
 def test_read_fail_exit_splits_by_errno_for_the_ones_that_do():
@@ -223,12 +223,12 @@ def test_read_fail_exit_splits_by_errno_for_the_ones_that_do():
     # file fails at open (2); the gzip family calls a directory a warning
     # (2) and a missing file an error (1). zgrep opens its operands
     # itself, so a failed read that reaches here is grep's trouble, 2.
-    assert read_fail_exit("sed", IsADirectoryError("/d")) == 4
-    assert read_fail_exit("sed", FileNotFoundError("/x")) == 2
-    assert read_fail_exit("zcat", IsADirectoryError("/d")) == 2
-    assert read_fail_exit("zcat", FileNotFoundError("/x")) == 1
-    assert read_fail_exit("zgrep", IsADirectoryError("/d")) == 2
-    assert read_fail_exit("zgrep", FileNotFoundError("/x")) == 2
+    assert read_fail_exit_code("sed", IsADirectoryError("/d")) == 4
+    assert read_fail_exit_code("sed", FileNotFoundError("/x")) == 2
+    assert read_fail_exit_code("zcat", IsADirectoryError("/d")) == 2
+    assert read_fail_exit_code("zcat", FileNotFoundError("/x")) == 1
+    assert read_fail_exit_code("zgrep", IsADirectoryError("/d")) == 2
+    assert read_fail_exit_code("zgrep", FileNotFoundError("/x")) == 2
 
 
 def test_read_fail_exit_ignores_anything_that_is_not_a_failed_read():
@@ -238,10 +238,10 @@ def test_read_fail_exit_ignores_anything_that_is_not_a_failed_read():
     # often a write refusal as a read one: `sed -i` on a backend with no
     # write op raises PermissionError and must stay 1, which is what
     # integ's lancedb_sed_i_readonly and notion_sed_i_readonly pin.
-    assert read_fail_exit("sed", PermissionError("-i not supported")) == 1
-    assert read_fail_exit("sed", ValueError("bad script")) == 1
-    assert read_fail_exit("sort", PermissionError("/locked")) == 1
-    assert read_fail_exit("sort", RuntimeError("transport")) == 1
+    assert read_fail_exit_code("sed", PermissionError("-i not supported")) == 1
+    assert read_fail_exit_code("sed", ValueError("bad script")) == 1
+    assert read_fail_exit_code("sort", PermissionError("/locked")) == 1
+    assert read_fail_exit_code("sort", RuntimeError("transport")) == 1
 
 
 def test_read_fail_exit_line_reads_the_terminal_errno():
@@ -249,10 +249,10 @@ def test_read_fail_exit_line_reads_the_terminal_errno():
     # errno is its LAST field. A path is free to spell a strerror itself,
     # and scanning the whole line read this directory as ENOENT.
     line = b"sed: /ram/No such file or directory: Is a directory\n"
-    assert read_fail_exit_line("sed", line) == 4
-    assert read_fail_exit_line("cat", line) == 1
+    assert read_fail_exit_code_from_line("sed", line) == 4
+    assert read_fail_exit_code_from_line("cat", line) == 1
     assert (
-        read_fail_exit_line(
+        read_fail_exit_code_from_line(
             "sed", b"sed: /ram/Is a directory: No such file or directory\n"
         )
         == 2
@@ -266,16 +266,24 @@ def test_read_fail_exit_line_takes_the_most_severe_of_a_blob():
         b"sed: /ram/nope: No such file or directory\n"
         b"sed: /ram/dir: Is a directory\n"
     )
-    assert read_fail_exit_line("sed", blob) == 4
-    assert read_fail_exit_line("sort", blob) == 2
+    assert read_fail_exit_code_from_line("sed", blob) == 4
+    assert read_fail_exit_code_from_line("sort", blob) == 2
 
 
 def test_read_fail_exit_line_keeps_the_catch_all_for_anything_else():
     # A line that carries no strerror is not a failed read, and neither
     # is one whose only strerror sits inside the path.
-    assert read_fail_exit_line("sed", b"sed: -e expression #1: unknown\n") == 1
-    assert read_fail_exit_line("sed", b"") == 1
-    assert read_fail_exit_line("sed", b"sed: /ram/Is a directory\n") == 1
+    assert (
+        read_fail_exit_code_from_line(
+            "sed", b"sed: -e expression #1: unknown\n"
+        )
+        == 1
+    )
+    assert read_fail_exit_code_from_line("sed", b"") == 1
+    assert (
+        read_fail_exit_code_from_line("sed", b"sed: /ram/Is a directory\n")
+        == 1
+    )
 
 
 def test_curl_usage_errors_exit_2():
@@ -366,7 +374,7 @@ def test_a_program_that_is_not_getopt_long_keeps_its_unknown_wording():
     """curl, python, jq and find answer this as an unknown option.
 
     Each measured: `curl --silent=2` is `option --silent=2: is unknown`,
-    `python3 --version=2` is `unknown option --version=2`, and
+    `python3 --version=2` is `Unknown option: --version=2`, and
     `jq --tab=2` is jq's own unknown-option line. Routing them through
     the getopt_long wording would put GNU's words in a program that does
     not use GNU's parser.
@@ -377,7 +385,7 @@ def test_a_program_that_is_not_getopt_long_keeps_its_unknown_wording():
     msg, _ = unexpected_value_error("jq", "--tab=2")
     assert msg.startswith(b"jq: unrecognized option '--tab=2'\n")
     msg, _ = unexpected_value_error("python3", "--version=2")
-    assert msg.startswith(b"unknown option --version=2\n")
+    assert msg.startswith(b"Unknown option: --version=2\n")
     msg, _ = unexpected_value_error("find", "--help=2")
     assert msg == b"find: unknown predicate `--help=2'\n"
 

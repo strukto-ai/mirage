@@ -36,6 +36,43 @@
       "flags": [
         "f"
       ]
+    },
+    {
+      "id": "uniq_f_zero_is_the_default",
+      "seq": 15500203,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a one\\nb one\\n' | uniq -f 0; printf 'a one\\nb one\\n' | uniq; printf 'a one\\nb one\\n' | uniq -f 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "a one\nb one\na one\nb one\na one\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
     }
   ]
 }

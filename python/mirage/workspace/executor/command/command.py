@@ -22,8 +22,10 @@ from mirage.commands.builtin.generic.crossmount import (
     handle_cross_mount,
     is_cross_mount,
 )
-from mirage.commands.builtin.generic.crossmount.detect import strategy_for
-from mirage.commands.builtin.generic.crossmount.types import Strategy
+from mirage.commands.builtin.generic.crossmount.constants import (
+    RELAY_COMMANDS,
+)
+from mirage.commands.builtin.generic.crossmount.detect import aggregate_for
 from mirage.commands.builtin.generic.program import (
     PROGRAM_FILE_COMMANDS,
     prepare_program,
@@ -47,6 +49,7 @@ from mirage.policy import resolve_limit, resolve_producer
 from mirage.policy.types import HandOff
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.job_table import JobTable
@@ -227,11 +230,12 @@ async def handle_command(
         text_parts = [
             p.virtual if isinstance(p, PathSpec) else p for p in parts
         ]
+        view = session_view(session, registry.policies)
+        if cmd_name == "fg":
+            # The one job builtin that writes before it blocks.
+            return await handle_fg(job_table, text_parts, session, view, sink)
         return await JOB_HANDLERS[cmd_name](
-            job_table,
-            text_parts,
-            session,
-            session_view(session, registry.policies),
+            job_table, text_parts, session, view
         )
 
     # Shell functions
@@ -280,7 +284,7 @@ async def handle_command(
                     if dispatch is not None
                     else None
                 ),
-                ns=namespace_view_of(registry, namespace, dispatch),
+                ns=namespace_view_of(registry, namespace, dispatch, session),
                 session_view=session_view(session, registry.policies),
                 processes=registry.process_view(session)
                 if registry.process_view is not None
@@ -320,7 +324,7 @@ async def handle_command(
     # dispatch chokepoint) stay ahead of this so protective refusals
     # keep their specific messages.
     if lookup(cmd_name, session, registry) is Consumer.UNKNOWN:
-        err = f"{cmd_name}: command not found\n".encode()
+        err = encode_text(f"{cmd_name}: command not found\n")
         return (
             None,
             IOResult(exit_code=127, stderr=err),
@@ -426,9 +430,9 @@ async def handle_command(
             msg = f"{exc}\n"
             return (
                 None,
-                IOResult(exit_code=1, stderr=msg.encode()),
+                IOResult(exit_code=1, stderr=encode_text(msg)),
                 ExecutionNode(
-                    command=cmd_str, exit_code=1, stderr=msg.encode()
+                    command=cmd_str, exit_code=1, stderr=encode_text(msg)
                 ),
             )
         if find_expr.newer and dispatch is not None:
@@ -464,7 +468,9 @@ async def handle_command(
         # word mean two things by mount count -- `cat --vers=x /ram/a` was
         # `option '--version' doesn't allow an argument` and the two-mount
         # line was `unrecognized option '--vers=x'`.
-        shared_spec = SPECS.get(cmd_name)
+        shared_spec = SPECS.get(cmd_name) or (
+            cmd_mount.spec_for(cmd_name) if cmd_mount else None
+        )
         cross_parsed = prepared or parse_flags(
             parts[1:],
             registered_spec(cmd_name, shared_spec)
@@ -472,7 +478,6 @@ async def handle_command(
             else None,
             cmd_name,
             session.cwd,
-            str_flag_paths=cmd_name != "tar",
         )
         cross_texts = (
             find_expr_tokens
@@ -489,19 +494,20 @@ async def handle_command(
                     command=cmd_str, exit_code=code, stderr=refusal_msg
                 ),
             )
-        # sort's output flag and cp/mv's -t route to their owning mount but
-        # are not inputs. Use the parser's operands so aliases and repeated
-        # paths keep their positions instead of subtracting matching path
-        # strings afterward.
+        # A path option's value (sort -o, cp -t, csplit -f) routes to its
+        # owning mount but is not an input. Use the parser's operands so
+        # aliases and repeated paths keep their positions instead of
+        # subtracting matching path strings afterward. find's expression
+        # is not the spec's grammar, so its start points are the words
+        # classified as paths.
         cross_scopes = (
-            cross_parsed.paths
-            if cmd_name in ("sort", "cp", "mv")
-            else path_scopes
+            path_scopes if cmd_name == "find" else cross_parsed.paths
         )
         cross_flags = cross_parsed.flag_kwargs
-        if strategy_for(cmd_name) is Strategy.RELAY:
-            # STREAM and FANOUT run each operand natively on its mount, which
-            # expands the operand's glob. RELAY sees every operand at once
+        if cmd_name in RELAY_COMMANDS:
+            # STREAM and FANOUT (and a custom command's reducer) run each
+            # operand natively on its mount, which expands the operand's
+            # glob. RELAY sees every operand at once
             # (wc's layout, cp's sources), so its glob operands must expand
             # here; an unmatched glob stays the literal word, like bash.
             # One operand at a time, so join's option loop sees each match
@@ -529,7 +535,7 @@ async def handle_command(
             routing_decision=routing_decision,
             execute_fn=execute_fn,
         )
-        cross_ns = namespace_view_of(registry, namespace, dispatch)
+        cross_ns = namespace_view_of(registry, namespace, dispatch, session)
         # A per-operand native run is single-mount by construction, so a
         # traversal operand holding nested mounts has to fan out inside
         # it, exactly as the same operand would on a line of its own.
@@ -544,7 +550,7 @@ async def handle_command(
             registry,
             session.cwd,
             cross_ns,
-            cross_stat,
+            session_view(session, registry.policies),
             dispatch=dispatch,
         )
         stdout, io = await handle_cross_mount(
@@ -560,6 +566,7 @@ async def handle_command(
             session_view=session_view(session, registry.policies),
             cwd=session.cwd,
             argv=spelled_words(parts[1:]),
+            aggregate=aggregate_for(cmd_name, cross_scopes, registry),
         )
         if cmd_name == "find":
             stdout = await _finish_find(
@@ -576,9 +583,9 @@ async def handle_command(
                 starts=cross_scopes,
             )
         if cross_parsed.warnings:
-            warn = "".join(
-                f"{cmd_name}: {w}\n" for w in cross_parsed.warnings
-            ).encode()
+            warn = encode_text(
+                "".join(f"{cmd_name}: {w}\n" for w in cross_parsed.warnings)
+            )
             existing = await materialize(io.stderr) if io.stderr else b""
             io.stderr = warn + existing
         # The native sub-runs carry their own mount's scope; the
@@ -625,7 +632,7 @@ async def handle_command(
                 None,
                 IOResult(
                     exit_code=1,
-                    stderr=span_err.encode(),
+                    stderr=encode_text(span_err),
                 ),
                 ExecutionNode(command=cmd_str, exit_code=1),
             )
@@ -635,7 +642,7 @@ async def handle_command(
             cmd_name, routing_scopes, session.cwd
         )
     except MountCommandUnsupported as exc:
-        err = f"{exc}\n".encode()
+        err = encode_text(f"{exc}\n")
         return (
             None,
             IOResult(exit_code=1, stderr=err),
@@ -646,7 +653,7 @@ async def handle_command(
             None,
             IOResult(
                 exit_code=127,
-                stderr=f"{cmd_name}: command not found".encode(),
+                stderr=encode_text(f"{cmd_name}: command not found"),
             ),
             ExecutionNode(command=cmd_str, exit_code=127),
         )
@@ -680,12 +687,12 @@ async def handle_command(
         )
 
     warn_bytes = (
-        "".join(f"{cmd_name}: {w}\n" for w in parse_warnings).encode()
+        encode_text("".join(f"{cmd_name}: {w}\n" for w in parse_warnings))
         if parse_warnings
         else b""
     )
 
-    single_ns = namespace_view_of(registry, namespace, dispatch)
+    single_ns = namespace_view_of(registry, namespace, dispatch, session)
     single_stat = (
         functools.partial(path_stat, dispatch)
         if dispatch is not None
@@ -707,8 +714,18 @@ async def handle_command(
             cmd_str,
             stdin,
             ns=single_ns,
-            stat_path=single_stat,
+            session_view=session_view(session, registry.policies),
             dispatch=dispatch,
+            native=functools.partial(
+                run_on_mount,
+                registry,
+                session,
+                dispatch,
+                namespace,
+                routing_decision=routing_decision,
+                argv=spelled_words(parts[1:]),
+                execute_fn=execute_fn,
+            ),
         )
         if cmd_name == "find":
             stdout = await _finish_find(

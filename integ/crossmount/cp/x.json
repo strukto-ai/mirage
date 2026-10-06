@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "id": "xm_cp_x_copies_across_mounts_both_ways",
+      "seq": 15600801,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "mkdir -p /data/fcF_cx/t/s && echo f > /data/fcF_cx/t/s/f && cp -rx /data/fcF_cx/t /data2/fcF_cx && cp -x --recursive /data2/fcF_cx /data/fcF_cx/back && find /data2/fcF_cx /data/fcF_cx/back | sort && cat /data/fcF_cx/back/s/f; rm -r /data/fcF_cx /data2/fcF_cx",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fcF_cx/back\n/data/fcF_cx/back/s\n/data/fcF_cx/back/s/f\n/data2/fcF_cx\n/data2/fcF_cx/s\n/data2/fcF_cx/s/f\nf\n",
+        "stderr": ""
+      },
+      "flags": [
+        "x",
+        "r"
+      ]
+    }
+  ]
+}

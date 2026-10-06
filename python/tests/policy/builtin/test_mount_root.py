@@ -66,7 +66,7 @@ def _ctx(
 @pytest.mark.parametrize(
     "cmd,needle",
     [
-        ("rm", "Device or resource busy"),
+        ("rm", "Is a directory"),
         ("rmdir", "Device or resource busy"),
         ("mv", "Device or resource busy"),
         ("mkdir", "File exists"),
@@ -122,6 +122,44 @@ async def test_non_root_paths_and_no_paths_pass():
             is None
         )
     assert await policy.pre_command(_ctx("rm", [], ["-r"], registry)) is None
+
+
+@pytest.mark.parametrize(
+    "argv,raw,virtual,reason",
+    [
+        (
+            ["-r"],
+            "/data/x/..",
+            "/data",
+            "refusing to remove '.' or '..' directory: skipping '/data/x/..'",
+        ),
+        (
+            ["-r"],
+            "//",
+            "//",
+            "it is dangerous to operate recursively on "
+            "'//' (same as '/')\nrm: use --no-preserve-root to override this "
+            "failsafe",
+        ),
+        (
+            ["-r", "--no-pres"],
+            "/",
+            "/",
+            "cannot remove '/': Device or resource busy",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_rm_refuses_a_mount_root_in_gnu_order(
+    argv, raw, virtual, reason
+):
+    registry = _registry()
+    registry.mount("/", RAMVFS(), MountMode.WRITE)
+    deny = await MountRootPolicy().pre_command(
+        _ctx("rm", [_path(virtual, raw)], argv, registry)
+    )
+    assert deny is not None
+    assert deny.reason == reason
 
 
 @pytest.mark.asyncio

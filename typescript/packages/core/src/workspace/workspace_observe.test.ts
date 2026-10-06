@@ -133,6 +133,14 @@ describe('Workspace observer wiring', () => {
     await ws.close()
   })
 
+  it('records what the line showed', async () => {
+    const ws = buildWorkspace()
+    await ws.shell('echo hi; echo err >&2')
+    const commands = await ws.history()
+    expect(commands.map((e) => e.stdout)).toEqual(['hi\n'])
+    await ws.close()
+  })
+
   // Op events name the virtual path, mount prefix included, so two mounts
   // holding the same filename stay distinguishable in the recording. The
   // write arrives through executeOp and the read through a lazy stream, so

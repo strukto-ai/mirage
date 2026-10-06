@@ -12,17 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../kit/typescript/index.ts'
-import type { Ctx, JsonValue, KitRoute } from '../kit/typescript/index.ts'
+import type { JsonValue, KitRoute } from '../kit/typescript/index.ts'
 import { API_PREFIXES, DEFAULT_LOGIN, REPO_DATE } from './config.ts'
 import type { C } from './config.ts'
-import { commitChanges } from './compare.ts'
-import { PROJECTS_CLASSIC_GONE, commitIdentity, nodeId, ownerNode } from './wire.ts'
-import type { CommitRow } from './wire.ts'
+import { commitHistory } from './compare.ts'
+import { PROJECTS_CLASSIC_GONE, nodeId, ownerNode, rootCommit } from './wire.ts'
 import { createReposAllowed, initRepo } from './seed.ts'
 import { commentConnection, issueConnection, issueNode, issueRow } from './issues.ts'
 import type { IssueRow, IssuesArgs } from './issues.ts'
-import { pullRequestConnection, pullRequestNode, pullRow } from './pulls.ts'
+import { commitNode, pullRequestConnection, pullRequestNode, pullRow } from './pulls.ts'
 import type { PullRequestsArgs, PullRow } from './pulls.ts'
 import {
   accountsOf,
@@ -39,12 +37,14 @@ import {
   perRepoModels,
   branchNames,
   commitList,
+  commitsBySha,
   commitsJson,
   metaOf,
   repoByName,
   repoIsEmpty,
   resolveRef,
   scope,
+  tagObject,
   tagRefs,
   treeOfBranch,
 } from './store.ts'
@@ -151,6 +151,85 @@ export function repoDate(repo: RepoRow, key: string): string {
   return typeof value === 'string' ? value : REPO_DATE
 }
 
+const HEADS = 'refs/heads/'
+const TAGS = 'refs/tags/'
+
+/**
+ * The object a sha names as GraphQL's `GitObject`: an annotated tag as a `Tag`
+ * over what it points at, a tree or blob by its id alone, and anything else as
+ * the commit it is.
+ */
+async function objectNode(
+  ctx: { db: C; tenant: string },
+  repo: RepoRow,
+  sha: string,
+  type = 'commit',
+): Promise<Record<string, unknown>> {
+  if (type === 'tree' || type === 'blob')
+    return { __typename: type === 'tree' ? 'Tree' : 'Blob', oid: sha }
+  const tag = await tagObject(ctx.db, ctx.tenant, repo, sha)
+  if (tag !== null)
+    return {
+      __typename: 'Tag',
+      oid: sha,
+      name: tag.tag,
+      message: tag.message,
+      target: () => objectNode(ctx, repo, tag.objectSha, tag.objectType),
+    }
+  const byId = await commitsBySha(ctx.db, ctx.tenant, repo)
+  return commitNode(ctx, [repo], byId.get(sha) ?? rootCommit(sha))
+}
+
+/**
+ * A ref as GraphQL's `Ref` reads it: its short name, the namespace it lives in
+ * and what it points at, a branch's head commit, or null for a branch nothing
+ * has been committed to.
+ */
+function refNode(
+  ctx: { db: C; tenant: string },
+  repo: RepoRow,
+  prefix: string,
+  name: string,
+): Record<string, unknown> {
+  return {
+    name,
+    prefix,
+    target: async () => {
+      if (prefix === TAGS) {
+        const tag = (await tagRefs(ctx.db, ctx.tenant, repo)).find((row) => row.name === name)
+        return tag === undefined ? null : await objectNode(ctx, repo, tag.sha)
+      }
+      const [head] = await commitList(ctx.db, ctx.tenant, repo, name)
+      return head === undefined ? null : commitNode(ctx, [repo], head)
+    },
+  }
+}
+
+// `ref(qualifiedName:)`: a fully qualified name in its own namespace, and a
+// short one as a branch, then as a tag. A partial prefix such as
+// `heads/main` names nothing, and neither does a name no ref has (both
+// measured against GitHub, 2026-10-03).
+async function namedRef(
+  ctx: { db: C; tenant: string },
+  repo: RepoRow,
+  qualifiedName: string,
+): Promise<Record<string, unknown> | null> {
+  const branches = await branchNames(ctx.db, ctx.tenant, repo)
+  const tags = (await tagRefs(ctx.db, ctx.tenant, repo)).map((row) => row.name)
+  const tries: [string, string][] = qualifiedName.startsWith(HEADS)
+    ? [[HEADS, qualifiedName.slice(HEADS.length)]]
+    : qualifiedName.startsWith(TAGS)
+      ? [[TAGS, qualifiedName.slice(TAGS.length)]]
+      : [
+          [HEADS, qualifiedName],
+          [TAGS, qualifiedName],
+        ]
+  for (const [prefix, name] of tries) {
+    if ((prefix === HEADS ? branches : tags).includes(name)) return refNode(ctx, repo, prefix, name)
+  }
+  return null
+}
+
 /**
  * The GraphQL `Repository` for one row: the same facts the REST object reports,
  * in GraphQL's spelling, plus what GraphQL alone exposes. A fixture's
@@ -217,7 +296,8 @@ export async function repositoryNode(
     watchers: { totalCount: loginsOf(repo, 'subscribers').length },
     codeOfConduct: null,
     contactLinks: [],
-    defaultBranchRef: { name: repo.defaultBranch },
+    defaultBranchRef: refNode(ctx, repo, HEADS, repo.defaultBranch),
+    ref: ({ qualifiedName }: { qualifiedName: string }) => namedRef(ctx, repo, qualifiedName),
     deleteBranchOnMerge: meta.delete_branch_on_merge === true,
     diskUsage: 0,
     fundingLinks: [],
@@ -492,15 +572,27 @@ export function repoRoutes(): KitRoute<C>[] {
         // full or abbreviated, starts the list at itself. One that names
         // nothing is 404, measured against GitHub (2026-09-29); listing the
         // default branch instead answered a question nobody asked. The list
-        // is filtered, then paged the way the repository list is.
+        // is every commit reachable through any parent, newest first, so a
+        // merged branch's commits are on it; it is filtered, then paged the
+        // way the repository list is.
         withRepo(async (ctx, repo) => {
           if (await repoIsEmpty(ctx.db, ctx.tenant, repo)) {
             return fail(409, 'Git Repository is empty.')
           }
           const at = await resolveRef(ctx.db, ctx.tenant, repo, ctx.query.get('sha') ?? '')
           if (at === null) return fail(404, 'Not Found')
-          if (at.history.length === 0) return fail(409, 'Git Repository is empty.')
-          const page = paged(ctx, await commitsMatching(ctx, repo, at.history))
+          const head = at.history[0]
+          if (head === undefined) return fail(409, 'Git Repository is empty.')
+          const byId = await commitsBySha(ctx.db, ctx.tenant, repo)
+          const page = paged(
+            ctx,
+            await commitHistory(ctx.db, ctx.tenant, repo, head.sha, byId, {
+              since: ctx.query.get('since'),
+              until: ctx.query.get('until'),
+              author: ctx.query.get('author') ?? '',
+              path: ctx.query.get('path') ?? '',
+            }),
+          )
           if (page === null) return fail(422, 'Validation Failed')
           const body = await commitsJson(ctx.db, ctx.tenant, repo, page.items)
           return { status: 200, body, headers: page.headers }
@@ -508,41 +600,6 @@ export function repoRoutes(): KitRoute<C>[] {
       ),
     ),
   ])
-}
-
-// The filters `commits` reads. `since` and `until` bound the commit date, and
-// one that is no date bounds everything out, as GitHub's does (measured
-// 2026-09-29: `since=abc` answers `[]`). `author` is the author's login or
-// email. `path` keeps the commits whose change against their first parent
-// touches that file or anything under it, a rename's old name included.
-async function commitsMatching(
-  ctx: Ctx<C>,
-  repo: RepoRow,
-  history: CommitRow[],
-): Promise<CommitRow[]> {
-  const since = ctx.query.get('since')
-  const until = ctx.query.get('until')
-  const author = (ctx.query.get('author') ?? '').toLowerCase()
-  const path = stripSlash(ctx.query.get('path') ?? '')
-  const kept: CommitRow[] = []
-  for (const [i, row] of history.entries()) {
-    const who = commitIdentity(row)
-    const when = Date.parse(who.committed)
-    if (since !== null && !(when >= Date.parse(since))) continue
-    if (until !== null && !(when <= Date.parse(until))) continue
-    if (author !== '' && who.login.toLowerCase() !== author && who.email.toLowerCase() !== author)
-      continue
-    if (path !== '') {
-      const changes = await commitChanges(ctx.db, ctx.tenant, repo, history.slice(i))
-      const touched = changes.flatMap((c) => [
-        c.filename,
-        ...(c.previous === null ? [] : [c.previous]),
-      ])
-      if (!touched.some((p) => p === path || p.startsWith(`${path}/`))) continue
-    }
-    kept.push(row)
-  }
-  return kept
 }
 
 const listRepos: Handler = async (ctx) => {
@@ -814,7 +871,12 @@ const forkRepo: Handler = authed(
   withRepo(async (ctx, source) => {
     const body = jsonBodyOf(ctx)
     const name = str(body, 'name').trim() === '' ? source.name : str(body, 'name').trim()
-    const fullName = `${DEFAULT_LOGIN}/${name}`
+    // `organization` forks into that account instead of the caller's, and
+    // `default_branch_only` copies the default branch alone.
+    const owner =
+      str(body, 'organization').trim() === '' ? DEFAULT_LOGIN : str(body, 'organization').trim()
+    const onlyDefault = body.default_branch_only === true
+    const fullName = `${owner}/${name}`
     const existing = await repoByName(ctx.db, ctx.tenant, fullName)
     if (existing !== null)
       return { status: 202, body: await repoJson(ctx.db, ctx.tenant, existing) }
@@ -822,7 +884,7 @@ const forkRepo: Handler = authed(
       data: {
         tenant: ctx.tenant,
         fullName,
-        owner: DEFAULT_LOGIN,
+        owner,
         name,
         defaultBranch: source.defaultBranch,
         metaJson: JSON.stringify({
@@ -841,6 +903,7 @@ const forkRepo: Handler = authed(
     // a fork shares its network's history and objects: a pull request from
     // it then has a merge base with its parent.
     for (const branch of await branchNames(ctx.db, ctx.tenant, source)) {
+      if (onlyDefault && branch !== source.defaultBranch) continue
       await addBranch(ctx.db, ctx.tenant, fullName, branch)
       const head = await headOf(ctx.db, ctx.tenant, source, branch)
       if (head !== '') {

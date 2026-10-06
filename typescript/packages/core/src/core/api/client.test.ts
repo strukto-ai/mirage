@@ -291,17 +291,17 @@ describe('retry delays', () => {
     }
   })
 
-  it('body mode refuses a delay it could never wait out and caps the rest', async () => {
+  it('body mode refuses a delay it could never wait out and caps the rest', () => {
     // JSON.parse rejects a bare NaN literal but overflows 1e999 to Infinity.
-    expect(await bodyDelay(new Response('{"retry_after": 2.5}'), retry)).toBe(2.5)
-    expect(await bodyDelay(new Response('{"retry_after": 7.5}'), retry)).toBe(4)
-    expect(await bodyDelay(new Response('{"retry_after": 1e999}'), retry)).toBe(1)
-    expect(await bodyDelay(new Response('{"retry_after": -5}'), retry)).toBe(1)
-    expect(await bodyDelay(new Response('{"retry_after": "soon"}'), retry)).toBe(1)
-    expect(await bodyDelay(new Response('not json'), retry)).toBe(1)
+    expect(bodyDelay('{"retry_after": 2.5}', retry)).toBe(2.5)
+    expect(bodyDelay('{"retry_after": 7.5}', retry)).toBe(4)
+    expect(bodyDelay('{"retry_after": 1e999}', retry)).toBe(1)
+    expect(bodyDelay('{"retry_after": -5}', retry)).toBe(1)
+    expect(bodyDelay('{"retry_after": "soon"}', retry)).toBe(1)
+    expect(bodyDelay('not json', retry)).toBe(1)
     // the 1s fallback bows to a ceiling below it
     const tight: RetryPolicy = { ...NO_RETRY, statuses: new Set([429]), maxBackoff: 0.5 }
-    expect(await bodyDelay(new Response('not json'), tight)).toBe(0.5)
+    expect(bodyDelay('not json', tight)).toBe(0.5)
   })
 
   it('a vetoed retryable status maps through the hook at once', async () => {
@@ -383,4 +383,22 @@ describe('bytes_response read', () => {
     // Read once, as bytes; a text read would have mangled binary content.
     expect(drain).toHaveBeenCalledTimes(1)
   })
+})
+
+describe('a repeated header', () => {
+  it.each(['bytes_response', 'response'] as const)(
+    'reads joined on a %s read, the way python joins it',
+    async (read) => {
+      // Two ETags name no single version; joined, the value matches no token.
+      const headers = new Headers({ 'Content-Type': 'application/json' })
+      headers.append('ETag', '"one"')
+      headers.append('ETag', '"two"')
+      const fakeFetch: typeof fetch = () =>
+        Promise.resolve(new Response('{"ok":true}', { status: 200, headers }))
+      const out = (await apiRequest('GET', TARGET, { errorOf, fetchFn: fakeFetch, read })) as {
+        headers: Record<string, string>
+      }
+      expect(out.headers.etag).toBe('"one", "two"')
+    },
+  )
 })

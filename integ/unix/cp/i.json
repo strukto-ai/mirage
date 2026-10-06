@@ -1,0 +1,112 @@
+{
+  "cases": [
+    {
+      "id": "cp_i_asks_and_reads_the_answer_from_stdin",
+      "seq": 15000080,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && printf x > fc0s && printf y > fc0d && cp -i fc0s fc0d; echo rc=$?; cat fc0d; echo; printf 'y\\n' | cp -i fc0s fc0d; echo rc=$?; cat fc0d; echo; printf y > fc0d; printf 'n\\n' | cp --interactive fc0s fc0d; echo rc=$?; cat fc0d; echo; cp -i fc0s fc0new; echo rc=$?; printf 'Yes\\n' | cp -i fc0s fc0d; echo rc=$?; rm -f fc0s fc0d fc0new)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\ny\nrc=0\nx\nrc=1\ny\nrc=0\nrc=0\n",
+        "stderr": "cp: overwrite 'fc0d'? cp: overwrite 'fc0d'? cp: overwrite 'fc0d'? cp: overwrite 'fc0d'? "
+      },
+      "flags": [
+        "i",
+        "interactive"
+      ]
+    },
+    {
+      "id": "cp_i_and_n_the_later_wins_and_f_keeps_asking",
+      "seq": 15000081,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && printf x > fc0s && printf y > fc0d && cp -in fc0s fc0d; echo rc=$?; cp -ni fc0s fc0d; echo rc=$?; cp -if fc0s fc0d; echo rc=$?; cat fc0d; echo; rm -f fc0s fc0d)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrc=1\nrc=1\ny\n",
+        "stderr": "cp: overwrite 'fc0d'? cp: overwrite 'fc0d'? "
+      },
+      "flags": [
+        "i",
+        "n",
+        "f"
+      ]
+    },
+    {
+      "id": "cp_i_asks_before_the_just_created_refusal",
+      "seq": 15000082,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fc0j/d1 /data/fc0j/d2 /data/fc0j/dst && echo 1 > /data/fc0j/d1/f && echo 2 > /data/fc0j/d2/f && cd /data/fc0j && printf 'y\\ny\\n' | cp -i d1/f d2/f dst; echo rc=$?; cat dst/f; cd / && rm -rf /data/fc0j)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n1\n",
+        "stderr": "cp: overwrite 'dst/f'? cp: will not overwrite just-created 'dst/f' with 'd2/f'\n"
+      },
+      "flags": [
+        "i"
+      ]
+    }
+  ]
+}

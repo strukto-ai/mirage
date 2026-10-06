@@ -14,6 +14,7 @@
 
 import type { NamespaceView } from '../../../../../ops/types.ts'
 import { transferLinksOf } from '../utils.ts'
+import type { ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { refuseReveal } from '../../../generic_bind/adapter.ts'
 import { mvGeneric, parseFlags } from '../../mv.ts'
@@ -35,6 +36,8 @@ export async function runMv(
   // then unlink the source, destroying it.
   storageKey?: (path: PathSpec) => string,
   ns?: NamespaceView,
+  // Where -i reads its answers.
+  stdin: ByteSource | null = null,
 ): Promise<CrossResult> {
   const flat = flatten(scopes)
   const stat = statOp(dispatch)
@@ -61,6 +64,7 @@ export async function runMv(
     storageKey,
     undefined,
     refuseReveal,
-    ns?.links == null ? undefined : transferLinksOf(ns.links, dispatch, '/'),
+    ns?.links == null ? undefined : transferLinksOf(ns.links, dispatch, '/', ns.visibility),
+    stdin,
   )
 }

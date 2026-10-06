@@ -203,6 +203,40 @@
         "stdout": "      5       5      24\n      5       5      24 total\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "wc_two_empty_files_stay_unpadded",
+      "seq": 15300206,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "wc /data/empty.txt /data/empty.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "0 0 0 /data/empty.txt\n0 0 0 /data/empty.txt\n0 0 0 total\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -284,3 +284,19 @@ describe('sed regex compilation (GNU sed 4.9 over glibc)', () => {
     ).toHaveLength(3)
   })
 })
+
+describe('a UTF-8 script', () => {
+  it('reads characters', () => {
+    const program = compileScript(
+      [{ kind: 'expr', text: 'y/\u00e9/e/;s/\\xc3\\xa9/x/' }],
+      false,
+      true,
+    )
+    const [y, s] = program.commands
+    expect([y?.ySrc, y?.yDst]).toEqual([['\u00e9'], ['e']])
+    expect(s?.subst?.re?.source).toBe('\u00e9')
+    expect(error('y/\u00e9/e/')).toBe(
+      "sed: -e expression #1, char 7: strings for `y' command are different lengths",
+    )
+  })
+})

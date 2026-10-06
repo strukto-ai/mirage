@@ -1,0 +1,86 @@
+{
+  "cases": [
+    {
+      "id": "documents_skill_cli_profile",
+      "seq": 960014,
+      "targets": [
+        "git-ram",
+        "git-disk"
+      ],
+      "command": "grep -c '^## `git status`' /SKILL.md; grep -c '^## `git add`' /SKILL.md",
+      "expect": {
+        "exit": 1,
+        "stdout": "1\n0\n",
+        "stderr": ""
+      },
+      "session": "docs-cli",
+      "session_profiles": {
+        "docs-cli": {
+          "commands": {
+            "allow": [
+              "git status",
+              "grep",
+              "cat",
+              "man",
+              "which",
+              "type"
+            ]
+          }
+        }
+      },
+      "documents": [
+        {
+          "kind": "skill",
+          "path": "/SKILL.md",
+          "session": "docs-cli"
+        }
+      ]
+    },
+    {
+      "id": "documents_skill_cli_bin_man",
+      "seq": 960015,
+      "targets": [
+        "git-ram",
+        "git-disk"
+      ],
+      "command": "which git; type -t git; man git status | head -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "/usr/bin/git\nfile\ngit status: Show the working tree status\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "documents_argparse_help_man_skill",
+      "seq": 960016,
+      "targets": [
+        "cli-airtable"
+      ],
+      "documents": [
+        {
+          "kind": "skill",
+          "path": "/SKILL.md"
+        }
+      ],
+      "command": "airtable record list --help > /scratch/help.txt; man airtable record list > /scratch/man.txt; cmp /scratch/help.txt /scratch/man.txt; grep -c '^usage: airtable record list' /SKILL.md; which airtable; type -t airtable",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n/usr/bin/airtable\nfile\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "documents_short_help_matches_long",
+      "seq": 960017,
+      "targets": [
+        "cli-airtable"
+      ],
+      "command": "airtable -h > /scratch/short.txt; airtable --help > /scratch/long.txt; cmp /scratch/short.txt /scratch/long.txt && echo same",
+      "expect": {
+        "exit": 0,
+        "stdout": "same\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

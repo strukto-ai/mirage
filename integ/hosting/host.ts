@@ -3,7 +3,6 @@ import { AuthMode } from '../../typescript/packages/server/src/auth/config.ts'
 
 const app = buildApp({
   authConfig: { mode: AuthMode.Local },
-  sshConfig: null,
   idleGraceSeconds: 60,
 })
 const gates = new Map<string, { wait: Promise<void>; release: () => void }>()

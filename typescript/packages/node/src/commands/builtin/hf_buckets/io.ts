@@ -27,7 +27,7 @@ import { read as hfRead } from '../../../core/hf_buckets/read.ts'
 import { readdir as hfReaddir } from '../../../core/hf_buckets/readdir.ts'
 import { rmR as hfRmR } from '../../../core/hf_buckets/rm.ts'
 import { stat as hfStat } from '../../../core/hf_buckets/stat.ts'
-import { stream as hfStream } from '../../../core/hf_buckets/stream.ts'
+import { readStream as hfStream } from '../../../core/hf_buckets/stream.ts'
 import { exists as hfExists } from '../../../core/hf_buckets/exists.ts'
 import { write as hfWrite } from '../../../core/hf_buckets/write.ts'
 

@@ -12,12 +12,45 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.shell.console.constants import KILLED_OUTCOME
-from mirage.shell.console.job_console import JobConsole
-from mirage.shell.console.ram import RAMConsoleStore
-from mirage.shell.console.store import ConsoleStore
-from mirage.shell.console.types import Channel, ConsoleChunk, ReadResult
-from mirage.shell.console.utils import exit_outcome
+import importlib
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mirage.shell.console.constants import KILLED_OUTCOME
+    from mirage.shell.console.job_console import JobConsole
+    from mirage.shell.console.ram import RAMConsoleStore
+    from mirage.shell.console.store import ConsoleStore
+    from mirage.shell.console.terminal import JobOutput, JobSide, Tee, Terminal
+    from mirage.shell.console.types import (
+        Channel,
+        ConsoleChunk,
+        OwnedStream,
+        ReadResult,
+    )
+    from mirage.shell.console.utils import exit_outcome
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.shell.console.constants": ("KILLED_OUTCOME",),
+    "mirage.shell.console.job_console": ("JobConsole",),
+    "mirage.shell.console.ram": ("RAMConsoleStore",),
+    "mirage.shell.console.store": ("ConsoleStore",),
+    "mirage.shell.console.terminal": (
+        "JobOutput",
+        "JobSide",
+        "Tee",
+        "Terminal",
+    ),
+    "mirage.shell.console.types": (
+        "Channel",
+        "ConsoleChunk",
+        "OwnedStream",
+        "ReadResult",
+    ),
+    "mirage.shell.console.utils": ("exit_outcome",),
+}
+_MODULE_OF = {
+    name: module for module, names in _EXPORTS.items() for name in names
+}
 
 __all__ = [
     "KILLED_OUTCOME",
@@ -25,7 +58,21 @@ __all__ = [
     "ConsoleChunk",
     "ConsoleStore",
     "JobConsole",
+    "JobOutput",
+    "JobSide",
+    "OwnedStream",
     "RAMConsoleStore",
     "ReadResult",
+    "Tee",
+    "Terminal",
     "exit_outcome",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    module = _MODULE_OF.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(importlib.import_module(module), name)
+    globals()[name] = value
+    return value

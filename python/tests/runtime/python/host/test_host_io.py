@@ -128,7 +128,6 @@ class TestDoors:
 
 class TestStreams:
     def test_a_wrapped_stream_serves_each_chunk_inside_the_bypass(self):
-
         async def drain():
             seen: list[bool] = []
             outside: list[bool] = []

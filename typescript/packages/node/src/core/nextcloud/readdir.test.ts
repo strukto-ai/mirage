@@ -65,6 +65,20 @@ describe('nextcloud readdir', () => {
     )
   })
 
+  it('stats each component of a missing path once', async () => {
+    const fake = new FakeNextcloudOperator({ 'data/a.txt': 'a' })
+    const asked: string[] = []
+    const realStat = fake.stat.bind(fake)
+    fake.stat = (key) => {
+      asked.push(key)
+      return realStat(key)
+    }
+    await expect(
+      codeOf(readdir(accessorWith(fake), PathSpec.fromStrPath('/data/never'))),
+    ).resolves.toBe('ENOENT')
+    expect(asked).toEqual(['data/never', 'data'])
+  })
+
   it('reports ENOENT for a missing nested path', async () => {
     const accessor = accessorWith(new FakeNextcloudOperator({ 'data/a.txt': 'a' }))
     await expect(codeOf(readdir(accessor, PathSpec.fromStrPath('/nodir/deep')))).resolves.toBe(

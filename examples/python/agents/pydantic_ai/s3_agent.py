@@ -14,14 +14,13 @@
 
 import asyncio
 import os
-from dataclasses import dataclass
 
 from dotenv import load_dotenv
 from pydantic_ai import Agent
-from pydantic_ai_backends import create_console_toolset
+from pydantic_ai_backends import PERMISSIVE_RULESET, ConsoleCapability
 
 from mirage import MountMode, Workspace
-from mirage.agents.pydantic_ai import PydanticAIWorkspace, build_system_prompt
+from mirage.agents.pydantic_ai import MirageWorkspace, build_system_prompt
 from mirage.vfs.s3 import S3VFS, S3Config
 
 load_dotenv(".env.development")
@@ -37,29 +36,23 @@ s3 = S3VFS(config)
 ws = Workspace({"/s3/": s3}, mode=MountMode.READ)
 
 
-@dataclass
-class Deps:
-    backend: PydanticAIWorkspace
-
-
-backend = PydanticAIWorkspace(ws)
-
-
 async def main():
     agent = Agent(
         "openai:gpt-4.1",
         system_prompt=await build_system_prompt(
             mount_info={"/s3/": "S3 bucket (CSV, Parquet, JSONL)"}
         ),
-        deps_type=Deps,
-        toolsets=[create_console_toolset()],
+        capabilities=[
+            MirageWorkspace(ws),
+            ConsoleCapability(permissions=PERMISSIVE_RULESET),
+        ],
     )
 
     task = (
         "Explore and summarize the data in /s3/data/."
         " Use head command for large files and do not write anything."
     )
-    result = await agent.run(task, deps=Deps(backend=backend))
+    result = await agent.run(task)
     print(result.output)
 
     records = ws.vfs.records

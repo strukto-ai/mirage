@@ -61,17 +61,15 @@ def _suffix_error(value: str, junk: str) -> UsageError:
     )
 
 
-def _missing_i_error(value: str) -> UsageError:
+def _missing_i_suffix_error(value: str) -> UsageError:
     """GNU's ``--from=iec-i`` complaint that the ``i`` is absent, exit 2.
 
-    The ``i`` test sits OUTSIDE the suffix branch in GNU's
-    ``simple_strtod_human``, so it answers for every field whose unit
-    letter is not followed by an ``i`` -- a field with no unit at all
-    included. Measured on coreutils 9.4: ``1``, ``1.5``, ``1K``, ``1Kx``,
-    ``1KB`` and ``1KII`` all get this clause, while ``1Kii`` and ``1KiB``
-    consume the ``i`` and report their leftover as an invalid suffix
-    instead, and ``1i`` never reaches it because ``i`` is not a unit
-    letter.
+    It answers for every field whose unit letter is not followed by an
+    ``i``: ``1K``, ``1Kx``, ``1KB`` and ``1KII`` all get this clause,
+    while ``1Kii`` and ``1KiB`` consume the ``i`` and report their
+    leftover as an invalid suffix instead, ``1i`` never reaches it
+    because ``i`` is not a unit letter, and a field with no unit at all
+    is read as it stands (coreutils 9.7; 9.4 refused that one too).
 
     Args:
         value (str): the whole input field, as typed.
@@ -105,7 +103,7 @@ def _scale_of(value: str, suffix: str, from_mode: str) -> tuple[int, int]:
     tail = suffix[1:]
     if from_mode == "iec-i":
         if tail[:1] != "i":
-            raise _missing_i_error(value)
+            raise _missing_i_suffix_error(value)
         if tail[1:]:
             raise _suffix_error(value, tail[1:])
         return 1024, exponent
@@ -147,8 +145,6 @@ def _parse_number(value: str, from_mode: str) -> tuple[Decimal, int]:
     number = Decimal(digits)
     _, _, fraction = digits.partition(".")
     if not suffix:
-        if from_mode == "iec-i":
-            raise _missing_i_error(value)
         return number, len(fraction)
     if suffix[0] not in _UNIT_EXPONENTS:
         raise _suffix_error(value, "")
@@ -163,9 +159,7 @@ def _parse_number(value: str, from_mode: str) -> tuple[Decimal, int]:
     return ctx.multiply(number, ctx.power(Decimal(base), exponent)), 0
 
 
-def _format_number(
-    number: Decimal, to_mode: str, grouping: bool, decimals: int
-) -> str:
+def _format_number(number: Decimal, to_mode: str, decimals: int) -> str:
     """Render a value the way GNU numfmt does for the given --to mode.
 
     GNU rounds away from zero, keeping one decimal only while the scaled
@@ -183,7 +177,6 @@ def _format_number(
     Args:
         number (Decimal): Value to render, already --from scaled.
         to_mode (str): One of ``none``, ``si``, ``iec`` or ``iec-i``.
-        grouping (bool): Whether to group thousands.
         decimals (int): Decimal places for ``--to=none``.
     """
     if to_mode == "none":
@@ -192,9 +185,7 @@ def _format_number(
             rounding=ROUND_UP,
             context=_context_for(str(number)),
         )
-        return format(
-            number, f",.{decimals}f" if grouping else f".{decimals}f"
-        )
+        return format(number, f".{decimals}f")
     base = Decimal(1000 if to_mode == "si" else 1024)
     display = _SI_DISPLAY if to_mode == "si" else _SUFFIX_ORDER
     power = 0
@@ -213,20 +204,17 @@ def _format_number(
     suffix = display[power]
     if to_mode == "iec-i" and power:
         suffix += "i"
-    spec = f",.{places}f" if grouping else f".{places}f"
-    return format(number, spec) + suffix
+    return format(number, f".{places}f") + suffix
 
 
 def _convert_field(
-    value: str, to_mode: str, from_mode: str, suffix: str, grouping: bool
+    value: str, to_mode: str, from_mode: str, suffix: str
 ) -> str:
     number, decimals = _parse_number(value.removesuffix(suffix), from_mode)
-    return _format_number(number, to_mode, grouping, decimals) + suffix
+    return _format_number(number, to_mode, decimals) + suffix
 
 
-def _convert_line(
-    line: str, to_mode: str, from_mode: str, suffix: str, grouping: bool
-) -> str:
+def _convert_line(line: str, to_mode: str, from_mode: str, suffix: str) -> str:
     """Reformat the first field of a record, preserving the rest verbatim.
 
     GNU ``numfmt`` converts only ``--field`` (1 by default) and copies the
@@ -237,20 +225,15 @@ def _convert_line(
         to_mode (str): Output scaling mode.
         from_mode (str): Input scaling mode.
         suffix (str): Suffix stripped before parsing and re-appended.
-        grouping (bool): Whether to group thousands in the output.
     """
     match = _FIRST_FIELD_RE.fullmatch(line)
     if match is None:
         return line
     lead, field, rest = match.groups()
-    return (
-        lead
-        + _convert_field(field, to_mode, from_mode, suffix, grouping)
-        + rest
-    )
+    return lead + _convert_field(field, to_mode, from_mode, suffix) + rest
 
 
-async def numfmt(
+async def numfmt_generic(
     *texts: str,
     stdin: ByteSource | None = None,
     to_mode: str = "none",
@@ -258,7 +241,14 @@ async def numfmt(
     suffix: str = "",
     grouping: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
-    convert: Callable[[str, str, str, str, bool], str]
+    # mirage's one locale is C, whose thousands separator is empty, so
+    # --grouping groups nothing; GNU still refuses it beside a --to scale.
+    if grouping and to_mode != "none":
+        return None, IOResult(
+            exit_code=1,
+            stderr=b"numfmt: grouping cannot be combined with --to\n",
+        )
+    convert: Callable[[str, str, str, str], str]
     if texts:
         fields, convert = list(texts), _convert_field
     else:
@@ -268,7 +258,7 @@ async def numfmt(
     printed = ""
     for value in fields:
         try:
-            printed += convert(value, to_mode, from_mode, suffix, grouping)
+            printed += convert(value, to_mode, from_mode, suffix)
         except UsageError as exc:
             # GNU aborts at the first invalid number, after printing the
             # ones before it.
@@ -279,4 +269,4 @@ async def numfmt(
     return printed.encode(), IOResult()
 
 
-__all__ = ["numfmt"]
+__all__ = ["numfmt_generic"]

@@ -33,6 +33,40 @@
       "flags": [
         "l"
       ]
+    },
+    {
+      "id": "cmp_l_pads_offsets_and_octal_and_names_an_empty_file",
+      "seq": 15800070,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/crc && printf 'a\\001c' > /data/crc/c1 && cd /data/crc && printf 'a\\177c' > c2 && cmp -l c1 c2; echo rc=$?; : > z && printf 'x' > x && cmp z x; echo rc=$?; cmp -l z x; echo rc=$?; printf 'abcdefghijk' > s && printf 'abXdefghijkZZ' > t && cmp -l s t; echo rc=$?; cd / && rm -r /data/crc",
+      "expect": {
+        "exit": 0,
+        "stdout": "2   1 177\nrc=1\nrc=1\nrc=1\n 3 143 130\nrc=1\n",
+        "stderr": "cmp: EOF on z which is empty\ncmp: EOF on z which is empty\ncmp: EOF on s after byte 11\n"
+      },
+      "flags": [
+        "l"
+      ]
     }
   ]
 }

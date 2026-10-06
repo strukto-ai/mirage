@@ -3176,9 +3176,13 @@ async def test_xargs_overlapping_shell_sessions(procs, named, child_first):
             child_held.set()
         child_result, other_result = await asyncio.gather(child, other)
         assert await child_result.console.snapshot() == b"child\n"
-        assert _stdout(other_result) == b"outer:kept\n"
         assert child_result.exit_code == other_result.exit_code == 0
-        assert _stdout(await ws.shell('echo "$X:$Y"')) == b"outer:kept\n"
+        later = _stdout(await ws.shell('echo "$X:$Y"'))
+        assert _stdout(other_result).endswith(b"outer:kept\n")
+        assert later.endswith(b"outer:kept\n")
+        # The job writes to the session's terminal: once, in whichever
+        # line was running when it wrote.
+        assert (_stdout(other_result) + later).count(b"child\n") == 1
     finally:
         child_held.set()
         other_held.set()

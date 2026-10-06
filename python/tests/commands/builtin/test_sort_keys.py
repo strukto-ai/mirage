@@ -1,7 +1,7 @@
 import pytest
 
 from mirage.commands.builtin.errors import SortKeyError
-from mirage.commands.builtin.generic.sort import sort
+from mirage.commands.builtin.generic.sort import sort_generic
 from mirage.commands.builtin.sort_keys import (
     KeyMods,
     _compute_fields,
@@ -407,7 +407,7 @@ async def _rb(_path):
 
 
 async def _run_sort(data: bytes, **kwargs) -> list[str]:
-    output, _ = await sort([], read_bytes=_rb, stdin=data, **kwargs)
+    output, _ = await sort_generic([], read_bytes=_rb, stdin=data, **kwargs)
     return output.decode().splitlines()
 
 
@@ -489,11 +489,12 @@ class TestSortGeneralNumeric:
         assert result == ["abc", "nan", "-3", "5", "inf"]
 
     @pytest.mark.asyncio
-    async def test_hex_is_not_numeric(self):
+    async def test_a_leading_number_is_read_like_strtold(self):
         result = await _run_sort(
-            b"0x10\n5", flags={"general_numeric_sort": True}
+            b"0x10\n5\n12abc\n0x\n0x1p99999",
+            flags={"general_numeric_sort": True},
         )
-        assert result == ["0x10", "5"]
+        assert result == ["0x", "5", "12abc", "0x10", "0x1p99999"]
 
 
 class TestSortMixed:

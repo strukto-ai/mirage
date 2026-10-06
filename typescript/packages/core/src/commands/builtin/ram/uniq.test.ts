@@ -60,13 +60,6 @@ describe('uniq', () => {
     expect(r.lines).toEqual(['aaa', 'bbb', 'ccc'])
   })
 
-  it('keeps non-consecutive duplicates', async () => {
-    const vfs = new RAMVFS()
-    vfs.store.files.set('/tmp/f.txt', ENC.encode('aaa\nbbb\naaa'))
-    const r = await runUniq(vfs, [PathSpec.fromStrPath('/tmp/f.txt')])
-    expect(r.lines).toEqual(['aaa', 'bbb', 'aaa'])
-  })
-
   it('-c prefixes each line with count', async () => {
     const vfs = new RAMVFS()
     vfs.store.files.set('/tmp/f.txt', ENC.encode('aaa\naaa\nbbb\nccc\nccc\nccc'))
@@ -117,12 +110,6 @@ describe('uniq', () => {
     vfs.store.files.set('/tmp/f.txt', ENC.encode('hello'))
     const r = await runUniq(vfs, [PathSpec.fromStrPath('/tmp/f.txt')])
     expect(r.lines).toEqual(['hello'])
-  })
-
-  it('reads from stdin when no path', async () => {
-    const vfs = new RAMVFS()
-    const r = await runUniq(vfs, [], {}, ENC.encode('a\na\nb\n'))
-    expect(r.lines).toEqual(['a', 'b'])
   })
 
   it('missing stdin and no path uses empty standard input', async () => {

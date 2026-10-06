@@ -206,8 +206,10 @@ SPECS: dict[str, CommandSpec] = {
             Option(long="--no-encoding"),
             Option(long="--no-pre"),
             Option(long="--unicode"),
+            Option(long="--no-unicode"),
             Option(long="--pcre2-unicode"),
             Option(long="--no-pcre2-unicode"),
+            Option(long="--auto-hybrid-regex"),
             Option(long="--no-auto-hybrid-regex"),
             # Accepted no-op like grep --color (#471), with ripgrep's
             # required value.

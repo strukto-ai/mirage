@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -149,21 +150,6 @@ def _format_asks(items: list[dict[str, Any]]) -> str:
     return format_table(["ID", "SESSION", "COMMAND", "STATUS", "REASON"], rows)
 
 
-def _format_version_log(versions: list[dict[str, Any]]) -> str:
-    if not versions:
-        return "No versions."
-    rows = [[v["id"][:12], v["message"]] for v in versions]
-    return format_table(["VERSION", "MESSAGE"], rows)
-
-
-def _format_diff(changes: dict[str, list[str]]) -> str:
-    lines: list[str] = []
-    for kind in ("added", "modified", "deleted"):
-        for path in changes.get(kind, []):
-            lines.append(f"{kind:<9} {path}")
-    return "\n".join(lines) if lines else "No changes."
-
-
 @app.command("create")
 def create_cmd(
     config_path: Path = typer.Argument(
@@ -222,183 +208,166 @@ def delete_cmd(workspace_id: str = typer.Argument(...)) -> None:
     emit(handle_response(r), human=lambda d: f"Deleted workspace {d['id']}.")
 
 
+@app.command("close")
+def close_cmd(workspace_id: str = typer.Argument(...)) -> None:
+    """Stop a workspace and keep its state for the same id."""
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request(
+            "POST", f"/v1/workspaces/{quote(workspace_id, safe='')}/close"
+        )
+    emit(handle_response(r), human=lambda d: f"Closed workspace {d['id']}.")
+
+
+@app.command("cancel")
+def cancel_cmd(workspace_id: str = typer.Argument(...)) -> None:
+    """Cancel the running and queued commands of every session."""
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request(
+            "POST", f"/v1/workspaces/{quote(workspace_id, safe='')}/cancel"
+        )
+    emit(handle_response(r))
+
+
+@app.command("kill")
+def kill_cmd(workspace_id: str = typer.Argument(...)) -> None:
+    """Kill the background jobs of every session."""
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request(
+            "POST", f"/v1/workspaces/{quote(workspace_id, safe='')}/kill"
+        )
+    emit(handle_response(r))
+
+
 @app.command("clone")
 def clone_cmd(
     source_id: str = typer.Argument(..., help="Source workspace id."),
     new_id: str | None = typer.Option(
         None, "--id", help="Explicit id for the clone."
     ),
-    at: str | None = typer.Option(
-        None,
-        "--at",
-        help="Clone from a past version (id or branch) not the live state.",
-    ),
 ) -> None:
-    """Clone a workspace, optionally from one of its past versions."""
-    body: dict[str, Any] = {"source_id": source_id}
+    """Clone a workspace's live state."""
+    body: dict[str, Any] = {}
     if new_id:
         body["id"] = new_id
-    if at:
-        body["at"] = at
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
-        r = client.request("POST", "/v1/workspaces/clone", json=body)
+        r = client.request(
+            "POST",
+            f"/v1/workspaces/{quote(source_id, safe='')}/clone",
+            json=body,
+        )
     emit(handle_response(r), human=_format_workspace_detail)
 
 
 @app.command("snapshot")
 def snapshot_cmd(
     workspace_id: str = typer.Argument(...),
-    output: Path = typer.Argument(..., help="Path to write the .tar to."),
+    output: Path | None = typer.Argument(
+        None, help="File to write the .tar to, on this machine."
+    ),
+    key: str | None = typer.Option(
+        None, "--key", help="Put it in the server's snapshot store instead."
+    ),
 ) -> None:
-    """Snapshot a workspace to a tar file.
+    """Snapshot a workspace.
 
-    The path is resolved to an absolute path and sent to the daemon,
-    which writes the tar itself. With the default local daemon that is
-    your filesystem; against a remote daemon the tar lands on the
-    daemon host.
+    The server sends the tar back and it is written to OUTPUT here,
+    whether the server runs on this machine or another. With --key it
+    goes to the server's snapshot store under that key.
     """
-    body = {"path": str(output.expanduser().resolve())}
+    if (output is None) == (key is None):
+        fail("snapshot takes an output file or --key", 2)
+    path = f"/v1/workspaces/{quote(workspace_id, safe='')}/snapshot"
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
-        r = client.request(
-            "POST",
-            f"/v1/workspaces/{quote(workspace_id, safe='')}/snapshot",
-            json=body,
-        )
+        if key is not None:
+            r = client.request("POST", path, json={"key": key}, timeout=None)
+            d = handle_response(r)
+            target = key
+        else:
+            r = client.request("GET", path, timeout=None)
+            if r.status_code >= 400:
+                handle_response(r)
+            assert output is not None
+            target = str(output.expanduser())
+            Path(target).write_bytes(r.content)
+            d = {"id": workspace_id, "path": target, "size": len(r.content)}
     emit(
-        handle_response(r),
-        human=lambda d: (
-            f"Snapshot {d['id']} -> {d['path']} ({d['size']:,} bytes)."
+        d,
+        human=lambda x: (
+            f"Snapshot {x['id']} -> {target} ({x['size']:,} bytes)."
         ),
     )
 
 
 @app.command("load")
 def load_cmd(
-    tar_path: Path = typer.Argument(..., exists=True, readable=True),
-    config_path: Path | None = typer.Argument(
+    paths: list[Path] | None = typer.Argument(
         None,
-        exists=True,
-        readable=True,
-        help="Optional workspace YAML/JSON config.",
+        metavar="[FILE] [CONFIG]",
+        help="The .tar to upload, then an optional workspace YAML/JSON "
+        "config; with --key, only the config.",
+    ),
+    key: str | None = typer.Option(
+        None, "--key", help="Load from the server's snapshot store."
     ),
     new_id: str | None = typer.Option(
         None, "--id", help="Explicit id for the restored workspace."
     ),
 ) -> None:
-    """Load a workspace from a tar file.
+    """Load a workspace from a snapshot.
 
-    The path is resolved to an absolute path and sent to the daemon,
-    which reads the tar itself.
+    FILE is read here and uploaded, whether the server runs on this
+    machine or another. With --key the tar comes from the server's
+    snapshot store.
     """
-    body: dict[str, Any] = {"path": str(tar_path.expanduser().resolve())}
+    given = list(paths or [])
+    if key is not None and len(given) > 1:
+        fail("load takes a FILE or --key, not both", 2)
+    if key is None and not 1 <= len(given) <= 2:
+        fail("load takes a FILE (or --key) and an optional CONFIG", 2)
+    tar_path = None if key is not None else given.pop(0)
+    config_path = given[0] if given else None
+    for p in (tar_path, config_path):
+        if p is not None and not p.expanduser().is_file():
+            fail(f"file not found: {p}", 2)
+    body: dict[str, Any] = {}
     if new_id:
         body["id"] = new_id
     if config_path:
         body["override"] = _resolve_config_arg(config_path)
     with make_client() as client:
         client.ensure_running()
-        r = client.request("POST", "/v1/workspaces/load", json=body)
+        if tar_path is None:
+            r = client.request(
+                "POST",
+                "/v1/workspaces/load",
+                json={**body, "key": key},
+                timeout=None,
+            )
+        else:
+            with tar_path.expanduser().open("rb") as tar:
+                r = client.request(
+                    "POST",
+                    "/v1/workspaces/load",
+                    files={
+                        "request": (
+                            "request.json",
+                            json.dumps(body),
+                            "application/json",
+                        ),
+                        "snapshot": (
+                            tar_path.name,
+                            tar,
+                            "application/x-tar",
+                        ),
+                    },
+                    timeout=None,
+                )
     emit(handle_response(r), human=_format_workspace_detail)
-
-
-@app.command("commit")
-def commit_cmd(
-    workspace_id: str = typer.Argument(..., help="Workspace id."),
-    message: str = typer.Option(
-        "", "-m", "--message", help="Version message."
-    ),
-    branch: str = typer.Option(
-        "main", "-b", "--branch", help="Branch to commit on."
-    ),
-) -> None:
-    """Commit the workspace's current state as a version."""
-    body = {"message": message, "branch": branch}
-    with make_client() as client:
-        client.ensure_running(allow_spawn=False)
-        r = client.request(
-            "POST",
-            f"/v1/workspaces/{quote(workspace_id, safe='')}/commit",
-            json=body,
-        )
-    emit(
-        handle_response(r),
-        human=lambda d: f"Committed {d['version'][:12]} on {d['branch']}.",
-    )
-
-
-@app.command("branch")
-def branch_cmd(
-    workspace_id: str = typer.Argument(..., help="Workspace id."),
-    name: str = typer.Argument(..., help="New branch name."),
-    from_branch: str = typer.Option(
-        "main", "--from", help="Branch to fork from."
-    ),
-) -> None:
-    """Create a branch at another branch's current version."""
-    body = {"name": name, "from_branch": from_branch}
-    with make_client() as client:
-        client.ensure_running(allow_spawn=False)
-        r = client.request(
-            "POST",
-            f"/v1/workspaces/{quote(workspace_id, safe='')}/branch",
-            json=body,
-        )
-    emit(
-        handle_response(r),
-        human=lambda d: (
-            f"Created branch {d['branch']} at {d['version'][:12]}."
-        ),
-    )
-
-
-@app.command("log")
-def log_cmd(
-    workspace_id: str = typer.Argument(..., help="Workspace id."),
-    branch: str = typer.Option("main", "-b", "--branch"),
-) -> None:
-    """List a workspace's versions (newest first)."""
-    with make_client() as client:
-        client.ensure_running(allow_spawn=False)
-        r = client.request(
-            "GET",
-            f"/v1/workspaces/{quote(workspace_id, safe='')}/versions",
-            params={"branch": branch},
-        )
-    emit(handle_response(r), human=_format_version_log)
-
-
-@app.command("diff")
-def diff_cmd(
-    workspace_id: str = typer.Argument(..., help="Workspace id."),
-    a: str | None = typer.Argument(
-        None, help="Base ref; omit to use live state."
-    ),
-    b: str | None = typer.Argument(
-        None, help="Compare ref; omit to use live state."
-    ),
-    branch: str = typer.Option("main", "-b", "--branch"),
-) -> None:
-    """Show changed files (git-style).
-
-    diff <id>          live vs HEAD
-    diff <id> <a>      live vs <a>
-    diff <id> <a> <b>  <a> vs <b>
-    """
-    params: dict[str, str] = {"branch": branch}
-    if a is not None:
-        params["a"] = a
-    if b is not None:
-        params["b"] = b
-    with make_client() as client:
-        client.ensure_running(allow_spawn=False)
-        r = client.request(
-            "GET",
-            f"/v1/workspaces/{quote(workspace_id, safe='')}/diff",
-            params=params,
-        )
-    emit(handle_response(r), human=_format_diff)
 
 
 @app.command("list-asks")
@@ -480,23 +449,6 @@ def deny_cmd(
             "POST", f"/v1/workspaces/{wid}/asks/{aid}", json=body
         )
     emit(handle_response(r), human=lambda d: f"Denied {d['id']}.")
-
-
-@app.command("checkout")
-def checkout_cmd(
-    workspace_id: str = typer.Argument(..., help="Workspace id."),
-    ref: str = typer.Argument(..., help="Version id or branch to restore."),
-) -> None:
-    """Restore a workspace in place to one of its versions."""
-    body = {"ref": ref}
-    with make_client() as client:
-        client.ensure_running(allow_spawn=False)
-        r = client.request(
-            "POST",
-            f"/v1/workspaces/{quote(workspace_id, safe='')}/checkout",
-            json=body,
-        )
-    emit(handle_response(r), human=_format_workspace_detail)
 
 
 def _document_cmd(

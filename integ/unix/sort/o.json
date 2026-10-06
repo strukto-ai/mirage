@@ -436,6 +436,43 @@
         "stdout": "",
         "stderr": "sort: options '-cC' are incompatible\n"
       }
+    },
+    {
+      "id": "sort_o_same_file_twice_is_one_output",
+      "seq": 15300105,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sort -o /data/fcC_o -o /data/fcC_o /data/b.txt; echo rc=$?; cat /data/fcC_o; rm /data/fcC_o",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n1\n2\n3\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
     }
   ]
 }

@@ -1,51 +1,43 @@
 ---
 title: Overview
-description: Drop a Mirage workspace into the Python agent framework you already use.
+description: Connect a coding agent or an agent framework to a Mirage workspace.
 icon: robot
 ---
 
-Most integrations ship behind an optional extra. Install only what you use.
+## Coding Agents
+
+Run the agent as it is, on a workspace the `mirage` CLI creates.
+
+| Agent | CLI | SSH | FUSE |
+| --- | :-: | :-: | :-: |
+| [Claude Code](/python/agents/claude-code) | ✓ | | ✓ |
+| [Codex](/python/agents/codex) | ✓ | ✓ | ✓ |
+| [Grok Build](/python/agents/grok-build) | ✓ | | ✓ |
+
+- **CLI**: the agent adds Mirage's seven tools from `mirage mcp`.
+- **SSH**: the agent's own tools run in the workspace.
+- **FUSE**: the agent's own tools work on the workspace, mounted as a folder.
+
+## Agent SDKs
+
+Your program holds the workspace and hands it to the framework.
+
+| Framework | Hand it | The agent gets |
+| --- | --- | --- |
+| [Claude Agent SDK](/python/agents/claude-agent-sdk) | `MirageServer(ws)` | Mirage's seven tools |
+| [Agno](/python/agents/agno) | `MirageToolkit(ws)` | Mirage's seven tools |
+| [OpenAI Agents](/python/agents/openai-agents) | `MirageShellExecutor(ws)`, `MirageEditor(ws)`, `MirageSandboxClient(ws)` | its shell, patch and sandbox tools, run in Mirage |
+| [LangChain Deep Agents](/python/agents/langchain) | `LangchainWorkspace(ws)` | its file and shell tools, run in Mirage |
+| [OpenHands](/python/agents/openhands) | `MirageWorkspace(workspace=ws)` | its workspace and terminal, run in Mirage |
+| [Pydantic AI](/python/agents/pydantic-ai) | `MirageWorkspace(ws)` | its workspace, so every file and shell tool runs in Mirage |
+| [Haystack](/python/agents/haystack) | `MirageShellTool(...)` | a bash tool |
+
+Mirage's seven tools are the session's [`session.tools`](/python/access/in-app#session-tools): `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob`.
+
+Each framework is an extra: `claude-agent-sdk`, `agno`, `openai`, `deepagents`, `openhands` or `pydantic-ai`.
 
 ```bash
-uv add 'mirage-ai[openai]'        # openai-agents
-uv add 'mirage-ai[deepagents]'    # LangChain deepagents
-uv add 'mirage-ai[openhands]'     # OpenHands SDK
-uv add 'mirage-ai[pydantic-ai]'   # pydantic-ai
-uv add 'mirage-ai[agno]'          # Agno
-uv add 'mirage-ai[claude-agent-sdk]'  # Claude Agent SDK
+uv add 'mirage-ai[agno]'
 ```
 
-Haystack is the exception: deepset maintains it in their own repository, so it installs as `mirage-haystack` rather than as an extra.
-
-<CardGroup cols={2}>
-  <Card title="OpenAI Agents" icon="/images/openai-logo.svg" href="/python/agents/openai-agents">
-    For the openai-agents SDK.
-  </Card>
-  <Card title="LangChain · Deep Agents" icon="/images/langchain-logo.svg" href="/python/agents/langchain">
-    Run Deep Agents on a Mirage workspace.
-  </Card>
-  <Card title="OpenHands" icon="/images/openhands-logo.svg" href="/python/agents/openhands">
-    For the OpenHands agent SDK.
-  </Card>
-  <Card title="pydantic-ai" icon="/images/pydantic-logo.svg" href="/python/agents/pydantic-ai">
-    For pydantic-ai and pydantic-deepagents.
-  </Card>
-  <Card title="Agno" icon="/images/agno-logo.svg" href="/python/agents/agno">
-    For Agno's `Agent` via `MirageToolkit`.
-  </Card>
-  <Card title="Haystack" icon="/images/haystack-logo.svg" href="/python/agents/haystack">
-    For Haystack's `Agent`, via deepset's `mirage-haystack` package.
-  </Card>
-  <Card title="Claude Code" icon="/images/claude-logo.svg" href="/python/agents/claude-code">
-    Mount a workspace via FUSE and run `claude` against it.
-  </Card>
-  <Card title="Claude Agent SDK" icon="/images/claude-logo.svg" href="/python/agents/claude-agent-sdk">
-    For `claude-agent-sdk` via an in-process MCP server.
-  </Card>
-  <Card title="Codex" icon="/images/openai-logo.svg" href="/python/agents/codex">
-    Mount with FUSE, then `codex`, or run Codex's own tools in a workspace over SSH.
-  </Card>
-  <Card title="Grok Build" icon="terminal" href="/python/agents/grok-build">
-    Mount a workspace via FUSE and run `grok` against it.
-  </Card>
-</CardGroup>
+Haystack installs as `mirage-haystack`, which deepset maintains.

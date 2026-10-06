@@ -160,9 +160,9 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
   }
 
   async evictPrefix(prefix: string, excluded: readonly string[] = []): Promise<void> {
-    // Store-wide: a fill in flight under the prefix has no entry yet, so
-    // its key cannot be enumerated below.
-    this.invalidation.invalidateAll()
+    // Before the removals below: a fill in flight under the prefix has no
+    // entry yet, so only its registration can name it.
+    this.invalidation.invalidatePrefix(prefix, excluded)
     // A pending fill may not have installed an entry yet.
     const keys = [...new Set([...this.entries.keys(), ...this.drainTasks.keys()])].filter(
       (k) => k.startsWith(prefix) && !excluded.some((boundary) => underPath(k, boundary)),

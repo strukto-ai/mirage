@@ -241,6 +241,10 @@ DEREFERENCE_FLAGS = {
     "du": ("L", ("dereference",)),
 }
 
+# The options that take a dereference back, the last of the two winning
+# (GNU du: `du -LP` does not follow, `du -PL` does).
+NO_DEREFERENCE_FLAGS = {"du": ("P", ("no-dereference",))}
+
 # find states its link policy as a leading option rather than a flag, and
 # the last one wins: `find -L -P x` does not follow, `find -P -L x` does.
 # -P (no follow) is the default; -H dereferences the start point only and
@@ -461,6 +465,42 @@ def _has_option(
     return False
 
 
+def _follows_last(
+    words: Sequence[str | PathSpec],
+    follow: tuple[str, tuple[str, ...]],
+    no_follow: tuple[str, tuple[str, ...]],
+) -> bool:
+    """Whether the last of a command's link options asks it to follow.
+
+    Args:
+        words (Sequence[str | PathSpec]): the command's raw words,
+            name first.
+        follow (tuple[str, tuple[str, ...]]): the short letters and long
+            names that dereference.
+        no_follow (tuple[str, tuple[str, ...]]): the ones that take it
+            back.
+    """
+    follows = False
+    for word in words[1:]:
+        if not isinstance(word, str) or word == "-":
+            continue
+        if word == "--":
+            break
+        if word.startswith("--"):
+            if word[2:] in follow[1]:
+                follows = True
+            elif word[2:] in no_follow[1]:
+                follows = False
+            continue
+        if word.startswith("-"):
+            for letter in word[1:]:
+                if letter in follow[0]:
+                    follows = True
+                elif letter in no_follow[0]:
+                    follows = False
+    return follows
+
+
 def _last_link_option(
     words: list[str | PathSpec], policy: dict[str, bool]
 ) -> bool:
@@ -489,7 +529,9 @@ def dereferences(name: str, words: list[str | PathSpec]) -> bool:
     if policy is not None:
         return _last_link_option(words, policy)
     spec = DEREFERENCE_FLAGS.get(name)
-    return spec is not None and _has_option(words, spec[0], spec[1])
+    if spec is None:
+        return False
+    return _follows_last(words, spec, NO_DEREFERENCE_FLAGS.get(name, ("", ())))
 
 
 def ls_link_mode(words: Sequence[str | PathSpec]) -> LsLinkMode:

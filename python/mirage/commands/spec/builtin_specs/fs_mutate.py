@@ -35,37 +35,54 @@ SPECS: dict[str, CommandSpec] = {
     ),
     "touch": CommandSpec(
         options=(
-            Option(short="-c"),
-            Option(short="-r", type="path"),
-            Option(short="-d", type="str"),
+            Option(short="-a"),
+            Option(short="-c", long="--no-create"),
+            Option(short="-d", long="--date", type="str"),
+            Option(short="-f"),
+            Option(short="-h", long="--no-dereference"),
+            Option(short="-m"),
+            Option(short="-r", long="--reference", type="path"),
+            Option(short="-t", type="str"),
+            Option(long="--time", type="str"),
         ),
         rest=Operand(type="path"),
     ),
-    # chmod/chown/chgrp self-parse their flags in the executor builtins, but
-    # they still need a spec so the leading MODE/OWNER/GROUP stays TEXT while
-    # the FILE operands classify as PATH (and so relative operands resolve
-    # against the session cwd, not the mount root).
+    # The leading MODE/OWNER/GROUP stays TEXT while the FILE operands
+    # classify as PATH, so relative operands resolve against the session
+    # cwd, not the mount root.
     "chmod": CommandSpec(
-        options=(Option(short="-R"), Option(short="-v"), Option(short="-f")),
+        options=(
+            Option(short="-c", long="--changes"),
+            Option(short="-f", long="--silent"),
+            Option(long="--quiet"),
+            Option(short="-v", long="--verbose"),
+            Option(short="-R", long="--recursive"),
+        ),
         positional=(Operand(type="str"),),
         rest=Operand(type="path"),
     ),
     "chown": CommandSpec(
         options=(
-            Option(short="-R"),
-            Option(short="-v"),
-            Option(short="-f"),
-            Option(short="-h"),
+            Option(short="-c", long="--changes"),
+            Option(short="-f", long="--silent"),
+            Option(long="--quiet"),
+            Option(short="-v", long="--verbose"),
+            Option(long="--dereference"),
+            Option(short="-h", long="--no-dereference"),
+            Option(short="-R", long="--recursive"),
         ),
         positional=(Operand(type="str"),),
         rest=Operand(type="path"),
     ),
     "chgrp": CommandSpec(
         options=(
-            Option(short="-R"),
-            Option(short="-v"),
-            Option(short="-f"),
-            Option(short="-h"),
+            Option(short="-c", long="--changes"),
+            Option(short="-f", long="--silent"),
+            Option(long="--quiet"),
+            Option(short="-v", long="--verbose"),
+            Option(long="--dereference"),
+            Option(short="-h", long="--no-dereference"),
+            Option(short="-R", long="--recursive"),
         ),
         positional=(Operand(type="str"),),
         rest=Operand(type="path"),
@@ -174,7 +191,11 @@ SPECS: dict[str, CommandSpec] = {
         rest=Operand(type="path"),
     ),
     "rmdir": CommandSpec(
-        options=(Option(short="-v"),),
+        options=(
+            Option(long="--ignore-fail-on-non-empty"),
+            Option(short="-p", long="--parents"),
+            Option(short="-v", long="--verbose"),
+        ),
         rest=Operand(type="path"),
     ),
     "unlink": CommandSpec(rest=Operand(type="path")),
@@ -214,10 +235,14 @@ SPECS: dict[str, CommandSpec] = {
     ),
     "readlink": CommandSpec(
         options=(
-            Option(short="-f"),
-            Option(short="-e"),
-            Option(short="-m"),
-            Option(short="-n"),
+            Option(short="-f", long="--canonicalize"),
+            Option(short="-e", long="--canonicalize-existing"),
+            Option(short="-m", long="--canonicalize-missing"),
+            Option(short="-n", long="--no-newline"),
+            Option(short="-q", long="--quiet"),
+            Option(short="-s", long="--silent"),
+            Option(short="-v", long="--verbose"),
+            Option(short="-z", long="--zero"),
         ),
         rest=Operand(type="path"),
     ),

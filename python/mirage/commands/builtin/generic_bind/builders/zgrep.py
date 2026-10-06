@@ -15,7 +15,7 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.zgrep import zgrep as generic_zgrep
+from mirage.commands.builtin.generic.zgrep import zgrep_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
     CommandIO,
@@ -24,6 +24,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
 from mirage.commands.builtin.utils.links import link_door
 from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import utf8_locale
 from mirage.types import PathSpec
 
 
@@ -39,7 +40,7 @@ async def zgrep(
         if paths and ops.is_mounted(accessor)
         else []
     )
-    return await generic_zgrep(
+    return await zgrep_generic(
         resolved,
         texts,
         opts.flags,
@@ -47,6 +48,7 @@ async def zgrep(
         stdin=opts.stdin,
         stat=partial(ops.stat, accessor),
         door=link_door(opts),
+        utf8=utf8_locale(opts.env),
     )
 
 

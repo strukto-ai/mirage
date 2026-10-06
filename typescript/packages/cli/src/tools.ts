@@ -35,13 +35,13 @@ async function callTool(
   const c = makeClient(loadDaemonSettings())
   await c.ensureRunning({ allowSpawn: false })
   const query =
-    target.session === undefined ? '' : `?sessionId=${encodeURIComponent(target.session)}`
+    target.session === undefined ? '' : `?session_id=${encodeURIComponent(target.session)}`
   const path = `/v1/workspaces/${encodeURIComponent(target.workspace)}/${name}${query}`
   const response = (await handleResponse(
     await c.request('POST', path, { body: JSON.stringify(args) }),
-  )) as { text: string; isError: boolean }
+  )) as { text: string; is_error: boolean }
   emit(response, (r) => r.text)
-  if (response.isError) process.exitCode = 1
+  if (response.is_error) process.exitCode = 1
 }
 
 function toolCommand(program: Command, name: string, description: string): Command {
@@ -71,7 +71,7 @@ export function registerToolCommands(program: Command): void {
       const content = opts.content ?? (await buffer(process.stdin)).toString('utf-8')
       await callTool(opts, 'write', { path, content })
     })
-  toolCommand(program, 'edit', 'Replace a string in a file read first.')
+  toolCommand(program, 'edit', 'Replace a string in an existing file.')
     .argument('<path>', 'File to edit')
     .argument('<old>', 'The exact text to replace')
     .argument('<new>', 'The text to put in its place')

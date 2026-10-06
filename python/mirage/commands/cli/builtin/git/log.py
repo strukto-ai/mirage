@@ -31,7 +31,6 @@ from mirage.commands.cli.builtin.git.errors import GitError, NoWorkspaceError
 from mirage.commands.cli.builtin.git.format import (
     FULL_SHA,
     Decorations,
-    needs_decorations,
     oneline,
     preset_block,
     render_template,
@@ -40,6 +39,7 @@ from mirage.commands.cli.builtin.git.graph import CommitGraph
 from mirage.commands.cli.builtin.git.history import (
     LogFlags,
     Walk,
+    decoration_for,
     decorations,
     parse_flags,
     ref_commits,
@@ -51,7 +51,8 @@ from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.repo import config_bool
 from mirage.commands.cli.builtin.git.revparse import split_revisions
 from mirage.commands.cli.builtin.git.session import opened
-from mirage.commands.cli.builtin.git.util import check_operands, escaped, fatal
+from mirage.commands.cli.builtin.git.types import Decoration
+from mirage.commands.cli.builtin.git.util import check_operands, fatal
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
@@ -63,7 +64,6 @@ def _collect(
     repo: BaseRepo,
     revisions: tuple[str, ...],
     flags: LogFlags,
-    want_decor: bool,
 ) -> tuple[list[Commit], Walk | None, Decorations | None]:
     """Resolve the starting points and walk them, synchronously.
 
@@ -77,13 +77,17 @@ def _collect(
         repo (BaseRepo): repository to walk.
         revisions (tuple[str, ...]): the revisions and ranges to walk,
             HEAD when none was given.
-        flags (LogFlags): the parsed invocation.
-        want_decor (bool): whether the format renders %d/%D.
+        flags (LogFlags): the parsed invocation, whose decoration style
+            says whether to load ref labels and how to spell them.
     """
     starts, hidden = split_revisions(repo, revisions or (HEAD,))
     if flags.all_refs:
         starts.extend(ref_commits(repo))
-    decor = decorations(repo) if want_decor else None
+    decor = (
+        None
+        if flags.decorate is Decoration.NONE
+        else decorations(repo, flags.decorate)
+    )
     if flags.graph:
         return [], walked(repo, starts, flags, tuple(hidden)), decor
     return select(repo, starts, flags, tuple(hidden)), None, decor
@@ -117,7 +121,7 @@ def _rendered(
         length = width if flags.abbrev_commit else FULL_SHA
         lines = [
             render_template("%h%d %s", commit, length, decor)
-            if flags.decorate
+            if flags.decorate is not Decoration.NONE
             else oneline(commit, length)
             for commit in commits
         ]
@@ -145,7 +149,11 @@ def _rendered(
         if index:
             lines.append("")
         block = preset_block(commit, fmt.kind, width, flags.date, mailmap)
-        if flags.decorate and block and block[0].startswith("commit "):
+        if (
+            flags.decorate is not Decoration.NONE
+            and block
+            and block[0].startswith("commit ")
+        ):
             block[0] += render_template("%d", commit, width, decor)
         lines.extend(block)
     return ("\n".join(lines) + "\n").encode() if lines else b""
@@ -232,7 +240,7 @@ def _graphed(
                 source = f" (from {parent[:cut]})"
             labels = (
                 render_template("%d", commit, width, decor)
-                if flags.decorate
+                if flags.decorate is not Decoration.NONE
                 else ""
             )
             if fmt.kind == "oneline":
@@ -291,7 +299,7 @@ async def log(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     try:
         if dispatch is None:
             raise NoWorkspaceError()
-        check_operands(texts, marked=escaped(inv.argv))
+        check_operands(inv, texts)
         parsed = parse_flags(fl, inv.env)
         repo, location = await opened(fl, doors)
         parsed = replace(
@@ -303,13 +311,12 @@ async def log(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                     dispatch, location, b"log", b"mailmap", True
                 ),
             ),
+            decorate=await decoration_for(
+                dispatch, location, fl, parsed.pretty
+            ),
         )
         commits, walk, decor = await asyncio.to_thread(
-            _collect,
-            repo,
-            tuple(texts),
-            parsed,
-            (parsed.decorate or needs_decorations(parsed.pretty)),
+            _collect, repo, tuple(texts), parsed
         )
         diff_flags = parse_diff_flags(fl, default_patch=False)
     except GitError as exc:

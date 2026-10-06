@@ -175,11 +175,11 @@
         "gapps"
       ],
       "clear_cache": true,
-      "command": "rm /slides/owned/*.gslide.json && ls /slides/owned | wc -l",
+      "command": "rm -v /slides/owned/nope.gslide.json /slides/owned/*.gslide.json; echo rc=$?; ls /slides/owned | wc -l",
       "expect": {
         "exit": 0,
-        "stdout": "0\n",
-        "stderr": ""
+        "stdout": "removed '/slides/owned/2026-01-01_Launch_Deck__pres0001.gslide.json'\nrc=1\n0\n",
+        "stderr": "rm: cannot remove '/slides/owned/nope.gslide.json': No such file or directory\n"
       }
     },
     {
@@ -336,6 +336,19 @@
       "expect": {
         "exit": 0,
         "stdout": "[[\"1\",\"2\",\"3\",\"10\"]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_sheets_render_keeps_the_documented_fields",
+      "seq": 520025,
+      "targets": [
+        "gapps"
+      ],
+      "command": "cat /sheets/owned/*__sheet0001.gsheet.json | jq -c '[keys, (.sheets[0] | keys), (.sheets[0].data[0] | keys), ([.sheets[0].data[0].rowData[].values[] | keys[]] | unique)]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\"properties\",\"sheets\",\"spreadsheetId\",\"spreadsheetUrl\"],[\"data\",\"properties\"],[\"rowData\"],[\"effectiveValue\",\"formattedValue\",\"userEnteredValue\"]]\n",
         "stderr": ""
       }
     }

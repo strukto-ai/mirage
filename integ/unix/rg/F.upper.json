@@ -29,9 +29,7 @@
         "stdout": "def main():\ndef main():\n",
         "stderr": ""
       },
-      "flags": [
-        "F"
-      ]
+      "flags": ["F", "no_fixed_strings"]
     }
   ]
 }

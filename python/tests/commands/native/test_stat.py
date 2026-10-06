@@ -21,5 +21,5 @@ def test_stat_c(env):
 
 def test_stat_f(env):
     env.create_file("f.txt", b"hello")
-    result = env.mirage("stat -f '%s' /data/f.txt")
-    assert len(result.strip()) > 0
+    result = env.mirage("stat -f -c '%n %T' /data/f.txt")
+    assert result.strip() == f"/data/f.txt {env.resource_type}"
