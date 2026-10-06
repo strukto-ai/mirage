@@ -123,7 +123,7 @@ async def expand_argv(
     Args:
         parts (list[TSNodeLike]): word nodes after env-prefix
             stripping and process-substitution removal.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         registry (MountRegistry): mount registry for classification.

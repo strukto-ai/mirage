@@ -65,7 +65,7 @@ async def expand_test_expr(
 
     Args:
         node: tree-sitter test_command node.
-        context (EvaluationContext): shell session for expansion.
+        context (EvaluationContext): the evaluation expanding it.
         execute_fn: workspace execute for command substitutions.
         cs: call stack for positional parameters.
     """
@@ -91,7 +91,7 @@ async def _flatten(
     Args:
         node: tree-sitter node to serialize.
         out (list[str]): accumulator.
-        context (EvaluationContext): shell session for expansion.
+        context (EvaluationContext): the evaluation expanding it.
         execute_fn: workspace execute for command substitutions.
         cs: call stack for positional parameters.
     """
@@ -170,7 +170,7 @@ async def expand_double_bracket(
 
     Args:
         node: tree-sitter test_command node opened with ``[[``.
-        context (EvaluationContext): shell session for expansion.
+        context (EvaluationContext): the evaluation expanding it.
         execute_fn: workspace execute for command substitutions.
         cs: call stack for positional parameters.
     """
@@ -191,7 +191,7 @@ async def _build_cond(
 
     Args:
         node: tree-sitter expression node.
-        context (EvaluationContext): shell session for expansion.
+        context (EvaluationContext): the evaluation expanding it.
         execute_fn: workspace execute for command substitutions.
         cs: call stack for positional parameters.
     """
@@ -220,7 +220,7 @@ async def _build_unary(
 
     Args:
         node: tree-sitter unary_expression or negation_expression.
-        context (EvaluationContext): shell session for expansion.
+        context (EvaluationContext): the evaluation expanding it.
         execute_fn: workspace execute for command substitutions.
         cs: call stack for positional parameters.
     """
@@ -265,7 +265,7 @@ async def _build_binary(
 
     Args:
         node: tree-sitter binary_expression.
-        context (EvaluationContext): shell session for expansion.
+        context (EvaluationContext): the evaluation expanding it.
         execute_fn: workspace execute for command substitutions.
         cs: call stack for positional parameters.
     """

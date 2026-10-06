@@ -68,7 +68,7 @@ async def _expand_brace_word(
 
     Args:
         node (TSNodeLike): concatenation or brace_expression.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
     """
@@ -116,7 +116,7 @@ async def expand_words(
 
     Args:
         parts (list[Any]): the word nodes to expand.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
     """

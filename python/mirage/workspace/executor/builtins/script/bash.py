@@ -126,7 +126,7 @@ async def handle_bash(
         dispatch (DispatchFn): op dispatcher, used to read a script file.
         execute_fn (Callable): runs the program text in this session.
         args (list[str]): words after the head word.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (ByteSource | None): input stream, also the program source
             when no operand names one.
         name (str): the head word (``bash`` or ``sh``). bash reports

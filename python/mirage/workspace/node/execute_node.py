@@ -149,8 +149,8 @@ async def _eval_cfor_expr(
             per comma-separated expression; empty for an empty slot.
         default (int): value an empty slot yields (1 for the condition
             so `for ((;;))` loops, 0 for init/update).
-        context (EvaluationContext): shell session; arithmetic assignments land
-            in its env.
+        context (EvaluationContext): the evaluation; arithmetic assignments
+            land in its session's env.
         execute_fn (Callable): recursive execute for substitutions.
         call_stack (CallStack | None): function-call scope, if any.
         view (SessionView | None): the session plane's gated door the
@@ -261,7 +261,7 @@ async def _recurse_reassociated(
             managed processes.
         right (Any): the list's right operand.
         node (Any): node being executed by handle_connection.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
     """
@@ -317,7 +317,7 @@ async def _recurse_lifted(
             managed processes.
         right (Any): the list's right operand.
         node (Any): node being executed by handle_connection.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
     """
@@ -436,7 +436,7 @@ async def _run_pipeline(
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry.
         stages (PipelineStages): the pipeline's stages.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
         processes (ProcessSupervisor | None): where the stages run as
@@ -553,7 +553,7 @@ async def _negated(
         stdout (Any): the wrapped statement's stdout.
         io (IOResult): its result, the status still its own.
         exec_node (ExecutionNode): its record.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         inner (Any): the wrapped statement's node.
     """
     session = context.session
@@ -614,7 +614,7 @@ async def _run_redirected(
         redirects (list[Redirect]): the statement's parsed redirects.
         processes (ProcessSupervisor | None): where the stages run as
             managed processes.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
         sink (JobConsole | None): where the redirect writes what it
@@ -767,7 +767,7 @@ async def _run_continuation(
             left side in ``handle_connection``.
         steps (tuple[tuple[str, Any], ...]): the ``(operator, right)``
             steps, in order.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
     """
@@ -802,7 +802,7 @@ async def _recurse_continuation(
         steps (tuple[tuple[str, Any], ...]): the steps before the
             current one.
         node (Any): the node ``handle_connection`` asks for.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
     """
@@ -1029,7 +1029,7 @@ async def _execute_node(
         execute_fn (Callable): recursive execute (for source/eval).
         agent_id (str): current agent ID for jobs.
         node (Any): tree-sitter node to execute.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack): shell call stack.
         cancel (asyncio.Event | None): event used to abort mid-flight.

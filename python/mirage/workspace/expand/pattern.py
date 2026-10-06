@@ -65,7 +65,7 @@ async def expand_pattern(
 
     Args:
         ts_node (TSNodeLike): one pattern node.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): function-call scope, if any.
     """

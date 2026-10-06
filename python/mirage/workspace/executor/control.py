@@ -475,7 +475,7 @@ async def handle_cfor(
             default when the slot is empty; raises ArithError with the
             offending expression text on an invalid expression, or
             ReadonlyError when it assigns to a readonly variable.
-        context (EvaluationContext): shell session.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (ByteSource | None): input stream, which each iteration
             reads on from where the one before stopped, like for/while.
         call_stack (CallStack | None): function-call scope, if any.
@@ -728,7 +728,7 @@ async def handle_select(
         variable (str): the select variable name.
         values (list[str | PathSpec]): menu entries, already expanded.
         body (list[TSNodeLike]): loop body statements.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (ByteSource | None): line source for choices.
         call_stack (CallStack | None): function-call scope, if any.
         job_table (JobTable | None): the job plane for a body statement

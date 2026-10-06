@@ -50,7 +50,7 @@ async def expand_redirects(
 
     Args:
         redirects (list[Redirect]): parsed redirects from get_redirects.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry for classification.
         call_stack (CallStack | None): shell call stack for expansion.
@@ -114,7 +114,7 @@ async def _expand_redirect(
 
     Args:
         r (Redirect): the parsed redirect.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry for classification.
         call_stack (CallStack | None): shell call stack for expansion.

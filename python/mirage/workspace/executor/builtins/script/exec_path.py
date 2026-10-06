@@ -125,7 +125,7 @@ async def handle_exec_path(
         execute_fn (Callable): runs a program line in this session.
         path (str): the head word, as typed.
         args (list[str]): the words after it, positional for the script.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         registry (MountRegistry): identifies the program view.
         namespace (Namespace): resolves links to program files.
         stdin (ByteSource | None): input stream for the script.

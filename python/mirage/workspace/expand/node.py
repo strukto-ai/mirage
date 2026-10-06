@@ -292,7 +292,7 @@ async def _arith_subscript(
 
     Args:
         sub_node (TSNodeLike): the ``subscript`` node.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door.
@@ -340,7 +340,7 @@ async def expand_node(
 
     Args:
         ts_node (TSNodeLike): the node to expand.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door, for
@@ -369,7 +369,7 @@ async def expand_node_marked(
 
     Args:
         ts_node (TSNodeLike): the node to expand.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door, for
@@ -399,7 +399,7 @@ async def expand_chunks(
 
     Args:
         ts_node (TSNodeLike): the node to expand.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door, for
@@ -539,7 +539,7 @@ async def _expand_child(
     Args:
         node (TSNodeLike): the nested node.
         quoted (bool): whether it sits inside double quotes.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door.
@@ -571,7 +571,7 @@ async def _string_chunks(
 
     Args:
         node (TSNodeLike): the string node.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door.
@@ -615,7 +615,7 @@ async def _substitution(
 
     Args:
         ts_node (TSNodeLike): the substitution node.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door.
@@ -703,7 +703,7 @@ async def _literal_node(
 
     Args:
         ts_node (TSNodeLike): the node to expand.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door.

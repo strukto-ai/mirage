@@ -146,7 +146,7 @@ async def expand_array_items(
 
     Args:
         array_node (Any): the tree-sitter ``array`` node.
-        context (EvaluationContext): shell session.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): workspace execute for substitutions.
         registry (MountRegistry): mount registry for glob resolution.
         namespace (Namespace): addressing authority holding the links.
@@ -199,7 +199,7 @@ async def _subscript_key_text(
     Args:
         subscript_node (Any): the tree-sitter ``subscript`` node.
         name (str): the array variable's name, for the raw slice.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         cs (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door.
@@ -235,7 +235,7 @@ async def execute_assignment(
 
     Args:
         node (Any): the tree-sitter ``variable_assignment`` node.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): recursive execute for substitutions.
         registry (MountRegistry): mount registry for glob resolution.
         namespace (Namespace): addressing authority holding the links.

@@ -687,7 +687,7 @@ async def handle_xargs(
         execute_fn (Callable): shell evaluator for the inner line.
         args (list[str]): options, then command name and initial
             arguments; the command defaults to ["echo"] like GNU.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (ByteSource | None): input whose words become arguments.
         dispatch (DispatchFn | None): op dispatcher, which reads -a.
         registry (MountRegistry | None): where command names are looked

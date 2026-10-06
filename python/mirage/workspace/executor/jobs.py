@@ -374,7 +374,7 @@ async def run_statement(
     Args:
         execute_node (Callable): the executor's statement runner.
         node (TSNodeLike): the statement.
-        context (EvaluationContext): shell session.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (ByteSource | None): the body's input; a job gets none,
             like a background process reading /dev/null.
         bound (tuple[SharedInput | None, bool]): ``fd0_binding`` as the

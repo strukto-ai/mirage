@@ -231,7 +231,7 @@ def _persistently_closed(context: EvaluationContext) -> set[int]:
     dup from refuses before the command runs.
 
     Args:
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
     """
     session = context.session
     closed: set[int] = set()
@@ -254,7 +254,7 @@ def _stdin_dest(context: EvaluationContext) -> _Fd | str:
     (`exec 0>f`) is the file.
 
     Args:
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
     """
     session = context.session
     identity = session.exec_stdin_identity

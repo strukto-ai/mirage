@@ -86,7 +86,7 @@ async def run_command_tree(
         execute_fn (Callable): recursive execute (for source/eval).
         agent_id (str): current agent ID for jobs.
         ast (Any): parsed tree-sitter root node.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         cancel (asyncio.Event | None): event used to abort mid-flight.
         routing_decision (RouteDecision | None): the typed line's routing

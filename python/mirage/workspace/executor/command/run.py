@@ -230,7 +230,7 @@ async def run_on_mount(
 
     Args:
         registry (MountRegistry): Mount registry.
-        context (EvaluationContext): Session providing cwd/env/session_id.
+        context (EvaluationContext): its session gives cwd, env and session_id.
         dispatch (Callable): Workspace operation dispatcher.
         namespace (Namespace | None): Addressing authority for ls symlinks.
         cmd_name (str): Command name.

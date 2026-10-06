@@ -116,7 +116,7 @@ def _declare_option_refusal(
         cmd (str): the builtin's own name for the diagnostic.
         flag_chars (set[str]): the `-` letters, `--` excluded.
         plus_chars (set[str]): the `+` letters.
-        context (EvaluationContext): shell session state (unused today, kept so
+        context (EvaluationContext): the evaluation (unused today, kept so
             a later check that reads it does not change the signature).
     """
     bad = next(
@@ -160,7 +160,7 @@ async def _plus_refusals(
 
     Args:
         cmd (str): the builtin's own name for the diagnostic.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         view (SessionView): the session plane's gated door.
         plus_chars (set[str]): the `+` letters.
         assignments (list[str]): `NAME` / `NAME=value` operands.
@@ -217,7 +217,7 @@ async def _stamp_attrs(
     would be, in the builtin's voice.
 
     Args:
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         view (SessionView): the session plane's gated door.
         flag_chars (set[str]): the `-` letters.
         plus_chars (set[str]): the `+` letters.
@@ -306,7 +306,7 @@ async def _stamp_export(
     host-seeded credential the deployment had refused.
 
     Args:
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         view (SessionView): the session plane's gated door.
         flag_chars (set[str]): the declaration's collected flag letters.
         assignments (list[str]): `NAME` / `NAME=value` operands.
@@ -357,7 +357,7 @@ async def execute_declaration(
 
     Args:
         node (Any): the tree-sitter ``declaration_command`` node.
-        context (EvaluationContext): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): recursive execute for substitutions.
         registry (MountRegistry): mount registry for glob resolution.
         namespace (Namespace): addressing authority holding the links.
