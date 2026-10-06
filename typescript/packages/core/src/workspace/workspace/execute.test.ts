@@ -20,7 +20,14 @@ import { IOResult } from '../../io/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode, VFSName } from '../../types.ts'
 import type { Action, CommandContext, Policy } from '../../policy/index.ts'
-import { getTestParser, stderrStr, stdoutStr } from '../fixtures/workspace_fixture.ts'
+import {
+  cachingRamWorkspace,
+  captureMarks,
+  getTestParser,
+  type Mark,
+  stderrStr,
+  stdoutStr,
+} from '../fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace.ts'
 
 const ENC = new TextEncoder()
@@ -401,5 +408,22 @@ describe('same-session lines run one at a time', () => {
     await interrupted
     await refused
     await closing
+  })
+})
+
+describe('a nested line', () => {
+  it('applies against only the records it made', async () => {
+    // A nested drain looks its read token up after apply, so a read the
+    // outer line made earlier must not be in what the nested apply sees: its
+    // token would label bytes it never described.
+    const ws = await cachingRamWorkspace()
+    open.push(ws)
+    expect((await ws.shell('echo a > /r/f')).exitCode).toBe(0)
+    const captured = captureMarks(ws)
+    expect((await ws.shell('cat /r/f; x=$(cat /r/f)')).exitCode).toBe(0)
+    const reads = (marks: Mark[] | undefined) =>
+      (marks ?? []).filter(([op, path]) => op === 'read' && path === '/r/f')
+    expect(reads(captured[0]?.[0])).toHaveLength(1)
+    expect(reads(captured[1]?.[0])).toHaveLength(2)
   })
 })

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSource } from '../io/types.ts'
 import { VFSName } from '../types.ts'
 
 // Ops whose record carries a token describing the bytes it moved, split
@@ -31,7 +32,7 @@ import { VFSName } from '../types.ts'
 // backends that record one stamp no token.
 // `truncate` would also need its record's `bytes` corrected before it
 // could join: it reports 0 while its token describes `length` bytes, so
-// the byte-identity guard in `latestFingerprint` would refuse every one.
+// the stored-size check in `writtenVerdict` would refuse every one.
 export const READ_FINGERPRINT_OPS: ReadonlySet<string> = new Set(['read'])
 export const WRITE_FINGERPRINT_OPS: ReadonlySet<string> = new Set(['write'])
 
@@ -99,6 +100,17 @@ export interface OpRecordInit {
   revision?: string | null
   /** In-process ownership for snapshot capture; not a persisted backend revision. */
   mountId?: string | null
+  /**
+   * The exact value the command that made this `write` put in
+   * `IOResult.writes` for a path it claims, set by the executor and
+   * cleared when the line ends. Internal: out of `toJSON`.
+   */
+  claimed?: ByteSource | null
+  /**
+   * Set when the line that persisted this record has ended, so a command
+   * returning later cannot mark it. Internal: out of `toJSON`.
+   */
+  sealed?: boolean
 }
 
 export class OpRecord {
@@ -111,6 +123,10 @@ export class OpRecord {
   fingerprint: string | null
   revision: string | null
   readonly mountId: string | null
+  /** See {@link OpRecordInit.claimed}. */
+  claimed: ByteSource | null
+  /** See {@link OpRecordInit.sealed}. */
+  sealed: boolean
 
   constructor(init: OpRecordInit) {
     this.op = init.op
@@ -122,6 +138,8 @@ export class OpRecord {
     this.fingerprint = init.fingerprint ?? null
     this.revision = init.revision ?? null
     this.mountId = init.mountId ?? null
+    this.claimed = init.claimed ?? null
+    this.sealed = init.sealed ?? false
   }
 
   get isCache(): boolean {

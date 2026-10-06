@@ -15,6 +15,8 @@
 import type { EvaluationContext } from '../../evaluation.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
 import { wrapCachableStreams } from '../../../io/stream.ts'
+import { commandRecords } from '../../../observe/context.ts'
+import { WRITE_FINGERPRINT_OPS, type OpRecord } from '../../../observe/record.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
 import type { ReaddirPath, StatPath } from '../../../ops/types.ts'
@@ -178,6 +180,53 @@ export async function dropMountCaches(registry: MountRegistry): Promise<void> {
   }
 }
 
+/**
+ * Mark a command's write records with the value it claims for them.
+ *
+ * A `write` record of a path the command both wrote and listed in
+ * `IOResult.cache` gets that exact `IOResult.writes` value as `claimed`,
+ * which `writtenVerdict` compares with the value the line caches. A record
+ * the line already sealed is left alone: a background command returning
+ * after its line ended must not mark a record that line persisted. `io`
+ * has virtual keys and its streams already wrapped. Mirrors python's
+ * `_mark_claimed_writes`.
+ */
+function markClaimedWrites(records: readonly OpRecord[], io: IOResult): void {
+  const cached = new Set(io.cache)
+  for (const rec of records) {
+    if (rec.sealed || !WRITE_FINGERPRINT_OPS.has(rec.op) || !cached.has(rec.path)) continue
+    const value = io.writes[rec.path]
+    if (value !== undefined) rec.claimed = value
+  }
+}
+
+/**
+ * Run one command and mark the writes it claims.
+ *
+ * The command's own records are collected while `call` runs; its keys then
+ * gain the mount `prefix` (empty for a relay, whose keys are already
+ * virtual), its streams are wrapped, and {@link markClaimedWrites} marks its
+ * write records with the values it put in `IOResult.writes`. Mirrors
+ * python's `run_claiming`.
+ */
+export async function runClaiming(
+  prefix: string,
+  call: () => Promise<[ByteSource | null, IOResult]>,
+): Promise<[ByteSource | null, IOResult]> {
+  const [stdout, io, mine] = await commandRecords(async (records) => {
+    const [out, result] = await call()
+    return [out, result, records] as const
+  })
+  if (prefix !== '') {
+    io.reads = prefixKeys(io.reads, prefix)
+    io.writes = prefixKeys(io.writes, prefix)
+    io.cache = io.cache.map((p) => prefix + p)
+  }
+  const wrapped = wrapCachableStreams(stdout, io)
+  markClaimedWrites(mine, wrapped[1])
+  return wrapped
+}
+
 // Run one already-parsed command on the mount that owns its paths. The shared
 // single-mount execution tail: mount resolution, session-mode checks, executeCmd,
 // filesystem-error formatting, ls/find post-processing, and read/write key
@@ -259,34 +308,29 @@ export async function runOnMount(
   // cancelled `rm` must not run.
   if (signal?.aborted === true) throw makeAbortError(signal)
   try {
-    const [initialStdout, io] = await mount.executeCmd(cmdName, paths, texts, flags, {
-      stdin: opts.stdin ?? null,
-      cwd: session.cwd,
-      dispatch,
-      sessionId: session.sessionId,
-      env: envSnapshot(session),
-      sessionView: sessionView(session, registry.policies, context.frame.diagnostics),
-      ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
-      execAllowed: registry.isExecAllowed(),
-      execPathAllowed: registry.execAllowedAt,
-      ...(lineRuntime !== undefined ? { runtime: lineRuntime } : {}),
-      ns,
-      statPath,
-      readdirPath,
-      ...(signal !== undefined ? { signal } : {}),
-      ...(ctx.executeFn !== undefined
-        ? { shell: nestedShell(ctx.executeFn, session, signal) }
-        : {}),
-      limitOverride,
-      ...(opts.argv !== undefined ? { argv: opts.argv } : {}),
-    })
-    const prefix = rstripSlash(mount.prefix)
-    if (prefix !== '') {
-      io.reads = prefixKeys(io.reads, prefix)
-      io.writes = prefixKeys(io.writes, prefix)
-      io.cache = io.cache.map((p) => prefix + p)
-    }
-    return wrapCachableStreams(initialStdout, io)
+    return await runClaiming(rstripSlash(mount.prefix), () =>
+      mount.executeCmd(cmdName, paths, texts, flags, {
+        stdin: opts.stdin ?? null,
+        cwd: session.cwd,
+        dispatch,
+        sessionId: session.sessionId,
+        env: envSnapshot(session),
+        sessionView: sessionView(session, registry.policies, context.frame.diagnostics),
+        ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
+        execAllowed: registry.isExecAllowed(),
+        execPathAllowed: registry.execAllowedAt,
+        ...(lineRuntime !== undefined ? { runtime: lineRuntime } : {}),
+        ns,
+        statPath,
+        readdirPath,
+        ...(signal !== undefined ? { signal } : {}),
+        ...(ctx.executeFn !== undefined
+          ? { shell: nestedShell(ctx.executeFn, session, signal) }
+          : {}),
+        limitOverride,
+        ...(opts.argv !== undefined ? { argv: opts.argv } : {}),
+      }),
+    )
   } catch (err) {
     // Command-owned usage errors (extra operands, missing patterns) become
     // this command's IOResult so the rest of the line keeps running, like a

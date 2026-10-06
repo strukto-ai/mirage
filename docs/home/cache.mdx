@@ -47,6 +47,19 @@ Which backends version their listings:
 
 One check answers for a whole command: later listings of the same mount (or, on disk, the same folder) in that command reuse it, and concurrent commands share a check only when it was sent after they started. Outside a command, a matching check is trusted for the same one-second window as a listing. A moved version, a missing path or a check that fails all re-list; the stored listing is kept for the re-list to compare against, never cleared. `bounded` mounts never check.
 
+### Writes
+
+A command that writes a file and reports the bytes it wrote, such as `tee`, `sed -i`, `sort -o`, `uniq` or `xxd`, keeps those bytes in the file cache, so the next read on the mount needs no download. On an object store the cached copy carries the ETag the upload reply names for what it stored. That is the same token the backend's `stat` reports, so under `read: fresh` the next read's probe matches it and the copy is served without a download.
+
+The bytes are kept only when the newest `write` recorded for that path on the line is the reporting command's own, and that write recorded exactly that many bytes. "Newest" is the order the backend's replies arrived in, and only `write` operations are compared: a `truncate` of the path later on the line is not seen, so `echo aaaa | tee F; truncate -s 2 F` keeps tee's bytes. (A `>>` append takes the path out of what the line caches, so it is dropped.) Otherwise nothing is cached and the next read downloads what the backend holds:
+
+- Another writer reached the same path later on the line without reporting its bytes: `sed -n 'w file'`, an `awk` redirect, a script runtime, or a second command in a concurrent pipeline stage, an `xargs -P` run or a background job.
+- The write's record counts a different number of bytes from the ones the command reports, so the record does not describe them.
+
+In the browser, where concurrent commands cannot be told apart, the first check is skipped: the reported bytes are kept with the newest write's token whenever the size matches, even if another writer to the same path landed last.
+
+Backends other than the object stores record no token for a write, so a written file is cached without one there: `bounded` serves it until the `ttl` expires, and where the mount accepts `fresh` the next read downloads it.
+
 ## Stores
 
 Each layer is a pluggable store with two built-ins:

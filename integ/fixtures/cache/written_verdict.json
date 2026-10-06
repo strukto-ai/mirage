@@ -1,0 +1,185 @@
+{
+  "cases": [
+    {
+      "name": "none",
+      "path": "/f",
+      "records": null,
+      "nbytes": 3,
+      "expect": {"keep": true, "token": null}
+    },
+    {
+      "name": "empty",
+      "path": "/f",
+      "records": [],
+      "nbytes": 3,
+      "expect": {"keep": true, "token": null}
+    },
+    {
+      "name": "only a read",
+      "path": "/f",
+      "records": [
+        {"op": "read", "path": "/f", "fingerprint": "Tr", "bytes": 3, "claimed": null}
+      ],
+      "nbytes": 3,
+      "expect": {"keep": true, "token": null}
+    },
+    {
+      "name": "one claimed, agrees",
+      "path": "/f",
+      "records": [
+        {"op": "write", "path": "/f", "fingerprint": "Ta", "bytes": 3, "claimed": "W"}
+      ],
+      "nbytes": 3,
+      "expect": {"keep": true, "token": "Ta"}
+    },
+    {
+      "name": "one claimed, tokenless",
+      "path": "/f",
+      "records": [
+        {"op": "write", "path": "/f", "fingerprint": null, "bytes": 3, "claimed": "W"}
+      ],
+      "nbytes": 3,
+      "expect": {"keep": true, "token": null}
+    },
+    {
+      "name": "one claimed, empty token",
+      "path": "/f",
+      "records": [
+        {"op": "write", "path": "/f", "fingerprint": "", "bytes": 3, "claimed": "W"}
+      ],
+      "nbytes": 3,
+      "expect": {"keep": true, "token": null}
+    },
+    {
+      "name": "one claimed, other size",
+      "path": "/f",
+      "records": [
+        {"op": "write", "path": "/f", "fingerprint": "Ta", "bytes": 9, "claimed": "W"}
+      ],
+      "nbytes": 3,
+      "expect": {"keep": false, "token": null}
+    },
+    {
+      "name": "tokenless claimed, other size",
+      "path": "/f",
+      "records": [
+        {"op": "write", "path": "/f", "fingerprint": null, "bytes": 9, "claimed": "W"}
+      ],
+      "nbytes": 3,
+      "expect": {"keep": false, "token": null}
+    },
+    {
+      "name": "empty-token claimed, other size",
+      "path": "/f",
+      "records": [
+        {"op": "write", "path": "/f", "fingerprint": "", "bytes": 9, "claimed": "W"}
+      ],
+      "nbytes": 3,
+      "expect": {"keep": false, "token": null}
+    },
+    {
+      "name": "one unclaimed",
+      "path": "/f",
+      "records": [
+        {"op": "write", "path": "/f", "fingerprint": "Ta", "bytes": 3, "claimed": null}
+      ],
+      "nbytes": 3,
+      "expect": {"keep": false, "token": null}
+    },
+    {
+      "name": "claimed other bytes, same size",
+      "path": "/f",
+      "records": [
+        {"op": "write", "path": "/f", "fingerprint": "Ta", "bytes": 3, "claimed": "X"}
+      ],
+      "nbytes": 3,
+      "expect": {"keep": false, "token": null}
+    },
+    {
+      "name": "claimed bytes that differ only in the last byte",
+      "path": "/f",
+      "records": [
+        {"op": "write", "path": "/f", "fingerprint": "Ta", "bytes": 3, "claimed": "W~"}
+      ],
+      "nbytes": 3,
+      "expect": {"keep": false, "token": null}
+    },
+    {
+      "name": "claimed a shorter prefix of the bytes",
+      "path": "/f",
+      "records": [
+        {"op": "write", "path": "/f", "fingerprint": "Ta", "bytes": 3, "claimed": "W<"}
+      ],
+      "nbytes": 3,
+      "expect": {"keep": false, "token": null}
+    },
+    {
+      "name": "claimed an equal copy",
+      "path": "/f",
+      "records": [
+        {"op": "write", "path": "/f", "fingerprint": "Ta", "bytes": 3, "claimed": "W="}
+      ],
+      "nbytes": 3,
+      "expect": {"keep": true, "token": "Ta"}
+    },
+    {
+      "name": "claimed W, then another command claimed X last",
+      "path": "/f",
+      "records": [
+        {"op": "write", "path": "/f", "fingerprint": "Ta", "bytes": 3, "claimed": "W"},
+        {"op": "write", "path": "/f", "fingerprint": "Tb", "bytes": 3, "claimed": "X"}
+      ],
+      "nbytes": 3,
+      "expect": {"keep": false, "token": null}
+    },
+    {
+      "name": "unclaimed after claimed, same size",
+      "path": "/f",
+      "records": [
+        {"op": "write", "path": "/f", "fingerprint": "Ta", "bytes": 3, "claimed": "W"},
+        {"op": "write", "path": "/f", "fingerprint": "Tb", "bytes": 3, "claimed": null}
+      ],
+      "nbytes": 3,
+      "expect": {"keep": false, "token": null}
+    },
+    {
+      "name": "claimed after unclaimed",
+      "path": "/f",
+      "records": [
+        {"op": "write", "path": "/f", "fingerprint": "Tb", "bytes": 3, "claimed": null},
+        {"op": "write", "path": "/f", "fingerprint": "Ta", "bytes": 3, "claimed": "W"}
+      ],
+      "nbytes": 3,
+      "expect": {"keep": true, "token": "Ta"}
+    },
+    {
+      "name": "tokenless claimed after tokened claimed",
+      "path": "/f",
+      "records": [
+        {"op": "write", "path": "/f", "fingerprint": "Ta", "bytes": 3, "claimed": "W"},
+        {"op": "write", "path": "/f", "fingerprint": null, "bytes": 3, "claimed": "W"}
+      ],
+      "nbytes": 3,
+      "expect": {"keep": true, "token": null}
+    },
+    {
+      "name": "other path only",
+      "path": "/f",
+      "records": [
+        {"op": "write", "path": "/g", "fingerprint": "Ta", "bytes": 3, "claimed": "W"}
+      ],
+      "nbytes": 3,
+      "expect": {"keep": true, "token": null}
+    },
+    {
+      "name": "create/truncate only",
+      "path": "/f",
+      "records": [
+        {"op": "create", "path": "/f", "fingerprint": "Ta", "bytes": 0, "claimed": "W"},
+        {"op": "truncate", "path": "/f", "fingerprint": "Ta", "bytes": 0, "claimed": "W"}
+      ],
+      "nbytes": 3,
+      "expect": {"keep": true, "token": null}
+    }
+  ]
+}

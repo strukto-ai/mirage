@@ -51,8 +51,8 @@ function makeConfig(): S3Config {
   }
 }
 
-function makeWorkspace(read: ReadSpec): Workspace {
-  return new Workspace({ '/s3': new S3VFS(makeConfig()) }, { mode: MountMode.WRITE, read })
+function makeWorkspace(read: ReadSpec, mode: MountMode = MountMode.WRITE): Workspace {
+  return new Workspace({ '/s3': new S3VFS(makeConfig()) }, { mode, read })
 }
 
 describe('object-store write fingerprint (mocked S3)', () => {
@@ -165,5 +165,114 @@ describe('object-store write fingerprint (mocked S3)', () => {
     } finally {
       await ws.close()
     }
+  })
+
+  interface WriteThenRead {
+    stored: string
+    served: string
+    again: string
+    downloads: number
+  }
+
+  /** Runs each line, then `cat /s3/f` twice, counting the first cat. */
+  async function writeThenRead(
+    lines: string[],
+    read: ReadSpec,
+    mode: MountMode = MountMode.WRITE,
+  ): Promise<WriteThenRead> {
+    const ws = makeWorkspace(read, mode)
+    try {
+      for (const line of lines) await ws.shell(line)
+      mock.calls.clear()
+      const first = await ws.shell('cat /s3/f')
+      const downloads = mock.calls.get('GetObject') ?? 0
+      const second = await ws.shell('cat /s3/f')
+      return {
+        stored: DEC.decode(mock.store.get(BUCKET, 'f') ?? new Uint8Array()),
+        served: DEC.decode(first.stdout),
+        again: DEC.decode(second.stdout),
+        downloads,
+      }
+    } finally {
+      await ws.close()
+    }
+  }
+
+  it('a later unclaimed write drops the claimed bytes', async () => {
+    // Equal lengths on purpose: the size guard cannot tell the two writes
+    // apart, so only the provenance mark keeps aaaa from serving under
+    // sed's token.
+    const got = await writeThenRead(["echo aaaa | tee /s3/f; echo bbbb | sed -n 'w /s3/f'"], FRESH)
+    expect(got.stored).toBe('bbbb\n')
+    expect(got.served).toBe('bbbb\n')
+    expect(got.again).toBe('bbbb\n')
+  })
+
+  it('a later runtime write drops the claimed bytes', async () => {
+    // The in-process QuickJS runtime writes through RuntimeVFS, inside
+    // the runtime command, which claims nothing.
+    const got = await writeThenRead(
+      [
+        'echo aaaa | tee /s3/f; ' +
+          `node -e "const f = std.open('/s3/f', 'w'); f.puts('bbbb\\n'); f.close()"`,
+      ],
+      FRESH,
+      MountMode.EXEC,
+    )
+    expect(got.stored).toBe('bbbb\n')
+    expect(got.served).toBe('bbbb\n')
+    expect(got.again).toBe('bbbb\n')
+  }, 120_000)
+
+  it('chained in-place edits serve from cache', async () => {
+    const got = await writeThenRead(
+      ["printf 'a\\n' | tee /s3/f", 'sed -i s/a/b/ /s3/f && sed -i s/b/c/ /s3/f'],
+      FRESH,
+    )
+    expect(got.stored).toBe('c\n')
+    expect(got.served).toBe('c\n')
+    expect(got.again).toBe('c\n')
+    expect(got.downloads).toBe(0)
+  })
+
+  // Bounded: a tokenless leftover would serve here, where fresh would hide it
+  // behind a re-read. A substitution hands only its stdout back, so its own
+  // apply is the only one that decides.
+  it.each([
+    ['eval', `eval "echo aaaa | tee /s3/f; echo bbbb | sed -n 'w /s3/f'"`],
+    ['substitution', `x=$(echo aaaa | tee /s3/f; echo bbbb | sed -n 'w /s3/f')`],
+  ])('a nested line drops bytes a later unclaimed write replaced: %s', async (_, line) => {
+    const got = await writeThenRead([line], BOUNDED)
+    expect(got.stored).toBe('bbbb\n')
+    expect(got.served).toBe('bbbb\n')
+    expect(got.again).toBe('bbbb\n')
+  })
+
+  // A nested line applies against the records it added, so its own write
+  // record vouches for tee's bytes and a fresh read downloads nothing.
+  it.each([
+    ['eval', "eval 'echo a | tee /s3/f'"],
+    ['substitution', 'x=$(echo a | tee /s3/f)'],
+  ])('a nested claimed write serves from cache: %s', async (_, line) => {
+    const got = await writeThenRead([line], FRESH)
+    expect(got.stored).toBe('a\n')
+    expect(got.served).toBe('a\n')
+    expect(got.downloads).toBe(0)
+  })
+
+  // The oracle is the object the mock holds, so the landing order the
+  // sleep sets is a margin, not what the assertion depends on.
+  it.each([
+    ['closed pipe', '{ sleep 0.2; echo aaaa; } | tee /s3/f | echo bbbb | tee /s3/f'],
+    ['pipeline', '{ sleep 0.2; echo aaaa; } | tee /s3/f >/dev/null | echo bbbb | tee /s3/f'],
+    [
+      'xargs -P',
+      "printf 'aaaa\\nbbbb\\n' | xargs -P2 -I{} sh -c 'test {} = aaaa && sleep 0.2; echo {} | tee /s3/f'",
+    ],
+    ['background', '{ sleep 0.2; echo aaaa | tee /s3/f; } & echo bbbb | tee /s3/f; wait'],
+  ])('concurrent writers serve what the backend holds: %s', async (_name, line) => {
+    const got = await writeThenRead([line], FRESH)
+    expect(got.served).toBe(got.stored)
+    expect(got.again).toBe(got.stored)
   })
 })

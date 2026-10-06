@@ -28,6 +28,7 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace.abort import ABORT_JOIN_SECONDS, MirageAbortError
 from mirage.workspace.session.ram import RAMSessionStore
 from mirage.workspace.session.store import SessionFields
+from tests.fixtures.apply_marks import caching_ram_workspace, capture_marks
 
 
 @pytest.mark.asyncio
@@ -698,3 +699,20 @@ async def test_invocation_shell_does_not_admit_unrelated_calls(named):
     finally:
         held.set()
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_nested_line_applies_against_only_the_records_it_made():
+    # A nested drain looks its read token up after apply, so a read the
+    # outer line made earlier must not be in what the nested apply sees:
+    # its token would label bytes it never described.
+    ws = caching_ram_workspace()
+    try:
+        assert (await ws.shell("echo a > /r/f")).exit_code == 0
+        captured = capture_marks(ws)
+        assert (await ws.shell("cat /r/f; x=$(cat /r/f)")).exit_code == 0
+    finally:
+        await ws.close()
+    (nested, _), (outer, _) = captured
+    assert [m[:2] for m in nested].count(("read", "/r/f")) == 1
+    assert [m[:2] for m in outer].count(("read", "/r/f")) == 2

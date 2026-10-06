@@ -14,15 +14,36 @@
 
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type * as cacheContextModule from '../../../cache/context.ts'
 import { CLISpec } from '../../../commands/cli/types.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
+import type { OpRecord } from '../../../observe/record.ts'
+import { DEFAULT_COMMAND_LIMITS } from '../../../policy/builtin/output_cap.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { createShellParser } from '../../../shell/parse/index.ts'
 import { ops } from '../../../test-utils.ts'
-import { MountMode, PathSpec } from '../../../types.ts'
+import { Limit, MountMode, PathSpec } from '../../../types.ts'
+import { cachingRamWorkspace, captureMarks } from '../../fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { dropMountCaches } from './run.ts'
+
+const slowWrite = vi.hoisted(() => ({ gate: null as Promise<void> | null, returned: 0 }))
+
+// RAM's write records before it invalidates; holding the invalidation lets a
+// write record while the line runs and its command return after the line.
+vi.mock('../../../cache/context.ts', async (importOriginal) => {
+  const real = await importOriginal<typeof cacheContextModule>()
+  return {
+    ...real,
+    async invalidateAfterWrite(path: PathSpec | string): Promise<void> {
+      const gate = slowWrite.gate
+      if (gate !== null) await gate
+      await real.invalidateAfterWrite(path)
+      if (gate !== null) slowWrite.returned += 1
+    },
+  }
+})
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -182,4 +203,87 @@ describe('a CLI write and the mount caches', () => {
       await ws.close()
     }
   })
+})
+
+function writesOf(ws: Workspace, path: string): OpRecord[] {
+  return ws.records.filter((r) => r.op === 'write' && r.path === path)
+}
+
+function claimedOf(ws: Workspace): (ByteSource | null)[] {
+  return ws.records.map((r) => r.claimed)
+}
+
+function within<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`not settled within ${String(ms)}ms`))
+    }, ms)
+  })
+  return Promise.race([work, late]).finally(() => {
+    clearTimeout(timer)
+  })
+}
+
+describe('the provenance mark', () => {
+  afterEach(() => {
+    delete DEFAULT_COMMAND_LIMITS.sleep
+    slowWrite.gate = null
+    slowWrite.returned = 0
+  })
+
+  it('marks a claimed write with the claimed value', async () => {
+    const ws = await cachingRamWorkspace()
+    const captured = captureMarks(ws)
+    try {
+      expect((await ws.shell('echo a | tee /r/f')).exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
+    expect(captured).toHaveLength(1)
+    const [marks, writes] = captured[0] ?? [[], {} as Record<string, ByteSource>]
+    const claimed = marks.filter(([op, path]) => op === 'write' && path === '/r/f')
+    expect(claimed).toHaveLength(1)
+    expect(claimed[0]?.[2]).toBe(writes['/r/f'])
+  })
+
+  it.each([
+    ['finished', 'echo a | tee /r/f', 0],
+    ['timed out', 'echo a | tee /r/f; sleep 2', 124],
+  ])('leaves no record marked after a line that %s', async (_, line, exitCode) => {
+    DEFAULT_COMMAND_LIMITS.sleep = new Limit({ timeoutSeconds: 0.1 })
+    const ws = await cachingRamWorkspace()
+    try {
+      expect((await ws.shell(line)).exitCode).toBe(exitCode)
+      expect(writesOf(ws, '/r/f').length).toBeGreaterThan(0)
+      expect(claimedOf(ws)).toEqual(ws.records.map(() => null))
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a background claimer ending after the line marks nothing', async () => {
+    // The background tee's write records while the line still runs (RAM
+    // stores the bytes and records before it invalidates, with no await
+    // between, so the loop sees the record once it sees the bytes), and the
+    // line persists that record; the tee itself returns only after the gate
+    // opens, past the line's end, when its scope is sealed.
+    let open: () => void = () => undefined
+    slowWrite.gate = new Promise<void>((resolve) => {
+      open = resolve
+    })
+    const ws = await cachingRamWorkspace()
+    try {
+      const line = 'echo a | tee /r/f & until [ -s /r/f ]; do sleep 0.01; done'
+      expect((await within(ws.shell(line), 5000)).exitCode).toBe(0)
+      expect(writesOf(ws, '/r/f').length).toBeGreaterThan(0)
+      open()
+      expect((await ws.shell('wait')).exitCode).toBe(0)
+      expect(slowWrite.returned).toBe(1)
+      expect(claimedOf(ws)).toEqual(ws.records.map(() => null))
+    } finally {
+      open()
+      await ws.close()
+    }
+  }, 10_000)
 })

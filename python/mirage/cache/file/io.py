@@ -20,6 +20,7 @@ from weakref import WeakKeyDictionary
 
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.io import CachableAsyncIterator, IOResult
+from mirage.io.types import ByteSource
 from mirage.observe.record import (
     READ_FINGERPRINT_OPS,
     WRITE_FINGERPRINT_OPS,
@@ -48,80 +49,112 @@ def mutation_lock(cache: FileCacheMixin) -> asyncio.Lock:
 
 
 def latest_fingerprint(
-    records: list[OpRecord] | None, path: str, ops: frozenset[str], nbytes: int
+    records: list[OpRecord] | None, path: str
 ) -> str | None:
-    """Latest backend fingerprint recorded for ``path`` by one of ``ops``.
+    """Latest backend fingerprint a read recorded for ``path``.
 
-    Backends stamp a read record with the content identifier they
-    returned (S3 ETag, OneDrive cTag, Postgres sha256), and an
-    object-store write record with the token its PUT answered.
-    Threading it into the cache entry lets a ``fresh`` mount's ``is_fresh``
-    compare like with like. None means the bytes carry no token, and the
-    entry then stores none: an unverifiable copy is dropped and re-read,
-    which is what a fabricated one produced anyway on every backend whose
-    token is not an md5 of the content.
+    Reads only: written bytes are decided by :func:`written_verdict`, so
+    there is one rule per direction. Backends stamp a read record with
+    the content identifier they returned (S3 ETag, OneDrive cTag,
+    Postgres sha256). Threading it into the cache entry lets a ``fresh``
+    mount's ``is_fresh`` compare like with like. None means the bytes
+    carry no token, and the entry then stores none: an unverifiable copy
+    is dropped and re-read, which is what a fabricated one produced
+    anyway on every backend whose token is not an md5 of the content.
 
-    For reads only the newest read of the path counts: when it carries no
-    token, neither does the entry, whatever an earlier read stamped.
-
-    ``ops`` is the direction the caller took, never both. One line's
-    records span every statement and pipeline segment (``IOResult.merge``
-    unions them), so a path read and written on the same line carries a
-    record of each; asking for the wrong direction stamps the write's
-    token onto the bytes the read produced, and the entry then reads as
-    fresh forever.
+    Only the newest read of the path counts: when it carries no token,
+    neither does the entry, whatever an earlier read stamped. The
+    backend did not vouch for the bytes stored, and an older read's
+    token would label bytes it never described, which a later revert to
+    that token serves as fresh.
 
     Args:
         records (list[OpRecord] | None): Op records emitted by the
             command that produced the IOResult being applied.
         path (str): Virtual path used as the cache key.
-        ops (frozenset[str]): ``READ_FINGERPRINT_OPS`` when the bytes
-            came from ``IOResult.reads``, ``WRITE_FINGERPRINT_OPS`` when
-            they came from ``IOResult.writes``.
-        nbytes (int): length of the bytes about to be stored, which a
-            write's token has to agree with.
     """
     if records is None:
         return None
     for rec in reversed(records):
-        if (
-            rec.op in READ_FINGERPRINT_OPS
-            and rec.op in ops
-            and rec.path == path
-            and not rec.fingerprint
-        ):
-            # The newest read is the one whose bytes are stored, and the
-            # backend did not vouch for them: an older read's token would
-            # label bytes it never described, which a later revert to that
-            # token serves as fresh.
-            return None
-        if rec.op in ops and rec.path == path and rec.fingerprint:
-            if rec.op in WRITE_FINGERPRINT_OPS and rec.bytes != nbytes:
-                # Direction is not identity: a line can hold several ops
-                # for one path while apply_io stores the bytes of just
-                # one of them, and `IOResult.merge` is right-wins on
-                # `writes`, so the empty eviction marker a server-side
-                # `cp` leaves there displaces the content `tee` wrote
-                # while `tee`'s record stays the last one (a copy that
-                # streams writes its own record, and the guard catches
-                # that one on the source's length instead). A token for
-                # a different length describes
-                # different bytes, and a wrong token reads as fresh for
-                # the life of the entry, so answer none and let the entry
-                # carry no token at all.
-                return None
-            return rec.fingerprint
+        if rec.op in READ_FINGERPRINT_OPS and rec.path == path:
+            return rec.fingerprint or None
     return None
+
+
+def written_verdict(
+    records: list[OpRecord] | None,
+    path: str,
+    written: ByteSource,
+    nbytes: int,
+) -> tuple[bool, str | None]:
+    """Whether a line keeps the bytes it wrote to ``path``, and their token.
+
+    Only the newest ``write`` record of the path counts. Its ``claimed``
+    value is what the command that made it put in ``IOResult.writes``,
+    so it vouches for ``written`` only when it is that very value, or
+    equal bytes. Any other value means another writer landed last (a
+    concurrent pipeline stage, an ``xargs -P`` run, a background job, a
+    door write that claims nothing), and neither the cached bytes nor the
+    pre-write entry are the file. A stored size other than ``nbytes``
+    means the backend stored other bytes than it was sent. A line with
+    no write record for the path keeps its bytes untokened.
+
+    Args:
+        records (list[OpRecord] | None): Op records of the line whose
+            IOResult is being applied.
+        path (str): Virtual path used as the cache key.
+        written (ByteSource): The original ``IOResult.writes`` value for
+            ``path``, never bytes joined from it.
+        nbytes (int): length of the bytes about to be stored.
+
+    Returns:
+        tuple[bool, str | None]: ``(True, token)`` to keep, labelled with
+        the newest write's token or None; ``(False, None)`` to drop.
+    """
+    if records is None:
+        return True, None
+    newest = next(
+        (
+            rec
+            for rec in reversed(records)
+            if rec.op in WRITE_FINGERPRINT_OPS and rec.path == path
+        ),
+        None,
+    )
+    if newest is None:
+        return True, None
+    claimed = newest.claimed
+    if claimed is not written and not (
+        isinstance(claimed, bytes)
+        and isinstance(written, bytes)
+        and claimed == written
+    ):
+        return False, None
+    if newest.bytes != nbytes:
+        return False, None
+    return True, newest.fingerprint or None
 
 
 async def _set_cached(
     cache: FileCacheMixin,
     path: str,
     data: bytes,
+    written: ByteSource | None,
     records: list[OpRecord] | None,
     cache_facts: Callable[[str], CacheFacts] | None,
-    ops: frozenset[str],
 ) -> None:
+    """Store ``data`` for ``path`` under the mutation lock.
+
+    Args:
+        cache (FileCacheMixin): The file cache to fill.
+        path (str): Virtual path used as the cache key.
+        data (bytes): The bytes to store.
+        written (ByteSource | None): The original ``IOResult.writes``
+            value when ``data`` was written, None when a read produced it.
+        records (list[OpRecord] | None): Op records of the line.
+        cache_facts (Callable[[str], CacheFacts] | None): Per-path
+            cacheability and ttl.
+    """
     async with mutation_lock(cache):
         facts = cache_facts(path) if cache_facts is not None else None
         # `cacheable` is read first and short-circuits, so `ttl` is never
@@ -129,7 +162,12 @@ async def _set_cached(
         # what keeps an unresolvable mount from being read as "no bound".
         if facts is None or facts.cacheable:
             await _set_cached_locked(
-                cache, path, data, records, ops, facts.ttl if facts else None
+                cache,
+                path,
+                data,
+                written,
+                records,
+                facts.ttl if facts else None,
             )
 
 
@@ -137,16 +175,25 @@ async def _set_cached_locked(
     cache: FileCacheMixin,
     path: str,
     data: bytes,
+    written: ByteSource | None,
     records: list[OpRecord] | None,
-    ops: frozenset[str],
     # No default: the one caller always has a bound to pass, and
     # omitting it would write an entry no `bounded` mount can ever
     # expire -- the population the gate's self-heal exists to clean up.
     # Required in the TypeScript twin for the same reason.
     ttl: int | None,
 ) -> None:
-    fingerprint = latest_fingerprint(records, path, ops, len(data))
-    if "read" in ops and fingerprint is None and await cache.exists(path):
+    if written is not None:
+        keep, token = written_verdict(records, path, written, len(data))
+        if not keep:
+            # The claimed path is skipped by apply_io's eviction loop, so
+            # the pre-write entry has to go here.
+            await cache.remove(path)
+            return
+        await cache.set(path, data, fingerprint=token, ttl=ttl)
+        return
+    fingerprint = latest_fingerprint(records, path)
+    if fingerprint is None and await cache.exists(path):
         # A tokenless read over a live entry is a warm read: these
         # bytes came out of this entry, so re-setting would drop the
         # backend fingerprint and force a ``fresh`` mount to refetch,
@@ -155,10 +202,6 @@ async def _set_cached_locked(
         # guarded walk reads the backend raw with an entry standing,
         # and only under ``bounded``, which already calls that entry
         # trusted.
-        #
-        # The direction gate keeps a write writing: a backend that
-        # stamps no write token would otherwise skip the set and leave
-        # pre-write bytes standing.
         return
     await cache.set(path, data, fingerprint=fingerprint, ttl=ttl)
 
@@ -182,18 +225,24 @@ async def apply_io(
     for path in kept:
         if cache_facts is not None and not cache_facts(path).cacheable:
             continue
-        data = io.reads.get(path)
         # The token has to describe the bytes actually stored, so the
-        # lookup asks about the side this branch took.
-        ops = READ_FINGERPRINT_OPS
+        # side this branch took decides which records label them.
+        data = io.reads.get(path)
+        written: ByteSource | None = None
         if data is None:
-            data = io.writes.get(path)
-            ops = WRITE_FINGERPRINT_OPS
+            data = written = io.writes.get(path)
         if data is None:
             continue
         if isinstance(data, bytes):
-            await _set_cached(cache, path, data, records, cache_facts, ops)
+            await _set_cached(cache, path, data, written, records, cache_facts)
         elif isinstance(data, CachableAsyncIterator):
+            if written is not None and (data.discarded or not data.exhausted):
+                # No claimer returns a written stream it did not finish
+                # (a discard marks a stream exhausted and empty), and its
+                # bytes are not the file's; the eviction loop below skips
+                # claimed paths, so the pre-write entry goes.
+                await cache.remove(path)
+                continue
             if data.discarded:
                 continue
             if data.exhausted:
@@ -201,9 +250,9 @@ async def apply_io(
                     cache,
                     path,
                     b"".join(data.buffered_chunks),
+                    written,
                     records,
                     cache_facts,
-                    ops,
                 )
             else:
                 if (
@@ -217,7 +266,6 @@ async def apply_io(
                             path,
                             data,
                             cache.drain_budget,
-                            ops,
                             records,
                             cache_facts,
                         )
@@ -248,11 +296,10 @@ async def _background_drain(
     path: str,
     it: CachableAsyncIterator,
     max_bytes: int,
-    ops: frozenset[str],
     records: list[OpRecord] | None = None,
     cache_facts: Callable[[str], CacheFacts] | None = None,
 ) -> None:
-    """Drain an unconsumed stream and write to cache.
+    """Drain an unconsumed read stream and write to cache.
 
     Cancelled by workspace.close() if the stream is still draining at
     shutdown. If the drain exceeds max_bytes (the cache's drain_budget)
@@ -265,6 +312,7 @@ async def _background_drain(
     try:
         materialized = await it.drain_bounded(max_bytes)
         if materialized is not None:
+            fingerprint = latest_fingerprint(records, path)
             async with mutation_lock(cache):
                 facts = cache_facts(path) if cache_facts is not None else None
                 # The large-object path stamps the bound too, or a
@@ -276,9 +324,7 @@ async def _background_drain(
                     await cache.add(
                         path,
                         materialized,
-                        fingerprint=latest_fingerprint(
-                            records, path, ops, len(materialized)
-                        ),
+                        fingerprint=fingerprint,
                         ttl=facts.ttl if facts else None,
                     )
         else:
