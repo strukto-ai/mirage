@@ -197,7 +197,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf file > '{mount}/scope-input'; eval '{ sleep 0.1; printf \"%s:%s\\n\" \"$(printf value)\" \"$(< {mount}/scope-input)\"; } &'; wait; rm '{mount}/scope-input'",
+      "command": "printf file > '{mount}/scope-input'; eval 'f() { printf value; }; { sleep 0.1; printf \"%s:%s\\n\" \"$(f)\" \"$(< {mount}/scope-input)\"; } &'; unset -f f; wait; rm '{mount}/scope-input'",
       "expect": {
         "exit": 0,
         "stdout": "value:file\n",

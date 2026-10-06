@@ -4,7 +4,7 @@ from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.parse.syntax import (
     find_syntax_issue,
     find_unterminated_backtick,
-    find_unterminated_quote,
+    syntax_error_message,
 )
 from mirage.shell.parse.types import SourceSpan, SyntaxDiagnostic, SyntaxIssue
 from mirage.shell.types import TSNodeLike
@@ -27,15 +27,6 @@ def diagnose(
         )
     if found is None:
         return ()
-    quote = find_unterminated_quote(root)
-    snippet = found.offending.strip()
-    message = (
-        f"mirage: unexpected EOF while looking for matching `{quote}'\n"
-        if quote is not None
-        else f"mirage: syntax error near '{snippet}'\n"
-        if snippet
-        else "mirage: syntax error in command\n"
-    )
     start, end = found.span.start, found.span.end
     return (
         SyntaxDiagnostic(
@@ -44,6 +35,6 @@ def diagnose(
                 offsets[start] if start < len(offsets) else start,
                 offsets[end] if end < len(offsets) else end,
             ),
-            message,
+            syntax_error_message(found.offending, root),
         ),
     )

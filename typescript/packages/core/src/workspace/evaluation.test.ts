@@ -1,5 +1,5 @@
 import * as executionTree from './node/run_tree.ts'
-import { afterEach, assert, expect, it, vi } from 'vitest'
+import { afterEach, assert, expect, test, vi } from 'vitest'
 import { CLISpec } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 import { Channel } from '../shell/console/index.ts'
@@ -12,6 +12,27 @@ import { childSession, executionSession } from './evaluation.ts'
 import type { TSNodeLike } from '../shell/types.ts'
 
 afterEach(() => vi.restoreAllMocks())
+
+const it = test.extend<{ owned: { ws: Workspace; programs: ParsedProgram[] } }>({
+  // eslint-disable-next-line no-empty-pattern -- Vitest requires destructuring for fixture dependencies.
+  owned: async ({}, use) => {
+    const parser = await getTestParser()
+    const programs: ParsedProgram[] = []
+    const original = parser.parseProgram.bind(parser)
+    vi.spyOn(parser, 'parseProgram').mockImplementation((source) => {
+      const program = original(source)
+      programs.push(program)
+      return program
+    })
+    const ws = new Workspace({}, { shellParser: parser })
+    try {
+      await use({ ws, programs })
+    } finally {
+      await ws.close()
+      expect(programs.every((program) => program.references === 0)).toBe(true)
+    }
+  },
+})
 
 it('keeps temporary frames off persistent state and child writes off the parent', () => {
   const state = new SessionState({ sessionId: 's' })
@@ -29,8 +50,9 @@ it('keeps temporary frames off persistent state and child writes off the parent'
   expect(Object.hasOwn(state, 'abortSignal')).toBe(false)
 })
 
-it('retains a background function through late substitutions and foreground unset', async () => {
-  const { ws, programs } = await trackedWorkspace()
+it('retains a background function through late substitutions and foreground unset', async ({
+  owned: { ws },
+}) => {
   const gate = barrier()
   installStall(ws, gate)
   try {
@@ -52,41 +74,35 @@ it('retains a background function through late substitutions and foreground unse
     expect(defining.references).toBe(0)
   } finally {
     gate.release()
-    await ws.close()
   }
-  expect(programs.every((program) => program.references === 0)).toBe(true)
 })
 
-it('explain borrows function programs without retaining another session', async () => {
-  const { ws, programs } = await trackedWorkspace()
-  try {
-    await ws.shell('f() { echo retained; }')
-    const before = programs.map((program) => program.references)
-    await ws.explain('cd /; f')
-    expect(programs.slice(0, before.length).map((program) => program.references)).toEqual(before)
-  } finally {
-    await ws.close()
-  }
-  expect(programs.every((program) => program.references === 0)).toBe(true)
+it('explain borrows function programs without retaining another session', async ({
+  owned: { ws, programs },
+}) => {
+  await ws.shell('f() { echo retained; }')
+  const before = programs.map((program) => program.references)
+  await ws.explain('cd /; f')
+  expect(programs.slice(0, before.length).map((program) => program.references)).toEqual(before)
 })
 
-it.each([
-  ['self-unset', 'f() { unset -f f; echo alive; }; f', 'alive\n'],
-  ['pipeline', 'f() { echo alive; }; f | cat', 'alive\n'],
-  ['parallel xargs', 'f() { echo "$1"; }; printf "x\\nx\\n" | xargs -P 2 -n 1 f', 'x\nx\n'],
-  ['subshell', '(f() { echo alive; }; f)', 'alive\n'],
-  ['nested bash', "bash -c 'f() { echo alive; }; f'", 'alive\n'],
-])('releases function programs after %s', async (_name, command, stdout) => {
-  const { ws, programs } = await trackedWorkspace()
-  try {
+it.for([
+  ['self-unset', 'f() { unset -f f; echo alive; }; f', 'alive\n', 0],
+  ['early return', 'f() { unset -f f; return 7; }; f', '', 7],
+  ['self-redefinition', 'f() { f() { echo new; }; echo old; }; f; f', 'old\nnew\n', 0],
+  ['pipeline', 'f() { echo alive; }; f | cat', 'alive\n', 0],
+  ['parallel xargs', 'f() { echo "$1"; }; printf "x\\nx\\n" | xargs -P 2 -n 1 f', 'x\nx\n', 0],
+  ['subshell', '(f() { echo alive; }; f)', 'alive\n', 0],
+  ['nested bash', "bash -c 'f() { echo alive; }; f'", 'alive\n', 0],
+] as const)(
+  'releases function programs after %s',
+  async ([_name, command, stdout, exitCode], { owned: { ws, programs } }) => {
     const io = await ws.shell(command)
-    expect([io.exitCode, io.stdoutText, io.stderrText]).toEqual([0, stdout, ''])
+    expect([io.exitCode, io.stdoutText, io.stderrText]).toEqual([exitCode, stdout, ''])
     await ws.shell('unset -f f')
     expect(programs.every((program) => program.references === 0)).toBe(true)
-  } finally {
-    await ws.close()
-  }
-})
+  },
+)
 
 it('closing one workspace leaves its injected parser usable by another', async () => {
   const parser = await getTestParser()
@@ -102,8 +118,7 @@ it('closing one workspace leaves its injected parser usable by another', async (
   }
 })
 
-it('keeps substitution writes off its parent while suspended', async () => {
-  const ws = new Workspace({}, { shellParser: await getTestParser() })
+it('keeps substitution writes off its parent while suspended', async ({ owned: { ws } }) => {
   const gate = barrier()
   installStall(ws, gate)
   const pending = ws.shell('X=parent; value=$(X=child; stall; echo "$X"); echo "$X:$value"')
@@ -117,20 +132,22 @@ it('keeps substitution writes off its parent while suspended', async () => {
   } finally {
     gate.release()
     await pending
-    await ws.close()
   }
 })
 
-it('keeps a cancelled tree alive until a blocked leaf actually settles', async () => {
-  const { ws, programs } = await trackedWorkspace()
+it('keeps a cancelled tree alive until a blocked leaf actually settles', async ({
+  owned: { ws, programs },
+}) => {
   const gate = barrier()
   const run = executionTree.runCommandTree
   let borrowed = ''
-  vi.spyOn(executionTree, 'runCommandTree').mockImplementation(async (...args) => {
-    await gate.pause()
-    borrowed = args[1].text
-    return run(...args)
-  })
+  const executing = vi
+    .spyOn(executionTree, 'runCommandTree')
+    .mockImplementation(async (...args) => {
+      await gate.pause()
+      borrowed = args[1].text
+      return run(...args)
+    })
   const abort = new AbortController()
   const pending = ws.shell('echo forbidden', { signal: abort.signal })
   const cancelled = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
@@ -144,26 +161,13 @@ it('keeps a cancelled tree alive until a blocked leaf actually settles', async (
       expect(programs.every((program) => program.references === 0)).toBe(true)
     })
     expect(borrowed).toBe('echo forbidden')
-    vi.restoreAllMocks()
+    executing.mockRestore()
     expect((await ws.shell('echo alive')).stdoutText).toBe('alive\n')
   } finally {
     gate.release()
     await cancelled
-    await ws.close()
   }
 })
-
-async function trackedWorkspace(): Promise<{ ws: Workspace; programs: ParsedProgram[] }> {
-  const parser = await getTestParser()
-  const programs: ParsedProgram[] = []
-  const original = parser.parseProgram.bind(parser)
-  vi.spyOn(parser, 'parseProgram').mockImplementation((source) => {
-    const program = original(source)
-    programs.push(program)
-    return program
-  })
-  return { ws: new Workspace({}, { shellParser: parser }), programs }
-}
 
 function barrier(): { entered: Promise<void>; pause: () => Promise<void>; release: () => void } {
   let enter!: () => void, release!: () => void

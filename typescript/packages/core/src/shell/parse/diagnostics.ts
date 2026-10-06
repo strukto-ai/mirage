@@ -1,6 +1,6 @@
 import type { TSNodeLike } from '../types.ts'
 import type { SyntaxDiagnostic } from './types.ts'
-import { findSyntaxIssue, findUnterminatedBacktick, findUnterminatedQuote } from './syntax.ts'
+import { findSyntaxIssue, findUnterminatedBacktick, syntaxErrorMessage } from './syntax.ts'
 
 export function diagnose(
   root: TSNodeLike,
@@ -19,18 +19,10 @@ export function diagnose(
       },
     }
   if (found === null) return []
-  const quote = findUnterminatedQuote(root)
-  const snippet = found.offending.trim()
-  const message =
-    quote !== null
-      ? 'mirage: unexpected EOF while looking for matching `' + quote + "'\n"
-      : snippet.length > 0
-        ? `mirage: syntax error near '${snippet}'\n`
-        : 'mirage: syntax error in command\n'
   return [
     {
       offending: found.offending,
-      message,
+      message: syntaxErrorMessage(found.offending, root),
       span: {
         start: offsets[found.span.start] ?? found.span.start,
         end: offsets[found.span.end] ?? found.span.end,

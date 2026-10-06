@@ -454,14 +454,24 @@ def syntax_error_result(
         offending (str): the span the parser flagged.
         node (TSNodeLike | None): the parsed command, for quote diagnostics.
     """
+    return IOResult(
+        exit_code=2, stderr=encode_text(syntax_error_message(offending, node))
+    )
+
+
+def syntax_error_message(
+    offending: str, node: TSNodeLike | None = None
+) -> str:
+    """Format the diagnostic shared by parsed programs and execution results.
+
+    Args:
+        offending (str): the span the parser flagged.
+        node (TSNodeLike | None): the parsed command, for quote diagnostics.
+    """
     quote = find_unterminated_quote(node) if node is not None else None
     snippet = offending.strip()
     if quote is not None:
-        message = (
-            f"mirage: unexpected EOF while looking for matching `{quote}'\n"
-        )
-    elif snippet:
-        message = f"mirage: syntax error near '{snippet}'\n"
-    else:
-        message = "mirage: syntax error in command\n"
-    return IOResult(exit_code=2, stderr=encode_text(message))
+        return f"mirage: unexpected EOF while looking for matching `{quote}'\n"
+    if snippet:
+        return f"mirage: syntax error near '{snippet}'\n"
+    return "mirage: syntax error in command\n"

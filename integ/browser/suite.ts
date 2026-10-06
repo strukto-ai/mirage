@@ -24,12 +24,15 @@ import {
 } from '../runners/typescript/execution.ts'
 import substitutionScope from '../bash/cmdsub/scope.json'
 import assignmentRedirect from '../bash/assign/redirect.json'
+import unset from '../bash/builtin/unset.json'
 import substitutionStatus from '../bash/cmdsub/status.json'
 import commandFunction from '../bash/command/function.json'
 import commandRun from '../bash/command/run.json'
 import jobsBackground from '../bash/jobs/bg.json'
 import jobsOutput from '../bash/jobs/output.json'
 import nestedSyntax from '../bash/quoted/nested_subshell.json'
+import quotingSyntax from '../bash/syntax/quoting.json'
+import pipelineStatus from '../bash/param/pipestatus.json'
 import traps from '../bash/trap/exit.json'
 
 export interface Outcome {
@@ -81,12 +84,15 @@ function battery(): [string, Check][] {
     traps,
     substitutionScope,
     assignmentRedirect,
+    unset,
     substitutionStatus,
     commandRun,
     commandFunction,
     jobsBackground,
     jobsOutput,
     nestedSyntax,
+    quotingSyntax,
+    pipelineStatus,
   ]
   return files.flatMap((file) =>
     (file.cases as unknown as Case[]).map((c): [string, Check] => [

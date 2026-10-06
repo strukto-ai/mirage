@@ -56,15 +56,18 @@ export function findUnterminatedQuote(node: TSNodeLike): string | null {
 
 /** Exit 2 with the bash-style diagnostic for an unparsable line. */
 export function syntaxErrorResult(offending: string, node: TSNodeLike): IOResult {
+  return new IOResult({ exitCode: 2, stderr: encodeText(syntaxErrorMessage(offending, node)) })
+}
+
+/** Format the diagnostic shared by parsed programs and execution results. */
+export function syntaxErrorMessage(offending: string, node: TSNodeLike): string {
   const quote = findUnterminatedQuote(node)
   const snippet = offending.trim()
-  const message =
-    quote !== null
-      ? 'mirage: unexpected EOF while looking for matching `' + quote + "'\n"
-      : snippet.length > 0
-        ? `mirage: syntax error near '${snippet}'\n`
-        : 'mirage: syntax error in command\n'
-  return new IOResult({ exitCode: 2, stderr: encodeText(message) })
+  return quote !== null
+    ? 'mirage: unexpected EOF while looking for matching `' + quote + "'\n"
+    : snippet.length > 0
+      ? `mirage: syntax error near '${snippet}'\n`
+      : 'mirage: syntax error in command\n'
 }
 
 // Locate a backtick substitution that is never closed. tree-sitter

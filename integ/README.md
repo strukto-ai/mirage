@@ -244,6 +244,25 @@ The ownership follow-ups in `bash/jobs/bg.json` (substitutions after `eval`
 returns) and `bash/cmdsub/scope.json` (child local and temporary environment
 scopes) are pinned to the same image and included in the Chrome battery.
 
+The #1438 behavior coverage uses the existing shared corpus on both hosts;
+Chrome imports these same files rather than maintaining another set of goldens:
+
+| Changed behavior or preserved contract | Shared coverage |
+| --- | --- |
+| Assignment-only redirects, substitution status/stderr and Unicode | `bash/assign/redirect.json` |
+| Child variables/functions stay isolated; local `unset` keeps the global hidden | `bash/cmdsub/scope.json` |
+| A running function survives self-unset, including `return 7` | `bash/builtin/unset.json` |
+| Active redefinition finishes the old body; stored functions survive `eval` and `source` readers | `bash/command/function.json` |
+| A background job retains its function after foreground unset, and parses substitutions after `eval` returns | `bash/jobs/bg.json` |
+| Child RANDOM reads preserve the parent's sequence and unset state | Existing cases in `bash/param/pipestatus.json` |
+| Shared diagnostic formatting preserves quote errors and nested syntax errors | Existing `bash/syntax/quoting.json` and `bash/quoted/nested_subshell.json` |
+
+The added unset/function cases and extended background case are pinned to the
+same Bash image. Native-tree release counts, suspended-parent inspection and
+late cancellation require host-controlled unit tests in the mirrored parser
+and evaluation suites. The existing browser host checks also cover cancellation
+and workspace shutdown; shell-output goldens cannot prove memory cleanup.
+
 ## Running locally
 
 The `unix/cp` and `unix/mv` cases use GNU coreutils 9.7 as their transfer

@@ -305,6 +305,74 @@
         "stdout": "[0 2 3] [x z w]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "unset_function_during_its_own_call",
+      "seq": 940088,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "f() { unset -f f; echo alive; }; f; declare -F f >/dev/null; echo defined:$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "alive\ndefined:1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unset_function_before_early_return",
+      "seq": 940089,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "f() { unset -f f; return 7; }; f",
+      "expect": {
+        "exit": 7,
+        "stdout": "",
+        "stderr": ""
+      }
     }
   ]
 }
