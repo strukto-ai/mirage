@@ -43,11 +43,9 @@ async def lay_out(
         "refs/tags",
         "info",
     ):
-        await ensure_dir(dispatch, gitdir.join(f"{directory}"))
+        await ensure_dir(dispatch, gitdir.join(directory))
     await write_once(
-        dispatch,
-        gitdir.join("HEAD"),
-        f"ref: refs/heads/{branch}\n".encode(),
+        dispatch, gitdir.join("HEAD"), f"ref: refs/heads/{branch}\n".encode()
     )
     await write_once(dispatch, gitdir.join("config"), config.encode())
     await write_once(

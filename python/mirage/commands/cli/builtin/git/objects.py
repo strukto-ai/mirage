@@ -141,8 +141,7 @@ class LooseObjects:
             fanout (str): the two-character directory name.
         """
         names = run_async_from_sync(
-            read_names(self._dispatch, self._root.join(fanout)),
-            self._loop,
+            read_names(self._dispatch, self._root.join(fanout)), self._loop
         )
         found = []
         for entry in names:

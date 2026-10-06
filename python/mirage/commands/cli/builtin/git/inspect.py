@@ -140,7 +140,9 @@ async def global_sources(
     )
     sources = []
     for source in paths:
-        data = await read_optional(dispatch, source)
+        data = await read_optional(
+            dispatch, PathSpec.from_str_path(source, cwd="/")
+        )
         if data is not None:
             sources.append((source, ConfigFile.from_file(BytesIO(data))))
     if not sources and listing:

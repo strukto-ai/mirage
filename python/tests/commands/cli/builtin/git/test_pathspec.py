@@ -27,15 +27,8 @@ from mirage.commands.cli.builtin.git.pathspec import (
     repo_relative,
     under,
 )
-from mirage.commands.cli.builtin.git.types import RepoLocation
-from mirage.types import PathSpec
 
-LOCATION = RepoLocation(
-    gitdir=PathSpec.from_str_path("/repo/.git"),
-    commondir=PathSpec.from_str_path("/repo/.git"),
-    worktree=PathSpec.from_str_path("/repo"),
-    mount_root=PathSpec.from_str_path("/repo/", cwd="/"),
-)
+from .conftest import LOCATION
 
 
 def test_a_relative_operand_resolves_against_the_run_directory():

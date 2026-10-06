@@ -17,7 +17,6 @@ from pathlib import Path
 
 import pytest
 
-from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.worktree import (
     UNTRACKED_ALL,
     UNTRACKED_NO,
@@ -25,16 +24,12 @@ from mirage.commands.cli.builtin.git.worktree import (
     scan,
     tracked_directories,
 )
-from mirage.types import LINK_TARGET_KEY, FileType, PathSpec
+from mirage.types import LINK_TARGET_KEY, FileType
 from mirage.workspace.mount.namespace.probe import path_stat
 from mirage.workspace.mount.namespace.view import namespace_view_of
 
-LOCATION = RepoLocation(
-    gitdir=PathSpec.from_str_path("/repo/.git"),
-    commondir=PathSpec.from_str_path("/repo/.git"),
-    worktree=PathSpec.from_str_path("/repo"),
-    mount_root=PathSpec.from_str_path("/repo/", cwd="/"),
-)
+from .conftest import LOCATION
+
 TRACKED = {"a.txt", "b.txt"}
 
 

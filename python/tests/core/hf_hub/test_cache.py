@@ -69,21 +69,21 @@ def test_etag_prefers_the_lfs_sha():
 
 def test_layout_paths():
     folder = repo_folder_name("acme/w", "model")
+    root = PathSpec.from_str_path("/hidden/../c", cwd="/")
+    blob = blob_path(root, folder, "e1")
+    assert blob.virtual == "/c/models--acme--w/blobs/e1"
+    assert blob.dotted == "/hidden/../c/models--acme--w/blobs/e1"
     assert (
-        blob_path(PathSpec.from_str_path("/c"), folder, "e1").virtual
-        == "/c/models--acme--w/blobs/e1"
-    )
-    assert (
-        ref_path(PathSpec.from_str_path("/c"), folder, "main").virtual
+        ref_path(root, folder, "main").virtual
         == "/c/models--acme--w/refs/main"
     )
     assert (
-        snapshot_dir(PathSpec.from_str_path("/c"), folder, "sha").virtual
+        snapshot_dir(root, folder, "sha").virtual
         == "/c/models--acme--w/snapshots/sha"
     )
-    assert snapshot_path(
-        PathSpec.from_str_path("/c"), folder, "sha", "sub/b.json"
-    ).virtual == ("/c/models--acme--w/snapshots/sha/sub/b.json")
+    assert snapshot_path(root, folder, "sha", "sub/b.json").virtual == (
+        "/c/models--acme--w/snapshots/sha/sub/b.json"
+    )
 
 
 @pytest.mark.parametrize(
@@ -118,10 +118,3 @@ def test_cache_root_reports_that_nothing_named_one():
     inventing a path."""
     assert cache_root({}) is None
     assert cache_root(None) is None
-
-
-def test_cache_paths_keep_the_roots_directory_walk():
-    root = PathSpec.from_str_path("/hidden/../cache", cwd="/")
-    blob = blob_path(root, "models--acme--w", "e1")
-    assert blob.virtual == "/cache/models--acme--w/blobs/e1"
-    assert blob.dotted == "/hidden/../cache/models--acme--w/blobs/e1"

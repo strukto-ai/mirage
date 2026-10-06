@@ -124,7 +124,5 @@ async def test_pack_permission_failure_keeps_path_and_git_error(failed_op):
         GitError, match="cannot read pack /repo/denied.pack: Permission denied"
     ):
         await check_pack(
-            dispatch,
-            PathSpec.from_str_path("/repo/denied.pack"),
-            b"0" * 20,
+            dispatch, PathSpec.from_str_path("/repo/denied.pack"), b"0" * 20
         )

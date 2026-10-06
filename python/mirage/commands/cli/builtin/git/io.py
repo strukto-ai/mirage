@@ -25,19 +25,19 @@ from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
 logger = logging.getLogger(__name__)
 
 
-async def read_file(dispatch: DispatchFn, path: str | PathSpec) -> bytes:
+async def read_file(dispatch: DispatchFn, path: PathSpec) -> bytes:
     """Read one virtual path through the workspace dispatcher.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str | PathSpec): absolute virtual path.
+        path (PathSpec): absolute virtual path.
     """
-    data, _ = await dispatch("read", PathSpec.from_str_path(path, cwd="/"))
+    data, _ = await dispatch("read", path)
     return data if isinstance(data, bytes) else bytes(data)
 
 
 async def entry_bytes(
-    dispatch: DispatchFn, path: str | PathSpec, info: FileStat
+    dispatch: DispatchFn, path: PathSpec, info: FileStat
 ) -> bytes:
     """The bytes git stores for one working-tree entry.
 
@@ -50,7 +50,7 @@ async def entry_bytes(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str | PathSpec): absolute virtual path.
+        path (PathSpec): absolute virtual path.
         info (FileStat): what the walk saw at that path, lstat-style.
     """
     if info.type is FileType.SYMLINK:
@@ -112,9 +112,7 @@ async def restore_entry(
         # below does, so a link alone in a new directory gets one too.
         await ensure_dir(dispatch, path.parent)
         await dispatch(
-            "symlink",
-            path,
-            target=blob.decode("utf-8", errors="replace"),
+            "symlink", path, target=blob.decode("utf-8", errors="replace")
         )
         return
     if linked:
@@ -206,36 +204,32 @@ async def drop_gitlink(
 
 
 async def read_range(
-    dispatch: DispatchFn, path: str | PathSpec, offset: int, size: int
+    dispatch: DispatchFn, path: PathSpec, offset: int, size: int
 ) -> bytes:
     """Read a byte range of one virtual path.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str | PathSpec): absolute virtual path.
+        path (PathSpec): absolute virtual path.
         offset (int): first byte to read.
         size (int): how many bytes to read.
     """
-    data, _ = await dispatch(
-        "read", PathSpec.from_str_path(path, cwd="/"), offset=offset, size=size
-    )
+    data, _ = await dispatch("read", path, offset=offset, size=size)
     return data if isinstance(data, bytes) else bytes(data)
 
 
-async def file_size(dispatch: DispatchFn, path: str | PathSpec) -> int | None:
+async def file_size(dispatch: DispatchFn, path: PathSpec) -> int | None:
     """A path's byte length, or None when the backend does not know it.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str | PathSpec): absolute virtual path.
+        path (PathSpec): absolute virtual path.
     """
-    stat, _ = await dispatch("stat", PathSpec.from_str_path(path, cwd="/"))
+    stat, _ = await dispatch("stat", path)
     return getattr(stat, "size", None)
 
 
-async def read_optional(
-    dispatch: DispatchFn, path: str | PathSpec
-) -> bytes | None:
+async def read_optional(dispatch: DispatchFn, path: PathSpec) -> bytes | None:
     """Read a path that a repository may legitimately not have.
 
     ``packed-refs`` and ``HEAD``-adjacent files are absent in perfectly
@@ -243,7 +237,7 @@ async def read_optional(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str | PathSpec): absolute virtual path.
+        path (PathSpec): absolute virtual path.
     """
     try:
         return await read_file(dispatch, path)
@@ -251,17 +245,15 @@ async def read_optional(
         return None
 
 
-async def read_names(dispatch: DispatchFn, path: str | PathSpec) -> list[str]:
+async def read_names(dispatch: DispatchFn, path: PathSpec) -> list[str]:
     """List a directory, empty when it does not exist.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str | PathSpec): absolute virtual path of the directory.
+        path (PathSpec): absolute virtual path of the directory.
     """
     try:
-        entries, _ = await dispatch(
-            "readdir", PathSpec.from_str_path(path, cwd="/")
-        )
+        entries, _ = await dispatch("readdir", path)
     except MISS_ERRORS:
         return []
     return list(entries or [])
@@ -280,7 +272,7 @@ def basename(entry: str) -> str:
     return entry.rstrip("/").rsplit("/", 1)[-1]
 
 
-async def ensure_dir(dispatch: DispatchFn, path: str | PathSpec) -> None:
+async def ensure_dir(dispatch: DispatchFn, path: PathSpec) -> None:
     """Create a directory and every missing directory above it.
 
     Written out rather than delegated to ``mkdir -p`` because the
@@ -296,10 +288,10 @@ async def ensure_dir(dispatch: DispatchFn, path: str | PathSpec) -> None:
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str | PathSpec): absolute virtual path of the directory.
+        path (PathSpec): absolute virtual path of the directory.
     """
     missing: list[PathSpec] = []
-    current = PathSpec.from_str_path(path, cwd="/")
+    current = path
     while current.virtual != "/":
         try:
             await dispatch("stat", current)
@@ -311,36 +303,35 @@ async def ensure_dir(dispatch: DispatchFn, path: str | PathSpec) -> None:
         await dispatch("mkdir", target)
 
 
-async def exists(dispatch: DispatchFn, path: str | PathSpec) -> bool:
+async def exists(dispatch: DispatchFn, path: PathSpec) -> bool:
     """Whether a point lookup finds anything at a path.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str | PathSpec): absolute virtual path.
+        path (PathSpec): absolute virtual path.
     """
     try:
-        await dispatch("stat", PathSpec.from_str_path(path, cwd="/"))
+        await dispatch("stat", path)
     except MISS_ERRORS:
         return False
     return True
 
 
 async def write_file(
-    dispatch: DispatchFn, path: str | PathSpec, data: bytes
+    dispatch: DispatchFn, path: PathSpec, data: bytes
 ) -> None:
     """Write one virtual path, creating the directories above it.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str | PathSpec): absolute virtual path.
+        path (PathSpec): absolute virtual path.
         data (bytes): the whole contents.
     """
-    scope = PathSpec.from_str_path(path, cwd="/")
-    await ensure_dir(dispatch, scope.parent)
-    await dispatch("write", scope, data=data)
+    await ensure_dir(dispatch, path.parent)
+    await dispatch("write", path, data=data)
 
 
-async def take_lock(dispatch: DispatchFn, path: str | PathSpec) -> None:
+async def take_lock(dispatch: DispatchFn, path: PathSpec) -> None:
     """Take a file's lock and let it go, as git does before rewriting it.
 
     git creates ``<path>.lock`` before it rewrites the index or the
@@ -354,14 +345,13 @@ async def take_lock(dispatch: DispatchFn, path: str | PathSpec) -> None:
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str | PathSpec): absolute virtual path of the file the lock guards.
+        path (PathSpec): absolute virtual path of the file the lock guards.
 
     Raises:
         FileExistsError: the lock is already there.
     """
-    scope = PathSpec.from_str_path(path, cwd="/")
     lock = PathSpec.from_str_path(
-        f"{scope.dotted or scope.virtual}.lock", cwd="/"
+        f"{path.dotted or path.virtual}.lock", cwd="/"
     )
     if await exists(dispatch, lock):
         raise eexist(lock)
@@ -370,7 +360,7 @@ async def take_lock(dispatch: DispatchFn, path: str | PathSpec) -> None:
 
 
 async def write_once(
-    dispatch: DispatchFn, path: str | PathSpec, data: bytes
+    dispatch: DispatchFn, path: PathSpec, data: bytes
 ) -> None:
     """Write a path only if nothing is there yet.
 
@@ -383,7 +373,7 @@ async def write_once(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str | PathSpec): absolute virtual path.
+        path (PathSpec): absolute virtual path.
         data (bytes): the whole contents.
     """
     if await exists(dispatch, path):
@@ -436,7 +426,7 @@ async def blocking_ancestor(
     return None
 
 
-async def remove_file(dispatch: DispatchFn, path: str | PathSpec) -> None:
+async def remove_file(dispatch: DispatchFn, path: PathSpec) -> None:
     """Delete one virtual path, tolerating one that is already gone.
 
     A miss is an answer rather than an error for every caller here:
@@ -445,16 +435,16 @@ async def remove_file(dispatch: DispatchFn, path: str | PathSpec) -> None:
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str | PathSpec): absolute virtual path.
+        path (PathSpec): absolute virtual path.
     """
     try:
-        await dispatch("unlink", PathSpec.from_str_path(path, cwd="/"))
+        await dispatch("unlink", path)
     except MISS_ERRORS as exc:
         logger.debug("nothing to remove at %s: %s", path, exc)
 
 
 async def rename_path(
-    dispatch: DispatchFn, source: str | PathSpec, target: str | PathSpec
+    dispatch: DispatchFn, source: PathSpec, target: PathSpec
 ) -> None:
     """Move one virtual path, file or directory, to another name.
 
@@ -465,14 +455,10 @@ async def rename_path(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        source (str | PathSpec): absolute virtual path to move.
-        target (str | PathSpec): absolute virtual path to move it to.
+        source (PathSpec): absolute virtual path to move.
+        target (PathSpec): absolute virtual path to move it to.
     """
-    await dispatch(
-        "rename",
-        PathSpec.from_str_path(source, cwd="/"),
-        dst=PathSpec.from_str_path(target, cwd="/"),
-    )
+    await dispatch("rename", source, dst=target)
 
 
 def refuse_mount(mounts: MountView | None, path: PathSpec) -> None:

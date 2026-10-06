@@ -24,7 +24,7 @@ import { IOResult } from '../../../../io/types.ts'
 import { OpsRegistry } from '../../../../ops/registry.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
-import { MountMode } from '../../../../types.ts'
+import { MountMode, PathSpec } from '../../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
 import * as gitFsModule from './fs.ts'
@@ -84,7 +84,7 @@ beforeAll(async () => {
   ]
   for (const rel of walk(repoPath)) {
     const target = `/repo/${rel}`
-    await ensureDir(dispatch, target.slice(0, target.lastIndexOf('/')))
+    await ensureDir(dispatch, PathSpec.fromStrPath(target).parent)
     await ws.dispatch('write', target, [new Uint8Array(readFileSync(join(repoPath, rel)))])
   }
   ws.registerCli('git', GIT)
@@ -469,7 +469,7 @@ it('matches native remote URLs and tracking branches', async () => {
     ]
     for (const rel of walk(repoPath)) {
       const target = `/repo/${rel}`
-      await ensureDir(dispatch, target.slice(0, target.lastIndexOf('/')))
+      await ensureDir(dispatch, PathSpec.fromStrPath(target).parent)
       await remoteWs.dispatch('write', target, [new Uint8Array(readFileSync(join(repoPath, rel)))])
     }
     remoteWs.registerCli('git', GIT)

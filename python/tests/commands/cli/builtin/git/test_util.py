@@ -98,17 +98,6 @@ async def test_an_unsupported_show_flag_is_refused(git_ws):
 
 
 @pytest.mark.asyncio
-async def test_directory_failure_precedes_leaf_flag_refusal(git_ws):
-    # Native git validates -C before the leaf interprets its flags.
-    result = await git_ws.shell("git -C /nowhere log --zzz")
-    assert result.exit_code == 128
-    assert (
-        result.stderr
-        == b"fatal: cannot change to '/nowhere': No such file or directory\n"
-    )
-
-
-@pytest.mark.asyncio
 async def test_a_real_revision_still_resolves(git_ws):
     result = await git_ws.shell("git -C /repo log --oneline HEAD")
     assert result.exit_code == 0

@@ -408,10 +408,7 @@ async def switch_to(
         mode, sha = after[path]
         if mode == GITLINK:
             await keep_gitlink(
-                dispatch,
-                stat_path,
-                location.worktree.join(name),
-                links,
+                dispatch, stat_path, location.worktree.join(name), links
             )
             continue
         # Whatever the removals above did not take, a component above

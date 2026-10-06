@@ -23,8 +23,8 @@ import type { Dispatch } from './types.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 
 /** Read one virtual path through the workspace dispatcher. */
-export async function readFile(dispatch: Dispatch, path: string | PathSpec): Promise<Uint8Array> {
-  const [data] = await dispatch('read', PathSpec.fromStrPath(path, undefined, '/'))
+export async function readFile(dispatch: Dispatch, path: PathSpec): Promise<Uint8Array> {
+  const [data] = await dispatch('read', path)
   return data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBufferLike)
 }
 
@@ -39,7 +39,7 @@ export async function readFile(dispatch: Dispatch, path: string | PathSpec): Pro
  */
 export async function entryBytes(
   dispatch: Dispatch,
-  path: string | PathSpec,
+  path: PathSpec,
   info: FileStat,
 ): Promise<Uint8Array> {
   if (info.type === FileType.SYMLINK) {
@@ -181,11 +181,11 @@ export async function dropGitlink(
 /** Read a byte range of one virtual path. */
 export async function readRange(
   dispatch: Dispatch,
-  path: string | PathSpec,
+  path: PathSpec,
   offset: number,
   size: number,
 ): Promise<Uint8Array> {
-  const [data] = await dispatch('read', PathSpec.fromStrPath(path, undefined, '/'), [], {
+  const [data] = await dispatch('read', path, [], {
     offset,
     size,
   })
@@ -198,10 +198,7 @@ export async function readRange(
  * `packed-refs` and `HEAD`-adjacent files are absent in perfectly valid
  * repositories, so a miss is an answer rather than an error.
  */
-export async function readOptional(
-  dispatch: Dispatch,
-  path: string | PathSpec,
-): Promise<Uint8Array | null> {
+export async function readOptional(dispatch: Dispatch, path: PathSpec): Promise<Uint8Array | null> {
   try {
     return await readFile(dispatch, path)
   } catch (err) {
@@ -211,9 +208,9 @@ export async function readOptional(
 }
 
 /** List a directory, empty when it does not exist. */
-export async function readNames(dispatch: Dispatch, path: string | PathSpec): Promise<string[]> {
+export async function readNames(dispatch: Dispatch, path: PathSpec): Promise<string[]> {
   try {
-    const [entries] = await dispatch('readdir', PathSpec.fromStrPath(path, undefined, '/'))
+    const [entries] = await dispatch('readdir', path)
     return [...((entries as string[] | null) ?? [])]
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return []
@@ -249,9 +246,9 @@ export function basename(entry: string): string {
  * directory is the set of keys under it, so creating one again costs a no-op
  * rather than an error.
  */
-export async function ensureDir(dispatch: Dispatch, path: string | PathSpec): Promise<void> {
+export async function ensureDir(dispatch: Dispatch, path: PathSpec): Promise<void> {
   const missing: PathSpec[] = []
-  let current = PathSpec.fromStrPath(path, undefined, '/')
+  let current = path
   while (current.virtual !== '/') {
     try {
       await dispatch('stat', current)
@@ -274,9 +271,9 @@ export async function ensureDir(dispatch: Dispatch, path: string | PathSpec): Pr
  * directory misses on a keyed store and raises EISDIR on disk, so "the read did
  * not work" says nothing about what the path is.
  */
-export async function isDirectory(dispatch: Dispatch, path: string | PathSpec): Promise<boolean> {
+export async function isDirectory(dispatch: Dispatch, path: PathSpec): Promise<boolean> {
   try {
-    const [stat] = await dispatch('stat', PathSpec.fromStrPath(path, undefined, '/'))
+    const [stat] = await dispatch('stat', path)
     return (stat as { type?: string } | null)?.type === FileType.DIRECTORY
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return false
@@ -285,9 +282,9 @@ export async function isDirectory(dispatch: Dispatch, path: string | PathSpec): 
 }
 
 /** Whether a point lookup finds anything at a path. */
-export async function exists(dispatch: Dispatch, path: string | PathSpec): Promise<boolean> {
+export async function exists(dispatch: Dispatch, path: PathSpec): Promise<boolean> {
   try {
-    await dispatch('stat', PathSpec.fromStrPath(path, undefined, '/'))
+    await dispatch('stat', path)
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return false
     throw err
@@ -306,9 +303,8 @@ export async function exists(dispatch: Dispatch, path: string | PathSpec): Promi
  * refuses and so does this (EEXIST), untouched. The look and the create are two
  * ops, since the door has no exclusive create.
  */
-export async function takeLock(dispatch: Dispatch, path: string | PathSpec): Promise<void> {
-  const scope = PathSpec.fromStrPath(path, undefined, '/')
-  const lock = PathSpec.fromStrPath(`${scope.dotted ?? scope.virtual}.lock`, undefined, '/')
+export async function takeLock(dispatch: Dispatch, path: PathSpec): Promise<void> {
+  const lock = PathSpec.fromStrPath(`${path.dotted ?? path.virtual}.lock`, undefined, '/')
   if (await exists(dispatch, lock)) throw eexist(lock.virtual)
   await dispatch('write', lock, [new Uint8Array()])
   await removeFile(dispatch, lock)
@@ -317,12 +313,11 @@ export async function takeLock(dispatch: Dispatch, path: string | PathSpec): Pro
 /** Write one virtual path, creating the directories above it. */
 export async function writeFile(
   dispatch: Dispatch,
-  path: string | PathSpec,
+  path: PathSpec,
   data: Uint8Array,
 ): Promise<void> {
-  const scope = PathSpec.fromStrPath(path, undefined, '/')
-  await ensureDir(dispatch, scope.parent)
-  await dispatch('write', scope, [data])
+  await ensureDir(dispatch, path.parent)
+  await dispatch('write', path, [data])
 }
 
 /**
@@ -332,9 +327,9 @@ export async function writeFile(
  * path deletes whatever ref or lock may or may not exist, and a checkout removes
  * files the other branch does not have.
  */
-export async function removeFile(dispatch: Dispatch, path: string | PathSpec): Promise<void> {
+export async function removeFile(dispatch: Dispatch, path: PathSpec): Promise<void> {
   try {
-    await dispatch('unlink', PathSpec.fromStrPath(path, undefined, '/'))
+    await dispatch('unlink', path)
   } catch (err) {
     if (!(isMissingPath(err) || isEnotdir(err) || isEisdir(err))) throw err
   }
@@ -393,12 +388,10 @@ export async function blockingAncestor(
  */
 export async function renamePath(
   dispatch: Dispatch,
-  source: string | PathSpec,
-  target: string | PathSpec,
+  source: PathSpec,
+  target: PathSpec,
 ): Promise<void> {
-  await dispatch('rename', PathSpec.fromStrPath(source, undefined, '/'), [
-    PathSpec.fromStrPath(target, undefined, '/'),
-  ])
+  await dispatch('rename', source, [target])
 }
 
 /**

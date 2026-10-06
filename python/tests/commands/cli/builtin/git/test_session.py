@@ -31,15 +31,15 @@ from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
 from tests.commands.cli.builtin.git.conftest import repo_doors
 
+from .conftest import REPO
+
 
 @pytest.mark.asyncio
 async def test_no_workspace_behind_the_cli_is_a_fatal():
     # Only reachable when a leaf is called directly: inside a workspace
     # the dispatcher always offers the facts a leaf declares.
     with pytest.raises(NoWorkspaceError):
-        await opened(
-            FlagView({"C": PathSpec.from_str_path("/repo")}), CLIDoors()
-        )
+        await opened(FlagView({"C": REPO}), CLIDoors())
 
 
 @pytest.mark.asyncio
@@ -49,14 +49,12 @@ async def test_a_missing_plane_is_enough_to_fail(workspace):
     # two doors wired.
     doors = replace(repo_doors(workspace), ns=None)
     with pytest.raises(NoWorkspaceError):
-        await opened(FlagView({"C": PathSpec.from_str_path("/repo")}), doors)
+        await opened(FlagView({"C": REPO}), doors)
 
 
 @pytest.mark.asyncio
 async def test_opening_reports_both_the_gitdir_and_its_worktree(workspace):
-    repo, location = await opened(
-        FlagView({"C": PathSpec.from_str_path("/repo")}), repo_doors(workspace)
-    )
+    repo, location = await opened(FlagView({"C": REPO}), repo_doors(workspace))
     assert isinstance(repo, BaseRepo)
     assert location.gitdir.virtual == "/repo/.git"
     assert location.worktree.virtual == "/repo"
@@ -65,7 +63,7 @@ async def test_opening_reports_both_the_gitdir_and_its_worktree(workspace):
 @pytest.mark.asyncio
 async def test_every_verb_inherits_the_same_discovery_walk(workspace):
     _repo, location = await opened(
-        FlagView({"C": PathSpec.from_str_path("/repo")}), repo_doors(workspace)
+        FlagView({"C": REPO}), repo_doors(workspace)
     )
     assert location.mount_root.virtual == "/repo"
 

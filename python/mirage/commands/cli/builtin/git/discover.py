@@ -115,6 +115,22 @@ async def _validated(
     return common
 
 
+async def _enter(stat_path: StatPath, start: PathSpec) -> None:
+    """Refuse a start git cannot change into, in ``-C``'s words.
+
+    Args:
+        stat_path (StatPath): dispatcher-backed stat, both channels.
+        start (PathSpec): the directory git starts in.
+    """
+    here = await stat_path(start)
+    if here is not None and here.type is FileType.DIRECTORY:
+        return
+    raise NoWorkingDirectoryError(
+        start.raw_path if start.dotted else start.virtual,
+        FsCondition.ENOENT if here is None else FsCondition.ENOTDIR,
+    )
+
+
 async def discover(
     dispatch: DispatchFn,
     stat_path: StatPath,
@@ -155,16 +171,7 @@ async def discover(
     """
     root = PathSpec.from_str_path(mount_root(start.virtual), cwd="/")
     if gitdir is not None:
-        here = await stat_path(start)
-        if here is None:
-            raise NoWorkingDirectoryError(
-                start.raw_path if start.dotted else start.virtual
-            )
-        if here.type is not FileType.DIRECTORY:
-            raise NoWorkingDirectoryError(
-                start.raw_path if start.dotted else start.virtual,
-                FsCondition.ENOTDIR,
-            )
+        await _enter(stat_path, start)
         candidate = gitdir
         info = await stat_path(candidate)
         if info is None:
@@ -200,13 +207,7 @@ async def discover(
             )
             common = await _common_dir(dispatch, gitdir)
             return await _location(
-                dispatch,
-                stat_path,
-                gitdir,
-                common,
-                current,
-                worktree,
-                root,
+                dispatch, stat_path, gitdir, common, current, worktree, root
             )
         if first:
             # git enters ``-C`` before it looks for anything, so a path it
@@ -217,16 +218,7 @@ async def discover(
             # repository the caller did not name. Asked only after the
             # first probe missed, because a hit already proves the
             # directory is there.
-            here = await stat_path(current)
-            if here is None:
-                raise NoWorkingDirectoryError(
-                    start.raw_path if start.dotted else start.virtual
-                )
-            if here.type is not FileType.DIRECTORY:
-                raise NoWorkingDirectoryError(
-                    start.raw_path if start.dotted else start.virtual,
-                    FsCondition.ENOTDIR,
-                )
+            await _enter(stat_path, start)
             first = False
         if current.virtual == root.virtual or current.virtual == "/":
             raise NotARepositoryError()

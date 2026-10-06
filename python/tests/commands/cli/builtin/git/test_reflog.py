@@ -21,6 +21,8 @@ import pytest
 from mirage.commands.cli.builtin.git.reflog import ZERO, entry, record
 from mirage.types import PathSpec
 
+from .conftest import GITDIR
+
 WHO = b"Test Author <test@example.com>"
 OLD = b"1" * 40
 NEW = b"2" * 40
@@ -70,8 +72,8 @@ async def test_both_logs_gain_the_same_line_when_head_is_on_a_branch(
 ):
     await record(
         git_rw.dispatch,
-        PathSpec.from_str_path("/repo/.git"),
-        PathSpec.from_str_path("/repo/.git"),
+        GITDIR,
+        GITDIR,
         "refs/heads/main",
         OLD,
         NEW,
@@ -92,8 +94,8 @@ async def test_a_detached_head_leaves_the_branch_log_alone(
     before = lines(repo_path, "logs", "refs", "heads", "main")
     await record(
         git_rw.dispatch,
-        PathSpec.from_str_path("/repo/.git"),
-        PathSpec.from_str_path("/repo/.git"),
+        GITDIR,
+        GITDIR,
         None,
         OLD,
         NEW,
@@ -112,8 +114,8 @@ async def test_entries_accumulate_rather_than_replace(git_rw, repo_path: Path):
     before = len(lines(repo_path, "logs", "HEAD"))
     await record(
         git_rw.dispatch,
-        PathSpec.from_str_path("/repo/.git"),
-        PathSpec.from_str_path("/repo/.git"),
+        GITDIR,
+        GITDIR,
         None,
         OLD,
         NEW,
@@ -123,8 +125,8 @@ async def test_entries_accumulate_rather_than_replace(git_rw, repo_path: Path):
     )
     await record(
         git_rw.dispatch,
-        PathSpec.from_str_path("/repo/.git"),
-        PathSpec.from_str_path("/repo/.git"),
+        GITDIR,
+        GITDIR,
         None,
         NEW,
         OLD,
@@ -144,7 +146,7 @@ async def test_a_linked_worktree_logs_its_branch_in_the_repository(
     await record(
         git_rw.dispatch,
         PathSpec.from_str_path("/repo/.git/worktrees/wt"),
-        PathSpec.from_str_path("/repo/.git"),
+        GITDIR,
         "refs/heads/main",
         OLD,
         NEW,

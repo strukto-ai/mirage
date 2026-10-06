@@ -206,11 +206,6 @@ async def located(fl: FlagView, doors: CLIDoors) -> RepoLocation:
     chosen = fl.as_path("work_tree")
     gitdir = fl.as_path("git_dir")
     location = await discover(
-        dispatch,
-        stat_path,
-        mounts.root_of,
-        start_point(fl),
-        gitdir,
-        chosen,
+        dispatch, stat_path, mounts.root_of, start_point(fl), gitdir, chosen
     )
     return replace(location, ns=doors.ns)

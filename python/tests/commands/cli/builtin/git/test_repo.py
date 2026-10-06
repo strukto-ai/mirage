@@ -19,29 +19,16 @@ from dulwich.objects import Commit
 from dulwich.walk import Walker
 
 from mirage.commands.cli.builtin.git import GIT
-from mirage.commands.cli.builtin.git.discover import discover
-from mirage.commands.cli.builtin.git.repo import open_repo
-from mirage.types import PathSpec
 
-from .conftest import commit_file, mounted, pack_everything, repo_facts
+from .conftest import commit_file, mounted, open_mounted, pack_everything
 
 HEAD = b"HEAD"
 MAIN = b"refs/heads/main"
 
 
-async def _open(ws):
-    """Discover and open the repository mounted at /repo.
-
-    Args:
-        ws (Workspace): the workspace under test.
-    """
-    location = await discover(*repo_facts(ws), PathSpec.from_str_path("/repo"))
-    return await open_repo(ws.dispatch, location)
-
-
 @pytest.mark.asyncio
 async def test_opens_a_loose_object_repository(workspace):
-    repo = await _open(workspace)
+    repo = await open_mounted(workspace)
     assert MAIN in repo.refs.allkeys()
     head = repo[repo.refs[MAIN]]
     assert isinstance(head, Commit)
@@ -53,7 +40,7 @@ async def test_opens_a_packed_repository(repo_path, workspace):
     # Toolathlon's repositories arrive packed, so serving one whose
     # objects are not loose at all is the real case, not an edge case.
     pack_everything(repo_path)
-    repo = await _open(workspace)
+    repo = await open_mounted(workspace)
     head = repo[repo.refs[MAIN]]
     assert head.message == b"third"
     assert len(list(Walker(repo.object_store, [head.id]))) == 3
@@ -103,7 +90,7 @@ async def test_history_walks_across_both_storage_forms(repo_path, workspace):
     # in the pack and its tip loose; neither reader alone can walk it.
     pack_everything(repo_path)
     commit_file(repo_path, "c.txt", "three\n", "fourth")
-    repo = await _open(workspace)
+    repo = await open_mounted(workspace)
     head = repo[repo.refs[MAIN]]
     assert head.message == b"fourth"
     messages = [
@@ -114,13 +101,13 @@ async def test_history_walks_across_both_storage_forms(repo_path, workspace):
 
 @pytest.mark.asyncio
 async def test_head_resolves_through_its_symbolic_ref(workspace):
-    repo = await _open(workspace)
+    repo = await open_mounted(workspace)
     assert repo.refs[HEAD] == repo.refs[MAIN]
 
 
 @pytest.mark.asyncio
 async def test_blob_content_survives_the_round_trip(workspace):
-    repo = await _open(workspace)
+    repo = await open_mounted(workspace)
     head = repo[repo.refs[MAIN]]
     tree = repo[head.tree]
     _mode, blob_id = tree[b"a.txt"]

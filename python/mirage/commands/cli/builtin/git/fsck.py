@@ -212,9 +212,7 @@ async def fsck(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         for directory in {location.gitdir, location.commondir}:
             roots.update(
                 await log_roots(
-                    doors.dispatch,
-                    doors.stat_path,
-                    directory.join("logs"),
+                    doors.dispatch, doors.stat_path, directory.join("logs")
                 )
             )
         out, io = await asyncio.to_thread(

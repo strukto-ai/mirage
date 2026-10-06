@@ -73,7 +73,7 @@ beforeAll(async () => {
   ]
   for (const rel of walk(repo)) {
     const target = `/repo/${rel}`
-    await ensureDir(dispatch, target.slice(0, target.lastIndexOf('/')))
+    await ensureDir(dispatch, PathSpec.fromStrPath(target).parent)
     await ws.dispatch('write', target, [new Uint8Array(readFileSync(join(repo, rel)))])
   }
   fs = gitFs(dispatch)
@@ -131,7 +131,7 @@ describe('gitFs', () => {
 
 describe('configValues', () => {
   it("reads every value as written, below isomorphic-git's own casts", async () => {
-    await ensureDir(dispatch, '/repo/cfg')
+    await ensureDir(dispatch, PathSpec.fromStrPath('/repo/cfg'))
     const text =
       '[core]\n\tbare = 1\n[Core]\n\tBare = yes\n\tbare\n\tbare =\n[core "sub"]\n\tbare = no\n'
     await ws.dispatch('write', '/repo/cfg/config', [new TextEncoder().encode(text)])

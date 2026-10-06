@@ -1,4 +1,4 @@
-import type { PathSpec } from '../../../../types.ts'
+import { PathSpec } from '../../../../types.ts'
 import { loadRefs, resolveSymbolic } from './refs.ts'
 import { shortenRef } from './ref_fields.ts'
 import git from 'isomorphic-git'
@@ -106,7 +106,7 @@ export async function globalSources(
   const xdg = configured === '' ? `${home}/.config` : configured
   const sources: { source: string; data: Uint8Array }[] = []
   for (const source of override === undefined ? [`${xdg}/git/config`, target] : [target]) {
-    const data = await readOptional(dispatch, source)
+    const data = await readOptional(dispatch, PathSpec.fromStrPath(source, undefined, '/'))
     if (data !== null) sources.push({ source, data })
   }
   if (!sources.length && listing)

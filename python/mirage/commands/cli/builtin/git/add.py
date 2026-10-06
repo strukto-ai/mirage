@@ -276,9 +276,7 @@ async def stage_changes(
     added: list[str] = []
     for path in sorted(stage):
         data = await entry_bytes(
-            dispatch,
-            location.worktree.join(path),
-            found.files[path],
+            dispatch, location.worktree.join(path), found.files[path]
         )
         sha = await store_blob(dispatch, location.commondir, data)
         entry = staged_entry(sha, found.files[path], len(data))

@@ -17,7 +17,7 @@ import { FileSystem } from 'isomorphic-git/models'
 
 import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
 import { enoent } from '../../../../errors/fs.ts'
-import { basename, ensureDir, exists, readNames, removeFile } from './io.ts'
+import { basename, ensureDir, exists, readNames, removeFile, writeFile as writePath } from './io.ts'
 import { posixNormpath } from '../../../../utils/path.ts'
 import type { Dispatch, RepoLocation } from './types.ts'
 
@@ -175,9 +175,11 @@ export function gitFs(
   }
 
   const writeFile = async (path: string, data: Uint8Array | string) => {
-    const bytes = typeof data === 'string' ? ENC.encode(data) : data
-    await ensureDir(dispatch, path.slice(0, path.lastIndexOf('/')) || '/')
-    await dispatch('write', PathSpec.fromStrPath(path), [bytes])
+    await writePath(
+      dispatch,
+      PathSpec.fromStrPath(path),
+      typeof data === 'string' ? ENC.encode(data) : data,
+    )
   }
 
   const stat = async (path: string) => {
@@ -191,13 +193,14 @@ export function gitFs(
       readFile,
       writeFile,
       unlink: async (path: string) => {
-        await removeFile(dispatch, path)
+        await removeFile(dispatch, PathSpec.fromStrPath(path))
       },
       // isomorphic-git wants bare names; backends may report either those or
       // whole paths, with or without a trailing slash.
-      readdir: async (path: string) => (await readNames(dispatch, path)).map(basename),
+      readdir: async (path: string) =>
+        (await readNames(dispatch, PathSpec.fromStrPath(path))).map(basename),
       mkdir: async (path: string) => {
-        await ensureDir(dispatch, path)
+        await ensureDir(dispatch, PathSpec.fromStrPath(path))
       },
       rmdir: async (path: string) => {
         await dispatch('rmdir', PathSpec.fromStrPath(path))
@@ -210,7 +213,7 @@ export function gitFs(
       // git chmods a loose object to 0444; the mount decides its own modes and
       // writeOnce never rewrites one, so there is nothing to enforce.
       chmod: () => Promise.resolve(),
-      exists: (path: string) => exists(dispatch, path),
+      exists: (path: string) => exists(dispatch, PathSpec.fromStrPath(path)),
     } as unknown as Record<string, (...args: never[]) => Promise<unknown>>,
   }
 }

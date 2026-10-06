@@ -723,9 +723,7 @@ async def fetch(
             dispatch, repo, location, taken, reason, not bare
         )
         await write_file(
-            dispatch,
-            location.gitdir.join(FETCH_HEAD),
-            fetch_head(url, taken),
+            dispatch, location.gitdir.join(FETCH_HEAD), fetch_head(url, taken)
         )
         shown = pruned + [
             row for row in rows if row.code != "=" or fl.as_bool("verbose")

@@ -98,6 +98,16 @@ async function validated(
   return common
 }
 
+/** Refuse a start git cannot change into, in `-C`'s words. */
+async function enter(statPath: StatPath, start: PathSpec): Promise<void> {
+  const here = await statPath(start)
+  if (here?.type === FileType.DIRECTORY) return
+  throw new NoWorkingDirectoryError(
+    start.dotted ? start.rawPath : start.virtual,
+    here === null ? 'ENOENT' : 'ENOTDIR',
+  )
+}
+
 /**
  * Find the repository governing a path, or throw git's own fatal.
  *
@@ -135,11 +145,7 @@ export async function discover(
 ): Promise<RepoLocation> {
   const root = PathSpec.fromStrPath(mountRoot(start.virtual), undefined, '/')
   if (gitdir !== null) {
-    const here = await statPath(start)
-    if (here === null)
-      throw new NoWorkingDirectoryError(start.dotted ? start.rawPath : start.virtual)
-    if (here.type !== FileType.DIRECTORY)
-      throw new NoWorkingDirectoryError(start.dotted ? start.rawPath : start.virtual, 'ENOTDIR')
+    await enter(statPath, start)
     const candidate = gitdir
     const info = await statPath(candidate)
     if (info === null) throw new NotARepositoryError(gitdir.rawPath)
@@ -183,12 +189,7 @@ export async function discover(
       // mutating a repository the caller did not name. Asked only after the
       // first probe missed, because a hit already proves the directory is
       // there.
-      const here = await statPath(current)
-      if (here === null)
-        throw new NoWorkingDirectoryError(start.dotted ? start.rawPath : start.virtual)
-      if (here.type !== FileType.DIRECTORY) {
-        throw new NoWorkingDirectoryError(start.dotted ? start.rawPath : start.virtual, 'ENOTDIR')
-      }
+      await enter(statPath, start)
       first = false
     }
     if (current.virtual === root.virtual || current.virtual === '/') throw new NotARepositoryError()

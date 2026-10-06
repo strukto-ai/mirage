@@ -54,8 +54,7 @@ async def stash_show(
         match = re.fullmatch(r"(?:stash@\{(\d+)\}|(\d+))", selector)
         if match is not None:
             data = await read_optional(
-                doors.dispatch,
-                location.commondir.join("logs/refs/stash"),
+                doors.dispatch, location.commondir.join("logs/refs/stash")
             )
             rows = list(reversed((data or b"").splitlines()))
             index = int(match.group(1) or match.group(2))
