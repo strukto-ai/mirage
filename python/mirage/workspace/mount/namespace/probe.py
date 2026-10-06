@@ -15,7 +15,6 @@
 import posixpath
 
 from mirage.errors.constants import MISS_ERRORS
-from mirage.errors.posix import posix_phrase
 from mirage.errors.types import DotWalkLoop, FsCondition
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
@@ -48,7 +47,7 @@ async def resolve_path_stat(
 
     A link loop in the path is absence too: the walk reaches nothing
     there, which is the question this answers, and a diagnostic that has
-    to name the errno asks :func:`miss_strerror`.
+    to name the errno asks :func:`miss_condition`.
 
     Args:
         dispatch (DispatchFn): op dispatcher.
@@ -93,8 +92,9 @@ async def path_stat(dispatch: DispatchFn, virtual: str) -> FileStat | None:
     return await resolve_path_stat(dispatch, spec)
 
 
-async def miss_strerror(dispatch: DispatchFn, virtual: str) -> str:
-    """The strerror GNU names for a path ``path_stat`` found nothing at.
+async def miss_condition(dispatch: DispatchFn, virtual: str) -> FsCondition:
+    """The condition a diagnostic names for a path ``path_stat`` found
+    nothing at.
 
     ``path_stat`` answers None for both ways a lookup fails, since an
     existence probe treats them alike, while a diagnostic names the one
@@ -109,12 +109,12 @@ async def miss_strerror(dispatch: DispatchFn, virtual: str) -> str:
     try:
         await dispatch("stat", PathSpec.from_str_path(virtual))
     except NotADirectoryError:
-        return posix_phrase(FsCondition.ENOTDIR)
+        return FsCondition.ENOTDIR
     except MISS_ERRORS:
-        return posix_phrase(FsCondition.ENOENT)
+        return FsCondition.ENOENT
     except DotWalkLoop:
-        return posix_phrase(FsCondition.ELOOP)
-    return posix_phrase(FsCondition.ENOENT)
+        return FsCondition.ELOOP
+    return FsCondition.ENOENT
 
 
 async def path_readdir(dispatch: DispatchFn, virtual: str) -> list[str]:

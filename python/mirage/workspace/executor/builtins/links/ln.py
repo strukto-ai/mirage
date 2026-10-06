@@ -19,7 +19,7 @@ from functools import partial
 from mirage.commands.builtin.utils.backup import backup_control, backup_target
 from mirage.commands.builtin.utils.constants import DEFAULT_BACKUP_SUFFIX
 from mirage.commands.builtin.utils.paths import (
-    absent_dest_strerror,
+    absent_dest_error,
     dispatch_stat,
     dot_refusal,
     typed_spec,
@@ -52,7 +52,7 @@ from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.probe import (
     link_target_stat,
-    miss_strerror,
+    miss_condition,
     path_readdir,
     path_stat,
 )
@@ -474,7 +474,7 @@ async def plan_links(
         if stat is None:
             return [], (
                 f"ln: failed to access '{typed}': "
-                f"{await miss_strerror(dispatch, resolved)}\n"
+                f"{posix_phrase(await miss_condition(dispatch, resolved))}\n"
             )
         if stat.type != FileType.DIRECTORY:
             return [], f"ln: target '{typed}' is not a directory\n"
@@ -517,7 +517,7 @@ async def plan_links(
             why = (
                 posix_phrase(FsCondition.ENOENT)
                 if word_text(last) == "" or _visible_link(namespace, last_abs)
-                else await miss_strerror(dispatch, resolved)
+                else posix_phrase(await miss_condition(dispatch, resolved))
             )
             return [], f"ln: target '{word_text(last)}': {why}\n"
         return [], f"ln: target '{word_text(last)}': Not a directory\n"
@@ -563,7 +563,7 @@ async def _source_bytes(
     if stat is None:
         return None, (
             f"ln: failed to access '{typed}': "
-            f"{await miss_strerror(dispatch, src_abs)}\n"
+            f"{posix_phrase(await miss_condition(dispatch, src_abs))}\n"
         )
     if stat.type == FileType.DIRECTORY:
         if flags.directory:
@@ -736,8 +736,10 @@ async def make_link(
             )
             return
         if not linked and behind is None:
-            missed = await miss_strerror(dispatch, plan.link_abs)
-            errors.append(_refused(flags, typed, target_typed, missed))
+            missed = await miss_condition(dispatch, plan.link_abs)
+            errors.append(
+                _refused(flags, typed, target_typed, posix_phrase(missed))
+            )
             return
         if linked and (
             behind is None or behind.type is not FileType.DIRECTORY
@@ -825,11 +827,13 @@ async def make_link(
         # mkdir -p, so the parent chain of the name (absent by now) is
         # judged first, as cp judges its destination's; the door judges
         # a symlink's itself.
-        why = await absent_dest_strerror(
+        why = await absent_dest_error(
             partial(dispatch_stat, dispatch), link_spec
         )
         if why is not None:
-            errors.append(_refused(flags, typed, target_typed, why))
+            errors.append(
+                _refused(flags, typed, target_typed, posix_phrase(why))
+            )
             return
     try:
         if link_target is not None:

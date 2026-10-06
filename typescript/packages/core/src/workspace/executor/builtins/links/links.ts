@@ -431,13 +431,13 @@ async function preparePair(
       // at the destination's stat, the same two wordings a regular source
       // gets from the generic, whose chain walk also keeps an absent
       // parent's ENOENT (`mv dlnk nodir/name/`) ahead of the slash.
-      const { strerror } = await destKind(dispatchStat(dispatch), dst)
+      const { condition } = await destKind(dispatchStat(dispatch), dst)
       const early =
-        strerror === posixPhrase('ENOTDIR')
+        condition === 'ENOTDIR'
           ? fail('mv', `mv: cannot stat '${dst.rawPath}': Not a directory\n`)
           : fail(
               'mv',
-              `mv: cannot move '${src.rawPath}' to '${dst.rawPath}': ${strerror ?? posixPhrase('ENOTDIR')}\n`,
+              `mv: cannot move '${src.rawPath}' to '${dst.rawPath}': ${posixPhrase(condition ?? 'ENOTDIR')}\n`,
             )
       return { items, early }
     }

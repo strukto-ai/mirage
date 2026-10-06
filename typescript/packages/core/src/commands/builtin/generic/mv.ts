@@ -61,6 +61,7 @@ import {
 } from './cp.ts'
 import type { FlagView } from '../../spec/flag_view.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
+import type { FsCondition } from '../../../errors/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -326,7 +327,7 @@ export async function mvGeneric(
   const [sources, dst] = splitOperands('mv', paths, flags.targetDir, flags.noTargetDir)
   let dstIsDir: boolean
   let dstExists: boolean
-  let dstErr: string | null = null
+  let dstErr: FsCondition | null = null
   if (flags.targetDir !== null) {
     const err = await targetDirError('mv', stat, dst)
     if (err !== null) {
@@ -341,7 +342,7 @@ export async function mvGeneric(
     const probe = await destKind(stat, dst)
     dstExists = probe.exists
     dstIsDir = probe.isDir
-    dstErr = probe.strerror
+    dstErr = probe.condition
   }
   let versionReaddir = readdir
   if (versionReaddir === undefined && isPrimitiveMove(strategy)) {
@@ -362,9 +363,9 @@ export async function mvGeneric(
   const lines: string[] = []
   const created = new Set<string>()
   for (const [src, target] of copyTargets(sources, dst, dstIsDir, dstExists, dstErr)) {
-    const { exists: srcExists, isDir: srcIsDir, strerror: srcErr } = await sourceKind(stat, src)
-    if (!srcExists) {
-      errors.push(`mv: cannot stat '${src.rawPath}': ${String(srcErr)}`)
+    const { isDir: srcIsDir, condition: srcErr } = await sourceKind(stat, src)
+    if (srcErr !== null) {
+      errors.push(`mv: cannot stat '${src.rawPath}': ${posixPhrase(srcErr)}`)
       continue
     }
     if (target.walkError !== null && target.rawPath === '') {
@@ -402,21 +403,21 @@ export async function mvGeneric(
     }
     const probe =
       !flags.noTargetDir && target.virtual === dst.virtual
-        ? { exists: dstExists, isDir: dstIsDir, strerror: dstErr }
+        ? { exists: dstExists, isDir: dstIsDir, condition: dstErr }
         : await destKind(stat, target)
-    const { exists: targetExists, isDir: targetIsDir, strerror: targetErr } = probe
+    const { exists: targetExists, isDir: targetIsDir, condition: targetErr } = probe
     // mv's own order: the destination's stat refuses before the rename
     // does. A chain that is merely absent is left to the backend rename
     // below, which answers ENOENT in the same words (and on a dirless
     // store may well succeed), unless a slash asked for a directory a
     // file source can never be.
     if (targetErr !== null && STAT_REFUSALS.has(targetErr)) {
-      errors.push(`mv: cannot stat '${target.rawPath}': ${targetErr}`)
+      errors.push(`mv: cannot stat '${target.rawPath}': ${posixPhrase(targetErr)}`)
       continue
     }
     if (slashRefusesFile(target, targetExists, srcIsDir)) {
       errors.push(
-        `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${targetErr ?? posixPhrase('ENOTDIR')}`,
+        `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${posixPhrase(targetErr ?? 'ENOTDIR')}`,
       )
       continue
     }

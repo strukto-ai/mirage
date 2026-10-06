@@ -15,18 +15,15 @@
 import { descendantPath } from './paths.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { FileType, type PathSpec, type StatFn } from '../../../types.ts'
-import { posixPhrase } from '../../../errors/posix.ts'
 import { eloop, enoent, enotdir, isMissingPath } from '../../../errors/fs.ts'
 
 // The destination verdicts GNU meets at the destination's own stat, before
 // any create or rename: a plain file in its chain, or a link loop in it. cp
 // and mv both word them `cannot stat 'DST'` (coreutils 9.7). Mirrors
 // Python's STAT_REFUSALS.
-export const STAT_REFUSALS: ReadonlySet<string> = new Set([
-  posixPhrase('ENOTDIR'),
-  posixPhrase('ELOOP'),
-])
+export const STAT_REFUSALS: ReadonlySet<FsCondition> = new Set<FsCondition>(['ENOTDIR', 'ELOOP'])
 import { rstripSlash } from '../../../utils/slash.ts'
+import type { FsCondition } from '../../../errors/types.ts'
 
 export type BackendKeyFn = (path: PathSpec) => string
 
@@ -49,11 +46,11 @@ export function copyTargets(
   dst: PathSpec,
   dstIsDir: boolean,
   dstExists = true,
-  dstErr: string | null = null,
+  dstErr: FsCondition | null = null,
 ): [PathSpec, PathSpec][] {
   if (sources.length > 1 && !dstIsDir) {
-    if (dstErr === posixPhrase('ELOOP')) throw eloop(`target '${dst.rawPath}'`)
-    if (!dstExists && dstErr !== posixPhrase('ENOTDIR')) throw enoent(`target '${dst.rawPath}'`)
+    if (dstErr === 'ELOOP') throw eloop(`target '${dst.rawPath}'`)
+    if (!dstExists && dstErr !== 'ENOTDIR') throw enoent(`target '${dst.rawPath}'`)
     throw enotdir(`target '${dst.rawPath}'`)
   }
   if (!dstIsDir) {

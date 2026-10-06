@@ -29,7 +29,7 @@ import {
   resolvePath,
 } from '../../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
-import { posixPhrase } from '../../../errors/posix.ts'
+import type { FsCondition } from '../../../errors/types.ts'
 
 // Stat via dispatch in the shape the generics' probes take: destKind and
 // its kin are written against a backend stat that raises on a miss, so a
@@ -126,17 +126,16 @@ export async function nearestAncestor(stat: StatFn, path: PathSpec): Promise<[st
   return ['/', true]
 }
 
-// The strerror a create at an absent path meets in its parent chain: null
+// The condition a create at an absent path meets in its parent chain: null
 // when the immediate parent is a directory, so the path can be made there;
-// `Not a directory` when a plain file stands in the chain; `No such file or
-// directory` when a directory higher up is the nearest thing there, the
-// components below it being absent. For a caller that already knows
-// `target` is not there, which is what destKind finds out first. Mirrors
-// Python's absent_dest_strerror.
-export async function absentDestStrerror(stat: StatFn, target: PathSpec): Promise<string | null> {
+// ENOTDIR when a plain file stands in the chain; ENOENT when a directory
+// higher up is the nearest thing there, the components below it being
+// absent. For a caller that already knows `target` is not there, which is
+// what destKind finds out first. Mirrors Python's absent_dest_error.
+export async function absentDestError(stat: StatFn, target: PathSpec): Promise<FsCondition | null> {
   const [node, isDir] = await nearestAncestor(stat, target)
-  if (!isDir) return posixPhrase('ENOTDIR')
-  return node === parent(norm(target.virtual)) ? null : posixPhrase('ENOENT')
+  if (!isDir) return 'ENOTDIR'
+  return node === parent(norm(target.virtual)) ? null : 'ENOENT'
 }
 
 // The link resolution a dot walk is handed, null while no link exists.

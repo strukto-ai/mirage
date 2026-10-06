@@ -16,7 +16,6 @@ from collections.abc import Callable
 from dataclasses import replace
 
 from mirage.errors.fs import dot_walk_error, eexist, eloop, enoent
-from mirage.errors.posix import posix_phrase
 from mirage.errors.render import operand_spelling
 from mirage.errors.types import (
     FsCondition,
@@ -220,15 +219,17 @@ async def nearest_ancestor(stat: StatFn, path: PathSpec) -> tuple[str, bool]:
     return "/", True
 
 
-async def absent_dest_strerror(stat: StatFn, target: PathSpec) -> str | None:
-    """The strerror a create at an absent path meets in its parent chain.
+async def absent_dest_error(
+    stat: StatFn, target: PathSpec
+) -> FsCondition | None:
+    """The condition a create at an absent path meets in its parent chain.
 
     None when the immediate parent is a directory, so the path can be
-    made there; ``Not a directory`` when a plain file stands in the
-    chain; ``No such file or directory`` when a directory higher up is
-    the nearest thing there, the components below it being absent. For
-    a caller that already knows ``target`` is not there, which is what
-    :func:`dest_kind` finds out first.
+    made there; ENOTDIR when a plain file stands in the chain; ENOENT
+    when a directory higher up is the nearest thing there, the
+    components below it being absent. For a caller that already knows
+    ``target`` is not there, which is what :func:`dest_kind` finds out
+    first. Mirrors TS ``absentDestError``.
 
     Args:
         stat (StatFn): Stats a path; raises when missing.
@@ -236,10 +237,10 @@ async def absent_dest_strerror(stat: StatFn, target: PathSpec) -> str | None:
     """
     node, is_dir = await nearest_ancestor(stat, target)
     if not is_dir:
-        return posix_phrase(FsCondition.ENOTDIR)
+        return FsCondition.ENOTDIR
     if node == parent(norm(target.virtual)):
         return None
-    return posix_phrase(FsCondition.ENOENT)
+    return FsCondition.ENOENT
 
 
 def link_follow(links: LinkView | None) -> Callable[[str], str] | None:

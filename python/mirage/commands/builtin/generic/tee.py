@@ -3,17 +3,15 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.paths import (
-    absent_dest_strerror,
+    absent_dest_error,
     entry_kind,
 )
 from mirage.commands.builtin.utils.stream import read_stdin_async
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.errors.fs import eisdir, enoent, enotdir, fs_strerror
-from mirage.errors.posix import posix_phrase
+from mirage.errors.fs import eisdir, enotdir, fs_error, fs_strerror
 from mirage.errors.render import fs_error_line
-from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, StatFn
@@ -124,12 +122,10 @@ async def open_refusal(
         return eisdir(path)
     if exists:
         return None
-    strerror = await absent_dest_strerror(stat, path)
-    if strerror is None:
+    condition = await absent_dest_error(stat, path)
+    if condition is None:
         return None
-    if strerror == posix_phrase(FsCondition.ENOTDIR):
-        return enotdir(path)
-    return enoent(path)
+    return fs_error(path, condition)
 
 
 async def write_output(

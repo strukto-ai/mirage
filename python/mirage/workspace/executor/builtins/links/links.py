@@ -517,7 +517,7 @@ async def _prepare_pair(
             _, _, verdict = await dest_kind(
                 partial(dispatch_stat, dispatch), dst
             )
-            if verdict == posix_phrase(FsCondition.ENOTDIR):
+            if verdict is FsCondition.ENOTDIR:
                 return items, fail(
                     "mv",
                     f"mv: cannot stat '{dst.raw_path}': Not a directory\n",
@@ -525,7 +525,8 @@ async def _prepare_pair(
             return items, fail(
                 "mv",
                 f"mv: cannot move '{src.raw_path}' to "
-                f"'{dst.raw_path}': {verdict or posix_phrase(FsCondition.ENOTDIR)}\n",
+                f"'{dst.raw_path}': "
+                f"{posix_phrase(verdict or FsCondition.ENOTDIR)}\n",
             )
     rewritten = items
     if into_dir and namespace.is_link(dst.virtual):

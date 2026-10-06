@@ -29,7 +29,7 @@ import {
 import { type ByteSource, materialize } from '../../../../io/types.ts'
 import { type FileStat, FileType, PathSpec, wordText } from '../../../../types.ts'
 import {
-  absentDestStrerror,
+  absentDestError,
   dispatchStat,
   dotRefusal,
   typedSpec,
@@ -61,7 +61,7 @@ import { absPath, fail, result } from '../shared.ts'
 import { posixRelative } from './links.ts'
 import {
   linkTargetStat,
-  missStrerror,
+  missCondition,
   pathReaddir,
   resolvePathStat,
 } from '../../../mount/namespace/probe.ts'
@@ -370,7 +370,10 @@ export async function planLinks(
       flags.noDereference,
     )
     if (stat === null) {
-      return [[], `ln: failed to access '${typed}': ${await missStrerror(dispatch, resolved)}\n`]
+      return [
+        [],
+        `ln: failed to access '${typed}': ${posixPhrase(await missCondition(dispatch, resolved))}\n`,
+      ]
     }
     if (stat.type !== FileType.DIRECTORY) return [[], `ln: target '${typed}' is not a directory\n`]
     return [operands.map((op) => into(op, resolved, typed)), null]
@@ -412,7 +415,7 @@ export async function planLinks(
       const why =
         wordText(last) === '' || visibleLink(namespace, lastAbs)
           ? posixPhrase('ENOENT')
-          : await missStrerror(dispatch, resolved)
+          : posixPhrase(await missCondition(dispatch, resolved))
       return [[], `ln: target '${wordText(last)}': ${why}\n`]
     }
     return [[], `ln: target '${wordText(last)}': Not a directory\n`]
@@ -442,7 +445,10 @@ async function sourceBytes(
   }
   const stat = await pathStat(dispatch, resolved)
   if (stat === null) {
-    return [null, `ln: failed to access '${typed}': ${await missStrerror(dispatch, resolved)}\n`]
+    return [
+      null,
+      `ln: failed to access '${typed}': ${posixPhrase(await missCondition(dispatch, resolved))}\n`,
+    ]
   }
   if (stat.type === FileType.DIRECTORY) {
     if (flags.directory) {
@@ -602,8 +608,8 @@ export async function makeLink(
       return
     }
     if (!linked && behind === null) {
-      const why = await missStrerror(dispatch, plan.linkAbs)
-      errors.push(refused(flags, typed, targetTyped, why))
+      const why = await missCondition(dispatch, plan.linkAbs)
+      errors.push(refused(flags, typed, targetTyped, posixPhrase(why)))
       return
     }
     if (linked && behind?.type !== FileType.DIRECTORY) {
@@ -689,9 +695,9 @@ export async function makeLink(
     // store makes the key whatever stands above it. ln is not mkdir -p, so
     // the parent chain of the name (absent by now) is judged first, as cp
     // judges its destination's; the door judges a symlink's itself.
-    const why = await absentDestStrerror(dispatchStat(dispatch), linkSpec)
+    const why = await absentDestError(dispatchStat(dispatch), linkSpec)
     if (why !== null) {
-      errors.push(refused(flags, typed, targetTyped, why))
+      errors.push(refused(flags, typed, targetTyped, posixPhrase(why)))
       return
     }
   }

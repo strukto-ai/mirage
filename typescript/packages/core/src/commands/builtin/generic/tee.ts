@@ -15,17 +15,16 @@
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec, StatFn } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { eisdir, enoent, enotdir, isEnoent, isFsError } from '../../../errors/fs.ts'
+import { eisdir, enotdir, fsError, isEnoent, isFsError } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { type FsError } from '../../../errors/types.ts'
-import { absentDestStrerror, entryKind } from '../utils/paths.ts'
+import { absentDestError, entryKind } from '../utils/paths.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
-import { posixPhrase } from '../../../errors/posix.ts'
 
 export interface TeeFlags {
   append: boolean
@@ -141,9 +140,9 @@ export async function openRefusal(
   const { exists, isDir } = await entryKind(stat, path)
   if (isDir) return eisdir(path)
   if (exists) return null
-  const strerror = await absentDestStrerror(stat, path)
-  if (strerror === null) return null
-  return strerror === posixPhrase('ENOTDIR') ? enotdir(path) : enoent(path)
+  const condition = await absentDestError(stat, path)
+  if (condition === null) return null
+  return fsError(path, condition)
 }
 
 export async function writeOutput(

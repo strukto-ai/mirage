@@ -2,7 +2,7 @@ import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
-from mirage.commands.builtin.utils.paths import absent_dest_strerror
+from mirage.commands.builtin.utils.paths import absent_dest_error
 from mirage.commands.builtin.utils.size_suffix import size_suffixes
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
@@ -11,7 +11,6 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import eisdir, enoent, enotdir
-from mirage.errors.posix import posix_phrase
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
@@ -195,8 +194,8 @@ async def _truncate_one(
             flags.no_create or not path.raw_path.endswith("/")
         ):
             raise
-        why = await absent_dest_strerror(stat, path)
-        if why == posix_phrase(FsCondition.ENOTDIR):
+        why = await absent_dest_error(stat, path)
+        if why is FsCondition.ENOTDIR:
             raise enotdir(path) from exc
         if flags.no_create:
             return
