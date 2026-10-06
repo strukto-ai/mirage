@@ -220,7 +220,7 @@ async def test_js_policy_script_selects_the_js_evaluator():
 
 @pytest.mark.asyncio
 async def test_hung_policy_script_times_out(monkeypatch):
-    monkeypatch.setattr(decide_mod, "POLICY_EVAL_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(decide_mod, "SCRIPT_EVAL_TIMEOUT_SECONDS", 0.05)
     with pytest.raises(RouteError, match="timed out after 0.05s"):
         await evaluate_policy(
             ScriptSource("1"), ctx_for("x"), [HangingEvaluator()]

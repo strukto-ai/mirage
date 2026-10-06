@@ -19,8 +19,8 @@ import pytest
 import pytest_asyncio
 from pydantic import BaseModel, ConfigDict
 
-from mirage import Workspace
-from mirage.policy import Action, CommandContext, Deny, Policy
+from mirage import Session, Workspace
+from mirage.policy import Action, Ask, CommandContext, Deny, Policy
 from mirage.policy.match import Outcome
 from mirage.policy.types import Scope
 from mirage.runtime.base import Runtime
@@ -1455,5 +1455,79 @@ async def test_a_mapfile_callback_is_asked_about_at_the_gate():
         )
         assert seen == [("cat", "/data/secret.txt", "0", "x")]
         assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()
+
+
+class _AskRm(Policy):
+    async def pre_command(self, ctx: CommandContext) -> Action | None:
+        return Ask("sign-off") if ctx.command == "rm" else None
+
+
+class _DenyRm(Policy):
+    async def pre_command(self, ctx: CommandContext) -> Action | None:
+        return Deny("no") if ctx.command == "rm" else None
+
+
+@pytest.mark.asyncio
+async def test_explain_shows_every_policys_answer_in_chain_order():
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.WRITE,
+        policies=[_AskRm(), _DenyRm()],
+    )
+    try:
+        [expl] = await ws.explain("rm /data/x")
+        # The Ask comes first and is still shown: no answer stops the
+        # loop, and the Deny is what the line meets.
+        assert expl.answers == (
+            Ask("sign-off", policy="_AskRm"),
+            Deny("no", policy="_DenyRm"),
+        )
+        assert (expl.exit_code, expl.refusal and expl.refusal.reason) == (
+            126,
+            "no",
+        )
+        assert await Session(ws, None).explain("rm /data/x") == [expl]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_explain_op_reads_one_op_as_the_door_would():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        ws.create_session(
+            "agent",
+            profile={
+                "mounts": {"/data": "read"},
+                "paths": {"hide": ["/data/vault"]},
+                "commands": {
+                    "deny": [{"reason": "sealed", "paths": ["/data/sec/*"]}],
+                    "ask": [{"reason": "nod", "paths": ["/data/out/*"]}],
+                },
+            },
+        )
+        sealed = await ws.explain_op("read", "/data/sec/k", "agent")
+        assert (sealed.outcome, sealed.exit_code) == (Outcome.DENY, 1)
+        assert sealed.refusal is not None and sealed.refusal.reason == "sealed"
+        assert sealed.answers == (Deny("sealed", policy="PermissionsPolicy"),)
+        asked = await ws.explain_op("read", "/data/out/a", "agent")
+        assert (asked.outcome, asked.exit_code) == (Outcome.ASK, 1)
+        assert asked.refusal is not None and asked.refusal.kind == "pending"
+        # A dry run records no question.
+        assert ws.decisions.pending("agent") == ()
+        # The mode raises its own error, so no record rides it.
+        written = await ws.explain_op("write", "/data/x", "agent")
+        assert (written.exit_code, written.refusal) == (1, None)
+        assert written.answers[-1].policy == "MountModePolicy"
+        # A hidden path is no path to any policy.
+        hidden = await ws.explain_op("read", "/data/vault/k", "agent")
+        assert (hidden.outcome, hidden.answers, hidden.paths) == (
+            Outcome.ALLOW,
+            (),
+            (),
+        )
+        assert (await ws.explain_op("read", "/data/x", "agent")).exit_code == 0
     finally:
         await ws.close()

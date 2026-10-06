@@ -27,6 +27,7 @@ import { MountMode } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { Workspace } from '../workspace/workspace.ts'
+import { Session } from '../workspace/handle.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -1239,5 +1240,89 @@ describe('prejudge scope', () => {
     )
     expect(seen).toEqual([['cat', '/data/secret.txt', '0', 'x']])
     expect(w.decisions.list('s')).toEqual([])
+  })
+})
+
+class AskRm implements Policy {
+  preCommand(ctx: CommandContext): Action | null {
+    return ctx.command === 'rm' ? { kind: 'ask', reason: 'sign-off' } : null
+  }
+}
+
+class DenyRm implements Policy {
+  preCommand(ctx: CommandContext): Action | null {
+    return ctx.command === 'rm' ? { kind: 'deny', reason: 'no' } : null
+  }
+}
+
+describe('explain answers and the op form', () => {
+  it("shows every policy's answer in chain order", async () => {
+    const ws = new Workspace(
+      { '/data/': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: await getTestParser(),
+        policies: [new AskRm(), new DenyRm()],
+      },
+    )
+    try {
+      const [expl] = await ws.explain('rm /data/x')
+      // The Ask comes first and is still shown: no answer stops the loop,
+      // and the Deny is what the line meets.
+      expect(expl?.answers).toEqual([
+        { kind: 'ask', reason: 'sign-off', policy: 'AskRm' },
+        { kind: 'deny', reason: 'no', policy: 'DenyRm' },
+      ])
+      expect([expl?.exitCode, expl?.refusal?.reason]).toEqual([126, 'no'])
+      expect(await new Session(ws, null).explain('rm /data/x')).toEqual([expl])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('reads one op as the door would', async () => {
+    const ws = new Workspace(
+      { '/data/': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      ws.createSession('agent', {
+        profile: parseSessionProfile({
+          mounts: { '/data': 'read' },
+          paths: { hide: ['/data/vault'] },
+          commands: {
+            deny: [{ reason: 'sealed', paths: ['/data/sec/*'] }],
+            ask: [{ reason: 'nod', paths: ['/data/out/*'] }],
+          },
+        }),
+      })
+      const sealed = await ws.explainOp('read', '/data/sec/k', 'agent')
+      expect([sealed.outcome, sealed.exitCode, sealed.refusal?.reason]).toEqual([
+        Outcome.DENY,
+        1,
+        'sealed',
+      ])
+      expect(sealed.answers).toEqual([
+        { kind: 'deny', reason: 'sealed', policy: 'PermissionsPolicy' },
+      ])
+      const asked = await ws.explainOp('read', '/data/out/a', 'agent')
+      expect([asked.outcome, asked.exitCode, asked.refusal?.kind]).toEqual([
+        Outcome.ASK,
+        1,
+        'pending',
+      ])
+      // A dry run records no question.
+      expect(ws.decisions.pending('agent')).toEqual([])
+      // The mode throws its own error, so no record rides it.
+      const written = await ws.explainOp('write', '/data/x', 'agent')
+      expect([written.exitCode, written.refusal]).toEqual([1, null])
+      expect(written.answers.at(-1)?.policy).toBe('MountModePolicy')
+      // A hidden path is no path to any policy.
+      const hidden = await ws.explainOp('read', '/data/vault/k', 'agent')
+      expect([hidden.outcome, hidden.answers, hidden.paths]).toEqual([Outcome.ALLOW, [], []])
+      expect((await ws.explainOp('read', '/data/x', 'agent')).exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
   })
 })

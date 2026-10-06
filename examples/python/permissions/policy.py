@@ -158,6 +158,19 @@ async def main() -> None:
             )
             print(f"{who:9} {line:30} {outcome}")
             print(f"{'':9} {'':30} {note}")
+
+        # A dry run names who would speak, for a line and for one op of
+        # a door that sees no command (a file tool, FUSE).
+        [said] = await ws.explain("cat /repo/flagged.txt", "reviewer")
+        for a in said.answers:
+            print(
+                f"{'explain':9} {'cat /repo/flagged.txt':30} {a.policy}: {a.reason}"
+            )
+        op = await ws.explain_op("write", "/scratch/cold/f", "reviewer")
+        for a in op.answers:
+            print(
+                f"{'explain':9} {'write /scratch/cold/f':30} {a.policy}: {a.reason}"
+            )
     finally:
         await ws.close()
 

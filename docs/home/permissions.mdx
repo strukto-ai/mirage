@@ -306,6 +306,18 @@ session store persists. A host answers **allow** or **deny**:
   with a `deny` record carrying the same reason), and running the line
   again raises a new ask.
 
+An `ask` rule that names paths and no command is a question at the op
+doors too, where no line is running behind the op: the `read`, `write`
+and `edit` tools, and a host's own `session.vfs` call. The op is refused
+with a plain `Permission denied` and a `pending` record, and the ask
+lands in the same ledger with no command, the path as what was asked
+about. Its key is the rule and the path, so `allow` once runs the next
+tool call on that path (every op the call makes on it, the read a
+`write` does to stamp the file's version included) and is spent when the
+call ends; `allow` with scope `session` covers every op and line the
+rule covers. Inside a running line the question is the line's, asked at
+the command door, so an op of a command never asks on its own.
+
 ### From the CLI
 
 ```bash
@@ -409,12 +421,29 @@ real operands.
 
 ## Dry runs
 
-`ws.explain(line, session_id)` runs the same gate without running the
-line: one `Explanation` per command, with the outcome, the rule that
-spoke and where it was written, the matched operand, and the exact
-`exit_code` and `stderr` the agent would see, byte-identical to the real
-refusal. What a host reads in an explanation and what an agent sees at
-the prompt cannot disagree, because they are the same computation.
+`ws.explain(line, session_id)` (or `session.explain(line)` on a
+session's handle) runs the same gate without running the line: one
+`Explanation` per command, with the outcome, the rule that spoke and
+where it was written, the matched operand, and the exact `exit_code` and
+`stderr` the agent would see, byte-identical to the real refusal. What a
+host reads in an explanation and what an agent sees at the prompt cannot
+disagree, because they are the same computation. Each explanation also
+carries every policy's answer to the command in chain order (`answers`:
+the document's rules answer as `PermissionsPolicy`, a coded policy by
+its class name), every answer at the placement stage (`placement`, the
+route policy's as `PlacementPolicy`) and the runtime that would serve
+the command (`runtime`, empty when the workspace runs it itself). A
+placement that refuses the line refuses it on its first command.
+
+`ws.explain_op(op, path, session_id)` (`ws.explainOp` in TypeScript,
+`session.explain_op(op, path)` on a handle) is the single-op form, for
+the doors that see ops and no command: what the op door would answer a
+`read`, `write` or `unlink` of one path, with `exit_code` 1 when it
+would refuse the op and `stderr` empty, since an op has no terminal.
+
+A dry run records no question and spends no grant, and a hidden path is
+no path to any of it: it explains as a line or op that runs, so no
+explanation ever names a hide.
 
 ## The worked example
 

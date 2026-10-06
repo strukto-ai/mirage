@@ -36,3 +36,8 @@ ABSENT_PATH: Final = (FileNotFoundError, NotADirectoryError)
 # (preview1's `path_link`, the process patch's `os.link`): a hard link
 # is a second name for one inode, and nothing above a mount holds that.
 HARD_LINK_REFUSAL: Final = FsCondition.EPERM
+
+# How long one policy script (a profile's ``policy:``, a ``route_policy``
+# or a runtime's ``script:``) may run before the line it judges is
+# refused or the route it decides fails. One bound for every stage.
+SCRIPT_EVAL_TIMEOUT_SECONDS = 10.0

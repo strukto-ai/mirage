@@ -49,8 +49,8 @@ import {
 } from '../abort.ts'
 import type { Dispatcher } from '../dispatcher/index.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
-import { RouteDeny, type RouteDecision } from '../../runtime/routing/index.ts'
-import { refusalOf, renderDeny, type Deny, type HandOff } from '../../policy/index.ts'
+import type { RouteDecision } from '../../runtime/routing/index.ts'
+import type { HandOff } from '../../policy/index.ts'
 import type { Refusal } from '../../types.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { inputSubstitutionRedirect } from '../../shell/helpers.ts'
@@ -65,7 +65,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import { withHandOff } from '../node/execute_node.ts'
 import type { ExecuteNodeDeps } from '../node/execute_node.ts'
-import { prejudgeLine, unrefusedNodes } from '../node/explain.ts'
+import { lineDenied, prejudgeLine, unrefusedNodes } from '../node/explain.ts'
 import { runCommandTree } from '../node/run_tree.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
 import type { SessionManager } from '../session/manager.ts'
@@ -73,7 +73,7 @@ import { type SessionState } from '../session/session.ts'
 import { type StatusWriter, newStatusWriter } from '../abort.ts'
 import { ExecutionNode } from '../types.ts'
 import { abortable, joinOrAbort } from '../abort.ts'
-import { failureResult, isControlFlowError } from './failure.ts'
+import { failureResult, isControlFlowError, placementRefused } from './failure.ts'
 import { ended, isUnwinding } from '../executor/control.ts'
 import { finishShell, inheritExitTrap } from '../executor/traps.ts'
 import { expandingAliases } from '../executor/builtins/alias/index.ts'
@@ -426,30 +426,23 @@ async function runPreparedLine(
           )
         }
         const rootNode = root as unknown as TSNodeLike
-        let routingDecision: RouteDecision | null
-        try {
-          routingDecision = await abortable(
-            env.router.decide(rootNode, command, options, targetSession),
-            options.signal,
-          )
-        } catch (caught) {
-          if (caught instanceof RouteDeny) {
-            // A deny is a policy outcome, not a mistake: it folds into the line's
-            // result the way a timeout does, never a throw. The denied party is
-            // the command, so the message carries its name like every
-            // per-command error, in bash's voice; the reason rides `refusal`.
-            const deny: Deny = { kind: 'deny', reason: caught.reason, scope: 'command' }
-            const [msg, exitCode] = renderDeny(commandName(command) || command, deny)
-            return answerLine(
-              env,
-              command,
-              options,
-              targetSession,
-              new ExecuteResult(new Uint8Array(), msg, exitCode, refusalOf(deny)),
-            )
-          }
-          throw caught
+        const placed = await abortable(
+          env.router.decide(rootNode, command, options, targetSession, () =>
+            lineDenied(
+              rootNode,
+              effectiveSession,
+              env.registry,
+              env.namespace,
+              options.agentId ?? env.agentId ?? '',
+              (source) => parser.parse(source) as unknown as TSNodeLike,
+            ),
+          ),
+          options.signal,
+        )
+        if (placed !== null && 'kind' in placed) {
+          return answerLine(env, command, options, targetSession, placementRefused(placed, command))
         }
+        const routingDecision: RouteDecision | null = placed
 
         const dispatch: DispatchFn = env.dispatcher.dispatch
 

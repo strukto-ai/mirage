@@ -21,6 +21,7 @@ import { anchorDepth, isGlob, pathVisible, showHead, shownMode } from '../utils/
 import { eacces, enoent, erofsReadOnly } from '../utils/errors.ts'
 import { parent } from '../utils/path.ts'
 import type { Policies } from '../policy/policies.ts'
+import type { HandOff } from '../policy/types.ts'
 import type { EntryGate, PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
 import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
 
@@ -392,6 +393,32 @@ export function runWithRefusalSink<T>(sink: RefusalSink, fn: () => Promise<T>): 
 }
 
 /**
+ * Whether a typed line is running in this context: the door it reaches is
+ * inside a command, not a file tool's or the host's own call. Mirrors
+ * Python's `line_running`.
+ */
+export function lineRunning(): boolean {
+  return refusalSinkStorage.getStore() !== undefined
+}
+
+const opCallStorage = createAsyncContext<HandOff>()
+
+/**
+ * Run one call made outside a line (a file tool's), the unit an op-level
+ * answer covers: a grant one of its ops is answered by is claimed on
+ * `handed` for the call's other ops on that path. Mirrors Python's
+ * `set_op_call`.
+ */
+export function runWithOpCall<T>(handed: HandOff, fn: () => Promise<T>): Promise<T> {
+  return Promise.resolve(opCallStorage.run(handed, fn))
+}
+
+/** The call made outside a line running in this context, null for a bare op. */
+export function getOpCall(): HandOff | null {
+  return opCallStorage.getStore() ?? null
+}
+
+/**
  * Hand a door's refusal to the line running in this context; a door
  * reached outside any line (a programmatic op) has no line to tell, and
  * the record rides the thrown error alone.
@@ -649,18 +676,11 @@ function reachesUnder(head: string, prefix: string): boolean {
 }
 
 /**
- * The strongest mode the current session reaches anywhere under a
- * mount: its mount-wide effective mode, or a deeper show grant, still
- * capped by the mount's configured mode.
- *
- * What the whole-mount gates read: a write command stays runnable on a
- * mount whose only writable region is a show entry (the op door then
- * refuses per path), and the interpreters' any-`x` rule counts a show
- * grant the way it counts a whole mount. Each live session's strongest
- * reach is computed on its own, then folded to the weakest across
- * sessions: a command runs only when every live session would let it.
+ * The strongest mode one session reaches anywhere under a mount: its
+ * mount-wide mode, or a deeper show grant, still capped by the mount's
+ * configured mode. Mirrors the Python `strongest_under_session`.
  */
-function strongestUnderSession(
+export function strongestUnderSession(
   sess: SessionState,
   mountPrefix: string,
   mountMode: MountMode,
@@ -679,6 +699,16 @@ function strongestUnderSession(
   return best
 }
 
+/**
+ * The strongest mode the live sessions reach anywhere under a mount
+ * (`strongestUnderSession`), folded to the weakest across them: a command
+ * runs only when every live session would let it.
+ *
+ * What the whole-mount gates read: a write command stays runnable on a
+ * mount whose only writable region is a show entry (the op door then
+ * refuses per path), and the interpreters' any-`x` rule counts a show
+ * grant the way it counts a whole mount.
+ */
 export function strongestModeUnder(mountPrefix: string, mountMode: MountMode): MountMode {
   let best = mountMode
   for (const sess of liveSessions()) {

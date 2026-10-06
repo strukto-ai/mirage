@@ -110,25 +110,38 @@ Besides the global `route_policy`, each runtime entry can carry its own `script:
 with the same `ctx` input but a boolean verdict: am I willing to serve this
 line? Unwilling entries step aside and the first willing capturer wins.
 
-## Route, then admit
+## Admit, then route
 
-Routing is the first of two judgments a typed line clears, and the only
-one that sees the line whole. The order is fixed: the syntax gate (an
-unparsable line exits 2 and no policy hears about it), then the route
-decision, then the [policy engine](/home/policy-engine) admits each
-command — whichever lane routing picked, since a whole line handed to a
-runtime clears the same per-command gate before the runtime sees a byte
-of it, and every VFS op the runtime performs still clears `pre_ops`.
+Placement is one stage of the [policy engine](/home/policy-engine), the
+`pre_execute` hook, and the route policy is its built-in: it answers
+ahead of the policies registered in code, and its verdicts are their
+answers (a runtime name is a `Route`, `{"deny": reason}` a `Deny`). A
+coded policy can place or refuse a line the same way:
 
-A route deny therefore short-circuits: the line dies whole and the
-admission hooks are never consulted, so one line produces at most one
-refusal. Both layers refuse in the same voice, `<command>: Permission denied` at exit 126 with the reason in the `refusal` record, on purpose: an agent reads one
-grammar, and the host tells the layers apart by what they judge (the
-route policy speaks once per line; the policy engine per command, per
-op, per env write, and only it can [ask](/home/permissions#asks) instead
-of denying). Nested lines (`$()`, `eval`, `source`, `xargs`) inherit the
-outer line's route decision and never re-route, but every nested
-command clears admission itself.
+```python
+from mirage.policy import Deny, Policy, Route
+from mirage.runtime.routing import RouteContext
+
+class HeavyOnDocker(Policy):
+    async def pre_execute(self, ctx: RouteContext) -> Route | Deny | None:
+        return Route("docker") if "/jobs/" in ctx.line else None
+```
+
+The order is fixed: the syntax gate (an unparsable line exits 2 and no
+policy hears about it), then admission, which judges every command of
+the line, then placement, then each command's own gate as it runs. A
+line the rules refuse is therefore never placed: no route script sees
+it, and the agent reads the rule's refusal, not a route deny. A Deny at
+this stage outranks every Route, whoever answered it, and two policies
+placing one line on different runtimes refuse it. Both refusals read
+`<command>: Permission denied` at exit 126 with the reason in the
+`refusal` record, the voice every whole-line refusal speaks. Nested
+lines (`$()`, `eval`, `source`, `xargs`) inherit the outer line's
+placement and never re-route, but every nested command clears admission
+itself.
+
+`ws.explain(line)` shows every placement answer and the runtime that
+would serve each command, without running anything.
 
 ## What runs the scripts
 
@@ -141,8 +154,9 @@ TypeScript) and `route_policy: ./policy.js` on the first JS evaluator
 the list; with no language match the first evaluator serves. A config
 with policy scripts but no evaluator entry fails at the first decision.
 
-Evaluation is bounded: a policy script that hangs fails the line with a
-policy error after 10 seconds instead of freezing the workspace.
+Evaluation is bounded by the one timeout every policy script shares: a
+route script that hangs fails the line with a policy error after 10
+seconds instead of freezing the workspace.
 
 When you build the workspace in code rather than from a config file,
 `route_policy=` also accepts a plain function with the same decision contract,

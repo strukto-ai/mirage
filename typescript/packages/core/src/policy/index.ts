@@ -59,6 +59,7 @@ export {
   Outcome,
   type Abandoned,
   type Pending,
+  type Route,
   type Decision,
   type Claim,
   type Claimant,

@@ -23,9 +23,14 @@ import {
   type Deny,
   type Explanation,
   type HandOff,
+  type OpsContext,
   type Occurrence,
   type Pending,
 } from '../../policy/types.ts'
+import { settled } from '../../policy/policies.ts'
+import { runWithSession } from '../../context/session_context.ts'
+import { pathVisible } from '../../utils/hidden.ts'
+import { POLICY_WRITE_OPS } from '../dispatcher/constants.ts'
 import {
   inputSubstitutionRedirect,
   getParts,
@@ -35,7 +40,7 @@ import {
 } from '../../shell/helpers.ts'
 import { opaqueReads, referencedNames } from '../../shell/parse/index.ts'
 import { NodeType, type TSNodeLike } from '../../shell/types.ts'
-import { PathSpec } from '../../types.ts'
+import { MountMode, PathSpec } from '../../types.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { makeAbortError } from '../abort.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
@@ -115,6 +120,12 @@ interface Judged {
   readonly intrinsic?: boolean
   readonly stated: boolean
   readonly unread?: ReadonlySet<string>
+  /**
+   * The context the chain was shown, absent for a command refused before
+   * it, so `explain` can gather every policy's answer without the gate
+   * paying for it.
+   */
+  readonly ctx?: CommandContext
 }
 
 /**
@@ -170,6 +181,9 @@ function unreadableWord(raw: string): Explanation {
     exitCode,
     stderr: decodeText(stderr),
     refusal: refusalOf(deny),
+    answers: [],
+    placement: [],
+    runtime: '',
   }
 }
 
@@ -196,6 +210,9 @@ function fromRefusal(
     exitCode: refusal.exitCode,
     stderr: missing ?? decodeText(refusal.stderr),
     refusal: refusal.refusal,
+    answers: [],
+    placement: [],
+    runtime: '',
   }
 }
 
@@ -228,6 +245,9 @@ async function explained(
     exitCode: 0,
     stderr: '',
     refusal: null,
+    answers: [],
+    placement: [],
+    runtime: '',
   }
   const action: Deny | Pending | null =
     asked !== null && asked.kind === 'ask' ? await registry.decisions.held(ctx, asked) : asked
@@ -337,6 +357,7 @@ async function judgeWords(
       stated: literal,
       intrinsic,
       unread,
+      ctx,
     },
   ]
   for (const inner of innerLines(name, words.slice(1))) {
@@ -972,6 +993,45 @@ export async function unrefusedNodes(
 }
 
 /**
+ * Whether a rule or a policy denies some command of a line, which is what
+ * placement waits on: admission comes first, so a line the rules refuse
+ * is never shown to a placing policy. Read-only, as `explainLine` is, so
+ * it spends no grant and asks no host. Only a verdict counts
+ * (`isVerdict`): a question nobody has answered may still let the line
+ * run, and a head word the session cannot see fails where it stands while
+ * the rest of its line runs, so such a line is still placed. Mirrors the
+ * Python `line_denied`.
+ */
+export async function lineDenied(
+  root: TSNodeLike,
+  session: SessionState,
+  registry: MountRegistry,
+  namespace: Namespace | null,
+  agentId: string,
+  reparse: (line: string) => TSNodeLike,
+): Promise<boolean> {
+  const judged = await judgeLine(
+    root,
+    session,
+    registry,
+    namespace,
+    agentId,
+    reparse,
+    rootFrame(root, null),
+  )
+  return denies(judged.map((one) => one.explanation))
+}
+
+/**
+ * Whether some command's explanation is a verdict that refuses it
+ * (`isVerdict`), the line-level refusal placement waits on. Mirrors the
+ * Python `denies`.
+ */
+export function denies(explanations: readonly Explanation[]): boolean {
+  return explanations.some((expl) => isVerdict(expl) && refuses(expl))
+}
+
+/**
  * What every command of a line would do, in the order the gate reads
  * them, without running any of it.
  *
@@ -1007,7 +1067,77 @@ export async function explainLine(
     true,
     wholeLine,
   )
-  return judged.map((one) => one.explanation)
+  const out: Explanation[] = []
+  for (const one of judged) {
+    if (one.ctx === undefined) {
+      out.push(one.explanation)
+      continue
+    }
+    const said = await registry.policies.answers('preCommand', one.ctx)
+    out.push({
+      ...one.explanation,
+      answers: said.filter((a): a is Deny | Ask => a.kind !== 'route'),
+    })
+  }
+  return out
+}
+
+/**
+ * What the op door would answer one op, without running it: the
+ * single-op form of `explainLine`, for the doors that see ops and no
+ * command (the file tools, `session.vfs`, FUSE). `command` is the op and
+ * `argv` its path. `exitCode` is 1 when the door would refuse the op and
+ * 0 when it would run it, and `stderr` stays empty, since an op has no
+ * terminal of its own; `refusal` is the record the refusal would carry,
+ * null for a mount mode's, which throws its own error. A path the session
+ * cannot see is shown to no policy, so it explains as an op that runs: a
+ * hide never surfaces. A question asked here is not recorded. Mirrors the
+ * Python `explain_op`.
+ */
+export async function explainOp(
+  op: string,
+  path: string,
+  session: SessionState,
+  registry: MountRegistry,
+): Promise<Explanation> {
+  const spec = PathSpec.fromStrPath(resolvePath(path, session.cwd))
+  const base: Explanation = {
+    command: op,
+    argv: [path],
+    outcome: Outcome.ALLOW,
+    rule: null,
+    reason: '',
+    source: '',
+    matchedPath: null,
+    paths: [],
+    exitCode: 0,
+    stderr: '',
+    refusal: null,
+    answers: [],
+    placement: [],
+    runtime: '',
+  }
+  if (!pathVisible(session.visibility, spec.virtual)) return base
+  const mount = registry.tryMountFor(spec.virtual)
+  const ctx: OpsContext = {
+    op,
+    path: spec,
+    write: POLICY_WRITE_OPS.has(op),
+    prefix: mount?.prefix ?? '',
+    sessionId: session.sessionId,
+    mode: mount?.mode ?? MountMode.WRITE,
+  }
+  const said = await runWithSession(session, () => registry.policies.answers('preOps', ctx))
+  const answers = said.filter((a): a is Deny | Ask => a.kind !== 'route')
+  const winner = settled(answers)
+  const judged: Explanation = { ...base, paths: [spec.virtual], answers }
+  if (winner === null || winner.kind === 'route') return judged
+  const action: Deny | Pending | null =
+    winner.kind === 'ask' ? await registry.decisions.heldOp(ctx, winner) : winner
+  const outcome = winner.kind === 'ask' ? Outcome.ASK : Outcome.DENY
+  if (action === null) return { ...judged, outcome, reason: winner.reason }
+  const record = action.kind === 'deny' && action.error !== undefined ? null : refusalOf(action)
+  return { ...judged, outcome, reason: winner.reason, exitCode: 1, refusal: record }
 }
 
 /**

@@ -13,6 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Ops } from '../../ops/ops.ts'
+import type { Decisions } from '../../policy/decisions.ts'
+import type { Explanation } from '../../policy/types.ts'
+import type { MountEntry } from '../mount/mount.ts'
 import type { SessionState } from '../session/session.ts'
 import type { FileVersionTracker } from '../tools/file_version.ts'
 import type { MirageToolOperations } from '../tools/tool_operations.ts'
@@ -53,6 +56,16 @@ export class Session {
     return this.ws.getSession(this.sessionId)
   }
 
+  /** The workspace's approval ledger, which this session's asked commands and ops are recorded in. */
+  get decisions(): Decisions {
+    return this.ws.decisions
+  }
+
+  /** The workspace's mounts, which the session's profile narrows. */
+  mounts(): readonly MountEntry[] {
+    return this.ws.mounts()
+  }
+
   /** The op facade run as this session. */
   get vfs(): Ops {
     return this.id === null ? this.ws.vfs : this.ws.vfs.forSession(this.id)
@@ -61,6 +74,15 @@ export class Session {
   /** The agent tools run as this session: one table per session, shared by every caller in the process. */
   get tools(): MirageToolOperations {
     return this.ws.sessionTools(this.id)
+  }
+
+  /**
+   * Hydrate the workspace's sessions, so a stored one is known.
+   *
+   * @internal
+   */
+  loaded(): Promise<void> {
+    return this.ws.ensureSessionsLoaded()
   }
 
   /**
@@ -75,6 +97,16 @@ export class Session {
   /** Run a shell line as this session; `Workspace.shell` with the session fixed. */
   shell(command: string, options: SessionExecuteOptions = {}): Promise<ExecuteResult> {
     return this.ws.shell(command, this.id === null ? options : { ...options, sessionId: this.id })
+  }
+
+  /** What a line would do as this session, without running any of it; `Workspace.explain` with the session fixed. */
+  explain(line: string): Promise<Explanation[]> {
+    return this.ws.explain(line, this.sessionId)
+  }
+
+  /** What the op door would answer one op as this session; `Workspace.explainOp` with the session fixed. */
+  explainOp(op: string, path: string): Promise<Explanation> {
+    return this.ws.explainOp(op, path, this.sessionId)
   }
 
   /** The paths a pattern matches as this session; `Workspace.glob` with the session fixed. */

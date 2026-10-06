@@ -132,6 +132,17 @@ async function main(): Promise<void> {
       console.log(`${pad(who, 9)} ${pad(line, 30)} ${answer(out, err, res.exitCode)}`)
       console.log(`${pad('', 9)} ${pad('', 30)} ${note}`)
     }
+
+    // A dry run names who would speak, for a line and for one op of a
+    // door that sees no command (a file tool, FUSE).
+    const [said] = await ws.explain('cat /repo/flagged.txt', 'reviewer')
+    for (const a of said?.answers ?? []) {
+      console.log(`${pad('explain', 9)} ${pad('cat /repo/flagged.txt', 30)} ${a.policy ?? ''}: ${a.reason}`)
+    }
+    const op = await ws.explainOp('write', '/scratch/cold/f', 'reviewer')
+    for (const a of op.answers) {
+      console.log(`${pad('explain', 9)} ${pad('write /scratch/cold/f', 30)} ${a.policy ?? ''}: ${a.reason}`)
+    }
   } finally {
     await ws.close()
   }

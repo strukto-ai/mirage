@@ -284,7 +284,7 @@ export function matchOp(rule: CommandRule, scope: HiddenPaths | null, ctx: OpsCo
 }
 
 /**
- * The reason an op may not run, null when it may.
+ * The rule an op meets and whether it asks, null when the op may run.
  *
  * The op-door twin of `ioRefusal`, and the same law: anchor depth first,
  * deny before ask at equal depth, and an ask satisfied by a grant the
@@ -294,16 +294,16 @@ export function matchOp(rule: CommandRule, scope: HiddenPaths | null, ctx: OpsCo
  * could not authorize the redirect it was written for: the write reached
  * this door and was refused there.
  *
- * An op reached with no admitted command behind it (FUSE, the cache, the
- * host's own facade) holds no grant, so an ask that wins here is a
- * refusal like a deny: there is no line to ask about and this door
- * cannot wait on a host.
+ * What an ask means is the door's to say: inside a running line it
+ * refuses like a deny, since the line was admitted without it, and
+ * outside one (a file tool, the host's facade) it goes to the approval
+ * door, keyed by rule and path. Mirrors Python's `op_ruling`.
  */
-export function opRefusal(
+export function opRuling(
   rules: AdmissionRules | null,
   ctx: OpsContext,
   granted: readonly CommandRule[],
-): string | null {
+): [CommandRule, boolean] | null {
   if (rules === null) return null
   let best: [number, number] | null = null
   let chosen: { rule: CommandRule; verb: number } | null = null
@@ -320,7 +320,19 @@ export function opRefusal(
   }
   if (chosen === null) return null
   if (chosen.verb === ASK_SECOND && granted.includes(chosen.rule)) return null
-  return chosen.rule.reason
+  return [chosen.rule, chosen.verb === ASK_SECOND]
+}
+
+/**
+ * The reason an op may not run, null when it may: the reason of
+ * `opRuling`'s rule, an ask read as a refusal.
+ */
+export function opRefusal(
+  rules: AdmissionRules | null,
+  ctx: OpsContext,
+  granted: readonly CommandRule[],
+): string | null {
+  return opRuling(rules, ctx, granted)?.[0].reason ?? null
 }
 
 const scopes = new WeakMap<CommandRule, HiddenPaths | null>()

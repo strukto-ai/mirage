@@ -32,12 +32,7 @@ import {
   type RouteScript,
 } from './types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-
-/** Policy evaluation is bounded: a hung script must not freeze every
- * line (command limits resolve after policy, so nothing above this
- * layer would). Matches the python POLICY_EVAL_TIMEOUT_SECONDS; a
- * holder object so tests can tighten it. */
-export const POLICY_EVAL_TIMEOUT = { seconds: 10 }
+import { SCRIPT_EVAL_TIMEOUT } from '../constants.ts'
 
 /**
  * The world's policy engine for a script.
@@ -107,13 +102,13 @@ async function evalSource(
       source,
       ctxPayload,
       evaluator,
-      POLICY_EVAL_TIMEOUT.seconds,
+      SCRIPT_EVAL_TIMEOUT.seconds,
       'policy script',
     )
   } catch (caught) {
     if (caught instanceof CommandTimeoutError) {
       throw new RouteError(
-        `policy script timed out after ${String(POLICY_EVAL_TIMEOUT.seconds)}s`,
+        `policy script timed out after ${String(SCRIPT_EVAL_TIMEOUT.seconds)}s`,
         { cause: caught },
       )
     }
@@ -228,7 +223,7 @@ export function parseVerdict(verdict: unknown): string | null {
 }
 
 /** Run the global policy, returning a runtime name or null to pass. */
-async function evaluatePolicy(
+export async function evaluatePolicy(
   policy: RoutePolicy,
   ctx: RouteContext,
   entries: readonly Runtime[],

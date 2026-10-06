@@ -19,10 +19,25 @@ from mirage.commands.errors import (
 )
 from mirage.io import IOResult
 from mirage.policy import Deny, refusal_of, render_deny
-from mirage.runtime.routing import RouteDeny
 from mirage.shell.bytes import encode_text
 from mirage.utils.errors import format_fs_error
 from mirage.workspace.workspace.utils import command_name
+
+
+def placement_refused(deny: Deny, command: str) -> IOResult:
+    """The line's result when the placement stage refused it.
+
+    A deny is a policy outcome, not a mistake: it folds into the line's
+    result through the outcome table admission renders with, never a
+    raise. The denied party is the command, so the message carries its
+    name like every per-command error.
+
+    Args:
+        deny (Deny): the stage's answer.
+        command (str): the raw command line, for the diagnostic name.
+    """
+    err, code = render_deny(command_name(command) or command, deny)
+    return IOResult(exit_code=code, stderr=err, refusal=refusal_of(deny))
 
 
 def failure_result(exc: BaseException, command: str) -> IOResult:
@@ -40,15 +55,6 @@ def failure_result(exc: BaseException, command: str) -> IOResult:
     """
     if isinstance(exc, CommandTimeoutError):
         return IOResult(exit_code=124, stderr=encode_text(str(exc) + "\n"))
-    if isinstance(exc, RouteDeny):
-        # A deny is a policy outcome, not a mistake: it folds into the
-        # line's result the way a timeout does, never a raise. The
-        # denied party is the command, so the message carries its name
-        # like every per-command error.
-        name = command_name(command) or command
-        deny = Deny(exc.reason)
-        err, code = render_deny(name, deny)
-        return IOResult(exit_code=code, stderr=err, refusal=refusal_of(deny))
     if isinstance(exc, FindParseError):
         return IOResult(exit_code=1, stderr=encode_text(f"{exc}\n"))
     if isinstance(exc, UsageError):

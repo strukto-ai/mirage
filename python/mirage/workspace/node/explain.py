@@ -13,10 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import dataclasses
 from collections.abc import Generator, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from mirage.context import reset_current_session, set_current_session
 from mirage.policy import (
     Abandoned,
     Ask,
@@ -26,12 +28,15 @@ from mirage.policy import (
     Explanation,
     HandOff,
     Occurrence,
+    OpsContext,
     Pending,
+    Route,
     refusal_of,
     render_deny,
     render_pending,
 )
 from mirage.policy.match import Outcome, decide, has_rules
+from mirage.policy.policies import settled
 from mirage.shell import parse
 from mirage.shell.bytes import decode_text
 from mirage.shell.helpers import (
@@ -43,9 +48,11 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.parse import opaque_reads, referenced_names
 from mirage.shell.types import NodeType
-from mirage.types import PathSpec
+from mirage.types import MountMode, PathSpec
+from mirage.utils.hidden import path_visible
 from mirage.utils.path import resolve_path
 from mirage.workspace.abort import MirageAbortError
+from mirage.workspace.dispatcher.constants import POLICY_WRITE_OPS
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -216,6 +223,9 @@ class Judged:
         unread (frozenset[str]): the paths no policy was shown
             (``_unread_paths``), so a pass that asks the gate again asks
             about what this explanation judged.
+        ctx (CommandContext | None): the context the chain was shown,
+            None for a command refused before it, so ``explain`` can
+            gather every policy's answer without the gate paying for it.
     """
 
     explanation: Explanation
@@ -223,6 +233,7 @@ class Judged:
     stated: bool
     intrinsic: bool = False
     unread: frozenset[str] = frozenset()
+    ctx: CommandContext | None = None
 
 
 def _unread_paths(
@@ -366,6 +377,7 @@ async def _judge_words(
             stated,
             intrinsic,
             unread,
+            ctx,
         )
     ]
     for inner in inner_lines(name, words[1:]):
@@ -1202,6 +1214,47 @@ async def _judge_line(
     return out
 
 
+async def line_denied(
+    ast: Any,
+    session: SessionState,
+    registry: MountRegistry,
+    namespace: Namespace | None,
+    agent_id: str = "",
+) -> bool:
+    """Whether a rule or a policy denies some command of a line, which
+    is what placement waits on: admission comes first, so a line the
+    rules refuse is never shown to a placing policy.
+
+    Read-only, as :func:`explain_line` is, so it spends no grant and
+    asks no host. Only a verdict counts (:func:`_is_verdict`): a
+    question nobody has answered may still let the line run, and a head
+    word the session cannot see fails where it stands while the rest
+    of its line runs, so such a line is still placed.
+
+    Args:
+        ast (Any): the parsed tree-sitter root node.
+        session (SessionState): the session running the line.
+        registry (MountRegistry): registry holding the policies, the
+            decision ledger and the CLI installs.
+        namespace (Namespace | None): the link table.
+        agent_id (str): the agent the line is attributed to.
+    """
+    judged = await _judge_line(
+        ast, session, registry, namespace, agent_id, root_frame(ast, None)
+    )
+    return denies([one.explanation for one in judged])
+
+
+def denies(explanations: Sequence[Explanation]) -> bool:
+    """Whether some command's explanation is a verdict that refuses it
+    (:func:`_is_verdict`), the line-level refusal placement waits on.
+
+    Args:
+        explanations (Sequence[Explanation]): a line's explanations.
+    """
+    return any(_is_verdict(e) and _refuses(e) for e in explanations)
+
+
 async def explain_line(
     ast: Any,
     session: SessionState,
@@ -1243,4 +1296,82 @@ async def explain_line(
         root_frame(ast, None),
         whole_line=whole_line,
     )
-    return [one.explanation for one in judged]
+    out: list[Explanation] = []
+    for one in judged:
+        expl = one.explanation
+        if one.ctx is not None:
+            said = await registry.policies.answers("pre_command", one.ctx)
+            expl = dataclasses.replace(
+                expl,
+                answers=tuple(a for a in said if isinstance(a, (Deny, Ask))),
+            )
+        out.append(expl)
+    return out
+
+
+async def explain_op(
+    op: str, path: str, session: SessionState, registry: MountRegistry
+) -> Explanation:
+    """What the op door would answer one op, without running it: the
+    single-op form of :func:`explain_line`, for the doors that see ops
+    and no command (the file tools, ``session.vfs``, FUSE).
+
+    ``command`` is the op and ``argv`` its path. ``exit_code`` is 1 when
+    the door would refuse the op and 0 when it would run it, and
+    ``stderr`` stays empty, since an op has no terminal of its own;
+    ``refusal`` is the record the refusal would carry, None for a mount
+    mode's, which raises its own error. A path the session cannot see
+    is shown to no policy, so it explains as an op that runs: a hide
+    never surfaces. A question asked here is not recorded.
+
+    Args:
+        op (str): the op's name (``read``, ``write``, ``unlink``, ...).
+        path (str): the path, absolute or under the session's cwd.
+        session (SessionState): the session the op runs as.
+        registry (MountRegistry): registry holding the policies and the
+            decision ledger.
+    """
+    spec = PathSpec.from_str_path(resolve_path(path, session.cwd))
+    if not path_visible(session.visibility, spec.virtual):
+        return Explanation(command=op, argv=(path,))
+    mount = registry.try_mount_for(spec.virtual)
+    ctx = OpsContext(
+        op=op,
+        path=spec,
+        write=op in POLICY_WRITE_OPS,
+        prefix=mount.prefix if mount is not None else "",
+        session_id=session.session_id,
+        mode=mount.mode if mount is not None else MountMode.WRITE,
+    )
+    token = set_current_session(session)
+    try:
+        said = await registry.policies.answers("pre_ops", ctx)
+    finally:
+        reset_current_session(token)
+    answers = tuple(a for a in said if isinstance(a, (Deny, Ask)))
+    winner = settled(answers)
+    base = Explanation(
+        command=op, argv=(path,), paths=(spec.virtual,), answers=answers
+    )
+    if winner is None or isinstance(winner, Route):
+        return base
+    action: Deny | Pending | None = (
+        registry.decisions.held_op(ctx, winner)
+        if isinstance(winner, Ask)
+        else winner
+    )
+    outcome = Outcome.ASK if isinstance(winner, Ask) else Outcome.DENY
+    if action is None:
+        return dataclasses.replace(base, outcome=outcome, reason=winner.reason)
+    record = (
+        None
+        if isinstance(action, Deny) and action.error is not None
+        else refusal_of(action)
+    )
+    return dataclasses.replace(
+        base,
+        outcome=outcome,
+        reason=winner.reason,
+        exit_code=1,
+        refusal=record,
+    )

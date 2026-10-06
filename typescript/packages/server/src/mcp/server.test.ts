@@ -16,6 +16,7 @@ import { Client, InMemoryTransport } from '@modelcontextprotocol/client'
 import { OpsRegistry } from '@struktoai/mirage-core/ops/registry'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
+import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { Workspace } from '@struktoai/mirage-node'
 import { describe, expect, it } from 'vitest'
 import { createMirageMcpServer } from './server.ts'
@@ -56,6 +57,24 @@ describe('createMirageMcpServer', () => {
     expect(firstText(read.content)).toContain('hello')
     const globbed = await client.callTool({ name: 'glob', arguments: { pattern: '*.txt' } })
     expect(firstText(globbed.content)).toBe('/hello.txt\n')
+    await client.close()
+    await server.close()
+    await workspace.close()
+  })
+
+  it("lists the tools the session's profile leaves it", async () => {
+    const workspace = mkWs()
+    workspace.createSession('ro', { profile: parseSessionProfile({ mounts: { '/': 'read' } }) })
+    const server = createMirageMcpServer(workspace, { sessionId: 'ro' })
+    const client = new Client({ name: 'mirage-test', version: '1.0.0' })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+    const tools = await client.listTools()
+    expect(tools.tools.map((tool) => tool.name)).toEqual(['shell', 'read', 'ls', 'grep', 'glob'])
+    await expect(
+      client.callTool({ name: 'write', arguments: { path: '/x', content: 'y' } }),
+    ).rejects.toThrow(/Tool write not found/)
     await client.close()
     await server.close()
     await workspace.close()

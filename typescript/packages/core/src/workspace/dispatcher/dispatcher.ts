@@ -41,6 +41,7 @@ import {
   type FsError,
 } from '../../utils/errors.ts'
 import { Policies, PolicyDenied } from '../../policy/index.ts'
+import type { Decisions } from '../../policy/decisions.ts'
 import { OpBoundary } from '../../ops/boundary.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
@@ -244,6 +245,9 @@ export class Dispatcher {
   // So does the workspace's write admission, which holds a write while a
   // capture reads.
   private readonly admitWrite: AdmitWrite | null
+  // And the approval ledger, which a path rule that asks is put to where
+  // no line is running.
+  private readonly decisions: Decisions | null
   private readonly writers = new KeyLock()
   private readonly stores = new WeakMap<BaseVFS, number>()
   private storeCount = 0
@@ -256,6 +260,7 @@ export class Dispatcher {
     policies?: Policies,
     drift?: DriftQueue,
     admitWrite?: AdmitWrite,
+    decisions?: Decisions,
   ) {
     this.namespace = namespace
     this.cache = cache
@@ -263,6 +268,7 @@ export class Dispatcher {
     this.policies = policies ?? new Policies()
     this.drift = drift ?? null
     this.admitWrite = admitWrite ?? null
+    this.decisions = decisions ?? null
     this.reconciler = new Reconciler(cache, namespace, opsRegistry)
   }
 
@@ -914,6 +920,7 @@ export class Dispatcher {
       mount?.prefix ?? '',
       mount?.mode ?? MountMode.WRITE,
       sessionId(),
+      this.decisions,
     )
   }
 
@@ -944,7 +951,7 @@ export class Dispatcher {
   ): Promise<unknown> {
     const mount = this.namespace.mountFor(spec.virtual)
     const write = this.opsRegistry.find(opName, vfs)?.write === true
-    const boundary = new OpBoundary(this.policies, mountPrefix, mode, sessionId())
+    const boundary = new OpBoundary(this.policies, mountPrefix, mode, sessionId(), this.decisions)
     if (write) {
       // The same pre-ops admission a dispatched op answers, with the
       // walk's own child path: the gate that admitted the rmdir judged

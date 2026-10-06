@@ -39,7 +39,8 @@ import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 
 /**
  * Mirage's tool table as Mastra tools: shell, read, write, edit, ls, grep
- * and glob, each with the shared input schema and answering
+ * and glob, each with the shared input schema, as far as the session's
+ * profile leaves them (`MirageToolOperations.names`), and answering
  * `{ text, isError }` as the MCP tool of the same name does.
  */
 export function mirageTools(ws: Workspace, options: MirageToolOperationsOptions = {}) {
@@ -58,7 +59,7 @@ export function mirageTools(ws: Workspace, options: MirageToolOperationsOptions 
         return { text: result.content[0]?.text ?? '', isError: result.isError === true }
       },
     })
-  return {
+  const all = {
     shell: mirageTool('shell', SHELL_DESCRIPTION, SHELL_INPUT),
     read: mirageTool('read', READ_DESCRIPTION, READ_INPUT),
     write: mirageTool('write', WRITE_DESCRIPTION, WRITE_INPUT),
@@ -67,4 +68,8 @@ export function mirageTools(ws: Workspace, options: MirageToolOperationsOptions 
     grep: mirageTool('grep', GREP_DESCRIPTION, GREP_INPUT),
     glob: mirageTool('glob', GLOB_DESCRIPTION, GLOB_INPUT),
   }
+  const names = operations.names()
+  return Object.fromEntries(
+    Object.entries(all).filter(([name]) => names.includes(name)),
+  ) as Partial<typeof all>
 }

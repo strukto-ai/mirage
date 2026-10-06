@@ -24,8 +24,8 @@ from mirage.context import reset_refusal_sink, set_refusal_sink
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope
-from mirage.policy import HandOff
-from mirage.runtime.routing import RouteDecision, RouteDeny, RouteError
+from mirage.policy import Deny, HandOff
+from mirage.runtime.routing import RouteDecision, RouteError
 from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole, Terminal
@@ -61,7 +61,11 @@ from mirage.workspace.node.admission import (
     is_pending,
     is_pending_refusal,
 )
-from mirage.workspace.node.explain import prejudge_line, unrefused_nodes
+from mirage.workspace.node.explain import (
+    line_denied,
+    prejudge_line,
+    unrefused_nodes,
+)
 from mirage.workspace.node.occurrence import evaluated_from
 from mirage.workspace.node.run_tree import run_command_tree
 from mirage.workspace.session import (
@@ -71,7 +75,10 @@ from mirage.workspace.session import (
     set_current_session,
 )
 from mirage.workspace.snapshot import ContentDriftError
-from mirage.workspace.workspace.failure import failure_result
+from mirage.workspace.workspace.failure import (
+    failure_result,
+    placement_refused,
+)
 from mirage.workspace.workspace.fill import (
     cli_env_names,
     fill_env,
@@ -577,7 +584,7 @@ async def run_prepared_line(
             io = syntax_error_result(offending, ast)
             record_status(session, io.exit_code)
             return io
-        decision = await ws._router.decide(
+        placed = await ws._router.decide(
             ast,
             command,
             runtime,
@@ -586,7 +593,19 @@ async def run_prepared_line(
             agent or "",
             ws._route_policy,
             routing_decision,
+            lambda: line_denied(
+                ast,
+                effective_session,
+                ws._registry,
+                ws._namespace,
+                agent or "",
+            ),
         )
+        if isinstance(placed, Deny):
+            io = placement_refused(placed, command)
+            record_status(session, io.exit_code)
+            return io
+        decision = placed
         nested = NestedRefusal()
 
         def note(refusal: Refusal) -> None:
@@ -848,10 +867,6 @@ async def run_prepared_line(
         logger.debug(
             "command %r timed out after %ss", exc.command, exc.seconds
         )
-        io = failure_result(exc, command)
-        record_status(session, io.exit_code)
-        return io
-    except RouteDeny as exc:
         io = failure_result(exc, command)
         record_status(session, io.exit_code)
         return io

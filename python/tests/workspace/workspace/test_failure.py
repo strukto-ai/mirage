@@ -17,9 +17,12 @@ from mirage.commands.errors import (
     FindParseError,
     UsageError,
 )
-from mirage.runtime.routing import RouteDeny
+from mirage.policy import Deny
 from mirage.types import Refusal
-from mirage.workspace.workspace.failure import failure_result
+from mirage.workspace.workspace.failure import (
+    failure_result,
+    placement_refused,
+)
 
 
 def test_timeout_reports_124_with_the_timeout_message():
@@ -28,11 +31,14 @@ def test_timeout_reports_124_with_the_timeout_message():
     assert io.stderr == b"sleep 99: timed out after 2.0s\n"
 
 
-def test_deny_reports_126_named_by_the_command():
-    io = failure_result(RouteDeny("no writes"), "rm -rf /data")
+def test_a_placement_deny_reports_126_named_by_the_command():
+    deny = Deny("no writes", policy="PlacementPolicy")
+    io = placement_refused(deny, "rm -rf /data")
     assert io.exit_code == 126
     assert io.stderr == b"rm: Permission denied\n"
-    assert io.refusal == Refusal(kind="deny", reason="no writes")
+    assert io.refusal == Refusal(
+        kind="deny", reason="no writes", policy="PlacementPolicy"
+    )
 
 
 def test_usage_error_keeps_its_own_exit_code():
@@ -64,5 +70,5 @@ def test_unknown_exception_falls_back_to_exit_1():
 def test_blank_line_falls_back_to_the_raw_command():
     # No word to name, so the diagnostic keeps whatever was typed
     # rather than reporting an empty command name.
-    io = failure_result(RouteDeny("nope"), "   ")
+    io = placement_refused(Deny("nope"), "   ")
     assert io.stderr == b"   : Permission denied\n"

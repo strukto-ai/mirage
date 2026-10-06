@@ -330,6 +330,7 @@ class Dispatcher:
             mount.prefix if mount is not None else "",
             mount.mode if mount is not None else MountMode.WRITE,
             _session_id(),
+            self._namespace.registry.decisions,
         )
 
     @property

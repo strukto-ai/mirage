@@ -13,11 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mirage.commands.builtin.utils.limit import apply_op_limit
 from mirage.policy.policies import Policies, post_ops_gate, pre_ops_gate
 from mirage.types import MountMode, PathSpec
+
+if TYPE_CHECKING:
+    from mirage.policy.decisions import Decisions
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,12 +32,15 @@ class OpBoundary:
         prefix (str): owning mount prefix.
         mode (MountMode | None): configured authorization ceiling.
         session_id (str): session whose grants govern this operation.
+        decisions (Decisions | None): the approval ledger a path rule
+            that asks is put to where no line is running.
     """
 
     policies: Policies
     prefix: str = ""
     mode: MountMode | None = None
     session_id: str = ""
+    decisions: "Decisions | None" = None
 
     async def admit(
         self,
@@ -57,6 +63,7 @@ class OpBoundary:
             create=create,
             subtree=subtree,
             check_hidden=check_hidden,
+            decisions=self.decisions,
         )
 
     async def complete(

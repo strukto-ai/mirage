@@ -100,7 +100,7 @@ import type { EvalResult } from '../../runtime/types.ts'
 import { PyodideUnavailableError } from '../../runtime/python/pyodide/errors.ts'
 import { Dispatcher } from '../dispatcher/index.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
-import { explainLine } from '../node/explain.ts'
+import { denies, explainLine, explainOp } from '../node/explain.ts'
 import { buildFilePrompt } from '../file_prompt.ts'
 import { getCurrentSessionFor } from '../../context/session_context.ts'
 import { abortable, hasAborted, makeAbortError } from '../abort.ts'
@@ -136,6 +136,7 @@ import type { ExecuteOptions, ExecuteResult, MountSpec, WorkspaceOptions } from 
 import { Mount } from '../mount/spec.ts'
 import { WatchManager } from './watch.ts'
 import { encodeText } from '../../shell/bytes.ts'
+import { placementRefused } from './failure.ts'
 
 export { ExecuteResult } from './types.ts'
 export type { ExecuteOptions, MountSpec, WorkspaceOptions } from './types.ts'
@@ -422,6 +423,7 @@ export class Workspace {
       this.registry.policies,
       this.drift,
       (write) => this.admitWrite(write),
+      this.registry.decisions,
     )
     this.registry.setReconciler(this.dispatcher.reconciler)
     this.registry.setOpStat((mount, path) => this.dispatcher.opStat(mount, path))
@@ -1109,16 +1111,20 @@ export class Workspace {
   }
 
   /**
-   * What a line would do under a session's profile, without running any
-   * it: one Explanation per command the gate reads, in gate order,
-   * nested lines included.
+   * What a line would do under a session's profile, without running any of
+   * it: one Explanation per command the gate reads, in gate order, nested
+   * lines included.
    *
-   * The dry run of the gate every command passes through, so this and
-   * the refusal an agent would read come out of one place and cannot
-   * disagree. It runs no command, expands nothing, spends no grant and
-   * puts no question to a host, which is what makes it safe to call
-   * about a line nobody typed. The line is judged on the static bindings'
-   * route; a route policy is not consulted.
+   * The dry run of the gate every command passes through, so this and the
+   * refusal an agent would read come out of one place and cannot disagree.
+   * It runs no command, expands nothing, spends no grant and puts no
+   * question to a host, which is what makes it safe to call about a line
+   * nobody typed. Each explanation carries every policy's answer to its
+   * command and the line's placement: every answer at `preExecute` and the
+   * runtime that would run the command. A line a rule refuses is never
+   * placed, as it is never placed when it runs, and a placement that
+   * refuses the line refuses it on its first command. A hidden path is no
+   * path to any of it.
    *
    * Host-side only. The structure of a profile's rules is an operator's
    * business, so there is no builtin an agent can type to read it.
@@ -1128,8 +1134,9 @@ export class Workspace {
     const session = this.getSession(sessionId === '' ? this.defaultSessionId : sessionId)
     const parser = await this.getShellParser()
     const reparse = (text: string): TSNodeLike => parser.parse(text)
-    return explainLine(
-      parser.parse(line),
+    const root = parser.parse(line)
+    const said = await explainLine(
+      root,
       session,
       this.registry,
       this.namespace,
@@ -1137,6 +1144,36 @@ export class Workspace {
       reparse,
       this.runtimeWorld.wholeLineFor(null) !== null,
     )
+    if (denies(said)) return said
+    const [answers, placed] = await this.router.placement(root, line, session)
+    const decision = placed !== null && !('kind' in placed) ? placed : null
+    const out = said.map((expl) => ({
+      ...expl,
+      placement: answers,
+      runtime: this.router.runtimeFor(expl.command, decision),
+    }))
+    const first = out[0]
+    if (placed !== null && 'kind' in placed && first !== undefined) {
+      const refused = placementRefused(placed, line)
+      out[0] = {
+        ...first,
+        exitCode: refused.exitCode,
+        stderr: refused.stderrText,
+        refusal: refused.refusal,
+      }
+    }
+    return out
+  }
+
+  /**
+   * What the op door would answer one op under a session's profile, without
+   * running it: the single-op form of `explain`, for the doors that see ops
+   * and no command (the file tools, `session.vfs`, FUSE).
+   */
+  async explainOp(op: string, path: string, sessionId = ''): Promise<Explanation> {
+    await this.ensureSessionsLoaded()
+    const session = this.getSession(sessionId === '' ? this.defaultSessionId : sessionId)
+    return explainOp(op, path, session, this.registry)
   }
 
   get workspaceId(): string {

@@ -116,7 +116,10 @@ export function createMirageMcpServer(
     name: options.name ?? 'mirage',
     version: options.version ?? VERSION,
   })
-  for (const tool of TOOLS) {
+  // The session's profile leaves it these tools; the rest are never
+  // offered, and a call to one is the SDK's own "not found".
+  const names = operations.names()
+  for (const tool of TOOLS.filter((candidate) => names.includes(candidate.name))) {
     server.registerTool(
       tool.name,
       {

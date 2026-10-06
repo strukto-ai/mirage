@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RouteContext } from '../runtime/routing/types.ts'
 import type {
   Action,
   CommandContext,
@@ -32,6 +33,17 @@ import type {
  */
 export interface Policy {
   preCommand?(ctx: CommandContext): Action | null | Promise<Action | null>
+  /**
+   * Place or refuse one typed line before any of it runs. Fires once per
+   * line, after the line clears admission (a line a rule refuses is never
+   * placed) and before it runs, with the payload a `routePolicy` reads; a
+   * nested line keeps the placement of the line that ran it. A Route
+   * names the runtime that serves the line, and a Deny refuses it whole,
+   * exit 126 and `<command>: Permission denied`. The workspace's
+   * `routePolicy` answers here as a built-in, ahead of the policies
+   * registered in code.
+   */
+  preExecute?(ctx: RouteContext): Action | null | Promise<Action | null>
   /**
    * Admit or refuse one VFS op, at the op doors and on the command
    * tier's backend I/O. The doors are the dispatcher and the ops

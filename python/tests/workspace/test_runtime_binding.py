@@ -18,13 +18,18 @@ import pytest_asyncio
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.config import _build_runtime_entries
 from mirage.io.types import materialize
+from mirage.policy import Deny, Policy, Route
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python import LocalRuntime, MontyRuntime
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.resolver import MountResolver
-from mirage.runtime.routing import DenyResult, RouteResult
+from mirage.runtime.routing import (
+    DenyResult,
+    RouteContext,
+    RouteResult,
+)
 from mirage.runtime.table import WorkspaceRuntime
 from mirage.runtime.types import RunArgs, RunResult, ScriptSource
 
@@ -402,6 +407,154 @@ async def test_policy_result_arms_route_and_deny():
         assert io.stderr == b"python3: Permission denied\n"
         assert io.refusal is not None
         assert io.refusal.reason == "secrets stay put"
+    finally:
+        await ws.close()
+
+
+class HeavyOnBeta(Policy):
+    async def pre_execute(self, ctx: RouteContext) -> Route | None:
+        return Route("beta") if "heavy" in ctx.line else None
+
+
+class NoSecrets(Policy):
+    async def pre_execute(self, ctx: RouteContext) -> Deny | None:
+        return Deny("secrets stay put") if "secret" in ctx.line else None
+
+
+@pytest.mark.asyncio
+async def test_a_coded_policy_places_the_line():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[AlphaRuntime(), BetaRuntime(), "workspace"],
+        policies=[HeavyOnBeta()],
+    )
+    try:
+        io = await ws.shell("python3 -c 'heavy'")
+        assert await materialize(io.stdout) == b"ran-beta\n"
+        io = await ws.shell("python3 -c 'light'")
+        assert await materialize(io.stdout) == b"ran-alpha\n"
+        # The caller's runtime argument is its own placement.
+        io = await ws.shell("python3 -c 'heavy'", runtime="alpha")
+        assert await materialize(io.stdout) == b"ran-alpha\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_placement_deny_outranks_a_route():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[AlphaRuntime(), BetaRuntime(), "workspace"],
+        route_policy=lambda ctx: "beta",
+        policies=[NoSecrets()],
+    )
+    try:
+        io = await ws.shell("python3 -c 'secret'")
+        assert (io.exit_code, io.stderr) == (
+            126,
+            b"python3: Permission denied\n",
+        )
+        assert io.refusal is not None
+        assert (io.refusal.reason, io.refusal.policy) == (
+            "secrets stay put",
+            "NoSecrets",
+        )
+        # A deny holds whoever placed the line, the caller included.
+        io = await ws.shell("python3 -c 'secret'", runtime="beta")
+        assert io.exit_code == 126
+        io = await ws.shell("python3 -c 'x'")
+        assert await materialize(io.stdout) == b"ran-beta\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_two_placements_that_disagree_refuse_the_line():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[AlphaRuntime(), BetaRuntime(), "workspace"],
+        route_policy=lambda ctx: "alpha",
+        policies=[HeavyOnBeta()],
+    )
+    try:
+        io = await ws.shell("python3 -c 'heavy'")
+        assert io.exit_code == 126
+        assert io.refusal is not None
+        assert io.refusal.reason == (
+            "policies place the line on different runtimes: "
+            "PlacementPolicy on alpha, HeavyOnBeta on beta"
+        )
+        io = await ws.shell("python3 -c 'light'")
+        assert await materialize(io.stdout) == b"ran-alpha\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_admission_comes_before_placement():
+    seen: list[str] = []
+
+    def away(ctx):
+        seen.append(ctx.line)
+        return {"deny": "routed away"}
+
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[AlphaRuntime(), "workspace"],
+        route_policy=away,
+    )
+    try:
+        ws.create_session(
+            "agent",
+            profile={
+                "commands": {
+                    "deny": [{"reason": "no deletes", "commands": ["rm"]}]
+                }
+            },
+        )
+        io = await ws.shell("rm /x", session_id="agent")
+        assert (io.exit_code, io.stderr) == (126, b"rm: Permission denied\n")
+        assert io.refusal is not None
+        assert io.refusal.reason == "no deletes"
+        assert seen == []
+        io = await ws.shell("echo ok", session_id="agent")
+        assert io.refusal is not None
+        assert io.refusal.reason == "routed away"
+        assert seen == ["echo ok"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_explain_names_the_policy_that_placed_the_line():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[AlphaRuntime(), BetaRuntime(), "workspace"],
+        route_policy=lambda ctx: "beta" if "heavy" in ctx.line else None,
+        policies=[NoSecrets()],
+    )
+    try:
+        [heavy] = await ws.explain("python3 -c 'heavy'")
+        assert heavy.placement == (Route("beta", policy="PlacementPolicy"),)
+        assert (heavy.runtime, heavy.exit_code) == ("beta", 0)
+        [light] = await ws.explain("python3 -c 'light'")
+        assert (light.placement, light.runtime) == ((), "alpha")
+        # A placement deny refuses the line on its first command, in the
+        # words the run would print.
+        [secret, echo] = await ws.explain("python3 -c 'secret'; echo x")
+        assert secret.placement == (
+            Deny("secrets stay put", policy="NoSecrets"),
+        )
+        assert (secret.exit_code, secret.stderr) == (
+            126,
+            "python3: Permission denied\n",
+        )
+        assert (echo.exit_code, echo.runtime) == (0, "")
     finally:
         await ws.close()
 

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import dataclasses
 import errno
 import logging
 import shutil
@@ -60,6 +61,7 @@ from mirage.ops import Ops
 from mirage.policy import (
     AskHandler,
     Decisions,
+    Deny,
     Explanation,
     HandOff,
     PermissionsPolicy,
@@ -84,6 +86,7 @@ from mirage.secrets.registry import source_for
 from mirage.secrets.sources import resolve_sources
 from mirage.secrets.types import ResolvedSource
 from mirage.shell import parse
+from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.constants import BIN_PREFIX
@@ -124,7 +127,7 @@ from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.mount.namespace.view import namespace_view_of
 from mirage.workspace.mount.read_policy import check_read_capability
 from mirage.workspace.mount.spec import Mount
-from mirage.workspace.node.explain import explain_line
+from mirage.workspace.node.explain import denies, explain_line, explain_op
 from mirage.workspace.session import SessionManager, SessionState, SessionStore
 from mirage.workspace.session.constants import DEFAULT_PROFILE
 from mirage.workspace.session.resolve import (
@@ -162,6 +165,7 @@ from mirage.workspace.workspace.build import (
 )
 from mirage.workspace.workspace.cache import build_file_cache
 from mirage.workspace.workspace.execute import LineFrame, execute_line
+from mirage.workspace.workspace.failure import placement_refused
 from mirage.workspace.workspace.guard import reject_config_script
 from mirage.workspace.workspace.handle import Session
 from mirage.workspace.workspace.kernel_mounts import KernelMounts
@@ -512,8 +516,13 @@ class Workspace:
         and the refusal an agent would read come out of one place and
         cannot disagree. It runs no command, expands nothing, spends no
         grant and puts no question to a host, which is what makes it
-        safe to call about a line nobody typed. The line is judged on
-        the static bindings' route; a route policy is not consulted.
+        safe to call about a line nobody typed. Each explanation carries
+        every policy's answer to its command and the line's placement:
+        every answer at ``pre_execute`` and the runtime that would run
+        the command. A line a rule refuses is never placed, as it is
+        never placed when it runs, and a placement that refuses the line
+        refuses it on its first command. A hidden path is no path to any
+        of it.
 
         Host-side only. The structure of a profile's rules is an
         operator's business, so there is no builtin an agent can type
@@ -530,13 +539,60 @@ class Workspace:
         """
         await self.ensure_sessions_loaded()
         session = self.get_session(session_id or self.default_session_id)
-        return await explain_line(
-            parse(line),
+        ast = parse(line)
+        said = await explain_line(
+            ast,
             session,
             self._registry,
             self._namespace,
             whole_line=self._runtimes.whole_line(None) is not None,
         )
+        if denies(said):
+            return said
+        answers, placed = await self._router.placement(
+            ast,
+            line,
+            session,
+            session.session_id,
+            self._default_agent_id or "",
+            self._route_policy,
+        )
+        decision = placed if isinstance(placed, RouteDecision) else None
+        out = [
+            dataclasses.replace(
+                expl,
+                placement=answers,
+                runtime=self._router.runtime_for(expl.command, decision),
+            )
+            for expl in said
+        ]
+        if isinstance(placed, Deny) and out:
+            refused = placement_refused(placed, line)
+            out[0] = dataclasses.replace(
+                out[0],
+                exit_code=refused.exit_code,
+                stderr=decode_text(await refused.materialize_stderr()),
+                refusal=refused.refusal,
+            )
+        return out
+
+    async def explain_op(
+        self, op: str, path: str, session_id: str = ""
+    ) -> Explanation:
+        """What the op door would answer one op under a session's
+        profile, without running it: the single-op form of ``explain``,
+        for the doors that see ops and no command (the file tools,
+        ``session.vfs``, FUSE).
+
+        Args:
+            op (str): the op's name (``read``, ``write``, ``unlink``, ...).
+            path (str): the path, absolute or under the session's cwd.
+            session_id (str): whose profile to judge it under; the
+                default session when empty.
+        """
+        await self.ensure_sessions_loaded()
+        session = self.get_session(session_id or self.default_session_id)
+        return await explain_op(op, path, session, self._registry)
 
     @property
     def declared_sources(self) -> Mapping[str, SecretSource]:

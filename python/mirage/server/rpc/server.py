@@ -444,17 +444,19 @@ class MirageRpcServer:
         return {}
 
     async def _tools_list(self, params: Params) -> JsonValue:
+        names = await self._ops.offered()
         return {
             "tools": [
                 tool.model_dump(mode="json", by_alias=True, exclude_none=True)
                 for tool in TOOLS
+                if tool.name in names
             ]
         }
 
     async def _tools_call(self, params: Params) -> JsonValue:
         name = _text(params, "name")
         tool = next((t for t in TOOLS if t.name == name), None)
-        if tool is None:
+        if tool is None or name not in await self._ops.offered():
             raise RpcError(RPC_INVALID_PARAMS, f"Tool {name} not found")
         arguments = params.get("arguments", {})
         if not isinstance(arguments, dict):

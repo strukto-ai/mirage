@@ -189,9 +189,10 @@ export class MirageRpcServer {
         await vfs().truncate(text(params, 'path'), length)
         return {}
       },
-      'tools/list': () =>
-        Promise.resolve({
-          tools: TOOLS.map((tool) => ({
+      'tools/list': async () => {
+        const names = await this.operations.offered()
+        return {
+          tools: TOOLS.filter((tool) => names.includes(tool.name)).map((tool) => ({
             name: tool.name,
             description: tool.description,
             inputSchema: tool.inputSchema as JsonValue,
@@ -199,7 +200,8 @@ export class MirageRpcServer {
               ? {}
               : { annotations: tool.annotations as JsonValue }),
           })),
-        }),
+        }
+      },
       'tools/call': (params, signal) => this.toolsCall(params, signal),
     }
   }
@@ -328,7 +330,9 @@ export class MirageRpcServer {
   private async toolsCall(params: Params, signal?: AbortSignal): Promise<JsonValue> {
     const name = text(params, 'name')
     const tool = TOOLS.find((candidate) => candidate.name === name)
-    if (tool === undefined) throw new RpcError(RPC_INVALID_PARAMS, `Tool ${name} not found`)
+    if (tool === undefined || !(await this.operations.offered()).includes(name)) {
+      throw new RpcError(RPC_INVALID_PARAMS, `Tool ${name} not found`)
+    }
     const args = params.arguments ?? {}
     if (typeof args !== 'object' || Array.isArray(args)) {
       throw new RpcError(RPC_INVALID_PARAMS, 'arguments must be an object')

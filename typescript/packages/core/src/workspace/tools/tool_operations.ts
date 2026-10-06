@@ -12,10 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { strongestUnderSession } from '../../context/session_context.ts'
 import type { Ops } from '../../ops/ops.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
+import { patternMatches } from '../../policy/match/pattern.ts'
+import { MOUNT_MODE_RANK, MountMode } from '../../types.ts'
 import { isEacces } from '../../utils/errors.ts'
+import { pathVisible } from '../../utils/hidden.ts'
 import { gnuDirname } from '../../utils/path.ts'
+import { commandVisible } from '../lookup/lookup.ts'
+import type { MountEntry } from '../mount/mount.ts'
+import { DEV_PREFIX } from '../mount/registry.ts'
+import type { SessionState } from '../session/session.ts'
 import type { Session, SessionExecuteOptions } from '../workspace/handle.ts'
 import type { ExecuteResult } from '../workspace/types.ts'
 import { FileVersionTracker, StaleMirageFileError } from './file_version.ts'
@@ -91,6 +99,50 @@ async function missing(vfs: Ops, path: string): Promise<boolean> {
   }
 }
 
+/** Every tool, in the order the doors list them. */
+export const TOOL_NAMES = ['shell', 'read', 'write', 'edit', 'ls', 'grep', 'glob'] as const
+
+/**
+ * Whether a session can run a command at all: its allow list installs the
+ * name and no rule refuses the bare command whole. Mirrors Python's `runs`.
+ */
+export function runs(name: string, session: SessionState): boolean {
+  if (!commandVisible(name, session)) return false
+  const rules = session.commands
+  if (rules === null) return true
+  return !rules.deny.some(
+    (rule) =>
+      (rule.paths ?? []).length === 0 &&
+      ((rule.commands ?? []).length === 0 ||
+        (rule.commands ?? []).some((p) => patternMatches(p, [name]))),
+  )
+}
+
+/**
+ * Whether a session may write anywhere: a mount it can see whose mode,
+ * narrowed by the profile or opened by a show entry below it, reaches
+ * write. `/dev` is left out: its null sink takes a write from anyone and
+ * stores nothing. Mirrors Python's `writes`.
+ */
+export function writes(session: SessionState, mounts: readonly MountEntry[]): boolean {
+  return mounts.some(
+    (mount) =>
+      mount.prefix !== DEV_PREFIX &&
+      pathVisible(session.visibility, mount.prefix) &&
+      MOUNT_MODE_RANK[strongestUnderSession(session, mount.prefix, mount.mode)] >=
+        MOUNT_MODE_RANK[MountMode.WRITE],
+  )
+}
+
+/**
+ * A file tool's call as the unit an op-level answer covers
+ * (`Decisions.withinCall`): an approval for a path runs every op the call
+ * makes on it, and the call's end spends it. Mirrors Python's `one_call`.
+ */
+function oneCall<T>(session: Session, run: () => Promise<T>): Promise<T> {
+  return session.decisions.withinCall(session.sessionId, run)
+}
+
 /**
  * The agent tools for one session, independent of any agent framework.
  * `session.tools` is the session's own table. Every guarded table of a
@@ -124,6 +176,50 @@ export class MirageToolOperations {
     return this.own !== null ? Promise.resolve(this.own) : this.session.reads()
   }
 
+  /**
+   * The tools this session can use, in the order the doors list them.
+   * Read off the session's profile, so no door offers a tool every call
+   * of which would be refused: `shell` needs a command the allow list
+   * installs, `ls` and `grep` run those commands and need them, and
+   * `write` and `edit` need somewhere the session may write. `read` and
+   * `glob` are always offered; what they cannot reach answers as the
+   * error it is. A session not loaded yet (a stored one before its first
+   * call) is offered every tool, since its profile is not known here; the
+   * policies still judge each call, and `offered` loads it first. Mirrors
+   * Python's `names`.
+   */
+  names(): readonly string[] {
+    let session: SessionState
+    try {
+      session = this.session.state
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('unknown session:')) return TOOL_NAMES
+      throw err
+    }
+    const allow = session.visibility.commands
+    const writable = writes(session, this.session.mounts())
+    const offered: Record<string, boolean> = {
+      shell: allow === null || allow.length > 0,
+      read: true,
+      write: writable,
+      edit: writable,
+      ls: runs('ls', session),
+      grep: runs('grep', session),
+      glob: true,
+    }
+    return TOOL_NAMES.filter((name) => offered[name] === true)
+  }
+
+  /**
+   * The tools this session can use, its sessions loaded first, so a stored
+   * session answers with its own profile: what an async door lists and
+   * calls by. Mirrors Python's `offered`.
+   */
+  async offered(): Promise<readonly string[]> {
+    await this.session.loaded()
+    return this.names()
+  }
+
   private lineOptions(signal: AbortSignal | undefined): SessionExecuteOptions {
     return signal === undefined ? {} : { signal }
   }
@@ -133,15 +229,17 @@ export class MirageToolOperations {
     return ioResult(await this.session.shell(command, this.lineOptions(signal)))
   }
 
-  async read(path: string, offset = 0, limit = 2000): Promise<ToolResult> {
-    const versions = await this.versions()
-    let data: Uint8Array
-    try {
-      data = await versions.read(path)
-    } catch (err) {
-      return this.readFailure(versions, path, err)
-    }
-    return this.numbered(versions, path, data, offset, limit)
+  read(path: string, offset = 0, limit = 2000): Promise<ToolResult> {
+    return oneCall(this.session, async () => {
+      const versions = await this.versions()
+      let data: Uint8Array
+      try {
+        data = await versions.read(path)
+      } catch (err) {
+        return this.readFailure(versions, path, err)
+      }
+      return this.numbered(versions, path, data, offset, limit)
+    })
   }
 
   /**
@@ -201,58 +299,62 @@ export class MirageToolOperations {
    * overwritten only when the agent was shown all of it and it did not
    * change since, so a write never clobbers text the agent has not seen.
    */
-  async write(path: string, content: string): Promise<ToolResult> {
-    const versions = await this.versions()
-    let present: boolean
-    try {
-      present = await versions.vfs.exists(path)
-    } catch (err) {
-      if (typeof (err as { code?: unknown } | null)?.code !== 'string') throw err
-      return errorResult(errorText(err))
-    }
-    if (present && !versions.hasRead(path)) {
-      return errorResult(`Error: file '${path}' exists; read all of it before overwriting it`)
-    }
-    try {
-      await ensureParents(versions.vfs, path)
-      await versions.write(path, content)
-    } catch (err) {
-      return errorResult(errorText(err))
-    }
-    return textResult(`Written: ${path}`)
+  write(path: string, content: string): Promise<ToolResult> {
+    return oneCall(this.session, async () => {
+      const versions = await this.versions()
+      let present: boolean
+      try {
+        present = await versions.vfs.exists(path)
+      } catch (err) {
+        if (typeof (err as { code?: unknown } | null)?.code !== 'string') throw err
+        return errorResult(errorText(err))
+      }
+      if (present && !versions.hasRead(path)) {
+        return errorResult(`Error: file '${path}' exists; read all of it before overwriting it`)
+      }
+      try {
+        await ensureParents(versions.vfs, path)
+        await versions.write(path, content)
+      } catch (err) {
+        return errorResult(errorText(err))
+      }
+      return textResult(`Written: ${path}`)
+    })
   }
 
-  async edit(
+  edit(
     path: string,
     oldString: string,
     newString: string,
     replaceAll = false,
   ): Promise<ToolResult> {
-    const versions = await this.versions()
-    let content: string
-    try {
-      content = decode(await versions.readForEdit(path))
-    } catch (err) {
-      if (err instanceof StaleMirageFileError) return errorResult(`Error: ${err.message}`)
-      if (await missing(versions.vfs, path)) {
-        return errorResult(`Error: file '${path}' not found`)
+    return oneCall(this.session, async () => {
+      const versions = await this.versions()
+      let content: string
+      try {
+        content = decode(await versions.readForEdit(path))
+      } catch (err) {
+        if (err instanceof StaleMirageFileError) return errorResult(`Error: ${err.message}`)
+        if (await missing(versions.vfs, path)) {
+          return errorResult(`Error: file '${path}' not found`)
+        }
+        return errorResult(errorText(err))
       }
-      return errorResult(errorText(err))
-    }
-    const [newContent, count] = replaceText(content, oldString, newString, replaceAll)
-    if (count === 0) {
-      return errorResult(`Error: string not found in file: '${oldString}'`)
-    }
-    if (count > 1 && !replaceAll) {
-      return errorResult(`Error: string appears ${String(count)} times. Pass replace_all=true`)
-    }
-    try {
-      await versions.writeEdit(path, newContent)
-    } catch (err) {
-      return errorResult(errorText(err))
-    }
-    const occurrences = replaceAll ? count : 1
-    return textResult(`Edited: ${path} (${String(occurrences)} occurrence(s))`)
+      const [newContent, count] = replaceText(content, oldString, newString, replaceAll)
+      if (count === 0) {
+        return errorResult(`Error: string not found in file: '${oldString}'`)
+      }
+      if (count > 1 && !replaceAll) {
+        return errorResult(`Error: string appears ${String(count)} times. Pass replace_all=true`)
+      }
+      try {
+        await versions.writeEdit(path, newContent)
+      } catch (err) {
+        return errorResult(errorText(err))
+      }
+      const occurrences = replaceAll ? count : 1
+      return textResult(`Edited: ${path} (${String(occurrences)} occurrence(s))`)
+    })
   }
 
   async ls(path: string, signal?: AbortSignal): Promise<ToolResult> {
@@ -305,29 +407,31 @@ export class MirageToolOperations {
    * says what it is. Any other failure propagates rather than pass for a
    * short list.
    */
-  async glob(pattern: string, path = '/'): Promise<ToolResult> {
-    const full =
-      pattern.startsWith('/') || path === ''
-        ? pattern
-        : path.endsWith('/')
-          ? `${path}${pattern}`
-          : `${path}/${pattern}`
-    let matches: string[]
-    try {
-      matches = await this.session.glob(full)
-    } catch (err) {
-      if (!isEacces(err)) throw err
-      matches = []
-    }
-    const files: string[] = []
-    for (const match of matches) {
+  glob(pattern: string, path = '/'): Promise<ToolResult> {
+    return oneCall(this.session, async () => {
+      const full =
+        pattern.startsWith('/') || path === ''
+          ? pattern
+          : path.endsWith('/')
+            ? `${path}${pattern}`
+            : `${path}/${pattern}`
+      let matches: string[]
       try {
-        if (await this.session.vfs.isFile(match)) files.push(match)
+        matches = await this.session.glob(full)
       } catch (err) {
         if (!isEacces(err)) throw err
+        matches = []
       }
-    }
-    return textResult(files.map((match) => `${match}\n`).join(''))
+      const files: string[] = []
+      for (const match of matches) {
+        try {
+          if (await this.session.vfs.isFile(match)) files.push(match)
+        } catch (err) {
+          if (!isEacces(err)) throw err
+        }
+      }
+      return textResult(files.map((match) => `${match}\n`).join(''))
+    })
   }
 
   /**
@@ -335,13 +439,20 @@ export class MirageToolOperations {
    * shares: MCP, the HTTP routes, the CLI and the agent adapters hand a
    * tool's name and its input, as the tool's `*_INPUT` schema reads it,
    * to this method, so each tool answers the same way through each of
-   * them. Throws for a name no tool has. Mirrors Python's `call`.
+   * them. Throws for a name no tool has, or one the session's profile does
+   * not offer (`offered`). Mirrors Python's `call`.
    */
   async call(
     name: string,
     args: Readonly<Record<string, unknown>>,
     signal?: AbortSignal,
   ): Promise<ToolResult> {
+    if (
+      (TOOL_NAMES as readonly string[]).includes(name) &&
+      !(await this.offered()).includes(name)
+    ) {
+      throw new Error(`unknown tool: ${name}`)
+    }
     switch (name) {
       case 'shell':
         return this.shell(args.command as string, signal)

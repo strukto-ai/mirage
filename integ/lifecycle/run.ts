@@ -36,6 +36,16 @@ import { classify } from '@struktoai/mirage-core/errors/classify'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { Channel, JobConsole } from '@struktoai/mirage-core/shell/console/index'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
+import {
+  Outcome,
+  Scope,
+  type Ask,
+  type Deny,
+  type Explanation,
+  type Route,
+} from '@struktoai/mirage-core/policy/types'
+import type { RouteContext } from '@struktoai/mirage-core/runtime/routing/types'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
@@ -90,8 +100,14 @@ type Step = (
       commands?: string[]
       paths?: string[]
       vars?: string[]
+      lines?: string[]
       reason: string
     }
+  | { op: 'tools' | 'asks' }
+  | { op: 'tool'; tool: string; arguments: Record<string, unknown> }
+  | { op: 'answer'; outcome?: Outcome; scope?: Scope }
+  | { op: 'explain'; command: string }
+  | { op: 'explain_op'; name: string; path: string }
   | { op: 'unregister_policy'; id: string }
   | {
       op: 'mounts' | 'clis' | 'runtimes' | 'close' | 'snapshot' | 'checkout' | 'drain_processes'
@@ -158,6 +174,29 @@ for (const register of [registerNodeVfs, registerBrowserVfs]) {
     })
     return Promise.resolve(vfs)
   })
+}
+
+/** Each policy answer as a case pins it: its kind, who gave it, and its reason or runtime. */
+function answered(answers: readonly (Deny | Ask | Route)[]): Record<string, string>[] {
+  return answers.map((a) => ({
+    kind: a.kind,
+    policy: a.policy ?? '',
+    ...(a.kind === 'route' ? { runtime: a.runtime } : { reason: a.reason }),
+  }))
+}
+
+/** An explanation as a case pins it. */
+function explained(expl: Explanation): Record<string, unknown> {
+  return {
+    command: expl.command,
+    outcome: expl.outcome,
+    exit_code: expl.exitCode,
+    stderr: expl.stderr,
+    answers: answered(expl.answers),
+    placement: answered(expl.placement),
+    runtime: expl.runtime,
+    refusal: expl.refusal?.kind ?? null,
+  }
 }
 
 // What earlier steps put aside for later ones: `snapshot` stores the
@@ -243,6 +282,14 @@ async function action(
           step.paths?.includes(ctx.path.virtual) ? { kind: 'deny', reason: step.reason } : null,
         preSession: (ctx) =>
           step.vars?.includes(ctx.key) ? { kind: 'deny', reason: step.reason } : null,
+        ...(step.lines === undefined
+          ? {}
+          : {
+              preExecute: (ctx: RouteContext) =>
+                (step.lines ?? []).some((word) => ctx.line.includes(word))
+                  ? { kind: 'deny', reason: step.reason }
+                  : null,
+            }),
       }
       ws.policies.add(policy)
       policies.set(step.id, policy)
@@ -326,6 +373,32 @@ async function action(
     case 'close':
       await ws.close()
       break
+    case 'tools':
+      return [...new Session(ws, step.session ?? null).tools.names()]
+    case 'tool': {
+      const result = await new Session(ws, step.session ?? null).tools.call(
+        step.tool,
+        step.arguments,
+      )
+      return { text: result.content[0]?.text ?? '', is_error: result.isError === true }
+    }
+    case 'asks':
+      return ws.decisions
+        .pending(step.session ?? '')
+        .map((r) => ({ command: r.command, paths: [...r.paths], reason: r.reason }))
+    case 'answer':
+      for (const record of ws.decisions.pending()) {
+        await ws.decisions.answer(
+          record.id,
+          step.outcome ?? Outcome.ALLOW,
+          step.scope ?? Scope.ONCE,
+        )
+      }
+      break
+    case 'explain':
+      return (await ws.explain(step.command, step.session ?? '')).map(explained)
+    case 'explain_op':
+      return explained(await ws.explainOp(step.name, step.path, step.session ?? ''))
     default:
       throw new Error(`unknown lifecycle action: ${String((step as { op: string }).op)}`)
   }

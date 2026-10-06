@@ -99,6 +99,22 @@ export interface Hide {
 }
 
 /**
+ * Place a line on a runtime, the answer `preExecute` gives beside a Deny.
+ *
+ * The runtime serves every command it captures on the line, as a
+ * `routePolicy` verdict naming it does. A Deny at the stage outranks it,
+ * and two policies placing one line on different runtimes refuse the
+ * line, since neither choice is the line's. Mirrors the Python `Route`.
+ */
+export interface Route {
+  kind: 'route'
+  /** The runtime entry's name. */
+  runtime: string
+  /** The policy that placed the line; the chain fills it in. */
+  policy?: string
+}
+
+/**
  * One admission rule of the permissions document: refuse (or ask about)
  * matching commands, on matching paths when it names any. It is the
  * compiled element of `commands.deny` and `commands.ask` wherever the
@@ -206,17 +222,20 @@ export interface Ask {
    * the door synthesizes.
    */
   rules?: readonly CommandRule[]
+  /** The policy that asked, as `explain` names it. */
+  policy?: string
 }
 
 /**
  * The closed vocabulary of policy answers, ranked by kind: Hide (the
  * built-in's, the path is absent), then Deny (first opinion wins), then
  * Ask (defers to the host; a Deny anywhere in the chain still wins),
- * then Limit (every opinion merges to the tightest, Limit.aggr). A hook
- * returns an Action to state an opinion or null to stay silent; each
- * hook accepts a fixed set of kinds (VALIDITY), enforced at the seam.
+ * then Route and Limit (every Route has to agree; every Limit merges to
+ * the tightest, Limit.aggr). A hook returns an Action to state an
+ * opinion or null to stay silent; each hook accepts a fixed set of kinds
+ * (VALIDITY), enforced at the seam.
  */
-export type Action = Hide | Deny | Limit | Ask
+export type Action = Hide | Deny | Limit | Ask | Route
 
 /**
  * How far an answer reaches.
@@ -579,10 +598,14 @@ export interface SessionContext {
 }
 
 export const VALIDITY: Readonly<
-  Record<'preCommand' | 'preOps' | 'postOps' | 'postExecute' | 'preSession', ReadonlySet<string>>
+  Record<
+    'preCommand' | 'preExecute' | 'preOps' | 'postOps' | 'postExecute' | 'preSession',
+    ReadonlySet<string>
+  >
 > = {
   preCommand: new Set(['deny', 'ask']),
-  preOps: new Set(['deny']),
+  preExecute: new Set(['deny', 'route']),
+  preOps: new Set(['deny', 'ask']),
   postOps: new Set(['deny', 'limit']),
   postExecute: new Set(['limit']),
   preSession: new Set(['deny']),
@@ -630,4 +653,18 @@ export interface Explanation {
   readonly stderr: string
   /** The record the refused result would carry, null when the line would run. */
   readonly refusal: Refusal | null
+  /**
+   * Every policy's answer to the command, in the order the chain asks
+   * them, each naming its policy; the document's rules answer as
+   * `PermissionsPolicy`. A hide is never among them.
+   */
+  readonly answers: readonly (Deny | Ask)[]
+  /**
+   * Every policy's answer to the line at `preExecute`, the route policy's
+   * first (as `PlacementPolicy`); empty when nothing places the line, or
+   * when a rule refuses it first.
+   */
+  readonly placement: readonly (Deny | Route)[]
+  /** The runtime entry that would run the command, empty when the workspace runs it itself. */
+  readonly runtime: string
 }

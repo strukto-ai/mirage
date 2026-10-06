@@ -21,6 +21,9 @@ from mirage.ops.ops import Ops
 from mirage.workspace.session import SessionState
 
 if TYPE_CHECKING:
+    from mirage.policy.decisions import Decisions
+    from mirage.policy.types import Explanation
+    from mirage.workspace.mount.registry import MountEntry
     from mirage.workspace.tools.file_version import FileVersionTracker
     from mirage.workspace.tools.tool_operations import MirageToolOperations
     from mirage.workspace.workspace.workspace import Workspace
@@ -57,6 +60,16 @@ class Session:
         return self._ws.get_session(self.session_id)
 
     @property
+    def decisions(self) -> "Decisions":
+        """The workspace's approval ledger, which this session's asked
+        commands and ops are recorded in."""
+        return self._ws.decisions
+
+    def mounts(self) -> list["MountEntry"]:
+        """The workspace's mounts, which the session's profile narrows."""
+        return self._ws.mounts()
+
+    @property
     def vfs(self) -> Ops:
         """The op facade run as this session."""
         if self._id is None:
@@ -68,6 +81,10 @@ class Session:
         """The agent tools run as this session: one table per session,
         shared by every caller in the process."""
         return self._ws._session_tools(self._id)
+
+    async def _loaded(self) -> None:
+        """Hydrate the workspace's sessions, so a stored one is known."""
+        await self._ws.ensure_sessions_loaded()
 
     async def _reads(self) -> "FileVersionTracker":
         """The read history the session's agent tools share."""
@@ -110,6 +127,25 @@ class Session:
             record=record,
             runtime=runtime,
         )
+
+    async def explain(self, line: str) -> list["Explanation"]:
+        """What a line would do as this session, without running any of
+        it; ``Workspace.explain`` with the session fixed.
+
+        Args:
+            line (str): the line to judge, as an agent would type it.
+        """
+        return await self._ws.explain(line, self.session_id)
+
+    async def explain_op(self, op: str, path: str) -> "Explanation":
+        """What the op door would answer one op as this session;
+        ``Workspace.explain_op`` with the session fixed.
+
+        Args:
+            op (str): the op's name (``read``, ``write``, ...).
+            path (str): the path.
+        """
+        return await self._ws.explain_op(op, path, self.session_id)
 
     async def glob(self, pattern: str) -> list[str]:
         """The paths a pattern matches as this session;

@@ -124,6 +124,28 @@ class Hide:
 
 
 @dataclass(frozen=True, slots=True)
+class Route:
+    """Place a line on a runtime, the answer ``pre_execute`` gives
+    beside a Deny.
+
+    The runtime serves every command it captures on the line, as a
+    ``route_policy`` verdict naming it does. A Deny at the stage
+    outranks it, and two policies placing one line on different
+    runtimes refuse the line, since neither choice is the line's.
+
+    Args:
+        runtime (str): the runtime entry's name.
+        policy (str): the policy that placed the line; the chain fills
+            it in.
+    """
+
+    kind: ClassVar[str] = "route"
+
+    runtime: str
+    policy: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class CommandRule:
     """One admission rule of the permissions document: refuse (or ask
     about) matching commands, on matching paths when it names any.
@@ -230,8 +252,9 @@ class Ask:
     ``commands.ask`` rule, a custom policy for a coded condition, and
     both route to the workspace's decision ledger (``Decisions``). A Deny
     from any policy outranks it: the chain keeps looking past an Ask
-    for a Deny, so an approval can never re-open a refusal. Command
-    plane only: the op doors cannot wait on a host.
+    for a Deny, so an approval can never re-open a refusal. A pre_ops
+    answer too, where the door puts it to the ledger when no line is
+    running behind the op and refuses it inside one.
 
     Args:
         reason (str): why the line needs sign-off, shown to the agent
@@ -247,6 +270,7 @@ class Ask:
             the line only once each is answered, so a nod given for one
             operand cannot carry another. Empty for a coded Ask, whose
             one rule the door synthesizes.
+        policy (str): the policy that asked, as ``explain`` names it.
     """
 
     kind: ClassVar[str] = "ask"
@@ -254,15 +278,17 @@ class Ask:
     reason: str
     rule: CommandRule | None = None
     rules: tuple[CommandRule, ...] = ()
+    policy: str = ""
 
 
 # The closed vocabulary of policy answers, ranked by kind: Hide (the
 # built-in's, the path is absent), then Deny (first opinion wins), then
 # Ask (defers to the host; a Deny anywhere in the chain still wins), then
-# Limit (every opinion merges to the tightest, Limit.aggr). A hook
-# returns an Action to state an opinion or None to stay silent; each
-# hook accepts a fixed set of kinds (VALIDITY), enforced loud.
-Action = Hide | Deny | Limit | Ask
+# Route and Limit (every Route has to agree; every Limit merges to the
+# tightest, Limit.aggr). A hook returns an Action to state an opinion or
+# None to stay silent; each hook accepts a fixed set of kinds
+# (VALIDITY), enforced loud.
+Action = Hide | Deny | Limit | Ask | Route
 
 
 class Scope(StrEnum):
@@ -753,7 +779,8 @@ class SessionContext:
 
 VALIDITY: dict[str, frozenset[str]] = {
     "pre_command": frozenset({Deny.kind, Ask.kind}),
-    "pre_ops": frozenset({Deny.kind}),
+    "pre_execute": frozenset({Deny.kind, Route.kind}),
+    "pre_ops": frozenset({Deny.kind, Ask.kind}),
     "post_ops": frozenset({Deny.kind, Limit.kind}),
     "post_execute": frozenset({Limit.kind}),
     "pre_session": frozenset({Deny.kind}),
@@ -793,6 +820,16 @@ class Explanation:
         stderr (str): what the agent would read, empty to run.
         refusal (Refusal | None): the record the refused result
             would carry, None when the line would run.
+        answers (tuple[Deny | Ask, ...]): every policy's answer to the
+            command, in the order the chain asks them, each naming its
+            policy; the document's rules answer as
+            ``PermissionsPolicy``. A hide is never among them.
+        placement (tuple[Deny | Route, ...]): every policy's answer to
+            the line at ``pre_execute``, the route policy's first (as
+            ``PlacementPolicy``); empty when nothing places the line, or
+            when a rule refuses it first.
+        runtime (str): the runtime entry that would run the command,
+            empty when the workspace runs it itself.
     """
 
     command: str
@@ -806,3 +843,6 @@ class Explanation:
     exit_code: int = 0
     stderr: str = ""
     refusal: Refusal | None = None
+    answers: "tuple[Deny | Ask, ...]" = ()
+    placement: "tuple[Deny | Route, ...]" = ()
+    runtime: str = ""

@@ -57,6 +57,9 @@ async function callTool(
   }
   const tools = await mcp.tools(workspaceId, sessionId, account)
   if (typeof tools === 'string') return { status: 404, body: { detail: tools } }
+  if (!(await tools.offered()).includes(name)) {
+    return { status: 404, body: { detail: `Tool ${name} not found` } }
+  }
   try {
     const result = await tools.call(name, args as Record<string, unknown>)
     return {
