@@ -161,8 +161,9 @@ async def config(
             doors = inv.doors or CLIDoors()
             _, location = await opened(fl, doors)
             assert doors.dispatch is not None
-            source = location.commondir.join("config").virtual
-            data = await read_file(doors.dispatch, source)
+            path = location.commondir.join("config")
+            data = await read_file(doors.dispatch, path)
+            source = path.raw_path
             ordinary = (
                 location.commondir.virtual
                 == location.worktree.virtual + "/.git"

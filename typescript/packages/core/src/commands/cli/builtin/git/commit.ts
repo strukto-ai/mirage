@@ -33,6 +33,7 @@ import {
 } from './errors.ts'
 import { stageTracked } from './add.ts'
 import { commitSummary } from './diff_output.ts'
+import { visibleEntries } from './pathspec.ts'
 import { readIndex, updateIndex } from './index_file.ts'
 import { takeLock } from './io.ts'
 
@@ -281,8 +282,8 @@ export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
       head.branch,
       await commitSummary(
         repo,
-        before ?? new Map(),
-        after,
+        visibleEntries(repo.location, before ?? new Map()),
+        visibleEntries(repo.location, after),
         await configBool(repo, 'core.quotepath', true),
       ),
       repo.abbrev,

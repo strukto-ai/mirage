@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import posixpath
 from collections.abc import Mapping, Sequence
 from typing import TypeVar
@@ -26,6 +27,9 @@ from mirage.shell.bytes import byte_view
 from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.hidden import path_visible
+from mirage.utils.path import CycleError
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -185,7 +189,15 @@ def visible_path(location: RepoLocation, relative: str) -> bool:
     path = location.worktree.join(relative)
     if not path_visible(ns.visibility, path.virtual):
         return False
-    parent = ns.links.resolve(path.directory) if ns.links else path.directory
+    try:
+        parent = (
+            ns.links.resolve(path.directory) if ns.links else path.directory
+        )
+    except CycleError as exc:
+        logger.debug(
+            "Index visibility uses the stored path for a link cycle: %s", exc
+        )
+        return True
     followed = PathSpec.from_str_path(parent, cwd="/").join(
         posixpath.basename(path.virtual)
     )

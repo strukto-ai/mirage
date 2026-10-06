@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { visibleEntries, repoRelative, under as inside } from './pathspec.ts'
+import { visiblePath, repoRelative, under as inside } from './pathspec.ts'
 import { type PathSpec, FileType, type FileStat } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { LinkView, MountView, StatPath } from '../../../../ops/types.ts'
@@ -49,10 +49,10 @@ const SOURCE_DIRECTORY_EMPTY = 'source directory is empty'
 const NOT_UNDER_VERSION_CONTROL = 'not under version control'
 const MULTIPLE_SOURCES = 'multiple sources for the same target'
 const CONFLICTED = 'conflicted'
-// Not one of git's, because git has no concept to word: a mount is mirage's own
-// boundary, so the refusal borrows the strerror the kernel gives for a rename it
-// will not perform.
+// Mount boundaries and session visibility are mirage-only refusals,
+// expressed with the corresponding filesystem error.
 const BUSY = 'Device or resource busy'
+const DENIED = 'Permission denied'
 
 /** The parsed shape of a `git mv` invocation. */
 export interface MvFlags {
@@ -195,6 +195,17 @@ export async function check(
   const landing = location.worktree.join(destination)
   if (info.type === FileType.DIRECTORY) {
     const held = [...tracked].filter((path) => inside(path, source)).sort(compareCodePoints)
+    // Renaming a directory moves every child; filtering the index alone
+    // would leave hidden children tracked at paths that no longer exist.
+    if (
+      held.some(
+        (path) =>
+          !visiblePath(location, path) ||
+          !visiblePath(location, destination + path.slice(source.length)),
+      )
+    ) {
+      return { reason: DENIED, paths: [], directory: true }
+    }
     if (held.some((path) => conflicted.has(path))) {
       return { reason: CONFLICTED, paths: held, directory: true }
     }
@@ -204,7 +215,7 @@ export async function check(
     if (held.length === 0) return { reason: SOURCE_DIRECTORY_EMPTY, paths: [], directory: true }
     return { reason: null, paths: held, directory: true }
   }
-  if (!tracked.has(source))
+  if (!tracked.has(source) || !visiblePath(location, source))
     return { reason: NOT_UNDER_VERSION_CONTROL, paths: [], directory: false }
   if (conflicted.has(source)) return { reason: CONFLICTED, paths: [source], directory: false }
   const target = await lstat(statPath, links, landing)
@@ -379,11 +390,11 @@ export async function mv(inv: CLIInvocation): Promise<CommandFnResult> {
     if (texts.length < 2) throw new UsageError('', verbUsage(inv))
     const repo = await opened(fl, doors, true)
     const state = await readIndex(repo, dispatch)
-    const conflicted = new Set(visibleEntries(repo.location, state.conflicts).keys())
+    const conflicted = new Set(state.conflicts.keys())
     // An unmerged path holds no ordinary entry, so a tracked set built from the
     // entries alone would call it untracked and let a directory holding one
     // move with its stages left behind.
-    const tracked = new Set([...visibleEntries(repo.location, state.entries).keys(), ...conflicted])
+    const tracked = new Set([...state.entries.keys(), ...conflicted])
     const moves = await plan(
       statPath,
       doors.ns?.links ?? null,

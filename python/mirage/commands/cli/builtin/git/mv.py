@@ -29,7 +29,7 @@ from mirage.commands.cli.builtin.git.io import remove_file, rename_path
 from mirage.commands.cli.builtin.git.pathspec import (
     repo_relative,
     under,
-    visible_entries,
+    visible_path,
 )
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import IndexState, RepoLocation
@@ -60,10 +60,10 @@ SOURCE_DIRECTORY_EMPTY = "source directory is empty"
 NOT_UNDER_VERSION_CONTROL = "not under version control"
 MULTIPLE_SOURCES = "multiple sources for the same target"
 CONFLICTED = "conflicted"
-# Not one of git's, because git has no concept to word: a mount is
-# mirage's own boundary, so the refusal borrows the strerror the kernel
-# gives for a rename it will not perform.
+# Mount boundaries and session visibility are mirage-only refusals,
+# expressed with the corresponding filesystem error.
 BUSY = "Device or resource busy"
+DENIED = "Permission denied"
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,6 +267,14 @@ async def check(
     landing = location.worktree.join(destination)
     if info.type is FileType.DIRECTORY:
         inside = tuple(sorted(path for path in tracked if under(path, source)))
+        # Renaming a directory moves every child; filtering the index alone
+        # would leave hidden children tracked at paths that no longer exist.
+        if any(
+            not visible_path(location, path)
+            or not visible_path(location, destination + path[len(source) :])
+            for path in inside
+        ):
+            return DENIED, (), True
         if any(path in conflicted for path in inside):
             return CONFLICTED, inside, True
         if await lstat(stat_path, links, landing) is not None:
@@ -274,7 +282,7 @@ async def check(
         if not inside:
             return SOURCE_DIRECTORY_EMPTY, (), True
         return None, inside, True
-    if source not in tracked:
+    if source not in tracked or not visible_path(location, source):
         return NOT_UNDER_VERSION_CONTROL, (), False
     if source in conflicted:
         return CONFLICTED, (source,), False
@@ -479,15 +487,13 @@ async def mv(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         repo, location = await opened(fl, doors, work_tree=True)
         state = await read_index(dispatch, location.gitdir)
         conflicted = {
-            path.decode("utf-8", errors="replace")
-            for path in visible_entries(location, state.conflicts)
+            path.decode("utf-8", errors="replace") for path in state.conflicts
         }
         # An unmerged path holds no ordinary entry, so a tracked set
         # built from the entries alone would call it untracked and let
         # a directory holding one move with its stages left behind.
         tracked = {
-            path.decode("utf-8", errors="replace")
-            for path in visible_entries(location, state.entries)
+            path.decode("utf-8", errors="replace") for path in state.entries
         } | conflicted
         moves = await plan(
             stat_path,

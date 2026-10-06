@@ -531,7 +531,7 @@ export async function fetch(inv: CLIInvocation): Promise<CommandFnResult> {
     const [rows, rejected] = await updateRefs(fetched, taken, reason, !bare)
     await writeFile(
       repo.dispatch,
-      location.gitdir.join(FETCH_HEAD).virtual,
+      location.gitdir.join(FETCH_HEAD),
       ENC.encode(fetchHead(url, taken)),
     )
     const shown = [...pruned, ...rows.filter((line) => line.code !== '=' || fl.asBool('verbose'))]

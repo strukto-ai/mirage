@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PathSpec } from '../../../../types.ts'
-import { posixNormpath } from '../../../../utils/path.ts'
+import { CycleError, posixNormpath } from '../../../../utils/path.ts'
 import { byteView } from '../../../../shell/bytes.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
 import { EmptyPathspecError, OutsideRepositoryError, UnsupportedPathspecError } from './errors.ts'
@@ -152,7 +152,14 @@ export function visiblePath(location: RepoLocation, relative: string): boolean {
   if (ns?.visibility === undefined) return true
   const path = location.worktree.join(relative)
   if (!pathVisible(ns.visibility, path.virtual)) return false
-  const parent = ns.links?.resolve(path.directory) ?? path.directory
+  let parent: string
+  try {
+    parent = ns.links?.resolve(path.directory) ?? path.directory
+  } catch (err) {
+    if (!(err instanceof CycleError)) throw err
+    console.debug('Index visibility uses the stored path for a link cycle')
+    return true
+  }
   const followed = PathSpec.fromStrPath(parent, undefined, '/').join(
     path.virtual.slice(path.virtual.lastIndexOf('/') + 1),
   )

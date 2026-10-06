@@ -127,7 +127,7 @@ export async function config(inv: CLIInvocation): Promise<CommandFnResult> {
         startPoint(fl).virtual === repo.location.worktree.virtual
       sources = [
         {
-          source: ordinary ? '.git/config' : path.virtual,
+          source: ordinary ? '.git/config' : path.rawPath,
           data: await readFile(repo.dispatch, path),
         },
       ]
