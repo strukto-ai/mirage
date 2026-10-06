@@ -34,6 +34,7 @@ interface CallQuery {
 
 const STATUS: Partial<Record<FsCondition, number>> = {
   ENOENT: 404,
+  NO_XATTR: 404,
   EACCES: 403,
   EPERM: 403,
   EROFS: 403,

@@ -21,6 +21,7 @@ shell command can answer directly through a backend's command handler.
 import asyncio
 import errno
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,7 @@ from mirage.policy.types import (
 from mirage.process.types import SpawnRequest
 from mirage.runtime.routing import RouteContext
 from mirage.runtime.types import ScriptSource
+from mirage.server import vfs_calls
 from mirage.shell.console import Channel, JobConsole
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -97,9 +99,12 @@ class RulePolicy(Policy):
             return Deny(self.rule["reason"])
         return None
 
-    async def pre_execute(self, ctx: RouteContext) -> Deny | None:
+    async def pre_execute(self, ctx: RouteContext) -> Deny | Route | None:
         if any(word in ctx.line for word in self.rule.get("lines", [])):
             return Deny(self.rule["reason"])
+        for word, runtime in self.rule.get("routes", {}).items():
+            if word in ctx.line:
+                return Route(runtime)
         return None
 
 
@@ -355,13 +360,13 @@ async def action(
     elif op == "explain":
         explain = Session(ws, step.get("session")).explain
         return explained(await explain.shell(step["command"]))
-    elif op == "explain_vfs":
-        vfs = Session(ws, step.get("session")).explain.vfs
-        args = [
-            a.encode() if i and step["name"] in ("write", "append") else a
-            for i, a in enumerate(step["args"])
-        ]
-        return explained(await getattr(vfs, step["name"])(*args))
+    elif op == "vfs":
+        session = Session(ws, step.get("session"))
+        call = vfs_calls.VFS_CALL_BY_NAME[step["call"]]
+        args = vfs_calls.checked(call, step.get("args", {}))
+        if step.get("explain"):
+            return explained(await call.run(session.explain.vfs, args))
+        return await vfs_calls.answered(session, call, args, False)
     elif op == "close":
         await ws.close()
     else:
@@ -424,7 +429,9 @@ def matches(actual: Any, expected: Any) -> bool:
 
 
 async def main() -> int:
-    suite = json.loads(SUITE.read_text())
+    suite = json.loads(
+        (Path(sys.argv[1]) if len(sys.argv) > 1 else SUITE).read_text()
+    )
     passed = 0
     steps = 0
     failures = 0

@@ -25,6 +25,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import shlex
 import signal
 import time
@@ -40,7 +41,15 @@ from mcp import Client, StdioServerParameters
 from mcp.client.streamable_http import streamable_http_client
 
 Answer = dict[str, Any]
-CLI_GROUPS = ("workspace", "session", "job", "daemon", "config")
+CLI_GROUPS = (
+    "workspace",
+    "session",
+    "job",
+    "daemon",
+    "config",
+    "vfs",
+    "tools",
+)
 WAITED = "the line waited for all of its input"
 STREAM_WAIT = 10.0
 
@@ -237,6 +246,8 @@ def cli_args(tool: str, args: dict[str, Any]) -> list[str]:
     Returns:
         list[str]: the flags and operands.
     """
+    if tool == "shell":
+        return [args["command"]]
     if tool == "read":
         words = [args["path"]]
         for key in ("offset", "limit"):
@@ -401,11 +412,14 @@ class HttpSteps:
     async def shell(
         self, wid: str, command: str, session: str | None
     ) -> Answer:
-        body: dict[str, Any] = {"command": command}
-        if session is not None:
-            body["session_id"] = session
+        params = {"session_id": session} if session is not None else {}
         return io_answer(
-            await self._ok("POST", f"/v1/workspaces/{wid}/shell", json=body)
+            await self._ok(
+                "POST",
+                f"/v1/workspaces/{wid}/shell",
+                json={"command": command},
+                params=params,
+            )
         )
 
     async def ids(self) -> list[str]:
@@ -530,8 +544,9 @@ class HttpSteps:
     ) -> tuple[str, int]:
         said = await self._ok(
             "POST",
-            f"/v1/workspaces/{wid}/explain/shell",
-            json={"command": command, "session_id": session},
+            f"/v1/workspaces/{wid}/shell",
+            json={"command": command},
+            params={"session_id": session, "explain": "true"},
         )
         return said["outcome"], said["exit_code"]
 
@@ -735,7 +750,7 @@ class CliSteps:
         self, wid: str, session: str, command: str
     ) -> tuple[str, int]:
         said = await self._json(
-            "workspace", "explain", wid, command, "--session", session
+            "shell", "-w", wid, "-s", session, "-c", command, "--explain"
         )
         return said["outcome"], said["exit_code"]
 
@@ -1082,6 +1097,117 @@ def _type(value: Any) -> str:
     return str(getattr(value, "value", value))
 
 
+LISTED = {"list_files": "files", "listxattr": "names", "glob": "paths"}
+
+
+def bytes_answer(step: dict[str, Any], wire: dict[str, Any]) -> Answer:
+    """One VFS call's answer as every access must give it: the call's
+    JSON, a stat narrowed to its type and size and a listing sorted, or
+    the errno a failure names.
+
+    Args:
+        step (dict[str, Any]): the case's input, naming the call.
+        wire (dict[str, Any]): the call's JSON, or ``{"errno": ...}``.
+    """
+    if "errno" in wire:
+        return {"error": wire["errno"]}
+    call = step["call"]
+    if call == "stat":
+        return {"type": wire["type"], "size": wire["size"]}
+    if call == "readdir":
+        return {"entries": _entries(step["path"], wire["entries"])}
+    if call in LISTED:
+        return {LISTED[call]: sorted(wire[LISTED[call]])}
+    return wire
+
+
+def _commands(node: dict[str, Any]) -> list[list[Any]]:
+    mine = (
+        [[node["command"], node["outcome"], node["exit_code"]]]
+        if "command" in node
+        else []
+    )
+    return mine + [c for child in node["children"] for c in _commands(child)]
+
+
+def explain_answer(wire: dict[str, Any]) -> Answer:
+    """An explanation as every access must give it: the verdict, then a
+    VFS call's error, or a line's exit code, stderr and each command's
+    verdict in source order.
+
+    Args:
+        wire (dict[str, Any]): the explanation's JSON.
+    """
+    refusal = wire["refusal"]
+    said = {
+        "outcome": wire["outcome"],
+        "reason": wire["reason"],
+        "source": wire["source"],
+        "refusal": refusal["kind"] if refusal else None,
+    }
+    if "call" in wire:
+        return {**said, "call": wire["call"], "error": wire["error"]}
+    return {
+        **said,
+        "exit_code": wire["exit_code"],
+        "stderr": wire["stderr"],
+        "commands": _commands(wire["node"]),
+    }
+
+
+def call_params(step: dict[str, Any]) -> dict[str, Any]:
+    """A bytes or explain case's arguments, without the case's own keys.
+
+    Args:
+        step (dict[str, Any]): the case's input.
+    """
+    return {
+        k: v for k, v in step.items() if k not in ("call", "via", "explain")
+    }
+
+
+def vfs_words(step: dict[str, Any]) -> tuple[list[str], bytes]:
+    """A VFS call as its ``mirage vfs`` command's words, with the bytes
+    it reads on stdin.
+
+    Args:
+        step (dict[str, Any]): the case's input.
+
+    Returns:
+        tuple[list[str], bytes]: the words after ``mirage``, and stdin.
+    """
+    from mirage.server.vfs_calls import BYTES, FLAG, VFS_CALL_BY_NAME
+
+    if step["call"] == "glob":
+        return ["glob", step["pattern"]], b""
+    call = VFS_CALL_BY_NAME[step["call"]]
+    words = ["vfs", call.name.replace("_", "-")]
+    stdin = b""
+    for name, schema in call.params.items():
+        if name not in step:
+            continue
+        if schema is BYTES:
+            stdin = base64.b64decode(step[name])
+        elif name in call.required:
+            words.append(str(step[name]))
+        elif schema is FLAG:
+            words += [f"--{name}"] if step[name] else []
+        else:
+            words += [f"--{name}", str(step[name])]
+    return words, stdin
+
+
+def wire_failure(status: int, body: Any) -> dict[str, Any]:
+    """A refused or failed call's answer off an HTTP error body.
+
+    Args:
+        status (int): the response status.
+        body (Any): its JSON body.
+    """
+    errno = body.get("errno") if isinstance(body, dict) else None
+    return {"errno": errno or f"HTTP {status}"}
+
+
 class InAppPython:
     """In-app on the Python host: ``Workspace`` and ``Session`` in this process."""
 
@@ -1092,6 +1218,7 @@ class InAppPython:
             "stdin",
             "tool",
             "bytes",
+            "explain",
             "cancel",
             "session",
             "workspace",
@@ -1153,7 +1280,9 @@ class InAppPython:
             result = await tools.call(step["tool"], step["arguments"])
             return {"text": result.text, "is_error": result.is_error}
         if op == "bytes":
-            return await self.bytes(session.vfs, step)
+            return await self.bytes(session, step)
+        if op == "explain":
+            return await self.explain(session, step)
         if op == "cancel":
             cancel = asyncio.Event()
             asyncio.get_running_loop().call_later(0.5, cancel.set)
@@ -1203,35 +1332,36 @@ class InAppPython:
             await io.stdout_str(), await io.stderr_str(), io.exit_code
         )
 
-    async def bytes(self, vfs: Any, step: dict[str, Any]) -> Answer:
-        call, path = step["call"], step.get("path", "")
+    async def bytes(self, session: Any, step: dict[str, Any]) -> Answer:
+        from mirage.errors.classify import classify
+        from mirage.server.vfs_calls import VFS_CALL_BY_NAME, answered, checked
+
+        params = call_params(step)
         try:
-            if call == "mkdir":
-                await vfs.mkdir(path)
-            elif call == "write":
-                await vfs.write(path, base64.b64decode(step["data_base64"]))
-            elif call == "read":
-                return {
-                    "data_base64": base64.b64encode(
-                        await vfs.read(path)
-                    ).decode()
-                }
-            elif call == "stat":
-                stat = await vfs.stat(path)
-                return {"type": _type(stat.type), "size": stat.size}
-            elif call == "readdir":
-                return {
-                    "entries": _entries(path, list(await vfs.readdir(path)))
-                }
-            elif call == "rename":
-                await vfs.rename(step["src"], step["dst"])
-            elif call == "unlink":
-                await vfs.unlink(path)
+            if step["call"] == "glob":
+                wire = {"paths": list(await session.glob(params["pattern"]))}
             else:
-                raise ValueError(call)
-        except FileNotFoundError:
-            return {"error": "ENOENT"}
-        return {}
+                call = VFS_CALL_BY_NAME[step["call"]]
+                wire = await answered(
+                    session, call, checked(call, params), False
+                )
+        except OSError as exc:
+            condition = classify(exc)
+            wire = {"errno": condition.name if condition else repr(exc)}
+        return bytes_answer(step, wire)
+
+    async def explain(self, session: Any, step: dict[str, Any]) -> Answer:
+        from mirage.server.io_serde import explanation_to_dict
+        from mirage.server.vfs_calls import VFS_CALL_BY_NAME, answered, checked
+
+        if step["call"] == "shell":
+            said = await session.explain.shell(step["command"])
+            return explain_answer(explanation_to_dict(said))
+        call = VFS_CALL_BY_NAME[step["call"]]
+        wire = await answered(
+            session, call, checked(call, call_params(step)), True
+        )
+        return explain_answer(wire)
 
 
 class InAppTypeScript:
@@ -1273,7 +1403,15 @@ class InAppTypeScript:
         )
         if process.returncode != 0:
             raise RuntimeError(f"inapp.ts failed: {err.decode()}")
-        return json.loads(out)
+        answers = json.loads(out)
+        if suite["op"] == "bytes":
+            return [
+                bytes_answer(c["input"], a)
+                for c, a in zip(suite["cases"], answers, strict=True)
+            ]
+        if suite["op"] == "explain":
+            return [explain_answer(a) for a in answers]
+        return answers
 
 
 class Http:
@@ -1285,6 +1423,8 @@ class Http:
             "shell",
             "stdin",
             "tool",
+            "bytes",
+            "explain",
             "cancel",
             "session",
             "workspace",
@@ -1330,28 +1470,48 @@ class Http:
     ) -> Answer:
         base = f"/v1/workspaces/{wid}"
         params = {"session_id": session} if session else {}
-        if op in ("shell", "session") or (
-            op == "tool" and step["tool"] == "shell"
-        ):
-            command = (
-                step["command"]
-                if "command" in step
-                else step["arguments"]["command"]
+        if op in ("shell", "session"):
+            reply = await http.post(
+                f"{base}/shell",
+                json={"command": step["command"]},
+                params=params,
             )
-            body = {"command": command, **params}
-            reply = await http.post(f"{base}/shell", json=body)
             reply.raise_for_status()
             return io_answer(reply.json())
         if op == "tool":
             reply = await http.post(
-                f"{base}/{step['tool']}", json=step["arguments"], params=params
+                f"{base}/tools/{step['tool']}",
+                json=step["arguments"],
+                params=params,
             )
             reply.raise_for_status()
             return tool_answer(reply.json())
+        if op == "bytes":
+            route = "glob" if step["call"] == "glob" else f"vfs/{step['call']}"
+            reply = await http.post(
+                f"{base}/{route}", json=call_params(step), params=params
+            )
+            if reply.status_code >= 400:
+                return bytes_answer(
+                    step, wire_failure(reply.status_code, reply.json())
+                )
+            return bytes_answer(step, reply.json())
+        if op == "explain":
+            route = (
+                "shell" if step["call"] == "shell" else f"vfs/{step['call']}"
+            )
+            reply = await http.post(
+                f"{base}/{route}",
+                json=call_params(step),
+                params={**params, "explain": "true"},
+            )
+            reply.raise_for_status()
+            return explain_answer(reply.json())
         if op == "stdin" and "stream" not in step:
-            request = json.dumps({"command": step["command"], **params})
+            request = json.dumps({"command": step["command"]})
             reply = await http.post(
                 f"{base}/shell",
+                params=params,
                 files={
                     "request": ("request.json", request, "application/json"),
                     "stdin": (
@@ -1426,6 +1586,8 @@ class Cli:
             "shell",
             "stdin",
             "tool",
+            "bytes",
+            "explain",
             "cancel",
             "session",
             "workspace",
@@ -1467,16 +1629,14 @@ class Cli:
         self, op: str, wid: str, session: str | None, step: dict[str, Any]
     ) -> Answer:
         env = self.server.env()
-        if op in ("shell", "session") or (
-            op == "tool" and step["tool"] == "shell"
-        ):
-            command = (
-                step["command"]
-                if "command" in step
-                else step["arguments"]["command"]
-            )
+        if op in ("shell", "session"):
             argv = self.server.cli(
-                "shell", "-w", wid, *self._session(session), "-c", command
+                "shell",
+                "-w",
+                wid,
+                *self._session(session),
+                "-c",
+                step["command"],
             )
             code, out, err = await run(argv, env, tty=True)
             return (
@@ -1486,6 +1646,7 @@ class Cli:
             )
         if op == "tool":
             argv = self.server.cli(
+                "tools",
                 step["tool"],
                 "-w",
                 wid,
@@ -1494,6 +1655,31 @@ class Cli:
             )
             code, out, err = await run(argv, env)
             return tool_answer(json.loads(out))
+        if op == "bytes":
+            words, stdin = vfs_words(step)
+            argv = self.server.cli(*words, "-w", wid, *self._session(session))
+            code, out, err = await run(argv, env, stdin=stdin)
+            if code != 0:
+                named = re.search(r"\(([A-Z][A-Z_]+)\)", err)
+                return bytes_answer(
+                    step, {"errno": named.group(1) if named else err.strip()}
+                )
+            return bytes_answer(step, json.loads(out))
+        if op == "explain":
+            words = (
+                ["shell", "-c", step["command"]]
+                if step["call"] == "shell"
+                else vfs_words(step)[0]
+            )
+            argv = self.server.cli(
+                *words, "-w", wid, *self._session(session), "--explain"
+            )
+            code, out, err = await run(argv, env)
+            if not out.strip():
+                raise RuntimeError(
+                    f"mirage {' '.join(words)} --explain: {err}"
+                )
+            return explain_answer(json.loads(out))
         if op == "stdin" and "stream" not in step:
             argv = self.server.cli("shell", "-w", wid, "-c", step["command"])
             code, out, err = await run(
@@ -1664,7 +1850,9 @@ class Rpc:
     """RPC over the HTTP endpoint."""
 
     name = "rpc"
-    OPS = frozenset({"shell", "stdin", "tool", "bytes", "cancel", "session"})
+    OPS = frozenset(
+        {"shell", "stdin", "tool", "bytes", "explain", "cancel", "session"}
+    )
 
     def __init__(self, server: Server, scratch: Path) -> None:
         self.server = server
@@ -1786,31 +1974,20 @@ async def rpc_case(
         )
     if op == "cancel":
         return {"text": await cancel(step["command"])}
+    if op == "explain":
+        method = "shell" if step["call"] == "shell" else f"vfs/{step['call']}"
+        reply = await call(method, {**call_params(step), "explain": True})
+        return explain_answer(rpc_result(reply))
     if op != "bytes":
         raise ValueError(op)
-    method = {
-        "mkdir": "vfs/mkdir",
-        "write": "vfs/write",
-        "read": "vfs/read",
-        "stat": "vfs/stat",
-        "readdir": "vfs/readdir",
-        "rename": "vfs/rename",
-        "unlink": "vfs/unlink",
-    }[step["call"]]
-    params = {k: v for k, v in step.items() if k not in ("call", "via")}
-    reply = await call(method, params)
+    method = "glob" if step["call"] == "glob" else f"vfs/{step['call']}"
+    reply = await call(method, call_params(step))
     if "error" in reply:
-        return (
-            {"error": "ENOENT"}
-            if reply["error"]["code"] == -32004
-            else {"error": reply["error"]["message"]}
+        data = reply["error"].get("data") or {}
+        return bytes_answer(
+            step, {"errno": data.get("errno", reply["error"]["message"])}
         )
-    result = reply["result"]
-    if step["call"] == "stat":
-        return {"type": result["type"], "size": result["size"]}
-    if step["call"] == "readdir":
-        return {"entries": _entries(step["path"], result["entries"])}
-    return result
+    return bytes_answer(step, reply["result"])
 
 
 SSH_OPTIONS = [

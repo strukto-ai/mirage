@@ -346,6 +346,11 @@ jobs:
           MIRAGE_QUICKJS_HOME: /tmp/quickjs
         run: ./python/.venv/bin/python integ/lifecycle/run.py
 
+      - name: Run the policy corpus (Python)
+        env:
+          MIRAGE_QUICKJS_HOME: /tmp/quickjs
+        run: ./python/.venv/bin/python integ/lifecycle/run.py integ/policy/cases.json
+
   integ-ts:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ts == 'true') }}
@@ -474,6 +479,10 @@ jobs:
       - name: Run workspace lifecycle JSON scenarios (Node and browser wrappers)
         working-directory: integ
         run: pnpm exec tsx lifecycle/run.ts
+
+      - name: Run the policy corpus (Node and browser wrappers)
+        working-directory: integ
+        run: pnpm exec tsx lifecycle/run.ts policy/cases.json
 
       # The browser wrapper again, in a real Chrome page: there is no
       # task-local async context there, so every session shares the

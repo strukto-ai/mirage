@@ -56,62 +56,6 @@ describe('session.explain.vfs', () => {
     await ws.close()
   })
 
-  it('explains each op as the door answers', async () => {
-    const explain = new Session(ws, 'agent').explain
-    const sealed = await explain.vfs.read('/data/sec/k')
-    expect([sealed.call, sealed.outcome, sealed.source, sealed.error]).toEqual([
-      'read',
-      Outcome.DENY,
-      'top',
-      'EACCES',
-    ])
-    expect(sealed.refusal?.reason).toBe('sealed')
-    expect(sealed.answers).toMatchObject([
-      { kind: 'deny', reason: 'sealed', policy: 'PermissionsPolicy' },
-    ])
-    const asked = await explain.vfs.write('/data/out/a', 'x')
-    expect([asked.outcome, asked.error, asked.refusal?.kind]).toEqual([
-      Outcome.ASK,
-      'EACCES',
-      'pending',
-    ])
-    expect(ws.decisions.pending('agent')).toEqual([])
-    // The mode throws its own error, so no record rides it.
-    const readOnly = await explain.vfs.mkdir('/ro/d')
-    expect([readOnly.error, readOnly.refusal]).toEqual(['EROFS', null])
-    expect(readOnly.answers.at(-1)?.policy).toBe('MountModePolicy')
-    const free = await explain.vfs.write('/data/new', 'x')
-    expect([free.outcome, free.error, free.answers]).toEqual([Outcome.ALLOW, '', []])
-    // Nothing ran.
-    expect(await ws.vfs.exists('/data/new')).toBe(false)
-  })
-
-  it('follows the door’s own path', async () => {
-    const explain = new Session(ws, 'agent').explain
-    const linked = await explain.vfs.read('/data/link')
-    expect([linked.paths, linked.error, linked.refusal?.reason]).toEqual([
-      ['/data/link'],
-      'EACCES',
-      'sealed',
-    ])
-    const moved = await explain.vfs.rename('/data/a', '/data/sec/b')
-    expect([moved.paths, moved.error, moved.refusal?.reason]).toEqual([
-      ['/data/a', '/data/sec/b'],
-      'EACCES',
-      'sealed',
-    ])
-  })
-
-  it('explains a hidden path like one nothing refuses', async () => {
-    const explain = new Session(ws, 'agent').explain
-    const hidden = await explain.vfs.read('/data/vault/k')
-    const missing = await explain.vfs.read('/data/nothing')
-    expect(hidden).toEqual({ ...missing, paths: ['/data/vault/k'] })
-    expect([missing.outcome, missing.error]).toEqual([Outcome.ALLOW, ''])
-    const exists = await explain.vfs.exists('/data/nothing')
-    expect([exists.call, exists.paths]).toEqual(['exists', ['/data/nothing']])
-  })
-
   it('leaves the drift checks pending', async () => {
     const drift = (ws as unknown as { drift: DriftQueue }).drift
     drift.queue('/data/sec/k', 'fingerprint')

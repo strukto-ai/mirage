@@ -269,7 +269,7 @@ Every result has `outcome` (`allow`, `deny`, `ask`), `reason`, `source`
 A line is refused whole by a rule or an unanswered ask; anything else
 fails only its own command. Tree nodes are `list`, `pipeline`,
 `subshell`, `group`, `substitution`, `line` (`bash -c`, `eval`, `xargs`)
-and `command`. `mirage workspace explain` prints it:
+and `command`. `mirage shell --explain` prints it:
 
 ```text
 cat /data/a | wc -l && echo $(cat /data/keys/a)  [deny, exit 1: sealed]
@@ -287,8 +287,7 @@ cat /data/a | wc -l && echo $(cat /data/keys/a)  [deny, exit 1: sealed]
 - In TypeScript without async task isolation (a browser),
   `explain.vfs` throws and `explain.shell`'s policies act for real.
 
-The same results come over `POST /v1/workspaces/{id}/explain/shell`, RPC
-`explain/shell` and `explain/vfs/<call>`, and `mirage workspace explain`.
+Every door takes the same option: `?explain=true` on HTTP's `shell` and `vfs/<call>` routes, `explain: true` on RPC, `--explain` on `mirage shell` and `mirage vfs`, each answering the same fields as JSON.
 
 ## Examples
 

@@ -40,6 +40,7 @@ router = APIRouter(prefix="/v1/workspaces/{workspace_id}")
 
 STATUS: dict[FsCondition, int] = {
     FsCondition.ENOENT: 404,
+    FsCondition.NO_XATTR: 404,
     FsCondition.EACCES: 403,
     FsCondition.EPERM: 403,
     FsCondition.EROFS: 403,

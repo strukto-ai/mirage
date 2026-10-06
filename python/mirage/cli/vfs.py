@@ -197,8 +197,11 @@ def command(call: VfsCall) -> Callable[..., None]:
         body = {
             name: _value(call, name, value)
             for name, value in given.items()
-            if value is not None
-            and not (call.params[name] is FLAG and value is False)
+            if call.params[name] is BYTES
+            or (
+                value is not None
+                and not (call.params[name] is FLAG and value is False)
+            )
         }
         result = answer(
             post(workspace_id, f"vfs/{call.name}", body, session_id, explain)

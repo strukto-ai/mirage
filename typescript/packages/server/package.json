@@ -57,6 +57,10 @@
       "types": "./dist/vfs_calls.d.ts",
       "import": "./dist/vfs_calls.js"
     },
+    "./io_serde": {
+      "types": "./dist/io_serde.d.ts",
+      "import": "./dist/io_serde.js"
+    },
     "./host_validation_constants": {
       "types": "./dist/host_validation_constants.d.ts",
       "import": "./dist/host_validation_constants.js"
