@@ -31,7 +31,9 @@ describe('vfsMd', () => {
     const markdown = await ws.vfsMd()
     expect(markdown).toContain('## `/data`\n\nBackend: `ram`. Access: read-only.')
     expect(markdown).toContain('## `/scratch`\n\nBackend: `ram`. Access: read-write.')
-    expect(markdown).toContain('## `/`\n\nBackend: `ram`. Access: read-write; programs can run.')
+    expect(markdown).toContain(
+      '## `/`\n\nBackend: `ram`. Access: read-write; python3 and js can run code here.',
+    )
   })
 
   it('keeps literal braces', async () => {

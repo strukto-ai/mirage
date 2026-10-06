@@ -25,7 +25,7 @@ from mirage.workspace.session.session import SessionState
 MODE_LINES = {
     MountMode.READ: "read-only",
     MountMode.WRITE: "read-write",
-    MountMode.EXEC: "read-write; programs can run",
+    MountMode.EXEC: "read-write; python3 and js can run code here",
 }
 
 

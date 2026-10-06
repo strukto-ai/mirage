@@ -594,7 +594,10 @@ export class MountRegistry {
   /**
    * Whether code may be loaded from this path: the per-script form of
    * `isExecAllowed`, read by an interpreter running a file operand
-   * (`python3 path.py`, `bash script.sh`).
+   * (`python3 path.py`, `js app.js`, or a `./script` whose shebang names
+   * one). Shell scripts (`bash script.sh`, `source`, a `./script` with no
+   * shebang or an sh one) never ask: they run in the shell, which checks
+   * each of their commands like a typed one.
    */
   execAllowedAt = (virtual: string): boolean => {
     const m = this.tryMountFor(virtual)

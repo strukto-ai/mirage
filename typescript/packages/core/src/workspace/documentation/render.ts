@@ -25,7 +25,7 @@ import type { SessionState } from '../session/session.ts'
 const MODE_LINES: Record<MountMode, string> = {
   [MountMode.READ]: 'read-only',
   [MountMode.WRITE]: 'read-write',
-  [MountMode.EXEC]: 'read-write; programs can run',
+  [MountMode.EXEC]: 'read-write; python3 and js can run code here',
 }
 
 export function vfsMd(registry: MountRegistry, session: SessionState): string {

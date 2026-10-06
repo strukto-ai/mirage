@@ -97,6 +97,6 @@ async def test_vfs_md_states_each_mount_mode():
     assert "## `/data`\n\nBackend: `ram`. Access: read-only." in markdown
     assert "## `/scratch`\n\nBackend: `ram`. Access: read-write." in markdown
     assert (
-        "## `/`\n\nBackend: `ram`. Access: read-write; programs can run."
-        in markdown
+        "## `/`\n\nBackend: `ram`. Access: read-write; python3 and js can run"
+        " code here." in markdown
     )
