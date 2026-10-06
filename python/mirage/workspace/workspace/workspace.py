@@ -49,9 +49,11 @@ from mirage.context import (
     reset_current_session,
     reset_explaining,
     reset_program_invocation,
+    reset_refusal_sink,
     set_current_session,
     set_explaining,
     set_program_invocation,
+    set_refusal_sink,
 )
 from mirage.io import IOResult
 from mirage.io.stream import materialize
@@ -548,11 +550,15 @@ class Workspace:
             order, nested lines included.
         """
         await self.ensure_sessions_loaded()
+        # Judged inside a line, as the line runs: an ask a deciding
+        # policy's read meets refuses like a deny and records nothing.
+        sink_token = set_refusal_sink(lambda refusal: None)
         token = set_explaining(DryRun.DECIDING)
         try:
             return await self._explained(line, session_id)
         finally:
             reset_explaining(token)
+            reset_refusal_sink(sink_token)
 
     async def _explained(
         self, line: str, session_id: str

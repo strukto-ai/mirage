@@ -86,6 +86,7 @@ import {
   captureSessionContext,
   getCurrentSessionUnlessForeign,
   runExplaining,
+  runWithRefusalSink,
   runWithSession,
   runAsProgram,
 } from '../../context/session_context.ts'
@@ -1133,9 +1134,14 @@ export class Workspace {
    */
   async explain(line: string, sessionId = ''): Promise<Explanation[]> {
     await this.ensureSessionsLoaded()
-    // Without task isolation the binding would reach other tasks' ops.
+    // Without task isolation the bindings would reach other tasks' ops.
     if (!asyncContextIsolatesTasks) return this.explained(line, sessionId)
-    return runExplaining(DryRun.DECIDING, () => this.explained(line, sessionId))
+    // Judged inside a line, as the line runs: an ask a deciding policy's
+    // read meets refuses like a deny and records nothing.
+    return runWithRefusalSink(
+      () => undefined,
+      () => runExplaining(DryRun.DECIDING, () => this.explained(line, sessionId)),
+    )
   }
 
   /** `explain`'s judging, run with its policies deciding. */

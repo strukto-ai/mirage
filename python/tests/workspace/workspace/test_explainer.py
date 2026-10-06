@@ -195,3 +195,22 @@ async def test_a_standing_approval_covers_a_deciding_read(ws):
     ws.policies.add(busy)
     await Session(ws, "agent").explain.vfs.write("/data/new", b"x")
     assert busy.errors == [errno.EROFS]
+
+
+@pytest.mark.asyncio
+async def test_a_line_s_policy_reads_as_the_running_line_does(ws):
+    await ws.vfs.mkdir("/data/out")
+    await ws.vfs.write("/data/out/q", b"q")
+    with pytest.raises(PermissionError):
+        await Session(ws, "agent").vfs.read("/data/out/q")
+    [asked] = ws.decisions.pending("agent")
+    await ws.decisions.answer(asked.id, Outcome.ALLOW, Scope.SESSION)
+    busy = _Busy(ws)
+    ws.policies.add(busy)
+    # Inside a line an ask refuses like a deny, approved or not.
+    await Session(ws, "agent").shell("ls /data/new")
+    assert set(busy.errors) == {errno.EACCES}
+    busy.errors.clear()
+    await ws.vfs.unlink("/data/stamp")
+    await Session(ws, "agent").explain.shell("ls /data/new")
+    assert busy.errors == [errno.EACCES, errno.EROFS]

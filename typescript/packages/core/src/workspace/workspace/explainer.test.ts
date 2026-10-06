@@ -180,4 +180,21 @@ describe('session.explain.vfs', () => {
     await new Session(ws, 'agent').explain.vfs.write('/data/new', 'x')
     expect(errors).toEqual(['EROFS'])
   })
+
+  it('reads a line’s policy as the running line does', async () => {
+    await ws.vfs.mkdir('/data/out')
+    await ws.vfs.write('/data/out/q', 'q')
+    await expect(new Session(ws, 'agent').vfs.read('/data/out/q')).rejects.toThrow()
+    const [asked] = ws.decisions.pending('agent')
+    await ws.decisions.answer(asked?.id ?? '', Outcome.ALLOW, Scope.SESSION)
+    const errors: (string | undefined)[] = []
+    ws.policies.add(busy(errors))
+    // Inside a line an ask refuses like a deny, approved or not.
+    await new Session(ws, 'agent').shell('ls /data/new')
+    expect(new Set(errors)).toEqual(new Set(['EACCES']))
+    errors.length = 0
+    await ws.vfs.unlink('/data/stamp')
+    await new Session(ws, 'agent').explain.shell('ls /data/new')
+    expect(errors).toEqual(['EACCES', 'EROFS'])
+  })
 })
