@@ -15,7 +15,7 @@
 import type { JsonSchemaType } from '@modelcontextprotocol/server'
 import type { Ops } from '@struktoai/mirage-core/ops/ops'
 import type { JsonValue } from '@struktoai/mirage-core/types'
-import { VfsExplainer } from '@struktoai/mirage-core/workspace/workspace/explainer'
+import type { VfsExplainer } from '@struktoai/mirage-core/workspace/workspace/explainer'
 
 export type Args = Readonly<Record<string, unknown>>
 export type Schema = Record<string, JsonValue>
@@ -121,9 +121,9 @@ export const VFS_CALLS: readonly VfsCall[] = [
     (t, a) => t.pwrite(str(a, 'path'), bin(a, 'data'), int(a, 'offset')),
   ),
   row('stat', "A path's metadata.", { path: PATH, nofollow: FLAG }, ['path'], 'stat', (t, a) =>
-    t instanceof VfsExplainer
-      ? t.stat(str(a, 'path'), nofollow(a))
-      : t.stat(str(a, 'path'), undefined, nofollow(a)),
+    'sessionId' in t
+      ? t.stat(str(a, 'path'), undefined, nofollow(a))
+      : t.stat(str(a, 'path'), nofollow(a)),
   ),
   row('readdir', "A directory's entries.", PATH_ONLY, ['path'], 'entries', (t, a) =>
     t.readdir(str(a, 'path')),

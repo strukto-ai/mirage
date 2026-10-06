@@ -41,6 +41,14 @@ from deploy import ROOT, SEED, Deployment, mirage_cli
 from mcp import Client, StdioServerParameters
 from mcp.client.streamable_http import streamable_http_client
 
+from mirage import Workspace
+from mirage.errors.classify import classify
+from mirage.policy.types import Outcome
+from mirage.server.io_serde import answered, checked, explanation_to_dict
+from mirage.server.vfs_calls import BYTES, FLAG, VFS_CALL_BY_NAME
+from mirage.server.workspace_config import build_workspace_from_config
+from mirage.vfs.s3.config import S3Config
+
 Answer = dict[str, Any]
 CLI_GROUPS = (
     "workspace",
@@ -824,8 +832,6 @@ class InAppSteps:
             await ws.close()
 
     async def create(self, wid: str) -> None:
-        from mirage.server.workspace_config import build_workspace_from_config
-
         path = self.scratch / f"{wid}.json"
         path.write_text(json.dumps({**self.config, "workspace_id": wid}))
         self.workspaces[wid] = await build_workspace_from_config(path)
@@ -896,19 +902,12 @@ class InAppSteps:
         await self.workspaces[wid].snapshot(str(self.scratch / name))
 
     async def load(self, name: str, to: str) -> None:
-        from mirage import Workspace
-
         self.workspaces[to] = await Workspace.load(str(self.scratch / name))
 
     async def store_snapshot(self, wid: str, key: str) -> None:
-        from mirage.vfs.s3.config import S3Config
-
         await self.workspaces[wid].snapshot(key, s3=S3Config(**self.store))
 
     async def store_load(self, key: str, to: str) -> None:
-        from mirage import Workspace
-        from mirage.vfs.s3.config import S3Config
-
         self.workspaces[to] = await Workspace.load(
             key, s3=S3Config(**self.store)
         )
@@ -926,13 +925,9 @@ class InAppSteps:
         return said.outcome.value, said.exit_code
 
     async def allow(self, wid: str, ask: str) -> None:
-        from mirage.policy.types import Outcome
-
         await self.workspaces[wid].decisions.answer(ask, Outcome.ALLOW)
 
     async def deny(self, wid: str, ask: str) -> None:
-        from mirage.policy.types import Outcome
-
         await self.workspaces[wid].decisions.answer(ask, Outcome.DENY)
 
 
@@ -1188,8 +1183,6 @@ def vfs_words(step: dict[str, Any]) -> tuple[list[str], bytes]:
     Returns:
         tuple[list[str], bytes]: the words after ``mirage``, and stdin.
     """
-    from mirage.server.vfs_calls import BYTES, FLAG, VFS_CALL_BY_NAME
-
     if step["call"] == "glob":
         return ["glob", step["pattern"]], b""
     call = VFS_CALL_BY_NAME[step["call"]]
@@ -1247,8 +1240,6 @@ class InAppPython:
     async def suite(
         self, suite: dict[str, Any], prefix: str, config: dict[str, Any]
     ) -> list[Answer]:
-        from mirage.server.workspace_config import build_workspace_from_config
-
         scratch = self.scratch / prefix
         scratch.mkdir(parents=True, exist_ok=True)
         if suite["op"] in STEP_OPS:
@@ -1345,10 +1336,6 @@ class InAppPython:
         )
 
     async def bytes(self, session: Any, step: dict[str, Any]) -> Answer:
-        from mirage.errors.classify import classify
-        from mirage.server.io_serde import answered, checked
-        from mirage.server.vfs_calls import VFS_CALL_BY_NAME
-
         params = call_params(step)
         try:
             if step["call"] == "glob":
@@ -1364,13 +1351,6 @@ class InAppPython:
         return bytes_answer(step, wire)
 
     async def explain(self, session: Any, step: dict[str, Any]) -> Answer:
-        from mirage.server.io_serde import (
-            answered,
-            checked,
-            explanation_to_dict,
-        )
-        from mirage.server.vfs_calls import VFS_CALL_BY_NAME
-
         if step["call"] == "shell":
             said = await session.explain.shell(step["command"])
             return explain_answer(explanation_to_dict(said))
@@ -1677,15 +1657,15 @@ class Cli:
                 )
             return bytes_answer(step, json.loads(out))
         if op == "explain":
-            words = (
-                ["shell", "-c", step["command"]]
+            words, stdin = (
+                (["shell", "-c", step["command"]], b"")
                 if step["call"] == "shell"
-                else vfs_words(step)[0]
+                else vfs_words(step)
             )
             argv = self.server.cli(
                 *words, "-w", wid, *self._session(session), "--explain"
             )
-            code, out, err = await run(argv, env)
+            code, out, err = await run(argv, env, stdin=stdin)
             if not out.strip():
                 raise RuntimeError(
                     f"mirage {' '.join(words)} --explain: {err}"
