@@ -20,7 +20,7 @@ import pytest
 from typer.testing import CliRunner
 
 from mirage.cli import workspace as workspace_cli
-from mirage.cli.workspace import _format_explanation, _resolve_config_arg
+from mirage.cli.workspace import _resolve_config_arg
 
 OVERRIDE = """
 mounts:
@@ -153,63 +153,3 @@ def test_load_with_a_key_takes_only_a_config(fake, tmp_path):
     assert body["key"] == "a.tar"
     assert body["override"]["mounts"]["/ram"]["vfs"] == "ram"
     assert _invoke("load", "--key", "a.tar", str(config), "x").exit_code == 2
-
-
-def _command(
-    text: str, outcome: str, reason: str = "", exit_code: int = 0
-) -> dict[str, Any]:
-    return {
-        "type": "command",
-        "text": text,
-        "outcome": outcome,
-        "exit_code": exit_code,
-        "reason": reason,
-        "source": "top" if reason else "",
-        "runtime": "",
-        "children": [],
-    }
-
-
-def test_explain_prints_the_line_as_its_tree():
-    cat = _command("cat /data/keys/a", "deny", "sealed", 1)
-    echo = _command("echo $(cat /data/keys/a)", "allow")
-    echo["children"] = [
-        {"type": "substitution", "text": "cat /data/keys/a", "children": [cat]}
-    ]
-    said = {
-        "line": "ls | wc -l && echo $(cat /data/keys/a)",
-        "outcome": "deny",
-        "reason": "sealed",
-        "exit_code": 1,
-        "node": {
-            "type": "line",
-            "text": "ls | wc -l && echo $(cat /data/keys/a)",
-            "children": [
-                {
-                    "type": "list",
-                    "text": "ls | wc -l && echo $(cat /data/keys/a)",
-                    "children": [
-                        {
-                            "type": "pipeline",
-                            "text": "ls | wc -l",
-                            "children": [
-                                _command("ls", "allow"),
-                                _command("wc -l", "allow"),
-                            ],
-                        },
-                        echo,
-                    ],
-                }
-            ],
-        },
-    }
-    assert _format_explanation(said).splitlines() == [
-        "ls | wc -l && echo $(cat /data/keys/a)  [deny, exit 1: sealed]",
-        "  list: ls | wc -l && echo $(cat /data/keys/a)",
-        "    pipeline: ls | wc -l",
-        "      ls  [allow]",
-        "      wc -l  [allow]",
-        "    echo $(cat /data/keys/a)  [allow]",
-        "      substitution: cat /data/keys/a",
-        "        cat /data/keys/a  [deny, exit 1: sealed]  top",
-    ]

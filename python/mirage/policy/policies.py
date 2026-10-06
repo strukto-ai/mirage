@@ -46,13 +46,13 @@ from mirage.policy.types import (
     DryRun,
     ExecuteResultContext,
     Hide,
-    OpsContext,
-    OpsResultContext,
     Outcome,
     Pending,
     Route,
     SessionContext,
+    VfsContext,
     VfsExplanation,
+    VfsResultContext,
 )
 from mirage.runtime.routing.types import RouteContext
 from mirage.types import Limit, MountMode, PathSpec, Refusal
@@ -65,8 +65,8 @@ logger = logging.getLogger(__name__)
 HookContext = (
     CommandContext
     | RouteContext
-    | OpsContext
-    | OpsResultContext
+    | VfsContext
+    | VfsResultContext
     | ExecuteResultContext
     | SessionContext
 )
@@ -195,7 +195,7 @@ def policy_denied(
     )
 
 
-async def pre_ops_gate(
+async def pre_vfs_gate(
     policies: "Policies",
     op: str,
     path: PathSpec,
@@ -210,7 +210,7 @@ async def pre_ops_gate(
     decisions: "Decisions | None" = None,
     final: bool = True,
 ) -> None:
-    """Fire pre_ops at an op door; a Deny becomes EACCES.
+    """Fire pre_vfs at an op door; a Deny becomes EACCES.
 
     The one seam helper both doors (the ops facade and the dispatcher)
     call, so a refusal is byte-identical however the mount is reached:
@@ -250,7 +250,7 @@ async def pre_ops_gate(
             run's op, which the dry run may not let change anything (an
             ask its read meets reads the ledger and records nothing).
     """
-    ctx = OpsContext(
+    ctx = VfsContext(
         op=op,
         path=path,
         write=write,
@@ -282,12 +282,12 @@ async def pre_ops_gate(
     if deciding and write:
         raise erofs(path.virtual)
     if not (
-        policies.wants("pre_ops")
+        policies.wants("pre_vfs")
         or check_hidden
         or (write and mode is not None)
     ):
         return
-    answer = await policies.pre_ops(ctx, check_hidden=check_hidden)
+    answer = await policies.pre_vfs(ctx, check_hidden=check_hidden)
     if isinstance(answer, Hide):
         raise answer.error
     if isinstance(answer, Ask):
@@ -310,20 +310,20 @@ async def pre_ops_gate(
 
 
 async def _explained_op(
-    policies: "Policies", ctx: OpsContext, decisions: "Decisions | None"
+    policies: "Policies", ctx: VfsContext, decisions: "Decisions | None"
 ) -> VfsExplanation:
-    """What the gate would answer one VFS call, as ``pre_ops_gate``
+    """What the gate would answer one VFS call, as ``pre_vfs_gate``
     decides it and without its consequences: every policy's answer, the
     one that wins, and the error the door would raise. A question reads
     the ledger's settled records and records nothing.
 
     Args:
         policies (Policies): the workspace's admission policies.
-        ctx (OpsContext): the call the gate sees.
+        ctx (VfsContext): the call the gate sees.
         decisions (Decisions | None): the approval ledger, None at a
             door that cannot ask.
     """
-    said = await policies.answers("pre_ops", ctx)
+    said = await policies.answers("pre_vfs", ctx)
     answers = tuple(a for a in said if isinstance(a, (Deny, Ask)))
     first = answers[0] if answers else None
     winner = next((a for a in answers if isinstance(a, Deny)), first)
@@ -360,7 +360,7 @@ async def _explained_op(
     )
 
 
-async def post_ops_gate(
+async def post_vfs_gate(
     policies: "Policies",
     op: str,
     path: PathSpec,
@@ -368,7 +368,7 @@ async def post_ops_gate(
     prefix: str,
     result: Any,
 ) -> Limit | None:
-    """Fire post_ops at an op door; a Deny suppresses the result.
+    """Fire post_vfs at an op door; a Deny suppresses the result.
 
     Returns the merged Limit bound (tightest per field across every
     opining policy) for the door to apply to a byte-producing result,
@@ -382,10 +382,10 @@ async def post_ops_gate(
         prefix (str): the owning mount's prefix.
         result (Any): the op's raw result, offered to the hooks.
     """
-    if not policies.wants("post_ops"):
+    if not policies.wants("post_vfs"):
         return None
-    deny, bound = await policies.post_ops(
-        OpsResultContext(
+    deny, bound = await policies.post_vfs(
+        VfsResultContext(
             op=op, path=path, write=write, prefix=prefix, result=result
         )
     )
@@ -571,7 +571,7 @@ class Policies:
         policies pays nothing per VFS op.
 
         Args:
-            hook (str): hook name (pre_command, pre_ops, post_ops).
+            hook (str): hook name (pre_command, pre_vfs, post_vfs).
         """
         return hook in self._wanted
 
@@ -587,7 +587,7 @@ class Policies:
         session's.
 
         Args:
-            hook (str): hook name (pre_command, pre_ops, pre_session).
+            hook (str): hook name (pre_command, pre_vfs, pre_session).
             session_id (str): the session, empty when none is bound.
         """
         base = getattr(Policy, hook)
@@ -615,7 +615,7 @@ class Policies:
         """The policies a stage asks, in order: the built-in placement
         first at ``pre_execute`` (unless the caller placed the line),
         the registered ones, and the built-in mount mode last at
-        ``pre_ops``, after every policy that could explain the refusal
+        ``pre_vfs``, after every policy that could explain the refusal
         in its own words.
 
         Args:
@@ -627,7 +627,7 @@ class Policies:
         chain: tuple[Policy, ...] = tuple(self._policies)
         if hook == "pre_execute" and self._placement and not placed:
             chain = (self._placement, *chain)
-        if hook == "pre_ops":
+        if hook == "pre_vfs":
             chain = (*chain, self._mode)
         return chain
 
@@ -732,7 +732,7 @@ class Policies:
         Deny, as the door's do. The built-in hides never answer here,
         since a hide never surfaces; the built-in placement answers first
         at ``pre_execute`` and the built-in mount mode last at
-        ``pre_ops``, as they do at the door.
+        ``pre_vfs``, as they do at the door.
 
         Args:
             hook (str): the hook in python spelling.
@@ -770,19 +770,19 @@ class Policies:
             return action
         return None if placed else agreed(list(routes))
 
-    async def hides(self, ctx: OpsContext) -> bool:
+    async def hides(self, ctx: VfsContext) -> bool:
         """Whether the built-in hides answer the op as absent, before any
         policy is asked.
 
         Args:
-            ctx (OpsContext): the op about to run.
+            ctx (VfsContext): the op about to run.
         """
-        return await self._hidden.pre_ops(ctx) is not None
+        return await self._hidden.pre_vfs(ctx) is not None
 
-    async def pre_ops(
-        self, ctx: OpsContext, *, check_hidden: bool = True
+    async def pre_vfs(
+        self, ctx: VfsContext, *, check_hidden: bool = True
     ) -> Hide | Deny | Ask | None:
-        """Fire pre_ops across the policies; first Deny wins, else the
+        """Fire pre_vfs across the policies; first Deny wins, else the
         first Ask, which the door decides how to put.
 
         The built-in hides answer before every policy, with a Hide that
@@ -792,15 +792,15 @@ class Policies:
         hook.
 
         Args:
-            ctx (OpsContext): the op about to run.
+            ctx (VfsContext): the op about to run.
             check_hidden (bool): False only for a door that has already
                 answered the hides itself.
         """
         if check_hidden:
-            hidden = await self._hidden.pre_ops(ctx)
+            hidden = await self._hidden.pre_vfs(ctx)
             if hidden is not None:
                 return hidden
-        action, _, _ = await self._fire("pre_ops", ctx)
+        action, _, _ = await self._fire("pre_vfs", ctx)
         return action
 
     async def pre_session(self, ctx: SessionContext) -> Deny | None:
@@ -812,16 +812,16 @@ class Policies:
         action, _, _ = await self._fire("pre_session", ctx)
         return _deny_only("pre_session", action)
 
-    async def post_ops(
-        self, ctx: OpsResultContext
+    async def post_vfs(
+        self, ctx: VfsResultContext
     ) -> tuple[Deny | None, Limit | None]:
-        """Fire post_ops; a Deny suppresses the result, Limits merge.
+        """Fire post_vfs; a Deny suppresses the result, Limits merge.
 
         Args:
-            ctx (OpsResultContext): the op and its raw result.
+            ctx (VfsResultContext): the op and its raw result.
         """
-        action, limit, _ = await self._fire("post_ops", ctx)
-        return _deny_only("post_ops", action), limit
+        action, limit, _ = await self._fire("post_vfs", ctx)
+        return _deny_only("post_vfs", action), limit
 
     async def post_execute(
         self, ctx: ExecuteResultContext

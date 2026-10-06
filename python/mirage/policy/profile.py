@@ -603,8 +603,8 @@ class SessionProfile(BaseModel):
     A profile may also state a ``policy``: a program defining the
     admission hooks it answers at, the way a coded Policy overrides only
     the hooks it cares about: ``pre_command(ctx)`` per command,
-    ``pre_ops(ctx)`` per VFS op, ``pre_session(ctx)`` per env write
-    (``preCommand``, ``preOps``, ``preSession`` in JavaScript). Each is
+    ``pre_vfs(ctx)`` per VFS op, ``pre_session(ctx)`` per env write
+    (``preCommand``, ``preVfs``, ``preSession`` in JavaScript). Each is
     handed the door's facts as ``ctx`` and answers with ``return``:
     allow (no opinion), deny, or at the command gate ask, so it
     expresses the conditions a declarative rule cannot; like every

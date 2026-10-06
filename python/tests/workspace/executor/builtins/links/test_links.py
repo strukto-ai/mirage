@@ -1,6 +1,6 @@
 import pytest
 
-from mirage.policy import Action, Deny, OpsContext, Policy
+from mirage.policy import Action, Deny, Policy, VfsContext
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -118,7 +118,7 @@ def test_accepts_line_refuses_what_the_command_layer_would():
 
 
 class PinLinks(Policy):
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         if ctx.op == "unlink" and ctx.path.virtual.endswith(".pinned"):
             return Deny("pinned")
         return None
@@ -183,7 +183,7 @@ async def test_ln_backup_refuses_a_directory_destination():
 
 
 class SealReads(Policy):
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         if ctx.op == "read" and ctx.path.virtual.endswith(".sealed"):
             return Deny("sealed")
         return None
@@ -214,7 +214,7 @@ async def test_ln_keeps_going_after_a_source_it_cannot_read():
 
 @pytest.mark.asyncio
 async def test_rm_of_a_link_goes_through_the_door():
-    # The strip used to write the node table directly, so a pre_ops
+    # The strip used to write the node table directly, so a pre_vfs
     # policy protecting a link never fired for `rm` while it fired for
     # every other door (the FUSE unlink hole, one tier up). The mount is
     # writable, so only the policy can be what refuses.
@@ -608,7 +608,7 @@ async def test_follow_paths_collapses_a_relative_target_and_keeps_the_name():
 
 
 class RefuseLinkCreation(Policy):
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         if ctx.op == "symlink" and ctx.path.virtual == "/other/tree/loop":
             return Deny("sealed")
         return None

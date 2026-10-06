@@ -18,13 +18,15 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 from mirage.io.types import ByteSource
-from mirage.server.io_serde import io_result_to_dict
+from mirage.server.io_serde import explanation_to_dict, io_result_to_dict
 from mirage.server.jobs import JobEntry, JobStatus, JobTable
 from mirage.server.multipart import MAX_REQUEST_PART, PartEvent, part_events
 from mirage.server.registry import WorkspaceEntry
+from mirage.server.routers.vfs import session_of
 from mirage.server.stdin import LoopStdin, UploadStdin
 from mirage.types import JsonValue
 from mirage.workspace.execution import ExecutionScope
@@ -39,7 +41,6 @@ class ShellRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     command: str
-    session_id: str | None = None
     agent_id: str | None = None
     cwd: str | None = None
     runtime: str | None = None
@@ -68,8 +69,6 @@ def _build_shell_kwargs(
         "command": req.command,
         "record": req.record,
     }
-    if req.session_id is not None:
-        kwargs["session_id"] = req.session_id
     if req.agent_id is not None:
         kwargs["agent_id"] = req.agent_id
     if req.cwd is not None:
@@ -93,8 +92,12 @@ async def shell(
     workspace_id: str,
     request: Request,
     background: bool = Query(False),
+    session_id: str | None = Query(None),
+    explain: bool = Query(False),
 ) -> Response:
     entry = _require_entry(request, workspace_id)
+    if explain:
+        return await _explained(entry, request, session_id, background)
     job_table = request.app.state.jobs
     content_type = request.headers.get("content-type", "")
     upload: asyncio.Task[None] | None = None
@@ -116,11 +119,7 @@ async def shell(
         req_obj = await _parse_json_body(request)
     await entry.runner.call(entry.runner.ws.ensure_sessions_loaded())
     kwargs = _build_shell_kwargs(req_obj, stdin)
-    session_id = (
-        req_obj.session_id
-        if req_obj.session_id is not None
-        else entry.runner.ws.default_session_id
-    )
+    session_id = session_id or entry.runner.ws.default_session_id
     kwargs["session_id"] = session_id
 
     async def run(scope: ExecutionScope) -> JsonValue:
@@ -162,6 +161,40 @@ async def shell(
         status_code=200,
         headers={"X-Mirage-Job-Id": job.id},
     )
+
+
+async def _explained(
+    entry: WorkspaceEntry,
+    request: Request,
+    session_id: str | None,
+    background: bool,
+) -> Response:
+    """What a line would do as a session, without running any of it
+    (``session.explain.shell``). Only the line is read: stdin, a working
+    directory, a runtime or a background job would change what runs,
+    which an explanation cannot follow, so each is refused.
+
+    Args:
+        entry (WorkspaceEntry): the workspace.
+        request (Request): the request, carrying the JSON body.
+        session_id (str | None): the session; None is the default.
+        background (bool): whether the caller asked for a job.
+    """
+    content_type = request.headers.get("content-type", "")
+    req_obj = (
+        None
+        if content_type.startswith("multipart/")
+        else await _parse_json_body(request)
+    )
+    if req_obj is None or background or req_obj.cwd or req_obj.runtime:
+        raise HTTPException(
+            status_code=400,
+            detail="explain takes the line alone: "
+            "no stdin, cwd, runtime or background",
+        )
+    session = await session_of(entry, session_id)
+    said = await entry.runner.call(session.explain.shell(req_obj.command))
+    return JSONResponse(content=explanation_to_dict(said))
 
 
 async def wait_attended(

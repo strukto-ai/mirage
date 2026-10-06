@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from unittest import mock
@@ -131,6 +132,28 @@ async def test_an_unknown_workspace_or_session_is_not_found(tmp_path):
     assert workspace.json() == {"detail": "workspace not found"}
     assert session.status_code == 404
     assert session.json() == {"detail": "session not found"}
+
+
+@pytest.mark.asyncio
+async def test_calls_all_serves_the_vfs_calls_and_explain(tmp_path):
+    async with daemon(tmp_path) as (base, _):
+        url = f"{base}/v1/workspaces/{await create_workspace(base)}/mcp"
+        async with Client(f"{url}?calls=all") as client:
+            names = [t.name for t in (await client.list_tools()).tools]
+            await client.call_tool(
+                "vfs_write", {"path": "/a.txt", "data_base64": "aGk="}
+            )
+            read = await client.call_tool("vfs_read", {"path": "/a.txt"})
+            said = await client.call_tool(
+                "shell", {"command": "rm /a.txt", "explain": True}
+            )
+        async with httpx.AsyncClient() as http:
+            refused = await http.post(f"{url}?calls=some", json={})
+    assert len(names) == 31
+    assert json.loads(read.content[0].text) == {"data_base64": "aGk="}
+    assert json.loads(said.content[0].text)["outcome"] == "allow"
+    assert refused.status_code == 400
+    assert refused.json() == {"detail": "calls must be tools or all"}
 
 
 @pytest.mark.asyncio

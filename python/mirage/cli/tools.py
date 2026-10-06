@@ -21,6 +21,10 @@ import typer
 from mirage.cli.client import make_client
 from mirage.cli.output import emit, handle_response
 
+app = typer.Typer(
+    help="The session's agent tools, as MCP serves them.", no_args_is_help=True
+)
+
 
 def call_tool(
     workspace_id: str,
@@ -39,7 +43,7 @@ def call_tool(
         name (str): the tool.
         arguments (dict[str, Any]): the tool's input.
     """
-    path = f"/v1/workspaces/{quote(workspace_id, safe='')}/{name}"
+    path = f"/v1/workspaces/{quote(workspace_id, safe='')}/tools/{name}"
     params = {"session_id": session_id} if session_id else None
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
@@ -220,3 +224,25 @@ def glob_cmd(
     call_tool(
         workspace_id, session_id, "glob", {"pattern": pattern, "path": path}
     )
+
+
+def shell_cmd(
+    command: str = typer.Argument(..., help="The command line to run."),
+    workspace_id: str = typer.Option(
+        ..., "--workspace_id", "--workspace", "-w", help="Workspace id."
+    ),
+    session_id: str | None = typer.Option(
+        None, "--session_id", "--session", "-s", help="Session id."
+    ),
+) -> None:
+    """Run a command line and read its output as the agent does."""
+    call_tool(workspace_id, session_id, "shell", {"command": command})
+
+
+app.command("shell")(shell_cmd)
+app.command("read")(read_cmd)
+app.command("write")(write_cmd)
+app.command("edit")(edit_cmd)
+app.command("ls")(ls_cmd)
+app.command("grep")(grep_cmd)
+app.command("glob")(glob_cmd)

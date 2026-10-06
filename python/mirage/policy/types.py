@@ -255,7 +255,7 @@ class Ask:
     ``commands.ask`` rule, a custom policy for a coded condition, and
     both route to the workspace's decision ledger (``Decisions``). A Deny
     from any policy outranks it: the chain keeps looking past an Ask
-    for a Deny, so an approval can never re-open a refusal. A pre_ops
+    for a Deny, so an approval can never re-open a refusal. A pre_vfs
     answer too, where the door puts it to the ledger when no line is
     running behind the op and refuses it inside one.
 
@@ -567,7 +567,7 @@ class ProfileScript:
 
     Compiled off ``SessionProfile.policy`` beside the admission rules,
     and evaluated by ``ScriptPolicy`` at the admission hooks the program
-    defines (``pre_command``, ``pre_ops``, ``pre_session``) with the
+    defines (``pre_command``, ``pre_vfs``, ``pre_session``) with the
     door's facts as ``ctx``; its answer is allow (no opinion), deny, or
     at the command gate ask.
 
@@ -686,8 +686,8 @@ class CommandContext:
 
 
 @dataclass(frozen=True, slots=True)
-class OpsContext:
-    """Facts about one VFS op, as pre_ops hooks see it.
+class VfsContext:
+    """Facts about one VFS op, as pre_vfs hooks see it.
 
     Fires at the op doors (the ``ws.vfs`` facade, which also serves
     FUSE, and the shell's internal dispatcher), before any backend or
@@ -718,8 +718,8 @@ class OpsContext:
 
 
 @dataclass(frozen=True, slots=True)
-class OpsResultContext:
-    """One completed VFS op, as post_ops hooks see it.
+class VfsResultContext:
+    """One completed VFS op, as post_vfs hooks see it.
 
     Args:
         op (str): operation name.
@@ -760,7 +760,7 @@ class SessionContext:
     """Facts about one session-state mutation, as pre_session hooks see it.
 
     Fires on the session plane before the write lands, so it holds
-    whichever tier asked. Not an OpsContext: a session key is not a
+    whichever tier asked. Not an VfsContext: a session key is not a
     path, and a path-scoped policy must never receive one dressed as a
     path and match it by accident.
 
@@ -783,8 +783,8 @@ class SessionContext:
 VALIDITY: dict[str, frozenset[str]] = {
     "pre_command": frozenset({Deny.kind, Ask.kind}),
     "pre_execute": frozenset({Deny.kind, Route.kind}),
-    "pre_ops": frozenset({Deny.kind, Ask.kind}),
-    "post_ops": frozenset({Deny.kind, Limit.kind}),
+    "pre_vfs": frozenset({Deny.kind, Ask.kind}),
+    "post_vfs": frozenset({Deny.kind, Limit.kind}),
     "post_execute": frozenset({Limit.kind}),
     "pre_session": frozenset({Deny.kind}),
 }
@@ -949,11 +949,11 @@ class ShellExplanation(Explanation):
 class VfsExplanation(Explanation):
     """A VFS call, explained: the POSIX-shaped call on ``session.vfs``
     (``read``, ``pwrite``, ``rename``, ``setxattr``, ...) and what its
-    gate (``pre_ops``) would answer.
+    gate (``pre_vfs``) would answer.
 
     Args:
         answers (tuple[Deny | Ask, ...]): every policy's answer to the
-            call (``pre_ops``).
+            call (``pre_vfs``).
         call (str): the call's name.
         paths (tuple[str, ...]): its path arguments, as given.
         error (str): the errno name the call would raise (``EACCES``,

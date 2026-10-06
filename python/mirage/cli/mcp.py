@@ -17,7 +17,7 @@ from collections.abc import Callable, Coroutine
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import httpx
 import typer
@@ -89,6 +89,11 @@ def mcp_cmd(
         "-s",
         help="Session the tools act as; the workspace's default when absent.",
     ),
+    all_calls: bool = typer.Option(
+        False,
+        "--all-calls",
+        help="Also serve each VFS call as a tool, and explain.",
+    ),
 ) -> None:
     """Serve a Mirage workspace's MCP tools over stdio.
 
@@ -101,6 +106,8 @@ def mcp_cmd(
     the live workspace created from that same config, and refuses it when
     the live one came from another. ``--session`` serves the tools as
     that session, under its profile, as it does for ``mirage shell``.
+    ``--all-calls`` also serves each VFS call as a ``vfs_<call>`` tool,
+    and ``explain`` on ``shell`` and on each of them.
     """
     if workspace_id is None:
         try:
@@ -113,7 +120,9 @@ def mcp_cmd(
         path = None
     from mirage.server.mcp.relay import relay_stdio
 
-    relay_workspace(path, workspace_id, session_id, "mcp", relay_stdio)
+    relay_workspace(
+        path, workspace_id, session_id, "mcp", relay_stdio, all_calls
+    )
 
 
 def delete_workspace(client: DaemonClient, workspace_id: str) -> None:
@@ -158,6 +167,7 @@ def relay_workspace(
     session_id: str | None,
     endpoint: str,
     relay: Callable[[str, Callable[[], str]], Coroutine[Any, Any, None]],
+    all_calls: bool = False,
 ) -> None:
     """Relay this process's stdio to one of a workspace's endpoints.
 
@@ -175,6 +185,7 @@ def relay_workspace(
         relay (Callable[[str, Callable[[], str]], Coroutine[Any, Any, None]]):
             relays stdio to a URL, asking for the bearer token on every
             request.
+        all_calls (bool): ask the MCP endpoint for the VFS calls too.
     """
     minted = False
     with make_client() as client:
@@ -200,8 +211,11 @@ def relay_workspace(
             )
         workspace_path = f"/v1/workspaces/{quote(str(workspace_id), safe='')}"
         url = f"{client.settings.url}{workspace_path}/{endpoint}"
-        if session_id is not None:
-            url += f"?session_id={quote(session_id, safe='')}"
+        query = {"session_id": session_id} if session_id is not None else {}
+        if all_calls:
+            query["calls"] = "all"
+        if query:
+            url += f"?{urlencode(query, quote_via=quote)}"
         token = client.token
     try:
         if session_id is not None and not has_session(

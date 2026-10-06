@@ -52,8 +52,8 @@ export type {
   Action,
   CommandContext,
   ExecuteResultContext,
-  OpsContext,
-  OpsResultContext,
+  VfsContext,
+  VfsResultContext,
   Policy,
 } from './policy/index.ts'
 export { Outcome, Scope } from './policy/index.ts'

@@ -19,7 +19,7 @@ import { CommandSpec, Operand } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import { RAMObserverStore } from '../observe/store.ts'
 import { OpsRegistry } from '../ops/registry.ts'
-import type { Action, OpsContext } from '../policy/index.ts'
+import type { Action, VfsContext } from '../policy/index.ts'
 import { RAMSessionStore } from './session/ram.ts'
 import type { SessionFields } from './session/store.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
@@ -569,7 +569,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
         shellParser: parser,
         policies: [
           {
-            preOps: async (ctx: OpsContext): Promise<Action | null> => {
+            preVfs: async (ctx: VfsContext): Promise<Action | null> => {
               if (!held.armed || ctx.op !== 'unlink') return null
               seen.push(ctx.path.virtual)
               if (seen.length === 1) await first
@@ -615,7 +615,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
         shellParser: parser,
         policies: [
           {
-            preOps: async (ctx: OpsContext): Promise<Action | null> => {
+            preVfs: async (ctx: VfsContext): Promise<Action | null> => {
               if (!held.armed || ctx.op !== 'unlink') return null
               seen.push(ctx.path.virtual)
               if (seen.length === 1) await first

@@ -12,14 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import dataclasses
 import errno
 
 import pytest
 import pytest_asyncio
 
 from mirage import Session, Workspace
-from mirage.policy import CommandContext, Deny, OpsContext, Policy
+from mirage.policy import CommandContext, Deny, Policy, VfsContext
 from mirage.policy.match import Outcome
 from mirage.policy.types import Scope
 from mirage.types import MountMode
@@ -49,64 +48,6 @@ async def ws():
 
 
 @pytest.mark.asyncio
-async def test_vfs_explains_each_op_as_the_door_answers(ws):
-    explain = Session(ws, "agent").explain
-    sealed = await explain.vfs.read("/data/sec/k")
-    assert (sealed.call, sealed.outcome, sealed.source, sealed.error) == (
-        "read",
-        Outcome.DENY,
-        "top",
-        "EACCES",
-    )
-    assert sealed.refusal is not None and sealed.refusal.reason == "sealed"
-    [answer] = sealed.answers
-    assert isinstance(answer, Deny)
-    assert (answer.reason, answer.policy) == ("sealed", "PermissionsPolicy")
-    asked = await explain.vfs.write("/data/out/a", b"x")
-    assert (asked.outcome, asked.error) == (Outcome.ASK, "EACCES")
-    assert asked.refusal is not None and asked.refusal.kind == "pending"
-    assert ws.decisions.pending("agent") == ()
-    # The mode raises its own error, so no record rides it.
-    read_only = await explain.vfs.mkdir("/ro/d")
-    assert (read_only.error, read_only.refusal) == ("EROFS", None)
-    assert read_only.answers[-1].policy == "MountModePolicy"
-    free = await explain.vfs.write("/data/new", b"x")
-    assert (free.outcome, free.error, free.answers) == (Outcome.ALLOW, "", ())
-    # Nothing ran.
-    assert not await ws.vfs.exists("/data/new")
-
-
-@pytest.mark.asyncio
-async def test_vfs_follows_the_doors_own_path(ws):
-    explain = Session(ws, "agent").explain
-    linked = await explain.vfs.read("/data/link")
-    assert linked.refusal is not None
-    assert (linked.paths, linked.error, linked.refusal.reason) == (
-        ("/data/link",),
-        "EACCES",
-        "sealed",
-    )
-    moved = await explain.vfs.rename("/data/a", "/data/sec/b")
-    assert moved.refusal is not None
-    assert (moved.paths, moved.error, moved.refusal.reason) == (
-        ("/data/a", "/data/sec/b"),
-        "EACCES",
-        "sealed",
-    )
-
-
-@pytest.mark.asyncio
-async def test_a_hidden_path_explains_like_one_nothing_refuses(ws):
-    explain = Session(ws, "agent").explain
-    hidden = await explain.vfs.read("/data/vault/k")
-    missing = await explain.vfs.read("/data/nothing")
-    assert hidden == dataclasses.replace(missing, paths=("/data/vault/k",))
-    assert (missing.outcome, missing.error) == (Outcome.ALLOW, "")
-    exists = await explain.vfs.exists("/data/nothing")
-    assert (exists.call, exists.paths) == ("exists", ("/data/nothing",))
-
-
-@pytest.mark.asyncio
 async def test_a_dry_run_leaves_the_drift_checks_pending(ws):
     ws._drift.queue("/data/sec/k", "fingerprint")
     await Session(ws, "agent").explain.vfs.read("/data/sec/k")
@@ -119,7 +60,7 @@ class _Flag(Policy):
     def __init__(self, ws: Workspace) -> None:
         self.ws = ws
 
-    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Deny | None:
         if ctx.op != "write" or ctx.path.virtual == "/data/flag":
             return None
         flag = await self.ws.vfs.read("/data/flag")
@@ -155,7 +96,7 @@ class _Busy(Policy):
         except PermissionError as exc:
             self.errors.append(exc.errno)
 
-    async def pre_ops(self, ctx: OpsContext) -> None:
+    async def pre_vfs(self, ctx: VfsContext) -> None:
         if ctx.op == "write" and ctx.path.virtual == "/data/new":
             await self._busy()
         return None

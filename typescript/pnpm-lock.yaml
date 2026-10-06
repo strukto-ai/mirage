@@ -293,6 +293,9 @@ importers:
       '@struktoai/mirage-node':
         specifier: workspace:*
         version: link:../typescript/packages/node
+      '@struktoai/mirage-server':
+        specifier: workspace:*
+        version: link:../typescript/packages/server
       chromadb:
         specifier: ^3.4.3
         version: 3.4.3

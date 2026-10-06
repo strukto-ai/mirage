@@ -29,8 +29,8 @@ import {
   RAMVFS,
   Workspace,
   type Action,
-  type OpsContext,
-  type OpsResultContext,
+  type VfsContext,
+  type VfsResultContext,
   type Policy,
 } from '@struktoai/mirage-node'
 import { resolveFusermountBinary } from '@struktoai/mirage-node/fuse/mount'
@@ -72,11 +72,11 @@ async function runSizelessProbe(
   }
 }
 
-// Policy probe: FUSE serves the workspace's op door, so a preOps deny
-// (sealed path) and a postOps deny (redacted content) must both surface as
+// Policy probe: FUSE serves the workspace's op door, so a preVfs deny
+// (sealed path) and a postVfs deny (redacted content) must both surface as
 // EACCES to ordinary file APIs, while unguarded reads pass.
 class SealReadsPolicy implements Policy {
-  preOps(ctx: OpsContext): Action | null {
+  preVfs(ctx: VfsContext): Action | null {
     if (!ctx.write && ctx.path.virtual.endsWith('.sealed')) {
       return { kind: 'deny', reason: 'sealed' }
     }
@@ -85,7 +85,7 @@ class SealReadsPolicy implements Policy {
 }
 
 class RedactReadsPolicy implements Policy {
-  postOps(ctx: OpsResultContext): Action | null {
+  postVfs(ctx: VfsResultContext): Action | null {
     const data = ctx.result instanceof Uint8Array ? new TextDecoder().decode(ctx.result) : null
     if (ctx.op === 'read' && data !== null && data.includes('TOPSECRET')) {
       return { kind: 'deny', reason: 'redacted' }
@@ -129,12 +129,12 @@ async function runPolicyProbe(
 }
 
 // Link-removal probe: FUSE used to drop a link straight into the namespace
-// table, at a layer no policy or session view covers, so a preOps deny never
+// table, at a layer no policy or session view covers, so a preVfs deny never
 // fired on one and the removal left no OpRecord. Routing the removal through
 // the op door is exactly what makes the two answers below differ, and unlink
 // is a LINK_ENTRY_OPS member so the door answers a link path itself.
 class PinLinksPolicy implements Policy {
-  preOps(ctx: OpsContext): Action | null {
+  preVfs(ctx: VfsContext): Action | null {
     if (ctx.op === 'unlink' && ctx.path.virtual.endsWith('.pinned')) {
       return { kind: 'deny', reason: 'pinned' }
     }

@@ -25,7 +25,7 @@ import type {
   Deny,
   HandOff,
   Occurrence,
-  OpsContext,
+  VfsContext,
   Pending,
   SessionDecisionsQuery,
 } from './types.ts'
@@ -222,7 +222,7 @@ export function sameOccurrence(a: Occurrence | null, b: Occurrence | null): bool
  * word asked about, and one rule, the document's or for a coded Ask one
  * over the path. Mirrors Python's `op_question`.
  */
-export function opQuestion(ctx: OpsContext, ask: Ask): [CommandContext, Ask] {
+export function opQuestion(ctx: VfsContext, ask: Ask): [CommandContext, Ask] {
   const asked: CommandContext = {
     command: '',
     paths: [ctx.path],
@@ -449,7 +449,7 @@ export class Decisions {
    * call ends; a SESSION answer passes every one the rule covers, lines
    * included. Mirrors Python's `resolve_op`.
    */
-  async resolveOp(ctx: OpsContext, ask: Ask): Promise<Deny | Pending | null> {
+  async resolveOp(ctx: VfsContext, ask: Ask): Promise<Deny | Pending | null> {
     const call = getOpCall(this)
     const claimant: Claimant | null =
       call === null
@@ -465,7 +465,7 @@ export class Decisions {
    * line: the read-only half of `resolveOp`, the one `explain` may take.
    * Mirrors Python's `held_op`.
    */
-  heldOp(ctx: OpsContext, ask: Ask): Promise<Deny | Pending | null> {
+  heldOp(ctx: VfsContext, ask: Ask): Promise<Deny | Pending | null> {
     const [asked, keyed] = opQuestion(ctx, ask)
     return this.held(asked, keyed)
   }

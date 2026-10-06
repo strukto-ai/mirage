@@ -141,6 +141,31 @@ describe('the MCP door over HTTP', () => {
     expect(await session.json()).toEqual({ detail: 'session not found' })
   })
 
+  it('serves the VFS calls and explain with calls=all', async () => {
+    const { base } = await daemon()
+    const url = `${base}/v1/workspaces/${await createWorkspace(base)}/mcp`
+    const client = await connect(`${url}?calls=all`)
+    const names = (await client.listTools()).tools.map((t) => t.name)
+    await client.callTool({ name: 'vfs_write', arguments: { path: '/a.txt', data_base64: 'aGk=' } })
+    const read = await client.callTool({ name: 'vfs_read', arguments: { path: '/a.txt' } })
+    const said = await client.callTool({
+      name: 'shell',
+      arguments: { command: 'rm /a.txt', explain: true },
+    })
+    const refused = await fetch(`${url}?calls=some`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    })
+    const text = (result: typeof read): string =>
+      (result.content as { text: string }[])[0]?.text ?? ''
+    expect(names).toHaveLength(31)
+    expect(JSON.parse(text(read))).toEqual({ data_base64: 'aGk=' })
+    expect(JSON.parse(text(said))).toMatchObject({ outcome: 'allow' })
+    expect(refused.status).toBe(400)
+    expect(await refused.json()).toEqual({ detail: 'calls must be tools or all' })
+  })
+
   it('rejects an unknown tool as a protocol error', async () => {
     const { base } = await daemon()
     const client = await connect(`${base}/v1/workspaces/${await createWorkspace(base)}/mcp`)

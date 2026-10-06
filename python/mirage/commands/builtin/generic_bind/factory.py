@@ -258,7 +258,7 @@ async def _run_with_namespace_globs(
         glob_children=children,
         glob_target_stat=(links.target_stat if links is not None else None),
     )
-    # Command path restrictions speak first, then the coded pre_ops
+    # Command path restrictions speak first, then the coded pre_vfs
     # hooks, both outside the cache wraps (`finish`) so a refusal fires
     # before a warm serve, the dispatcher's own order at the op door. A
     # probe answer is served below them (`with_probe_answers` on the

@@ -34,8 +34,8 @@ import {
   type Deny,
   type ExecuteResultContext,
   type Hide,
-  type OpsContext,
-  type OpsResultContext,
+  type VfsContext,
+  type VfsResultContext,
   type Pending,
   type Route,
   type SessionContext,
@@ -191,17 +191,17 @@ export function policyDenied(
 }
 
 /**
- * What the gate would answer one VFS call, as `preOpsGate` decides it and
+ * What the gate would answer one VFS call, as `preVfsGate` decides it and
  * without its consequences: every policy's answer, the one that wins,
  * and the error the door would throw. A question reads the ledger's
  * settled records and records nothing. Mirrors the Python `_explained_op`.
  */
 async function explainedOp(
   policies: Policies,
-  ctx: OpsContext,
+  ctx: VfsContext,
   decisions: Decisions | null,
 ): Promise<VfsExplanation> {
-  const answers = (await policies.answers('preOps', ctx)).filter(
+  const answers = (await policies.answers('preVfs', ctx)).filter(
     (a): a is Deny | Ask => a.kind !== 'route',
   )
   const winner = answers.find((a) => a.kind === 'deny') ?? answers[0] ?? null
@@ -244,7 +244,7 @@ async function explainedOp(
 }
 
 /**
- * Fire preOps at the op door; a Deny becomes a PolicyDenied (EACCES),
+ * Fire preVfs at the op door; a Deny becomes a PolicyDenied (EACCES),
  * or the built-in's own error (ENOENT for a hide, EROFS for a mode).
  * The one seam helper the dispatcher calls, so a refusal is identical
  * however the mount is reached: shell internals, programmatic access,
@@ -264,7 +264,7 @@ async function explainedOp(
  * decides that op throws EROFS, since the dry run may change nothing, and
  * an ask its read meets reads the ledger and records nothing.
  */
-export async function preOpsGate(
+export async function preVfsGate(
   policies: Policies,
   op: string,
   path: PathSpec,
@@ -272,14 +272,14 @@ export async function preOpsGate(
   prefix: string,
   sessionId = '',
   issuer?: symbol,
-  access: Pick<OpsContext, 'mode' | 'create' | 'subtree'> & {
+  access: Pick<VfsContext, 'mode' | 'create' | 'subtree'> & {
     checkHidden?: boolean
     decisions?: Decisions | null
     final?: boolean
   } = {},
 ): Promise<void> {
   const { checkHidden = true, decisions = null, final = true, ...context } = access
-  const ctx: OpsContext = {
+  const ctx: VfsContext = {
     op,
     path,
     write,
@@ -300,10 +300,10 @@ export async function preOpsGate(
   }
   const deciding = trace === DryRun.DECIDING
   if (deciding && write) throw erofs(path)
-  if (!(policies.wants('preOps') || checkHidden || (write && context.mode !== undefined))) {
+  if (!(policies.wants('preVfs') || checkHidden || (write && context.mode !== undefined))) {
     return
   }
-  let answer: Hide | Deny | Ask | null = await policies.preOps(ctx, checkHidden)
+  let answer: Hide | Deny | Ask | null = await policies.preVfs(ctx, checkHidden)
   if (answer === null) return
   if (answer.kind === 'hide') throw answer.error
   if (answer.kind === 'ask') {
@@ -322,12 +322,12 @@ export async function preOpsGate(
 }
 
 /**
- * Fire postOps at the op door; a Deny suppresses the result. Returns
+ * Fire postVfs at the op door; a Deny suppresses the result. Returns
  * the merged Limit bound (tightest per field across every opining
  * policy) for the door to apply to a byte-producing result, or null
  * when no policy bounds this op.
  */
-export async function postOpsGate(
+export async function postVfsGate(
   policies: Policies,
   op: string,
   path: PathSpec,
@@ -335,8 +335,8 @@ export async function postOpsGate(
   prefix: string,
   result: unknown,
 ): Promise<Limit | null> {
-  if (!policies.wants('postOps')) return null
-  const [deny, bound] = await policies.postOps({ op, path, write, prefix, result })
+  if (!policies.wants('postVfs')) return null
+  const [deny, bound] = await policies.postVfs({ op, path, write, prefix, result })
   if (deny !== null) {
     if (deny.error !== undefined) throw deny.error
     throw policyDenied(deny, path.virtual)
@@ -453,7 +453,7 @@ export class Policies {
   /**
    * The policies a stage asks, in order: the built-in placement first at
    * `preExecute` (unless the caller placed the line), the registered
-   * ones, and the built-in mount mode last at `preOps`, after every
+   * ones, and the built-in mount mode last at `preVfs`, after every
    * policy that could explain the refusal in its own words. A snapshot,
    * so the order holds if the host edits registrations while a hook
    * awaits; changes take effect at the next gate.
@@ -463,7 +463,7 @@ export class Policies {
     if (hook === 'preExecute' && this.placement !== null && !placed) {
       chain = [this.placement, ...chain]
     }
-    if (hook === 'preOps') chain = [...chain, this.mode]
+    if (hook === 'preVfs') chain = [...chain, this.mode]
     return chain
   }
 
@@ -501,8 +501,8 @@ export class Policies {
     ctx:
       | CommandContext
       | RouteContext
-      | OpsContext
-      | OpsResultContext
+      | VfsContext
+      | VfsResultContext
       | ExecuteResultContext
       | SessionContext,
     every: boolean,
@@ -520,8 +520,8 @@ export class Policies {
           policy,
           ctx as CommandContext &
             RouteContext &
-            OpsContext &
-            OpsResultContext &
+            VfsContext &
+            VfsResultContext &
             ExecuteResultContext &
             SessionContext,
         )
@@ -570,8 +570,8 @@ export class Policies {
     ctx:
       | CommandContext
       | RouteContext
-      | OpsContext
-      | OpsResultContext
+      | VfsContext
+      | VfsResultContext
       | ExecuteResultContext
       | SessionContext,
     placed = false,
@@ -590,7 +590,7 @@ export class Policies {
    * hide the answers after it; without it the answers end at the first
    * Deny, as the door's do. The built-in hides never answer here, since a
    * hide never surfaces; the built-in placement answers first at
-   * `preExecute` and the built-in mount mode last at `preOps`, as they do
+   * `preExecute` and the built-in mount mode last at `preVfs`, as they do
    * at the door. Mirrors the Python `answers`.
    */
   async answers(
@@ -598,8 +598,8 @@ export class Policies {
     ctx:
       | CommandContext
       | RouteContext
-      | OpsContext
-      | OpsResultContext
+      | VfsContext
+      | VfsResultContext
       | ExecuteResultContext
       | SessionContext,
     every = true,
@@ -628,12 +628,12 @@ export class Policies {
   }
 
   /** Whether the built-in hides answer the op as absent, before any policy is asked. */
-  async hides(ctx: OpsContext): Promise<boolean> {
-    return (await this.hidden.preOps(ctx)) !== null
+  async hides(ctx: VfsContext): Promise<boolean> {
+    return (await this.hidden.preVfs(ctx)) !== null
   }
 
   /**
-   * Fire preOps across the policies; the first Deny wins, else the first
+   * Fire preVfs across the policies; the first Deny wins, else the first
    * Ask, which the door decides how to put. The built-in
    * hides answer before every policy, with a Hide that outranks whatever
    * a policy would say, so a refusal never tells a session a hidden name
@@ -641,19 +641,19 @@ export class Policies {
    * whether or not any policy overrides the hook; `checkHidden` false
    * only for a door that has already answered the hides itself.
    */
-  async preOps(ctx: OpsContext, checkHidden = true): Promise<Hide | Deny | Ask | null> {
+  async preVfs(ctx: VfsContext, checkHidden = true): Promise<Hide | Deny | Ask | null> {
     if (checkHidden) {
-      const hidden = await this.hidden.preOps(ctx)
+      const hidden = await this.hidden.preVfs(ctx)
       if (hidden !== null) return hidden
     }
-    const [action] = await this.fire('preOps', ctx)
+    const [action] = await this.fire('preVfs', ctx)
     return action
   }
 
-  /** Fire postOps; a Deny suppresses the result, Limits merge. */
-  async postOps(ctx: OpsResultContext): Promise<[Deny | null, Limit | null]> {
-    const [action, limit] = await this.fire('postOps', ctx)
-    return [denyOnly('postOps', action), limit]
+  /** Fire postVfs; a Deny suppresses the result, Limits merge. */
+  async postVfs(ctx: VfsResultContext): Promise<[Deny | null, Limit | null]> {
+    const [action, limit] = await this.fire('postVfs', ctx)
+    return [denyOnly('postVfs', action), limit]
   }
 
   /** Fire postExecute; Limits merge to the boundary bound. */

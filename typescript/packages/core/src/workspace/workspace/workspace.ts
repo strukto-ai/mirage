@@ -372,7 +372,7 @@ export class Workspace {
       () => this.mounts().map((entry) => entry.prefix),
       // The doors the runtime world attaches, so a profile policy reads
       // the mounts an agent's program would, and through the same gate,
-      // with its ops stamped as its own for its `preOps` to recognize.
+      // with its ops stamped as its own for its `preVfs` to recognize.
       { bridge: (issuer) => this.buildWorkspaceBridge(issuer), resolver: sandboxResolver },
     )
     this.registry.policies.add(this.scriptPolicy)
@@ -735,7 +735,7 @@ export class Workspace {
   // `offset`/`size` attrs ask for a byte range, matching Python's
   // RuntimeVFS.read. An `issuer` rides every op as the `issuer` kwarg, which the dispatcher
   // lifts onto the op door's context and never forwards to a backend:
-  // it is how a profile policy's own reads reach its `preOps` marked as
+  // it is how a profile policy's own reads reach its `preVfs` marked as
   // its own, as an argument rather than ambient state.
   private buildWorkspaceBridge(issuer?: symbol): BridgeDispatchFn {
     const dispatch = (

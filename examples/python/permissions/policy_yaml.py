@@ -45,7 +45,7 @@ LINES = [
     (
         "reviewer",
         "echo x > /scratch/cold/f",
-        "pre_ops refuses a write at the op door",
+        "pre_vfs refuses a write at the op door",
     ),
     ("reviewer", "export AWS_SECRET=x", "pre_session refuses a credential"),
     (

@@ -20,7 +20,10 @@
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { buffer } from 'node:stream/consumers'
+import { classify } from '@struktoai/mirage-core/errors/classify'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
+import { answered, checked, explanationToDict } from '@struktoai/mirage-server/io_serde'
+import { VFS_CALL_BY_NAME } from '@struktoai/mirage-server/vfs_calls'
 import {
   Outcome,
   Workspace,
@@ -31,7 +34,6 @@ import {
 type Json = Record<string, unknown>
 type Answer = Record<string, unknown>
 type Session = Awaited<ReturnType<Workspace['session']>>
-type Vfs = Session['vfs']
 interface Case {
   id: string
   input: Json
@@ -71,18 +73,6 @@ function prefixOf(path: string): string {
   return path.replace(/\/+$/, '') || '/'
 }
 
-function entries(path: string, names: readonly string[]): string[] {
-  const base = path.replace(/\/+$/, '')
-  return names.map((n) => (n.startsWith('/') ? n : `${base}/${n}`)).sort()
-}
-
-function missing(error: unknown): boolean {
-  const e = error as { code?: string; errno?: string; message?: string }
-  return (
-    e.code === 'ENOENT' || e.errno === 'ENOENT' || /ENOENT|No such file/.test(String(e.message))
-  )
-}
-
 async function build(config: Json, path: string): Promise<Workspace> {
   writeFileSync(path, JSON.stringify(config))
   const args = await configToWorkspaceArgs(loadWorkspaceConfigFile(path))
@@ -106,27 +96,39 @@ async function streamed(session: Session, step: Json): Promise<Answer> {
   return shellAnswer(io.stdoutText, io.stderrText, io.exitCode)
 }
 
-async function bytes(vfs: Vfs, step: Json): Promise<Answer> {
-  const call = step.call as string
-  const path = (step.path as string | undefined) ?? ''
+/** A bytes or explain case's arguments, without the case's own keys. */
+function callParams(step: Json): Json {
+  return Object.fromEntries(
+    Object.entries(step).filter(([key]) => !['call', 'via', 'explain'].includes(key)),
+  )
+}
+
+/**
+ * One VFS call's JSON, or the errno its failure names; the runner narrows
+ * it to the canonical answer, as it does every access's.
+ */
+async function bytes(session: Session, step: Json): Promise<Answer> {
+  const params = callParams(step)
   try {
-    if (call === 'mkdir') await vfs.mkdir(path)
-    else if (call === 'write')
-      await vfs.write(path, Buffer.from(step.data_base64 as string, 'base64'))
-    else if (call === 'read')
-      return { data_base64: Buffer.from(await vfs.read(path)).toString('base64') }
-    else if (call === 'stat') {
-      const stat = await vfs.stat(path)
-      return { type: String(stat.type), size: stat.size }
-    } else if (call === 'readdir') return { entries: entries(path, await vfs.readdir(path)) }
-    else if (call === 'rename') await vfs.rename(step.src as string, step.dst as string)
-    else if (call === 'unlink') await vfs.unlink(path)
-    else throw new Error(`unknown call ${call}`)
+    if (step.call === 'glob') return { paths: await session.glob(params.pattern as string) }
+    const call = VFS_CALL_BY_NAME.get(step.call as string)
+    if (call === undefined) throw new Error(`unknown call ${String(step.call)}`)
+    return (await answered(session, call, await checked(call, params), false)) as Answer
   } catch (error) {
-    if (missing(error)) return { error: 'ENOENT' }
-    throw error
+    const condition = classify(error)
+    if (condition === null) throw error
+    return { errno: condition }
   }
-  return {}
+}
+
+/** One explanation's JSON; the runner narrows it, as it does every access's. */
+async function explain(session: Session, step: Json): Promise<Answer> {
+  if (step.call === 'shell') {
+    return explanationToDict(await session.explain.shell(step.command as string)) as Answer
+  }
+  const call = VFS_CALL_BY_NAME.get(step.call as string)
+  if (call === undefined) throw new Error(`unknown call ${String(step.call)}`)
+  return (await answered(session, call, await checked(call, callParams(step)), true)) as Answer
 }
 
 async function caseAnswer(
@@ -150,7 +152,8 @@ async function caseAnswer(
     const result = await tools.call(step.tool as string, step.arguments as Json)
     return { text: result.content[0]?.text ?? '', is_error: result.isError === true }
   }
-  if (op === 'bytes') return bytes(session.vfs, step)
+  if (op === 'bytes') return bytes(session, step)
+  if (op === 'explain') return explain(session, step)
   if (op === 'cancel') {
     const stop = new AbortController()
     setTimeout(() => stop.abort(), 500)

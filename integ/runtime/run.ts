@@ -43,8 +43,8 @@ import {
   type CommandContext,
   type ExecuteResultContext,
   type MountSpec,
-  type OpsContext,
-  type OpsResultContext,
+  type VfsContext,
+  type VfsResultContext,
   type Policy,
   type RouteContext,
   type BaseVFS,
@@ -260,7 +260,7 @@ function registerRuntimes(entries: Record<string, string>): void {
 // itself (`"sync": true`), so one case runs under both shapes on both
 // hosts. The seam awaits whatever a hook returns, which is what let a
 // plain `def` hook stop failing closed on the python side.
-type HookName = 'preCommand' | 'preExecute' | 'preOps' | 'postOps' | 'postExecute'
+type HookName = 'preCommand' | 'preExecute' | 'preVfs' | 'postVfs' | 'postExecute'
 
 interface TestPolicy<C> {
   readonly hook: HookName
@@ -294,13 +294,13 @@ class PlaceLine implements TestPolicy<RouteContext> {
   }
 }
 
-class LockWrites implements TestPolicy<OpsContext> {
-  readonly hook = 'preOps'
+class LockWrites implements TestPolicy<VfsContext> {
+  readonly hook = 'preVfs'
   private readonly prefix: string
   constructor(spec: PolicySpec) {
     this.prefix = spec.prefix ?? ''
   }
-  decide(ctx: OpsContext): Action | null {
+  decide(ctx: VfsContext): Action | null {
     if (ctx.write && ctx.path.virtual.startsWith(this.prefix)) {
       return { kind: 'deny', reason: 'locked' }
     }
@@ -308,13 +308,13 @@ class LockWrites implements TestPolicy<OpsContext> {
   }
 }
 
-class SealReads implements TestPolicy<OpsContext> {
-  readonly hook = 'preOps'
+class SealReads implements TestPolicy<VfsContext> {
+  readonly hook = 'preVfs'
   private readonly suffix: string
   constructor(spec: PolicySpec) {
     this.suffix = spec.suffix ?? ''
   }
-  decide(ctx: OpsContext): Action | null {
+  decide(ctx: VfsContext): Action | null {
     if (!ctx.write && ctx.path.virtual.endsWith(this.suffix)) {
       return { kind: 'deny', reason: 'sealed' }
     }
@@ -322,13 +322,13 @@ class SealReads implements TestPolicy<OpsContext> {
   }
 }
 
-class RedactReads implements TestPolicy<OpsResultContext> {
-  readonly hook = 'postOps'
+class RedactReads implements TestPolicy<VfsResultContext> {
+  readonly hook = 'postVfs'
   private readonly marker: string
   constructor(spec: PolicySpec) {
     this.marker = spec.marker ?? ''
   }
-  decide(ctx: OpsResultContext): Action | null {
+  decide(ctx: VfsResultContext): Action | null {
     const data = ctx.result instanceof Uint8Array ? DEC.decode(ctx.result) : null
     if (ctx.op === 'read' && data !== null && data.includes(this.marker)) {
       return { kind: 'deny', reason: 'redacted' }
@@ -337,15 +337,15 @@ class RedactReads implements TestPolicy<OpsResultContext> {
   }
 }
 
-class OpReadCap implements TestPolicy<OpsResultContext> {
-  readonly hook = 'postOps'
+class OpReadCap implements TestPolicy<VfsResultContext> {
+  readonly hook = 'postVfs'
   private readonly suffix: string
   private readonly maxBytes: number
   constructor(spec: PolicySpec) {
     this.suffix = spec.suffix ?? ''
     this.maxBytes = spec.max_bytes ?? 0
   }
-  decide(ctx: OpsResultContext): Action | null {
+  decide(ctx: VfsResultContext): Action | null {
     if (ctx.op === 'read' && ctx.path.virtual.endsWith(this.suffix)) {
       return new Limit({ maxBytes: this.maxBytes })
     }
@@ -852,7 +852,7 @@ async function runStep(
   }
   if (step.read_op !== undefined) {
     // Reads through the op door (the surface FUSE and programmatic
-    // access share), where preOps/postOps policies fire.
+    // access share), where preVfs/postVfs policies fire.
     let errnoName = 'NONE'
     let content = ''
     try {

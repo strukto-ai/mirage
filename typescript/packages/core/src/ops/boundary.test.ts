@@ -16,16 +16,16 @@ import { describe, expect, it } from 'vitest'
 import { PolicyDenied } from '../policy/errors.ts'
 import { Policies } from '../policy/policies.ts'
 import type { Policy } from '../policy/base.ts'
-import type { OpsContext } from '../policy/types.ts'
+import type { VfsContext } from '../policy/types.ts'
 import { Limit, MountMode, PathSpec } from '../types.ts'
 import { OpBoundary } from './boundary.ts'
 
 const sealed: Policy = {
-  preOps: (ctx: OpsContext) =>
+  preVfs: (ctx: VfsContext) =>
     ctx.path.virtual.startsWith('/d/sec') ? { kind: 'deny', reason: 'sealed' } : null,
 }
 
-const capped: Policy = { postOps: () => new Limit({ maxBytes: 3 }) }
+const capped: Policy = { postVfs: () => new Limit({ maxBytes: 3 }) }
 
 function path(virtual: string): PathSpec {
   return PathSpec.fromStrPath(virtual)
@@ -46,7 +46,7 @@ describe('OpBoundary', () => {
     await expect(boundary.admit('write', path('/ro/f'), true)).rejects.toThrow(/read-only/)
   })
 
-  it('complete applies the postOps limit', async () => {
+  it('complete applies the postVfs limit', async () => {
     const data = new TextEncoder().encode('abcdef')
     const capped3 = new OpBoundary(new Policies([capped]), '/d/')
     expect(await capped3.complete('read', path('/d/f'), false, data)).toEqual(

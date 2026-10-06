@@ -19,6 +19,7 @@ import { MountMode } from '@struktoai/mirage-core/types'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { Workspace } from '@struktoai/mirage-node'
 import { describe, expect, it } from 'vitest'
+import { VFS_CALLS } from '../vfs_calls.ts'
 import { createMirageMcpServer } from './server.ts'
 
 function mkWs(): Workspace {
@@ -181,6 +182,39 @@ describe('createMirageMcpServer', () => {
     })
     expect(edit.isError).not.toBe(true)
     expect(await workspace.vfs.cat('/doc.txt')).toBe('changed')
+    await client.close()
+    await server.close()
+    await workspace.close()
+  })
+
+  it('serves the VFS calls and explain with allCalls', async () => {
+    const workspace = mkWs()
+    const server = createMirageMcpServer(workspace, { allCalls: true })
+    const client = new Client({ name: 'mirage-test', version: '1.0.0' })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+    const tools = new Map(
+      (await client.listTools()).tools.map((tool) => [
+        tool.name,
+        tool.inputSchema.properties ?? {},
+      ]),
+    )
+    expect(tools.size).toBe(7 + VFS_CALLS.length)
+    expect(tools.get('shell')).toHaveProperty('explain')
+    expect(tools.get('vfs_write')).toHaveProperty('explain')
+    expect(tools.get('read')).not.toHaveProperty('explain')
+    const call = async (name: string, args: Record<string, unknown>) =>
+      client.callTool({ name, arguments: args })
+    await call('vfs_write', { path: '/a', data_base64: 'aGk=' })
+    const read = await call('vfs_read', { path: '/a' })
+    const missing = await call('vfs_read', { path: '/nope' })
+    const line = await call('shell', { command: 'rm /a', explain: true })
+    expect(JSON.parse(firstText(read.content))).toEqual({ data_base64: 'aGk=' })
+    expect(missing.isError).toBe(true)
+    expect(JSON.parse(firstText(missing.content))).toMatchObject({ errno: 'ENOENT' })
+    expect(JSON.parse(firstText(line.content))).toMatchObject({ outcome: 'allow' })
+    expect(await workspace.vfs.exists('/a')).toBe(true)
     await client.close()
     await server.close()
     await workspace.close()

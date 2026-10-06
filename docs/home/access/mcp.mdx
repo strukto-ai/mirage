@@ -106,7 +106,11 @@ The endpoint takes the same bearer token as the [HTTP API](/home/access/http#aut
 | `grep` | Search file contents. |
 | `glob` | Find paths by pattern. |
 
-Their inputs are listed under [Call a tool](/home/access/http#call-a-tool). `read`, `ls`, `grep` and `glob` are marked read-only. A session is offered the ones its [profile](/home/policy-engine#which-door-enforces-what) leaves it: `shell` needs a command the allow list installs, `ls` and `grep` those commands, `write` and `edit` a mount the session may write. A tool it is not offered is `not found`.
+Their inputs are listed under [Call a tool](/home/access/http#call-a-tool). `read`, `ls`, `grep` and `glob` are marked read-only. A session is offered the ones its [profile](/home/policy/policies#which-door-enforces-what) leaves it: `shell` needs a command the allow list installs, `ls` and `grep` those commands, `write` and `edit` a mount the session may write. A tool it is not offered is `not found`.
+
+## VFS calls and explain
+
+Add `?calls=all` to the URL, or `--all-calls` to `mirage mcp`, to also list each of the 24 [VFS calls](/home/access/http#call-the-vfs) as a tool named `vfs_<call>` (`vfs_read`, `vfs_is_dir`), with the same arguments. Each answers the route's JSON as text; a failed one answers `{detail, errno, refusal}` with `isError` set. `shell` and every `vfs_<call>` then take `explain: true`, which answers what the call would do and runs nothing; see [Explain](/home/policy/explain).
 
 ## Sessions
 

@@ -16,7 +16,7 @@ from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from mirage.policy.base import Policy
-from mirage.policy.types import Action, OpsResultContext
+from mirage.policy.types import Action, VfsResultContext
 from mirage.types import Limit, Producer
 
 _DEFAULT_MAX_LINES = 2000
@@ -129,7 +129,7 @@ def resolve_producer(
 class OutputCapPolicy(Policy):
     """The built-in output cap, seeded by the registry.
 
-    Answers post_ops with a mount's per-op bound. Command output is finalized
+    Answers post_vfs with a mount's per-op bound. Command output is finalized
     at its terminal destination using resolve_producer; post_execute remains
     the hook for explicit whole-invocation policies.
 
@@ -142,5 +142,5 @@ class OutputCapPolicy(Policy):
     def __init__(self, override_for: OverrideLookup) -> None:
         self._override_for = override_for
 
-    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
         return self._override_for(ctx.prefix, ctx.op)

@@ -28,8 +28,8 @@ import { PolicyDenied } from './errors.ts'
 import {
   Policies,
   postExecuteGate,
-  postOpsGate,
-  preOpsGate,
+  postVfsGate,
+  preVfsGate,
   describeRefusal,
   saysWhy,
   refusalOf,
@@ -45,8 +45,8 @@ import type {
   Deny,
   ExecuteResultContext,
   CommandRule,
-  OpsContext,
-  OpsResultContext,
+  VfsContext,
+  VfsResultContext,
   Route,
 } from './types.ts'
 
@@ -82,7 +82,7 @@ class IllegalReturn implements Policy {
 const silent: Policy = {}
 
 class DenyReadOps implements Policy {
-  preOps(ctx: OpsContext): Action | null {
+  preVfs(ctx: VfsContext): Action | null {
     if (ctx.op === 'read') return { kind: 'deny', reason: 'no reads' }
     return null
   }
@@ -109,13 +109,13 @@ class DenyRm implements Policy {
 }
 
 class AskOnOps implements Policy {
-  preOps(_ctx: OpsContext): Action | null {
+  preVfs(_ctx: VfsContext): Action | null {
     return { kind: 'ask', reason: 'cannot wait here' }
   }
 }
 
 class DenyBigResults implements Policy {
-  postOps(ctx: OpsResultContext): Action | null {
+  postVfs(ctx: VfsResultContext): Action | null {
     if (ctx.result instanceof Uint8Array && ctx.result.length > 8) {
       return { kind: 'deny', reason: 'result too large' }
     }
@@ -124,13 +124,13 @@ class DenyBigResults implements Policy {
 }
 
 class SuppressCapacity implements Policy {
-  postOps(ctx: OpsResultContext): Action | null {
+  postVfs(ctx: VfsResultContext): Action | null {
     return ctx.op === 'statfs' ? { kind: 'deny', reason: 'no capacity' } : null
   }
 }
 
 class ReadOnlyProd implements Policy {
-  preOps(ctx: OpsContext): Action | null {
+  preVfs(ctx: VfsContext): Action | null {
     if (ctx.write && ctx.path.virtual.startsWith('/data/prod/')) {
       return { kind: 'deny', reason: 'prod is frozen' }
     }
@@ -246,13 +246,13 @@ describe('Policies', () => {
     await expect(policies.preCommand(ctx('ls'))).rejects.toThrow(/IllegalReturn/)
   })
 
-  it('preOps first deny wins and wants() gates', async () => {
+  it('preVfs first deny wins and wants() gates', async () => {
     const policies = new Policies()
-    expect(policies.wants('preOps')).toBe(false)
+    expect(policies.wants('preVfs')).toBe(false)
     policies.add(new DenyReadOps())
-    expect(policies.wants('preOps')).toBe(true)
-    expect(policies.wants('postOps')).toBe(false)
-    const deny = await policies.preOps({
+    expect(policies.wants('preVfs')).toBe(true)
+    expect(policies.wants('postVfs')).toBe(false)
+    const deny = await policies.preVfs({
       op: 'read',
       path: path('/data/x'),
       write: false,
@@ -260,18 +260,18 @@ describe('Policies', () => {
     })
     expect(deny).toEqual({ kind: 'deny', reason: 'no reads', policy: 'DenyReadOps' })
     expect(
-      await policies.preOps({ op: 'write', path: path('/data/x'), write: true, prefix: '/data/' }),
+      await policies.preVfs({ op: 'write', path: path('/data/x'), write: true, prefix: '/data/' }),
     ).toBeNull()
   })
 
-  it('preOpsGate throws PolicyDenied with the EACCES stamp', async () => {
+  it('preVfsGate throws PolicyDenied with the EACCES stamp', async () => {
     const policies = new Policies()
     policies.add(new DenyReadOps())
-    await expect(preOpsGate(policies, 'read', path('/data/x'), false, '/data/')).rejects.toThrow(
+    await expect(preVfsGate(policies, 'read', path('/data/x'), false, '/data/')).rejects.toThrow(
       PolicyDenied,
     )
     try {
-      await preOpsGate(policies, 'read', path('/data/x'), false, '/data/')
+      await preVfsGate(policies, 'read', path('/data/x'), false, '/data/')
     } catch (err) {
       expect((err as PolicyDenied).code).toBe('EACCES')
       expect((err as PolicyDenied).virtualPath).toBe('/data/x')
@@ -279,15 +279,15 @@ describe('Policies', () => {
       expect((err as PolicyDenied).refusal?.reason).toBe('no reads')
     }
     // No opinion on writes: the gate passes silently.
-    await preOpsGate(policies, 'write', path('/data/x'), true, '/data/')
+    await preVfsGate(policies, 'write', path('/data/x'), true, '/data/')
   })
 
-  it('postOpsGate suppresses the result', async () => {
+  it('postVfsGate suppresses the result', async () => {
     const policies = new Policies()
     policies.add(new DenyBigResults())
-    await postOpsGate(policies, 'read', path('/data/x'), false, '/data/', new Uint8Array(4))
+    await postVfsGate(policies, 'read', path('/data/x'), false, '/data/', new Uint8Array(4))
     await expect(
-      postOpsGate(policies, 'read', path('/data/x'), false, '/data/', new Uint8Array(64)),
+      postVfsGate(policies, 'read', path('/data/x'), false, '/data/', new Uint8Array(64)),
     ).rejects.toMatchObject({ refusal: { reason: 'result too large' } })
   })
 
@@ -309,7 +309,7 @@ describe('Policies', () => {
 })
 
 describe('workspace policies', () => {
-  it('a postOps deny suppresses a capacity reply', async () => {
+  it('a postVfs deny suppresses a capacity reply', async () => {
     const ws = executableWorkspace()
     try {
       await ws.shell('touch /data/f')
@@ -455,9 +455,9 @@ describe('workspace policies', () => {
     }
   })
 
-  it('a preOps policy holds on the shell door', async () => {
+  it('a preVfs policy holds on the shell door', async () => {
     // touch routes through the dispatcher, not handleCommand; a
-    // preOps-only policy must still refuse it with GNU wording.
+    // preVfs-only policy must still refuse it with GNU wording.
     const ws = executableWorkspace()
     try {
       ws.policies.add(new ReadOnlyProd())
@@ -490,13 +490,13 @@ describe('workspace policies', () => {
 })
 
 class CapFour implements Policy {
-  postOps(_ctx: OpsResultContext): Action | null {
+  postVfs(_ctx: VfsResultContext): Action | null {
     return new Limit({ maxBytes: 4 })
   }
 }
 
 class CapTwo implements Policy {
-  postOps(_ctx: OpsResultContext): Action | null {
+  postVfs(_ctx: VfsResultContext): Action | null {
     return new Limit({ maxBytes: 2 })
   }
 }
@@ -514,7 +514,7 @@ class CapLines implements Policy {
 }
 
 describe('Limit', () => {
-  const opsCtx = (): OpsResultContext => ({
+  const opsCtx = (): VfsResultContext => ({
     op: 'read',
     path: path('/data/x'),
     write: false,
@@ -522,19 +522,19 @@ describe('Limit', () => {
     result: new TextEncoder().encode('payload'),
   })
 
-  it('postOps limits merge to the tightest', async () => {
+  it('postVfs limits merge to the tightest', async () => {
     const policies = new Policies()
     policies.add(new CapFour())
     policies.add(new CapTwo())
-    const [deny, bound] = await policies.postOps(opsCtx())
+    const [deny, bound] = await policies.postVfs(opsCtx())
     expect(deny).toBeNull()
     expect(bound?.maxBytes).toBe(2)
   })
 
-  it('postOpsGate returns the merged bound', async () => {
+  it('postVfsGate returns the merged bound', async () => {
     const policies = new Policies()
     policies.add(new CapFour())
-    const bound = await postOpsGate(policies, 'read', path('/data/x'), false, '/data/', null)
+    const bound = await postVfsGate(policies, 'read', path('/data/x'), false, '/data/', null)
     expect(bound?.maxBytes).toBe(4)
   })
 
@@ -569,7 +569,7 @@ describe('Limit', () => {
     }
   })
 
-  it('a postOps limit caps the op door', async () => {
+  it('a postVfs limit caps the op door', async () => {
     const ws = executableWorkspace()
     try {
       ws.policies.add(new CapFour())
@@ -601,7 +601,7 @@ class Boom implements Policy {
 }
 
 class DenyReads implements Policy {
-  postOps(ctx: OpsResultContext): Action | null {
+  postVfs(ctx: VfsResultContext): Action | null {
     return ctx.op === 'read' ? { kind: 'deny', reason: 'reads are suppressed' } : null
   }
 }
@@ -645,7 +645,7 @@ describe('Limit end to end', () => {
     }
   })
 
-  it('a postOps deny beats a limit', async () => {
+  it('a postVfs deny beats a limit', async () => {
     const ws = executableWorkspace()
     try {
       ws.policies.add(new CapFour())
@@ -732,7 +732,7 @@ describe('Ask in the chain', () => {
     // A door that cannot put the question (no ledger) refuses it, in the
     // deny voice, with the reason on the record.
     const policies = new Policies([new AskOnOps()])
-    const refused = await preOpsGate(policies, 'write', path('/data/x'), true, '/data/').catch(
+    const refused = await preVfsGate(policies, 'write', path('/data/x'), true, '/data/').catch(
       (err: unknown) => err,
     )
     expect(refused).toBeInstanceOf(PolicyDenied)

@@ -17,7 +17,7 @@ import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { parseSessionProfile } from '../policy/profile.ts'
-import type { Action, OpsContext, OpsResultContext, Policy } from '../policy/index.ts'
+import type { Action, VfsContext, VfsResultContext, Policy } from '../policy/index.ts'
 import { runWithSession } from '../context/session_context.ts'
 import { getTestParser, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
 import { Session } from './workspace/handle.ts'
@@ -25,7 +25,7 @@ import { Workspace } from './workspace/workspace.ts'
 
 /** Refuse the unlink of one exact path, whatever door asked. */
 class DenyRemnantUnlink implements Policy {
-  preOps(ctx: OpsContext): Action | null {
+  preVfs(ctx: VfsContext): Action | null {
     if (ctx.op === 'unlink' && ctx.path.virtual === '/a/d/sec/k') {
       return { kind: 'deny', reason: 'protected' }
     }
@@ -35,7 +35,7 @@ class DenyRemnantUnlink implements Policy {
 
 /** Refuse every unlink once it has run. */
 class DenyUnlinkAfter implements Policy {
-  postOps(ctx: OpsResultContext): Action | null {
+  postVfs(ctx: VfsResultContext): Action | null {
     return ctx.op === 'unlink' ? { kind: 'deny', reason: 'too late' } : null
   }
 }
@@ -670,7 +670,7 @@ describe('the ops door against hides', () => {
 
   it('a policy denied remnant keeps the refusal', async () => {
     // The gate that admitted the rmdir judged the directory; each
-    // cascade deletion answers preOps with its own child path, so a
+    // cascade deletion answers preVfs with its own child path, so a
     // policy that protects the hidden file refuses its unlink, the
     // cascade folds the denial into the original not-empty refusal,
     // and the protected content survives.
@@ -702,8 +702,8 @@ describe('the ops door against hides', () => {
     expect(stdoutStr(kept)).toBe('k\n')
   })
 
-  it('a postOps deny does not strand the cascade', async () => {
-    // A deletion is done by the time postOps could speak, so the cascade
+  it('a postVfs deny does not strand the cascade', async () => {
+    // A deletion is done by the time postVfs could speak, so the cascade
     // never asks it: the rmdir takes the hidden remnant and the directory,
     // rather than refusing with a child already gone.
     const parser = await getTestParser()

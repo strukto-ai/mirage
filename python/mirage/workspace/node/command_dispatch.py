@@ -640,7 +640,7 @@ async def _run_argv(
     # so its own I/O can ask about the entries the gate did not see and
     # a nested line binds its own (see ``Admitted``). The workspace's
     # policies bind in the same window, whether or not a gate judged the
-    # line, so the command tier's policy guard can fire pre_ops for the
+    # line, so the command tier's policy guard can fire pre_vfs for the
     # backend I/O a handler performs.
     ptoken = set_op_policies(registry.policies)
     try:

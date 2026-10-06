@@ -455,7 +455,7 @@ export interface SessionCommandsQuery {
  * One profile's policy, as a session carries it: the program, the
  * engine it runs on, and the profile it speaks for. Compiled off the
  * profile's policy block beside the admission rules; `ScriptPolicy`
- * calls the admission hooks it defines (`preCommand`, `preOps`,
+ * calls the admission hooks it defines (`preCommand`, `preVfs`,
  * `preSession`) with the door's facts, and a hook returns allow (no
  * opinion), deny, or at the command gate ask. `profile` is
  * the profile's name, which the policy reads as `ctx.profile`; empty
@@ -532,7 +532,7 @@ export interface CommandContext {
   walks?: boolean
 }
 
-/** Facts about one VFS op, as preOps hooks see it. Fires at the op
+/** Facts about one VFS op, as preVfs hooks see it. Fires at the op
  * door (the dispatcher every access routes through, FUSE included),
  * before any backend or cache I/O. `sessionId` is the session the door
  * serves, set from the session it already resolves for hides and
@@ -544,7 +544,7 @@ export interface CommandContext {
  * through ambient context, so no concurrent op can be taken for it;
  * python marks the same read with a task-local ContextVar, which a
  * browser has no twin of. */
-export interface OpsContext {
+export interface VfsContext {
   op: string
   path: PathSpec
   write: boolean
@@ -560,9 +560,9 @@ export interface OpsContext {
   subtree?: boolean
 }
 
-/** One completed VFS op, as postOps hooks see it; a Deny suppresses
+/** One completed VFS op, as postVfs hooks see it; a Deny suppresses
  * the result. */
-export interface OpsResultContext {
+export interface VfsResultContext {
   op: string
   path: PathSpec
   write: boolean
@@ -586,7 +586,7 @@ export interface ExecuteResultContext {
 /**
  * Facts about one session-state mutation, as preSession hooks see it.
  * Fires on the session plane before the write lands, so it holds
- * whichever tier asked. Not an OpsContext: a session key is not a
+ * whichever tier asked. Not an VfsContext: a session key is not a
  * path, and a path-scoped policy must never receive one dressed as a
  * path and match it by accident. `value` is null for an unset.
  * `sessionId` says which session is writing, so a policy can scope a
@@ -602,14 +602,14 @@ export interface SessionContext {
 
 export const VALIDITY: Readonly<
   Record<
-    'preCommand' | 'preExecute' | 'preOps' | 'postOps' | 'postExecute' | 'preSession',
+    'preCommand' | 'preExecute' | 'preVfs' | 'postVfs' | 'postExecute' | 'preSession',
     ReadonlySet<string>
   >
 > = {
   preCommand: new Set(['deny', 'ask']),
   preExecute: new Set(['deny', 'route']),
-  preOps: new Set(['deny', 'ask']),
-  postOps: new Set(['deny', 'limit']),
+  preVfs: new Set(['deny', 'ask']),
+  postVfs: new Set(['deny', 'limit']),
   postExecute: new Set(['limit']),
   preSession: new Set(['deny']),
 }
@@ -745,11 +745,11 @@ export interface ShellExplanation extends Explanation {
 
 /**
  * A VFS call, explained: the POSIX-shaped call on `session.vfs` (`read`,
- * `pwrite`, `rename`, `setxattr`, ...) and what its gate (`preOps`) would
+ * `pwrite`, `rename`, `setxattr`, ...) and what its gate (`preVfs`) would
  * answer. Mirrors the Python VfsExplanation.
  */
 export interface VfsExplanation extends Explanation {
-  /** Every policy's answer to the call (`preOps`). */
+  /** Every policy's answer to the call (`preVfs`). */
   readonly answers: readonly (Deny | Ask)[]
   /** The call's name. */
   readonly call: string

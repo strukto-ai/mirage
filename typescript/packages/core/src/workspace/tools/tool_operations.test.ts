@@ -23,7 +23,7 @@ import { MirageToolOperations, TOOL_NAMES } from './tool_operations.ts'
 import { Outcome } from '../../policy/types.ts'
 import type { Policy } from '../../policy/base.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
-import type { OpsContext } from '../../policy/types.ts'
+import type { VfsContext } from '../../policy/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import { RAMWorkspaceStateStore } from '../store/ram.ts'
 
@@ -249,7 +249,7 @@ describe('a session', () => {
   it('answers a file refused down to its stat as a tool error', async () => {
     await ws.shell('mkdir /d && echo l > /d/locked.txt && echo o > /d/open.txt')
     const lockedFile: Policy = {
-      preOps(ctx: OpsContext) {
+      preVfs(ctx: VfsContext) {
         return ctx.path.virtual === '/d/locked.txt' ? { kind: 'deny', reason: 'locked' } : null
       },
     }
