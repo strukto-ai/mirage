@@ -213,3 +213,13 @@ async def test_a_profile_narrows_the_tool_list():
         with pytest.raises(MCPError) as caught:
             await client.call_tool("write", {"path": "/x", "content": "y"})
     assert caught.value.message == "Tool write not found"
+
+
+@pytest.mark.asyncio
+async def test_the_tool_list_is_read_on_every_request():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    # The server is built before the session exists, as it is for a
+    # stored session that loads later: the list still follows its profile.
+    server = MirageMcpServer(ws, session_id="late")
+    ws.create_session("late", profile={"mounts": {"/": "read"}})
+    assert "write" not in [t.name for t in await list_tools(server)]

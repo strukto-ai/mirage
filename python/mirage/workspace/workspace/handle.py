@@ -19,10 +19,10 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.ops.ops import Ops
 from mirage.workspace.session import SessionState
+from mirage.workspace.workspace.explainer import Explainer
 
 if TYPE_CHECKING:
     from mirage.policy.decisions import Decisions
-    from mirage.policy.types import Explanation
     from mirage.workspace.mount.registry import MountEntry
     from mirage.workspace.tools.file_version import FileVersionTracker
     from mirage.workspace.tools.tool_operations import MirageToolOperations
@@ -33,7 +33,8 @@ class Session:
     """One session's doors, bound together.
 
     ``shell`` runs a line as the session, ``vfs`` is the op facade run
-    as it and ``tools`` the agent tools over both, so a host holds one
+    as it, ``tools`` the agent tools over both and ``explain`` the same
+    doors as a dry run, so a host holds one
     object per agent and every door answers under the same profile:
     hides, mount modes, grants and standing decisions. Nothing is
     stored here; the session record stays with the session manager and
@@ -75,6 +76,12 @@ class Session:
         if self._id is None:
             return self._ws.vfs
         return self._ws.vfs._for_session(self._id)
+
+    @property
+    def explain(self) -> Explainer:
+        """This session's calls explained instead of run, under the same
+        names: ``explain.shell(line)``, ``explain.vfs.<op>(...)``."""
+        return Explainer(self._ws, self._id, self.vfs)
 
     @property
     def tools(self) -> "MirageToolOperations":
@@ -127,25 +134,6 @@ class Session:
             record=record,
             runtime=runtime,
         )
-
-    async def explain(self, line: str) -> list["Explanation"]:
-        """What a line would do as this session, without running any of
-        it; ``Workspace.explain`` with the session fixed.
-
-        Args:
-            line (str): the line to judge, as an agent would type it.
-        """
-        return await self._ws.explain(line, self.session_id)
-
-    async def explain_op(self, op: str, path: str) -> "Explanation":
-        """What the op door would answer one op as this session;
-        ``Workspace.explain_op`` with the session fixed.
-
-        Args:
-            op (str): the op's name (``read``, ``write``, ...).
-            path (str): the path.
-        """
-        return await self._ws.explain_op(op, path, self.session_id)
 
     async def glob(self, pattern: str) -> list[str]:
         """The paths a pattern matches as this session;

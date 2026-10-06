@@ -1488,46 +1488,6 @@ async def test_explain_shows_every_policys_answer_in_chain_order():
             126,
             "no",
         )
-        assert await Session(ws, None).explain("rm /data/x") == [expl]
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_explain_op_reads_one_op_as_the_door_would():
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    try:
-        ws.create_session(
-            "agent",
-            profile={
-                "mounts": {"/data": "read"},
-                "paths": {"hide": ["/data/vault"]},
-                "commands": {
-                    "deny": [{"reason": "sealed", "paths": ["/data/sec/*"]}],
-                    "ask": [{"reason": "nod", "paths": ["/data/out/*"]}],
-                },
-            },
-        )
-        sealed = await ws.explain_op("read", "/data/sec/k", "agent")
-        assert (sealed.outcome, sealed.exit_code) == (Outcome.DENY, 1)
-        assert sealed.refusal is not None and sealed.refusal.reason == "sealed"
-        assert sealed.answers == (Deny("sealed", policy="PermissionsPolicy"),)
-        asked = await ws.explain_op("read", "/data/out/a", "agent")
-        assert (asked.outcome, asked.exit_code) == (Outcome.ASK, 1)
-        assert asked.refusal is not None and asked.refusal.kind == "pending"
-        # A dry run records no question.
-        assert ws.decisions.pending("agent") == ()
-        # The mode raises its own error, so no record rides it.
-        written = await ws.explain_op("write", "/data/x", "agent")
-        assert (written.exit_code, written.refusal) == (1, None)
-        assert written.answers[-1].policy == "MountModePolicy"
-        # A hidden path is no path to any policy.
-        hidden = await ws.explain_op("read", "/data/vault/k", "agent")
-        assert (hidden.outcome, hidden.answers, hidden.paths) == (
-            Outcome.ALLOW,
-            (),
-            (),
-        )
-        assert (await ws.explain_op("read", "/data/x", "agent")).exit_code == 0
+        assert await Session(ws, None).explain.shell("rm /data/x") == [expl]
     finally:
         await ws.close()

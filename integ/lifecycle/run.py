@@ -128,6 +128,7 @@ def explained(expl: Explanation) -> dict[str, Any]:
         "placement": answered(expl.placement),
         "runtime": expl.runtime,
         "refusal": expl.refusal.kind if expl.refusal is not None else None,
+        "error": expl.error,
     }
 
 
@@ -329,14 +330,15 @@ async def action(
                 Scope(step.get("scope", "once")),
             )
     elif op == "explain":
-        said = await ws.explain(step["command"], step.get("session", ""))
-        return [explained(expl) for expl in said]
-    elif op == "explain_op":
-        return explained(
-            await ws.explain_op(
-                step["name"], step["path"], step.get("session", "")
-            )
-        )
+        explain = Session(ws, step.get("session")).explain
+        return [explained(e) for e in await explain.shell(step["command"])]
+    elif op == "explain_vfs":
+        vfs = Session(ws, step.get("session")).explain.vfs
+        args = [
+            a.encode() if i and step["name"] in ("write", "append") else a
+            for i, a in enumerate(step["args"])
+        ]
+        return explained(await getattr(vfs, step["name"])(*args))
     elif op == "close":
         await ws.close()
     else:

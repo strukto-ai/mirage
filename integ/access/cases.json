@@ -248,6 +248,8 @@
     {"id": "creates_the_workspace", "input": {"step": "create", "id": "w"}, "expect": {"text": "w"}},
     {"id": "writes_a_file", "input": {"step": "shell", "id": "w", "command": "echo x > /f"}, "expect": {"text": "", "is_error": false}},
     {"id": "creates_an_asking_session", "input": {"step": "session_create", "id": "w", "session": "agent", "profile": "asker"}, "expect": {"text": "agent"}},
+    {"id": "explain_says_the_line_would_ask", "input": {"step": "explain", "id": "w", "session": "agent", "command": "rm /f"}, "expect": {"text": "ask 126"}},
+    {"id": "the_dry_run_asked_nothing", "input": {"step": "asks", "id": "w"}, "expect": {"text": ""}},
     {"id": "the_guarded_line_asks", "input": {"step": "shell", "id": "w", "session": "agent", "command": "rm /f"}, "expect": {"text": "rm: Permission denied\n", "is_error": true}},
     {"id": "lists_the_ask", "input": {"step": "asks", "id": "w"}, "expect": {"text": "removal needs sign-off"}},
     {"id": "allows_it", "input": {"step": "allow", "id": "w"}, "expect": {"text": "allowed"}},

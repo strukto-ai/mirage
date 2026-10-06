@@ -246,18 +246,20 @@ The paths a pattern matches, as the session sees them.
 paths = await session.glob("/src/**/*.py")
 ```
 
-### session.explain, session.explain_op
+### session.explain
 
 ```python
-await session.explain(line) -> list[Explanation]
-await session.explain_op(op, path) -> Explanation
+await session.explain.shell(line) -> list[Explanation]
+await session.explain.vfs.<op>(...) -> Explanation
 ```
 
-What a line, or one op, would do as the session, without running it: the refusal the agent would read, every policy's answer and the line's placement. See [Dry runs](/home/permissions#dry-runs).
+The session's doors as a dry run, under the same names: what a line, or one file op, would do as the session, without running it. A line gets the refusal the agent would read, every policy's answer and the line's placement; an op gets every policy's answer and the error the call would raise. See [Dry runs](/home/permissions#dry-runs).
 
 ```python
-[expl] = await session.explain("rm /data/x")
+[expl] = await session.explain.shell("rm /data/x")
 print(expl.exit_code, [a.policy for a in expl.answers])
+op = await session.explain.vfs.write("/data/x", b"hi")
+print(op.error, [a.policy for a in op.answers])
 ```
 
 ### session.vfs

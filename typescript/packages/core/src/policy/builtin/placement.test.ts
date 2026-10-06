@@ -32,11 +32,14 @@ function line(text: string): RouteContext {
 
 describe('PlacementPolicy', () => {
   it('a route verdict is a placement answer', async () => {
-    const policy = new PlacementPolicy((ctx) => {
-      if (ctx.line.includes('heavy')) return 'beta'
-      if (ctx.line.includes('secret')) return { deny: 'secrets stay put' }
-      return null
-    }, [])
+    const policy = new PlacementPolicy(
+      (ctx) => {
+        if (ctx.line.includes('heavy')) return 'beta'
+        if (ctx.line.includes('secret')) return { deny: 'secrets stay put' }
+        return null
+      },
+      () => [],
+    )
     expect(await policy.preExecute(line('python3 heavy'))).toEqual({
       kind: 'route',
       runtime: 'beta',
@@ -48,7 +51,7 @@ describe('PlacementPolicy', () => {
     expect(await policy.preExecute(line('echo hi'))).toBeNull()
     // A mistake in the route policy is the deployment's, not a refusal.
     await expect(
-      new PlacementPolicy((() => ({ runtme: 'x' })) as unknown as RoutePolicy, []).preExecute(
+      new PlacementPolicy((() => ({ runtme: 'x' })) as unknown as RoutePolicy, () => []).preExecute(
         line('echo hi'),
       ),
     ).rejects.toThrow(/unknown policy verdict keys/)

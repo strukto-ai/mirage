@@ -421,29 +421,55 @@ real operands.
 
 ## Dry runs
 
-`ws.explain(line, session_id)` (or `session.explain(line)` on a
-session's handle) runs the same gate without running the line: one
-`Explanation` per command, with the outcome, the rule that spoke and
-where it was written, the matched operand, and the exact `exit_code` and
-`stderr` the agent would see, byte-identical to the real refusal. What a
-host reads in an explanation and what an agent sees at the prompt cannot
-disagree, because they are the same computation. Each explanation also
-carries every policy's answer to the command in chain order (`answers`:
-the document's rules answer as `PermissionsPolicy`, a coded policy by
-its class name), every answer at the placement stage (`placement`, the
-route policy's as `PlacementPolicy`) and the runtime that would serve
-the command (`runtime`, empty when the workspace runs it itself). A
-placement that refuses the line refuses it on its first command.
+`session.explain` is a session's doors as a dry run, under the same
+names: `session.explain.shell(line)` is `session.shell(line)` and
+`session.explain.vfs.<op>(...)` is `session.vfs.<op>(...)`, each taking
+the arguments the real call does. Nothing runs: no command, no backend
+or cache read, no grant spent and no question recorded.
 
-`ws.explain_op(op, path, session_id)` (`ws.explainOp` in TypeScript,
-`session.explain_op(op, path)` on a handle) is the single-op form, for
-the doors that see ops and no command: what the op door would answer a
-`read`, `write` or `unlink` of one path, with `exit_code` 1 when it
-would refuse the op and `stderr` empty, since an op has no terminal.
+```python
+explain = (await ws.session("reviewer")).explain
+[expl] = await explain.shell("rm /data/x")
+op = await explain.vfs.write("/vault/key", b"x")
+```
 
-A dry run records no question and spends no grant, and a hidden path is
-no path to any of it: it explains as a line or op that runs, so no
-explanation ever names a hide.
+```typescript
+const explain = (await ws.session('reviewer')).explain
+const [expl] = await explain.shell('rm /data/x')
+const op = await explain.vfs.write('/vault/key', 'x')
+```
+
+`explain.shell` (also `ws.explain(line, session_id)`) runs the gate
+without running the line: one `Explanation` per command, with the
+outcome, the rule that spoke and where it was written, the matched
+operand, and the exact `exit_code` and `stderr` the agent would see,
+byte-identical to the real refusal. What a host reads in an explanation
+and what an agent sees at the prompt cannot disagree, because they are
+the same computation. Each explanation also carries every policy's
+answer to the command in chain order (`answers`: the document's rules
+answer as `PermissionsPolicy`, a coded policy by its class name), every
+answer at the placement stage (`placement`, the route policy's as
+`PlacementPolicy`) and the runtime that would serve the command
+(`runtime`, empty when the workspace runs it itself). A line a rule
+refuses or asks about is never placed, and a placement that refuses the
+line refuses it on its first command.
+
+`explain.vfs` is for the doors that see ops and no command (the file
+tools, `session.vfs`, FUSE). Each op walks the real door, so the path is
+resolved and links are followed as the call would, and stops at the op
+gate: `command` is the op, `argv` its paths, `answers` every policy's
+answer, and `error` the error the call would raise (`EACCES`, `EROFS`),
+empty when it would run. A rename is judged at its source and its
+destination.
+
+With no policy speaking, a line explains as one that runs (`exit_code`
+0, `answers` empty) and an op as one that runs (`error` empty). A
+hidden path is no path to any of it: it explains like a path no policy
+refuses, so no explanation ever names a hide. Whether a path exists is
+not a dry run's question either. Over the server, `POST
+/v1/workspaces/{id}/explain/shell`, `mirage workspace explain ID LINE`
+and the RPC methods `explain/shell` and `explain/vfs/<op>` are the same
+dry runs.
 
 ## The worked example
 

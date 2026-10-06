@@ -450,7 +450,7 @@ export class Decisions {
    * included. Mirrors Python's `resolve_op`.
    */
   async resolveOp(ctx: OpsContext, ask: Ask): Promise<Deny | Pending | null> {
-    const call = getOpCall()
+    const call = getOpCall(this)
     const claimant: Claimant | null =
       call === null
         ? null
@@ -476,13 +476,15 @@ export class Decisions {
    * claimed for the call, so every op of the call on that path runs on it
    * (a write tool reads the file back to stamp its version), and the
    * call's end spends it. A call made inside another runs in the outer
-   * one. Mirrors Python's `within_call`.
+   * one; a call another ledger runs (a host callback reaching a second
+   * workspace mid-call) is no call of this one's. Mirrors Python's
+   * `within_call`.
    */
   async withinCall<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
-    if (getOpCall() !== null) return run()
+    if (getOpCall(this) !== null) return run()
     const handed: HandOff = { claimed: [], parent: null, origin: null }
     try {
-      return await runWithOpCall(handed, run)
+      return await runWithOpCall(this, handed, run)
     } finally {
       await this.revoke(sessionId, handed)
     }

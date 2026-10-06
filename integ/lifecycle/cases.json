@@ -3765,7 +3765,7 @@
       ]
     },
     {
-      "id": "explain_shows_every_answer_and_the_op_form",
+      "id": "explain_shows_every_answer_and_the_vfs_form",
       "settings": {
         "mode": "write",
         "mounts": {
@@ -3867,14 +3867,15 @@
           }
         },
         {
-          "op": "explain_op",
+          "op": "explain_vfs",
           "session": "agent",
           "name": "read",
-          "path": "/sec/k",
+          "args": ["/sec/k"],
           "expect": {
             "value": {
               "outcome": "deny",
-              "exit_code": 1,
+              "exit_code": 0,
+              "error": "EACCES",
               "refusal": "deny",
               "answers": [
                 {
@@ -3887,15 +3888,28 @@
           }
         },
         {
-          "op": "explain_op",
+          "op": "explain_vfs",
           "session": "agent",
-          "name": "read",
-          "path": "/out/a",
+          "name": "write",
+          "args": ["/out/a", "x"],
           "expect": {
             "value": {
               "outcome": "ask",
-              "exit_code": 1,
+              "error": "EACCES",
               "refusal": "pending"
+            }
+          }
+        },
+        {
+          "op": "explain_vfs",
+          "session": "agent",
+          "name": "rename",
+          "args": ["/a", "/sec/b"],
+          "expect": {
+            "value": {
+              "command": "rename",
+              "outcome": "deny",
+              "error": "EACCES"
             }
           }
         },
@@ -3906,16 +3920,76 @@
           }
         },
         {
-          "op": "explain_op",
+          "op": "explain_vfs",
           "session": "agent",
           "name": "read",
-          "path": "/vault/k",
+          "args": ["/vault/k"],
           "expect": {
             "value": {
               "outcome": "allow",
-              "exit_code": 0,
+              "error": "",
               "answers": []
             }
+          }
+        }
+      ]
+    },
+    {
+      "id": "an_ask_comes_before_placement",
+      "note": "A line a rule asks about is not shown to a placing policy: the question is recorded and the line waits on it, rather than a placement deny answering first.",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/": {
+            "vfs": "ram",
+            "config": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "session",
+          "id": "agent",
+          "profile": {
+            "commands": {
+              "ask": [
+                {
+                  "reason": "nod",
+                  "commands": ["rm"]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "op": "register_policy",
+          "id": "lines",
+          "lines": ["rm"],
+          "reason": "routed away"
+        },
+        {
+          "op": "exec",
+          "session": "agent",
+          "command": "rm /x",
+          "expect": {
+            "value": {
+              "exit_code": 126,
+              "stderr": "rm: Permission denied\n",
+              "refusal": "nod"
+            }
+          }
+        },
+        {
+          "op": "asks",
+          "session": "agent",
+          "expect": {
+            "value": [
+              {
+                "command": "rm",
+                "paths": ["/x"],
+                "reason": "nod"
+              }
+            ]
           }
         }
       ]

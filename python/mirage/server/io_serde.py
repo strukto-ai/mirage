@@ -16,6 +16,8 @@ from dataclasses import asdict
 from typing import Any
 
 from mirage.io.types import IOResult
+from mirage.policy.types import Ask, Deny, Explanation, Route
+from mirage.types import JsonValue
 
 
 async def io_result_to_dict(result: IOResult | None) -> dict[str, Any]:
@@ -40,3 +42,49 @@ async def io_result_to_dict(result: IOResult | None) -> dict[str, Any]:
             ),
         }
     return {"kind": "raw", "value": str(result)}
+
+
+def explanation_to_dict(expl: Explanation) -> dict[str, JsonValue]:
+    """An explanation as the server's doors answer it.
+
+    Args:
+        expl (Explanation): what one command or one op would do.
+
+    Returns:
+        dict[str, JsonValue]: serializable response payload.
+    """
+    return {
+        "command": expl.command,
+        "argv": list(expl.argv),
+        "outcome": expl.outcome.value,
+        "reason": expl.reason,
+        "source": expl.source,
+        "matched_path": expl.matched_path,
+        "paths": list(expl.paths),
+        "exit_code": expl.exit_code,
+        "stderr": expl.stderr,
+        "refusal": asdict(expl.refusal) if expl.refusal is not None else None,
+        "answers": [answer_to_dict(a) for a in expl.answers],
+        "placement": [answer_to_dict(a) for a in expl.placement],
+        "runtime": expl.runtime,
+        "error": expl.error,
+    }
+
+
+def answer_to_dict(action: Deny | Ask | Route) -> dict[str, JsonValue]:
+    """One policy's answer as the server's doors carry it.
+
+    Args:
+        action (Deny | Ask | Route): the answer.
+    """
+    if isinstance(action, Route):
+        return {
+            "kind": "route",
+            "runtime": action.runtime,
+            "policy": action.policy,
+        }
+    return {
+        "kind": action.kind,
+        "reason": action.reason,
+        "policy": action.policy,
+    }

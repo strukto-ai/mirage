@@ -36,7 +36,7 @@ export class OpBoundary {
     op: string,
     path: PathSpec,
     write: boolean,
-    access: { create?: boolean; subtree?: boolean; checkHidden?: boolean } = {},
+    access: { create?: boolean; subtree?: boolean; checkHidden?: boolean; final?: boolean } = {},
     issuer?: symbol,
   ): Promise<void> {
     await preOpsGate(this.policies, op, path, write, this.prefix, this.sessionId, issuer, {

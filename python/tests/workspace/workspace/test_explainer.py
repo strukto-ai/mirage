@@ -1,0 +1,99 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import dataclasses
+
+import pytest
+import pytest_asyncio
+
+from mirage import Session, Workspace
+from mirage.policy import Deny
+from mirage.policy.match import Outcome
+from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
+
+PROFILE = {
+    "mounts": {"/data": "write", "/ro": "read"},
+    "paths": {"hide": ["/data/vault"]},
+    "commands": {
+        "deny": [{"reason": "sealed", "paths": ["/data/sec/*"]}],
+        "ask": [{"reason": "nod", "paths": ["/data/out/*"]}],
+    },
+}
+
+
+@pytest_asyncio.fixture
+async def ws():
+    ws = Workspace(
+        {"/data/": RAMVFS(), "/ro/": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.vfs.mkdir("/data/sec")
+    await ws.vfs.write("/data/sec/k", b"key")
+    await ws.vfs.symlink("/data/link", "/data/sec/k")
+    ws.create_session("agent", profile=PROFILE)
+    yield ws
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_vfs_explains_each_op_as_the_door_answers(ws):
+    explain = Session(ws, "agent").explain
+    sealed = await explain.vfs.read("/data/sec/k")
+    assert (sealed.command, sealed.outcome, sealed.error) == (
+        "read",
+        Outcome.DENY,
+        "EACCES",
+    )
+    assert sealed.refusal is not None and sealed.refusal.reason == "sealed"
+    assert sealed.answers == (Deny("sealed", policy="PermissionsPolicy"),)
+    asked = await explain.vfs.write("/data/out/a", b"x")
+    assert (asked.outcome, asked.error) == (Outcome.ASK, "EACCES")
+    assert asked.refusal is not None and asked.refusal.kind == "pending"
+    assert ws.decisions.pending("agent") == ()
+    # The mode raises its own error, so no record rides it.
+    read_only = await explain.vfs.mkdir("/ro/d")
+    assert (read_only.error, read_only.refusal) == ("EROFS", None)
+    assert read_only.answers[-1].policy == "MountModePolicy"
+    free = await explain.vfs.write("/data/new", b"x")
+    assert (free.outcome, free.error, free.answers) == (Outcome.ALLOW, "", ())
+    # Nothing ran.
+    assert not await ws.vfs.exists("/data/new")
+
+
+@pytest.mark.asyncio
+async def test_vfs_follows_the_doors_own_path(ws):
+    explain = Session(ws, "agent").explain
+    linked = await explain.vfs.read("/data/link")
+    assert linked.refusal is not None
+    assert (linked.argv, linked.error, linked.refusal.reason) == (
+        ("/data/link",),
+        "EACCES",
+        "sealed",
+    )
+    moved = await explain.vfs.rename("/data/a", "/data/sec/b")
+    assert moved.refusal is not None
+    assert (moved.argv, moved.error, moved.refusal.reason) == (
+        ("/data/a", "/data/sec/b"),
+        "EACCES",
+        "sealed",
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_hidden_path_explains_like_one_nothing_refuses(ws):
+    explain = Session(ws, "agent").explain
+    hidden = await explain.vfs.read("/data/vault/k")
+    missing = await explain.vfs.read("/data/nothing")
+    assert hidden == dataclasses.replace(missing, argv=("/data/vault/k",))
+    assert (missing.outcome, missing.error) == (Outcome.ALLOW, "")

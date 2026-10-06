@@ -716,10 +716,15 @@ describe('Ask in the chain', () => {
     }
     // With nothing refusing, the first Ask is the answer.
     const policies = new Policies([new AskRm(), new AskAll()])
-    expect(await policies.preCommand(ctx('rm'))).toEqual({ kind: 'ask', reason: 'sign-off' })
+    expect(await policies.preCommand(ctx('rm'))).toEqual({
+      kind: 'ask',
+      reason: 'sign-off',
+      policy: 'AskRm',
+    })
     expect(await policies.preCommand(ctx('ls'))).toEqual({
       kind: 'ask',
       reason: 'second opinion',
+      policy: 'AskAll',
     })
   })
 

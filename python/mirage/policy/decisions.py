@@ -481,7 +481,7 @@ class Decisions:
             None to run the op, a Deny to refuse it, a Pending when the
             host has not decided.
         """
-        call = get_op_call()
+        call = get_op_call(self)
         claimant = (
             Claimant(call, Occurrence(None, ctx.path.virtual, 0, 0))
             if call is not None
@@ -510,7 +510,9 @@ class Decisions:
         A ONCE grant one of its ops is answered by is claimed for the
         call, so every op of the call on that path runs on it (a write
         tool reads the file back to stamp its version), and the call's
-        end spends it. A call made inside another runs in the outer one.
+        end spends it. A call made inside another runs in the outer one;
+        a call another ledger runs (a host callback reaching a second
+        workspace mid-call) is no call of this one's.
 
         Args:
             session_id (str): the session the call runs as.
@@ -519,10 +521,10 @@ class Decisions:
         Returns:
             T: what the call returned.
         """
-        if get_op_call() is not None:
+        if get_op_call(self) is not None:
             return await run()
         handed = HandOff()
-        token = set_op_call(handed)
+        token = set_op_call(self, handed)
         try:
             return await run()
         finally:

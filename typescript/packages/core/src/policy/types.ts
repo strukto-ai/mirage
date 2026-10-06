@@ -615,13 +615,17 @@ export const VALIDITY: Readonly<
 export type PolicyHook = keyof typeof VALIDITY
 
 /**
- * What one command of a line would do, without doing it.
+ * What one command of a line, or one call on a session's file ops, would
+ * do, without doing it.
  *
  * Produced by the same gate the dispatcher runs, so a host reading this
  * and an agent typing the line cannot be told different things.
  * Everything the agent would see is here as it would arrive: `exitCode`
  * and `stderr` come out of the one outcome table, so an explanation of a
- * refused line is byte-identical to the refusal.
+ * refused line is byte-identical to the refusal. A file op has no
+ * terminal of its own: `command` is the op, `argv` its paths as given,
+ * and `error` names the error the call would throw, while `exitCode` and
+ * `stderr` stay empty.
  *
  * `outcome` is the document's answer and `rule` says who gave it. The
  * two refusals the allow list produces both arrive as `DENY` with no
@@ -667,4 +671,6 @@ export interface Explanation {
   readonly placement: readonly (Deny | Route)[]
   /** The runtime entry that would run the command, empty when the workspace runs it itself. */
   readonly runtime: string
+  /** For a file op, the errno name the call would throw (`EACCES`, `EROFS`), empty when it would run. */
+  readonly error: string
 }

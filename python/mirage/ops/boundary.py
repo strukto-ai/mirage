@@ -51,6 +51,7 @@ class OpBoundary:
         create: bool = False,
         subtree: bool = False,
         check_hidden: bool = True,
+        final: bool = True,
     ) -> None:
         await pre_ops_gate(
             self.policies,
@@ -64,6 +65,7 @@ class OpBoundary:
             subtree=subtree,
             check_hidden=check_hidden,
             decisions=self.decisions,
+            final=final,
         )
 
     async def complete(

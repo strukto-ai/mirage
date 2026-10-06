@@ -18,10 +18,8 @@ import {
   RouteError,
   type RouteContext,
   type RouteDecision,
-  type RoutePolicy,
 } from '../../runtime/routing/index.ts'
 import type { ParsedCommand } from '../../runtime/routing/types.ts'
-import { PlacementPolicy } from '../../policy/builtin/placement.ts'
 import type { Deny, Route } from '../../policy/types.ts'
 import { settled } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
@@ -47,26 +45,23 @@ import type { Runtimes } from './runtimes.ts'
  * inherits the typed line's decision and never re-routes. The runtime
  * argument is the caller's own placement, so a Route is not asked for,
  * but a coded policy's Deny still refuses the line. Admission comes
- * first: a line `denied` reports refused is left on the static bindings,
- * unplaced, for the gate to refuse.
+ * first: a line `held` reports refused or waiting on a question is left
+ * on the static bindings, unplaced, for the gate to answer.
  */
 export class Router {
   private readonly registry: MountRegistry
   private readonly runtimes: Runtimes
-  private readonly routePolicy: RoutePolicy | null
   private readonly agentId: string | null
   private readonly resolver: MountResolver
 
   constructor(
     registry: MountRegistry,
     runtimes: Runtimes,
-    routePolicy: RoutePolicy | null,
     agentId: string | null,
     resolver: MountResolver,
   ) {
     this.registry = registry
     this.runtimes = runtimes
-    this.routePolicy = routePolicy
     this.agentId = agentId
     this.resolver = resolver
   }
@@ -76,35 +71,25 @@ export class Router {
     command: string,
     options: ExecuteOptions,
     session: SessionState,
-    denied?: () => Promise<boolean>,
+    held?: () => Promise<boolean>,
   ): Promise<RouteDecision | Deny | null> {
     if (options.routingDecision !== undefined) return options.routingDecision
     const policies = this.registry.policies
-    const coded = policies.wants('preExecute')
+    const placing = policies.wants('preExecute')
     if (options.runtime !== undefined) {
       const placed = this.placed(options.runtime)
-      if (!coded || (denied !== undefined && (await denied()))) return placed
-      const said = await policies.preExecute(this.context(root, command, options, session))
+      if (!placing || (held !== undefined && (await held()))) return placed
+      const said = await policies.preExecute(this.context(root, command, options, session), true)
       return said?.kind === 'deny' ? said : placed
     }
     const hasScripts = this.runtimes.entries.some((entry) => entry.script !== undefined)
-    if (this.routePolicy === null && !hasScripts && !coded) return null
-    if (denied !== undefined && (await denied())) return null
+    if (!placing && !hasScripts) return null
+    if (held !== undefined && (await held())) return null
     const ctx = this.context(root, command, options, session)
-    const placement =
-      this.routePolicy === null
-        ? null
-        : new PlacementPolicy(this.routePolicy, this.runtimes.entries)
-    const said = await policies.preExecute(ctx, placement)
+    const said = await policies.preExecute(ctx)
     if (said?.kind === 'deny') return said
     if (said?.kind === 'route') return this.placed(said.runtime)
-    return decideLine(
-      this.runtimes.entries,
-      null,
-      ctx,
-      this.runtimes.bindings,
-      this.external(ctx.commands, session),
-    )
+    return this.scripted(ctx, session)
   }
 
   /**
@@ -119,25 +104,29 @@ export class Router {
   ): Promise<[readonly (Deny | Route)[], RouteDecision | Deny | null]> {
     const policies = this.registry.policies
     const hasScripts = this.runtimes.entries.some((entry) => entry.script !== undefined)
-    if (this.routePolicy === null && !hasScripts && !policies.wants('preExecute')) return [[], null]
+    if (!hasScripts && !policies.wants('preExecute')) return [[], null]
     const ctx = this.context(root, command, {}, session)
-    const placement =
-      this.routePolicy === null
-        ? null
-        : new PlacementPolicy(this.routePolicy, this.runtimes.entries)
-    const said = await policies.answers('preExecute', ctx, placement)
+    const said = await policies.answers('preExecute', ctx)
     const answers = said.filter((a): a is Deny | Route => a.kind !== 'ask')
     const winner = settled(answers)
     if (winner?.kind === 'deny') return [answers, winner]
     if (winner?.kind === 'route') return [answers, this.placed(winner.runtime)]
-    const decision = await decideLine(
+    return [answers, await this.scripted(ctx, session)]
+  }
+
+  /**
+   * The entry scripts' decision, for a line no policy placed: each
+   * runtime's `script:` says whether it takes the line. Mirrors Python's
+   * `Router._scripted`.
+   */
+  private scripted(ctx: RouteContext, session: SessionState): Promise<RouteDecision> {
+    return decideLine(
       this.runtimes.entries,
       null,
       ctx,
       this.runtimes.bindings,
       this.external(ctx.commands, session),
     )
-    return [answers, decision]
   }
 
   /**

@@ -42,7 +42,7 @@ async def test_a_route_verdict_is_a_placement_answer():
             return {"deny": "secrets stay put"}
         return None
 
-    policy = PlacementPolicy(route, [])
+    policy = PlacementPolicy(route, list)
     assert await policy.pre_execute(_line("python3 heavy")) == Route("beta")
     assert await policy.pre_execute(_line("cat secret")) == Deny(
         "secrets stay put"
@@ -50,6 +50,6 @@ async def test_a_route_verdict_is_a_placement_answer():
     assert await policy.pre_execute(_line("echo hi")) is None
     # A mistake in the route policy is the deployment's, not a refusal.
     with pytest.raises(RouteError, match="unknown policy verdict keys"):
-        await PlacementPolicy(lambda ctx: {"runtme": "x"}, []).pre_execute(
+        await PlacementPolicy(lambda ctx: {"runtme": "x"}, list).pre_execute(
             _line("echo hi")
         )

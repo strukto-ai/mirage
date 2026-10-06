@@ -80,6 +80,23 @@ describe('createMirageMcpServer', () => {
     await workspace.close()
   })
 
+  it('reads the tool list on every request', async () => {
+    const workspace = mkWs()
+    // The server is built before the session exists, as it is for a
+    // stored session that loads later: the list still follows its profile.
+    const server = createMirageMcpServer(workspace, { sessionId: 'late' })
+    workspace.createSession('late', { profile: parseSessionProfile({ mounts: { '/': 'read' } }) })
+    const client = new Client({ name: 'mirage-test', version: '1.0.0' })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+    const tools = await client.listTools()
+    expect(tools.tools.map((tool) => tool.name)).not.toContain('write')
+    await client.close()
+    await server.close()
+    await workspace.close()
+  })
+
   it("advertises each tool's arguments and read-only hint", async () => {
     const workspace = mkWs()
     const server = createMirageMcpServer(workspace)

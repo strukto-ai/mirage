@@ -575,6 +575,7 @@ class Dispatcher:
             write,
             create=op in HIDDEN_CREATE_OPS,
             subtree=op == "rename",
+            final=op != "rename",
         )
         # A rename's destination is a create there: it passes the same
         # gate as the source, so a path rule holds against moving into
@@ -1043,7 +1044,13 @@ class Dispatcher:
         mount = self._namespace.try_mount_for(path.virtual)
         boundary = self._boundary(mount)
         write = op in POLICY_WRITE_OPS
-        await boundary.admit(op, path, write, create=op in HIDDEN_CREATE_OPS)
+        await boundary.admit(
+            op,
+            path,
+            write,
+            create=op in HIDDEN_CREATE_OPS,
+            final=op != "rename",
+        )
         result: str | FileStat | None = None
         if op == "unlink":
             target = self._namespace.readlink(path.virtual) or ""

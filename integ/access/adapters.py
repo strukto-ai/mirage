@@ -499,6 +499,16 @@ class HttpSteps:
             for a in await self._ok("GET", f"/v1/workspaces/{wid}/asks")
         ]
 
+    async def explain(
+        self, wid: str, session: str, command: str
+    ) -> list[tuple[str, int]]:
+        said = await self._ok(
+            "POST",
+            f"/v1/workspaces/{wid}/explain/shell",
+            json={"command": command, "session_id": session},
+        )
+        return [(e["outcome"], e["exit_code"]) for e in said["explanations"]]
+
     async def allow(self, wid: str, ask: str) -> None:
         await self._ok(
             "POST",
@@ -666,6 +676,14 @@ class CliSteps:
             for a in await self._json("workspace", "list-asks", wid)
         ]
 
+    async def explain(
+        self, wid: str, session: str, command: str
+    ) -> list[tuple[str, int]]:
+        said = await self._json(
+            "workspace", "explain", wid, command, "--session", session
+        )
+        return [(e["outcome"], e["exit_code"]) for e in said["explanations"]]
+
     async def allow(self, wid: str, ask: str) -> None:
         await self._json("workspace", "allow", wid, ask)
 
@@ -799,6 +817,15 @@ class InAppSteps:
             (d.id, d.reason) for d in self.workspaces[wid].decisions.pending()
         ]
 
+    async def explain(
+        self, wid: str, session: str, command: str
+    ) -> list[tuple[str, int]]:
+        explain = (await self.workspaces[wid].session(session)).explain
+        return [
+            (e.outcome.value, e.exit_code)
+            for e in await explain.shell(command)
+        ]
+
     async def allow(self, wid: str, ask: str) -> None:
         from mirage.policy.types import Outcome
 
@@ -909,6 +936,11 @@ async def run_steps(
                         reason for _, reason in await steps.asks(wid)
                     )
                 }
+            elif kind == "explain":
+                said = await steps.explain(
+                    wid, step["session"], step["command"]
+                )
+                answer = {"text": " ".join(f"{o} {c}" for o, c in said)}
             elif kind in ("allow", "deny"):
                 pending = await steps.asks(wid)
                 await getattr(steps, kind)(wid, pending[0][0])

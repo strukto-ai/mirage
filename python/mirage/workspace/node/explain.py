@@ -18,7 +18,6 @@ from collections.abc import Generator, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from mirage.context import reset_current_session, set_current_session
 from mirage.policy import (
     Abandoned,
     Ask,
@@ -28,15 +27,12 @@ from mirage.policy import (
     Explanation,
     HandOff,
     Occurrence,
-    OpsContext,
     Pending,
-    Route,
     refusal_of,
     render_deny,
     render_pending,
 )
 from mirage.policy.match import Outcome, decide, has_rules
-from mirage.policy.policies import settled
 from mirage.shell import parse
 from mirage.shell.bytes import decode_text
 from mirage.shell.helpers import (
@@ -48,11 +44,9 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.parse import opaque_reads, referenced_names
 from mirage.shell.types import NodeType
-from mirage.types import MountMode, PathSpec
-from mirage.utils.hidden import path_visible
+from mirage.types import PathSpec
 from mirage.utils.path import resolve_path
 from mirage.workspace.abort import MirageAbortError
-from mirage.workspace.dispatcher.constants import POLICY_WRITE_OPS
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -143,6 +137,7 @@ def _explained(
     session: SessionState,
     registry: MountRegistry,
     asked: Deny | Ask | None,
+    answers: tuple[Deny | Ask, ...],
 ) -> Explanation:
     """One command's explanation, rendered from the same table the gate
     renders a refusal with.
@@ -158,6 +153,7 @@ def _explained(
         session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the decision ledger.
         asked (Deny | Ask | None): what the policy chain answered.
+        answers (tuple[Deny | Ask, ...]): the answers it came from.
     """
     decision = decide(ctx, session.commands)
     base = Explanation(
@@ -169,6 +165,7 @@ def _explained(
         source=decision.source,
         matched_path=decision.matched_path,
         paths=tuple(p.virtual for p in ctx.paths),
+        answers=answers,
     )
     action: Deny | Pending | None = (
         registry.decisions.held(ctx, asked)
@@ -182,16 +179,9 @@ def _explained(
         if isinstance(action, Pending)
         else render_deny(ctx.command, action)
     )
-    reason = action.reason if base.reason == "" else base.reason
-    return Explanation(
-        command=base.command,
-        argv=base.argv,
-        outcome=base.outcome,
-        rule=base.rule,
-        reason=reason,
-        source=base.source,
-        matched_path=base.matched_path,
-        paths=base.paths,
+    return dataclasses.replace(
+        base,
+        reason=action.reason if base.reason == "" else base.reason,
         exit_code=code,
         stderr=decode_text(err),
         refusal=refusal_of(action),
@@ -283,6 +273,7 @@ async def _judge_words(
     intrinsic: bool = False,
     whole_line: bool = False,
     lost: bool = False,
+    every: bool = False,
 ) -> list[Judged]:
     """Explain one command and whatever lines it runs in turn, each
     with its occurrence.
@@ -324,6 +315,7 @@ async def _judge_words(
             rule (``admit_line``); the executor judges the expanded name.
         lost (bool): whether a ``cd`` the walk could not follow ran
             before the command, as ``Walked`` carries it.
+        every (bool): ask every policy past a Deny, for ``explain``.
     """
     head = words[0]
     if head.text is None:
@@ -359,6 +351,7 @@ async def _judge_words(
         redirects=redirect_paths(redirect_words, registry, session.cwd),
         intrinsic=intrinsic,
         unread=unread,
+        every=every,
     )
     if isinstance(gated, Refused):
         return [
@@ -369,10 +362,10 @@ async def _judge_words(
                 intrinsic,
             )
         ]
-    ctx, asked = gated
+    ctx, asked, answers = gated
     out = [
         Judged(
-            _explained(ctx, session, registry, asked),
+            _explained(ctx, session, registry, asked, answers),
             occurrence,
             stated,
             intrinsic,
@@ -395,6 +388,7 @@ async def _judge_words(
                     stated and not inner.open,
                     whole_line,
                     lost,
+                    every,
                 )
             )
         else:
@@ -414,6 +408,7 @@ async def _judge_words(
                     missing=inner.missing,
                     whole_line=whole_line,
                     lost=lost,
+                    every=every,
                 )
             )
     return out
@@ -739,6 +734,52 @@ def _walked_line(
     yield from _walk_node(ast, session, home_dir(session), frame, lost)
 
 
+async def line_judgments(
+    ast: Any,
+    session: SessionState,
+    registry: MountRegistry,
+    namespace: Namespace | None,
+    handed: HandOff,
+    agent_id: str = "",
+) -> list[tuple[Walked, list[Judged]]]:
+    """Every command of a line judged read-only, each with its place on
+    the line: the pass placement waits on (:func:`line_held`) and
+    :func:`prejudge_line` refuses from, made once for both.
+
+    Args:
+        ast (Any): the parsed tree-sitter root node.
+        session (SessionState): the session running the line.
+        registry (MountRegistry): registry holding the policies, the
+            decision ledger and the CLI installs.
+        namespace (Namespace | None): the link table.
+        handed (HandOff): the line's hand-off, whose origin places each
+            command on the line.
+        agent_id (str): the agent the line is attributed to.
+    """
+    judged: list[tuple[Walked, list[Judged]]] = []
+    frame = root_frame(ast, handed.origin)
+    for item in _walked_line(ast, session, frame):
+        if item.words[0].text is None:
+            continue
+        judged.append(
+            (
+                item,
+                await _judge_words(
+                    item.words,
+                    item.occurrence,
+                    item.session,
+                    registry,
+                    namespace,
+                    agent_id,
+                    item.redirects,
+                    intrinsic=item.intrinsic,
+                    lost=item.lost,
+                ),
+            )
+        )
+    return judged
+
+
 async def prejudge_line(
     ast: Any,
     session: SessionState,
@@ -747,6 +788,7 @@ async def prejudge_line(
     handed: HandOff,
     agent_id: str = "",
     cancel: asyncio.Event | None = None,
+    judged: "list[tuple[Walked, list[Judged]]] | None" = None,
 ) -> Refused | None:
     """Judge every command of a line before any of it runs, and refuse
     the whole line when a rule speaks about one.
@@ -846,30 +888,16 @@ async def prejudge_line(
             exactly as the per-command gate does; without it a compound
             line asked here waited on an answer its own timeout could
             no longer cut short.
+        judged (list[tuple[Walked, list[Judged]]] | None): the line's
+            read-only judgments (:func:`line_judgments`) when placement
+            already made them, so the policies are asked once.
 
     Returns:
         The line's refusal, or None to run it.
     """
-    judged: list[tuple[Walked, list[Judged]]] = []
-    frame = root_frame(ast, handed.origin)
-    for item in _walked_line(ast, session, frame):
-        if item.words[0].text is None:
-            continue
-        judged.append(
-            (
-                item,
-                await _judge_words(
-                    item.words,
-                    item.occurrence,
-                    item.session,
-                    registry,
-                    namespace,
-                    agent_id,
-                    item.redirects,
-                    intrinsic=item.intrinsic,
-                    lost=item.lost,
-                ),
-            )
+    if judged is None:
+        judged = await line_judgments(
+            ast, session, registry, namespace, handed, agent_id
         )
     if sum(len(explained) for _, explained in judged) < 2:
         return None
@@ -967,7 +995,7 @@ async def _verdict_refuses(
     )
     if isinstance(gated, Refused):
         return True
-    ctx, asked = gated
+    ctx, asked, _ = gated
     if not isinstance(asked, Ask):
         return isinstance(asked, Deny)
     standing = registry.decisions.held(ctx, asked, claimant)
@@ -1175,6 +1203,7 @@ async def _judge_line(
     stated: bool = True,
     whole_line: bool = False,
     lost: bool = False,
+    every: bool = False,
 ) -> list[Judged]:
     """Every command of a line explained, in the order the gate reads
     them, each with its place on the line.
@@ -1193,6 +1222,7 @@ async def _judge_line(
             ``_judge_words`` takes it.
         lost (bool): whether the line begins with its cwd lost, as a
             line a command runs after such a ``cd`` does.
+        every (bool): ask every policy past a Deny, for ``explain``.
     """
     out: list[Judged] = []
     for item in _walked_line(ast, session, frame, lost):
@@ -1209,50 +1239,69 @@ async def _judge_line(
                 intrinsic=item.intrinsic,
                 whole_line=whole_line,
                 lost=item.lost,
+                every=every,
             )
         )
     return out
 
 
-async def line_denied(
-    ast: Any,
-    session: SessionState,
+async def line_held(
+    judged: list[tuple[Walked, list[Judged]]],
     registry: MountRegistry,
-    namespace: Namespace | None,
-    agent_id: str = "",
+    handed: HandOff,
+    cancel: asyncio.Event | None = None,
 ) -> bool:
-    """Whether a rule or a policy denies some command of a line, which
-    is what placement waits on: admission comes first, so a line the
-    rules refuse is never shown to a placing policy.
+    """Whether the line's admission holds it back, which is what
+    placement waits on: admission comes first, so a line the rules
+    refuse, or that waits on the host, is never shown to a placing
+    policy.
 
-    Read-only, as :func:`explain_line` is, so it spends no grant and
-    asks no host. Only a verdict counts (:func:`_is_verdict`): a
-    question nobody has answered may still let the line run, and a head
-    word the session cannot see fails where it stands while the rest
-    of its line runs, so such a line is still placed.
+    A verdict (:func:`_is_verdict`) that refuses holds the line. A
+    question is put to the host now, on the line's hand-off, so the gate
+    that later runs the command finds the answer claimed for it and
+    does not ask again; one still waiting holds the line, and a question
+    the gate will ask about other words (``Judged.stated`` False) is
+    left to it. A head word the session cannot see fails where it
+    stands while the rest of its line runs, so it does not hold the
+    line.
 
     Args:
-        ast (Any): the parsed tree-sitter root node.
-        session (SessionState): the session running the line.
-        registry (MountRegistry): registry holding the policies, the
-            decision ledger and the CLI installs.
-        namespace (Namespace | None): the link table.
-        agent_id (str): the agent the line is attributed to.
+        judged (list[tuple[Walked, list[Judged]]]): the line's read-only
+            judgments (:func:`line_judgments`).
+        registry (MountRegistry): registry holding the decision ledger.
+        handed (HandOff): the line's hand-off, on which an answer given
+            here is claimed for the gate.
+        cancel (asyncio.Event | None): the run's kill channel.
     """
-    judged = await _judge_line(
-        ast, session, registry, namespace, agent_id, root_frame(ast, None)
-    )
-    return denies([one.explanation for one in judged])
+    for _, explained in judged:
+        for one in explained:
+            expl = one.explanation
+            if not _is_verdict(expl) or expl.exit_code == 0:
+                continue
+            if _refuses(expl):
+                return True
+            asked = next((a for a in expl.answers if isinstance(a, Ask)), None)
+            if one.ctx is None or asked is None or not one.stated:
+                continue
+            action = await registry.decisions.resolve(
+                one.ctx, asked, cancel, Claimant(handed, one.occurrence)
+            )
+            if isinstance(action, Abandoned):
+                raise MirageAbortError()
+            if action is not None:
+                return True
+    return False
 
 
-def denies(explanations: Sequence[Explanation]) -> bool:
+def holds(explanations: Sequence[Explanation]) -> bool:
     """Whether some command's explanation is a verdict that refuses it
-    (:func:`_is_verdict`), the line-level refusal placement waits on.
+    or waits on the host (:func:`_is_verdict`), the line-level answer
+    placement waits on.
 
     Args:
         explanations (Sequence[Explanation]): a line's explanations.
     """
-    return any(_is_verdict(e) and _refuses(e) for e in explanations)
+    return any(_is_verdict(e) and e.exit_code != 0 for e in explanations)
 
 
 async def explain_line(
@@ -1295,83 +1344,6 @@ async def explain_line(
         agent_id,
         root_frame(ast, None),
         whole_line=whole_line,
+        every=True,
     )
-    out: list[Explanation] = []
-    for one in judged:
-        expl = one.explanation
-        if one.ctx is not None:
-            said = await registry.policies.answers("pre_command", one.ctx)
-            expl = dataclasses.replace(
-                expl,
-                answers=tuple(a for a in said if isinstance(a, (Deny, Ask))),
-            )
-        out.append(expl)
-    return out
-
-
-async def explain_op(
-    op: str, path: str, session: SessionState, registry: MountRegistry
-) -> Explanation:
-    """What the op door would answer one op, without running it: the
-    single-op form of :func:`explain_line`, for the doors that see ops
-    and no command (the file tools, ``session.vfs``, FUSE).
-
-    ``command`` is the op and ``argv`` its path. ``exit_code`` is 1 when
-    the door would refuse the op and 0 when it would run it, and
-    ``stderr`` stays empty, since an op has no terminal of its own;
-    ``refusal`` is the record the refusal would carry, None for a mount
-    mode's, which raises its own error. A path the session cannot see
-    is shown to no policy, so it explains as an op that runs: a hide
-    never surfaces. A question asked here is not recorded.
-
-    Args:
-        op (str): the op's name (``read``, ``write``, ``unlink``, ...).
-        path (str): the path, absolute or under the session's cwd.
-        session (SessionState): the session the op runs as.
-        registry (MountRegistry): registry holding the policies and the
-            decision ledger.
-    """
-    spec = PathSpec.from_str_path(resolve_path(path, session.cwd))
-    if not path_visible(session.visibility, spec.virtual):
-        return Explanation(command=op, argv=(path,))
-    mount = registry.try_mount_for(spec.virtual)
-    ctx = OpsContext(
-        op=op,
-        path=spec,
-        write=op in POLICY_WRITE_OPS,
-        prefix=mount.prefix if mount is not None else "",
-        session_id=session.session_id,
-        mode=mount.mode if mount is not None else MountMode.WRITE,
-    )
-    token = set_current_session(session)
-    try:
-        said = await registry.policies.answers("pre_ops", ctx)
-    finally:
-        reset_current_session(token)
-    answers = tuple(a for a in said if isinstance(a, (Deny, Ask)))
-    winner = settled(answers)
-    base = Explanation(
-        command=op, argv=(path,), paths=(spec.virtual,), answers=answers
-    )
-    if winner is None or isinstance(winner, Route):
-        return base
-    action: Deny | Pending | None = (
-        registry.decisions.held_op(ctx, winner)
-        if isinstance(winner, Ask)
-        else winner
-    )
-    outcome = Outcome.ASK if isinstance(winner, Ask) else Outcome.DENY
-    if action is None:
-        return dataclasses.replace(base, outcome=outcome, reason=winner.reason)
-    record = (
-        None
-        if isinstance(action, Deny) and action.error is not None
-        else refusal_of(action)
-    )
-    return dataclasses.replace(
-        base,
-        outcome=outcome,
-        reason=winner.reason,
-        exit_code=1,
-        refusal=record,
-    )
+    return [one.explanation for one in judged]

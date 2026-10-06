@@ -20,8 +20,9 @@ import { rstripSlash, stripSlash } from '../utils/slash.ts'
 import { anchorDepth, isGlob, pathVisible, showHead, shownMode } from '../utils/hidden.ts'
 import { eacces, enoent, erofsReadOnly } from '../utils/errors.ts'
 import { parent } from '../utils/path.ts'
+import type { Decisions } from '../policy/decisions.ts'
 import type { Policies } from '../policy/policies.ts'
-import type { HandOff } from '../policy/types.ts'
+import type { Explanation, HandOff } from '../policy/types.ts'
 import type { EntryGate, PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
 import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
 
@@ -401,21 +402,47 @@ export function lineRunning(): boolean {
   return refusalSinkStorage.getStore() !== undefined
 }
 
-const opCallStorage = createAsyncContext<HandOff>()
+const opCallStorage = createAsyncContext<readonly [Decisions, HandOff]>()
 
 /**
  * Run one call made outside a line (a file tool's), the unit an op-level
  * answer covers: a grant one of its ops is answered by is claimed on
- * `handed` for the call's other ops on that path. Mirrors Python's
- * `set_op_call`.
+ * `handed` for the call's other ops on that path. `owner` is the ledger
+ * the call runs under, the only one that claims on `handed` and spends
+ * it. Mirrors Python's `set_op_call`.
  */
-export function runWithOpCall<T>(handed: HandOff, fn: () => Promise<T>): Promise<T> {
-  return Promise.resolve(opCallStorage.run(handed, fn))
+export function runWithOpCall<T>(
+  owner: Decisions,
+  handed: HandOff,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return Promise.resolve(opCallStorage.run([owner, handed], fn))
 }
 
-/** The call made outside a line running in this context, null for a bare op. */
-export function getOpCall(): HandOff | null {
-  return opCallStorage.getStore() ?? null
+/**
+ * The call made outside a line running in this context under `owner`'s
+ * ledger, null for a bare op or for a call another ledger runs (a host
+ * callback reaching a second workspace mid-call).
+ */
+export function getOpCall(owner: Decisions): HandOff | null {
+  const call = opCallStorage.getStore()
+  return call?.[0] === owner ? call[1] : null
+}
+
+const explainingStorage = createAsyncContext<Explanation[]>()
+
+/**
+ * Run `fn` as a dry run: the op gate notes on `trace` what it would
+ * answer and stops the op before any backend or cache is touched.
+ * Mirrors Python's `set_explaining`.
+ */
+export function runExplaining<T>(trace: Explanation[], fn: () => Promise<T>): Promise<T> {
+  return Promise.resolve(explainingStorage.run(trace, fn))
+}
+
+/** The dry run's trace when the calls in this context only explain, null when they run. */
+export function explaining(): Explanation[] | null {
+  return explainingStorage.getStore() ?? null
 }
 
 /**

@@ -156,9 +156,10 @@ follows with the profile pair, `PermissionsPolicy`, reading each
 session's compiled [profile](/home/permissions), and `ScriptPolicy` for
 profile policies, the `policy:` file a profile names, then `policies=`
 in list order, then anything added later through `ws.policies.add()`.
-At `pre_execute` the workspace's `route_policy` answers first, as
-`PlacementPolicy`; at `pre_ops` the hide answers before every policy and
-the mount mode (`MountModePolicy`) after them.
+At `pre_execute` the workspace's `route_policy` answers first, as the
+built-in `PlacementPolicy` the workspace installs (`policies.place`); at
+`pre_ops` the hide answers before every policy and the mount mode
+(`MountModePolicy`) after them.
 
 A policy that raises does not fail open: the loop answers a Deny naming
 the policy and the error is logged. The route policy is the one
@@ -173,8 +174,9 @@ A typed line clears them in a fixed order:
 1. **Syntax.** An unparsable line exits 2 and no policy is consulted.
 2. **Admission.** Every command in the line is judged before any of it
    runs, so a rule-refused line never runs halfway, and a line the rules
-   refuse is never placed: no placing policy, route script included,
-   ever sees it.
+   refuse, or that waits on a question to the host, is never placed: no
+   placing policy, route script included, ever sees it. The question is
+   recorded here, once, and the command's own gate finds the answer.
 3. **Placement.** `pre_execute` places the line: the route policy, then
    the coded policies, then each runtime's own `script:` when nothing
    placed it. A Deny refuses the line whole, at exit 126.
@@ -238,11 +240,13 @@ Scripts come in two jobs, and each job runs one way:
 
 ## Dry runs
 
-`ws.explain(line, session_id)` (`session.explain(line)` on a session's
-handle, the same names in TypeScript) runs the gates without running the line: one `Explanation` per
-command with the exact `exit_code` and `stderr` the agent would see,
-every policy's answer to the command (`answers`), every answer at
+`session.explain` runs a session's doors as a dry run under the same
+names: `session.explain.shell(line)` gives one `Explanation` per command
+with the exact `exit_code` and `stderr` the agent would see, every
+policy's answer to the command (`answers`), every answer at
 `pre_execute` (`placement`) and the runtime that would serve the
-command (`runtime`). `ws.explain_op(op, path, session_id)`
-(`ws.explainOp` in TypeScript) is the single-op form, for the doors that see ops and no command. A hide is
-never among the answers; see [Dry runs](/home/permissions#dry-runs).
+command (`runtime`); `session.explain.vfs.<op>(...)` walks the real op
+door and stops at its gate, with every `pre_ops` answer and the error
+the call would raise. Each is asked once: the answers shown are the
+ones the outcome came from. A hide is never among the answers; see
+[Dry runs](/home/permissions#dry-runs).

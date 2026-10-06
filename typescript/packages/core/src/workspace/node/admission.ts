@@ -352,7 +352,8 @@ export function redirectPaths(
 /**
  * Everything the gate decides about one command before anything is
  * spent on it: visibility, the classified context, and the policy
- * chain's answer.
+ * chain's answer (the first Deny, else the first Ask) with the answers it
+ * came from.
  *
  * Split out of `admit` so a dry run can have the answer without the
  * consequences. Nothing here records a request, consumes a grant or
@@ -364,7 +365,8 @@ export function redirectPaths(
  * virtual paths a reader of the line's text cannot vouch for: what a word
  * only the runtime expands names, or a relative word after a `cd` it
  * could not follow. No policy is shown them; the per-command gate reads
- * the real ones and passes none.
+ * the real ones and passes none. `every` asks every policy past a Deny,
+ * for `explain`; the gate's own answers end at the first Deny.
  */
 export async function gate(
   name: string,
@@ -378,7 +380,8 @@ export async function gate(
   redirects: readonly PathSpec[] = [],
   intrinsic = false,
   unread: ReadonlySet<string> = new Set(),
-): Promise<Refused | [CommandContext, Deny | Ask | null]> {
+  every = false,
+): Promise<Refused | [CommandContext, Deny | Ask | null, (Deny | Ask)[]]> {
   const tool = intrinsic || isTool(name, session)
   if (tool && !listed(name, session)) {
     return {
@@ -410,7 +413,10 @@ export async function gate(
     tool,
     walks: walksMounts(name, [name, ...args]),
   }
-  return [ctx, await registry.policies.preCommand(ctx)]
+  const answers = (await registry.policies.answers('preCommand', ctx, every)).filter(
+    (a): a is Deny | Ask => a.kind !== 'route',
+  )
+  return [ctx, answers.find((a) => a.kind === 'deny') ?? answers[0] ?? null, answers]
 }
 
 export async function admit(

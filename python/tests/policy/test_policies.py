@@ -370,8 +370,12 @@ async def test_a_deny_anywhere_in_the_chain_outranks_an_ask():
         )
     # With nothing refusing, the first Ask is the answer.
     policies = Policies([AskRm(), AskAll()])
-    assert await policies.pre_command(_ctx("rm")) == Ask("sign-off")
-    assert await policies.pre_command(_ctx("ls")) == Ask("second opinion")
+    assert await policies.pre_command(_ctx("rm")) == Ask(
+        "sign-off", policy="AskRm"
+    )
+    assert await policies.pre_command(_ctx("ls")) == Ask(
+        "second opinion", policy="AskAll"
+    )
 
 
 @pytest.mark.asyncio

@@ -15,7 +15,6 @@
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from mirage.policy.builtin.placement import PlacementPolicy
 from mirage.policy.policies import settled
 from mirage.policy.types import Deny, Route
 from mirage.runtime.base import Runtime
@@ -25,7 +24,6 @@ from mirage.runtime.routing import (
     RouteContext,
     RouteDecision,
     RouteError,
-    RoutePolicy,
     decide_line,
     parsed_commands,
 )
@@ -48,7 +46,7 @@ class Router:
     route policy as a built-in, then the coded policies), then the
     entry scripts. It reads the runtime entries and the registry's
     static bindings but owns no mutable workspace state, so the
-    volatile parts (the policy callable, the current agent) arrive per
+    volatile parts (the current agent, the line's admission) arrive per
     call and a new step is added here rather than in the workspace.
 
     Args:
@@ -75,9 +73,8 @@ class Router:
         session: SessionState,
         session_id: str,
         agent_id: str,
-        route_policy: RoutePolicy | None,
         inherited: RouteDecision | None,
-        denied: Callable[[], Awaitable[bool]] | None = None,
+        held: Callable[[], Awaitable[bool]] | None = None,
     ) -> RouteDecision | Deny | None:
         """Resolve the routing decision for one typed line.
 
@@ -88,8 +85,8 @@ class Router:
         it: nested lines never re-route. The runtime argument is the
         caller's own placement, so a Route is not asked for, but a coded
         policy's Deny still refuses the line. Admission comes first: a
-        line ``denied`` reports refused is left on the static bindings,
-        unplaced, for the gate to refuse.
+        line ``held`` reports refused or waiting on a question is left
+        on the static bindings, unplaced, for the gate to answer.
 
         Args:
             ast: the parsed tree-sitter root node.
@@ -99,13 +96,12 @@ class Router:
             session (SessionState): the effective session (cwd, env).
             session_id (str): session hosting the line.
             agent_id (str): agent the line runs as.
-            route_policy (RoutePolicy | None): the workspace route
-                policy, if any.
             inherited (RouteDecision | None): the calling line's
                 decision, for nested evals.
-            denied (Callable[[], Awaitable[bool]] | None): whether a
-                rule or a policy denies some command of the line, read
-                only when there is a placement to consult.
+            held (Callable[[], Awaitable[bool]] | None): the line's
+                admission, whether some command of it is refused or
+                waits on the host; awaited only when there is a
+                placement to consult.
 
         Raises:
             RouteError: an unknown runtime name or a failing policy.
@@ -114,31 +110,79 @@ class Router:
             return inherited
         entries = self._runtimes.entries
         policies = self._registry.policies
-        coded = policies.wants("pre_execute")
+        placing = policies.wants("pre_execute")
         if runtime is not None:
             placed = self._placed(entries, runtime)
-            if not coded or (denied is not None and await denied()):
+            if not placing or (held is not None and await held()):
                 return placed
             said = await policies.pre_execute(
-                self._context(ast, command, session, session_id, agent_id)
+                self._context(ast, command, session, session_id, agent_id),
+                placed=True,
             )
             return said if isinstance(said, Deny) else placed
-        has_scripts = any(entry.script is not None for entry in entries)
-        if route_policy is None and not has_scripts and not coded:
+        if not placing and not any(e.script is not None for e in entries):
             return None
-        if denied is not None and await denied():
+        if held is not None and await held():
             return None
         ctx = self._context(ast, command, session, session_id, agent_id)
-        placement = (
-            PlacementPolicy(route_policy, entries)
-            if route_policy is not None
-            else None
-        )
-        said = await policies.pre_execute(ctx, placement)
+        said = await policies.pre_execute(ctx)
         if isinstance(said, Deny):
             return said
         if isinstance(said, Route):
             return self._placed(entries, said.runtime)
+        return await self._scripted(entries, ctx, session)
+
+    async def placement(
+        self,
+        ast: Any,
+        command: str,
+        session: SessionState,
+        session_id: str,
+        agent_id: str,
+    ) -> tuple[tuple[Deny | Route, ...], RouteDecision | Deny | None]:
+        """Every placement answer for a line and what they decide,
+        without running it: what ``explain`` shows.
+
+        Args:
+            ast: the parsed tree-sitter root node.
+            command (str): the raw command line.
+            session (SessionState): the effective session.
+            session_id (str): session hosting the line.
+            agent_id (str): agent the line runs as.
+
+        Raises:
+            RouteError: an unknown runtime name or a failing policy.
+        """
+        entries = self._runtimes.entries
+        policies = self._registry.policies
+        if not policies.wants("pre_execute") and not any(
+            e.script is not None for e in entries
+        ):
+            return (), None
+        ctx = self._context(ast, command, session, session_id, agent_id)
+        said = await policies.answers("pre_execute", ctx)
+        answers = tuple(a for a in said if isinstance(a, (Deny, Route)))
+        winner = settled(answers)
+        if isinstance(winner, Deny):
+            return answers, winner
+        if isinstance(winner, Route):
+            return answers, self._placed(entries, winner.runtime)
+        return answers, await self._scripted(entries, ctx, session)
+
+    async def _scripted(
+        self, entries: list[Runtime], ctx: RouteContext, session: SessionState
+    ) -> RouteDecision:
+        """The entry scripts' decision, for a line no policy placed: each
+        runtime's ``script:`` says whether it takes the line.
+
+        Args:
+            entries (list[Runtime]): the workspace's ordered runtimes.
+            ctx (RouteContext): the placement stage's payload.
+            session (SessionState): the effective session.
+
+        Raises:
+            RouteError: a script that fails or answers a verdict shape.
+        """
         try:
             return await decide_line(
                 entries,
@@ -151,61 +195,6 @@ class Router:
             raise
         except (ValueError, ImportError) as exc:
             raise RouteError(str(exc)) from exc
-
-    async def placement(
-        self,
-        ast: Any,
-        command: str,
-        session: SessionState,
-        session_id: str,
-        agent_id: str,
-        route_policy: RoutePolicy | None,
-    ) -> tuple[tuple[Deny | Route, ...], RouteDecision | Deny | None]:
-        """Every placement answer for a line and what they decide,
-        without running it: what ``explain`` shows.
-
-        Args:
-            ast: the parsed tree-sitter root node.
-            command (str): the raw command line.
-            session (SessionState): the effective session.
-            session_id (str): session hosting the line.
-            agent_id (str): agent the line runs as.
-            route_policy (RoutePolicy | None): the workspace route
-                policy, if any.
-
-        Raises:
-            RouteError: an unknown runtime name or a failing policy.
-        """
-        entries = self._runtimes.entries
-        policies = self._registry.policies
-        has_scripts = any(entry.script is not None for entry in entries)
-        if (
-            route_policy is None
-            and not has_scripts
-            and not policies.wants("pre_execute")
-        ):
-            return (), None
-        ctx = self._context(ast, command, session, session_id, agent_id)
-        placement = (
-            PlacementPolicy(route_policy, entries)
-            if route_policy is not None
-            else None
-        )
-        said = await policies.answers("pre_execute", ctx, placement)
-        answers = tuple(a for a in said if isinstance(a, (Deny, Route)))
-        winner = settled(answers)
-        if isinstance(winner, Deny):
-            return answers, winner
-        if isinstance(winner, Route):
-            return answers, self._placed(entries, winner.runtime)
-        decision = await decide_line(
-            entries,
-            None,
-            ctx,
-            self._registry.runtime_bindings,
-            self._external(ctx.commands, session),
-        )
-        return answers, decision
 
     def runtime_for(self, command: str, decision: RouteDecision | None) -> str:
         """The runtime entry that serves a command under a decision (the

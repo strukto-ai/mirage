@@ -461,7 +461,11 @@ export class Dispatcher {
         opName,
         p,
         opWrite,
-        { create: HIDDEN_CREATE_OPS.has(opName), subtree: opName === 'rename' },
+        {
+          create: HIDDEN_CREATE_OPS.has(opName),
+          subtree: opName === 'rename',
+          final: opName !== 'rename',
+        },
         issuer,
       )
       // A rename's destination is a create there: it passes the same gate
@@ -1194,7 +1198,13 @@ export class Dispatcher {
     const mount = this.namespace.tryMountFor(path.virtual)
     const boundary = this.boundary(mount)
     const write = POLICY_WRITE_OPS.has(opName)
-    await boundary.admit(opName, path, write, { create: HIDDEN_CREATE_OPS.has(opName) }, issuer)
+    await boundary.admit(
+      opName,
+      path,
+      write,
+      { create: HIDDEN_CREATE_OPS.has(opName), final: opName !== 'rename' },
+      issuer,
+    )
     let target: string
     let result: string | FileStat | null = null
     if (opName === 'unlink') {

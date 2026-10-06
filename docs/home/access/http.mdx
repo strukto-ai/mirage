@@ -280,6 +280,19 @@ Every shell line is a job: `pending`, `running`, then `done`, `failed` or `cance
 
 <Badge color="red">DELETE</Badge> `/v1/jobs/{job_id}`
 
+## Explain
+
+### Explain a shell line
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/explain/shell`
+
+The dry run of [running a line](#run-a-shell-line): nothing runs, no question is recorded, and each command of the line comes back with what the agent would read and every policy's answer. See [Dry runs](/home/permissions#dry-runs).
+
+<ParamField body="command" type="string" required>The line, as the agent would type it.</ParamField>
+<ParamField body="session_id" type="string">Whose profile to judge it under; the default session when absent.</ParamField>
+
+The file op dry runs are on [RPC](/home/access/rpc#methods), as `explain/vfs/<op>`.
+
 ## Asks
 
 ### List asks

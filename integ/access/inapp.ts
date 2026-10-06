@@ -258,6 +258,10 @@ async function steps(
             .map((d) => d.reason)
             .join('\n'),
         })
+      } else if (kind === 'explain') {
+        const explain = (await get(wid).session(step.session as string)).explain
+        const said = await explain.shell(step.command as string)
+        answers.push({ text: said.map((e) => `${e.outcome} ${e.exitCode}`).join(' ') })
       } else if (kind === 'allow' || kind === 'deny') {
         const pending = get(wid).decisions.pending()
         const outcome = kind === 'allow' ? Outcome.ALLOW : Outcome.DENY

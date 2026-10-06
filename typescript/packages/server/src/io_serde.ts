@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Ask, Deny, Explanation, Route } from '@struktoai/mirage-core/policy/types'
 import type { JsonValue, Refusal } from '@struktoai/mirage-core/types'
 import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/workspace'
 
@@ -56,4 +57,41 @@ export function ioResultToDict(result: unknown): ResultDict & JsonValue {
     }
   }
   return { kind: 'raw', value: String(result) }
+}
+
+/** One policy's answer as the server's doors carry it. Mirrors Python's `answer_to_dict`. */
+function answerToDict(action: Deny | Ask | Route): Record<string, JsonValue> {
+  if (action.kind === 'route') {
+    return { kind: 'route', runtime: action.runtime, policy: action.policy ?? '' }
+  }
+  return { kind: action.kind, reason: action.reason, policy: action.policy ?? '' }
+}
+
+/** An explanation as the server's doors answer it. Mirrors Python's `explanation_to_dict`. */
+export function explanationToDict(expl: Explanation): Record<string, JsonValue> {
+  return {
+    command: expl.command,
+    argv: [...expl.argv],
+    outcome: expl.outcome,
+    reason: expl.reason,
+    source: expl.source,
+    matched_path: expl.matchedPath,
+    paths: [...expl.paths],
+    exit_code: expl.exitCode,
+    stderr: expl.stderr,
+    refusal:
+      expl.refusal === null
+        ? null
+        : {
+            kind: expl.refusal.kind,
+            reason: expl.refusal.reason,
+            policy: expl.refusal.policy,
+            scope: expl.refusal.scope,
+            ask_id: expl.refusal.askId,
+          },
+    answers: expl.answers.map(answerToDict),
+    placement: expl.placement.map(answerToDict),
+    runtime: expl.runtime,
+    error: expl.error,
+  }
 }

@@ -34,6 +34,7 @@ import { cliSpecFor } from '../../commands/cli/specs.ts'
 import type { CLISpec } from '../../commands/cli/types.ts'
 import type { CLIInstall } from '../cli/types.ts'
 import { PermissionsPolicy } from '../../policy/builtin/permissions.ts'
+import { PlacementPolicy } from '../../policy/builtin/placement.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { Decisions } from '../../policy/decisions.ts'
 import { JobTable } from '../../shell/job_table/index.ts'
@@ -64,7 +65,6 @@ import {
   parseMountMode,
 } from '../../types.ts'
 import type { Explanation, Policies } from '../../policy/index.ts'
-import type { RoutePolicy } from '../../runtime/routing/index.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { Ops } from '../../ops/ops.ts'
 import type { MountEntry } from '../mount/mount.ts'
@@ -100,7 +100,7 @@ import type { EvalResult } from '../../runtime/types.ts'
 import { PyodideUnavailableError } from '../../runtime/python/pyodide/errors.ts'
 import { Dispatcher } from '../dispatcher/index.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
-import { denies, explainLine, explainOp } from '../node/explain.ts'
+import { explainLine, holds } from '../node/explain.ts'
 import { buildFilePrompt } from '../file_prompt.ts'
 import { getCurrentSessionFor } from '../../context/session_context.ts'
 import { abortable, hasAborted, makeAbortError } from '../abort.ts'
@@ -221,7 +221,6 @@ export class Workspace {
   private secretSourcesBuilt: Readonly<Record<string, ResolvedSource>> | null = null
   private secretSourcesPending: Promise<Record<string, ResolvedSource>> | null = null
   private readonly router: Router
-  private readonly routePolicy: RoutePolicy | null
   private readonly scriptPolicy: ScriptPolicy
   private readonly profiles: Record<string, SessionProfile>
   private readonly defaultProfileName: string | null
@@ -329,7 +328,6 @@ export class Workspace {
       this.runtimeContext(),
     )
     rejectConfigScript('routePolicy', options.routePolicy)
-    this.routePolicy = options.routePolicy ?? null
     // The permission profiles: one per name, and the one a session
     // gets when it names none. A profile is the whole document a
     // session runs under, so there is no workspace-wide block above it.
@@ -483,13 +481,12 @@ export class Workspace {
       binding: this.runtimeBinding,
     })
     this.closers.push(() => this.runtimeWorld.close())
-    this.router = new Router(
-      this.registry,
-      this.runtimeWorld,
-      this.routePolicy,
-      this.agentId,
-      sandboxResolver,
-    )
+    this.router = new Router(this.registry, this.runtimeWorld, this.agentId, sandboxResolver)
+    if (options.routePolicy !== undefined) {
+      this.registry.policies.place(
+        new PlacementPolicy(options.routePolicy, () => this.runtimeWorld.entries),
+      )
+    }
   }
 
   /**
@@ -1121,10 +1118,11 @@ export class Workspace {
    * question to a host, which is what makes it safe to call about a line
    * nobody typed. Each explanation carries every policy's answer to its
    * command and the line's placement: every answer at `preExecute` and the
-   * runtime that would run the command. A line a rule refuses is never
-   * placed, as it is never placed when it runs, and a placement that
-   * refuses the line refuses it on its first command. A hidden path is no
-   * path to any of it.
+   * runtime that would run the command. A line a rule refuses, or that
+   * waits on the host, is never placed, as it is never placed when it
+   * runs, and a placement that refuses the line refuses it on its first
+   * command. A hidden path is no path to any of it. `session.explain` is
+   * the same dry run for each of a session's doors.
    *
    * Host-side only. The structure of a profile's rules is an operator's
    * business, so there is no builtin an agent can type to read it.
@@ -1144,7 +1142,7 @@ export class Workspace {
       reparse,
       this.runtimeWorld.wholeLineFor(null) !== null,
     )
-    if (denies(said)) return said
+    if (holds(said)) return said
     const [answers, placed] = await this.router.placement(root, line, session)
     const decision = placed !== null && !('kind' in placed) ? placed : null
     const out = said.map((expl) => ({
@@ -1163,17 +1161,6 @@ export class Workspace {
       }
     }
     return out
-  }
-
-  /**
-   * What the op door would answer one op under a session's profile, without
-   * running it: the single-op form of `explain`, for the doors that see ops
-   * and no command (the file tools, `session.vfs`, FUSE).
-   */
-  async explainOp(op: string, path: string, sessionId = ''): Promise<Explanation> {
-    await this.ensureSessionsLoaded()
-    const session = this.getSession(sessionId === '' ? this.defaultSessionId : sessionId)
-    return explainOp(op, path, session, this.registry)
   }
 
   get workspaceId(): string {

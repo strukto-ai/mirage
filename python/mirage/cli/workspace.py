@@ -398,6 +398,47 @@ def list_asks_cmd(
     emit(handle_response(r), human=_format_asks)
 
 
+def _format_explanations(data: dict[str, Any]) -> str:
+    items = data["explanations"]
+    if not items:
+        return "Nothing to explain."
+    rows = [
+        [
+            " ".join([item["command"], *item["argv"]]),
+            item["outcome"],
+            str(item["exit_code"]),
+            ", ".join(f"{a['policy']} {a['kind']}" for a in item["answers"]),
+        ]
+        for item in items
+    ]
+    return format_table(["COMMAND", "OUTCOME", "EXIT", "ANSWERS"], rows)
+
+
+@app.command("explain")
+def explain_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace id."),
+    command: str = typer.Argument(
+        ..., help="The line, as the agent would type it."
+    ),
+    session: str = typer.Option(
+        "", "--session", help="Whose profile to judge it under."
+    ),
+) -> None:
+    """What a line would do, without running it: each command's outcome
+    and every policy's answer."""
+    body = {"command": command}
+    if session:
+        body["session_id"] = session
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request(
+            "POST",
+            f"/v1/workspaces/{quote(workspace_id, safe='')}/explain/shell",
+            json=body,
+        )
+    emit(handle_response(r), human=_format_explanations)
+
+
 @app.command("allow")
 def allow_cmd(
     workspace_id: str = typer.Argument(..., help="Workspace id."),

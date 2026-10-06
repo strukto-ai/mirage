@@ -133,13 +133,15 @@ async function main(): Promise<void> {
       console.log(`${pad('', 9)} ${pad('', 30)} ${note}`)
     }
 
-    // A dry run names who would speak, for a line and for one op of a
-    // door that sees no command (a file tool, FUSE).
-    const [said] = await ws.explain('cat /repo/flagged.txt', 'reviewer')
+    // A dry run names who would speak, through the session's own doors:
+    // a line, and one op of a door that sees no command (a file tool,
+    // FUSE).
+    const explain = (await ws.session('reviewer')).explain
+    const [said] = await explain.shell('cat /repo/flagged.txt')
     for (const a of said?.answers ?? []) {
       console.log(`${pad('explain', 9)} ${pad('cat /repo/flagged.txt', 30)} ${a.policy ?? ''}: ${a.reason}`)
     }
-    const op = await ws.explainOp('write', '/scratch/cold/f', 'reviewer')
+    const op = await explain.vfs.write('/scratch/cold/f', 'draft')
     for (const a of op.answers) {
       console.log(`${pad('explain', 9)} ${pad('write /scratch/cold/f', 30)} ${a.policy ?? ''}: ${a.reason}`)
     }

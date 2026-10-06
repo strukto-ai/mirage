@@ -46,6 +46,7 @@ import {
 } from '@struktoai/mirage-core/policy/types'
 import type { RouteContext } from '@struktoai/mirage-core/runtime/routing/types'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
+import type { VfsExplainer } from '@struktoai/mirage-core/workspace/workspace/explainer'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
@@ -107,7 +108,7 @@ type Step = (
   | { op: 'tool'; tool: string; arguments: Record<string, unknown> }
   | { op: 'answer'; outcome?: Outcome; scope?: Scope }
   | { op: 'explain'; command: string }
-  | { op: 'explain_op'; name: string; path: string }
+  | { op: 'explain_vfs'; name: string; args: string[] }
   | { op: 'unregister_policy'; id: string }
   | {
       op: 'mounts' | 'clis' | 'runtimes' | 'close' | 'snapshot' | 'checkout' | 'drain_processes'
@@ -186,6 +187,35 @@ function answered(answers: readonly (Deny | Ask | Route)[]): Record<string, stri
 }
 
 /** An explanation as a case pins it. */
+// One op of `session.explain.vfs`, its arguments as a case spells them:
+// the paths, then the bytes a write or an append carries.
+function explainVfs(
+  vfs: VfsExplainer,
+  step: { name: string; args: string[] },
+): Promise<Explanation> {
+  const [first = '', second = ''] = step.args
+  switch (step.name) {
+    case 'write':
+      return vfs.write(first, second)
+    case 'append':
+      return vfs.append(first, new TextEncoder().encode(second))
+    case 'rename':
+      return vfs.rename(first, second)
+    case 'truncate':
+      return vfs.truncate(first, Number(second))
+    case 'read':
+    case 'stat':
+    case 'readdir':
+    case 'exists':
+    case 'mkdir':
+    case 'rmdir':
+    case 'unlink':
+      return vfs[step.name](first)
+    default:
+      throw new Error(`unknown vfs op: ${step.name}`)
+  }
+}
+
 function explained(expl: Explanation): Record<string, unknown> {
   return {
     command: expl.command,
@@ -196,6 +226,7 @@ function explained(expl: Explanation): Record<string, unknown> {
     placement: answered(expl.placement),
     runtime: expl.runtime,
     refusal: expl.refusal?.kind ?? null,
+    error: expl.error,
   }
 }
 
@@ -396,9 +427,11 @@ async function action(
       }
       break
     case 'explain':
-      return (await ws.explain(step.command, step.session ?? '')).map(explained)
-    case 'explain_op':
-      return explained(await ws.explainOp(step.name, step.path, step.session ?? ''))
+      return (await new Session(ws, step.session ?? null).explain.shell(step.command)).map(
+        explained,
+      )
+    case 'explain_vfs':
+      return explained(await explainVfs(new Session(ws, step.session ?? null).explain.vfs, step))
     default:
       throw new Error(`unknown lifecycle action: ${String((step as { op: string }).op)}`)
   }

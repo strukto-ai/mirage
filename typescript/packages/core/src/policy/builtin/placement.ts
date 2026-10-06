@@ -20,9 +20,9 @@ import type { Policy } from '../base.ts'
 import type { Deny, Route } from '../types.ts'
 
 /**
- * The workspace's `routePolicy`, answering at `preExecute`. The router
- * compiles the configured callable or script into this built-in, so a
- * route verdict is one more placement answer: a runtime name
+ * The workspace's `routePolicy`, answering at `preExecute`. The workspace
+ * compiles the configured callable or script into this built-in
+ * (`Policies.place`), so a route verdict is one more placement answer: a runtime name
  * (`{ runtime: name }`, `RouteResult`) is a Route, `{ deny: reason }`
  * (`DenyResult`) a Deny, null silence. Its payload and its verdict shapes
  * are the route policy's own. A mistake in it (an unknown verdict key, a
@@ -32,15 +32,20 @@ import type { Deny, Route } from '../types.ts'
  * Python `PlacementPolicy`.
  */
 export class PlacementPolicy implements Policy {
+  /**
+   * @param route the configured callable or script.
+   * @param entries the workspace's ordered runtimes as they stand when a
+   *   line is placed, which pick a script's evaluator.
+   */
   constructor(
     private readonly route: RoutePolicy,
-    private readonly entries: readonly Runtime[],
+    private readonly entries: () => readonly Runtime[],
   ) {}
 
   async preExecute(ctx: RouteContext): Promise<Deny | Route | null> {
     let name: string | null
     try {
-      name = await evaluatePolicy(this.route, ctx, this.entries)
+      name = await evaluatePolicy(this.route, ctx, this.entries())
     } catch (err) {
       if (err instanceof RouteDeny) return { kind: 'deny', reason: err.reason }
       throw err

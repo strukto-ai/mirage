@@ -17,6 +17,7 @@ import base64
 import json
 import logging
 from collections.abc import Awaitable, Callable, Coroutine, Mapping
+from functools import partial
 from typing import Any, TypeGuard, TypeVar
 
 import jsonschema
@@ -24,7 +25,7 @@ import jsonschema
 from mirage import __version__
 from mirage.errors.classify import classify, failure_text
 from mirage.errors.types import FsCondition
-from mirage.server.io_serde import io_result_to_dict
+from mirage.server.io_serde import explanation_to_dict, io_result_to_dict
 from mirage.server.mcp.server import TOOLS
 from mirage.server.rpc.constants import (
     RPC_INTERNAL_ERROR,
@@ -33,6 +34,7 @@ from mirage.server.rpc.constants import (
     RPC_METHOD_NOT_FOUND,
     RPC_NOT_FOUND,
     RPC_PARSE_ERROR,
+    VFS_OPS,
 )
 from mirage.types import JsonValue
 from mirage.workspace.tools.tool_operations import MirageToolOperations
@@ -110,14 +112,49 @@ def _bytes(params: Params, name: str) -> bytes:
         raise RpcError(RPC_INVALID_PARAMS, f"{name} must be base64") from exc
 
 
+def _vfs_args(
+    op: str, params: Params
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    """One op's arguments off its params, read the same way for
+    ``vfs/<op>`` and its dry run ``explain/vfs/<op>``.
+
+    Args:
+        op (str): the op's name.
+        params (Params): the request's params.
+    """
+    if op == "read":
+        offset = params.get("offset", 0)
+        size = params.get("size")
+        if not _integer(offset):
+            raise RpcError(RPC_INVALID_PARAMS, "offset must be an integer")
+        if size is not None and not _integer(size):
+            raise RpcError(RPC_INVALID_PARAMS, "size must be an integer")
+        return (_text(params, "path"), offset, size), {}
+    if op in ("write", "append"):
+        return (_text(params, "path"), _bytes(params, "data_base64")), {}
+    if op == "stat":
+        nofollow = bool(params.get("nofollow", False))
+        return (_text(params, "path"),), {"nofollow": nofollow}
+    if op == "rename":
+        return (_text(params, "src"), _text(params, "dst")), {}
+    if op == "truncate":
+        length = params.get("length")
+        if not _integer(length):
+            raise RpcError(RPC_INVALID_PARAMS, "length must be an integer")
+        return (_text(params, "path"), length), {}
+    return (_text(params, "path"),), {}
+
+
 class MirageRpcServer:
     """Serves one session of a workspace over JSON-RPC 2.0.
 
     The methods are the in-app Session API under the same names: ``shell``
     is ``session.shell``, ``glob`` is ``session.glob``, ``vfs/<op>`` is
-    ``session.vfs.<op>``, and ``tools/list`` and ``tools/call`` serve the
-    session's agent tool table with MCP's schemas. Bytes travel as
-    base64. ``$/cancelRequest`` cancels a running request.
+    ``session.vfs.<op>``, ``explain/shell`` and ``explain/vfs/<op>`` are
+    their dry runs under ``session.explain``, and ``tools/list`` and
+    ``tools/call`` serve the session's agent tool table with MCP's
+    schemas. Bytes travel as base64. ``$/cancelRequest`` cancels a
+    running request.
 
     Args:
         workspace (Workspace): the workspace to serve.
@@ -160,6 +197,11 @@ class MirageRpcServer:
             "vfs/unlink": self._unlink,
             "vfs/rename": self._rename,
             "vfs/truncate": self._truncate,
+            "explain/shell": self._explain_shell,
+            **{
+                f"explain/vfs/{op}": partial(self._explain_vfs, op)
+                for op in VFS_OPS
+            },
             "tools/list": self._tools_list,
             "tools/call": self._tools_call,
         }
@@ -368,40 +410,23 @@ class MirageRpcServer:
         return {"paths": list(paths)}
 
     async def _read(self, params: Params) -> JsonValue:
-        offset = params.get("offset", 0)
-        size = params.get("size")
-        if not _integer(offset):
-            raise RpcError(RPC_INVALID_PARAMS, "offset must be an integer")
-        if size is not None and not _integer(size):
-            raise RpcError(RPC_INVALID_PARAMS, "size must be an integer")
-        data = await self.hop(
-            self._session.vfs.read(_text(params, "path"), offset, size)
-        )
+        args, _ = _vfs_args("read", params)
+        data = await self.hop(self._session.vfs.read(*args))
         return {"data_base64": base64.b64encode(data).decode()}
 
     async def _write(self, params: Params) -> JsonValue:
-        await self.hop(
-            self._session.vfs.write(
-                _text(params, "path"), _bytes(params, "data_base64")
-            )
-        )
+        args, _ = _vfs_args("write", params)
+        await self.hop(self._session.vfs.write(*args))
         return {}
 
     async def _append(self, params: Params) -> JsonValue:
-        await self.hop(
-            self._session.vfs.append(
-                _text(params, "path"), _bytes(params, "data_base64")
-            )
-        )
+        args, _ = _vfs_args("append", params)
+        await self.hop(self._session.vfs.append(*args))
         return {}
 
     async def _stat(self, params: Params) -> JsonValue:
-        stat = await self.hop(
-            self._session.vfs.stat(
-                _text(params, "path"),
-                nofollow=bool(params.get("nofollow", False)),
-            )
-        )
+        args, kwargs = _vfs_args("stat", params)
+        stat = await self.hop(self._session.vfs.stat(*args, **kwargs))
         return stat.model_dump(mode="json", exclude={"extra"})
 
     async def _readdir(self, params: Params) -> JsonValue:
@@ -427,21 +452,25 @@ class MirageRpcServer:
         return {}
 
     async def _rename(self, params: Params) -> JsonValue:
-        await self.hop(
-            self._session.vfs.rename(
-                _text(params, "src"), _text(params, "dst")
-            )
-        )
+        args, _ = _vfs_args("rename", params)
+        await self.hop(self._session.vfs.rename(*args))
         return {}
 
     async def _truncate(self, params: Params) -> JsonValue:
-        length = params.get("length")
-        if not _integer(length):
-            raise RpcError(RPC_INVALID_PARAMS, "length must be an integer")
-        await self.hop(
-            self._session.vfs.truncate(_text(params, "path"), length)
-        )
+        args, _ = _vfs_args("truncate", params)
+        await self.hop(self._session.vfs.truncate(*args))
         return {}
+
+    async def _explain_shell(self, params: Params) -> JsonValue:
+        said = await self.hop(
+            self._session.explain.shell(_text(params, "command"))
+        )
+        return {"explanations": [explanation_to_dict(e) for e in said]}
+
+    async def _explain_vfs(self, op: str, params: Params) -> JsonValue:
+        args, kwargs = _vfs_args(op, params)
+        explain = getattr(self._session.explain.vfs, op)
+        return explanation_to_dict(await self.hop(explain(*args, **kwargs)))
 
     async def _tools_list(self, params: Params) -> JsonValue:
         names = await self._ops.offered()

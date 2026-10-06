@@ -1274,53 +1274,7 @@ describe('explain answers and the op form', () => {
         { kind: 'deny', reason: 'no', policy: 'DenyRm' },
       ])
       expect([expl?.exitCode, expl?.refusal?.reason]).toEqual([126, 'no'])
-      expect(await new Session(ws, null).explain('rm /data/x')).toEqual([expl])
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('reads one op as the door would', async () => {
-    const ws = new Workspace(
-      { '/data/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
-    try {
-      ws.createSession('agent', {
-        profile: parseSessionProfile({
-          mounts: { '/data': 'read' },
-          paths: { hide: ['/data/vault'] },
-          commands: {
-            deny: [{ reason: 'sealed', paths: ['/data/sec/*'] }],
-            ask: [{ reason: 'nod', paths: ['/data/out/*'] }],
-          },
-        }),
-      })
-      const sealed = await ws.explainOp('read', '/data/sec/k', 'agent')
-      expect([sealed.outcome, sealed.exitCode, sealed.refusal?.reason]).toEqual([
-        Outcome.DENY,
-        1,
-        'sealed',
-      ])
-      expect(sealed.answers).toEqual([
-        { kind: 'deny', reason: 'sealed', policy: 'PermissionsPolicy' },
-      ])
-      const asked = await ws.explainOp('read', '/data/out/a', 'agent')
-      expect([asked.outcome, asked.exitCode, asked.refusal?.kind]).toEqual([
-        Outcome.ASK,
-        1,
-        'pending',
-      ])
-      // A dry run records no question.
-      expect(ws.decisions.pending('agent')).toEqual([])
-      // The mode throws its own error, so no record rides it.
-      const written = await ws.explainOp('write', '/data/x', 'agent')
-      expect([written.exitCode, written.refusal]).toEqual([1, null])
-      expect(written.answers.at(-1)?.policy).toBe('MountModePolicy')
-      // A hidden path is no path to any policy.
-      const hidden = await ws.explainOp('read', '/data/vault/k', 'agent')
-      expect([hidden.outcome, hidden.answers, hidden.paths]).toEqual([Outcome.ALLOW, [], []])
-      expect((await ws.explainOp('read', '/data/x', 'agent')).exitCode).toBe(0)
+      expect(await new Session(ws, null).explain.shell('rm /data/x')).toEqual([expl])
     } finally {
       await ws.close()
     }

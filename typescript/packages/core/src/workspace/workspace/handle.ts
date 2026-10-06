@@ -14,11 +14,11 @@
 
 import type { Ops } from '../../ops/ops.ts'
 import type { Decisions } from '../../policy/decisions.ts'
-import type { Explanation } from '../../policy/types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { SessionState } from '../session/session.ts'
 import type { FileVersionTracker } from '../tools/file_version.ts'
 import type { MirageToolOperations } from '../tools/tool_operations.ts'
+import { Explainer } from './explainer.ts'
 import type { ExecuteOptions, ExecuteResult } from './types.ts'
 import type { Workspace } from './workspace.ts'
 
@@ -28,9 +28,9 @@ export type SessionExecuteOptions = Omit<ExecuteOptions, 'sessionId'>
 /**
  * One session's doors, bound together.
  *
- * `shell` runs a line as the session, `vfs` is the op facade run as it
- * and `tools` the agent tools over both, so a host holds one object per
- * agent and every door answers under the same profile: hides, mount
+ * `shell` runs a line as the session, `vfs` is the op facade run as it,
+ * `tools` the agent tools over both and `explain` the same doors as a dry
+ * run, so a host holds one object per agent and every door answers under the same profile: hides, mount
  * modes, grants and standing decisions. Nothing is stored here; the session record stays with the
  * session manager and `state` reads it. Obtained from
  * `Workspace.session`, which creates the session or adopts it. A null id
@@ -71,6 +71,14 @@ export class Session {
     return this.id === null ? this.ws.vfs : this.ws.vfs.forSession(this.id)
   }
 
+  /**
+   * This session's calls explained instead of run, under the same names:
+   * `explain.shell(line)`, `explain.vfs.<op>(...)`.
+   */
+  get explain(): Explainer {
+    return new Explainer(this.ws, this.id, this.vfs)
+  }
+
   /** The agent tools run as this session: one table per session, shared by every caller in the process. */
   get tools(): MirageToolOperations {
     return this.ws.sessionTools(this.id)
@@ -97,16 +105,6 @@ export class Session {
   /** Run a shell line as this session; `Workspace.shell` with the session fixed. */
   shell(command: string, options: SessionExecuteOptions = {}): Promise<ExecuteResult> {
     return this.ws.shell(command, this.id === null ? options : { ...options, sessionId: this.id })
-  }
-
-  /** What a line would do as this session, without running any of it; `Workspace.explain` with the session fixed. */
-  explain(line: string): Promise<Explanation[]> {
-    return this.ws.explain(line, this.sessionId)
-  }
-
-  /** What the op door would answer one op as this session; `Workspace.explainOp` with the session fixed. */
-  explainOp(op: string, path: string): Promise<Explanation> {
-    return this.ws.explainOp(op, path, this.sessionId)
   }
 
   /** The paths a pattern matches as this session; `Workspace.glob` with the session fixed. */

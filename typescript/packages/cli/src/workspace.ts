@@ -168,6 +168,27 @@ function formatAsks(items: AskRecord[]): string {
   )
 }
 
+interface ExplanationRecord {
+  command: string
+  argv: string[]
+  outcome: string
+  exit_code: number
+  answers: { kind: string; policy: string }[]
+}
+
+function formatExplanations(data: { explanations: ExplanationRecord[] }): string {
+  if (data.explanations.length === 0) return 'Nothing to explain.'
+  return formatTable(
+    ['COMMAND', 'OUTCOME', 'EXIT', 'ANSWERS'],
+    data.explanations.map((e) => [
+      [e.command, ...e.argv].join(' '),
+      e.outcome,
+      String(e.exit_code),
+      e.answers.map((a) => `${a.policy} ${a.kind}`).join(', '),
+    ]),
+  )
+}
+
 export function registerWorkspaceCommands(program: Command): void {
   const ws = program.command('workspace').description('Manage workspaces.')
 
@@ -311,6 +332,24 @@ export function registerWorkspaceCommands(program: Command): void {
         `/v1/workspaces/${encodeURIComponent(id)}/asks${qs === '' ? '' : `?${qs}`}`,
       )
       emit((await handleResponse(r)) as AskRecord[], formatAsks)
+    })
+
+  ws.command('explain')
+    .description(
+      "What a line would do, without running it: each command's outcome and every policy's answer.",
+    )
+    .argument('<id>')
+    .argument('<command>', 'The line, as the agent would type it')
+    .option('--session <sessionId>', 'Whose profile to judge it under')
+    .action(async (id: string, command: string, opts: { session?: string }) => {
+      const body: Record<string, string> = { command }
+      if (opts.session !== undefined) body.session_id = opts.session
+      const c = buildClient()
+      await c.ensureRunning({ allowSpawn: false })
+      const r = await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/explain/shell`, {
+        body: JSON.stringify(body),
+      })
+      emit((await handleResponse(r)) as { explanations: ExplanationRecord[] }, formatExplanations)
     })
 
   ws.command('allow')

@@ -48,6 +48,7 @@ from mirage.server.paths import (
 from mirage.server.registry import OWNERS_PREFIX, WorkspaceRegistry
 from mirage.server.routers import (
     asks,
+    explain,
     health,
     jobs,
     oauth,
@@ -255,6 +256,7 @@ def build_app(
     app.include_router(sessions.router)
     app.include_router(asks.router)
     app.include_router(shell.router)
+    app.include_router(explain.router)
     app.include_router(ssh.router)
     app.include_router(tools.router)
     app.include_router(jobs.router)
