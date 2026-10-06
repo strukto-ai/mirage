@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Buffer } from 'node:buffer'
+import { fromJsonSchema } from '@modelcontextprotocol/server'
 import { classify, failureText } from '@struktoai/mirage-core/errors/classify'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import type {
@@ -23,8 +25,10 @@ import type {
   ShellNode,
   VfsExplanation,
 } from '@struktoai/mirage-core/policy/types'
-import type { JsonValue, Refusal } from '@struktoai/mirage-core/types'
+import { FileStat, type JsonValue, type Refusal } from '@struktoai/mirage-core/types'
+import type { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import { BYTES, schemaOf, type Args, type VfsCall } from './vfs_calls.ts'
 
 interface IoResultDict {
   kind: 'io'
@@ -139,4 +143,58 @@ export function explanationToDict(
 function nodeToDict(node: ShellNode | CommandExplanation): Record<string, JsonValue> {
   if ('command' in node) return explanationToDict(node)
   return { type: node.type, text: node.text, children: node.children.map(nodeToDict) }
+}
+
+/** A VFS call's arguments do not fit its schema. Mirrors Python's `CallArgsError`. */
+export class CallArgsError extends Error {}
+
+/**
+ * A VFS call's arguments, held to its schema, as its method takes them:
+ * each `<name>_base64` decoded to the bytes `<name>` takes. Throws
+ * `CallArgsError` when they do not fit. Mirrors Python's `checked`.
+ */
+export async function checked(call: VfsCall, params: unknown): Promise<Record<string, unknown>> {
+  const result = await fromJsonSchema(schemaOf(call))['~standard'].validate(params)
+  if (result.issues !== undefined) {
+    const why = result.issues.map((issue) => issue.message).join('; ')
+    throw new CallArgsError(`invalid arguments for vfs/${call.name}: ${why}`)
+  }
+  const args: Record<string, unknown> = {}
+  for (const [name, value] of Object.entries(params as Record<string, unknown>)) {
+    if (call.params[name] !== BYTES) {
+      args[name] = value
+      continue
+    }
+    const text = String(value)
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(text) || text.length % 4 !== 0) {
+      throw new CallArgsError(`${name} must be base64`)
+    }
+    args[name.replace(/_base64$/, '')] = new Uint8Array(Buffer.from(text, 'base64'))
+  }
+  return args
+}
+
+function toJson(value: unknown): JsonValue {
+  if (value instanceof Uint8Array) return Buffer.from(value).toString('base64')
+  if (value instanceof FileStat) {
+    return Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'extra')) as JsonValue
+  }
+  return value as JsonValue
+}
+
+/**
+ * Run a VFS call as a session, or explain it, and answer it as JSON.
+ * Mirrors Python's `answered`.
+ */
+export async function answered(
+  session: Session,
+  call: VfsCall,
+  args: Args,
+  explain: boolean,
+): Promise<JsonValue> {
+  if (explain) {
+    return explanationToDict((await call.run(session.explain.vfs, args)) as VfsExplanation)
+  }
+  const result = await call.run(session.vfs, args)
+  return call.answer === null ? {} : { [call.answer]: toJson(result) }
 }

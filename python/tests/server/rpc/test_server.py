@@ -66,7 +66,9 @@ async def test_vfs_methods_mirror_the_ops():
         rpc, "vfs/read", {"path": "/d/a.txt", "offset": 4, "size": 3}
     )
     assert base64.b64decode(sliced["result"]["data_base64"]) == b"two"
-    stat = (await call(rpc, "vfs/stat", {"path": "/d/a.txt"}))["result"]
+    stat = (await call(rpc, "vfs/stat", {"path": "/d/a.txt"}))["result"][
+        "stat"
+    ]
     assert stat["type"] == "file"
     assert stat["size"] == 8
     listed = (await call(rpc, "vfs/readdir", {"path": "/d"}))["result"]

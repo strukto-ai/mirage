@@ -20,7 +20,14 @@ import type { JsonValue } from '@struktoai/mirage-core/types'
 import { VERSION } from '@struktoai/mirage-core/version'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { explanationToDict, failureToDict, ioResultToDict } from '../io_serde.ts'
+import {
+  CallArgsError,
+  answered,
+  checked,
+  explanationToDict,
+  failureToDict,
+  ioResultToDict,
+} from '../io_serde.ts'
 import { TOOLS } from '../mcp/server.ts'
 import {
   RPC_INTERNAL_ERROR,
@@ -30,7 +37,7 @@ import {
   RPC_NOT_FOUND,
   RPC_PARSE_ERROR,
 } from './constants.ts'
-import { VFS_CALLS, CallArgsError, answered, checked, type VfsCall } from '../vfs_calls.ts'
+import { VFS_CALLS, type VfsCall } from '../vfs_calls.ts'
 
 const PROTOCOL_VERSION = '1'
 export const CANCEL_REQUEST = '$/cancelRequest'

@@ -402,11 +402,12 @@ jobs:
 
       # Built here rather than downloaded from the bootstrap job: waiting for
       # that job held this one, among the last to finish, back by a minute
-      # and a half, and the four packages every step here imports build in
-      # under one.
-      - name: Build mirage-core, mirage-node, mirage-browser and mirage-agents
+      # and a half, and the five packages every step here imports build in
+      # under one. The lifecycle and policy corpora take the VFS call
+      # table from mirage-server.
+      - name: Build mirage-core, mirage-node, mirage-browser, mirage-agents and mirage-server
         working-directory: typescript
-        run: pnpm --filter @struktoai/mirage-core --filter @struktoai/mirage-node --filter @struktoai/mirage-browser --filter @struktoai/mirage-agents build
+        run: pnpm --filter @struktoai/mirage-core --filter @struktoai/mirage-node --filter @struktoai/mirage-browser --filter @struktoai/mirage-agents --filter @struktoai/mirage-server build
 
       - name: Wait for Nextcloud and tune it for the battery
         uses: ./.github/actions/nextcloud-tune

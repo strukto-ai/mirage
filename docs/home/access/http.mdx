@@ -266,14 +266,14 @@ curl -s "http://127.0.0.1:8765/v1/workspaces/demo/shell?session_id=agent" \
 <ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
 <ParamField query="explain" type="boolean" default="false">Answer the call's explanation; run nothing.</ParamField>
 
-The body is the call's arguments; bytes travel base64.
+The body is the call's arguments, up to 4 MiB; bytes travel base64. Each call answers one field, or `{}`.
 
 | Call | Arguments | Answers |
 | --- | --- | --- |
 | `read` | `path`, `offset?`, `size?` | `data_base64` |
 | `write`, `append` | `path`, `data_base64` | `{}` |
 | `pwrite` | `path`, `data_base64`, `offset` | `{}` |
-| `stat` | `path`, `nofollow?` | the stat |
+| `stat` | `path`, `nofollow?` | `stat` |
 | `readdir` | `path` | `entries` |
 | `exists`, `is_dir`, `is_file` | `path` | `exists`, `is_dir`, `is_file` |
 | `cat` | `path` | `text` |
@@ -289,7 +289,7 @@ The body is the call's arguments; bytes travel base64.
 | `removexattr` | `path`, `name`, `nofollow?` | `{}` |
 | `truncate` | `path`, `length` | `{}` |
 
-A failed call answers `{detail, errno}`, and a policy's refusal adds its `refusal` record. The errno picks the status: `404` for `ENOENT` and `NO_XATTR`, `403` for `EACCES`, `EPERM` and `EROFS`, `409` for `EEXIST`, `ENOTEMPTY` and `EBUSY`, `400` for the rest.
+A failed call answers `{detail, errno}`, and a policy's refusal adds its `refusal` record. The errno picks the status: `404` for `ENOENT` and `NO_XATTR`, `403` for `EACCES`, `EPERM` and `EROFS`, `409` for `EEXIST`, `ENOTEMPTY` and `EBUSY`, `400` for `ENOTDIR`, `EISDIR`, `EINVAL`, `EXDEV`, `ELOOP` and `ENOTSUP`, and `500` for anything else, such as `EIO`.
 
 ### Match paths
 

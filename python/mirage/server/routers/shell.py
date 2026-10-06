@@ -18,6 +18,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 from mirage.io.types import ByteSource
@@ -169,9 +170,9 @@ async def _explained(
     background: bool,
 ) -> Response:
     """What a line would do as a session, without running any of it
-    (``session.explain.shell``). Only the line is read: a working
-    directory, a runtime, stdin or a background job would change what
-    runs, which an explanation cannot follow, so each is refused.
+    (``session.explain.shell``). Only the line is read: stdin, a working
+    directory, a runtime or a background job would change what runs,
+    which an explanation cannot follow, so each is refused.
 
     Args:
         entry (WorkspaceEntry): the workspace.
@@ -179,25 +180,21 @@ async def _explained(
         session_id (str | None): the session; None is the default.
         background (bool): whether the caller asked for a job.
     """
-    if background or request.headers.get("content-type", "").startswith(
-        "multipart/"
-    ):
+    content_type = request.headers.get("content-type", "")
+    req_obj = (
+        None
+        if content_type.startswith("multipart/")
+        else await _parse_json_body(request)
+    )
+    if req_obj is None or background or req_obj.cwd or req_obj.runtime:
         raise HTTPException(
             status_code=400,
-            detail="explain takes the line alone: no stdin, no background",
-        )
-    req_obj = await _parse_json_body(request)
-    if req_obj.cwd is not None or req_obj.runtime is not None:
-        raise HTTPException(
-            status_code=400,
-            detail="explain takes the line alone: no cwd, no runtime",
+            detail="explain takes the line alone: "
+            "no stdin, cwd, runtime or background",
         )
     session = await session_of(entry, session_id)
     said = await entry.runner.call(session.explain.shell(req_obj.command))
-    return Response(
-        content=json.dumps(explanation_to_dict(said)),
-        media_type="application/json",
-    )
+    return JSONResponse(content=explanation_to_dict(said))
 
 
 async def wait_attended(

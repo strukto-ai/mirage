@@ -53,11 +53,8 @@ import {
 import type { RouteContext } from '@struktoai/mirage-core/runtime/routing/types'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
-import {
-  VFS_CALL_BY_NAME,
-  answered as answeredCall,
-  checked,
-} from '@struktoai/mirage-server/vfs_calls'
+import { answered as answeredCall, checked } from '@struktoai/mirage-server/io_serde'
+import { VFS_CALL_BY_NAME } from '@struktoai/mirage-server/vfs_calls'
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
 import { applyStateDict, toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
@@ -237,8 +234,6 @@ function answered(answers: readonly (Deny | Ask | Route)[]): Record<string, stri
   }))
 }
 
-// One call of `session.explain.vfs`, its arguments as a case spells them:
-// the paths, then the bytes a write or an append carries.
 /**
  * An explanation as a case pins it: a VFS call's verdict, or a line's with
  * its commands in the order the line reads them.
@@ -458,7 +453,9 @@ async function action(
       const call = VFS_CALL_BY_NAME.get(step.call)
       if (call === undefined) throw new Error(`unknown vfs call: ${step.call}`)
       const args = await checked(call, step.args ?? {})
-      if (step.explain === true) return explained(await call.explain(session.explain.vfs, args))
+      if (step.explain === true) {
+        return explained((await call.run(session.explain.vfs, args)) as VfsExplanation)
+      }
       return answeredCall(session, call, args, false)
     }
     default:

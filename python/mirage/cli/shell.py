@@ -28,6 +28,7 @@ from mirage.cli.output import (
     fail,
     handle_response,
 )
+from mirage.cli.vfs import answer, post
 from mirage.execution.types import ExecutionStatus as JobStatus
 
 WAIT_SLICE_S = 30.0
@@ -85,21 +86,14 @@ def shell_cmd(
     """
     query: dict[str, str] = {"session_id": session_id} if session_id else {}
     payload: dict[str, Any] = {"command": command}
-    if explain:
-        with make_client() as client:
-            client.ensure_running(allow_spawn=False)
-            r = client.request(
-                "POST",
-                f"/v1/workspaces/{quote(workspace_id, safe='')}/shell",
-                params={**query, "explain": "true"},
-                json=payload,
-            )
-        emit(handle_response(r), human=_format_explanation)
-        return
     if cwd:
         payload["cwd"] = cwd
     if runtime:
         payload["runtime"] = runtime
+    if explain:
+        said = answer(post(workspace_id, "shell", payload, session_id, True))
+        emit(said, human=_format_explanation)
+        return
     path = f"/v1/workspaces/{quote(workspace_id, safe='')}/shell"
     piped = not sys.stdin.isatty()
     with make_client() as client:

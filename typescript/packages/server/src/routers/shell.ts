@@ -231,17 +231,18 @@ async function explained(
   let said: ShellExplanation
   try {
     const entry = requireEntry(deps.registry, req.params.wsId, req.account)
+    const parsed = ShellBodySchema.safeParse(req.body)
     if (
       queryFlag(req.query.background, 'background') ||
-      req.headers['content-type']?.startsWith('multipart/') === true
+      req.headers['content-type']?.startsWith('multipart/') === true ||
+      (parsed.success && (parsed.data.cwd !== undefined || parsed.data.runtime !== undefined))
     ) {
-      throw new RouteError(400, 'explain takes the line alone: no stdin, no background')
+      throw new RouteError(
+        400,
+        'explain takes the line alone: no stdin, cwd, runtime or background',
+      )
     }
-    const parsed = ShellBodySchema.safeParse(req.body)
     if (!parsed.success) throw new RouteError(400, `bad shell request: ${parsed.error.message}`)
-    if (parsed.data.cwd !== undefined || parsed.data.runtime !== undefined) {
-      throw new RouteError(400, 'explain takes the line alone: no cwd, no runtime')
-    }
     const session = await sessionOf(entry.runner.ws, req.query.session_id)
     said = await session.explain.shell(parsed.data.command)
   } catch (err) {
@@ -254,7 +255,11 @@ export function registerShellRoutes(app: FastifyInstance, deps: ShellRoutesDeps)
   app.post<{ Params: ShellParams; Body: ShellBody; Querystring: ShellQuery }>(
     '/v1/workspaces/:wsId/shell',
     async (req, reply) => {
-      if (req.query.explain === 'true') return explained(req, reply, deps)
+      try {
+        if (queryFlag(req.query.explain, 'explain')) return await explained(req, reply, deps)
+      } catch (err) {
+        return failure(reply, err)
+      }
       const { wsId } = req.params
       if (deps.registry.visible(wsId, req.account) === null) {
         return reply.status(404).send({ detail: 'workspace not found' })

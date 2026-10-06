@@ -12,15 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { DEFAULT_MAX_REQUEST_BODY_SIZE } from '@modelcontextprotocol/server'
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import { classify } from '@struktoai/mirage-core/errors/classify'
 import type { FsCondition } from '@struktoai/mirage-core/errors/types'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { failureToDict } from '../io_serde.ts'
+import { CallArgsError, answered, checked, failureToDict } from '../io_serde.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
-import { VFS_CALLS, CallArgsError, answered, checked } from '../vfs_calls.ts'
+import { VFS_CALLS } from '../vfs_calls.ts'
 
 export interface VfsRoutesDeps {
   registry: WorkspaceRegistry
@@ -95,6 +96,7 @@ export function queryFlag(value: string | undefined, name: string): boolean {
  */
 export function failure(reply: FastifyReply, err: unknown): FastifyReply {
   if (err instanceof RouteError) return reply.status(err.status).send({ detail: err.message })
+  if (err instanceof CallArgsError) return reply.status(400).send({ detail: err.message })
   const condition = classify(err)
   const status = condition === null ? 500 : (STATUS[condition] ?? 500)
   return reply.status(status).send(failureToDict(err))
@@ -110,18 +112,13 @@ export function registerVfsRoutes(app: FastifyInstance, deps: VfsRoutesDeps): vo
   for (const call of VFS_CALLS) {
     app.post<{ Params: { wsId: string }; Querystring: CallQuery }>(
       `/v1/workspaces/:wsId/vfs/${call.name}`,
+      { bodyLimit: DEFAULT_MAX_REQUEST_BODY_SIZE },
       async (req, reply) => {
         let body: JsonValue
         try {
           const ws = requireEntry(deps.registry, req.params.wsId, req.account).runner.ws
           const explain = queryFlag(req.query.explain, 'explain')
-          let args: Record<string, unknown>
-          try {
-            args = await checked(call, req.body ?? {})
-          } catch (err) {
-            if (err instanceof CallArgsError) throw new RouteError(400, err.message)
-            throw err
-          }
+          const args = await checked(call, req.body ?? {})
           const session = await sessionOf(ws, req.query.session_id)
           body = await answered(session, call, args, explain)
         } catch (err) {
@@ -135,17 +132,21 @@ export function registerVfsRoutes(app: FastifyInstance, deps: VfsRoutesDeps): vo
     Params: { wsId: string }
     Querystring: CallQuery
     Body: { pattern?: unknown } | undefined
-  }>('/v1/workspaces/:wsId/glob', async (req, reply) => {
-    let paths: string[]
-    try {
-      const ws = requireEntry(deps.registry, req.params.wsId, req.account).runner.ws
-      const pattern = req.body?.pattern
-      if (typeof pattern !== 'string') throw new RouteError(400, 'pattern must be a string')
-      const session = await sessionOf(ws, req.query.session_id)
-      paths = await session.glob(pattern)
-    } catch (err) {
-      return failure(reply, err)
-    }
-    return reply.send({ paths })
-  })
+  }>(
+    '/v1/workspaces/:wsId/glob',
+    { bodyLimit: DEFAULT_MAX_REQUEST_BODY_SIZE },
+    async (req, reply) => {
+      let paths: string[]
+      try {
+        const ws = requireEntry(deps.registry, req.params.wsId, req.account).runner.ws
+        const pattern = req.body?.pattern
+        if (typeof pattern !== 'string') throw new RouteError(400, 'pattern must be a string')
+        const session = await sessionOf(ws, req.query.session_id)
+        paths = await session.glob(pattern)
+      } catch (err) {
+        return failure(reply, err)
+      }
+      return reply.send({ paths })
+    },
+  )
 }

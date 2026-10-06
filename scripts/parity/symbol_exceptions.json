@@ -335,7 +335,8 @@
    "python_only": {
     "glob": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "router": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
-    "vfs_route": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access."
+    "vfs_route": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
+    "json_body": "FastAPI hands a route the raw request, so the VFS, glob and tool routes read their JSON object through json_body, bounded by MCP's size limit; Fastify parses and bounds the body itself (bodyLimit)."
    },
    "typescript_only": {
     "CallQuery": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
@@ -347,15 +348,13 @@
   },
   "server/vfs_calls": {
    "typescript_only": {
-    "attrs": "TypeScript reads each argument off the checked unknown record through a typed accessor and builds each row with row(), which folds the call and its answer into one function; Python's rows index the args dict directly and keep run and answer apart.",
-    "bin": "TypeScript reads each argument off the checked unknown record through a typed accessor and builds each row with row(), which folds the call and its answer into one function; Python's rows index the args dict directly and keep run and answer apart.",
-    "flag": "TypeScript reads each argument off the checked unknown record through a typed accessor and builds each row with row(), which folds the call and its answer into one function; Python's rows index the args dict directly and keep run and answer apart.",
-    "int": "TypeScript reads each argument off the checked unknown record through a typed accessor and builds each row with row(), which folds the call and its answer into one function; Python's rows index the args dict directly and keep run and answer apart.",
-    "nofollow": "TypeScript reads each argument off the checked unknown record through a typed accessor and builds each row with row(), which folds the call and its answer into one function; Python's rows index the args dict directly and keep run and answer apart.",
-    "read": "TypeScript reads each argument off the checked unknown record through a typed accessor and builds each row with row(), which folds the call and its answer into one function; Python's rows index the args dict directly and keep run and answer apart.",
-    "str": "TypeScript reads each argument off the checked unknown record through a typed accessor and builds each row with row(), which folds the call and its answer into one function; Python's rows index the args dict directly and keep run and answer apart.",
-    "xattrOpts": "TypeScript reads each argument off the checked unknown record through a typed accessor and builds each row with row(), which folds the call and its answer into one function; Python's rows index the args dict directly and keep run and answer apart.",
-    "row": "TypeScript reads each argument off the checked unknown record through a typed accessor and builds each row with row(), which folds the call and its answer into one function; Python's rows index the args dict directly and keep run and answer apart."
+    "attrs": "TypeScript methods take positional arguments and option objects, so each row's run reads its arguments off the checked record through typed accessors and is built with row(); Python calls the method of the same name with the arguments by keyword.",
+    "bin": "TypeScript methods take positional arguments and option objects, so each row's run reads its arguments off the checked record through typed accessors and is built with row(); Python calls the method of the same name with the arguments by keyword.",
+    "flag": "TypeScript methods take positional arguments and option objects, so each row's run reads its arguments off the checked record through typed accessors and is built with row(); Python calls the method of the same name with the arguments by keyword.",
+    "int": "TypeScript methods take positional arguments and option objects, so each row's run reads its arguments off the checked record through typed accessors and is built with row(); Python calls the method of the same name with the arguments by keyword.",
+    "nofollow": "TypeScript methods take positional arguments and option objects, so each row's run reads its arguments off the checked record through typed accessors and is built with row(); Python calls the method of the same name with the arguments by keyword.",
+    "str": "TypeScript methods take positional arguments and option objects, so each row's run reads its arguments off the checked record through typed accessors and is built with row(); Python calls the method of the same name with the arguments by keyword.",
+    "row": "TypeScript methods take positional arguments and option objects, so each row's run reads its arguments off the checked record through typed accessors and is built with row(); Python calls the method of the same name with the arguments by keyword."
    }
   },
   "server/mcp/http": {

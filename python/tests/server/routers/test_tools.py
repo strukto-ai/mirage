@@ -107,6 +107,7 @@ async def test_a_body_over_the_limit_is_refused():
     ) as client:
         wid = await _create_workspace(client)
         r = await client.post(
-            f"/v1/workspaces/{wid}/tools/read", content=b" " * (4 * 1024 * 1024 + 1)
+            f"/v1/workspaces/{wid}/tools/read",
+            content=b" " * (4 * 1024 * 1024 + 1),
         )
         assert r.status_code == 413

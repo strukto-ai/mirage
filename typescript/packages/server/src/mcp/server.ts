@@ -45,15 +45,8 @@ import {
 import type { ToolResult } from '@struktoai/mirage-core/workspace/tools/tool_operations'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
-import { explanationToDict, failureToDict } from '../io_serde.ts'
-import {
-  VFS_CALLS,
-  CallArgsError,
-  answered,
-  checked,
-  schemaOf,
-  type VfsCall,
-} from '../vfs_calls.ts'
+import { answered, checked, explanationToDict, failureToDict } from '../io_serde.ts'
+import { VFS_CALLS, schemaOf, type VfsCall } from '../vfs_calls.ts'
 
 const READ_ONLY: ToolAnnotations = { readOnlyHint: true }
 
@@ -177,24 +170,6 @@ export function createMirageMcpServer(
   // what a call refuses and miss what a widened profile allows. A tool
   // the session is not offered is "not found", as Python's server says.
   server.server.registerCapabilities({ tools: { listChanged: true } })
-  const vfsCall = async (
-    call: VfsCall,
-    given: Record<string, unknown>,
-    explain: boolean,
-  ): Promise<ToolResult> => {
-    let args: Record<string, unknown>
-    try {
-      args = await checked(call, given)
-    } catch (err) {
-      if (!(err instanceof CallArgsError)) throw err
-      return { content: [{ type: 'text', text: err.message }], isError: true }
-    }
-    try {
-      return json(await answered(session, call, args, explain))
-    } catch (err) {
-      return json(failureToDict(err), true)
-    }
-  }
   const listed = async (): Promise<(typeof TOOLS)[number][]> => {
     const names = await operations.offered()
     const tools = TOOLS.filter((tool) => names.includes(tool.name))
@@ -219,23 +194,28 @@ export function createMirageMcpServer(
       throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Tool ${name} not found`)
     }
     const args = request.params.arguments ?? {}
-    const checked = await fromJsonSchema(tool.inputSchema)['~standard'].validate(args)
-    if (checked.issues !== undefined) {
-      const why = checked.issues.map((issue) => issue.message).join('; ')
+    const valid = await fromJsonSchema(tool.inputSchema)['~standard'].validate(args)
+    if (valid.issues !== undefined) {
+      const why = valid.issues.map((issue) => issue.message).join('; ')
       const text = `Input validation error: Invalid arguments for tool ${name}: ${why}`
       return { content: [{ type: 'text', text }], isError: true }
     }
     const { explain, ...given } = args
     const vfs = VFS_TOOLS.get(name)
-    if (vfs !== undefined) return vfsCall(vfs.call, given, explain === true)
     try {
+      if (vfs !== undefined) {
+        return json(
+          await answered(session, vfs.call, await checked(vfs.call, given), explain === true),
+        )
+      }
       if (tool === EXPLAINED_SHELL && explain === true) {
         return json(explanationToDict(await session.explain.shell(String(given.command))))
       }
-      return await operations.call(name, tool === EXPLAINED_SHELL ? given : args, ctx.mcpReq.signal)
+      return await operations.call(name, given, ctx.mcpReq.signal)
     } catch (err) {
       // A call that failed is a tool result the agent reads, not a
       // protocol error.
+      if (vfs !== undefined) return json(failureToDict(err), true)
       const text = err instanceof Error ? err.message : String(err)
       return { content: [{ type: 'text', text }], isError: true }
     }

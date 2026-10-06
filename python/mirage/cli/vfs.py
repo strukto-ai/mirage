@@ -132,43 +132,23 @@ def _flag_name(name: str) -> str:
 
 def _parameter(call: VfsCall, name: str) -> inspect.Parameter:
     schema = call.params[name]
+    default: Any
     if schema is BYTES:
-        option = typer.Option(
-            None,
-            f"--{_flag_name(name)}",
-            help=f"The {_flag_name(name)} as text; stdin when absent.",
+        flag = _flag_name(name)
+        default = typer.Option(
+            None, f"--{flag}", help=f"The {flag} as text; stdin when absent."
         )
-        return inspect.Parameter(
-            name,
-            inspect.Parameter.KEYWORD_ONLY,
-            default=option,
-            annotation=str | None,
-        )
-    if schema is FLAG:
-        option = typer.Option(False, f"--{name}")
-        return inspect.Parameter(
-            name,
-            inspect.Parameter.KEYWORD_ONLY,
-            default=option,
-            annotation=bool,
-        )
-    kind: type = int if schema is INTEGER else str
-    if name in call.required:
-        return inspect.Parameter(
-            name,
-            inspect.Parameter.KEYWORD_ONLY,
-            default=typer.Argument(...),
-            annotation=kind,
-        )
-    if schema is SIZE:
-        kind = int
-    elif schema is OWNER:
-        kind = str
+        kind: Any = str | None
+    elif schema is FLAG:
+        default, kind = typer.Option(False, f"--{name}"), bool
+    elif name in call.required:
+        default = typer.Argument(...)
+        kind = int if schema is INTEGER else str
+    else:
+        default = typer.Option(None, f"--{name}")
+        kind = (int if schema in (INTEGER, SIZE) else str) | None
     return inspect.Parameter(
-        name,
-        inspect.Parameter.KEYWORD_ONLY,
-        default=typer.Option(None, f"--{name}"),
-        annotation=kind | None,
+        name, inspect.Parameter.KEYWORD_ONLY, default=default, annotation=kind
     )
 
 
@@ -208,26 +188,18 @@ def command(call: VfsCall) -> Callable[..., None]:
         )
         emit(result, human=_explained if explain else HUMAN.get(call.name))
 
-    parameters = [_parameter(call, name) for name in call.params]
-    parameters += [
+    parameters = [_parameter(call, name) for name in call.params] + [
         inspect.Parameter(
-            "workspace_id",
+            name,
             inspect.Parameter.KEYWORD_ONLY,
-            default=WORKSPACE,
-            annotation=str,
-        ),
-        inspect.Parameter(
-            "session_id",
-            inspect.Parameter.KEYWORD_ONLY,
-            default=SESSION,
-            annotation=str | None,
-        ),
-        inspect.Parameter(
-            "explain",
-            inspect.Parameter.KEYWORD_ONLY,
-            default=EXPLAIN,
-            annotation=bool,
-        ),
+            default=default,
+            annotation=kind,
+        )
+        for name, default, kind in (
+            ("workspace_id", WORKSPACE, str),
+            ("session_id", SESSION, str | None),
+            ("explain", EXPLAIN, bool),
+        )
     ]
     vars(run)["__signature__"] = inspect.Signature(parameters)
     run.__annotations__ = {p.name: p.annotation for p in parameters}

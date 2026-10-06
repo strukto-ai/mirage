@@ -1114,7 +1114,7 @@ def bytes_answer(step: dict[str, Any], wire: dict[str, Any]) -> Answer:
         return {"error": wire["errno"]}
     call = step["call"]
     if call == "stat":
-        return {"type": wire["type"], "size": wire["size"]}
+        return {"type": wire["stat"]["type"], "size": wire["stat"]["size"]}
     if call == "readdir":
         return {"entries": _entries(step["path"], wire["entries"])}
     if call in LISTED:
@@ -1154,6 +1154,17 @@ def explain_answer(wire: dict[str, Any]) -> Answer:
         "stderr": wire["stderr"],
         "commands": _commands(wire["node"]),
     }
+
+
+def route(step: dict[str, Any], sep: str = "/") -> str:
+    """The route, method or tool a bytes or explain case calls.
+
+    Args:
+        step (dict[str, Any]): the case's input.
+        sep (str): what joins ``vfs`` and the call; MCP's tools use ``_``.
+    """
+    call = step["call"]
+    return call if call in ("shell", "glob") else f"vfs{sep}{call}"
 
 
 def call_params(step: dict[str, Any]) -> dict[str, Any]:
@@ -1335,7 +1346,8 @@ class InAppPython:
 
     async def bytes(self, session: Any, step: dict[str, Any]) -> Answer:
         from mirage.errors.classify import classify
-        from mirage.server.vfs_calls import VFS_CALL_BY_NAME, answered, checked
+        from mirage.server.io_serde import answered, checked
+        from mirage.server.vfs_calls import VFS_CALL_BY_NAME
 
         params = call_params(step)
         try:
@@ -1352,8 +1364,12 @@ class InAppPython:
         return bytes_answer(step, wire)
 
     async def explain(self, session: Any, step: dict[str, Any]) -> Answer:
-        from mirage.server.io_serde import explanation_to_dict
-        from mirage.server.vfs_calls import VFS_CALL_BY_NAME, answered, checked
+        from mirage.server.io_serde import (
+            answered,
+            checked,
+            explanation_to_dict,
+        )
+        from mirage.server.vfs_calls import VFS_CALL_BY_NAME
 
         if step["call"] == "shell":
             said = await session.explain.shell(step["command"])
@@ -1487,27 +1503,21 @@ class Http:
             )
             reply.raise_for_status()
             return tool_answer(reply.json())
-        if op == "bytes":
-            route = "glob" if step["call"] == "glob" else f"vfs/{step['call']}"
+        if op in ("bytes", "explain"):
+            explain = {"explain": "true"} if op == "explain" else {}
             reply = await http.post(
-                f"{base}/{route}", json=call_params(step), params=params
+                f"{base}/{route(step)}",
+                json=call_params(step),
+                params={**params, **explain},
             )
+            if op == "explain":
+                reply.raise_for_status()
+                return explain_answer(reply.json())
             if reply.status_code >= 400:
                 return bytes_answer(
                     step, wire_failure(reply.status_code, reply.json())
                 )
             return bytes_answer(step, reply.json())
-        if op == "explain":
-            route = (
-                "shell" if step["call"] == "shell" else f"vfs/{step['call']}"
-            )
-            reply = await http.post(
-                f"{base}/{route}",
-                json=call_params(step),
-                params={**params, "explain": "true"},
-            )
-            reply.raise_for_status()
-            return explain_answer(reply.json())
         if op == "stdin" and "stream" not in step:
             request = json.dumps({"command": step["command"]})
             reply = await http.post(
@@ -1838,15 +1848,12 @@ async def mcp_case(
     elif op == "tool":
         tool, arguments = step["tool"], step["arguments"]
     elif op == "explain":
-        tool = "shell" if step["call"] == "shell" else f"vfs_{step['call']}"
         result = await client.call_tool(
-            tool, {**call_params(step), "explain": True}
+            route(step, "_"), {**call_params(step), "explain": True}
         )
         return explain_answer(json.loads(result.content[0].text))
     elif op == "bytes":
-        result = await client.call_tool(
-            f"vfs_{step['call']}", call_params(step)
-        )
+        result = await client.call_tool(route(step, "_"), call_params(step))
         answer = json.loads(result.content[0].text)
         if result.is_error:
             answer = {"errno": answer.get("errno", answer["detail"])}
@@ -2001,13 +2008,11 @@ async def rpc_case(
     if op == "cancel":
         return {"text": await cancel(step["command"])}
     if op == "explain":
-        method = "shell" if step["call"] == "shell" else f"vfs/{step['call']}"
-        reply = await call(method, {**call_params(step), "explain": True})
+        reply = await call(route(step), {**call_params(step), "explain": True})
         return explain_answer(rpc_result(reply))
     if op != "bytes":
         raise ValueError(op)
-    method = "glob" if step["call"] == "glob" else f"vfs/{step['call']}"
-    reply = await call(method, call_params(step))
+    reply = await call(route(step), call_params(step))
     if "error" in reply:
         data = reply["error"].get("data") or {}
         return bytes_answer(

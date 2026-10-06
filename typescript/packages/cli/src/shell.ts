@@ -16,6 +16,7 @@ import type { Command } from 'commander'
 import { makeClient, type DaemonClient } from './client.ts'
 import { emit, exitCodeFromResponse, fail, handleResponse } from './output.ts'
 import { loadDaemonSettings } from './settings.ts'
+import { answer, post } from './vfs.ts'
 
 const WAIT_SLICE_S = 30
 const INTERRUPTED = 130
@@ -113,19 +114,19 @@ export function registerShellCommand(program: Command): void {
         const body: Record<string, unknown> = { command: opts.command }
         if (opts.cwd !== undefined) body.cwd = opts.cwd
         if (opts.runtime !== undefined) body.runtime = opts.runtime
+        if (opts.explain === true) {
+          const said = await answer(await post(opts, 'shell', body))
+          emit(said as ExplanationRecord, formatExplanation)
+          return
+        }
         const session =
           opts.session === undefined ? '' : `session_id=${encodeURIComponent(opts.session)}`
         const path = `/v1/workspaces/${encodeURIComponent(opts.workspace)}/shell`
         const c = makeClient(loadDaemonSettings())
         await c.ensureRunning({ allowSpawn: false })
-        if (opts.explain === true) {
-          const query = session === '' ? '?explain=true' : `?${session}&explain=true`
-          const r = await c.request('POST', `${path}${query}`, { body: JSON.stringify(body) })
-          emit((await handleResponse(r)) as ExplanationRecord, formatExplanation)
-          return
-        }
         const foreground = session === '' ? path : `${path}?${session}`
-        const background = session === '' ? `${path}?background=true` : `${path}?${session}&background=true`
+        const background =
+          session === '' ? `${path}?background=true` : `${path}?${session}&background=true`
         const piped = !process.stdin.isTTY
         if (piped && opts.bg !== true) {
           const stop = new AbortController()

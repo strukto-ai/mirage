@@ -39,7 +39,11 @@ async function tool(
   name: string,
   payload: Record<string, unknown>,
 ): Promise<{ text: string; is_error: boolean }> {
-  const res = await app.inject({ method: 'POST', url: `/v1/workspaces/${id}/tools/${name}`, payload })
+  const res = await app.inject({
+    method: 'POST',
+    url: `/v1/workspaces/${id}/tools/${name}`,
+    payload,
+  })
   expect(res.statusCode).toBe(200)
   return res.json()
 }
@@ -83,7 +87,11 @@ describe('the tool routes', () => {
 
   it('refuse bad arguments and unknown targets', async () => {
     const { app, id } = await workspace()
-    const bad = await app.inject({ method: 'POST', url: `/v1/workspaces/${id}/tools/read`, payload: {} })
+    const bad = await app.inject({
+      method: 'POST',
+      url: `/v1/workspaces/${id}/tools/read`,
+      payload: {},
+    })
     const ws = await app.inject({
       method: 'POST',
       url: '/v1/workspaces/nope/tools/read',

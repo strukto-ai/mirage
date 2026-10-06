@@ -32,15 +32,13 @@ from mcp.types import (
 )
 
 from mirage import __version__
-from mirage.server.io_serde import explanation_to_dict, failure_to_dict
-from mirage.server.vfs_calls import (
-    VFS_CALLS,
-    CallArgsError,
-    VfsCall,
+from mirage.server.io_serde import (
     answered,
     checked,
-    schema_of,
+    explanation_to_dict,
+    failure_to_dict,
 )
+from mirage.server.vfs_calls import VFS_CALLS, VfsCall, schema_of
 from mirage.types import JsonValue
 from mirage.workspace.tools.tool_descriptions import (
     EDIT_DESCRIPTION,
@@ -292,33 +290,24 @@ class MirageMcpServer:
             )
         explain = arguments.get("explain", False)
         given = {k: v for k, v in arguments.items() if k != "explain"}
-        if params.name in VFS_TOOLS:
-            return await self._vfs(VFS_TOOLS[params.name][1], given, explain)
         try:
+            if params.name in VFS_TOOLS:
+                call = VFS_TOOLS[params.name][1]
+                return _json(
+                    await self.hop(
+                        answered(
+                            self._session, call, checked(call, given), explain
+                        )
+                    )
+                )
             if tool is EXPLAINED_SHELL and explain:
                 said = await self.hop(
                     self._session.explain.shell(given["command"])
                 )
                 return _json(explanation_to_dict(said))
-            if tool is EXPLAINED_SHELL:
-                arguments = given
-            return _to_mcp(await self._ops.call(params.name, arguments))
+            return _to_mcp(await self._ops.call(params.name, given))
         except Exception as exc:
             logger.debug("mcp tool %s failed", params.name, exc_info=True)
+            if params.name in VFS_TOOLS:
+                return _json(failure_to_dict(exc), True)
             return _to_mcp(ToolResult(str(exc), True))
-
-    async def _vfs(
-        self, call: VfsCall, given: dict[str, Any], explain: bool
-    ) -> CallToolResult:
-        try:
-            args = checked(call, given)
-        except CallArgsError as exc:
-            return _to_mcp(ToolResult(str(exc), True))
-        try:
-            answer = await self.hop(
-                answered(self._session, call, args, explain)
-            )
-        except Exception as exc:
-            logger.debug("mcp vfs_%s failed", call.name, exc_info=True)
-            return _json(failure_to_dict(exc), True)
-        return _json(answer)

@@ -3,2297 +3,256 @@
  "cases": [
   {
    "id": "the_allow_list_decides_what_is_a_command",
-   "settings": {
-    "mode": "write",
-    "mounts": {
-     "/data": {
-      "vfs": "ram",
-      "config": {}
-     }
-    }
-   },
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
-    {
-     "op": "session",
-     "id": "agent",
-     "profile": {
-      "commands": {
-       "allow": [
-        "echo",
-        "cat",
-        "ls"
-       ]
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "echo hi",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "hi\n",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "rm /data/x",
-     "expect": {
-      "value": {
-       "exit_code": 127,
-       "stdout": "",
-       "stderr": "rm: command not found\n",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "rm /data/x; echo after",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "after\n",
-       "stderr": "rm: command not found\n",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "explain",
-     "session": "agent",
-     "command": "rm /data/x; echo after",
-     "expect": {
-      "value": {
-       "outcome": "allow",
-       "reason": "",
-       "answers": [],
-       "refusal": null,
-       "exit_code": 0,
-       "stderr": "",
-       "commands": [
-        {
-         "command": "rm",
-         "outcome": "deny",
-         "answers": [],
-         "runtime": ""
-        },
-        {
-         "command": "echo",
-         "outcome": "allow",
-         "answers": [],
-         "runtime": ""
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "tools",
-     "session": "agent",
-     "expect": {
-      "value": [
-       "shell",
-       "read",
-       "write",
-       "edit",
-       "ls",
-       "glob"
-      ]
-     }
-    }
+    {"op": "session", "id": "agent", "profile": {"commands": {"allow": ["echo", "cat", "ls"]}}},
+    {"op": "exec", "session": "agent", "command": "echo hi", "expect": {"value": {"exit_code": 0, "stdout": "hi\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "rm /data/x", "expect": {"value": {"exit_code": 127, "stdout": "", "stderr": "rm: command not found\n", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "rm /data/x; echo after", "expect": {"value": {"exit_code": 0, "stdout": "after\n", "stderr": "rm: command not found\n", "refusal": null}}},
+    {"op": "explain", "session": "agent", "command": "rm /data/x; echo after", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [], "refusal": null, "exit_code": 0, "stderr": "", "commands": [{"command": "rm", "outcome": "deny", "answers": [], "runtime": ""}, {"command": "echo", "outcome": "allow", "answers": [], "runtime": ""}]}}},
+    {"op": "tools", "session": "agent", "expect": {"value": ["shell", "read", "write", "edit", "ls", "glob"]}}
    ]
   },
   {
    "id": "a_command_rule_refuses_the_whole_line",
-   "settings": {
-    "mode": "write",
-    "mounts": {
-     "/data": {
-      "vfs": "ram",
-      "config": {}
-     }
-    }
-   },
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
-    {
-     "op": "session",
-     "id": "agent",
-     "profile": {
-      "commands": {
-       "deny": [
-        {
-         "reason": "no deletes",
-         "commands": [
-          "rm"
-         ]
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "command": "echo x > /data/f",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "echo first; rm /data/f",
-     "expect": {
-      "value": {
-       "exit_code": 126,
-       "stdout": "",
-       "stderr": "rm: Permission denied\n",
-       "refusal": "no deletes"
-      }
-     }
-    },
-    {
-     "op": "explain",
-     "session": "agent",
-     "command": "echo first; rm /data/f",
-     "expect": {
-      "value": {
-       "outcome": "deny",
-       "reason": "no deletes",
-       "answers": [],
-       "refusal": "deny",
-       "exit_code": 126,
-       "stderr": "rm: Permission denied\n",
-       "commands": [
-        {
-         "command": "echo",
-         "outcome": "allow",
-         "answers": [],
-         "runtime": ""
-        },
-        {
-         "command": "rm",
-         "outcome": "deny",
-         "answers": [
-          {
-           "kind": "deny",
-           "policy": "PermissionsPolicy",
-           "reason": "no deletes"
-          }
-         ],
-         "runtime": ""
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "exists",
-     "args": {
-      "path": "/data/f"
-     },
-     "expect": {
-      "value": {
-       "exists": true
-      }
-     }
-    }
+    {"op": "session", "id": "agent", "profile": {"commands": {"deny": [{"reason": "no deletes", "commands": ["rm"]}]}}},
+    {"op": "exec", "command": "echo x > /data/f", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "echo first; rm /data/f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "refusal": "no deletes"}}},
+    {"op": "explain", "session": "agent", "command": "echo first; rm /data/f", "expect": {"value": {"outcome": "deny", "reason": "no deletes", "answers": [], "refusal": "deny", "exit_code": 126, "stderr": "rm: Permission denied\n", "commands": [{"command": "echo", "outcome": "allow", "answers": [], "runtime": ""}, {"command": "rm", "outcome": "deny", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "no deletes"}], "runtime": ""}]}}},
+    {"op": "vfs", "session": "agent", "call": "exists", "args": {"path": "/data/f"}, "expect": {"value": {"exists": true}}}
    ]
   },
   {
    "id": "a_path_rule_answers_in_the_commands_own_voice",
-   "settings": {
-    "mode": "write",
-    "mounts": {
-     "/data": {
-      "vfs": "ram",
-      "config": {}
-     }
-    }
-   },
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
-    {
-     "op": "session",
-     "id": "agent",
-     "profile": {
-      "commands": {
-       "deny": [
-        {
-         "reason": "sealed",
-         "paths": [
-          "/data/sec/*"
-         ]
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "command": "mkdir -p /data/sec; echo k > /data/sec/k; echo o > /data/open",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "cat /data/open /data/sec/k",
-     "expect": {
-      "value": {
-       "exit_code": 1,
-       "stdout": "",
-       "stderr": "cat: /data/sec/k: Permission denied\n",
-       "refusal": "sealed"
-      }
-     }
-    },
-    {
-     "op": "explain",
-     "session": "agent",
-     "command": "cat /data/open /data/sec/k",
-     "expect": {
-      "value": {
-       "outcome": "deny",
-       "reason": "sealed",
-       "answers": [],
-       "refusal": "deny",
-       "exit_code": 1,
-       "stderr": "cat: /data/sec/k: Permission denied\n",
-       "commands": [
-        {
-         "command": "cat",
-         "outcome": "deny",
-         "answers": [
-          {
-           "kind": "deny",
-           "policy": "PermissionsPolicy",
-           "reason": "sealed"
-          }
-         ],
-         "runtime": ""
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "grep -r k /data",
-     "expect": {
-      "value": {
-       "exit_code": 2,
-       "stdout": "",
-       "stderr": "grep: /data/sec/k: Permission denied\n",
-       "refusal": "sealed"
-      }
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "read",
-     "args": {
-      "path": "/data/sec/k"
-     },
-     "expect": {
-      "errno": "EACCES",
-      "reason": "sealed"
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "read",
-     "args": {
-      "path": "/data/sec/k"
-     },
-     "explain": true,
-     "expect": {
-      "value": {
-       "call": "read",
-       "outcome": "deny",
-       "reason": "sealed",
-       "answers": [
-        {
-         "kind": "deny",
-         "policy": "PermissionsPolicy",
-         "reason": "sealed"
-        }
-       ],
-       "refusal": "deny",
-       "error": "EACCES"
-      }
-     }
-    },
-    {
-     "op": "tool",
-     "session": "agent",
-     "tool": "read",
-     "arguments": {
-      "path": "/data/sec/k"
-     },
-     "expect": {
-      "value": {
-       "text_contains": "policy denied: sealed\n",
-       "is_error": true
-      }
-     }
-    }
+    {"op": "session", "id": "agent", "profile": {"commands": {"deny": [{"reason": "sealed", "paths": ["/data/sec/*"]}]}}},
+    {"op": "exec", "command": "mkdir -p /data/sec; echo k > /data/sec/k; echo o > /data/open", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "cat /data/open /data/sec/k", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cat: /data/sec/k: Permission denied\n", "refusal": "sealed"}}},
+    {"op": "explain", "session": "agent", "command": "cat /data/open /data/sec/k", "expect": {"value": {"outcome": "deny", "reason": "sealed", "answers": [], "refusal": "deny", "exit_code": 1, "stderr": "cat: /data/sec/k: Permission denied\n", "commands": [{"command": "cat", "outcome": "deny", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "sealed"}], "runtime": ""}]}}},
+    {"op": "exec", "session": "agent", "command": "grep -r k /data", "expect": {"value": {"exit_code": 2, "stdout": "", "stderr": "grep: /data/sec/k: Permission denied\n", "refusal": "sealed"}}},
+    {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/sec/k"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/sec/k"}, "explain": true, "expect": {"value": {"call": "read", "outcome": "deny", "reason": "sealed", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "sealed"}], "refusal": "deny", "error": "EACCES"}}},
+    {"op": "tool", "session": "agent", "tool": "read", "arguments": {"path": "/data/sec/k"}, "expect": {"value": {"text_contains": "policy denied: sealed\n", "is_error": true}}}
    ]
   },
   {
    "id": "the_deeper_anchor_wins_whatever_its_verb",
-   "settings": {
-    "mode": "write",
-    "mounts": {
-     "/data": {
-      "vfs": "ram",
-      "config": {}
-     }
-    }
-   },
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
-    {
-     "op": "session",
-     "id": "agent",
-     "profile": {
-      "commands": {
-       "deny": [
-        {
-         "reason": "no deletes in data",
-         "commands": {
-          "rm": [
-           "/data/*"
-          ]
-         }
-        }
-       ],
-       "ask": [
-        {
-         "reason": "keep needs a nod",
-         "commands": {
-          "rm": [
-           "/data/keep/*"
-          ]
-         }
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "command": "mkdir -p /data/keep; echo a > /data/keep/a; echo b > /data/b",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "rm /data/b",
-     "expect": {
-      "value": {
-       "exit_code": 1,
-       "stdout": "",
-       "stderr": "rm: cannot remove '/data/b': Permission denied\n",
-       "refusal": "no deletes in data"
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "rm /data/keep/a",
-     "expect": {
-      "value": {
-       "exit_code": 126,
-       "stdout": "",
-       "stderr": "rm: Permission denied\n",
-       "refusal": "keep needs a nod"
-      }
-     }
-    },
-    {
-     "op": "explain",
-     "session": "agent",
-     "command": "rm /data/keep/a",
-     "expect": {
-      "value": {
-       "outcome": "ask",
-       "reason": "keep needs a nod",
-       "answers": [],
-       "refusal": "pending",
-       "exit_code": 126,
-       "stderr": "rm: Permission denied\n",
-       "commands": [
-        {
-         "command": "rm",
-         "outcome": "ask",
-         "answers": [
-          {
-           "kind": "ask",
-           "policy": "PermissionsPolicy",
-           "reason": "keep needs a nod"
-          }
-         ],
-         "runtime": ""
-        }
-       ]
-      }
-     }
-    }
+    {"op": "session", "id": "agent", "profile": {"commands": {"deny": [{"reason": "no deletes in data", "commands": {"rm": ["/data/*"]}}], "ask": [{"reason": "keep needs a nod", "commands": {"rm": ["/data/keep/*"]}}]}}},
+    {"op": "exec", "command": "mkdir -p /data/keep; echo a > /data/keep/a; echo b > /data/b", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "rm /data/b", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "rm: cannot remove '/data/b': Permission denied\n", "refusal": "no deletes in data"}}},
+    {"op": "exec", "session": "agent", "command": "rm /data/keep/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "refusal": "keep needs a nod"}}},
+    {"op": "explain", "session": "agent", "command": "rm /data/keep/a", "expect": {"value": {"outcome": "ask", "reason": "keep needs a nod", "answers": [], "refusal": "pending", "exit_code": 126, "stderr": "rm: Permission denied\n", "commands": [{"command": "rm", "outcome": "ask", "answers": [{"kind": "ask", "policy": "PermissionsPolicy", "reason": "keep needs a nod"}], "runtime": ""}]}}}
    ]
   },
   {
    "id": "an_ask_waits_for_the_host_and_each_answer_holds_as_scoped",
-   "settings": {
-    "mode": "write",
-    "mounts": {
-     "/data": {
-      "vfs": "ram",
-      "config": {}
-     }
-    }
-   },
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
-    {
-     "op": "session",
-     "id": "agent",
-     "profile": {
-      "commands": {
-       "ask": [
-        {
-         "reason": "removal needs sign-off",
-         "commands": [
-          "rm"
-         ]
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "command": "touch /data/a /data/b /data/c /data/d",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "rm /data/a",
-     "expect": {
-      "value": {
-       "exit_code": 126,
-       "stdout": "",
-       "stderr": "rm: Permission denied\n",
-       "refusal": "removal needs sign-off"
-      }
-     }
-    },
-    {
-     "op": "asks",
-     "expect": {
-      "value": [
-       {
-        "command": "rm",
-        "paths": [
-         "/data/a"
-        ],
-        "reason": "removal needs sign-off"
-       }
-      ]
-     }
-    },
-    {
-     "op": "answer",
-     "outcome": "allow",
-     "scope": "once"
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "rm /data/a",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "rm /data/b",
-     "expect": {
-      "value": {
-       "exit_code": 126,
-       "stdout": "",
-       "stderr": "rm: Permission denied\n",
-       "refusal": "removal needs sign-off"
-      }
-     }
-    },
-    {
-     "op": "answer",
-     "outcome": "allow",
-     "scope": "session"
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "rm /data/b",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "rm /data/c",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "asks",
-     "expect": {
-      "value": []
-     }
-    }
+    {"op": "session", "id": "agent", "profile": {"commands": {"ask": [{"reason": "removal needs sign-off", "commands": ["rm"]}]}}},
+    {"op": "exec", "command": "touch /data/a /data/b /data/c /data/d", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "rm /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "refusal": "removal needs sign-off"}}},
+    {"op": "asks", "expect": {"value": [{"command": "rm", "paths": ["/data/a"], "reason": "removal needs sign-off"}]}},
+    {"op": "answer", "outcome": "allow", "scope": "once"},
+    {"op": "exec", "session": "agent", "command": "rm /data/a", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "rm /data/b", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "refusal": "removal needs sign-off"}}},
+    {"op": "answer", "outcome": "allow", "scope": "session"},
+    {"op": "exec", "session": "agent", "command": "rm /data/b", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "rm /data/c", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "asks", "expect": {"value": []}}
    ]
   },
   {
    "id": "a_denied_ask_refuses_the_retry_and_asks_again",
-   "settings": {
-    "mode": "write",
-    "mounts": {
-     "/data": {
-      "vfs": "ram",
-      "config": {}
-     }
-    }
-   },
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
-    {
-     "op": "session",
-     "id": "agent",
-     "profile": {
-      "commands": {
-       "ask": [
-        {
-         "reason": "removal needs sign-off",
-         "commands": [
-          "rm"
-         ]
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "command": "touch /data/a",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "rm /data/a",
-     "expect": {
-      "value": {
-       "exit_code": 126,
-       "stdout": "",
-       "stderr": "rm: Permission denied\n",
-       "refusal": "removal needs sign-off"
-      }
-     }
-    },
-    {
-     "op": "answer",
-     "outcome": "deny",
-     "scope": "once"
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "rm /data/a",
-     "expect": {
-      "value": {
-       "exit_code": 126,
-       "stdout": "",
-       "stderr": "rm: Permission denied\n",
-       "refusal": "removal needs sign-off"
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "rm /data/a",
-     "expect": {
-      "value": {
-       "exit_code": 126,
-       "stdout": "",
-       "stderr": "rm: Permission denied\n",
-       "refusal": "removal needs sign-off"
-      }
-     }
-    },
-    {
-     "op": "asks",
-     "expect": {
-      "value": [
-       {
-        "command": "rm",
-        "paths": [
-         "/data/a"
-        ],
-        "reason": "removal needs sign-off"
-       }
-      ]
-     }
-    }
+    {"op": "session", "id": "agent", "profile": {"commands": {"ask": [{"reason": "removal needs sign-off", "commands": ["rm"]}]}}},
+    {"op": "exec", "command": "touch /data/a", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "rm /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "refusal": "removal needs sign-off"}}},
+    {"op": "answer", "outcome": "deny", "scope": "once"},
+    {"op": "exec", "session": "agent", "command": "rm /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "refusal": "removal needs sign-off"}}},
+    {"op": "exec", "session": "agent", "command": "rm /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "refusal": "removal needs sign-off"}}},
+    {"op": "asks", "expect": {"value": [{"command": "rm", "paths": ["/data/a"], "reason": "removal needs sign-off"}]}}
    ]
   },
   {
    "id": "hide_and_show",
-   "settings": {
-    "mode": "write",
-    "mounts": {
-     "/data": {
-      "vfs": "ram",
-      "config": {}
-     }
-    }
-   },
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
-    {
-     "op": "session",
-     "id": "agent",
-     "profile": {
-      "paths": {
-       "hide": [
-        "/data/private",
-        {
-         "patterns": [
-          "*.env"
-         ],
-         "reason": "dotenv"
-        }
-       ],
-       "show": {
-        "/data/private/pub": "read"
-       }
-      },
-      "vars": {
-       "hide": [
-        "SECRET*"
-       ]
-      },
-      "env": {
-       "SECRET_TOKEN": "t0ken",
-       "OPEN": "yes"
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "command": "mkdir -p /data/private/pub; echo s > /data/private/s; echo p > /data/private/pub/p; echo k > /data/app.env; echo o > /data/open",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "ls /data",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "open\nprivate\n",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "cat /data/private/s",
-     "expect": {
-      "value": {
-       "exit_code": 1,
-       "stdout": "",
-       "stderr": "cat: /data/private/s: No such file or directory\n",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "cat /data/private/pub/p",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "p\n",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "cat /data/app.env",
-     "expect": {
-      "value": {
-       "exit_code": 1,
-       "stdout": "",
-       "stderr": "cat: /data/app.env: No such file or directory\n",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "read",
-     "args": {
-      "path": "/data/private/s"
-     },
-     "expect": {
-      "errno": "ENOENT"
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "read",
-     "args": {
-      "path": "/data/private/s"
-     },
-     "explain": true,
-     "expect": {
-      "value": {
-       "call": "read",
-       "outcome": "allow",
-       "reason": "",
-       "answers": [],
-       "refusal": null,
-       "error": ""
-      }
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "readdir",
-     "args": {
-      "path": "/data"
-     },
-     "expect": {
-      "value": {
-       "entries": [
-        "/data/open",
-        "/data/private"
-       ]
-      }
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "write",
-     "args": {
-      "path": "/data/private/pub/q",
-      "data_base64": "eA=="
-     },
-     "expect": {
-      "errno": "EROFS"
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "write",
-     "args": {
-      "path": "/data/private/new",
-      "data_base64": "eA=="
-     },
-     "expect": {
-      "errno": "EACCES"
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "echo ${SECRET_TOKEN:-unset} $OPEN",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "unset yes\n",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "SECRET_KEY=1",
-     "expect": {
-      "value": {
-       "exit_code": 1,
-       "stdout": "",
-       "stderr": "SECRET_KEY: permission denied\n",
-       "refusal": null
-      }
-     }
-    }
+    {"op": "session", "id": "agent", "profile": {"paths": {"hide": ["/data/private", {"patterns": ["*.env"], "reason": "dotenv"}], "show": {"/data/private/pub": "read"}}, "vars": {"hide": ["SECRET*"]}, "env": {"SECRET_TOKEN": "t0ken", "OPEN": "yes"}}},
+    {"op": "exec", "command": "mkdir -p /data/private/pub; echo s > /data/private/s; echo p > /data/private/pub/p; echo k > /data/app.env; echo o > /data/open", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "ls /data", "expect": {"value": {"exit_code": 0, "stdout": "open\nprivate\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "cat /data/private/s", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cat: /data/private/s: No such file or directory\n", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "cat /data/private/pub/p", "expect": {"value": {"exit_code": 0, "stdout": "p\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "cat /data/app.env", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cat: /data/app.env: No such file or directory\n", "refusal": null}}},
+    {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/private/s"}, "expect": {"errno": "ENOENT"}},
+    {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/private/s"}, "explain": true, "expect": {"value": {"call": "read", "outcome": "allow", "reason": "", "answers": [], "refusal": null, "error": ""}}},
+    {"op": "vfs", "session": "agent", "call": "readdir", "args": {"path": "/data"}, "expect": {"value": {"entries": ["/data/open", "/data/private"]}}},
+    {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/private/pub/q", "data_base64": "eA=="}, "expect": {"errno": "EROFS"}},
+    {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/private/new", "data_base64": "eA=="}, "expect": {"errno": "EACCES"}},
+    {"op": "exec", "session": "agent", "command": "echo ${SECRET_TOKEN:-unset} $OPEN", "expect": {"value": {"exit_code": 0, "stdout": "unset yes\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "SECRET_KEY=1", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "SECRET_KEY: permission denied\n", "refusal": null}}}
    ]
   },
   {
    "id": "mount_modes_narrow_what_a_session_may_write",
-   "settings": {
-    "mode": "write",
-    "mounts": {
-     "/data": {
-      "vfs": "ram",
-      "config": {}
-     },
-     "/ro": {
-      "vfs": "ram",
-      "config": {},
-      "mode": "read"
-     }
-    }
-   },
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}, "/ro": {"vfs": "ram", "config": {}, "mode": "read"}}},
    "steps": [
-    {
-     "op": "session",
-     "id": "agent",
-     "profile": {
-      "mounts": {
-       "/data": "read"
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "command": "echo x > /data/f",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "cat /data/f",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "x\n",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "echo y > /data/f",
-     "expect": {
-      "value": {
-       "exit_code": 1,
-       "stdout": "",
-       "stderr": "/data/f: Read-only file system\n",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "write",
-     "args": {
-      "path": "/data/f",
-      "data_base64": "eQ=="
-     },
-     "expect": {
-      "errno": "EROFS"
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "write",
-     "args": {
-      "path": "/data/f",
-      "data_base64": "eQ=="
-     },
-     "explain": true,
-     "expect": {
-      "value": {
-       "call": "write",
-       "outcome": "deny",
-       "reason": "Read-only file system",
-       "answers": [
-        {
-         "kind": "deny",
-         "policy": "MountModePolicy",
-         "reason": "Read-only file system"
-        }
-       ],
-       "refusal": null,
-       "error": "EROFS"
-      }
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "mkdir",
-     "args": {
-      "path": "/data/d"
-     },
-     "expect": {
-      "errno": "EROFS"
-     }
-    },
-    {
-     "op": "tools",
-     "session": "agent",
-     "expect": {
-      "value": [
-       "shell",
-       "read",
-       "write",
-       "edit",
-       "ls",
-       "grep",
-       "glob"
-      ]
-     }
-    }
+    {"op": "session", "id": "agent", "profile": {"mounts": {"/data": "read"}}},
+    {"op": "exec", "command": "echo x > /data/f", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "cat /data/f", "expect": {"value": {"exit_code": 0, "stdout": "x\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "echo y > /data/f", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "/data/f: Read-only file system\n", "refusal": null}}},
+    {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/f", "data_base64": "eQ=="}, "expect": {"errno": "EROFS"}},
+    {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/f", "data_base64": "eQ=="}, "explain": true, "expect": {"value": {"call": "write", "outcome": "deny", "reason": "Read-only file system", "answers": [{"kind": "deny", "policy": "MountModePolicy", "reason": "Read-only file system"}], "refusal": null, "error": "EROFS"}}},
+    {"op": "vfs", "session": "agent", "call": "mkdir", "args": {"path": "/data/d"}, "expect": {"errno": "EROFS"}},
+    {"op": "tools", "session": "agent", "expect": {"value": ["shell", "read", "write", "edit", "ls", "grep", "glob"]}}
    ]
   },
   {
    "id": "a_mount_section_holds_its_rules_by_cwd_and_operand",
-   "settings": {
-    "mode": "write",
-    "mounts": {
-     "/data": {
-      "vfs": "ram",
-      "config": {}
-     },
-     "/scratch": {
-      "vfs": "ram",
-      "config": {}
-     }
-    }
-   },
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}, "/scratch": {"vfs": "ram", "config": {}}}},
    "steps": [
-    {
-     "op": "session",
-     "id": "agent",
-     "profile": {
-      "mounts": {
-       "/data": {
-        "commands": {
-         "deny": [
-          {
-           "reason": "frozen here",
-           "commands": [
-            "rm"
-           ]
-          }
-         ]
-        }
-       }
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "command": "echo x > /data/f; echo y > /scratch/g",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "cd /data && rm f",
-     "expect": {
-      "value": {
-       "exit_code": 126,
-       "stdout": "",
-       "stderr": "rm: Permission denied\n",
-       "refusal": "frozen here"
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "rm /data/f",
-     "expect": {
-      "value": {
-       "exit_code": 126,
-       "stdout": "",
-       "stderr": "rm: Permission denied\n",
-       "refusal": "frozen here"
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "rm /scratch/g",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    }
+    {"op": "session", "id": "agent", "profile": {"mounts": {"/data": {"commands": {"deny": [{"reason": "frozen here", "commands": ["rm"]}]}}}}},
+    {"op": "exec", "command": "echo x > /data/f; echo y > /scratch/g", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "cd /data && rm f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "refusal": "frozen here"}}},
+    {"op": "exec", "session": "agent", "command": "rm /data/f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "refusal": "frozen here"}}},
+    {"op": "exec", "session": "agent", "command": "rm /scratch/g", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}}
    ]
   },
   {
    "id": "every_vfs_call_meets_the_path_rule",
-   "settings": {
-    "mode": "write",
-    "mounts": {
-     "/data": {
-      "vfs": "ram",
-      "config": {}
-     }
-    }
-   },
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
-    {
-     "op": "session",
-     "id": "agent",
-     "profile": {
-      "commands": {
-       "deny": [
-        {
-         "reason": "sealed",
-         "paths": [
-          "/data/sec/*"
-         ]
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "command": "mkdir -p /data/sec; echo k > /data/sec/k; echo o > /data/o",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "read",
-     "args": {
-      "path": "/data/sec/k"
-     },
-     "expect": {
-      "errno": "EACCES",
-      "reason": "sealed"
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "cat",
-     "args": {
-      "path": "/data/sec/k"
-     },
-     "expect": {
-      "errno": "EACCES",
-      "reason": "sealed"
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "write",
-     "args": {
-      "path": "/data/sec/k",
-      "data_base64": "eA=="
-     },
-     "expect": {
-      "errno": "EACCES",
-      "reason": "sealed"
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "append",
-     "args": {
-      "path": "/data/sec/k",
-      "data_base64": "eA=="
-     },
-     "expect": {
-      "errno": "EACCES",
-      "reason": "sealed"
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "pwrite",
-     "args": {
-      "path": "/data/sec/k",
-      "data_base64": "eA==",
-      "offset": 0
-     },
-     "expect": {
-      "errno": "EACCES",
-      "reason": "sealed"
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "truncate",
-     "args": {
-      "path": "/data/sec/k",
-      "length": 0
-     },
-     "expect": {
-      "errno": "EACCES",
-      "reason": "sealed"
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "unlink",
-     "args": {
-      "path": "/data/sec/k"
-     },
-     "expect": {
-      "errno": "EACCES",
-      "reason": "sealed"
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "create",
-     "args": {
-      "path": "/data/sec/new"
-     },
-     "expect": {
-      "errno": "EACCES",
-      "reason": "sealed"
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "mkdir",
-     "args": {
-      "path": "/data/sec/d"
-     },
-     "expect": {
-      "errno": "EACCES",
-      "reason": "sealed"
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "rename",
-     "args": {
-      "src": "/data/o",
-      "dst": "/data/sec/o"
-     },
-     "expect": {
-      "errno": "EACCES",
-      "reason": "sealed"
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "rename",
-     "args": {
-      "src": "/data/sec/k",
-      "dst": "/data/k"
-     },
-     "expect": {
-      "errno": "EACCES",
-      "reason": "sealed"
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "symlink",
-     "args": {
-      "path": "/data/sec/l",
-      "target": "/data/o"
-     },
-     "expect": {
-      "errno": "EACCES",
-      "reason": "sealed"
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "setxattr",
-     "args": {
-      "path": "/data/sec/k",
-      "name": "user.a",
-      "value_base64": "eA=="
-     },
-     "expect": {
-      "errno": "EACCES",
-      "reason": "sealed"
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "getxattr",
-     "args": {
-      "path": "/data/sec/k",
-      "name": "user.a"
-     },
-     "expect": {
-      "errno": "EACCES",
-      "reason": "sealed"
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "setattr",
-     "args": {
-      "path": "/data/sec/k",
-      "mode": 420
-     },
-     "expect": {
-      "errno": "EACCES",
-      "reason": "sealed"
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "rename",
-     "args": {
-      "src": "/data/o",
-      "dst": "/data/sec/o"
-     },
-     "explain": true,
-     "expect": {
-      "value": {
-       "call": "rename",
-       "outcome": "deny",
-       "reason": "sealed",
-       "answers": [
-        {
-         "kind": "deny",
-         "policy": "PermissionsPolicy",
-         "reason": "sealed"
-        }
-       ],
-       "refusal": "deny",
-       "error": "EACCES"
-      }
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "exists",
-     "args": {
-      "path": "/data/o"
-     },
-     "expect": {
-      "value": {
-       "exists": true
-      }
-     }
-    }
+    {"op": "session", "id": "agent", "profile": {"commands": {"deny": [{"reason": "sealed", "paths": ["/data/sec/*"]}]}}},
+    {"op": "exec", "command": "mkdir -p /data/sec/e; echo k > /data/sec/k; echo o > /data/o; ln -s /data/o /data/sec/m", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/sec/k"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "cat", "args": {"path": "/data/sec/k"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/sec/k", "data_base64": "eA=="}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "append", "args": {"path": "/data/sec/k", "data_base64": "eA=="}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "pwrite", "args": {"path": "/data/sec/k", "data_base64": "eA==", "offset": 0}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "truncate", "args": {"path": "/data/sec/k", "length": 0}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "unlink", "args": {"path": "/data/sec/k"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "create", "args": {"path": "/data/sec/new"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "mkdir", "args": {"path": "/data/sec/d"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "rename", "args": {"src": "/data/o", "dst": "/data/sec/o"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "rename", "args": {"src": "/data/sec/k", "dst": "/data/k"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "symlink", "args": {"path": "/data/sec/l", "target": "/data/o"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "setxattr", "args": {"path": "/data/sec/k", "name": "user.a", "value_base64": "eA=="}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "getxattr", "args": {"path": "/data/sec/k", "name": "user.a"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "setattr", "args": {"path": "/data/sec/k", "mode": 420}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "readdir", "args": {"path": "/data/sec/e"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "list_files", "args": {"path": "/data/sec/e"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "rmdir", "args": {"path": "/data/sec/e"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "readlink", "args": {"path": "/data/sec/m"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "listxattr", "args": {"path": "/data/sec/k"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "removexattr", "args": {"path": "/data/sec/k", "name": "user.a"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "stat", "args": {"path": "/data/sec/k"}, "expect": {"value": {"stat": {"type": "file", "size": 2}}}},
+    {"op": "vfs", "session": "agent", "call": "exists", "args": {"path": "/data/sec/k"}, "expect": {"value": {"exists": true}}},
+    {"op": "vfs", "session": "agent", "call": "is_dir", "args": {"path": "/data/sec/e"}, "expect": {"value": {"is_dir": true}}},
+    {"op": "vfs", "session": "agent", "call": "is_file", "args": {"path": "/data/sec/k"}, "expect": {"value": {"is_file": true}}},
+    {"op": "vfs", "session": "agent", "call": "rename", "args": {"src": "/data/o", "dst": "/data/sec/o"}, "explain": true, "expect": {"value": {"call": "rename", "outcome": "deny", "reason": "sealed", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "sealed"}], "refusal": "deny", "error": "EACCES"}}},
+    {"op": "vfs", "session": "agent", "call": "exists", "args": {"path": "/data/o"}, "expect": {"value": {"exists": true}}}
    ]
   },
   {
    "id": "coded_policies_join_the_chain_at_every_hook",
-   "settings": {
-    "mode": "write",
-    "mounts": {
-     "/data": {
-      "vfs": "ram",
-      "config": {}
-     }
-    }
-   },
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
-    {
-     "op": "exec",
-     "command": "echo x > /data/locked",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "register_policy",
-     "id": "cmd",
-     "commands": [
-      "touch"
-     ],
-     "reason": "no touching"
-    },
-    {
-     "op": "register_policy",
-     "id": "path",
-     "paths": [
-      "/data/locked"
-     ],
-     "reason": "locked file"
-    },
-    {
-     "op": "register_policy",
-     "id": "var",
-     "vars": [
-      "MODE"
-     ],
-     "reason": "mode is fixed"
-    },
-    {
-     "op": "register_policy",
-     "id": "line",
-     "lines": [
-      "blocked"
-     ],
-     "reason": "blocked line"
-    },
-    {
-     "op": "exec",
-     "command": "touch /data/t",
-     "expect": {
-      "value": {
-       "exit_code": 126,
-       "stdout": "",
-       "stderr": "touch: Permission denied\n",
-       "refusal": "no touching"
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "command": "cat /data/locked",
-     "expect": {
-      "value": {
-       "exit_code": 1,
-       "stdout": "",
-       "stderr": "cat: /data/locked: Permission denied\n",
-       "refusal": "locked file"
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "command": "export MODE=fast",
-     "expect": {
-      "value": {
-       "exit_code": 1,
-       "stdout": "",
-       "stderr": "MODE: permission denied\n",
-       "refusal": "mode is fixed"
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "command": "echo blocked",
-     "expect": {
-      "value": {
-       "exit_code": 126,
-       "stdout": "",
-       "stderr": "echo: Permission denied\n",
-       "refusal": "blocked line"
-      }
-     }
-    },
-    {
-     "op": "explain",
-     "command": "touch /data/t",
-     "expect": {
-      "value": {
-       "outcome": "deny",
-       "reason": "no touching",
-       "answers": [],
-       "refusal": "deny",
-       "exit_code": 126,
-       "stderr": "touch: Permission denied\n",
-       "commands": [
-        {
-         "command": "touch",
-         "outcome": "deny",
-         "answers": [
-          {
-           "kind": "deny",
-           "policy": "RulePolicy",
-           "reason": "no touching"
-          }
-         ],
-         "runtime": ""
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "explain",
-     "command": "echo blocked",
-     "expect": {
-      "value": {
-       "outcome": "deny",
-       "reason": "blocked line",
-       "answers": [
-        {
-         "kind": "deny",
-         "policy": "RulePolicy",
-         "reason": "blocked line"
-        }
-       ],
-       "refusal": "deny",
-       "exit_code": 126,
-       "stderr": "echo: Permission denied\n",
-       "commands": [
-        {
-         "command": "echo",
-         "outcome": "allow",
-         "answers": [],
-         "runtime": ""
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "vfs",
-     "call": "read",
-     "args": {
-      "path": "/data/locked"
-     },
-     "expect": {
-      "errno": "EACCES",
-      "reason": "locked file"
-     }
-    },
-    {
-     "op": "unregister_policy",
-     "id": "cmd",
-     "expect": {
-      "value": true
-     }
-    },
-    {
-     "op": "exec",
-     "command": "touch /data/t",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    }
+    {"op": "exec", "command": "echo x > /data/locked", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "register_policy", "id": "cmd", "commands": ["touch"], "reason": "no touching"},
+    {"op": "register_policy", "id": "path", "paths": ["/data/locked"], "reason": "locked file"},
+    {"op": "register_policy", "id": "var", "vars": ["MODE"], "reason": "mode is fixed"},
+    {"op": "register_policy", "id": "line", "lines": ["blocked"], "reason": "blocked line"},
+    {"op": "exec", "command": "touch /data/t", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "touch: Permission denied\n", "refusal": "no touching"}}},
+    {"op": "exec", "command": "cat /data/locked", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cat: /data/locked: Permission denied\n", "refusal": "locked file"}}},
+    {"op": "exec", "command": "export MODE=fast", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "MODE: permission denied\n", "refusal": "mode is fixed"}}},
+    {"op": "exec", "command": "echo blocked", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "echo: Permission denied\n", "refusal": "blocked line"}}},
+    {"op": "explain", "command": "touch /data/t", "expect": {"value": {"outcome": "deny", "reason": "no touching", "answers": [], "refusal": "deny", "exit_code": 126, "stderr": "touch: Permission denied\n", "commands": [{"command": "touch", "outcome": "deny", "answers": [{"kind": "deny", "policy": "RulePolicy", "reason": "no touching"}], "runtime": ""}]}}},
+    {"op": "explain", "command": "echo blocked", "expect": {"value": {"outcome": "deny", "reason": "blocked line", "answers": [{"kind": "deny", "policy": "RulePolicy", "reason": "blocked line"}], "refusal": "deny", "exit_code": 126, "stderr": "echo: Permission denied\n", "commands": [{"command": "echo", "outcome": "allow", "answers": [], "runtime": ""}]}}},
+    {"op": "vfs", "call": "read", "args": {"path": "/data/locked"}, "expect": {"errno": "EACCES", "reason": "locked file"}},
+    {"op": "unregister_policy", "id": "cmd", "expect": {"value": true}},
+    {"op": "exec", "command": "touch /data/t", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}}
    ]
   },
   {
    "id": "placement_routes_the_line_and_a_deny_outranks_it",
-   "settings": {
-    "mode": "exec",
-    "mounts": {
-     "/data": {
-      "vfs": "ram",
-      "config": {}
-     }
-    },
-    "runtimes": [
-     "monty",
-     "workspace"
-    ]
-   },
+   "settings": {"mode": "exec", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "runtimes": ["monty", "workspace"]},
    "steps": [
-    {
-     "op": "register_policy",
-     "id": "route",
-     "routes": {
-      "heavy": "monty"
-     },
-     "reason": ""
-    },
-    {
-     "op": "register_policy",
-     "id": "deny",
-     "lines": [
-      "secret"
-     ],
-     "reason": "secrets stay put"
-    },
-    {
-     "op": "explain",
-     "command": "python3 -c \"print('heavy')\"",
-     "expect": {
-      "value": {
-       "outcome": "allow",
-       "reason": "",
-       "answers": [
-        {
-         "kind": "route",
-         "policy": "RulePolicy",
-         "runtime": "monty"
-        }
-       ],
-       "refusal": null,
-       "exit_code": 0,
-       "stderr": "",
-       "commands": [
-        {
-         "command": "python3",
-         "outcome": "allow",
-         "answers": [],
-         "runtime": "monty"
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "command": "python3 -c \"print('heavy')\"",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "heavy\n",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "explain",
-     "command": "python3 -c \"print('heavy secret')\"",
-     "expect": {
-      "value": {
-       "outcome": "deny",
-       "reason": "secrets stay put",
-       "answers": [
-        {
-         "kind": "route",
-         "policy": "RulePolicy",
-         "runtime": "monty"
-        },
-        {
-         "kind": "deny",
-         "policy": "RulePolicy",
-         "reason": "secrets stay put"
-        }
-       ],
-       "refusal": "deny",
-       "exit_code": 126,
-       "stderr": "python3: Permission denied\n",
-       "commands": [
-        {
-         "command": "python3",
-         "outcome": "allow",
-         "answers": [],
-         "runtime": ""
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "command": "python3 -c \"print('heavy secret')\"",
-     "expect": {
-      "value": {
-       "exit_code": 126,
-       "stdout": "",
-       "stderr": "python3: Permission denied\n",
-       "refusal": "secrets stay put"
-      }
-     }
-    }
+    {"op": "register_policy", "id": "route", "routes": {"heavy": "monty"}, "reason": ""},
+    {"op": "register_policy", "id": "deny", "lines": ["secret"], "reason": "secrets stay put"},
+    {"op": "explain", "command": "python3 -c \"print('heavy')\"", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [{"kind": "route", "policy": "RulePolicy", "runtime": "monty"}], "refusal": null, "exit_code": 0, "stderr": "", "commands": [{"command": "python3", "outcome": "allow", "answers": [], "runtime": "monty"}]}}},
+    {"op": "exec", "command": "python3 -c \"print('heavy')\"", "expect": {"value": {"exit_code": 0, "stdout": "heavy\n", "stderr": "", "refusal": null}}},
+    {"op": "explain", "command": "python3 -c \"print('heavy secret')\"", "expect": {"value": {"outcome": "deny", "reason": "secrets stay put", "answers": [{"kind": "route", "policy": "RulePolicy", "runtime": "monty"}, {"kind": "deny", "policy": "RulePolicy", "reason": "secrets stay put"}], "refusal": "deny", "exit_code": 126, "stderr": "python3: Permission denied\n", "commands": [{"command": "python3", "outcome": "allow", "answers": [], "runtime": ""}]}}},
+    {"op": "exec", "command": "python3 -c \"print('heavy secret')\"", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "python3: Permission denied\n", "refusal": "secrets stay put"}}}
    ]
   },
   {
    "id": "a_profile_script_decides_commands_and_vfs_calls",
-   "settings": {
-    "mode": "write",
-    "mounts": {
-     "/data": {
-      "vfs": "ram",
-      "config": {}
-     }
-    },
-    "runtimes": [
-     "monty",
-     "workspace"
-    ]
-   },
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "runtimes": ["monty", "workspace"]},
    "steps": [
-    {
-     "op": "session",
-     "id": "agent",
-     "profile": {
-      "policy": {
-       "script": {
-        "source": "def pre_command(ctx):\n    if ctx['command']['name'] == 'touch':\n        return {'deny': 'script says no'}\n    return None\n\ndef pre_ops(ctx):\n    if ctx['op']['path'] == '/data/s':\n        return {'deny': 'script guards s'}\n    return None\n",
-        "language": "python"
-       },
-       "runtime": "monty"
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "command": "echo s > /data/s",
-     "expect": {
-      "value": {
-       "exit_code": 0,
-       "stdout": "",
-       "stderr": "",
-       "refusal": null
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "touch /data/t",
-     "expect": {
-      "value": {
-       "exit_code": 126,
-       "stdout": "",
-       "stderr": "touch: Permission denied\n",
-       "refusal": "script says no"
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "cat /data/s",
-     "expect": {
-      "value": {
-       "exit_code": 1,
-       "stdout": "",
-       "stderr": "cat: /data/s: Permission denied\n",
-       "refusal": "script guards s"
-      }
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "read",
-     "args": {
-      "path": "/data/s"
-     },
-     "expect": {
-      "errno": "EACCES",
-      "reason": "script guards s"
-     }
-    },
-    {
-     "op": "explain",
-     "session": "agent",
-     "command": "touch /data/t",
-     "expect": {
-      "value": {
-       "outcome": "deny",
-       "reason": "script says no",
-       "answers": [],
-       "refusal": "deny",
-       "exit_code": 126,
-       "stderr": "touch: Permission denied\n",
-       "commands": [
-        {
-         "command": "touch",
-         "outcome": "deny",
-         "answers": [
-          {
-           "kind": "deny",
-           "policy": "ScriptPolicy",
-           "reason": "script says no"
-          }
-         ],
-         "runtime": ""
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "read",
-     "args": {
-      "path": "/data/s"
-     },
-     "explain": true,
-     "expect": {
-      "value": {
-       "call": "read",
-       "outcome": "deny",
-       "reason": "script guards s",
-       "answers": [
-        {
-         "kind": "deny",
-         "policy": "ScriptPolicy",
-         "reason": "script guards s"
-        }
-       ],
-       "refusal": "deny",
-       "error": "EACCES"
-      }
-     }
-    }
+    {"op": "session", "id": "agent", "profile": {"policy": {"script": {"source": "def pre_command(ctx):\n    if ctx['command']['name'] == 'touch':\n        return {'deny': 'script says no'}\n    return None\n\ndef pre_ops(ctx):\n    if ctx['op']['path'] == '/data/s':\n        return {'deny': 'script guards s'}\n    return None\n", "language": "python"}, "runtime": "monty"}}},
+    {"op": "exec", "command": "echo s > /data/s", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "touch /data/t", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "touch: Permission denied\n", "refusal": "script says no"}}},
+    {"op": "exec", "session": "agent", "command": "cat /data/s", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cat: /data/s: Permission denied\n", "refusal": "script guards s"}}},
+    {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/s"}, "expect": {"errno": "EACCES", "reason": "script guards s"}},
+    {"op": "explain", "session": "agent", "command": "touch /data/t", "expect": {"value": {"outcome": "deny", "reason": "script says no", "answers": [], "refusal": "deny", "exit_code": 126, "stderr": "touch: Permission denied\n", "commands": [{"command": "touch", "outcome": "deny", "answers": [{"kind": "deny", "policy": "ScriptPolicy", "reason": "script says no"}], "runtime": ""}]}}},
+    {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/s"}, "explain": true, "expect": {"value": {"call": "read", "outcome": "deny", "reason": "script guards s", "answers": [{"kind": "deny", "policy": "ScriptPolicy", "reason": "script guards s"}], "refusal": "deny", "error": "EACCES"}}}
    ]
   },
   {
    "id": "the_tool_list_follows_the_profile",
-   "settings": {
-    "mode": "write",
-    "mounts": {
-     "/": {
-      "vfs": "ram",
-      "config": {}
-     }
-    }
-   },
+   "settings": {"mode": "write", "mounts": {"/": {"vfs": "ram", "config": {}}}},
    "steps": [
-    {
-     "op": "tools",
-     "expect": {
-      "value": [
-       "shell",
-       "read",
-       "write",
-       "edit",
-       "ls",
-       "grep",
-       "glob"
-      ]
-     }
-    },
-    {
-     "op": "session",
-     "id": "reader",
-     "profile": {
-      "mounts": {
-       "/": "read"
-      },
-      "commands": {
-       "allow": [
-        "cat",
-        "ls"
-       ]
-      }
-     }
-    },
-    {
-     "op": "tools",
-     "session": "reader",
-     "expect": {
-      "value": [
-       "shell",
-       "read",
-       "ls",
-       "glob"
-      ]
-     }
-    },
-    {
-     "op": "write",
-     "path": "/a.txt",
-     "data": "x\n"
-    },
-    {
-     "op": "tool",
-     "session": "reader",
-     "tool": "read",
-     "arguments": {
-      "path": "/a.txt"
-     },
-     "expect": {
-      "value": {
-       "text": "     1\tx\n",
-       "is_error": false
-      }
-     }
-    }
+    {"op": "tools", "expect": {"value": ["shell", "read", "write", "edit", "ls", "grep", "glob"]}},
+    {"op": "session", "id": "reader", "profile": {"mounts": {"/": "read"}, "commands": {"allow": ["cat", "ls"]}}},
+    {"op": "tools", "session": "reader", "expect": {"value": ["shell", "read", "ls", "glob"]}},
+    {"op": "write", "path": "/a.txt", "data": "x\n"},
+    {"op": "tool", "session": "reader", "tool": "read", "arguments": {"path": "/a.txt"}, "expect": {"value": {"text": "     1\tx\n", "is_error": false}}}
    ]
   },
   {
    "id": "a_path_ask_outside_a_line_waits_on_the_host",
-   "settings": {
-    "mode": "write",
-    "mounts": {
-     "/": {
-      "vfs": "ram",
-      "config": {}
-     }
-    }
-   },
+   "settings": {"mode": "write", "mounts": {"/": {"vfs": "ram", "config": {}}}},
    "steps": [
-    {
-     "op": "session",
-     "id": "agent",
-     "profile": {
-      "commands": {
-       "ask": [
-        {
-         "reason": "outbox needs a nod",
-         "paths": [
-          "/out/*"
-         ]
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "tool",
-     "session": "agent",
-     "tool": "write",
-     "arguments": {
-      "path": "/out/a.txt",
-      "content": "hi\n"
-     },
-     "expect": {
-      "value": {
-       "is_error": true,
-       "text_contains": "requires approval: outbox needs a nod (ask "
-      }
-     }
-    },
-    {
-     "op": "asks",
-     "expect": {
-      "value": [
-       {
-        "command": "",
-        "paths": [
-         "/out/a.txt"
-        ],
-        "reason": "outbox needs a nod"
-       }
-      ]
-     }
-    },
-    {
-     "op": "answer",
-     "outcome": "allow",
-     "scope": "once"
-    },
-    {
-     "op": "tool",
-     "session": "agent",
-     "tool": "write",
-     "arguments": {
-      "path": "/out/a.txt",
-      "content": "hi\n"
-     },
-     "expect": {
-      "value": {
-       "text": "Written: /out/a.txt",
-       "is_error": false
-      }
-     }
-    },
-    {
-     "op": "asks",
-     "expect": {
-      "value": []
-     }
-    },
-    {
-     "op": "tool",
-     "session": "agent",
-     "tool": "write",
-     "arguments": {
-      "path": "/out/b.txt",
-      "content": "hi\n"
-     },
-     "expect": {
-      "value": {
-       "is_error": true,
-       "text_contains": "requires approval: outbox needs a nod"
-      }
-     }
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "echo hi > /out/c.txt",
-     "expect": {
-      "value": {
-       "exit_code": 126,
-       "refusal": "outbox needs a nod"
-      }
-     }
-    }
+    {"op": "session", "id": "agent", "profile": {"commands": {"ask": [{"reason": "outbox needs a nod", "paths": ["/out/*"]}]}}},
+    {"op": "tool", "session": "agent", "tool": "write", "arguments": {"path": "/out/a.txt", "content": "hi\n"}, "expect": {"value": {"is_error": true, "text_contains": "requires approval: outbox needs a nod (ask "}}},
+    {"op": "asks", "expect": {"value": [{"command": "", "paths": ["/out/a.txt"], "reason": "outbox needs a nod"}]}},
+    {"op": "answer", "outcome": "allow", "scope": "once"},
+    {"op": "tool", "session": "agent", "tool": "write", "arguments": {"path": "/out/a.txt", "content": "hi\n"}, "expect": {"value": {"text": "Written: /out/a.txt", "is_error": false}}},
+    {"op": "asks", "expect": {"value": []}},
+    {"op": "tool", "session": "agent", "tool": "write", "arguments": {"path": "/out/b.txt", "content": "hi\n"}, "expect": {"value": {"is_error": true, "text_contains": "requires approval: outbox needs a nod"}}},
+    {"op": "exec", "session": "agent", "command": "echo hi > /out/c.txt", "expect": {"value": {"exit_code": 126, "refusal": "outbox needs a nod"}}}
    ]
   },
   {
    "id": "explain_shows_every_answer_and_the_vfs_form",
-   "settings": {
-    "mode": "write",
-    "mounts": {
-     "/": {
-      "vfs": "ram",
-      "config": {}
-     }
-    }
-   },
+   "settings": {"mode": "write", "mounts": {"/": {"vfs": "ram", "config": {}}}},
    "steps": [
-    {
-     "op": "session",
-     "id": "agent",
-     "profile": {
-      "paths": {
-       "hide": [
-        "/vault"
-       ]
-      },
-      "commands": {
-       "deny": [
-        {
-         "reason": "no deletes",
-         "commands": [
-          "rm"
-         ]
-        },
-        {
-         "reason": "sealed",
-         "paths": [
-          "/sec/*"
-         ]
-        }
-       ],
-       "ask": [
-        {
-         "reason": "nod",
-         "paths": [
-          "/out/*"
-         ]
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "register_policy",
-     "id": "lines",
-     "lines": [
-      "blocked"
-     ],
-     "reason": "blocked here"
-    },
-    {
-     "op": "explain",
-     "session": "agent",
-     "command": "rm /x",
-     "expect": {
-      "value": {
-       "outcome": "deny",
-       "exit_code": 126,
-       "answers": [],
-       "commands": [
-        {
-         "command": "rm",
-         "outcome": "deny",
-         "answers": [
-          {
-           "kind": "deny",
-           "policy": "PermissionsPolicy",
-           "reason": "no deletes"
-          }
-         ]
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "explain",
-     "session": "agent",
-     "command": "echo blocked",
-     "expect": {
-      "value": {
-       "outcome": "deny",
-       "exit_code": 126,
-       "stderr": "echo: Permission denied\n",
-       "answers": [
-        {
-         "kind": "deny",
-         "reason": "blocked here"
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "explain",
-     "session": "agent",
-     "command": "echo hi",
-     "expect": {
-      "value": {
-       "outcome": "allow",
-       "exit_code": 0,
-       "answers": [],
-       "commands": [
-        {
-         "command": "echo",
-         "runtime": ""
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "read",
-     "args": {
-      "path": "/sec/k"
-     },
-     "explain": true,
-     "expect": {
-      "value": {
-       "outcome": "deny",
-       "error": "EACCES",
-       "refusal": "deny",
-       "answers": [
-        {
-         "kind": "deny",
-         "policy": "PermissionsPolicy",
-         "reason": "sealed"
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "write",
-     "args": {
-      "path": "/out/a",
-      "data_base64": "eA=="
-     },
-     "explain": true,
-     "expect": {
-      "value": {
-       "outcome": "ask",
-       "error": "EACCES",
-       "refusal": "pending"
-      }
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "rename",
-     "args": {
-      "src": "/a",
-      "dst": "/sec/b"
-     },
-     "explain": true,
-     "expect": {
-      "value": {
-       "call": "rename",
-       "outcome": "deny",
-       "error": "EACCES"
-      }
-     }
-    },
-    {
-     "op": "asks",
-     "expect": {
-      "value": []
-     }
-    },
-    {
-     "op": "vfs",
-     "session": "agent",
-     "call": "read",
-     "args": {
-      "path": "/vault/k"
-     },
-     "explain": true,
-     "expect": {
-      "value": {
-       "outcome": "allow",
-       "error": "",
-       "answers": []
-      }
-     }
-    }
+    {"op": "session", "id": "agent", "profile": {"paths": {"hide": ["/vault"]}, "commands": {"deny": [{"reason": "no deletes", "commands": ["rm"]}, {"reason": "sealed", "paths": ["/sec/*"]}], "ask": [{"reason": "nod", "paths": ["/out/*"]}]}}},
+    {"op": "register_policy", "id": "lines", "lines": ["blocked"], "reason": "blocked here"},
+    {"op": "explain", "session": "agent", "command": "rm /x", "expect": {"value": {"outcome": "deny", "exit_code": 126, "answers": [], "commands": [{"command": "rm", "outcome": "deny", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "no deletes"}]}]}}},
+    {"op": "explain", "session": "agent", "command": "echo blocked", "expect": {"value": {"outcome": "deny", "exit_code": 126, "stderr": "echo: Permission denied\n", "answers": [{"kind": "deny", "reason": "blocked here"}]}}},
+    {"op": "explain", "session": "agent", "command": "echo hi", "expect": {"value": {"outcome": "allow", "exit_code": 0, "answers": [], "commands": [{"command": "echo", "runtime": ""}]}}},
+    {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/sec/k"}, "explain": true, "expect": {"value": {"outcome": "deny", "error": "EACCES", "refusal": "deny", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "sealed"}]}}},
+    {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/out/a", "data_base64": "eA=="}, "explain": true, "expect": {"value": {"outcome": "ask", "error": "EACCES", "refusal": "pending"}}},
+    {"op": "vfs", "session": "agent", "call": "rename", "args": {"src": "/a", "dst": "/sec/b"}, "explain": true, "expect": {"value": {"call": "rename", "outcome": "deny", "error": "EACCES"}}},
+    {"op": "asks", "expect": {"value": []}},
+    {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/vault/k"}, "explain": true, "expect": {"value": {"outcome": "allow", "error": "", "answers": []}}}
    ]
   },
   {
    "id": "an_ask_comes_before_placement",
    "note": "A line a rule asks about is not shown to a placing policy: the question is recorded and the line waits on it, rather than a placement deny answering first.",
-   "settings": {
-    "mode": "write",
-    "mounts": {
-     "/": {
-      "vfs": "ram",
-      "config": {}
-     }
-    }
-   },
+   "settings": {"mode": "write", "mounts": {"/": {"vfs": "ram", "config": {}}}},
    "steps": [
-    {
-     "op": "session",
-     "id": "agent",
-     "profile": {
-      "commands": {
-       "ask": [
-        {
-         "reason": "nod",
-         "commands": [
-          "rm"
-         ]
-        }
-       ]
-      }
-     }
-    },
-    {
-     "op": "register_policy",
-     "id": "lines",
-     "lines": [
-      "rm"
-     ],
-     "reason": "routed away"
-    },
-    {
-     "op": "exec",
-     "session": "agent",
-     "command": "rm /x",
-     "expect": {
-      "value": {
-       "exit_code": 126,
-       "stderr": "rm: Permission denied\n",
-       "refusal": "nod"
-      }
-     }
-    },
-    {
-     "op": "asks",
-     "session": "agent",
-     "expect": {
-      "value": [
-       {
-        "command": "rm",
-        "paths": [
-         "/x"
-        ],
-        "reason": "nod"
-       }
-      ]
-     }
-    }
+    {"op": "session", "id": "agent", "profile": {"commands": {"ask": [{"reason": "nod", "commands": ["rm"]}]}}},
+    {"op": "register_policy", "id": "lines", "lines": ["rm"], "reason": "routed away"},
+    {"op": "exec", "session": "agent", "command": "rm /x", "expect": {"value": {"exit_code": 126, "stderr": "rm: Permission denied\n", "refusal": "nod"}}},
+    {"op": "asks", "session": "agent", "expect": {"value": [{"command": "rm", "paths": ["/x"], "reason": "nod"}]}}
    ]
   }
  ]

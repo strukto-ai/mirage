@@ -47,7 +47,8 @@ from mirage.policy.types import (
 from mirage.process.types import SpawnRequest
 from mirage.runtime.routing import RouteContext
 from mirage.runtime.types import ScriptSource
-from mirage.server import vfs_calls
+from mirage.server import io_serde
+from mirage.server.vfs_calls import VFS_CALL_BY_NAME
 from mirage.shell.console import Channel, JobConsole
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -362,11 +363,12 @@ async def action(
         return explained(await explain.shell(step["command"]))
     elif op == "vfs":
         session = Session(ws, step.get("session"))
-        call = vfs_calls.VFS_CALL_BY_NAME[step["call"]]
-        args = vfs_calls.checked(call, step.get("args", {}))
+        call = VFS_CALL_BY_NAME[step["call"]]
+        args = io_serde.checked(call, step.get("args", {}))
         if step.get("explain"):
-            return explained(await call.run(session.explain.vfs, args))
-        return await vfs_calls.answered(session, call, args, False)
+            vfs = session.explain.vfs
+            return explained(await getattr(vfs, call.name)(**args))
+        return await io_serde.answered(session, call, args, False)
     elif op == "close":
         await ws.close()
     else:

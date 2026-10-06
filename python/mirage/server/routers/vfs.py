@@ -13,23 +13,25 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import json
 import logging
 from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
+from mcp.server.transport_security import DEFAULT_MAX_REQUEST_BODY_SIZE
 
 from mirage.errors.classify import classify
 from mirage.errors.types import FsCondition
-from mirage.server.io_serde import failure_to_dict
-from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
-from mirage.server.vfs_calls import (
-    VFS_CALLS,
+from mirage.server.io_serde import (
     CallArgsError,
-    VfsCall,
     answered,
     checked,
+    failure_to_dict,
 )
+from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
+from mirage.server.vfs_calls import VFS_CALLS, VfsCall
+from mirage.types import JsonValue
 from mirage.workspace.workspace.handle import Session
 
 logger = logging.getLogger(__name__)
@@ -91,6 +93,34 @@ async def session_of(entry: WorkspaceEntry, session_id: str | None) -> Session:
     return Session(ws, session_id or None)
 
 
+async def json_body(request: Request) -> dict[str, JsonValue]:
+    """A request's JSON object, read up to the MCP route's size limit.
+
+    Args:
+        request (Request): the request.
+
+    Raises:
+        HTTPException: 413 past the limit, 400 for anything but a JSON
+            object.
+    """
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > DEFAULT_MAX_REQUEST_BODY_SIZE:
+            raise HTTPException(
+                status_code=413, detail="request body too large"
+            )
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        parsed = None
+    if not isinstance(parsed, dict):
+        raise HTTPException(
+            status_code=400, detail="the body is a JSON object"
+        )
+    return parsed
+
+
 def failure(exc: Exception) -> JSONResponse:
     """A call's failure as the HTTP doors answer it: the errno it names
     picks the status, and the body carries the errno, the text and, for
@@ -119,18 +149,7 @@ def vfs_route(call: VfsCall) -> Callable[..., Awaitable[JSONResponse]]:
     ) -> JSONResponse:
         entry = require_entry(request, workspace_id)
         try:
-            params = await request.json()
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=f"invalid JSON body for vfs/{call.name}",
-            ) from exc
-        if not isinstance(params, dict):
-            raise HTTPException(
-                status_code=400, detail="the body is a JSON object"
-            )
-        try:
-            args = checked(call, params)
+            args = checked(call, await json_body(request))
         except CallArgsError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         session = await session_of(entry, session_id)
@@ -161,8 +180,7 @@ async def glob(
     """``session.glob``: every path a pattern matches, as the session
     sees them."""
     entry = require_entry(request, workspace_id)
-    params = await request.json()
-    pattern = params.get("pattern") if isinstance(params, dict) else None
+    pattern = (await json_body(request)).get("pattern")
     if not isinstance(pattern, str):
         raise HTTPException(status_code=400, detail="pattern must be a string")
     session = await session_of(entry, session_id)

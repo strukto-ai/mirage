@@ -66,10 +66,9 @@ describe('MirageRpcServer', () => {
     const sliced = (await call(rpc, 'vfs/read', { path: '/d/a.txt', offset: 4, size: 3 }))
       .result as { data_base64: string }
     expect(Buffer.from(sliced.data_base64, 'base64').toString()).toBe('two')
-    const stat = (await call(rpc, 'vfs/stat', { path: '/d/a.txt' })).result as Record<
-      string,
-      unknown
-    >
+    const { stat } = (await call(rpc, 'vfs/stat', { path: '/d/a.txt' })).result as {
+      stat: Record<string, unknown>
+    }
     expect([stat.type, stat.size]).toEqual(['file', 8])
     await call(rpc, 'vfs/rename', { src: '/d/a.txt', dst: '/d/b.txt' })
     await call(rpc, 'vfs/truncate', { path: '/d/b.txt', length: 3 })
