@@ -55,6 +55,9 @@ export function registerDocumentsRoutes(app: FastifyInstance, deps: DocumentsRou
             const entry = deps.registry.visible(req.params.wsId, req.account)
             if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
             const ws = entry.runner.ws
+            // Loaded before the error mapping: a store that cannot be read
+            // is the server's failure, never a 403 or 404 to the client.
+            await ws.ensureSessionsLoaded()
             const sessionId = req.params.sessionId ?? req.query.session_id
             const path = method === 'PUT' ? req.body.path : undefined
             try {

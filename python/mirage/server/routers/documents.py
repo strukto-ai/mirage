@@ -41,6 +41,9 @@ async def document(
     )
     if entry is None:
         raise HTTPException(404, "workspace not found")
+    # Loaded before the error mapping: a store that cannot be read is
+    # the server's failure, never a 403 or 404 to the client.
+    await entry.runner.call(entry.runner.ws.ensure_sessions_loaded())
     method = (
         entry.runner.ws.vfs_md if kind == "vfs" else entry.runner.ws.skill_md
     )
