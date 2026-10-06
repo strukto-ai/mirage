@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { constants as fsConstants } from 'node:fs'
-import type { Action, OpsResultContext, Policy } from '@struktoai/mirage-core/policy/index'
+import type { Action, VfsResultContext, Policy } from '@struktoai/mirage-core/policy/index'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { ContentType, FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
 import { describe, expect, it, vi } from 'vitest'
@@ -737,13 +737,13 @@ describe('MirageFS — session binding', () => {
 })
 
 describe('MirageFS — a policy deny on read surfaces EACCES', () => {
-  it('postOps deny reports EACCES instead of an empty read', async () => {
+  it('postVfs deny reports EACCES instead of an empty read', async () => {
     const vfs = new RAMVFS()
     vfs.store.dirs.add('/')
     vfs.store.files.set('/secret.txt', new TextEncoder().encode('TOPSECRET plans\n'))
     vfs.store.files.set('/clean.txt', new TextEncoder().encode('hello\n'))
     const redact: Policy = {
-      postOps(ctx: OpsResultContext): Action | null {
+      postVfs(ctx: VfsResultContext): Action | null {
         const data = ctx.result instanceof Uint8Array ? new TextDecoder().decode(ctx.result) : null
         if (ctx.op === 'read' && data?.includes('TOPSECRET') === true) {
           return { kind: 'deny', reason: 'redacted' }

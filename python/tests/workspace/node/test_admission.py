@@ -669,7 +669,7 @@ def test_the_admitted_gate_scopes_each_start_point_on_its_own():
     assert gate.scopes("/data")
     assert gate.scopes("/data/sealed/s")
     assert not gate.scopes("/other")
-    # A pre_ops policy judges every op, so every walk is the guard's.
+    # A pre_vfs policy judges every op, so every walk is the guard's.
     judged = Admitted(
         rules=rules,
         tokens=("find", "/other"),

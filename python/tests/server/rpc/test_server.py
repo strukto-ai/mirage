@@ -66,7 +66,9 @@ async def test_vfs_methods_mirror_the_ops():
         rpc, "vfs/read", {"path": "/d/a.txt", "offset": 4, "size": 3}
     )
     assert base64.b64decode(sliced["result"]["data_base64"]) == b"two"
-    stat = (await call(rpc, "vfs/stat", {"path": "/d/a.txt"}))["result"]
+    stat = (await call(rpc, "vfs/stat", {"path": "/d/a.txt"}))["result"][
+        "stat"
+    ]
     assert stat["type"] == "file"
     assert stat["size"] == 8
     listed = (await call(rpc, "vfs/readdir", {"path": "/d"}))["result"]
@@ -83,52 +85,6 @@ async def test_vfs_methods_mirror_the_ops():
     assert (await call(rpc, "vfs/exists", {"path": "/d"}))["result"] == {
         "exists": False
     }
-
-
-@pytest.mark.asyncio
-async def test_explain_methods_are_the_dry_runs_of_their_doors():
-    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
-    ws.create_session(
-        "agent",
-        profile={
-            "commands": {"deny": [{"reason": "sealed", "paths": ["/sec/*"]}]}
-        },
-    )
-    rpc = MirageRpcServer(ws, "agent")
-    assert "explain/vfs/rename" in rpc.methods
-    shell = await call(rpc, "explain/shell", {"command": "rm /sec/k"})
-    said = shell["result"]
-    [rm] = said["node"]["children"]
-    assert (rm["command"], said["outcome"], said["exit_code"]) == (
-        "rm",
-        "deny",
-        1,
-    )
-    assert rm["answers"] == [
-        {"kind": "deny", "reason": "sealed", "policy": "PermissionsPolicy"}
-    ]
-    assert (said["line"], said["source"]) == ("rm /sec/k", "top")
-    written = await call(
-        rpc, "explain/vfs/write", {"path": "/sec/k", "data_base64": b64("x")}
-    )
-    assert written["result"]["call"] == "write"
-    assert written["result"]["paths"] == ["/sec/k"]
-    assert (written["result"]["outcome"], written["result"]["error"]) == (
-        "deny",
-        "EACCES",
-    )
-    free = await call(
-        rpc, "explain/vfs/write", {"path": "/f", "data_base64": ""}
-    )
-    assert (free["result"]["outcome"], free["result"]["error"]) == (
-        "allow",
-        "",
-    )
-    assert (await call(rpc, "vfs/exists", {"path": "/f"}))["result"] == {
-        "exists": False
-    }
-    bad = await call(rpc, "explain/vfs/truncate", {"path": "/f"})
-    assert bad["error"]["message"] == "length must be an integer"
 
 
 @pytest.mark.asyncio

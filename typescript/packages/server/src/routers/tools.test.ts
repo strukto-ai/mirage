@@ -39,7 +39,11 @@ async function tool(
   name: string,
   payload: Record<string, unknown>,
 ): Promise<{ text: string; is_error: boolean }> {
-  const res = await app.inject({ method: 'POST', url: `/v1/workspaces/${id}/${name}`, payload })
+  const res = await app.inject({
+    method: 'POST',
+    url: `/v1/workspaces/${id}/tools/${name}`,
+    payload,
+  })
   expect(res.statusCode).toBe(200)
   return res.json()
 }
@@ -57,12 +61,14 @@ describe('the tool routes', () => {
     const listed = await tool(app, id, 'ls', { path: '/src' })
     const found = await tool(app, id, 'grep', { pattern: 'PIN', path: '/src', ignore_case: true })
     const globbed = await tool(app, id, 'glob', { pattern: '**/*.py' })
+    const shelled = await tool(app, id, 'shell', { command: 'echo hi' })
     expect(written).toEqual({ text: 'Written: /src/a.py', is_error: false })
     expect(read).toEqual({ text: '     1\tNeedle\n', is_error: false })
     expect(edited.is_error).toBe(false)
     expect(listed.text).toBe('a.py\n')
     expect(found).toEqual({ text: '/src/a.py:1:pin\n', is_error: false })
     expect(globbed).toEqual({ text: '/src/a.py\n', is_error: false })
+    expect(shelled).toEqual({ text: 'hi\n', is_error: false })
   })
 
   it('keep the session stamps across requests', async () => {
@@ -81,15 +87,19 @@ describe('the tool routes', () => {
 
   it('refuse bad arguments and unknown targets', async () => {
     const { app, id } = await workspace()
-    const bad = await app.inject({ method: 'POST', url: `/v1/workspaces/${id}/read`, payload: {} })
+    const bad = await app.inject({
+      method: 'POST',
+      url: `/v1/workspaces/${id}/tools/read`,
+      payload: {},
+    })
     const ws = await app.inject({
       method: 'POST',
-      url: '/v1/workspaces/nope/read',
+      url: '/v1/workspaces/nope/tools/read',
       payload: { path: '/a' },
     })
     const session = await app.inject({
       method: 'POST',
-      url: `/v1/workspaces/${id}/read?session_id=nope`,
+      url: `/v1/workspaces/${id}/tools/read?session_id=nope`,
       payload: { path: '/a' },
     })
     expect(bad.statusCode).toBe(400)

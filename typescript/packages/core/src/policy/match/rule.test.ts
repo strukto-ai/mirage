@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 
 import { PathSpec } from '../../types.ts'
 import { classifyPaths } from '../../utils/hidden.ts'
-import type { CommandContext, CommandRule, AdmissionRules, OpsContext } from '../types.ts'
+import type { CommandContext, CommandRule, AdmissionRules, VfsContext } from '../types.ts'
 import {
   ioReach,
   ioRefusal,
@@ -113,7 +113,7 @@ describe('rules', () => {
     const broad: CommandRule = { reason: 'repo is sealed', paths: ['/repo/*'] }
     const carve: CommandRule = { reason: 'outbox nod', paths: ['/repo/outbox/*'] }
     const rules: AdmissionRules = { allow: null, deny: [broad], ask: [carve] }
-    const inside: OpsContext = {
+    const inside: VfsContext = {
       op: 'write',
       path: path('/repo/outbox/a'),
       write: true,
@@ -125,7 +125,7 @@ describe('rules', () => {
     expect(opRefusal(rules, inside, [carve])).toBeNull()
     // Outside the carve-out the deny is what is left, and a grant for
     // the ask says nothing about it.
-    const outside: OpsContext = {
+    const outside: VfsContext = {
       op: 'write',
       path: path('/repo/sealed/a'),
       write: true,
@@ -133,7 +133,7 @@ describe('rules', () => {
     }
     expect(opRefusal(rules, outside, [carve])).toBe('repo is sealed')
     // A metadata op is reached by neither: deny is present and refused.
-    const stat: OpsContext = {
+    const stat: VfsContext = {
       op: 'stat',
       path: path('/repo/outbox/a'),
       write: false,
@@ -153,7 +153,7 @@ describe('rules', () => {
   it('matchOp only for pure path rules', () => {
     const rule: CommandRule = { reason: 'frozen', paths: ['/data/locked/*'] }
     const scope = classifyPaths(rule.paths ?? [])
-    const op: OpsContext = {
+    const op: VfsContext = {
       op: 'write',
       path: path('/data/locked/a'),
       write: true,

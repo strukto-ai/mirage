@@ -1,0 +1,46 @@
+---
+title: Policy
+sidebarTitle: Overview
+description: Control everything an agent does in the virtual terminal, in code or in scripts, with the whole context in hand.
+icon: /images/policy-icon.svg
+---
+
+A policy controls everything an agent does in the virtual terminal: every
+line, every command, every file it touches and every env write. It can
+refuse, ask a host, move a line to another runtime, or bound what comes
+back.
+
+Each hook gets the whole context: the line and its commands, the words
+after expansion, the paths, cwd, session, env and mounts, and after a call
+its result. A policy can even read the files a command names before it
+decides. The hook returns an answer, or `None` to stay out of it.
+
+Write a policy as a class in Python or TypeScript, or as a script a
+[profile](/home/permissions#cwd-env-policy) loads from YAML, in Python or
+JavaScript. Add it to the workspace and every session goes through it.
+
+## Why not a harness hook
+
+A harness hook, such as Claude Code's `PreToolUse` or an SDK's
+`can_use_tool`, sees one tool call: a tool name and a string such as
+`cat $(ls /data | head -1)`. A Mirage policy runs inside the shell and the
+filesystem, so it sees what that string only implies.
+
+| | Harness hook | Mirage policy |
+| --- | --- | --- |
+| Commands | the raw string; `$( )`, `xargs`, `find -exec`, `eval` and variables hide what runs | every command after expansion, nested ones included |
+| Files | the paths written in the string | every file a command reads or writes, such as each one `grep -r`, `tar` or `cp -r` reaches |
+| Ways in | that harness's own tools | every session and door: the SDK, MCP, HTTP, RPC, SSH, FUSE |
+
+## In this section
+
+- [Policies](/home/policy/policies): write one. The hooks, what each can
+  answer, and what the agent gets back.
+- [Explain](/home/policy/explain): ask what a line or a VFS call would
+  do, without running it.
+
+Related:
+
+- [Permissions](/home/permissions): allow lists, path rules, hides and
+  asks, written in YAML with no code.
+- [Route policy](/home/route-policy): which runtime runs a line.

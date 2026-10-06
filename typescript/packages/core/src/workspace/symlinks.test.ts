@@ -23,7 +23,7 @@ import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import { FileStat, FileType, MountMode } from '../types.ts'
-import type { Action, OpsContext } from '../policy/index.ts'
+import type { Action, VfsContext } from '../policy/index.ts'
 import { applyStateDict, toStateDict } from './snapshot/state.ts'
 import { Workspace } from './workspace/workspace.ts'
 
@@ -171,7 +171,7 @@ describe('symlinks (namespace-backed)', () => {
         shellParser: parser,
         policies: [
           {
-            preOps: (ctx: OpsContext): Action | null =>
+            preVfs: (ctx: VfsContext): Action | null =>
               ctx.op === 'rename' ? { kind: 'deny', reason: 'frozen' } : null,
           },
         ],

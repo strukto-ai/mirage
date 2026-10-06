@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Command } from 'commander'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { registerShellCommand } from './shell.ts'
+import { formatExplanation, registerShellCommand } from './shell.ts'
 
 class Exited extends Error {
   constructor(readonly code: number | undefined) {
@@ -73,5 +73,62 @@ describe('mirage shell', () => {
       server.close()
       rmSync(home, { recursive: true, force: true })
     }
+  })
+})
+
+function command(text: string, outcome: string, reason = '', exitCode = 0) {
+  return {
+    type: 'command',
+    text,
+    outcome,
+    exit_code: exitCode,
+    reason,
+    source: reason === '' ? '' : 'top',
+    runtime: '',
+    children: [],
+  }
+}
+
+describe('mirage workspace explain', () => {
+  it('prints the line as its tree', () => {
+    const cat = command('cat /data/keys/a', 'deny', 'sealed', 1)
+    const echo = {
+      ...command('echo $(cat /data/keys/a)', 'allow'),
+      children: [{ type: 'substitution', text: 'cat /data/keys/a', children: [cat] }],
+    }
+    const said = {
+      line: 'ls | wc -l && echo $(cat /data/keys/a)',
+      outcome: 'deny',
+      reason: 'sealed',
+      exit_code: 1,
+      node: {
+        type: 'line',
+        text: 'ls | wc -l && echo $(cat /data/keys/a)',
+        children: [
+          {
+            type: 'list',
+            text: 'ls | wc -l && echo $(cat /data/keys/a)',
+            children: [
+              {
+                type: 'pipeline',
+                text: 'ls | wc -l',
+                children: [command('ls', 'allow'), command('wc -l', 'allow')],
+              },
+              echo,
+            ],
+          },
+        ],
+      },
+    }
+    expect(formatExplanation(said).split('\n')).toEqual([
+      'ls | wc -l && echo $(cat /data/keys/a)  [deny, exit 1: sealed]',
+      '  list: ls | wc -l && echo $(cat /data/keys/a)',
+      '    pipeline: ls | wc -l',
+      '      ls  [allow]',
+      '      wc -l  [allow]',
+      '    echo $(cat /data/keys/a)  [allow]',
+      '      substitution: cat /data/keys/a',
+      '        cat /data/keys/a  [deny, exit 1: sealed]  top',
+    ])
   })
 })

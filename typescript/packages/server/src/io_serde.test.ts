@@ -12,9 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { OpsRegistry } from '@struktoai/mirage-core/ops/registry'
+import { MountMode } from '@struktoai/mirage-core/types'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { ioResultToDict } from './io_serde.ts'
+import { Workspace } from '@struktoai/mirage-node'
+import { describe, expect, it } from 'vitest'
+import { CallArgsError, answered, checked, ioResultToDict } from './io_serde.ts'
+import { VFS_CALL_BY_NAME, type VfsCall } from './vfs_calls.ts'
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s)
 
@@ -50,5 +56,40 @@ describe('ioResultToDict', () => {
         ask_id: 'abc123',
       },
     })
+  })
+})
+
+describe('checked and answered', () => {
+  const byName = (name: string): VfsCall => {
+    const call = VFS_CALL_BY_NAME.get(name)
+    if (call === undefined) throw new Error(`no vfs call ${name}`)
+    return call
+  }
+
+  it('runs or explains a VFS call as JSON', async () => {
+    const ram = new RAMVFS()
+    const ops = new OpsRegistry()
+    for (const op of ram.ops()) ops.register(op)
+    const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+    const session = new Session(ws, null)
+    const args = await checked(byName('write'), { path: '/a', data_base64: 'aGk=' })
+    expect(args).toEqual({ path: '/a', data: new Uint8Array([104, 105]) })
+    expect(await answered(session, byName('write'), args, false)).toEqual({})
+    expect(await answered(session, byName('read'), { path: '/a' }, false)).toEqual({
+      data_base64: 'aGk=',
+    })
+    const said = await answered(session, byName('unlink'), { path: '/a' }, true)
+    expect(said).toMatchObject({ call: 'unlink', outcome: 'allow' })
+    expect(await session.vfs.exists('/a')).toBe(true)
+    await ws.close()
+  })
+
+  it('refuses arguments outside the schema', async () => {
+    await expect(checked(byName('write'), { path: '/a', data_base64: '%%' })).rejects.toThrow(
+      new CallArgsError('data_base64 must be base64'),
+    )
+    await expect(checked(byName('write'), { path: '/a' })).rejects.toThrow(
+      /invalid arguments for vfs\/write/,
+    )
   })
 })

@@ -16,13 +16,13 @@ import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
-import type { Action, OpsContext, Policy } from '../../policy/index.ts'
+import type { Action, VfsContext, Policy } from '../../policy/index.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { SharedStdin } from '../../io/stream.ts'
 
 class NoRmdir implements Policy {
-  preOps(ctx: OpsContext): Action | null {
+  preVfs(ctx: VfsContext): Action | null {
     return ctx.op === 'rmdir' ? { kind: 'deny', reason: 'no rmdir' } : null
   }
 }

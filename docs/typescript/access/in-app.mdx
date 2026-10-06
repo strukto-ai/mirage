@@ -36,7 +36,7 @@ One terminal over the backends mounted at each prefix.
   The profile a session gets when it names none.
 </ResponseField>
 <ResponseField name="options.policies" type="Policy[]">
-  [Policies](/home/policy-engine) every line passes through.
+  [Policies](/home/policy/overview) every line passes through.
 </ResponseField>
 <ResponseField name="options.onAsk" type="AskHandler">
   Answers an ask while the line waits. Without one, asks wait in [`ws.decisions`](#ws-decisions).
@@ -258,7 +258,7 @@ session.explain.shell(line): Promise<ShellExplanation>
 session.explain.vfs.<call>(...): Promise<VfsExplanation>
 ```
 
-What `session.shell` or a `session.vfs` call would do, without running it: a line's verdict and parse tree, a VFS call's verdict and error, each with every policy's answer. In a browser (no async task isolation) `explain.vfs` throws and `explain.shell`'s policies act for real. See [Explain](/home/permissions#explain).
+What `session.shell` or a `session.vfs` call would do, without running it: a line's verdict and parse tree, a VFS call's verdict and error, each with every policy's answer. In a browser (no async task isolation) `explain.vfs` throws and `explain.shell`'s policies act for real. See [Explain](/home/policy/explain).
 
 ```ts
 const shellRes = await session.explain.shell('rm /data/x')
@@ -321,7 +321,7 @@ session.tools.call(name, args, signal?): Promise<ToolResult>
 session.tools.names(): readonly string[]
 ```
 
-The seven agent tools, for a model rather than a program: every answer is text, and a failure is `isError`, never a throw. `call` takes a tool's name and its JSON input, the form an agent loop gets from the model. The session has one table, shared by every caller, so `write` and `edit` refuse a file the agent has not read in full, or one that changed since it read it. `names()` is the tools the session's [profile](/home/policy-engine#which-door-enforces-what) leaves it, which MCP, RPC and the agent adapters offer: `shell` needs a command the allow list installs, `ls` and `grep` those commands, `write` and `edit` a mount the session may write.
+The seven agent tools, for a model rather than a program: every answer is text, and a failure is `isError`, never a throw. `call` takes a tool's name and its JSON input, the form an agent loop gets from the model. The session has one table, shared by every caller, so `write` and `edit` refuse a file the agent has not read in full, or one that changed since it read it. `names()` is the tools the session's [profile](/home/policy/policies#which-door-enforces-what) leaves it, which MCP, RPC and the agent adapters offer: `shell` needs a command the allow list installs, `ls` and `grep` those commands, `write` and `edit` a mount the session may write.
 
 | Tool | Answers |
 | --- | --- |

@@ -30,7 +30,7 @@ from mirage.policy.types import (
     AdmissionRules,
     CommandContext,
     CommandRule,
-    OpsContext,
+    VfsContext,
 )
 from mirage.types import PathSpec
 from mirage.utils.hidden import classify_paths
@@ -156,14 +156,14 @@ def test_a_walking_command_touches_the_mounts_under_its_operands():
 def test_match_op_only_for_pure_path_rules():
     rule = CommandRule(reason="frozen", paths=("/data/locked/*",))
     scope = classify_paths(rule.paths)
-    op = OpsContext(
+    op = VfsContext(
         op="write", path=_path("/data/locked/a"), write=True, prefix="/data/"
     )
     assert match_op(rule, scope, op)
     assert not match_op(
         rule,
         scope,
-        OpsContext(
+        VfsContext(
             op="write", path=_path("/data/open/a"), write=True, prefix="/data/"
         ),
     )
@@ -176,7 +176,7 @@ def test_op_refusal_reads_depth_before_verb_and_honours_a_grant():
     broad = CommandRule(reason="repo is sealed", paths=("/repo/*",))
     carve = CommandRule(reason="outbox nod", paths=("/repo/outbox/*",))
     rules = AdmissionRules(deny=(broad,), ask=(carve,))
-    inside = OpsContext(
+    inside = VfsContext(
         op="write", path=_path("/repo/outbox/a"), write=True, prefix="/repo/"
     )
     # The deeper ask wins where both reach, exactly as the command door
@@ -185,12 +185,12 @@ def test_op_refusal_reads_depth_before_verb_and_honours_a_grant():
     assert op_refusal(rules, inside, (carve,)) is None
     # Outside the carve-out the deny is what is left, and a grant for
     # the ask says nothing about it.
-    outside = OpsContext(
+    outside = VfsContext(
         op="write", path=_path("/repo/sealed/a"), write=True, prefix="/repo/"
     )
     assert op_refusal(rules, outside, (carve,)) == "repo is sealed"
     # A metadata op is reached by neither: deny is present and refused.
-    stat = OpsContext(
+    stat = VfsContext(
         op="stat", path=_path("/repo/outbox/a"), write=False, prefix="/repo/"
     )
     assert op_refusal(rules, stat, ()) is None
@@ -311,7 +311,7 @@ def test_match_op_refuses_a_subtree_op_on_the_directory_holding_the_scope():
         assert match_op(
             rule,
             scope,
-            OpsContext(
+            VfsContext(
                 op=op, path=_path(virtual), write=True, prefix="/data/"
             ),
         )
@@ -320,7 +320,7 @@ def test_match_op_refuses_a_subtree_op_on_the_directory_holding_the_scope():
     assert not match_op(
         rule,
         scope,
-        OpsContext(
+        VfsContext(
             op="readdir",
             path=_path("/data/locked"),
             write=False,
@@ -330,7 +330,7 @@ def test_match_op_refuses_a_subtree_op_on_the_directory_holding_the_scope():
     assert not match_op(
         rule,
         scope,
-        OpsContext(
+        VfsContext(
             op="rename", path=_path("/data/other"), write=True, prefix="/data/"
         ),
     )
@@ -344,7 +344,7 @@ def test_match_op_lets_a_metadata_op_through():
         assert not match_op(
             rule,
             scope,
-            OpsContext(
+            VfsContext(
                 op=op,
                 path=_path("/data/locked/a"),
                 write=False,
@@ -354,7 +354,7 @@ def test_match_op_lets_a_metadata_op_through():
     assert match_op(
         rule,
         scope,
-        OpsContext(
+        VfsContext(
             op="read",
             path=_path("/data/locked/a"),
             write=False,

@@ -35,7 +35,7 @@ class SessionScopedMixin(ABC):
         """Whether this policy's ``hook`` will speak for one session.
 
         Args:
-            hook (str): the hook name (``pre_command``, ``pre_ops``,
+            hook (str): the hook name (``pre_command``, ``pre_vfs``,
                 ``pre_session``, ...).
             session_id (str): the session, empty when none is bound.
         """

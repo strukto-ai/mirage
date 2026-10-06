@@ -171,11 +171,11 @@ describe('resolveProducer', () => {
 })
 
 describe('OutputCapPolicy', () => {
-  it('answers postOps from the op table', () => {
+  it('answers postVfs from the op table', () => {
     const policy = new OutputCapPolicy((prefix, name) =>
       prefix === '/a/' && name === 'read' ? new Limit({ maxBytes: 4 }) : null,
     )
-    const capped = policy.postOps({
+    const capped = policy.postVfs({
       op: 'read',
       path: new PathSpec({ virtual: '/a/x', directory: '/a', vfsPath: '' }),
       write: false,
@@ -183,7 +183,7 @@ describe('OutputCapPolicy', () => {
       result: null,
     })
     expect(capped).toEqual(new Limit({ maxBytes: 4 }))
-    const silent = policy.postOps({
+    const silent = policy.postVfs({
       op: 'write',
       path: new PathSpec({ virtual: '/a/x', directory: '/a', vfsPath: '' }),
       write: true,

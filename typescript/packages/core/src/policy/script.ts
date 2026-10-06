@@ -31,7 +31,7 @@ import {
   type Ask,
   type CommandContext,
   type Deny,
-  type OpsContext,
+  type VfsContext,
   type PolicyHook,
   type ProfileScript,
   type SessionContext,
@@ -39,16 +39,16 @@ import {
 } from './types.ts'
 
 /** The admission hooks a policy program may define, as the Policy interface spells them. */
-export type ScriptHook = 'preCommand' | 'preOps' | 'preSession'
+export type ScriptHook = 'preCommand' | 'preVfs' | 'preSession'
 
 /**
  * The admission hooks a policy program may define, JavaScript spelling
- * to python spelling. The output doors (postOps, postExecute) stay
+ * to python spelling. The output doors (postVfs, postExecute) stay
  * coded: they answer with a Limit over a live result.
  */
 export const HOOKS: Readonly<Record<ScriptHook, string>> = {
   preCommand: 'pre_command',
-  preOps: 'pre_ops',
+  preVfs: 'pre_vfs',
   preSession: 'pre_session',
 }
 
@@ -91,12 +91,12 @@ export function scriptContext(
 }
 
 /**
- * What a profile's script is told about one VFS op: the `OpsContext`
+ * What a profile's script is told about one VFS op: the `VfsContext`
  * the coded hooks read, as plain data.
  */
 export function opsScriptContext(
   profile: string,
-  ctx: OpsContext,
+  ctx: VfsContext,
   mounts: readonly string[],
 ): Record<string, EvalValue> {
   return {
@@ -130,7 +130,7 @@ export function sessionScriptContext(
  * The vocabulary is the coded hook's own, spelled as data: null or
  * `'allow'` is no opinion (the command runs unless another rule refuses
  * it, and can never override one that does), `'deny'` / `{deny: reason}`
- * refuses, and at `preCommand` and `preOps` `'ask'` / `{ask: reason}`
+ * refuses, and at `preCommand` and `preVfs` `'ask'` / `{ask: reason}`
  * takes the line (or an op no line is running behind) to the approval
  * door, since the session door cannot wait on a host (`VALIDITY`). The
  * bare strings carry the document's default reasons, the same ones a rule
@@ -179,7 +179,7 @@ export function scriptAction(value: EvalValue, hook: ScriptHook = 'preCommand'):
  * agent's program would, and a read from a policy clears the op door
  * like any other. The bridge is built for one `issuer`, the policy's
  * own token: every op it dispatches carries the token to the op door
- * (`OpsContext.issuer`), which is how the policy's `preOps` tells its
+ * (`VfsContext.issuer`), which is how the policy's `preVfs` tells its
  * own read from anyone else's. The workspace supplies them; a bare
  * ScriptPolicy (outside a workspace) has none, and its programs see no
  * file.
@@ -189,7 +189,7 @@ export interface ScriptWiring {
   resolver: MountResolver
 }
 
-/** A hook's name in the program's own language: `preOps` in JavaScript, `pre_ops` in python. */
+/** A hook's name in the program's own language: `preVfs` in JavaScript, `pre_vfs` in python. */
 export function hookName(script: ScriptSource, hook: ScriptHook): string {
   return script.language === 'js' ? hook : HOOKS[hook]
 }
@@ -260,7 +260,7 @@ export function definedHooks(script: ScriptSource, value: EvalValue): ReadonlySe
  * one calls the profile's policy program with the same facts. A program
  * defines the hooks it answers at, the way a coded Policy defines only
  * the hooks it cares about: `preCommand` per command (`scriptContext`),
- * `preOps` per VFS op (`opsScriptContext`), `preSession` per env write
+ * `preVfs` per VFS op (`opsScriptContext`), `preSession` per env write
  * (`sessionScriptContext`). Which ones it defines is probed once per
  * program (`hookProbe`), so a hook it leaves out is silence at that
  * door and costs no evaluation, and a program defining none fails
@@ -273,7 +273,7 @@ export function definedHooks(script: ScriptSource, value: EvalValue): ReadonlySe
  * the workspace's files the way an agent's runtime is (`ScriptWiring`),
  * so a policy may read what an operand holds and answer for its
  * content, not only its name. A read from a policy clears the op door
- * like any other, except this policy's own `preOps`: the policy is the
+ * like any other, except this policy's own `preVfs`: the policy is the
  * one asking, and judging its own read would re-enter the evaluation
  * waiting on it. It knows its own read by `issuer`, a token only its
  * bridge stamps and that rides each op as an argument: a mark kept in
@@ -320,9 +320,9 @@ export class ScriptPolicy implements Policy, SessionScoped {
     )
   }
 
-  async preOps(ctx: OpsContext): Promise<Action | null> {
+  async preVfs(ctx: VfsContext): Promise<Action | null> {
     if (ctx.issuer === this.issuer) return null
-    return this.judge('preOps', ctx.sessionId ?? '', (entry) =>
+    return this.judge('preVfs', ctx.sessionId ?? '', (entry) =>
       opsScriptContext(entry.profile, ctx, this.mounts()),
     )
   }

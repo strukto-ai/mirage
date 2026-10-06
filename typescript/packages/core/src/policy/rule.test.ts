@@ -18,7 +18,7 @@ import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../types.ts'
 import { MountRegistry } from '../workspace/mount/registry.ts'
 import { RulePolicy } from './rule.ts'
-import type { OpsContext } from './types.ts'
+import type { VfsContext } from './types.ts'
 import type { CommandContext } from './types.ts'
 
 function path(virtual: string, raw?: string): PathSpec {
@@ -57,8 +57,8 @@ describe('RulePolicy grammar', () => {
       path: '/a/b.key/c',
     })
     expect(policy.preCommand(ctx('cat', [path('/a/b.keyx')]))).toBeNull()
-    const op: OpsContext = { op: 'read', path: path('/x/y.key'), write: false, prefix: '/x/' }
-    expect(policy.preOps(op)).toEqual({ kind: 'deny', reason: 'keys' })
+    const op: VfsContext = { op: 'read', path: path('/x/y.key'), write: false, prefix: '/x/' }
+    expect(policy.preVfs(op)).toEqual({ kind: 'deny', reason: 'keys' })
   })
 
   it('question mark and a class are patterns too', () => {
@@ -102,8 +102,8 @@ describe('RulePolicy', () => {
   })
 })
 
-describe('RulePolicy preOps twin', () => {
-  function opsCtx(virtual: string): OpsContext {
+describe('RulePolicy preVfs twin', () => {
+  function opsCtx(virtual: string): VfsContext {
     return { op: 'read', path: path(virtual), write: false, prefix: '/data/' }
   }
 
@@ -111,9 +111,9 @@ describe('RulePolicy preOps twin', () => {
     // Pure path protection also fires at the op door, so FUSE and
     // programmatic ops cannot bypass it.
     const policy = new RulePolicy({ reason: 'frozen', paths: ['/data/locked/*'] })
-    const deny = policy.preOps(opsCtx('/data/locked/a'))
+    const deny = policy.preVfs(opsCtx('/data/locked/a'))
     expect(deny).toEqual({ kind: 'deny', reason: 'frozen' })
-    expect(policy.preOps(opsCtx('/data/open/a'))).toBeNull()
+    expect(policy.preVfs(opsCtx('/data/open/a'))).toBeNull()
   })
 
   it('skips command-scoped rules', () => {
@@ -124,6 +124,6 @@ describe('RulePolicy preOps twin', () => {
       commands: ['rm'],
       paths: ['/data/prod/*'],
     })
-    expect(policy.preOps(opsCtx('/data/prod/x'))).toBeNull()
+    expect(policy.preVfs(opsCtx('/data/prod/x'))).toBeNull()
   })
 })

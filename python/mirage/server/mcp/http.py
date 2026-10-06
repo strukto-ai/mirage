@@ -13,8 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Coroutine, Mapping
+from typing import Any, TypeVar
 
 import anyio
 from fastapi import FastAPI
@@ -51,6 +51,9 @@ from mirage.workspace.tools.tool_operations import (
 from mirage.workspace.workspace import Session
 
 MCP_PATH = "/v1/workspaces/{workspace_id}/mcp"
+CALLS = {"tools": False, "all": True}
+
+T = TypeVar("T")
 
 
 class DaemonToolOperations(MirageToolOperations):
@@ -154,15 +157,55 @@ class DaemonToolOperations(MirageToolOperations):
         return await self._entry.runner.call(on_loop())
 
 
+class DaemonMcpServer(MirageMcpServer):
+    """The MCP server as the daemon serves it: each Session call runs on
+    the workspace's loop, as the RPC door's does.
+
+    Args:
+        entry (WorkspaceEntry): the workspace the tools act on.
+        session_id (str): the session the tools act as.
+        operations (DaemonToolOperations): the session's tool table.
+        all_calls (bool): also serve the VFS calls and explain.
+    """
+
+    def __init__(
+        self,
+        entry: WorkspaceEntry,
+        session_id: str,
+        operations: DaemonToolOperations,
+        all_calls: bool,
+    ) -> None:
+        super().__init__(
+            entry.runner.ws,
+            session_id=session_id,
+            operations=operations,
+            all_calls=all_calls,
+        )
+        self._entry = entry
+
+    async def hop(self, work: Coroutine[Any, Any, T]) -> T:
+        """Run a Session call on the workspace's loop.
+
+        Args:
+            work (Coroutine[Any, Any, T]): the call.
+
+        Returns:
+            T: its result.
+        """
+        return await self._entry.runner.call(work)
+
+
 class McpDoor:
     """Serves every workspace's tools over MCP's streamable HTTP.
 
     The endpoint is stateless: each request runs in the workspace's
     default session, or the one ``?session_id=`` names, as ``/shell``
-    picks its session. One tool table per workspace and live session outlives
-    the requests, so the read one request stamps guards the edit the next
-    one makes. The SDK's session manager starts on the first request, so
-    the app serves MCP with or without ASGI lifespan events.
+    picks its session. ``?calls=all`` also serves the VFS calls and
+    explain; ``tools``, the default, serves the agent tools alone. One
+    tool table per workspace and live session outlives the requests, so
+    the read one request stamps guards the edit the next one makes. The
+    SDK's session manager starts on the first request, so the app serves
+    MCP with or without ASGI lifespan events.
 
     Args:
         registry (WorkspaceRegistry): the daemon's workspaces.
@@ -178,7 +221,7 @@ class McpDoor:
                 WorkspaceEntry,
                 SessionState,
                 DaemonToolOperations,
-                MirageMcpServer,
+                dict[bool, DaemonMcpServer],
             ],
         ] = {}
         self.server: Server[dict[str, Any]] = Server(
@@ -225,6 +268,12 @@ class McpDoor:
             return
         request = Request(scope, receive)
         workspace_id = request.path_params["workspace_id"]
+        if request.query_params.get("calls", "tools") not in CALLS:
+            refused = JSONResponse(
+                {"detail": "calls must be tools or all"}, status_code=400
+            )
+            await refused(scope, receive, send)
+            return
         try:
             served = await self._served_for(
                 workspace_id,
@@ -406,7 +455,10 @@ class McpDoor:
     async def _served_for(
         self, workspace_id: str, session_id: str | None, account: str | None
     ) -> tuple[
-        WorkspaceEntry, SessionState, DaemonToolOperations, MirageMcpServer
+        WorkspaceEntry,
+        SessionState,
+        DaemonToolOperations,
+        dict[bool, DaemonMcpServer],
     ]:
         for key, (cached, held, _, _) in list(self._served.items()):
             if (
@@ -435,19 +487,25 @@ class McpDoor:
                 entry,
                 session,
                 operations,
-                MirageMcpServer(ws, operations=operations),
+                {
+                    all_calls: DaemonMcpServer(
+                        entry, session_id, operations, all_calls
+                    )
+                    for all_calls in CALLS.values()
+                },
             )
             self._served[key] = served
         return served
 
-    async def _target(self, request: Request) -> MirageMcpServer:
+    async def _target(self, request: Request) -> DaemonMcpServer:
         """The MCP server a request is for.
 
         Args:
             request (Request): the HTTP request.
 
         Returns:
-            MirageMcpServer: the server for its workspace and session.
+            DaemonMcpServer: the server for its workspace, session and
+                ``?calls=``.
 
         Raises:
             LookupError: the workspace or the session does not exist.
@@ -457,11 +515,11 @@ class McpDoor:
             request.query_params.get("session_id"),
             request.state.account,
         )
-        return served[3]
+        return served[3][CALLS[request.query_params.get("calls", "tools")]]
 
     async def _context_target(
         self, ctx: ServerRequestContext[dict[str, Any]]
-    ) -> MirageMcpServer:
+    ) -> DaemonMcpServer:
         if not isinstance(ctx.request, Request):
             raise MCPError(INVALID_REQUEST, "not an HTTP request")
         try:

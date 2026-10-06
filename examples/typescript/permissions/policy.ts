@@ -60,7 +60,7 @@ def pre_command(ctx):
             return {"deny": "marked files are not read by " + ctx["profile"]}
     return None
 
-def pre_ops(ctx):
+def pre_vfs(ctx):
     op = ctx["op"]
     if op["write"] and op["path"].startswith("/scratch/cold/"):
         return {"deny": "the cold store is frozen"}
@@ -84,7 +84,7 @@ const SEED = [
 const LINES: [string, string, string][] = [
   ['reviewer', 'cat /repo/notes.txt', 'pre_command read the file and found no marker'],
   ['reviewer', 'cat /repo/flagged.txt', 'and refuses one that holds it; the reason is for the operator'],
-  ['reviewer', 'cat /scratch/cold/k', 'pre_ops lets a read through'],
+  ['reviewer', 'cat /scratch/cold/k', 'pre_vfs lets a read through'],
   ['reviewer', 'echo x > /scratch/cold/f', 'and refuses a write at the op door'],
   ['reviewer', 'rm /scratch/cold/k', 'whichever command asked for it'],
   ['reviewer', 'export AWS_SECRET=x', 'the coded policy, at the session door'],

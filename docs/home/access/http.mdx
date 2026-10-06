@@ -84,8 +84,8 @@ A failed request answers `{"detail": "<message>"}`.
 | --- | --- |
 | `400` | The body is not JSON or fails its schema, or the `Host` is not allowed. |
 | `401` | A missing or rejected token. |
-| `403` | An account asked to shut the server down. |
-| `404` | An unknown workspace, session, job or ask, or one of another account's. |
+| `403` | A VFS call a policy or a mount mode refuses, or an account asked to shut the server down. |
+| `404` | An unknown workspace, session, job or ask, one of another account's, or a path a VFS call does not find. |
 | `409` | A taken id, an ask already answered, or a workspace whose lines did not end for a snapshot or clone. |
 | `413` | A body over 4 MiB, or an uploaded snapshot over 1 GiB. |
 | `422` | An unknown profile or a bad mode. |
@@ -235,37 +235,82 @@ Replaces the session's modes, hides and rules. Its cwd, env and history stay.
 
 Answers the [document](/home/workspace#vfs-md-and-skill-md) as `text/markdown`. `skill-md` in place of `vfs-md` serves SKILL.md. A missing session or parent is `404`, a path that is taken `409`, a bad path or profile `422`.
 
-## Shell and tools
+## Shell, VFS calls and tools
+
+Each call acts as the session `?session_id=` names, the default one when absent. `?explain=true` on the shell or a VFS call answers what the call would do instead of doing it; see [Explain](/home/policy/explain).
 
 ### Run a shell line
 
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/shell`
 
 <ParamField body="command" type="string" required>The line.</ParamField>
-<ParamField body="session_id" type="string">The session. The default when absent.</ParamField>
 <ParamField body="cwd" type="string">A working directory for this line only.</ParamField>
+<ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
 <ParamField query="background" type="boolean" default="false">Answer `202` with `{job_id, workspace_id, submitted_at}` at once.</ParamField>
+<ParamField query="explain" type="boolean" default="false">Answer the line's explanation; run nothing.</ParamField>
 
-Answers `{kind, exit_code, stdout, stderr, refusal}` when the line finishes, with the job id in `X-Mirage-Job-Id`. A dropped request cancels its job.
+Answers `{kind, exit_code, stdout, stderr, refusal}` when the line finishes, with the job id in `X-Mirage-Job-Id`. A dropped request cancels its job. With `explain`, only the line is read: stdin, `cwd`, `runtime` and `background` are refused.
 
 To send stdin, post `multipart/form-data` with a `request` part holding the JSON body, then a `stdin` part. The line starts when the `stdin` part begins and reads it as it arrives. A body that stops before its closing boundary cancels the line and answers `400`. With `?background=true`, the whole upload is read before the `202`.
 
 ```bash
-curl -s http://127.0.0.1:8765/v1/workspaces/demo/shell \
+curl -s "http://127.0.0.1:8765/v1/workspaces/demo/shell?session_id=agent" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"command": "ls / | wc -l"}'
 ```
 
+### Call the VFS
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/vfs/{call}`
+
+<ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
+<ParamField query="explain" type="boolean" default="false">Answer the call's explanation; run nothing.</ParamField>
+
+The body is the call's arguments, up to 4 MiB; bytes travel base64. Each call answers one field, or `{}`.
+
+| Call | Arguments | Answers |
+| --- | --- | --- |
+| `read` | `path`, `offset?`, `size?` | `data_base64` |
+| `write`, `append` | `path`, `data_base64` | `{}` |
+| `pwrite` | `path`, `data_base64`, `offset` | `{}` |
+| `stat` | `path`, `nofollow?` | `stat` |
+| `readdir` | `path` | `entries` |
+| `exists`, `is_dir`, `is_file` | `path` | `exists`, `is_dir`, `is_file` |
+| `cat` | `path` | `text` |
+| `list_files` | `path` | `files` |
+| `mkdir`, `rmdir`, `unlink`, `create` | `path` | `{}` |
+| `rename` | `src`, `dst` | `{}` |
+| `symlink` | `path`, `target` | `{}` |
+| `readlink` | `path` | `target` |
+| `setattr` | `path`, `mode?`, `uid?`, `gid?`, `atime?`, `mtime?`, `nofollow?` | `changed` |
+| `getxattr` | `path`, `name`, `nofollow?` | `value_base64` |
+| `listxattr` | `path`, `nofollow?` | `names` |
+| `setxattr` | `path`, `name`, `value_base64`, `create?`, `replace?`, `nofollow?` | `{}` |
+| `removexattr` | `path`, `name`, `nofollow?` | `{}` |
+| `truncate` | `path`, `length` | `{}` |
+
+A failed call answers `{detail, errno}`, and a policy's refusal adds its `refusal` record. The errno picks the status: `404` for `ENOENT` and `NO_XATTR`, `403` for `EACCES`, `EPERM` and `EROFS`, `409` for `EEXIST`, `ENOTEMPTY` and `EBUSY`, `400` for `ENOTDIR`, `EISDIR`, `EINVAL`, `EXDEV`, `ELOOP` and `ENOTSUP`, and `500` for anything else, such as `EIO`.
+
+### Match paths
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/glob`
+
+<ParamField body="pattern" type="string" required>A pathname pattern, such as `/src/**/*.py`.</ParamField>
+<ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
+
+Answers `{paths}`, every path the session sees that matches.
+
 ### Call a tool
 
-<Badge color="green">POST</Badge> `/v1/workspaces/{id}/{tool}`
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/tools/{tool}`
 
 <ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
 
-The body is the tool's input:
+The [agent tools](/home/access/mcp#tools); the body is the tool's input:
 
 | Tool | Required | Optional |
 | --- | --- | --- |
+| `shell` | `command` | |
 | `read` | `path` | `offset`, `limit` |
 | `write` | `path`, `content` | |
 | `edit` | `path`, `old_string`, `new_string` | `replace_all` |
@@ -298,19 +343,6 @@ Every shell line is a job: `pending`, `running`, then `done`, `failed` or `cance
 ### Cancel a job
 
 <Badge color="red">DELETE</Badge> `/v1/jobs/{job_id}`
-
-## Explain
-
-### Explain a shell line
-
-<Badge color="green">POST</Badge> `/v1/workspaces/{id}/explain/shell`
-
-What [running the line](#run-a-shell-line) would do, without running it: its verdict, `exit_code`, `stderr` and parse tree (`node`), each command with every policy's answer. See [Explain](/home/permissions#explain).
-
-<ParamField body="command" type="string" required>The line, as the agent would type it.</ParamField>
-<ParamField body="session_id" type="string">Whose profile to judge it under; the default session when absent.</ParamField>
-
-VFS calls are not on REST yet; explain them over [RPC](/home/access/rpc#methods) with `explain/vfs/<call>`.
 
 ## Asks
 

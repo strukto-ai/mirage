@@ -59,7 +59,8 @@ async def _raise_ask(client: AsyncClient, wid: str, sid: str) -> str:
     is what the pending list now holds."""
     r = await client.post(
         f"/v1/workspaces/{wid}/shell",
-        json={"command": "rm /f.txt", "session_id": sid},
+        params={"session_id": sid},
+        json={"command": "rm /f.txt"},
     )
     assert r.status_code == 200, r.text
     body = r.json()
@@ -84,7 +85,8 @@ async def test_ask_allow_round_trip():
         await _create_session(client, wid, "agent_a")
         await client.post(
             f"/v1/workspaces/{wid}/shell",
-            json={"command": "touch /f.txt", "session_id": "agent_a"},
+            params={"session_id": "agent_a"},
+            json={"command": "touch /f.txt"},
         )
         ask_id = await _raise_ask(client, wid, "agent_a")
 
@@ -114,7 +116,8 @@ async def test_ask_allow_round_trip():
 
         r = await client.post(
             f"/v1/workspaces/{wid}/shell",
-            json={"command": "rm /f.txt", "session_id": "agent_a"},
+            params={"session_id": "agent_a"},
+            json={"command": "rm /f.txt"},
         )
         assert r.json()["exit_code"] == 0, r.text
         # The ONCE answer is consumed by the retry that used it.
@@ -141,7 +144,8 @@ async def test_ask_deny_refuses_the_retry():
 
         r = await client.post(
             f"/v1/workspaces/{wid}/shell",
-            json={"command": "rm /f.txt", "session_id": "agent_a"},
+            params={"session_id": "agent_a"},
+            json={"command": "rm /f.txt"},
         )
         body = r.json()
         assert body["exit_code"] == 126
@@ -161,7 +165,8 @@ async def test_session_scope_covers_the_next_matching_line():
         await _create_session(client, wid, "agent_a")
         await client.post(
             f"/v1/workspaces/{wid}/shell",
-            json={"command": "touch /f.txt /g.txt", "session_id": "agent_a"},
+            params={"session_id": "agent_a"},
+            json={"command": "touch /f.txt /g.txt"},
         )
         ask_id = await _raise_ask(client, wid, "agent_a")
 
@@ -175,7 +180,8 @@ async def test_session_scope_covers_the_next_matching_line():
         for target in ("/f.txt", "/g.txt"):
             r = await client.post(
                 f"/v1/workspaces/{wid}/shell",
-                json={"command": f"rm {target}", "session_id": "agent_a"},
+                params={"session_id": "agent_a"},
+                json={"command": f"rm {target}"},
             )
             assert r.json()["exit_code"] == 0, r.text
 

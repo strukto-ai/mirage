@@ -136,8 +136,8 @@ describe('session cancel and kill', () => {
         })
         const r = await app.inject({
           method: 'POST',
-          url: '/v1/workspaces/cw/shell?background=true',
-          payload: { command: 'sleep 30', session_id: sid },
+          url: `/v1/workspaces/cw/shell?background=true&session_id=${sid}`,
+          payload: { command: 'sleep 30' },
         })
         jobs[sid] = r.json<{ job_id: string }>().job_id
         await waitStatus(app, jobs[sid], 'running')
@@ -171,15 +171,15 @@ describe('session cancel and kill', () => {
       })
       await app.inject({
         method: 'POST',
-        url: '/v1/workspaces/kw/shell',
-        payload: { command: 'sleep 30 &', session_id: 'a' },
+        url: '/v1/workspaces/kw/shell?session_id=a',
+        payload: { command: 'sleep 30 &' },
       })
       const r = await app.inject({ method: 'POST', url: '/v1/workspaces/kw/sessions/a/kill' })
       expect(r.json()).toEqual({ killed: 1 })
       const after = await app.inject({
         method: 'POST',
-        url: '/v1/workspaces/kw/shell',
-        payload: { command: 'jobs; echo alive', session_id: 'a' },
+        url: '/v1/workspaces/kw/shell?session_id=a',
+        payload: { command: 'jobs; echo alive' },
       })
       expect(after.json<{ stdout: string }>().stdout).toContain('alive')
     } finally {

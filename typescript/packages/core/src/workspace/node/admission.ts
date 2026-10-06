@@ -148,7 +148,7 @@ const REDIRECT_CHAIN: ReadonlySet<string> = new Set([
  * by `ioRefusal` under the same precedence the gate applied to the line,
  * and a refusal is the op door's `PolicyDenied` (EACCES, the path, the
  * reason on its record), which every command renders as GNU's
- * `Permission denied`. `opsJudged` is whether a coded or scripted preOps
+ * `Permission denied`. `opsJudged` is whether a coded or scripted preVfs
  * policy speaks for the session, which judges every path.
  * `granted` holds the ask rules the line runs under a grant for: the one
  * the door answered for this line, and the session's standing ones.
@@ -187,7 +187,7 @@ export class Admitted implements EntryGate {
   }
 
   // Whether anything at or under this path could be refused for the
-  // running command: a coded or scripted preOps policy judges every path,
+  // running command: a coded or scripted preVfs policy judges every path,
   // and a rule in force any path its scope could cover.
   scopes(virtual: string): boolean {
     return this.opsJudged || ioReach(this.rules, this.tokens, virtual)
@@ -450,10 +450,10 @@ export async function admit(
   // Asked before the gate so the answer is in by the time the gate's is:
   // admission takes no extra turns, and background jobs launched in order
   // still finish in order.
-  const opsJudged = registry.policies.wantsFor('preOps', session.sessionId)
+  const opsJudged = registry.policies.wantsFor('preVfs', session.sessionId)
   // A refused command never awaits it, so a failure is reported here.
   opsJudged.catch((err: unknown) => {
-    console.warn(`preOps policy query failed for ${name}: ${String(err)}`)
+    console.warn(`preVfs policy query failed for ${name}: ${String(err)}`)
   })
   const gated = await gate(
     name,

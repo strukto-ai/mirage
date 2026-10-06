@@ -76,7 +76,7 @@ async with stdio_server() as (read, write):
     await server.run(read, write, options)
 ```
 
-`MirageMcpServer(workspace, stale_write_protection=True, name="mirage", version=..., session_id=None, operations=None)`. Its `server` is the MCP SDK's low-level `Server`.
+`MirageMcpServer(workspace, stale_write_protection=True, name="mirage", version=..., session_id=None, operations=None, all_calls=False)`. Its `server` is the MCP SDK's low-level `Server`. `all_calls=True` adds the [VFS calls and explain](/home/access/mcp#vfs-calls-and-explain).
 
 ```python
 from mirage.server.rpc import MirageRpcServer

@@ -21,7 +21,7 @@ from mirage.commands.config import RegisteredCommand
 
 # A native fast path answers from the raw backend tree, so every place
 # one is wired must fork to the guarded walk when a hide, a path rule or
-# a pre_ops policy could judge an entry inside the subtree it answers
+# a pre_vfs policy could judge an entry inside the subtree it answers
 # for. The gate is `paths_scoped`, which reads the command's namespace
 # view; this meta-test pins the fork wherever a native core is wired, so
 # the next backend that ships one cannot silently list what a session

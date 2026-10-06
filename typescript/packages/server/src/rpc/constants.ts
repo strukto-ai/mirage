@@ -18,18 +18,3 @@ export const RPC_METHOD_NOT_FOUND = -32601
 export const RPC_INVALID_PARAMS = -32602
 export const RPC_INTERNAL_ERROR = -32603
 export const RPC_NOT_FOUND = -32004
-
-/** The session's file ops the server answers, as `vfs/<op>` and their dry runs `explain/vfs/<op>`. */
-export const VFS_OPS = [
-  'read',
-  'write',
-  'append',
-  'stat',
-  'readdir',
-  'exists',
-  'mkdir',
-  'rmdir',
-  'unlink',
-  'rename',
-  'truncate',
-] as const

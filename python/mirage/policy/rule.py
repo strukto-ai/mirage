@@ -20,7 +20,7 @@ from mirage.policy.types import (
     CommandRule,
     Deny,
     DenyScope,
-    OpsContext,
+    VfsContext,
 )
 from mirage.utils.hidden import classify_paths
 
@@ -52,7 +52,7 @@ class RulePolicy(Policy):
             return Deny(self.rule.reason)
         return Deny(self.rule.reason, DenyScope.OPERAND, path=hit.operand)
 
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         # The op-layer twin: pure path protection (no command scope)
         # also holds at the op doors, so FUSE, programmatic ops, and
         # the warm cache cannot bypass it. Command-scoped rules stay

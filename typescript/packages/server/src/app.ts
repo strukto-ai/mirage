@@ -23,9 +23,9 @@ import { isHostAllowed, resolveAllowedHosts } from './host_validation.ts'
 import { registerMcpRoutes } from './mcp/http.ts'
 import { registerRpcRoutes } from './rpc/http.ts'
 import { registerAsksRoutes } from './routers/asks.ts'
-import { registerExplainRoutes } from './routers/explain.ts'
 import { registerShellRoutes } from './routers/shell.ts'
 import { registerToolsRoutes } from './routers/tools.ts'
+import { registerVfsRoutes } from './routers/vfs.ts'
 import { registerHealthRoutes } from './routers/health.ts'
 import { registerJobsRoutes } from './routers/jobs.ts'
 import { registerDocumentsRoutes } from './routers/documents.ts'
@@ -114,11 +114,11 @@ export function buildApp(options: BuildAppOptions = {}) {
   registerDocumentsRoutes(app, { registry })
   registerAsksRoutes(app, { registry })
   registerShellRoutes(app, { registry, jobs })
-  registerExplainRoutes(app, { registry })
   registerJobsRoutes(app, { jobs, registry })
   const mcp = registerMcpRoutes(app, registry, jobs)
   registerRpcRoutes(app, registry, jobs, mcp)
   registerToolsRoutes(app, { mcp })
+  registerVfsRoutes(app, { registry })
   const ssh: SSHDoor = {
     config: options.sshConfig ?? resolveSSHConfig(),
     listener: null,

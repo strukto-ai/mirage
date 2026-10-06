@@ -21,9 +21,9 @@ from mirage.policy.types import (
     CommandContext,
     Deny,
     DenyScope,
-    OpsContext,
     ProfileScript,
     SessionContext,
+    VfsContext,
 )
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.errors import EvalError
@@ -211,8 +211,8 @@ def _ops_ctx(
     path: str = "/scratch/frozen/f",
     write: bool = True,
     session_id: str = "s",
-) -> OpsContext:
-    return OpsContext(
+) -> VfsContext:
+    return VfsContext(
         op=op,
         path=_path(path),
         write=write,
@@ -313,8 +313,8 @@ def test_the_hook_is_called_in_the_programs_own_language():
     py, js = ScriptSource("x"), ScriptSource("x", language="js")
     assert hook_call(py, "pre_command") == "pre_command(ctx)"
     assert hook_call(js, "pre_command") == "preCommand(ctx)"
-    assert hook_call(py, "pre_ops") == "pre_ops(ctx)"
-    assert hook_call(js, "pre_ops") == "preOps(ctx)"
+    assert hook_call(py, "pre_vfs") == "pre_vfs(ctx)"
+    assert hook_call(js, "pre_vfs") == "preVfs(ctx)"
     assert hook_name(py, "pre_session") == "pre_session"
     assert hook_name(js, "pre_session") == "preSession"
 
@@ -425,7 +425,7 @@ async def test_a_wired_policy_attaches_the_doors_to_the_engine(monkeypatch):
     assert attached is resolver
     # The door is the workspace's, reached through the policy's own
     # wrapper, which marks the op as the policy's read for as long as it
-    # runs so the policy's pre_ops lets it through; outside the call the
+    # runs so the policy's pre_vfs lets it through; outside the call the
     # mark is down.
     await dispatch("read", _path("/repo/sealed/k"))
     assert marked == [True]
@@ -493,14 +493,14 @@ def test_the_probe_asks_for_every_hook_in_the_programs_own_language():
 
 
 def test_defined_hooks_reads_the_probes_answer_in_python_spelling():
-    assert defined_hooks(ScriptSource("x"), ["pre_ops"]) == {"pre_ops"}
+    assert defined_hooks(ScriptSource("x"), ["pre_vfs"]) == {"pre_vfs"}
     assert defined_hooks(
         ScriptSource("x", language="js"), ["preCommand", "preSession"]
     ) == {"pre_command", "pre_session"}
     assert defined_hooks(ScriptSource("x"), []) == frozenset()
 
 
-@pytest.mark.parametrize("value", [None, "pre_ops", ["nope"], [1]])
+@pytest.mark.parametrize("value", [None, "pre_vfs", ["nope"], [1]])
 def test_defined_hooks_refuses_anything_else(value):
     with pytest.raises(ValueError, match="hook probe answered"):
         defined_hooks(ScriptSource("x"), value)
@@ -524,7 +524,7 @@ async def test_a_hook_the_program_leaves_out_is_silence_without_an_evaluation():
     # cost no evaluation: a program that judges commands is not charged
     # per op for a hook it never wrote.
     policy = _policy(DENY_ANSWER)
-    assert await policy.pre_ops(_ops_ctx()) is None
+    assert await policy.pre_vfs(_ops_ctx()) is None
     assert await policy.pre_session(_session_ctx()) is None
     assert FakeEngine.built[0].evals == 1
     assert await policy.pre_command(_ctx()) == Deny("sealed")
@@ -533,10 +533,10 @@ async def test_a_hook_the_program_leaves_out_is_silence_without_an_evaluation():
 
 @pytest.mark.asyncio
 async def test_an_op_hook_it_defines_judges_the_op_with_its_facts():
-    policy = _policy({"deny": "frozen"}, hooks=("pre_ops",))
-    assert await policy.pre_ops(_ops_ctx()) == Deny("frozen")
+    policy = _policy({"deny": "frozen"}, hooks=("pre_vfs",))
+    assert await policy.pre_vfs(_ops_ctx()) == Deny("frozen")
     engine = FakeEngine.built[0]
-    assert engine.code == "SOURCE\n\npre_ops(ctx)\n"
+    assert engine.code == "SOURCE\n\npre_vfs(ctx)\n"
     assert engine.seen == {
         "ctx": ops_script_context("release", _ops_ctx(), _mounts())
     }
@@ -561,8 +561,8 @@ async def test_a_session_hook_it_defines_judges_the_write_with_its_facts():
 async def test_an_op_hook_may_ask():
     # The door puts it to the host where no line is running, and refuses
     # it inside one.
-    policy = _policy({"ask": "nod"}, hooks=("pre_ops",))
-    assert await policy.pre_ops(_ops_ctx()) == Ask("nod")
+    policy = _policy({"ask": "nod"}, hooks=("pre_vfs",))
+    assert await policy.pre_vfs(_ops_ctx()) == Ask("nod")
 
 
 @pytest.mark.asyncio
@@ -570,12 +570,12 @@ async def test_a_program_defining_no_hook_fails_closed_at_every_door():
     policy = _policy(None, hooks=())
     for action in (
         await policy.pre_command(_ctx()),
-        await policy.pre_ops(_ops_ctx()),
+        await policy.pre_vfs(_ops_ctx()),
         await policy.pre_session(_session_ctx()),
     ):
         assert action == Deny(
             "profile 'release' policy defines no hook: "
-            "pre_command, pre_ops or pre_session"
+            "pre_command, pre_vfs or pre_session"
         )
     # One probe; nothing else was evaluated.
     assert FakeEngine.built[0].evals == 1
@@ -591,16 +591,16 @@ async def test_the_no_hook_refusal_speaks_the_programs_language():
     policy = ScriptPolicy(OneScript(entry), _mounts)
     policy._engines["quickjs"] = FakeEngine(None, hooks=())
     assert await policy.pre_command(_ctx()) == Deny(
-        "profile 'release' policy defines no hook: preCommand, preOps or "
+        "profile 'release' policy defines no hook: preCommand, preVfs or "
         "preSession"
     )
 
 
 @pytest.mark.asyncio
 async def test_the_probe_runs_once_per_program():
-    policy = _policy(None, hooks=("pre_ops",))
-    await policy.pre_ops(_ops_ctx())
-    await policy.pre_ops(_ops_ctx("read", write=False))
+    policy = _policy(None, hooks=("pre_vfs",))
+    await policy.pre_vfs(_ops_ctx())
+    await policy.pre_vfs(_ops_ctx("read", write=False))
     await policy.pre_command(_ctx())
     # The probe, then two op judgments; the command door was silence.
     assert FakeEngine.built[0].evals == 3
@@ -635,17 +635,17 @@ async def test_the_hook_set_is_remembered_per_language():
 
 @pytest.mark.asyncio
 async def test_the_policys_own_read_is_not_judged_by_its_op_hook():
-    # The mark the reading door raises is what pre_ops reads first, so a
+    # The mark the reading door raises is what pre_vfs reads first, so a
     # read the engine issues never re-enters the evaluation waiting on
     # it; the same op from anyone else is judged.
-    policy = _policy({"deny": "frozen"}, hooks=("pre_ops",))
+    policy = _policy({"deny": "frozen"}, hooks=("pre_vfs",))
     token = _POLICY_READ.set(True)
     try:
-        assert await policy.pre_ops(_ops_ctx("read", write=False)) is None
+        assert await policy.pre_vfs(_ops_ctx("read", write=False)) is None
     finally:
         _POLICY_READ.reset(token)
     assert FakeEngine.built[0].evals == 0
-    assert await policy.pre_ops(_ops_ctx("read", write=False)) == Deny(
+    assert await policy.pre_vfs(_ops_ctx("read", write=False)) == Deny(
         "frozen"
     )
 
@@ -658,8 +658,8 @@ async def test_wants_for_says_which_sessions_a_hook_speaks_for():
     policy = _policy(None, hooks=("pre_command",))
     assert await policy.wants_for("pre_command", "s") is True
     assert await policy.wants_for("pre_session", "s") is False
-    assert await policy.wants_for("pre_ops", "s") is False
-    assert await policy.wants_for("post_ops", "s") is False
+    assert await policy.wants_for("pre_vfs", "s") is False
+    assert await policy.wants_for("post_vfs", "s") is False
     assert (
         await ScriptPolicy(OneScript(None), _mounts).wants_for(
             "pre_session", "s"

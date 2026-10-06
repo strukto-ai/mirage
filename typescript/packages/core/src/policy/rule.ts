@@ -14,7 +14,7 @@
 
 import type { Policy } from './base.ts'
 import { matchOp, matchRule } from './match/rule.ts'
-import type { Action, CommandContext, CommandRule, OpsContext } from './types.ts'
+import type { Action, CommandContext, CommandRule, VfsContext } from './types.ts'
 import type { HiddenPaths } from '../types.ts'
 import { classifyPaths } from '../utils/hidden.ts'
 
@@ -44,7 +44,7 @@ export class RulePolicy implements Policy {
     return { kind: 'deny', reason: this.rule.reason, scope: 'operand', path: hit.operand }
   }
 
-  preOps(ctx: OpsContext): Action | null {
+  preVfs(ctx: VfsContext): Action | null {
     // The op-layer twin: pure path protection (no command scope) also
     // holds at the op door, so FUSE, programmatic ops, and the warm
     // cache cannot bypass it. Command-scoped rules stay command-layer:

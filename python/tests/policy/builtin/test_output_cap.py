@@ -21,7 +21,7 @@ from mirage.policy.builtin.output_cap import (
     resolve_limit,
     resolve_producer,
 )
-from mirage.policy.types import OpsResultContext
+from mirage.policy.types import VfsResultContext
 from mirage.types import Limit, OnExceed, PathSpec, Producer
 
 
@@ -152,12 +152,12 @@ def test_resolve_producer_empty_command_has_no_bound():
 
 
 @pytest.mark.asyncio
-async def test_output_cap_policy_answers_post_ops_from_the_op_table():
+async def test_output_cap_policy_answers_post_vfs_from_the_op_table():
     policy = OutputCapPolicy(
         _override_table({("/a/", "read"): Limit(max_bytes=4)})
     )
-    capped = await policy.post_ops(
-        OpsResultContext(
+    capped = await policy.post_vfs(
+        VfsResultContext(
             op="read",
             path=PathSpec.from_str_path("/a/x"),
             write=False,
@@ -167,8 +167,8 @@ async def test_output_cap_policy_answers_post_ops_from_the_op_table():
     )
     assert isinstance(capped, Limit)
     assert capped.max_bytes == 4
-    silent = await policy.post_ops(
-        OpsResultContext(
+    silent = await policy.post_vfs(
+        VfsResultContext(
             op="write",
             path=PathSpec.from_str_path("/a/x"),
             write=True,
