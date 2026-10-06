@@ -25,6 +25,8 @@ from mirage.commands.spec.usage import (
     usage_hint,
 )
 from mirage.errors.classify import failure_text
+from mirage.errors.fs import fs_strerror
+from mirage.errors.types import DotWalkError, DotWalkLoop
 from mirage.io.types import IOResult
 from mirage.ops.types import ChildMounts, LinkView, MountView, StatPath
 from mirage.types import (
@@ -37,7 +39,6 @@ from mirage.types import (
     LsTimeKind,
     PathSpec,
 )
-from mirage.utils.errors import DotWalkError, DotWalkLoop, fs_strerror
 from mirage.utils.key_prefix import mount_prefix_of, rekey, under_path
 from mirage.utils.path import CycleError, respell_one
 from mirage.utils.quote import escape_name

@@ -25,8 +25,8 @@ from mirage.cache.index import (
 from mirage.core.disk.errors import disk_error
 from mirage.core.disk.listing_version import folder_version, wall_ns
 from mirage.core.disk.utils import read_entries, resolve_inside
+from mirage.errors.fs import enoent, enotdir
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent, enotdir
 from mirage.utils.key_prefix import mount_prefix_of
 
 

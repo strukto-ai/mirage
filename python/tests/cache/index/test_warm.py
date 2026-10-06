@@ -12,7 +12,7 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.warm import entry_or_warm
-from mirage.utils.errors import enoent, enotdir
+from mirage.errors.fs import enoent, enotdir
 
 KEY = "/owned/notes.json"
 

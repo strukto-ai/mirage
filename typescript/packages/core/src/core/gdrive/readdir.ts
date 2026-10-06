@@ -22,7 +22,7 @@ import { MIME_TO_EXT, listFiles, listSharedDrives } from '../google/drive.ts'
 import { rootContext } from './resolve.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { enotdir } from '../../utils/errors.ts'
+import { enotdir, enoent } from '../../errors/fs.ts'
 
 export const DIRECTORY_RESOURCE_TYPES: ReadonlySet<string> = new Set([
   'gdrive/folder',
@@ -82,17 +82,13 @@ export async function readdir(
     ;[folderId, driveId] = await rootContext(accessor)
   } else {
     if (index === undefined) {
-      const e = new Error(`ENOENT: ${path.virtual}`) as Error & { code: string }
-      e.code = 'ENOENT'
-      throw e
+      throw enoent(path.virtual)
     }
     const parentOriginal = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
     const parentPath = PathSpec.fromStrPath(parentOriginal, mountKey(parentOriginal, prefix))
     const entry = await entryOrWarm(index, virtualKey, () => readdir(accessor, parentPath, index))
     if (entry === null) {
-      const e = new Error(`ENOENT: ${path.virtual}`) as Error & { code: string }
-      e.code = 'ENOENT'
-      throw e
+      throw enoent(path.virtual)
     }
     if (!DIRECTORY_RESOURCE_TYPES.has(entry.resourceType)) {
       // Listing a file's id answers with an empty child set rather than an

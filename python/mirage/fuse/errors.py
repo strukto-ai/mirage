@@ -25,7 +25,7 @@ NO_XATTR = posix_errno(FsCondition.NO_XATTR)
 
 # Genuine last resort, for an error whose only signal is its message.
 # The repo's own backends no longer need it -- every rmdir refusal is
-# raised through mirage.utils.errors, which stamps the errno -- but a
+# raised through mirage.errors.fs, which stamps the errno -- but a
 # third-party client can still hand up an untyped failure that carries
 # nothing else: SFTP 3 reports a non-empty directory as asyncssh's
 # SFTPFailure, which is not an OSError and has no code of its own, so

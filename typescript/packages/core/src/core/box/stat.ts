@@ -23,7 +23,7 @@ import { SHA1 } from './constants.ts'
 import { entryToken, tokenOf } from './fingerprint.ts'
 import { readdir as coreReaddir, resourceTypeFor } from './readdir.ts'
 import { namesThisPath, pathParts, resolveItem } from './resolve.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 
 function statFromItem(item: BoxItem): FileStat {

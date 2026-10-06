@@ -220,7 +220,7 @@ async def test_readdir_error_reports_the_virtual_path(tmp_path):
             PathSpec(vfs_path="nope", virtual="/nope", directory="/nope"),
             index,
         )
-    assert str(excinfo.value) == "/nope"
+    assert excinfo.value.filename == "/nope"
     assert str(tmp_path) not in str(excinfo.value)
 
 

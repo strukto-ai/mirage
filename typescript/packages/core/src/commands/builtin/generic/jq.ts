@@ -45,7 +45,7 @@ import {
 import { yieldBytes } from '../../../io/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { isFsError } from '../../../utils/errors.ts'
+import { isFsError } from '../../../errors/fs.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { helpPage, versionLine } from '../../spec/standard.ts'

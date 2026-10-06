@@ -22,7 +22,7 @@ import { checkPack } from './fsck.ts'
 import { GitError } from './errors.ts'
 import type { Dispatch } from './types.ts'
 import { IOResult } from '../../../../io/types.ts'
-import { eacces } from '../../../../utils/errors.ts'
+import { eacces } from '../../../../errors/fs.ts'
 import { FileStat, FileType } from '../../../../types.ts'
 import { GIT } from './index.ts'
 

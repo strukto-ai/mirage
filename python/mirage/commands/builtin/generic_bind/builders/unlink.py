@@ -21,9 +21,10 @@ from mirage.commands.builtin.generic_bind.adapter import (
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.usage import extra_operand_error
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import FS_ERRORS, fs_strerror
 
 
 async def unlink(

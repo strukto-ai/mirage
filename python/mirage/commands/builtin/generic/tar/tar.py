@@ -55,11 +55,12 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import eisdir, fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, MountView
 from mirage.types import PathSpec
-from mirage.utils.compress import GZIP_MAGIC, gunzip_partial
-from mirage.utils.errors import FS_ERRORS, GzipDataError, eisdir, fs_strerror
+from mirage.utils.compress import GZIP_MAGIC, GzipDataError, gunzip_partial
 
 logger = logging.getLogger(__name__)
 

@@ -15,7 +15,7 @@
 import { IOResult, type ByteSource } from '../../../../../io/types.ts'
 import type { NamespaceView } from '../../../../../ops/types.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../../../types.ts'
-import { isFsError } from '../../../../../utils/errors.ts'
+import { isFsError } from '../../../../../errors/fs.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { runDispatch } from '../../../generic_bind/dispatch.ts'
 import { isStdin } from '../../../utils/stream.ts'

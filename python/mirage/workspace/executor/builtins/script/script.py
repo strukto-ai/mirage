@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import eisdir, fs_strerror
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import FileType
-from mirage.utils.errors import FS_ERRORS, eisdir, fs_strerror
 from mirage.utils.path import resolve_path
 from mirage.workspace.executor.builtins.scope import _to_scope
 from mirage.workspace.mount.namespace.probe import resolve_path_stat

@@ -15,7 +15,7 @@
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { enotempty } from '../../utils/errors.ts'
+import { enotempty } from '../../errors/fs.ts'
 import { graphDelete } from '../msgraph/client.ts'
 import { driveRootEmpty } from '../msgraph/drive.ts'
 import { driveLoc } from './client.ts'

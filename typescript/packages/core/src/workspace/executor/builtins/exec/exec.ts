@@ -27,7 +27,7 @@ import {
 import { Channel } from '../../../../shell/console/index.ts'
 import { recordStatus, type Written } from '../../statement.ts'
 import { type Redirect, RedirectKind } from '../../../../shell/types.ts'
-import { fsStrerror, isFsError, isMissingPath } from '../../../../utils/errors.ts'
+import { fsStrerror, isFsError, isMissingPath } from '../../../../errors/fs.ts'
 import { PathSpec } from '../../../../types.ts'
 import { getRedirects } from '../../../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../../../shell/types.ts'

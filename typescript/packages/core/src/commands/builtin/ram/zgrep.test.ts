@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { eacces, enoent } from '../../../utils/errors.ts'
+import { eacces, enoent } from '../../../errors/fs.ts'
 import { zgrepGeneric } from '../generic/zgrep.ts'
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'

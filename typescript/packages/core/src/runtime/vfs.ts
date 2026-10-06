@@ -14,7 +14,7 @@
 
 import { ConcurrencyLimiter } from '../concurrency/limiter.ts'
 import { classify } from '../errors/index.ts'
-import { isMissingOp, isMissingPath } from '../utils/errors.ts'
+import { isMissingOp, isMissingPath } from '../errors/fs.ts'
 import {
   contentSize,
   DIR_MODE,

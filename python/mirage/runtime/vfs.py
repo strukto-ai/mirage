@@ -18,6 +18,7 @@ from collections.abc import Coroutine, Iterator
 from typing import Any, TypeVar
 
 from mirage.concurrency.limiter import ConcurrencyLimiter
+from mirage.errors.types import OperationNotSupportedError
 from mirage.runtime.constants import ABSENT_PATH, LISTING_ENTRY_CONCURRENCY
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.handles import FlushStep
@@ -25,7 +26,6 @@ from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn, RuntimeContext, VFSEntry, VFSStat
 from mirage.types import FileStat, PathSpec
 from mirage.utils.context_scope import ContextScope
-from mirage.utils.errors import OperationNotSupportedError
 from mirage.utils.path import norm
 from mirage.utils.stat_view import (
     DIR_MODE,

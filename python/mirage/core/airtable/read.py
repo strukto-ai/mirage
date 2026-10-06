@@ -29,8 +29,8 @@ from mirage.core.airtable.stat import stat
 from mirage.core.hierarchy.probe import resolve_entry
 from mirage.core.hierarchy.read import make_read
 from mirage.core.hierarchy.scope import ScopeMatch
+from mirage.errors.fs import efbig, enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import efbig, enoent
 
 
 async def ensure_listed(

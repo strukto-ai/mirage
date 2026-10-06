@@ -15,7 +15,7 @@
 import type { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
-import { eisdir } from '../../utils/errors.ts'
+import { eisdir } from '../../errors/fs.ts'
 import type { SlugTree } from './tree.ts'
 
 const ENC = new TextEncoder()

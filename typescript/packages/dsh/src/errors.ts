@@ -15,7 +15,7 @@
 import { FsError } from '@deepseek-ai/dsh-fs'
 import type { FsErrorCode } from '@deepseek-ai/dsh-fs'
 import type { Refusal } from '@struktoai/mirage-core/types'
-import { isMissingPath } from '@struktoai/mirage-core/utils/errors'
+import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
 import { withRefusal } from '@struktoai/mirage-core/workspace/tools/io_text'
 
 export function assertNotAborted(signal: AbortSignal | undefined, operation: string): void {

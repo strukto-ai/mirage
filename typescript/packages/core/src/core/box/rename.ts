@@ -15,7 +15,7 @@
 import type { BoxAccessor } from '../../accessor/box.ts'
 import { invalidateAfterMove } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { eisdir, enoent, enotdir, enotempty } from '../../utils/errors.ts'
+import { eisdir, enoent, enotdir, enotempty } from '../../errors/fs.ts'
 import { BoxApiError } from './client.ts'
 import { deleteFile, deleteFolder, updateFile, updateFolder, type BoxItem } from './api.ts'
 import { pathParts, resolveItem, resolveParentId } from './resolve.ts'

@@ -21,14 +21,12 @@ from mirage.commands.builtin.utils.paths import dispatch_stat, walk_spelling
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import DotWalkLoop, FsCondition
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import (
-    ELOOP_STRERROR,
-    FS_ERRORS,
-    DotWalkLoop,
-    fs_strerror,
-)
 from mirage.utils.path import CycleError
 from mirage.workspace.executor.builtins.shared import fail
 from mirage.workspace.executor.builtins.types import Result
@@ -314,7 +312,8 @@ async def _slashed_link_refusal(
         followed = namespace.follow(src.virtual)
     except CycleError:
         return fail(
-            "mv", f"mv: cannot stat '{src.raw_path}': {ELOOP_STRERROR}\n"
+            "mv",
+            f"mv: cannot stat '{src.raw_path}': {posix_phrase(FsCondition.ELOOP)}\n",
         )
     target = await stat_or_none(dispatch, PathSpec.from_str_path(followed))
     if target is None:
@@ -477,7 +476,9 @@ async def _prepare_pair(
             and namespace.is_link(src.virtual)
         ):
             return items, fail(
-                "mv", f"mv: cannot stat '{dst.raw_path}': {ELOOP_STRERROR}\n"
+                "mv",
+                f"mv: cannot stat '{dst.raw_path}': "
+                f"{posix_phrase(FsCondition.ELOOP)}\n",
             )
         return items, None
 
@@ -516,7 +517,7 @@ async def _prepare_pair(
             _, _, verdict = await dest_kind(
                 partial(dispatch_stat, dispatch), dst
             )
-            if verdict == "Not a directory":
+            if verdict is FsCondition.ENOTDIR:
                 return items, fail(
                     "mv",
                     f"mv: cannot stat '{dst.raw_path}': Not a directory\n",
@@ -524,7 +525,8 @@ async def _prepare_pair(
             return items, fail(
                 "mv",
                 f"mv: cannot move '{src.raw_path}' to "
-                f"'{dst.raw_path}': {verdict or 'Not a directory'}\n",
+                f"'{dst.raw_path}': "
+                f"{posix_phrase(verdict or FsCondition.ENOTDIR)}\n",
             )
     rewritten = items
     if into_dir and namespace.is_link(dst.virtual):

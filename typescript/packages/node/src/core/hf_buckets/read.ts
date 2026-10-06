@@ -15,7 +15,7 @@
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { eisdir, enoent } from '@struktoai/mirage-core/utils/errors'
+import { eisdir, enoent } from '@struktoai/mirage-core/errors/fs'
 import type { ByteWindow } from '@struktoai/mirage-core/utils/ranges'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'

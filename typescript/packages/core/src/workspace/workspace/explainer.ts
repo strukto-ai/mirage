@@ -18,7 +18,7 @@ import { Explained } from '../../policy/errors.ts'
 import { Outcome, type ShellExplanation, type VfsExplanation } from '../../policy/types.ts'
 import type { SetAttrFields } from '../../types.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
-import { isFsError } from '../../utils/errors.ts'
+import { isFsError } from '../../errors/fs.ts'
 import type { Workspace } from './workspace.ts'
 
 /**

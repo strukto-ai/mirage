@@ -40,6 +40,7 @@ export const EXDEV = 18
 // host's (node:os supplies the platform-variant ones, mirroring how
 // python's adapter reads its errno module).
 const CONDITION_ERRNO: Record<FsCondition, number> = {
+  EBADF: osConstants.errno.EBADF,
   ENOENT,
   ENOTDIR,
   EISDIR,
@@ -54,6 +55,7 @@ const CONDITION_ERRNO: Record<FsCondition, number> = {
   EIO,
   EBUSY: osConstants.errno.EBUSY,
   EROFS,
+  EFBIG: osConstants.errno.EFBIG,
   // "Attribute not set": ENOATTR on macOS, which node:os does not name,
   // and ENODATA on linux. Mirrors python's errors/posix.py.
   NO_XATTR: process.platform === 'darwin' ? 93 : osConstants.errno.ENODATA,

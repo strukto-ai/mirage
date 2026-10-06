@@ -25,7 +25,7 @@ import {
   makeEventFilename,
 } from '../../vfs/gcal/event_entry.ts'
 import type { JsonValue, PathSpec } from '../../types.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { globPrefix, literalSpan } from '../../utils/glob_walk.ts'
 import {

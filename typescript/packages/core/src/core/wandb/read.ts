@@ -1,7 +1,7 @@
 import type { WandbAccessor } from '../../accessor/wandb.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileType, type PathSpec } from '../../types.ts'
-import { eisdir, enoent } from '../../utils/errors.ts'
+import { eisdir, enoent } from '../../errors/fs.ts'
 import { jsonBytes, jsonlBytes } from '../render/json.ts'
 import { LEAVES, parts, runVars } from './pathing.ts'
 import { RUN, RUN_CONFIG, RUN_SUMMARY } from './queries.ts'

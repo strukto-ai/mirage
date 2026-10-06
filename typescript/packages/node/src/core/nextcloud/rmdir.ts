@@ -1,6 +1,6 @@
 import { invalidateAfterUnlink } from '@struktoai/mirage-core/cache/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { enoent, enotempty } from '@struktoai/mirage-core/utils/errors'
+import { enoent, enotempty } from '@struktoai/mirage-core/errors/fs'
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { isNotFound, nextcloudKey } from './util.ts'

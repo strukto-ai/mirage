@@ -15,7 +15,8 @@
 import { stdinStream } from '../utils/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { fsStrerror, gnuStrerror, isFsError } from '../../../utils/errors.ts'
+import { fsStrerror, isFsError } from '../../../errors/fs.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { shellQuote } from '../../../utils/quote.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -97,9 +98,9 @@ export enum InputStage {
 // only holds a rendered line, sorts a failure into the same step as a
 // command holding the error. Mirrors input_stage in sort.py.
 export function inputStage(strerror: string, sorting: boolean): InputStage {
-  if (strerror === gnuStrerror('EBADF')) return sorting ? InputStage.STAT : InputStage.READ
-  for (const code of ['EISDIR', 'EFBIG']) {
-    if (strerror === gnuStrerror(code)) return InputStage.READ
+  if (strerror === posixPhrase('EBADF')) return sorting ? InputStage.STAT : InputStage.READ
+  for (const code of ['EISDIR', 'EFBIG'] as const) {
+    if (strerror === posixPhrase(code)) return InputStage.READ
   }
   return InputStage.ACCESS
 }

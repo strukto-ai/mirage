@@ -22,9 +22,9 @@ from mirage.core.s3.client import (
     async_session,
     closing_body,
 )
+from mirage.errors.fs import enoent
 from mirage.observe.context import record, revision_for, start_op
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.ranges import range_header
 
 

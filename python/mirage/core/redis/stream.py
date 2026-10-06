@@ -17,9 +17,9 @@ from collections.abc import AsyncIterator
 from mirage.accessor.redis import RedisAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.redis.dest import lookup_error
+from mirage.errors.fs import eisdir
 from mirage.observe.context import record_stream
 from mirage.types import PathSpec
-from mirage.utils.errors import eisdir
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import norm
 

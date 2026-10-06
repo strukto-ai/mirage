@@ -20,9 +20,9 @@ from gridfs.errors import NoFile
 from mirage.accessor.gridfs import GridFSAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gridfs.client import _key, bucket, latest_file
+from mirage.errors.fs import enoent
 from mirage.observe.context import record_stream, revision_for
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 async def read_stream(

@@ -22,7 +22,7 @@ import {
   type SearchFindDeps,
   type WalkFindDeps,
 } from './find.ts'
-import { isEnoent } from '../../utils/errors.ts'
+import { isEnoent } from '../../errors/fs.ts'
 import { CommandTimeoutError } from '../../commands/errors.ts'
 import { parseFindExpression } from '../../commands/builtin/find_parse.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'

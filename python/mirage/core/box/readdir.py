@@ -23,8 +23,8 @@ from mirage.core.box.api import absent_on_404, list_folder_items
 from mirage.core.box.constants import SHA1
 from mirage.core.box.fingerprint import token_of
 from mirage.core.box.resolve import root_id
+from mirage.errors.fs import enoent, enotdir
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
@@ -59,7 +59,7 @@ async def readdir(
             manager.probed_stat(path_spec) if manager is not None else None
         )
         if probed is not None and probed.type != FileType.DIRECTORY:
-            raise NotADirectoryError(virtual)
+            raise enotdir(virtual)
         parent_virtual = virtual_key.rstrip("/").rsplit("/", 1)[0] or "/"
         parent_path = PathSpec.from_str_path(
             parent_virtual, mount_key(parent_virtual, prefix)
@@ -70,7 +70,7 @@ async def readdir(
         if entry is None:
             raise enoent(virtual)
         if entry.resource_type != "box/folder":
-            raise NotADirectoryError(virtual)
+            raise enotdir(virtual)
         folder_id = entry.id
 
     items = await absent_on_404(

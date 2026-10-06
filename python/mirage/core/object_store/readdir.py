@@ -29,9 +29,9 @@ from mirage.core.object_store.driver import (
     ReaddirFn,
     TreeEntry,
 )
+from mirage.errors.fs import listing_error
 from mirage.types import PathSpec
 from mirage.utils import key_prefix as kp
-from mirage.utils.errors import listing_error
 from mirage.utils.key_prefix import mount_prefix_of
 
 logger = logging.getLogger(__name__)

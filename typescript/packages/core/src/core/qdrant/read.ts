@@ -14,7 +14,7 @@
 
 import type { QdrantAccessor } from '../../accessor/qdrant.ts'
 import type { PathSpec } from '../../types.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import type { Reader } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { blobBytes } from '../vector/read.ts'

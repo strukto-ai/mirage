@@ -14,7 +14,7 @@
 
 import type { FileStat, PathSpec } from '../../types.ts'
 import { FileType } from '../../types.ts'
-import { fsStrerror, isWalkError } from '../../utils/errors.ts'
+import { fsStrerror, isWalkError } from '../../errors/fs.ts'
 import { classify } from '../../errors/classify.ts'
 import { posixErrno } from '../../errors/posix.ts'
 import { gnuBasename, respellOne } from '../../utils/path.ts'

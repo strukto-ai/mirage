@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { CODE_ARMS } from './constants.ts'
-import { gnuPhrase } from './posix.ts'
+import { posixPhrase } from './posix.ts'
 import type { FsCondition } from './types.ts'
 
 /**
@@ -37,13 +37,13 @@ export function classify(err: unknown): FsCondition | null {
 }
 
 /**
- * What a diagnostic says about a failure: GNU's strerror for a condition
+ * What a diagnostic says about a failure: the strerror text for a condition
  * the vocabulary names (EIO reads 'Input/output error'), else the error's
  * own words ('socket hang up'). Never the message of a stamped error,
  * which may name a real host path. Mirrors python's `failure_text`.
  */
 export function failureText(err: unknown): string {
   const condition = classify(err)
-  if (condition !== null) return gnuPhrase(condition)
+  if (condition !== null) return posixPhrase(condition)
   return err instanceof Error ? err.message : String(err)
 }

@@ -19,7 +19,7 @@ import { IndexEntry, type Evicted } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { IndexView } from '../../cache/index/view.ts'
 import { ContentType, PathSpec } from '../../types.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { DATE, JSON_NAME } from './codec.ts'
 import {

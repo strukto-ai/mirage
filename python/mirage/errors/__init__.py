@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.errors.classify import classify
-from mirage.errors.posix import POSIX, gnu_phrase, posix_errno
+from mirage.errors.posix import POSIX, posix_errno, posix_phrase
 from mirage.errors.types import FsCondition, PosixErrno
 
 __all__ = [
@@ -21,6 +21,6 @@ __all__ = [
     "FsCondition",
     "PosixErrno",
     "classify",
-    "gnu_phrase",
+    "posix_phrase",
     "posix_errno",
 ]

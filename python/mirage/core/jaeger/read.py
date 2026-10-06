@@ -26,8 +26,8 @@ from mirage.core.jaeger.client import (
 from mirage.core.jaeger.readdir import assert_service
 from mirage.core.jaeger.scope import detect_scope
 from mirage.core.render.json import json_bytes
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 def _has_service(trace: dict[str, Any], service: str) -> bool:

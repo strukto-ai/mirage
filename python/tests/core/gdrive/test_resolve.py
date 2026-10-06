@@ -192,4 +192,4 @@ async def test_resolve_parent_error_names_full_operand(
     error = FileNotFoundError if parent == "missing" else NotADirectoryError
     with pytest.raises(error) as raised:
         await resolve_parent(gdrive_accessor, path)
-    assert str(raised.value) == path.virtual
+    assert raised.value.filename == path.virtual

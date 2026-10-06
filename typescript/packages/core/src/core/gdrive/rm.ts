@@ -15,7 +15,7 @@
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { invalidateSubtree } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import { deleteFile } from '../google/drive.ts'
 import { eaccesOnDenied, resolveKey } from './resolve.ts'
 

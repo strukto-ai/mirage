@@ -11,8 +11,8 @@ from mirage.core.hierarchy.probe import (
     resolve_entry,
 )
 from mirage.core.hierarchy.scope import ScopeMatch
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 TIMESTAMP = re.compile(
     r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})\Z"

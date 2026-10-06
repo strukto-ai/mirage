@@ -207,7 +207,7 @@ async def test_read_missing_raises_file_not_found():
                     "/od/Docs/a.txt", mount_key("/od/Docs/a.txt", "/od")
                 ),
             )
-    assert str(exc.value) == "/od/Docs/a.txt"
+    assert exc.value.filename == "/od/Docs/a.txt"
 
 
 _MM_META = re.compile(r".*/root:/m/k\.txt(\?.*)?$")

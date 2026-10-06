@@ -51,6 +51,10 @@ from mirage.commands.builtin.utils.copy import (
 )
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import (
     MoveStrategy,
@@ -60,7 +64,6 @@ from mirage.types import (
     ReaddirFn,
     StatFn,
 )
-from mirage.utils.errors import FS_ERRORS, fs_strerror
 
 _logger = logging.getLogger(__name__)
 
@@ -430,8 +433,10 @@ async def mv_generic(
         sources, dst, dst_is_dir, dst_exists, dst_err
     ):
         src_exists, src_is_dir, src_err = await source_kind(stat, src)
-        if not src_exists:
-            errors.append(f"mv: cannot stat '{src.raw_path}': {src_err}")
+        if src_err is not None:
+            errors.append(
+                f"mv: cannot stat '{src.raw_path}': {posix_phrase(src_err)}"
+            )
             continue
         if target.walk_error is not None and target.raw_path == "":
             # GNU stats an empty destination as the directory it is typed
@@ -482,14 +487,17 @@ async def mv_generic(
         # backend rename below, which answers ENOENT in the same words
         # (and on a dirless store may well succeed), unless a slash
         # asked for a directory a file source can never be.
-        if target_err in STAT_REFUSALS:
-            errors.append(f"mv: cannot stat '{target.raw_path}': {target_err}")
+        if target_err is not None and target_err in STAT_REFUSALS:
+            errors.append(
+                f"mv: cannot stat '{target.raw_path}': "
+                f"{posix_phrase(target_err)}"
+            )
             continue
         if slash_refuses_file(target, target_exists, src_is_dir):
             errors.append(
                 f"mv: cannot move '{src.raw_path}' to "
                 f"'{target.raw_path}': "
-                f"{target_err or 'Not a directory'}"
+                f"{posix_phrase(target_err or FsCondition.ENOTDIR)}"
             )
             continue
         mismatch = overwrite_type_error(

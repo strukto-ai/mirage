@@ -1,7 +1,7 @@
 import type { Accessor } from '../accessor/base.ts'
 import type { CommandIO } from '../commands/builtin/generic_bind/adapter.ts'
 import { streamFromBytes } from '../commands/builtin/utils/wrap.ts'
-import { eisdir, isEnoent, isEnotdir } from '../utils/errors.ts'
+import { eisdir, isEnoent, isEnotdir } from '../errors/fs.ts'
 import { type FileStat, FileType } from '../types.ts'
 import type {
   ContentSearchOps,

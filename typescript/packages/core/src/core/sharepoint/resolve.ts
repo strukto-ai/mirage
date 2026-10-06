@@ -14,7 +14,7 @@
 
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
 import type { PathSpec } from '../../types.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { graphList } from '../msgraph/client.ts'

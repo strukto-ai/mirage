@@ -21,16 +21,12 @@ from mirage.commands.builtin.utils.paths import (
     nearest_ancestor,
     typed_spec,
 )
+from mirage.errors.fs import enoent, enotdir, walk_refusal
+from mirage.errors.render import fs_error_line
+from mirage.errors.types import DotWalkError
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import CapacityResult, CapacityState, PathSpec
-from mirage.utils.errors import (
-    DotWalkError,
-    enoent,
-    enotdir,
-    fs_error_line,
-    walk_refusal,
-)
 from mirage.workspace.executor.builtins.df.constants import (
     BLOCK_SUFFIX,
     SI_UNITS,

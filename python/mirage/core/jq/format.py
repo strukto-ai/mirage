@@ -26,7 +26,7 @@ from mirage.core.jq.types import (
     JqOptions,
     JqRun,
 )
-from mirage.utils.errors import fs_strerror
+from mirage.errors.fs import fs_strerror
 
 logger = logging.getLogger(__name__)
 

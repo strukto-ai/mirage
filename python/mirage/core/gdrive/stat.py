@@ -23,8 +23,8 @@ from mirage.core.gdrive.readdir import readdir as _readdir
 from mirage.core.gdrive.readdir import resource_type_for
 from mirage.core.gdrive.resolve import resolve_key
 from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT, get_file
+from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 

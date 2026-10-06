@@ -15,11 +15,12 @@
 import type { FsCondition } from './types.ts'
 
 // Every code spelling the vocabulary names. Identity for the vocabulary's own
-// names (which is what the utils/errors constructors, CycleError and
+// names (which is what the errors/fs constructors, CycleError and
 // CrossMountError stamp), plus the aliases other raisers use:
 // EOPNOTSUPP is ENOTSUP's second POSIX spelling, and ENODATA/ENOATTR
 // are the two platform names for one "attribute not set" condition.
 export const CODE_ARMS: Record<string, FsCondition> = {
+  EBADF: 'EBADF',
   ENOENT: 'ENOENT',
   ENOTDIR: 'ENOTDIR',
   EISDIR: 'EISDIR',
@@ -35,6 +36,33 @@ export const CODE_ARMS: Record<string, FsCondition> = {
   EIO: 'EIO',
   EBUSY: 'EBUSY',
   EROFS: 'EROFS',
+  EFBIG: 'EFBIG',
   ENODATA: 'NO_XATTR',
   ENOATTR: 'NO_XATTR',
 }
+
+// The conditions a command reports against one operand before it moves on
+// to the next: the line ends in the condition's phrase, and isFsError
+// swallows exactly these. A failure outside the set (EIO, a dropped
+// connection) carries its own words and propagates. Mirrors python's
+// OPERAND_CONDITIONS.
+export const OPERAND_CONDITIONS: ReadonlySet<FsCondition> = new Set<FsCondition>([
+  'EBADF',
+  'ENOENT',
+  'ENOTDIR',
+  'EISDIR',
+  'ELOOP',
+  'EEXIST',
+  'EROFS',
+  'EACCES',
+  'ENOTEMPTY',
+  'ENOTSUP',
+  'EXDEV',
+  'EFBIG',
+])
+
+// The failures that happen after the open, which a command words as the
+// read step: a directory opens and then refuses the read, and the backend
+// contract raises the other two for a read it will not serve. Mirrors
+// Python's READ_FAILURES.
+export const READ_FAILURES: ReadonlySet<string> = new Set(['EISDIR', 'EFBIG', 'EBADF'])

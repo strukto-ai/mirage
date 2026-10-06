@@ -15,6 +15,7 @@
 from dataclasses import dataclass
 
 from mirage.commands.spec.usage import read_fail_exit_code
+from mirage.errors.render import format_fs_error
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.types import ByteSource, materialize
@@ -29,7 +30,6 @@ from mirage.shell.descriptors import (
 )
 from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.types import TSNodeLike
-from mirage.utils.errors import format_fs_error
 from mirage.workspace.abort import StatusWriter, line_status_writer
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode

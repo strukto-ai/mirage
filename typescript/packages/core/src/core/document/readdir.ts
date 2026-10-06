@@ -14,7 +14,7 @@
 
 import type { DocumentAccessor } from '../../accessor/document.ts'
 import type { PathSpec } from '../../types.ts'
-import { enotdir } from '../../utils/errors.ts'
+import { enotdir } from '../../errors/fs.ts'
 
 export function readdir(_accessor: DocumentAccessor, path: PathSpec): Promise<string[]> {
   return Promise.reject(enotdir(path))

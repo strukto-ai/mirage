@@ -3,7 +3,7 @@ import { createRequire } from 'node:module'
 import { afterEach, beforeAll, expect, it, vi } from 'vitest'
 import { createShellParser, type ShellParser } from '../../../shell/parse/index.ts'
 import { GENERAL_CURL } from './curl.ts'
-import { eacces, enoent } from '../../../utils/errors.ts'
+import { eacces, enoent } from '../../../errors/fs.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 

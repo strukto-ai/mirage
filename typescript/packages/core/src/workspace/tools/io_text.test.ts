@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import type { Refusal } from '../../types.ts'
 import { ExecuteResult } from '../workspace/workspace.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
+import { eisdir } from '../../errors/fs.ts'
 import { decode, errorText, ioToStr, replaceText, withRefusal } from './io_text.ts'
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s)
@@ -81,7 +82,7 @@ describe('ioToStr with a refusal', () => {
   })
 
   it('leaves an operand refusal alone', () => {
-    // The stderr line already names the reason, GNU-style.
+    // The command's stderr line already names the reason.
     const operand: Refusal = {
       kind: 'deny',
       reason: "cannot remove 'x': keys",
@@ -95,7 +96,7 @@ describe('ioToStr with a refusal', () => {
   })
 
   it('describes an operand refusal whose line was redirected away', () => {
-    // `cat /protected 2>/dev/null`: the GNU line is gone, so the record
+    // `cat /protected 2>/dev/null`: cat's line is gone, so the record
     // is the only reason left to hand over.
     const operand: Refusal = {
       kind: 'deny',
@@ -141,7 +142,7 @@ describe('ioToStr with a refusal', () => {
   })
 
   it('trusts the reason wherever the line landed', () => {
-    // `2>&1` moved the GNU line onto stdout; the text still says why.
+    // `2>&1` moved cat's line onto stdout; the text still says why.
     const operand: Refusal = {
       kind: 'deny',
       reason: '/protected: frozen',
@@ -184,10 +185,14 @@ describe('errorText', () => {
       askId: null,
     }
     expect(errorText(new PolicyDenied('Permission denied', '/data/x', refusal))).toBe(
-      'Error: Permission denied\npolicy denied: sealed\n',
+      'Error: /data/x: Permission denied\npolicy denied: sealed\n',
     )
     expect(errorText(new Error('No such file or directory'))).toBe(
       'Error: No such file or directory',
     )
+    const pathless = Object.assign(new Error('Permission denied'), { code: 'EACCES' })
+    expect(errorText(pathless)).toBe('Error: Permission denied')
+    expect(errorText(eisdir('Is a directory'))).toBe('Error: Is a directory: Is a directory')
+    expect(errorText(undefined)).toBe('Error: undefined')
   })
 })

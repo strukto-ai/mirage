@@ -21,6 +21,9 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import missing_operand_error
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror
+from mirage.errors.render import fs_error_line
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.runtime.types import DispatchFn
@@ -36,7 +39,6 @@ from mirage.types import (
     StatFn,
 )
 from mirage.utils.dates import iso_timestamp, iso_to_epoch
-from mirage.utils.errors import FS_ERRORS, fs_error_line, fs_strerror
 from mirage.utils.quote import shell_quote_always
 from mirage.utils.stat_view import (
     content_size,

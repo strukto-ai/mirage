@@ -18,7 +18,7 @@ import type { RAMAccessor } from '../../accessor/ram.ts'
 import { IndexEntry, type IndexCacheStore } from '../../cache/index/index.ts'
 import { ResourceType } from '../../cache/index/config.ts'
 import type { PathSpec } from '../../types.ts'
-import { readdirError } from '../../utils/errors.ts'
+import { readdirError } from '../../errors/fs.ts'
 import { norm } from '../../utils/path.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 

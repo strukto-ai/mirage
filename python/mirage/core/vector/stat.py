@@ -21,8 +21,8 @@ from mirage.core.hierarchy.stat import StatHook
 from mirage.core.hierarchy.stat import make_stat as hierarchy_stat
 from mirage.core.vector.scope import table_of
 from mirage.core.vector.types import VectorTree
+from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec, StatFn
-from mirage.utils.errors import enoent
 
 
 def _name_of(path: PathSpec) -> str:

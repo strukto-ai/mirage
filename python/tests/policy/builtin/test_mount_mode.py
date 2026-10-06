@@ -17,10 +17,10 @@ import errno
 import pytest
 
 from mirage.context import reset_current_session, set_current_session
+from mirage.errors.types import ReadOnlyError
 from mirage.ops.boundary import OpBoundary
 from mirage.policy import Policies
 from mirage.types import MountMode, PathSpec
-from mirage.utils.errors import ReadOnlyError
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.mount.mount import MountEntry

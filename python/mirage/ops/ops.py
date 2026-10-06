@@ -17,6 +17,7 @@ from dataclasses import replace
 from typing import Any
 
 from mirage.context import get_current_session, session_visibility
+from mirage.errors.types import NoMountError
 from mirage.io import OpReport
 from mirage.observe import OpRecord
 from mirage.observe.context import OpTimer, finish_record, start_op
@@ -24,7 +25,6 @@ from mirage.ops.config import NO_FOLLOW_OPS, NamespaceLinks, OpsMount
 from mirage.ops.types import SessionBind
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec
-from mirage.utils.errors import NoMountError
 from mirage.utils.hidden import path_visible
 from mirage.utils.path import dotted_spelling, owner_prefix
 

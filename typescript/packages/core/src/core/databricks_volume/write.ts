@@ -21,7 +21,7 @@ import { dbxFetch } from './client.ts'
 import { ensurePathSpec, parentPath } from './_helpers.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
-import { enoent, enotdir } from '../../utils/errors.ts'
+import { enoent, enotdir } from '../../errors/fs.ts'
 
 async function ensureParentDirectory(
   accessor: DatabricksVolumeAccessor,

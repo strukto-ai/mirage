@@ -32,6 +32,7 @@ from mirage.context import (
     set_mount_gate,
     strongest_mode_under,
 )
+from mirage.errors.types import ReadOnlyError
 from mirage.types import (
     HiddenPaths,
     MountMode,
@@ -40,7 +41,6 @@ from mirage.types import (
     Visibility,
     weaker_mode,
 )
-from mirage.utils.errors import ReadOnlyError
 from mirage.utils.hidden import hidden_under, path_visible
 from mirage.workspace.session import SessionManager, SessionState
 

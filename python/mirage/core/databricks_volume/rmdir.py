@@ -21,8 +21,8 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.stat import stat
+from mirage.errors.fs import enoent, enotdir, enotempty
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import enoent, enotdir, enotempty
 
 
 def _list_directory_sync(

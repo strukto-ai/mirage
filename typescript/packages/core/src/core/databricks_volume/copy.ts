@@ -24,7 +24,7 @@ import { read } from './read.ts'
 import { listDirectoryContents } from './readdir.ts'
 import { stat } from './stat.ts'
 import { write } from './write.ts'
-import { eisdir } from '../../utils/errors.ts'
+import { eisdir } from '../../errors/fs.ts'
 
 async function uploadBytes(
   accessor: DatabricksVolumeAccessor,

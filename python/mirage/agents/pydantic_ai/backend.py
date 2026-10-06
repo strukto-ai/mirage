@@ -15,7 +15,6 @@
 import asyncio
 import errno
 import logging
-import os
 import posixpath
 import shlex
 from collections.abc import Mapping
@@ -34,6 +33,7 @@ from mirage.agents.pydantic_ai.convert import (
     io_to_command_result,
     stat_to_entry,
 )
+from mirage.errors.fs import ebusy
 from mirage.ops.ops import Ops
 from mirage.types import FileType
 from mirage.utils.path import MAX_SYMLINK_HOPS, CycleError
@@ -51,7 +51,7 @@ async def _doomed(
 ) -> list[tuple[str, bool]]:
     st = await vfs.stat(path, nofollow=True)
     if ws.registry.is_mount_root(path):
-        raise OSError(errno.EBUSY, os.strerror(errno.EBUSY), path)
+        raise ebusy(path)
     if st.type != FileType.DIRECTORY:
         return [(path, False)]
     doomed = []

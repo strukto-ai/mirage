@@ -25,7 +25,7 @@ import {
 } from './errors.ts'
 import { readIndex } from './index_file.ts'
 import { exists, under } from './io.ts'
-import { isEnotdir } from '../../../../utils/errors.ts'
+import { isEnotdir } from '../../../../errors/fs.ts'
 import type { CommitFacts } from './format.ts'
 import { loadRefs, TAG_PREFIX } from './refs.ts'
 import { commitFacts, repoArgs, type Repo } from './repo.ts'

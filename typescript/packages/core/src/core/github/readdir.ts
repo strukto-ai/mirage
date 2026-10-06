@@ -24,7 +24,7 @@ import { ensureLiveSnapshot, refillSnapshot } from './tree.ts'
 import { withIndexLock } from '../../cache/index/lock.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
 function stripPrefix(path: PathSpec): string {

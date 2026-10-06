@@ -14,7 +14,7 @@
 
 import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
-import { enotsup } from '@struktoai/mirage-core/utils/errors'
+import { enotsup } from '@struktoai/mirage-core/errors/fs'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'

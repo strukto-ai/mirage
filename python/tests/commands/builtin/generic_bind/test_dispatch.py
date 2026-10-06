@@ -20,10 +20,10 @@ from mirage.commands.builtin.generic_bind.adapter import Builder
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS
+from mirage.errors.fs import eacces
 from mirage.io import IOResult
 from mirage.ops.registry import op as register_op
 from mirage.types import MountMode
-from mirage.utils.errors import eacces
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 

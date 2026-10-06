@@ -2,16 +2,9 @@ import { concat } from '../../../io/cachable_iterator.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { gunzipStream } from '../../../utils/compress.ts'
-import {
-  enoent,
-  eloop,
-  fsErrorLine,
-  GzipDataError,
-  isDotWalkError,
-  isEisdir,
-  isEnoent,
-  isFsError,
-} from '../../../utils/errors.ts'
+import { enoent, eloop, isDotWalkError, isEisdir, isEnoent, isFsError } from '../../../errors/fs.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
+import { GzipDataError } from '../../../utils/compress.ts'
 import { mountedPath, respelled } from '../../../utils/key_prefix.ts'
 import type { LinkDoor } from '../utils/links.ts'
 import {

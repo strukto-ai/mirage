@@ -24,9 +24,9 @@ from mirage.cache.index.warm import entry_or_warm
 from mirage.core.box.api import download_file, download_file_stream
 from mirage.core.box.fingerprint import entry_token, read_token
 from mirage.core.box.readdir import readdir
+from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import record, record_stream, start_op
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.ranges import window_for
 
@@ -40,7 +40,7 @@ async def _resolve_entry(
     prefix = mount_prefix_of(path.virtual, path.vfs_path)
     key = path.vfs_path
     if not key:
-        raise IsADirectoryError(virtual)
+        raise eisdir(virtual)
     virtual_key = prefix + "/" + key if prefix else "/" + key
     parent_key = posixpath.dirname(virtual_key) or "/"
     parent_path = PathSpec.from_str_path(
@@ -55,7 +55,7 @@ async def _resolve_entry(
     if entry is None:
         raise enoent(virtual)
     if entry.resource_type == "box/folder":
-        raise IsADirectoryError(virtual)
+        raise eisdir(virtual)
     return entry
 
 

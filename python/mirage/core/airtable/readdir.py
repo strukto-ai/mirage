@@ -31,7 +31,7 @@ from mirage.core.airtable.pathing import (
 from mirage.core.airtable.scope import detect_scope
 from mirage.core.hierarchy.readdir import DirListing, make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
-from mirage.utils.errors import enoent
+from mirage.errors.fs import enoent
 
 Listing = list[tuple[str, IndexEntry]]
 

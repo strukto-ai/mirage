@@ -17,9 +17,9 @@ import asyncio
 import pytest
 
 from mirage.commands.builtin.generic.crossmount.relay.mv import run_mv
+from mirage.errors.fs import eacces, enoent
 from mirage.io.types import IOResult
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import eacces, enoent
 
 
 @pytest.mark.asyncio

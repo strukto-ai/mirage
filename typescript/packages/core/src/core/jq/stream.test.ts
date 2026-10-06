@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { JqParser } from './parse.ts'
 import { InputReader, READ_CHUNK, piecesThrough, readTexts, valueText } from './stream.ts'
 import { JqParseError, NO_VALUE, jqOptions, type InputSource, type JqOptions } from './types.ts'
-import { eacces, eisdir, enoent } from '../../utils/errors.ts'
+import { eacces, eisdir, enoent } from '../../errors/fs.ts'
 
 const ENC = new TextEncoder()
 

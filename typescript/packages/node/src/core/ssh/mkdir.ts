@@ -14,7 +14,7 @@
 
 import { invalidateAfterWrite, invalidateAncestors } from '@struktoai/mirage-core/cache/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { eexist, enoent } from '@struktoai/mirage-core/utils/errors'
+import { eexist, enoent } from '@struktoai/mirage-core/errors/fs'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { SFTPWrapper, Stats } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'

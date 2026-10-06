@@ -15,6 +15,7 @@
 import errno as host_errno
 
 from mirage.errors import FsCondition
+from mirage.errors.fs import no_mount
 from mirage.runtime.constants import HARD_LINK_REFUSAL
 from mirage.runtime.wasm.errors import (
     EINVAL,
@@ -26,7 +27,6 @@ from mirage.runtime.wasm.errors import (
     errno_for,
     wasi_errno,
 )
-from mirage.utils.errors import no_mount
 from mirage.utils.path import CycleError
 
 
@@ -84,6 +84,7 @@ def test_preview1_numbering_is_the_wasi_libc_table():
     # on the wire and 2 in Python's errno module. Pinned literally so a
     # host-errno leak cannot pass.
     assert WASI == {
+        FsCondition.EBADF: 8,
         FsCondition.ENOENT: 44,
         FsCondition.ENOTDIR: 54,
         FsCondition.EISDIR: 31,
@@ -98,6 +99,7 @@ def test_preview1_numbering_is_the_wasi_libc_table():
         FsCondition.EIO: 29,
         FsCondition.EBUSY: 10,
         FsCondition.EROFS: 69,
+        FsCondition.EFBIG: 22,
         FsCondition.NO_XATTR: 58,
     }
 

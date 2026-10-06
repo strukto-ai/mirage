@@ -34,7 +34,7 @@ import {
 import type { MountEntry } from './mount/mount.ts'
 
 const ENC = new TextEncoder()
-import { enotsup } from '../utils/errors.ts'
+import { enotsup } from '../errors/fs.ts'
 import type { OpsRegistry } from '../ops/registry.ts'
 import { Reconciler } from './reconcile.ts'
 import { runInCommandScope } from '../cache/index/scope.ts'
