@@ -246,7 +246,7 @@ jobs:
       - name: Install TypeScript dependencies
         working-directory: typescript
         run: pnpm install --frozen-lockfile=false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: integ-typescript-dist
           path: typescript/packages
