@@ -275,10 +275,13 @@ The added unset/function cases and extended background case are pinned to the
 same Bash image. Suspended-parent isolation is checked through the real HTTP
 hosting suite on both languages and a gated registered CLI in real Chrome,
 which inspects the parent's variable before releasing the substitution. These
-replace the equivalent suspended-state unit checks. Native-tree release counts
-and a cancelled evaluator that settles late remain in the mirrored parser and
-evaluation unit suites; shell-output goldens cannot prove memory cleanup.
-The browser host checks also cover cancellation and workspace shutdown.
+replace the equivalent suspended-state unit checks. Release counts stay in
+the mirrored parser and evaluation unit suites, since shell-output goldens
+cannot prove memory cleanup. Only TypeScript answers a cancelled caller before
+the line's tree settles (Python joins the line first), so only its evaluation
+suite checks that a cancelled tree keeps its programs until a blocked leaf
+settles. The browser host checks also cover cancellation and workspace
+shutdown.
 
 ## Running locally
 
