@@ -18,9 +18,10 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import TypeVar
 
+from mirage.cache.context import capture_read
 from mirage.cache.file.io import latest_fingerprint, mutation_lock
 from mirage.cache.file.mixin import FileCacheMixin
-from mirage.cache.index.config import Evicted
+from mirage.cache.index.config import Evicted, IndexEntry
 from mirage.cache.index.constants import (
     CHECKED_LIMIT,
     LISTING_TRUST_WINDOW,
@@ -404,6 +405,29 @@ class CacheManager:
             return None
         return stat
 
+    async def retain_resolved_entry(
+        self,
+        path: PathSpec,
+        generation: int,
+        predecessor: str,
+        entry: IndexEntry,
+    ) -> None:
+        """Retain a live fallback row only while its predecessor still owns the slot.
+
+        Args:
+            path (PathSpec): confirmed file path.
+            generation (int): generation before the remote check.
+            predecessor (str): serialized previous index row.
+            entry (IndexEntry): confirmed replacement row.
+        """
+        key = self._cache_key(path)
+        async with self.mutation():
+            if generation != self._read_generation or not self._owns_path(key):
+                return
+            await self.scope_index_locked(self._index).replace_if_unchanged(
+                key, predecessor, entry
+            )
+
     def scope_index_locked(self, index: IndexCacheStore) -> IndexCacheStore:
         """A view for a caller already inside ``mutation()``.
 
@@ -561,10 +585,10 @@ class CacheManager:
         generation = self._read_generation
         recorder = active_recorder()
         start = len(recorder.sink) if recorder is not None else 0
-        data = await fetch()
+        key = self._cache_key(path)
+        data, facts = await capture_read(key, fetch)
         if not isinstance(data, bytes):
             return data
-        key = self._cache_key(path)
         cache = self._readable_cache(key)
         if cache is not None:
             async with mutation_lock(cache):
@@ -579,6 +603,12 @@ class CacheManager:
                     fingerprint = latest_fingerprint(
                         records, key, READ_FINGERPRINT_OPS, len(data)
                     )
+                    if facts:
+                        fingerprint = (
+                            facts[0]
+                            if all(fp == facts[0] for fp in facts)
+                            else None
+                        )
                     await cache.set(
                         key, data, fingerprint=fingerprint, ttl=self._read_ttl
                     )

@@ -178,6 +178,16 @@ class IndexView(IndexCacheStore):
             if self._owns(vfs_path):
                 await self._store.put(vfs_path, entry)
 
+    async def replace_if_unchanged(
+        self, vfs_path: str, predecessor: str, entry: IndexEntry
+    ) -> bool:
+        async with self._fence():
+            if not self._owns(vfs_path):
+                return False
+            return await self._store.replace_if_unchanged(
+                vfs_path, predecessor, entry
+            )
+
     async def set_dir(
         self,
         vfs_path: str,

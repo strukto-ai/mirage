@@ -11,6 +11,7 @@
         "hf",
         "hf-prefix",
         "dropbox",
+        "box",
         "onedrive",
         "sharepoint",
         "sharepoint-prefix",
@@ -73,6 +74,7 @@
         "s3",
         "s3-prefix",
         "dropbox",
+        "box",
         "onedrive",
         "sharepoint",
         "sharepoint-prefix"
@@ -129,7 +131,7 @@
         "stdout": "a.txt\nb.txt\na\nb.txt\n1\n",
         "stderr": ""
       },
-      "note": "A re-list that no longer names a file evicts its cached row, so stat stops answering for it; before, msgraph's stat answered from the old row and test -e said it still existed. s3 names the directory's own targets; dropbox runs it since its stat answers content_hash from the re-listed rows (Task 1.4); box cannot yet, it has no TS shadow (#1341 item 2)."
+      "note": "A re-list that no longer names a file evicts its cached row, so stat stops answering for it; before, msgraph's stat answered from the old row and test -e said it still existed. s3 names the directory's own targets; dropbox runs it since its stat answers content_hash from the re-listed rows (Task 1.4), and box since its stat answers the sha1 those rows carry."
     },
     {
       "id": "listing_relist_drops_descendants_of_a_replaced_directory",
@@ -138,6 +140,7 @@
         "s3",
         "s3-prefix",
         "dropbox",
+        "box",
         "onedrive",
         "sharepoint",
         "sharepoint-prefix"

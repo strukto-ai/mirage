@@ -12,10 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
 
+from mirage.cache.index.config import IndexEntry
+from mirage.cache.index.ram import ListingCheckStore, RAMIndexCacheStore
 from mirage.observe.record import (
     CONTENT_CHANGING_OPS,
     RETRACT_FINGERPRINT_OPS,
@@ -23,7 +26,8 @@ from mirage.observe.record import (
     SUBTREE_RETRACT_OPS,
     OpRecord,
 )
-from mirage.workspace.snapshot.drift import capture_fingerprints
+from mirage.types import FileStat, FileType
+from mirage.workspace.snapshot.drift import capture_fingerprints, check_drift
 from mirage.workspace.snapshot.keys import FingerprintKey
 
 
@@ -415,3 +419,37 @@ def test_an_empty_fingerprint_beside_a_revision_still_pins():
     no token, but the revision beside it is one."""
     entries = capture_fingerprints(_ws([_rec("write", "/s3/a", "", "rev-1")]))
     assert _paths(entries) == ["/s3/a"]
+
+
+def test_a_drift_check_offers_no_hints():
+    # A restored index's ids are no lead for drift: the scratch store it
+    # stats through is not a hinting ListingCheckStore.
+    restored = RAMIndexCacheStore()
+    asyncio.run(
+        restored.set_dir(
+            "/m",
+            [
+                (
+                    "a.txt",
+                    IndexEntry(id="1", name="a.txt", resource_type="file"),
+                )
+            ],
+        )
+    )
+    seen: list[bool] = []
+
+    async def execute_op(op, path, index):
+        assert (await restored.get("/m/a.txt")).entry is not None
+        assert isinstance(index, RAMIndexCacheStore)
+        seen.append(isinstance(index, ListingCheckStore))
+        return FileStat(name="a.txt", type=FileType.FILE, fingerprint="t")
+
+    mount = SimpleNamespace(
+        prefix="/m/",
+        mount_id=None,
+        index=restored,
+        vfs=SimpleNamespace(supports_snapshot=True),
+        execute_op=execute_op,
+    )
+    asyncio.run(check_drift(lambda _p: mount, "/m/a.txt", "t"))
+    assert seen == [False]

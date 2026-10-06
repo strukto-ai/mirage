@@ -201,3 +201,31 @@ export async function invalidateAncestors(path: PathSpec): Promise<void> {
 export function listingRefreshed(folder: string): boolean {
   return activeCacheManager()?.listingTrusted(folder) === true
 }
+
+const readFacts = createAsyncContext<{
+  path: string
+  facts: WeakMap<Uint8Array, (string | null)[]>
+}>()
+
+/** Collect tokens belonging to the exact bytes returned by a fetch. */
+export async function captureRead<T>(
+  path: string,
+  fetch: () => Promise<T>,
+): Promise<[T, (string | null)[]]> {
+  const facts = new WeakMap<Uint8Array, (string | null)[]>()
+  return readFacts.run({ path, facts }, async () => {
+    const data = await fetch()
+    return [data, data instanceof Uint8Array ? (facts.get(data) ?? []) : []]
+  })
+}
+
+/** Publish a backend-verified token without activating observation. */
+export function publishRead(path: string, data: Uint8Array, fingerprint: string | null): void {
+  // Fallback contexts overlap; exact result identity makes broadcast safe.
+  for (const capture of readFacts.liveStores()) {
+    if (capture.path !== path) continue
+    const tokens = capture.facts.get(data) ?? []
+    tokens.push(fingerprint)
+    capture.facts.set(data, tokens)
+  }
+}

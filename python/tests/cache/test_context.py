@@ -19,6 +19,7 @@ import pytest
 
 from mirage.cache.context import (
     active_cache_manager,
+    capture_read,
     evict_after,
     invalidate_after_move,
     invalidate_after_unlink,
@@ -26,6 +27,7 @@ from mirage.cache.context import (
     invalidate_ancestors,
     invalidate_subtree,
     listing_refreshed,
+    publish_read,
     push_cache_manager,
 )
 from mirage.cache.file.ram import RAMFileCacheStore
@@ -232,3 +234,32 @@ async def test_evict_after_evicts_and_keeps_the_ops_error(
     with pytest.raises(raised) if raised else contextlib.nullcontext():
         assert await evict_after(_op(op_error), evict) == "done"
     assert results == [seen]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tokens", [["verified"], [None], ["first", "second"]])
+async def test_capture_keeps_exact_object_facts(tokens):
+    data = b"payload"
+    foreign = bytes(bytearray(data))
+    assert foreign == data and foreign is not data
+
+    async def fetch():
+        publish_read("/m/other", data, "wrong-path")
+        publish_read("/m/x", foreign, "wrong-object")
+        for token in tokens:
+            publish_read("/m/x", data, token)
+        return data
+
+    result, facts = await capture_read("/m/x", fetch)
+    assert result is data
+    assert facts == tokens
+
+
+@pytest.mark.asyncio
+async def test_capture_preserves_non_byte_results():
+    value = 42
+
+    async def fetch():
+        return value
+
+    assert await capture_read("/m/x", fetch) == (42, [])

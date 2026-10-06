@@ -229,3 +229,20 @@ async def test_readdir_keeps_a_throttled_listing_a_failure(accessor, index):
                 index,
             )
     assert caught.value.status == 429
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sha1, kept", [(5, None), ("", None), ("abc", "abc")])
+async def test_readdir_keeps_only_a_string_sha1(accessor, index, sha1, kept):
+    items = [
+        {"id": "200", "name": "a.txt", "type": "file", "size": 1, "sha1": sha1}
+    ]
+    with patch(
+        "mirage.core.box.readdir.list_folder_items",
+        new_callable=AsyncMock,
+        return_value=items,
+    ):
+        await readdir(
+            accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index
+        )
+    assert (await index.get("/a.txt")).entry.extra.get("sha1") == kept

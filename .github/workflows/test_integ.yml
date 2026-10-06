@@ -246,7 +246,7 @@ jobs:
       - name: Install TypeScript dependencies
         working-directory: typescript
         run: pnpm install --frozen-lockfile=false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: integ-typescript-dist
           path: typescript/packages
@@ -693,6 +693,15 @@ jobs:
       - name: Assert the hf fake (bucket paths-info, resolve ETag, 416)
         working-directory: integ
         run: pnpm run hf:selftest
+
+      # The box fake's fresh-check wire: a `read: fresh` check on box trusts
+      # the sha1 of GET /2.0/files/{id} only when the same answer places the
+      # file (item_status active, a path_collection from All Files down), so
+      # a fake that lost either field would let every box fresh case pass
+      # through the slower listing walk.
+      - name: Assert the box fake (path_collection, item_status, sha1 of the bytes)
+        working-directory: integ
+        run: pnpm run box:selftest
 
       # And one fake further. Nothing inside mirage speaks to Cloud Storage at
       # all, so this fake has no corpus case of any kind: its three consumers

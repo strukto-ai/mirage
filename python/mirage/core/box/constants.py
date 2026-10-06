@@ -40,3 +40,8 @@ PLACE_EVENTS = frozenset(
     }
 )
 TRASH_EVENTS = frozenset({"ITEM_TRASH"})
+
+SHA1 = "sha1"
+ACTIVE = "active"
+ALL_FILES_FOLDER_ID = "0"
+TRASH_FOLDER_ID = "1"

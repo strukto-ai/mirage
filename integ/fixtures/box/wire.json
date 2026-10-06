@@ -1,0 +1,101 @@
+[
+  {
+    "path": "/2.0/files/102?fields=name,size,modified_at,etag,parent,item_status,path_collection,sha1",
+    "status": 200,
+    "body": {
+      "type": "file",
+      "id": "102",
+      "name": "c.txt",
+      "size": 1,
+      "modified_at": "2026-01-01T00:00:00Z",
+      "etag": "1",
+      "parent": {
+        "type": "folder",
+        "id": "101"
+      },
+      "item_status": "active",
+      "path_collection": {
+        "total_count": 3,
+        "entries": [
+          {
+            "type": "folder",
+            "id": "0",
+            "name": "All Files"
+          },
+          {
+            "type": "folder",
+            "id": "100",
+            "name": "a"
+          },
+          {
+            "type": "folder",
+            "id": "101",
+            "name": "b"
+          }
+        ]
+      },
+      "sha1": "11f6ad8ec52a2984abaafd7c3b516503785c2072"
+    }
+  },
+  {
+    "path": "/2.0/folders/101/items?fields=name,size,modified_at,etag,parent,item_status,path_collection,sha1",
+    "status": 200,
+    "body": {
+      "entries": [
+        {
+          "type": "file",
+          "id": "102",
+          "name": "c.txt",
+          "size": 1,
+          "modified_at": "2026-01-01T00:00:00Z",
+          "etag": "1",
+          "parent": {
+            "type": "folder",
+            "id": "101"
+          },
+          "item_status": "active",
+          "path_collection": {
+            "total_count": 3,
+            "entries": [
+              {
+                "type": "folder",
+                "id": "0",
+                "name": "All Files"
+              },
+              {
+                "type": "folder",
+                "id": "100",
+                "name": "a"
+              },
+              {
+                "type": "folder",
+                "id": "101",
+                "name": "b"
+              }
+            ]
+          },
+          "sha1": "11f6ad8ec52a2984abaafd7c3b516503785c2072"
+        }
+      ],
+      "total_count": 1,
+      "offset": 0
+    }
+  },
+  {
+    "path": "/2.0/folders/0/items?fields=name,size,modified_at,etag,parent,item_status,path_collection,sha1",
+    "status": 200,
+    "body": {
+      "entries": [
+        {
+          "type": "folder",
+          "id": "100",
+          "name": "a",
+          "modified_at": "2026-01-01T00:00:00Z",
+          "etag": "0"
+        }
+      ],
+      "total_count": 1,
+      "offset": 0
+    }
+  }
+]

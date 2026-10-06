@@ -40,6 +40,10 @@ export class BoxVFS extends BaseVFS {
   // Box item listings carry an exact byte `size` for every file (0
   // included); sizeless weblinks are filtered out of listings.
   override readonly sizesAlwaysKnown: boolean = true
+  // stat and every whole read stamp the file's sha1, which a listing row
+  // and GET /files/{id} carry. A download names no version, so a read
+  // checks its bytes against the row it resolved through.
+  override readonly readRevalidatable: boolean = true
   override readonly indexTtl: number = 86_400
   override readonly prompt: string = PROMPT
   readonly config: BoxConfig

@@ -60,6 +60,7 @@ async def absent_on_404(virtual: str, call: Callable[[], Awaitable[T]]) -> T:
 
 LIST_FIELDS = "id,name,type,size,modified_at,etag,sha1,parent"
 SEARCH_FIELDS = "id,name,type,path_collection"
+ITEM_FIELDS = "type,id,name,size,modified_at,sha1,path_collection,item_status"
 SEARCH_PAGE = 200
 # Box search serves at most 10,000 matches across all pages; a result set
 # that reaches the ceiling may be incomplete and must not narrow a scan.
@@ -76,7 +77,7 @@ async def list_folder_items(
 
     Args:
         tm (BoxTokenManager): token manager.
-        folder_id (str): Box folder id ("0" is the root).
+        folder_id (str): Box folder id ("0" is All Files, the account root).
         limit (int): page size for each request.
     """
     out: list[dict[str, Any]] = []
@@ -192,6 +193,18 @@ async def get_folder_info(
     tm: BoxTokenManager, folder_id: str
 ) -> dict[str, Any]:
     return await box_get(tm, f"{tm.api_base}/folders/{folder_id}")
+
+
+async def get_file_info(tm: BoxTokenManager, file_id: str) -> dict[str, Any]:
+    """One file's live metadata: its sha1, name, ancestry and status.
+
+    Args:
+        tm (BoxTokenManager): token manager.
+        file_id (str): Box file id.
+    """
+    return await box_get(
+        tm, f"{tm.api_base}/files/{file_id}", params={"fields": ITEM_FIELDS}
+    )
 
 
 async def download_file(

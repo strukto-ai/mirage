@@ -87,12 +87,14 @@ class Reconciler:
         manager = mount.cache_manager
         spec = PathSpec.from_str_path(path)
         remote_stat = None if manager is None else manager.probed_stat(spec)
+        scratch = None
+        generation = None if manager is None else manager.generation
         if remote_stat is None:
-            generation = None if manager is None else manager.generation
-            # Resolve backend IDs without reusing cached metadata.
+            scratch = ListingCheckStore(hints=mount.index)
+            # No cached row answers; the mount's rows ride along as hints.
             try:
                 remote_stat = await mount.execute_op(
-                    "stat", path, index=ListingCheckStore()
+                    "stat", path, index=scratch
                 )
             except (FileNotFoundError, NotADirectoryError):
                 await self.on_missing(path)
@@ -121,6 +123,20 @@ class Reconciler:
             await self._cache.remove(path)
             await mount.index.clear()
             return Verdict.STALE
+        predecessor = (
+            None if scratch is None else scratch.hinted_rows.get(path)
+        )
+        if (
+            scratch is not None
+            and predecessor is not None
+            and manager is not None
+            and generation is not None
+        ):
+            confirmed = (await scratch.get(path)).entry
+            if confirmed is not None:
+                await manager.retain_resolved_entry(
+                    spec, generation, predecessor, confirmed
+                )
         return Verdict.FRESH
 
     async def _probe_or_unknown(self, mount: MountEntry, path: str) -> Verdict:

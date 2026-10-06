@@ -16,7 +16,11 @@ from typing import Any
 
 from mirage.accessor.box import BoxAccessor
 from mirage.core.box.api import list_folder_items
-from mirage.core.box.readdir import ROOT_FOLDER_ID
+from mirage.core.box.constants import (
+    ACTIVE,
+    ALL_FILES_FOLDER_ID,
+    TRASH_FOLDER_ID,
+)
 from mirage.types import PathSpec
 
 
@@ -25,7 +29,7 @@ def path_parts(path: PathSpec) -> list[str]:
 
 
 def root_id(accessor: BoxAccessor) -> str:
-    return accessor.config.root_folder_id or ROOT_FOLDER_ID
+    return accessor.config.root_folder_id or ALL_FILES_FOLDER_ID
 
 
 async def resolve_chain(
@@ -112,3 +116,35 @@ def mount_relative_key(
         return None
     names.append(item.get("name", ""))
     return "/".join(n for n in names if n)
+
+
+def names_this_path(
+    accessor: BoxAccessor, item: dict[str, Any], path: PathSpec
+) -> bool:
+    """Whether a live ``GET /files/{id}`` answer is the active file at ``path``.
+
+    Box enforces unique names per folder, so a file whose live chain of names
+    from the mount root equals the path is the very item walking the path
+    would reach. Four checks: the item is a file, its ``item_status`` is
+    active, its ``path_collection`` starts at All Files and passes no Trash
+    folder, and its names below the mount root equal the path. The name
+    comparison alone already rejects a trashed chain below the mount root;
+    the All Files check also refuses a chain that does not start at All
+    Files yet passes through the mount root with the right names below it,
+    which the name comparison alone would accept, and with the Trash check
+    catches the mount root itself in Trash.
+
+    Args:
+        accessor (BoxAccessor): Box accessor.
+        item (dict[str, Any]): ``GET /files/{id}`` answer.
+        path (PathSpec): the path being checked.
+    """
+    if item.get("type") != "file" or item.get("item_status") != ACTIVE:
+        return False
+    chain = (item.get("path_collection") or {}).get("entries") or []
+    if not chain or chain[0].get("id") != ALL_FILES_FOLDER_ID:
+        return False
+    if any(anc.get("id") == TRASH_FOLDER_ID for anc in chain):
+        return False
+    key = mount_relative_key(item, root_id(accessor))
+    return key == "/".join(path_parts(path))

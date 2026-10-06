@@ -14,6 +14,7 @@ from mirage.cache.index import (
     RAMIndexCacheStore,
 )
 from mirage.cache.index.redis import RedisIndexCacheStore
+from mirage.cache.index.store import IndexCacheStore
 
 
 @pytest_asyncio.fixture(params=["ram", "fake-redis", "redis"])
@@ -668,3 +669,56 @@ async def test_holds_subtree(store, listings, row, state, probe, expected):
         for path in reversed(listings):
             await store.invalidate_dir(path)
     assert await store.holds_subtree(probe) is expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expired", [False, True])
+async def test_conditional_replacement_preserves_listing(store, expired):
+    deadline = datetime.now(timezone.utc) + timedelta(
+        seconds=-1 if expired else 3600
+    )
+    await store.set_dir("/dir", [("a", entry())], deadline, version="v1")
+    listing = await store.list_dir("/dir")
+    assert listing.status == (LookupStatus.EXPIRED if expired else None)
+    old = (await store.get("/dir/a")).entry
+    replacement = entry("confirmed")
+    assert await store.replace_if_unchanged(
+        "/dir/a", old.model_dump_json(), replacement
+    )
+    current = (await store.get("/dir/a")).entry
+    assert current.id == "confirmed" and current.index_time
+    assert await store.list_dir("/dir") == listing
+    pinned = replacement.model_copy(update={"index_time": "pinned"})
+    assert await store.replace_if_unchanged(
+        "/dir/a", current.model_dump_json(), pinned
+    )
+    assert (await store.get("/dir/a")).entry == pinned
+    assert await store.list_dir("/dir") == listing
+    assert not await store.replace_if_unchanged(
+        "/dir/a", old.model_dump_json(), replacement
+    )
+    assert not await store.replace_if_unchanged(
+        "/missing", old.model_dump_json(), replacement
+    )
+    assert not await IndexCacheStore.replace_if_unchanged(
+        store, "/dir/a", pinned.model_dump_json(), old
+    )
+    assert (await store.get("/dir/a")).entry == pinned
+
+
+@pytest.mark.asyncio
+async def test_conditional_replacement_observes_pending_seed(store):
+    old = entry().model_copy(update={"index_time": "old"})
+    await store.put("/dir/a", old)
+    seeded = old.model_copy(
+        update={"extra": {"nested": {"tags": ["changed"]}}}
+    )
+    store.seed(
+        {"/dir/a": seeded},
+        {"/dir": ["/dir/a"]},
+        datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    assert not await store.replace_if_unchanged(
+        "/dir/a", old.model_dump_json(), entry("confirmed")
+    )
+    assert (await store.get("/dir/a")).entry == seeded

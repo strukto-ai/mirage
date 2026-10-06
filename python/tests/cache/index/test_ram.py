@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
 from mirage.cache.index import IndexEntry, RAMIndexCacheStore
 from mirage.cache.index.config import LookupStatus
+from mirage.cache.index.ram import ListingCheckStore
 
 
 @pytest.fixture
@@ -142,3 +143,46 @@ async def test_invalidate_prefix_respects_path_boundary(store):
     assert "/chan/day" not in store._children
     assert "/chan/daytime" in store._children
     assert "/chan/daytime/b" in store._entries
+
+
+def _row(name: str = "c.txt") -> IndexEntry:
+    return IndexEntry(id="F1", name=name, resource_type="box/file")
+
+
+@pytest.mark.asyncio
+async def test_a_scratch_store_hints_the_row_its_source_holds():
+    src = RAMIndexCacheStore()
+    await src.set_dir("/m/a", [("c.txt", _row())])
+    scratch = ListingCheckStore(hints=src)
+    assert (
+        await scratch.hint("/m/a/c.txt") == (await src.get("/m/a/c.txt")).entry
+    )
+    assert await scratch.hint("/m/a/missing.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_a_hint_is_never_an_answer():
+    # Seeding the scratch store with the mount's rows would hand every
+    # backend cached metadata as truth -- the #1040 bug.
+    src = RAMIndexCacheStore()
+    await src.set_dir("/m/a", [("c.txt", _row())])
+    scratch = ListingCheckStore(hints=src)
+    assert (await scratch.get("/m/a/c.txt")).entry is None
+    assert (await scratch.list_dir("/m/a")).entries is None
+    assert await scratch.hint("/m/a/c.txt") is not None
+
+
+def test_hints_outside_a_freshness_check_are_refused():
+    with pytest.raises(TypeError, match="hints"):
+        RAMIndexCacheStore(hints=RAMIndexCacheStore())
+
+
+@pytest.mark.asyncio
+async def test_an_expired_row_still_hints():
+    # The id is confirmed by the backend before anything trusts it, so an
+    # expired listing is still a usable address.
+    src = RAMIndexCacheStore(ttl=60)
+    await src.set_dir("/m/a", [("c.txt", _row())])
+    src._expiry["/m/a"] = datetime(2000, 1, 1, tzinfo=timezone.utc)
+    scratch = ListingCheckStore(hints=src)
+    assert await scratch.hint("/m/a/c.txt") is not None

@@ -40,6 +40,8 @@ import type { OneDriveAccessor } from '@struktoai/mirage-core/accessor/onedrive'
 import type { SharePointAccessor } from '@struktoai/mirage-core/accessor/sharepoint'
 import * as dropboxIo from '@struktoai/mirage-core/commands/builtin/dropbox/io'
 import type { DropboxAccessor } from '@struktoai/mirage-core/accessor/dropbox'
+import * as boxIo from '@struktoai/mirage-core/commands/builtin/box/io'
+import type { BoxAccessor } from '@struktoai/mirage-core/accessor/box'
 import * as gdocsIo from '@struktoai/mirage-core/commands/builtin/gdocs/io'
 import * as gdriveIo from '@struktoai/mirage-core/commands/builtin/gdrive/io'
 import * as gsheetsIo from '@struktoai/mirage-core/commands/builtin/gsheets/io'
@@ -98,6 +100,7 @@ import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { checkReadCapability } from '@struktoai/mirage-core/workspace/mount/read_policy'
 import { DEFAULT_READ_TTL, ReadPolicy } from '@struktoai/mirage-core/types'
+import { InlineBox } from './fixtures/box.ts'
 import { InlineDropbox } from './fixtures/dropbox.ts'
 import { InlineGitHub, blobSha } from './fixtures/github.ts'
 
@@ -484,6 +487,7 @@ type Family =
   | 'gsheets'
   | 'gslides'
   | 'dropbox'
+  | 'box'
 
 const HARNESSES: Record<string, Family> = {
   ...Object.fromEntries(S3_FAMILY.map((name) => [name, 's3' as const])),
@@ -498,6 +502,7 @@ const HARNESSES: Record<string, Family> = {
   gsheets: 'gsheets',
   gslides: 'gslides',
   dropbox: 'dropbox',
+  box: 'box',
 }
 
 // The mounts that render a Drive file through its editor API: the mime type
@@ -515,6 +520,8 @@ const GAPPS: Record<
 // user's own, SharePoint one library of one site, mounted scoped so the keys
 // stay drive-relative (unscoped, `a.txt` would name a site).
 const GRAPH: Record<string, string> = { onedrive: ME, sharepoint: DRIVE_ID }
+
+const DEEP = 'a/b/c.txt'
 
 // One document per family, identical in the python twin. oci is the one
 // alias with a required field beyond these; every other one-of (r2's
@@ -713,6 +720,36 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       readBytes: (p) => dropboxIo.IO.readBytes(accessor, p, index),
       readStream: (p) => dropboxIo.IO.readStream(accessor, p, index),
       stat: (p) => dropboxIo.IO.stat(accessor, p, index),
+      streamSlot: 'stream',
+    }
+  }
+  if (HARNESSES[name] === 'box') {
+    // Box has no key_prefix; the prefixed shape mounts a root_folder_id
+    // instead, with a decoy at the same key outside it.
+    const key = KEYS[shape]
+    const stored = shape === 'prefixed' ? PREFIX + key : key
+    const box = new InlineBox({ [stored]: data })
+    if (shape === 'prefixed') box.create(key, DECOY)
+    vi.stubGlobal('fetch', box.fetch)
+    const vfs = await buildVfs('box', {
+      access_token: 't',
+      endpoint: box.url,
+      ...(shape === 'prefixed' ? { root_folder_id: box.idOf(PREFIX) } : {}),
+    })
+    const accessor = vfs.accessor as BoxAccessor
+    expect(vfs.readRevalidatable).toBe(true)
+    const index = new RAMIndexCacheStore()
+    return {
+      vfs,
+      accessor,
+      key,
+      fetches: () => box.count('content'),
+      rewrite: (next) => {
+        box.write(stored, next)
+      },
+      readBytes: (p) => boxIo.IO.readBytes(accessor, p, index),
+      readStream: (p) => boxIo.IO.readStream(accessor, p, index),
+      stat: (p) => boxIo.IO.stat(accessor, p, index),
       streamSlot: 'stream',
     }
   }
@@ -1108,6 +1145,43 @@ function readsOnMount(): [string, string][] {
   return H.slots.filter(([, path]) => path.startsWith('/m/'))
 }
 
+// Decoys at every level, so a folder listing reads differently from a
+// point lookup by id.
+function deepBox(root = ''): InlineBox {
+  const files: Record<string, Uint8Array> = { [`${root}${DEEP}`]: SEED }
+  for (const level of ['', 'a/', 'a/b/'])
+    for (let i = 0; i < 5; i++) files[`${root}${level}d${String(i)}.txt`] = DECOY
+  return new InlineBox(files)
+}
+
+function walk(box: InlineBox): string[] {
+  return ['items:0', `items:${box.idOf('a')}`, `items:${box.idOf('a/b')}`]
+}
+
+async function run(ws: Workspace, command: string): Promise<[number, Uint8Array, string]> {
+  const result = await ws.shell(command)
+  return [result.exitCode, result.stdout, new TextDecoder().decode(result.stderr)]
+}
+
+async function boxCase<T>(
+  scenario: (ws: Workspace, box: InlineBox) => Promise<T>,
+  root = '',
+): Promise<T> {
+  const box = deepBox(root)
+  vi.stubGlobal('fetch', box.fetch)
+  const vfs = await buildVfs('box', {
+    access_token: 't',
+    endpoint: box.url,
+    ...(root !== '' ? { root_folder_id: box.idOf(root) } : {}),
+  })
+  const ws = freshWorkspace(vfs)
+  try {
+    return await scenario(ws, box)
+  } finally {
+    await ws.close()
+  }
+}
+
 describe('the read-token contract', () => {
   beforeAll(() => {
     s3 = installS3Mock(undefined, { etagSuffix: SUFFIX })
@@ -1185,6 +1259,7 @@ describe('the read-token contract', () => {
       'sharepoint',
       'hf_buckets',
       'dropbox',
+      'box',
     ])
       for (const shape of shapes) for (const row of rows) expectedA.add(`${family}-${shape}-${row}`)
     for (const n of aliases) for (const row of rows) expectedA.add(`${n}-root-${row}`)
@@ -1544,6 +1619,259 @@ describe('the read-token contract', () => {
       } finally {
         await ws.close()
       }
+    })
+  })
+
+  describe('box end to end', () => {
+    it.each(
+      ['', 'sub/'].flatMap((root) =>
+        ['/m/a/b', '/m/a/b/'].map((operand) => [root, operand] as const),
+      ),
+    )(
+      'fresh box listing resolves a replaced parent folder: root=%s operand=%s',
+      async (root, operand) => {
+        await boxCase(async (ws, box) => {
+          await line(ws, `ls ${operand}`)
+          box.renameFolder(`${root}a/b`, 'old')
+          box.create(`${root}a/b/new.txt`, new TextEncoder().encode('new listing'))
+          box.create(`${root}${DEEP}`, CHANGED)
+          box.log.length = 0
+          expect(await line(ws, `ls ${operand}`)).toEqual(
+            new TextEncoder().encode('c.txt\nnew.txt\n'),
+          )
+          expect(await line(ws, `cat /m/${DEEP}`)).toEqual(CHANGED)
+          const fid = box.idOf(`${root}${DEEP}`)
+          const pathWalk = [
+            `items:${root === '' ? '0' : box.idOf(root)}`,
+            `items:${box.idOf(`${root}a`)}`,
+            `items:${box.idOf(`${root}a/b`)}`,
+          ]
+          expect(box.log).toEqual([...pathWalk, ...pathWalk, `content:${fid}`, `dl:${fid}`])
+        }, root)
+      },
+    )
+
+    it('a cold fresh box read lists each level once then downloads', async () => {
+      await boxCase(async (ws, box) => {
+        expect(await line(ws, `cat /m/${DEEP}`)).toEqual(SEED)
+        const fid = box.idOf(DEEP)
+        expect(box.log).toEqual([...walk(box), `content:${fid}`, `dl:${fid}`])
+      })
+    })
+
+    it.each(['', 'r/'])('a warm fresh box read is one request by id (root=%s)', async (root) => {
+      await boxCase(async (ws, box) => {
+        await line(ws, `cat /m/${DEEP}`)
+        const before = box.log.length
+        expect(await line(ws, `cat /m/${DEEP}`)).toEqual(SEED)
+        expect(box.log.slice(before)).toEqual([`info:${box.idOf(root + DEEP)}`])
+      }, root)
+    })
+
+    it('a direct warm fresh box read is one request by id', async () => {
+      await boxCase(async (ws, box) => {
+        expect(await ws.vfs.read(`/m/${DEEP}`)).toEqual(SEED)
+        const before = box.log.length
+        expect(await ws.vfs.read(`/m/${DEEP}`)).toEqual(SEED)
+        expect(box.log.slice(before)).toEqual([`info:${box.idOf(DEEP)}`])
+      })
+    })
+
+    it('with its index cleared a warm box read walks every time', async () => {
+      // Every stale or unknown verdict on the mount clears its index, and a
+      // fresh verdict reached by the walk refills only the throwaway store:
+      // until a cold read or a listing refills it, each check walks.
+      await boxCase(async (ws, box) => {
+        await line(ws, `cat /m/${DEEP}`)
+        const logs: string[][] = []
+        for (let i = 0; i < 2; i++) {
+          await ws.mount('/m').index.clear()
+          const before = box.log.length
+          expect(await line(ws, `cat /m/${DEEP}`)).toEqual(SEED)
+          logs.push(box.log.slice(before))
+        }
+        expect(logs).toEqual([walk(box), walk(box)])
+      })
+    })
+
+    it('a same-size box rewrite in the same second is refetched', async () => {
+      // The fake keeps modified_at across writes, as the real service does
+      // within a second: only sha1 tells the two versions apart, and it must
+      // come from Box's live answer, not the cached row.
+      await boxCase(async (ws, box) => {
+        await line(ws, `cat /m/${DEEP}`)
+        box.write(DEEP, CHANGED)
+        const before = box.log.length
+        const out = await line(ws, `cat /m/${DEEP}`)
+        const fid = box.idOf(DEEP)
+        expect(SEED.byteLength).toBe(CHANGED.byteLength)
+        expect(out).toEqual(CHANGED)
+        expect(box.log.slice(before)).toEqual([
+          `info:${fid}`,
+          ...walk(box),
+          `content:${fid}`,
+          `dl:${fid}`,
+        ])
+      })
+    })
+
+    it('a box file moved outside is gone and drops its overlay', async () => {
+      await boxCase(async (ws, box) => {
+        await line(ws, `cat /m/${DEEP}`)
+        await line(ws, `chmod 600 /m/${DEEP}`)
+        const fid = box.idOf(DEEP)
+        box.move(DEEP, 'a/x/c.txt')
+        const before = box.log.length
+        const [code, , err] = await run(ws, `cat /m/${DEEP}`)
+        const log = box.log.slice(before)
+        const meta = ws.namespace.metaFor(`/m/${DEEP}`)
+        const moved = await line(ws, 'cat /m/a/x/c.txt')
+        expect(code).toBe(1)
+        expect(err).toContain('No such file or directory')
+        expect(meta).toBeNull()
+        expect(moved).toEqual(SEED)
+        // The probe: one info by the hinted id, which places the file
+        // elsewhere; its walk lists the old parent chain, misses, and
+        // resolveItem lists it again. GONE clears the mount index, so cat's
+        // own stat walks twice more.
+        const w = walk(box)
+        expect(log).toEqual([`info:${fid}`, ...w, ...w, ...w, ...w])
+      })
+    })
+
+    it.each(['trash', 'purge'] as const)(
+      'a box file deleted and recreated is read anew (%s)',
+      async (mode) => {
+        await boxCase(async (ws, box) => {
+          await line(ws, `cat /m/${DEEP}`)
+          await line(ws, `chmod 600 /m/${DEEP}`)
+          const old = box.idOf(DEEP)
+          box.delete(DEEP, mode)
+          const fresh = box.create(DEEP, CHANGED)
+          const before = box.log.length
+          const out = await line(ws, `cat /m/${DEEP}`)
+          const log = box.log.slice(before)
+          const modeBits = await line(ws, `stat -c %a /m/${DEEP}`)
+          expect(out).toEqual(CHANGED)
+          // The probe's walk fills only its throwaway store and STALE clears
+          // the mount's index, so the read resolves the new id by walking again.
+          expect(log).toEqual([
+            `info:${old}`,
+            ...walk(box),
+            ...walk(box),
+            `content:${fresh}`,
+            `dl:${fresh}`,
+          ])
+          // STALE keeps the overlay; reading the purged id's 404 as gone would
+          // have dropped it while the walk still printed the new bytes.
+          expect(new TextDecoder().decode(modeBits)).toBe('600\n')
+        })
+      },
+    )
+
+    it('a box file recreated with the same bytes is served warm', async () => {
+      await boxCase(async (ws, box) => {
+        await line(ws, `cat /m/${DEEP}`)
+        const old = box.idOf(DEEP)
+        box.delete(DEEP, 'purge')
+        const fresh = box.create(DEEP, SEED)
+        for (let i = 0; i < 2; i++) {
+          const before = box.log.length
+          expect(await line(ws, `cat /m/${DEEP}`)).toEqual(SEED)
+          expect(box.log.slice(before)).toEqual(
+            i === 0 ? [`info:${old}`, ...walk(box)] : [`info:${fresh}`],
+          )
+        }
+      })
+    })
+
+    it('a box file under a renamed parent is gone', async () => {
+      await boxCase(async (ws, box) => {
+        await line(ws, `cat /m/${DEEP}`)
+        const fid = box.idOf(DEEP)
+        const toA = walk(box).slice(0, 2)
+        box.renameFolder('a/b', 'b2')
+        const before = box.log.length
+        const [code, , err] = await run(ws, `cat /m/${DEEP}`)
+        const log = box.log.slice(before)
+        expect(code).toBe(1)
+        expect(err).toContain('No such file or directory')
+        expect(await line(ws, 'cat /m/a/b2/c.txt')).toEqual(SEED)
+        // Each walk stops at a, which no longer holds b: the probe's populate
+        // pass and resolveItem, then cat's own stat over the cleared index.
+        expect(log).toEqual([`info:${fid}`, ...toA, ...toA, ...toA, ...toA])
+      })
+    })
+
+    it('a box file under a trashed mount root is gone', async () => {
+      // Trashing the root makes metadata for its descendant return not_found.
+      await boxCase(async (ws, box) => {
+        await line(ws, `cat /m/${DEEP}`)
+        const root = box.idOf('r')
+        const fid = box.idOf(`r/${DEEP}`)
+        box.delete('r', 'trash_ancestor')
+        const before = box.log.length
+        const [code, out, err] = await run(ws, `cat /m/${DEEP}`)
+        expect(code).toBe(1)
+        expect(out).toEqual(new Uint8Array(0))
+        expect(err).toContain('No such file or directory')
+        // The root's listing 404s each time: the probe's populate pass and
+        // resolveItem, cat's own stat (the same two), then the parent listing
+        // cat's missing-operand path asks for.
+        expect(box.log.slice(before)).toEqual([
+          `info:${fid}`,
+          ...Array<string>(5).fill(`items:${root}`),
+        ])
+      }, 'r/')
+    })
+
+    it('a box file the user lost info access to is checked by the walk', async () => {
+      await boxCase(async (ws, box) => {
+        await line(ws, `cat /m/${DEEP}`)
+        await line(ws, `chmod 600 /m/${DEEP}`)
+        const fid = box.idOf(DEEP)
+        box.forbidden.add(fid)
+        const before = box.log.length
+        expect(await line(ws, `cat /m/${DEEP}`)).toEqual(SEED)
+        expect(box.log.slice(before)).toEqual([`info:${fid}`, ...walk(box)])
+        expect(new TextDecoder().decode(await line(ws, `stat -c %a /m/${DEEP}`))).toBe('600\n')
+        // Each check pays the refused GET and the walk again: an accepted cost.
+        const again = box.log.length
+        expect(await line(ws, `cat /m/${DEEP}`)).toEqual(SEED)
+        expect(box.log.slice(again)).toEqual([`info:${fid}`, ...walk(box)])
+      })
+    })
+
+    it('a box file with no sha1 is refetched on every fresh read', async () => {
+      // Pinned on purpose: a file Box gives no sha1 cannot be verified, so
+      // each fresh read is UNKNOWN -- a cold download and a cleared mount
+      // index. That cost is the documented price of an unverifiable file.
+      await boxCase(async (ws, box) => {
+        const fid = box.idOf(DEEP)
+        box.unhashed.add(fid)
+        await line(ws, `cat /m/${DEEP}`)
+        const before = box.log.length
+        expect(await line(ws, `cat /m/${DEEP}`)).toEqual(SEED)
+        expect(box.log.slice(before)).toEqual([
+          `info:${fid}`,
+          ...walk(box),
+          `content:${fid}`,
+          `dl:${fid}`,
+        ])
+      })
+    })
+
+    it('a warm box ls shows what a cold one does from one request', async () => {
+      // The probe's stat is reused by the command's own stat, so the fields
+      // the probe asks for must carry everything ls prints.
+      await boxCase(async (ws, box) => {
+        const cold = await line(ws, `ls -l /m/${DEEP}`)
+        await line(ws, `cat /m/${DEEP}`)
+        const before = box.log.length
+        const warm = await line(ws, `ls -l /m/${DEEP}`)
+        expect(warm).toEqual(cold)
+        expect(box.log.slice(before)).toEqual([`info:${box.idOf(DEEP)}`])
+      })
     })
   })
 })

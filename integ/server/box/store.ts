@@ -192,10 +192,10 @@ export async function removeTree(db: C, tenant: string, id: string): Promise<voi
 
 // The chain from the account root down to the immediate parent, excluding the
 // item itself: the vendor's path_collection shape.
-export async function ancestors(db: C, tenant: string, id: string): Promise<Item[]> {
+export async function ancestors(db: C, tenant: string, item: Item): Promise<Item[]> {
   const chain: Item[] = []
-  let cur = await itemById(db, tenant, id)
-  while (cur !== null && cur.parentId !== null) {
+  let cur = item
+  while (cur.parentId !== null) {
     const parent = await itemById(db, tenant, cur.parentId)
     if (parent === null) break
     chain.push(parent)
@@ -267,7 +267,7 @@ export async function recordEvent(
   const source =
     eventType === 'ITEM_TRASH'
       ? trashedSource(item)
-      : eventSource(item, await ancestors(db, tenant, item.id))
+      : eventSource(item, await ancestors(db, tenant, item))
   await db.boxEvent.create({
     data: {
       tenant,
