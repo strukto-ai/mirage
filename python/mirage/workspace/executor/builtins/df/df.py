@@ -244,7 +244,7 @@ async def _target_mounts(
     ordered = sorted(
         (
             m
-            for m in registry.mounts()
+            for m in registry.visible_mounts()
             if path_visible(session.visibility, m.prefix.rstrip("/") or "/")
         ),
         key=lambda m: m.prefix,

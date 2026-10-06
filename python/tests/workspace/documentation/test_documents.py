@@ -76,6 +76,11 @@ async def test_closed_session_does_not_leave_a_view_for_reused_id():
     ws = workspace()
     a = await ws.session("a")
     await a.vfs_md("/VFS.md")
+    await ws.session("b")
+    owner, other = [
+        (await ws.shell("df", session_id=name)).stdout for name in ("a", "b")
+    ]
+    assert b" /VFS.md\n" in owner and b"/VFS.md" not in other
     await ws.close_session("a")
     await ws.session("a")
     with pytest.raises(FileNotFoundError):

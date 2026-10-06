@@ -33,6 +33,40 @@
         "stdout": "/data/fchain/a.md\nfound /data/fchain/a.md\n/data/fchain/b.json\nfound /data/fchain/b.json\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "find_test_after_a_chain_action_is_refused_under_a_group",
+      "seq": 16100272,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fchain2 && printf x > /data/fchain2/a && printf x > /data/fchain2/b && printf x > /data/fchain2/c && find /data/fchain2 -type f -print \\( -name a -o -name b \\) -delete; find /data/fchain2 -type f -print ! -name a -delete; ls /data/fchain2; rm -rf /data/fchain2",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\nc\n",
+        "stderr": "find: -name: tests after actions are not supported\nfind: -name: tests after actions are not supported\n"
+      }
     }
   ]
 }
