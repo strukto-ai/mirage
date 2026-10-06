@@ -17,7 +17,7 @@ import { IOResult } from '../../../../io/types.ts'
 import type { MountView, NamespaceView } from '../../../../ops/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
-import { eacces } from '../../../../utils/errors.ts'
+import { eacces } from '../../../../errors/fs.ts'
 import { mountStarts, ownedScopes, reached } from './scopes.ts'
 import type { OwnedScope } from './types.ts'
 

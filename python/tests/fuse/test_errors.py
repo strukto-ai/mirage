@@ -18,11 +18,11 @@ import os
 
 import pytest
 
+from mirage.errors.fs import no_mount
 from mirage.fuse.errors import NO_XATTR, classify_error
 from mirage.policy import PolicyDenied
 from mirage.runtime.errors import CrossMountError
 from mirage.types import Refusal
-from mirage.utils.errors import no_mount
 from mirage.utils.path import CycleError
 
 

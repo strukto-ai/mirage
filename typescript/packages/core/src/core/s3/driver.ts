@@ -16,7 +16,7 @@ import { toIsoZ } from '../../utils/dates.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import { VFSName } from '../../types.ts'
-import { eaccesRefused } from '../../utils/errors.ts'
+import { eaccesRefused } from '../../errors/fs.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type {
   ChildEntry,

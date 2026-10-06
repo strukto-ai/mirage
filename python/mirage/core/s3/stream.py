@@ -25,9 +25,9 @@ from mirage.core.s3.client import (
     is_not_found,
 )
 from mirage.core.s3.read import _fp_rev_from_s3_response
+from mirage.errors.fs import enoent
 from mirage.observe.context import record_stream, revision_for
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 async def read_stream(

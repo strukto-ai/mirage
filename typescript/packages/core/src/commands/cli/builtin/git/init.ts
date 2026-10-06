@@ -1,6 +1,6 @@
 import { IOResult } from '../../../../io/types.ts'
 import { FileType } from '../../../../types.ts'
-import { isEexist, isErofs } from '../../../../utils/errors.ts'
+import { isEexist, isErofs } from '../../../../errors/fs.ts'
 import { resolvePath } from '../../../../utils/path.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'

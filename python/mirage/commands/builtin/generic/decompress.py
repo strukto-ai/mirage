@@ -15,17 +15,14 @@ from mirage.commands.builtin.utils.copy import path_exists
 from mirage.commands.builtin.utils.links import LinkDoor
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.stream import stdin_stream
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import eloop
+from mirage.errors.render import fs_error_line
+from mirage.errors.types import DotWalkMissing
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
-from mirage.utils.compress import gunzip_stream
-from mirage.utils.errors import (
-    FS_ERRORS,
-    DotWalkMissing,
-    GzipDataError,
-    eloop,
-    fs_error_line,
-)
+from mirage.utils.compress import GzipDataError, gunzip_stream
 from mirage.utils.key_prefix import mounted_path
 
 _ASCII_LOWER = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)

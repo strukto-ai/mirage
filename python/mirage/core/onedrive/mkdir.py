@@ -18,8 +18,8 @@ from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.msgraph.drive import FolderTarget, create_child_folder
 from mirage.core.onedrive.client import full_item_url, item_url
+from mirage.errors.fs import enotdir
 from mirage.types import PathSpec
-from mirage.utils.errors import enotdir
 from mirage.utils.key_prefix import mount_prefix_of
 
 

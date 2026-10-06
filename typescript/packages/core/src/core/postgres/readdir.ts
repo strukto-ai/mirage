@@ -17,7 +17,7 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import { makeReaddir } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { enoent, isEnoent } from '../../utils/errors.ts'
+import { enoent, isEnoent } from '../../errors/fs.ts'
 import { listMatviews, listSchemas, listTables, listViews } from './client.ts'
 import { detectScope, ENTITY_FILES, KIND_DIRS } from './scope.ts'
 

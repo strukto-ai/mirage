@@ -23,8 +23,8 @@ from mirage.core.gdrive.resolve import (
     resolve_parent,
 )
 from mirage.core.google.drive import delete_file, list_files, patch_file
+from mirage.errors.fs import enoent, enotempty
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent, enotempty
 
 
 @eacces_on_denied

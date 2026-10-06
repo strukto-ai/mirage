@@ -27,6 +27,9 @@ from mirage.context import (
     reset_explaining,
     set_explaining,
 )
+from mirage.errors.fs import eacces
+from mirage.errors.render import fs_error_line
+from mirage.errors.types import ReadOnlyError
 from mirage.policy.base import Policy
 from mirage.policy.builtin.hidden_paths import HiddenPathsPolicy
 from mirage.policy.builtin.mount_mode import MountModePolicy
@@ -53,7 +56,6 @@ from mirage.policy.types import (
 )
 from mirage.runtime.routing.types import RouteContext
 from mirage.types import Limit, MountMode, PathSpec, Refusal
-from mirage.utils.errors import ReadOnlyError, eacces, fs_error_line
 
 if TYPE_CHECKING:
     from mirage.policy.decisions import Decisions

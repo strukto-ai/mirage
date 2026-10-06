@@ -29,9 +29,9 @@ from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import CommandOpts
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.search import make_search_op
+from mirage.errors.fs import efbig, enoent
 from mirage.io.types import ByteSource
 from mirage.types import ContentType, FileStat, FileType, PathSpec
-from mirage.utils.errors import efbig, enoent
 from mirage.vfs.types import ContentSearchOps, SearchOps, SearchQuery
 from tests.core.hierarchy.conftest import FakeAccessor, detect_scope, spec
 

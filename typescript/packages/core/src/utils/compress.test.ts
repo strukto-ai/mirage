@@ -24,7 +24,7 @@ import {
   gunzipPartial,
   gzip,
 } from './compress.ts'
-import { GzipDataError } from './errors.ts'
+import { GzipDataError } from './compress.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

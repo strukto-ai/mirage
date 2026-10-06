@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { unreadableStdin } from '../../../shell/descriptors.ts'
-import { enoent } from '../../../utils/errors.ts'
+import { enoent } from '../../../errors/fs.ts'
 import type { CommandOpts } from '../../config.ts'
 import { parseFlags, sortGeneric } from './sort.ts'
 

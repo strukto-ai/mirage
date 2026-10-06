@@ -29,6 +29,8 @@ from mirage.context import (
     set_current_session,
     set_mount_gate,
 )
+from mirage.errors.render import format_fs_error
+from mirage.errors.types import OperationNotSupportedError
 from mirage.ops.types import NamespaceView
 from mirage.policy import Action, Deny, OpsContext, Policy
 from mirage.types import (
@@ -42,7 +44,6 @@ from mirage.types import (
     ShownPaths,
     Visibility,
 )
-from mirage.utils.errors import OperationNotSupportedError, format_fs_error
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
 from mirage.vfs.types import ContentSearchOps
 from mirage.workspace.session import SessionState

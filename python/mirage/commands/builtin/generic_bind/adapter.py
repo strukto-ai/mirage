@@ -37,6 +37,16 @@ from mirage.context import (
     session_visibility,
 )
 from mirage.context.session_context import require_paths_writable
+from mirage.errors.constants import MISS_ERRORS
+from mirage.errors.fs import (
+    eexist,
+    eisdir,
+    enoent,
+    enotdir,
+    enotsup,
+    walk_refusal,
+)
+from mirage.errors.types import DotWalkError, ReadOnlyError
 from mirage.io import IOResult
 from mirage.ops.generic.factory import refuse_taken
 from mirage.ops.namespace_view import paths_scoped
@@ -50,17 +60,6 @@ from mirage.policy.constants import METADATA_OPS
 from mirage.policy.policies import Policies, pre_ops_gate
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec, WalkProbe
-from mirage.utils.errors import (
-    MISS_ERRORS,
-    DotWalkError,
-    ReadOnlyError,
-    eexist,
-    eisdir,
-    enoent,
-    enotdir,
-    enotsup,
-    walk_refusal,
-)
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
 from mirage.utils.hidden import hidden_under, move_reveals, path_visible
 from mirage.utils.path import norm, parent

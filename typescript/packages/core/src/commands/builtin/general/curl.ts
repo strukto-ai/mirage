@@ -26,7 +26,7 @@ import {
   isHttpError,
 } from '../utils/http.ts'
 import { UsageError } from '../../errors.ts'
-import { gnuStrerror, isFsError, isWalkError, enotsup } from '../../../utils/errors.ts'
+import { gnuStrerror, isFsError, isWalkError, enotsup } from '../../../errors/fs.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { FlagView } from '../../spec/flag_view.ts'

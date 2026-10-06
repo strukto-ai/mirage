@@ -22,7 +22,7 @@ import { MIME_TO_EXT, listFiles, listSharedDrives } from '../google/drive.ts'
 import { rootContext } from './resolve.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { enotdir } from '../../utils/errors.ts'
+import { enotdir } from '../../errors/fs.ts'
 
 export const DIRECTORY_RESOURCE_TYPES: ReadonlySet<string> = new Set([
   'gdrive/folder',

@@ -21,7 +21,7 @@ import { command, type RegisteredCommand } from '@struktoai/mirage-core/commands
 import { specOf } from '@struktoai/mirage-core/commands/spec/builtins'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
-import { eacces } from '@struktoai/mirage-core/utils/errors'
+import { eacces } from '@struktoai/mirage-core/errors/fs'
 
 function guardedListing(original: RegisteredOp): RegisteredOp {
   return {

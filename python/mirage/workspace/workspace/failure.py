@@ -17,10 +17,10 @@ from mirage.commands.errors import (
     FindParseError,
     UsageError,
 )
+from mirage.errors.render import format_fs_error
 from mirage.io import IOResult
 from mirage.policy import Deny, refusal_of, render_deny
 from mirage.shell.bytes import encode_text
-from mirage.utils.errors import format_fs_error
 from mirage.workspace.workspace.utils import command_name
 
 

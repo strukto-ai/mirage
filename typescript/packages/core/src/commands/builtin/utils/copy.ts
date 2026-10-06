@@ -15,7 +15,8 @@
 import { descendantPath } from './paths.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { FileType, type PathSpec, type StatFn } from '../../../types.ts'
-import { ELOOP_STRERROR, eloop, enoent, enotdir, isMissingPath } from '../../../utils/errors.ts'
+import { ELOOP_STRERROR } from '../../../errors/constants.ts'
+import { eloop, enoent, enotdir, isMissingPath } from '../../../errors/fs.ts'
 
 // The destination verdicts GNU meets at the destination's own stat, before
 // any create or rename: a plain file in its chain, or a link loop in it. cp

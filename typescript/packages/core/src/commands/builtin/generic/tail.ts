@@ -31,13 +31,9 @@ import {
   tailBytes,
   type TailCounts,
 } from '../tail_counts.ts'
-import {
-  fsErrorLine,
-  fsStrerror,
-  isEisdir,
-  isFsError,
-  READ_FAILURES,
-} from '../../../utils/errors.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
+import { fsStrerror, isEisdir, isFsError } from '../../../errors/fs.ts'
+import { READ_FAILURES } from '../../../errors/constants.ts'
 import { shellQuote } from '../../../utils/quote.ts'
 import { splitOpened } from '../utils/operands.ts'
 import { readStdinAsync } from '../utils/stream.ts'

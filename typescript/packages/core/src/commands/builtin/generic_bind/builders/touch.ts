@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
-import { fsStrerror, isFsError } from '../../../../utils/errors.ts'
+import { fsStrerror, isFsError } from '../../../../errors/fs.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'

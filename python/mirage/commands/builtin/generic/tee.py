@@ -12,10 +12,11 @@ from mirage.commands.builtin.utils.stream import read_stdin_async
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.errors.fs import fs_strerror
+from mirage.errors.render import fs_error_line
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, StatFn
-from mirage.utils.errors import fs_error_line, fs_strerror
 
 logger = logging.getLogger(__name__)
 

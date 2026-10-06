@@ -16,8 +16,8 @@ from mirage.accessor.box import BoxAccessor
 from mirage.cache.context import invalidate_after_unlink
 from mirage.core.box.api import delete_file
 from mirage.core.box.resolve import path_parts, resolve_item
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 async def unlink(accessor: BoxAccessor, path: PathSpec) -> None:

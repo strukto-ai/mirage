@@ -15,7 +15,7 @@
 import { UsageError } from '../errors.ts'
 import type { ArgmatchChoices, ArgmatchKind } from './argmatch.ts'
 import { quoteText } from '../quote.ts'
-import { gnuStrerror } from '../../utils/errors.ts'
+import { gnuStrerror } from '../../errors/fs.ts'
 import {
   IN_ORDER_OPERANDS,
   OLD_OPTION_EXIT,

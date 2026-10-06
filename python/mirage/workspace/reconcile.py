@@ -19,8 +19,8 @@ from functools import partial
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index.config import Evicted
 from mirage.cache.index.ram import ListingCheckStore
+from mirage.errors.types import OperationNotSupportedError
 from mirage.types import FileStat, ListingVersion, PathSpec, ReadPolicy
-from mirage.utils.errors import OperationNotSupportedError
 from mirage.utils.path import ancestors
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.namespace import Namespace

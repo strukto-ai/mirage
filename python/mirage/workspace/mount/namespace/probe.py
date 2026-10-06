@@ -14,9 +14,10 @@
 
 import posixpath
 
+from mirage.errors.constants import ELOOP_STRERROR, MISS_ERRORS
+from mirage.errors.types import DotWalkLoop
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import ELOOP_STRERROR, MISS_ERRORS, DotWalkLoop
 from mirage.utils.path import CycleError
 from mirage.workspace.mount.namespace import Namespace
 

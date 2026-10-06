@@ -15,7 +15,7 @@
 import { stdinStream } from '../utils/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { fsStrerror, gnuStrerror, isFsError } from '../../../utils/errors.ts'
+import { fsStrerror, gnuStrerror, isFsError } from '../../../errors/fs.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { shellQuote } from '../../../utils/quote.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'

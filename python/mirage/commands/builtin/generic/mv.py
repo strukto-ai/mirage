@@ -51,6 +51,8 @@ from mirage.commands.builtin.utils.copy import (
 )
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import (
     MoveStrategy,
@@ -60,7 +62,6 @@ from mirage.types import (
     ReaddirFn,
     StatFn,
 )
-from mirage.utils.errors import FS_ERRORS, fs_strerror
 
 _logger = logging.getLogger(__name__)
 

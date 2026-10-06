@@ -30,8 +30,9 @@ from mirage.commands.spec.constants import (
     USAGE_HINT_PREFIX,
 )
 from mirage.commands.spec.types import CommandName
+from mirage.errors.fs import fs_strerror
+from mirage.errors.types import DotWalkLoop, FileTooLargeError
 from mirage.shell.bytes import decode_text, encode_text
-from mirage.utils.errors import DotWalkLoop, FileTooLargeError, fs_strerror
 
 
 def usage_exit_code(cmd_name: str) -> int:

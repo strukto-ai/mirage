@@ -15,15 +15,9 @@
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec, StatFn } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import {
-  eisdir,
-  enoent,
-  enotdir,
-  fsErrorLine,
-  isEnoent,
-  isFsError,
-  type FsError,
-} from '../../../utils/errors.ts'
+import { eisdir, enoent, enotdir, isEnoent, isFsError } from '../../../errors/fs.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
+import { type FsError } from '../../../errors/types.ts'
 import { absentDestStrerror, entryKind } from '../utils/paths.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { readStdinAsync } from '../utils/stream.ts'

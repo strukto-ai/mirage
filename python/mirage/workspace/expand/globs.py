@@ -16,13 +16,13 @@ import dataclasses
 import posixpath
 
 from mirage.context import session_visibility
+from mirage.errors.constants import WALK_ERRORS
 from mirage.ops.config import NamespaceLinks
 from mirage.ops.namespace_view import child_mount_names, namespace_names
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import SHOPT_DEFAULTS
 from mirage.shell.errors import DiscardSignal
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import WALK_ERRORS
 from mirage.utils.glob_walk import (
     glob_name_matches,
     glob_pattern,

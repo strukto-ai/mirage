@@ -15,7 +15,7 @@
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
-import { eisdir } from '../../utils/errors.ts'
+import { eisdir } from '../../errors/fs.ts'
 import { fileEntry, joinLines } from '../slug_tree/read.ts'
 import { scalarString } from '../slug_tree/rows.ts'
 import { iterPageChunks, pageChunks } from './client.ts'

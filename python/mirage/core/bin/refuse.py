@@ -16,8 +16,8 @@ import errno
 from typing import Any
 
 from mirage.accessor.bin import BinAccessor
+from mirage.errors.types import ReadOnlyError
 from mirage.types import PathSpec
-from mirage.utils.errors import ReadOnlyError
 
 
 async def refuse(

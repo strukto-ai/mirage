@@ -19,6 +19,7 @@ from mirage.commands.config import ExecContext
 from mirage.commands.errors import CommandTimeoutError, UsageError
 from mirage.commands.spec.types import CommandSpec, FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code
+from mirage.errors.render import format_fs_error
 from mirage.io import IOResult
 from mirage.io.stream import materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
@@ -28,7 +29,6 @@ from mirage.runtime.table import WorkspaceRuntime
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
-from mirage.utils.errors import format_fs_error
 from mirage.workspace.executor.command.flags import parse_flags
 from mirage.workspace.mount import (
     MountCommandUnsupported,

@@ -15,7 +15,7 @@
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { lookupError } from './dest.ts'
-import { eisdir } from '../../utils/errors.ts'
+import { eisdir } from '../../errors/fs.ts'
 import { norm } from '../../utils/path.ts'
 import { invalidateAfterUnlink } from '../../cache/context.ts'
 

@@ -37,6 +37,7 @@ from asyncssh.constants import (
     FXF_TRUNC,
 )
 
+from mirage.errors.types import NoMountError
 from mirage.fuse.core import MountCore
 from mirage.fuse.errors import classify_error
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
@@ -48,7 +49,6 @@ from mirage.server.ssh.session import (
     open_session,
 )
 from mirage.server.ssh.stream import ENCODING, ERRORS
-from mirage.utils.errors import NoMountError
 
 logger = logging.getLogger(__name__)
 

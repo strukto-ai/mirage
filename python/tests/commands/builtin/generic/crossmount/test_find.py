@@ -23,10 +23,10 @@ from mirage.commands.builtin.generic.crossmount.find import (
 )
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS
+from mirage.errors.fs import eacces
 from mirage.io import IOResult
 from mirage.ops.registry import op
 from mirage.types import MountMode, PathSpec
-from mirage.utils.errors import eacces
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 

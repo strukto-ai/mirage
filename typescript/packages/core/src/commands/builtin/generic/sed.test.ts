@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { yieldBytes } from '../../../io/stream.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { eisdir } from '../../../utils/errors.ts'
+import { eisdir } from '../../../errors/fs.ts'
 import type { CommandOpts } from '../../config.ts'
 import { sedGeneric } from './sed.ts'
 

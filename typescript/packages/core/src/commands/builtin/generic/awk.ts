@@ -42,7 +42,7 @@ import {
   isFsError,
   isMissingPath,
   isWalkError,
-} from '../../../utils/errors.ts'
+} from '../../../errors/fs.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { shellJoin } from '../../../shell/join.ts'
 

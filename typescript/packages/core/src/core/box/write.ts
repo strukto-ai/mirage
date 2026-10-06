@@ -15,7 +15,7 @@
 import type { BoxAccessor } from '../../accessor/box.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { eisdir, enoent } from '../../utils/errors.ts'
+import { eisdir, enoent } from '../../errors/fs.ts'
 import { uploadFileVersion, uploadNewFile } from './api.ts'
 import { pathParts, resolveItem, resolveParentId } from './resolve.ts'
 

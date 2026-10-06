@@ -16,7 +16,7 @@ import type { GitHubAccessor } from '../../accessor/github.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { type PathSpec, VFSName } from '../../types.ts'
-import { eisdir, enoent } from '../../utils/errors.ts'
+import { eisdir, enoent } from '../../errors/fs.ts'
 import { fetchBlob } from './client.ts'
 import { locate, lookupRetrying } from './lookup.ts'
 

@@ -24,6 +24,7 @@ from mirage.commands.builtin.generic.cp import (
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.fs import enotsup
 from mirage.io.types import IOResult
 from mirage.ops.types import LinkView
 from mirage.types import (
@@ -37,7 +38,6 @@ from mirage.types import (
     PathSpec,
     PrimitiveCopy,
 )
-from mirage.utils.errors import enotsup
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 

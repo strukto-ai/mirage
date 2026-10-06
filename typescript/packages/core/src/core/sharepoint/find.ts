@@ -22,7 +22,7 @@ import {
   type PredNode,
 } from '../../commands/builtin/find_eval.ts'
 import { FileType, type PathSpec } from '../../types.ts'
-import { isEnoent } from '../../utils/errors.ts'
+import { isEnoent } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { DIR_SIZE } from '../../utils/stat_view.ts'

@@ -16,7 +16,61 @@ import zlib
 from collections.abc import AsyncIterator, Generator, Iterator
 from enum import Enum
 
-from mirage.utils.errors import GzipDataError
+
+class GzipDataError(ValueError):
+    """Why ``gzip -d`` cannot decompress one input, in gzip's words.
+
+    ``fatal`` is gzip 1.13's split: an input with no gzip header, or
+    with a header naming a method or flag gzip does not support, is
+    reported and the run moves on to the next operand, while a truncated
+    or corrupt one ends the run, as does a CRC or length mismatch unless
+    ``-t`` is only testing. A mismatch in both carries both reasons, in
+    gzip's order. ``keeps_output`` says the bytes decoded before the
+    failure are whole members: after a refusal of a later member, of
+    trailing garbage, or of a trailer. An in-place run still writes them
+    when the refusal is not fatal, and tar reads them whatever gzip
+    does. ``first_header`` says gzip stopped inside its first member's
+    header, before it would create an output file or read a body; on
+    stdin that ends the run, as gzip exits there. The reasons are gzip's
+    own lines, the program name and any leading newline included, since
+    gunzip, zcat, zgrep and tar's child all run gzip.
+
+    Args:
+        reasons (tuple[str, ...]): gzip's diagnostic lines, each with
+            ``{}`` where the input's name goes.
+        fatal (bool): whether gzip stops at this input.
+        exit_code (int): One for an error, two for a trailing-data warning.
+        keeps_output (bool): whether the bytes decoded before the
+            failure are whole members.
+        first_header (bool): whether the failure lies in the first
+            member's header.
+    """
+
+    def __init__(
+        self,
+        reasons: tuple[str, ...],
+        fatal: bool,
+        exit_code: int = 1,
+        keeps_output: bool = False,
+        first_header: bool = False,
+    ) -> None:
+        super().__init__("\n".join(reasons))
+        self.reasons = reasons
+        self.fatal = fatal
+        self.exit_code = exit_code
+        self.keeps_output = keeps_output
+        self.first_header = first_header
+
+    def render(self, label: str) -> str:
+        """gzip's lines for the failure, the input named ``label``.
+
+        Args:
+            label (str): the input as the diagnostic names it.
+        """
+        return "".join(
+            f"{reason.replace('{}', label)}\n" for reason in self.reasons
+        )
+
 
 GZIP_MAGIC = b"\x1f\x8b"
 # gzip 1.13's lines for the inputs ``gzip -d`` refuses, ``{}`` standing

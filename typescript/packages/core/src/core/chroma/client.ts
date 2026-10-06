@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import { scalarString } from '../slug_tree/rows.ts'
 
 const PATH_TREE_ID = '__path_tree__'

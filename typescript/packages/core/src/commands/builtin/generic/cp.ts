@@ -47,15 +47,15 @@ import {
   pathExists,
   type BackendKeyFn,
 } from '../utils/copy.ts'
+import { ELOOP_STRERROR } from '../../../errors/constants.ts'
 import {
-  ELOOP_STRERROR,
   fsStrerror,
   isDotWalkError,
   isEacces,
   isEnotdir,
   isFsError,
   isMissingPath,
-} from '../../../utils/errors.ts'
+} from '../../../errors/fs.ts'
 import { typedLink } from '../utils/links.ts'
 import { absentDestStrerror, descendantPath, nearestAncestor, spelledFrom } from '../utils/paths.ts'
 import { rstripSlash } from '../../../utils/slash.ts'

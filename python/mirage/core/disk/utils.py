@@ -21,8 +21,8 @@ from pathlib import Path
 from typing import BinaryIO
 
 from mirage.core.disk.errors import disk_error
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 logger = logging.getLogger(__name__)
 

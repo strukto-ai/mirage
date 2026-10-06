@@ -18,8 +18,8 @@ import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.airtable.read import read
+from mirage.errors.types import FileTooLargeError
 from mirage.types import PathSpec
-from mirage.utils.errors import FileTooLargeError
 from mirage.utils.key_prefix import mount_key
 from tests.fixtures.airtable_api import make_accessor
 

@@ -30,8 +30,8 @@ from mirage.core.box.resolve import (
     resolve_item,
     root_id,
 )
+from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 

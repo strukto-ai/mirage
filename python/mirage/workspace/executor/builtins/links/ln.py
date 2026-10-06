@@ -37,11 +37,13 @@ from mirage.commands.spec.usage import (
     usage_hint,
 )
 from mirage.context import session_visibility
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror
+from mirage.errors.types import DotWalkLoop
 from mirage.io.stream import materialize
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import FileStat, FileType, PathSpec, word_text
-from mirage.utils.errors import FS_ERRORS, DotWalkLoop, fs_strerror
 from mirage.utils.hidden import path_visible
 from mirage.utils.path import CycleError, dotted_spelling
 from mirage.workspace.executor.builtins.shared import abs_path, fail, result

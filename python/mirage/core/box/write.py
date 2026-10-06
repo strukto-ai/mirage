@@ -16,9 +16,9 @@ from mirage.accessor.box import BoxAccessor
 from mirage.cache.context import invalidate_after_write
 from mirage.core.box.api import upload_file_version, upload_new_file
 from mirage.core.box.resolve import path_parts, resolve_item, resolve_parent_id
+from mirage.errors.fs import enoent
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 async def write(accessor: BoxAccessor, path: PathSpec, data: bytes) -> None:

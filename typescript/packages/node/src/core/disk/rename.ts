@@ -16,7 +16,7 @@ import type { DiskAccessor } from '../../accessor/disk.ts'
 import { rename as fsRename, lstat } from 'node:fs/promises'
 import { invalidateAfterMove } from '@struktoai/mirage-core/cache/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { enoent } from '@struktoai/mirage-core/utils/errors'
+import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { resolveInside } from './utils.ts'
 
 /**

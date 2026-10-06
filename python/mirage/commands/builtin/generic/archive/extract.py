@@ -15,8 +15,8 @@
 from collections.abc import Awaitable, Callable
 
 from mirage.commands.builtin.generic.archive.walk import StatFn
+from mirage.errors.constants import FS_ERRORS
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import FS_ERRORS
 
 
 def extract_dest(

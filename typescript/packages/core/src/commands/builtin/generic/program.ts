@@ -10,7 +10,8 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { decodeText } from '../../../shell/bytes.ts'
 import { FileType, type PathSpec } from '../../../types.ts'
-import { eisdir, fsErrorLine, fsStrerror, isEisdir, isFsError } from '../../../utils/errors.ts'
+import { eisdir, fsStrerror, isEisdir, isFsError } from '../../../errors/fs.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
 
 // The commands whose program files the executor reads before routing and
 // lowers to their inline form. jq reads its -f file itself, after its option

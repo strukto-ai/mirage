@@ -22,8 +22,8 @@ from mirage.core.box.api import (
 )
 from mirage.core.box.client import BoxApiError
 from mirage.core.box.resolve import path_parts, resolve_item, resolve_parent_id
+from mirage.errors.fs import eisdir, enoent, enotdir, enotempty
 from mirage.types import PathSpec
-from mirage.utils.errors import eisdir, enoent, enotdir, enotempty
 
 
 async def rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:

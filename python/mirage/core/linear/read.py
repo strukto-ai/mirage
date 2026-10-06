@@ -40,8 +40,8 @@ from mirage.core.linear.normalize import (
 from mirage.core.linear.scope import detect_scope
 from mirage.core.linear.stat import stat
 from mirage.core.render.json import jsonl_bytes_by_created_at
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 async def _read_team_json(

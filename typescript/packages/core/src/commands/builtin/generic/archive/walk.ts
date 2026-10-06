@@ -15,7 +15,7 @@
 import type { LinkView, MountView } from '../../../../ops/types.ts'
 import { type FileStat, FileType, LINK_TARGET_KEY, PathSpec } from '../../../../types.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
-import { isEnotdir } from '../../../../utils/errors.ts'
+import { isEnotdir } from '../../../../errors/fs.ts'
 import { CycleError } from '../../../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../../../utils/slash.ts'
 import type { Entry, MemberKind, Problem, Scan, Walked } from './types.ts'

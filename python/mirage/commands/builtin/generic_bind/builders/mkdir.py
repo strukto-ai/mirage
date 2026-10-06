@@ -33,16 +33,12 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.context import DEFAULT_UMASK, get_walk_probe, session_umask
+from mirage.errors.constants import ELOOP_STRERROR, FS_ERRORS
+from mirage.errors.fs import error_path, fs_strerror
+from mirage.errors.render import operand_spelling
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import (
-    ELOOP_STRERROR,
-    FS_ERRORS,
-    error_path,
-    fs_strerror,
-    operand_spelling,
-)
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.mode import DEFAULT_DIR_MODE, parse_chmod
 from mirage.utils.path import CycleError, norm, parent, walk_nodes

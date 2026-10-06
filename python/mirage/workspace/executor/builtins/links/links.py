@@ -21,14 +21,11 @@ from mirage.commands.builtin.utils.paths import dispatch_stat, walk_spelling
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.errors.constants import ELOOP_STRERROR, FS_ERRORS
+from mirage.errors.fs import fs_strerror
+from mirage.errors.types import DotWalkLoop
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import (
-    ELOOP_STRERROR,
-    FS_ERRORS,
-    DotWalkLoop,
-    fs_strerror,
-)
 from mirage.utils.path import CycleError
 from mirage.workspace.executor.builtins.shared import fail
 from mirage.workspace.executor.builtins.types import Result

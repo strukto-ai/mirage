@@ -17,6 +17,8 @@ from enum import Enum, auto
 from functools import partial
 
 from mirage.context import reset_redirect_paths, set_redirect_paths
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, share
 from mirage.io.stream import materialize
@@ -51,7 +53,6 @@ from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind, TSNodeLike
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.workspace.executor.builtins import _to_scope
 from mirage.workspace.executor.builtins.exec.constants import (
     CLOSED,

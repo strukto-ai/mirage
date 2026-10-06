@@ -24,7 +24,7 @@ import { dropboxPathOf } from './paths.ts'
 import { CONTENT_HASH, MISS_SUMMARIES } from './constants.ts'
 import { tokenOf } from './fingerprint.ts'
 import { readdir as coreReaddir } from './readdir.ts'
-import { enoent, isEnoent } from '../../utils/errors.ts'
+import { enoent, isEnoent } from '../../errors/fs.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 
 function statFromEntry(entry: DropboxEntry): FileStat {

@@ -1,13 +1,7 @@
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
-import {
-  eisdir,
-  enoent,
-  enotdir,
-  fsErrorLine,
-  isEnotdir,
-  isFsError,
-} from '../../../utils/errors.ts'
+import { eisdir, enoent, enotdir, isEnotdir, isFsError } from '../../../errors/fs.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
 import { isDir } from '../../../utils/stat_view.ts'
 import { UsageError } from '../../errors.ts'
 import { quoteText } from '../../quote.ts'

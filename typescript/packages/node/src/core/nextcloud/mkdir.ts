@@ -1,7 +1,7 @@
 import type { Operator } from 'opendal'
 import { invalidateAfterWrite, invalidateAncestors } from '@struktoai/mirage-core/cache/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { eexist, enoent, enotdir } from '@struktoai/mirage-core/utils/errors'
+import { eexist, enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
 import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'

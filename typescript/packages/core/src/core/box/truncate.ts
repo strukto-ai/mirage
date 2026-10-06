@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { enotsup } from '../../utils/errors.ts'
+import { enotsup } from '../../errors/fs.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
 import type { PathSpec } from '../../types.ts'
 import { downloadFile } from './api.ts'

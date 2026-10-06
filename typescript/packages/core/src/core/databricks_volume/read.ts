@@ -20,7 +20,7 @@ import { dbxFetch } from './client.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
 import { rangeHeader, windowIfUnranged } from '../../utils/ranges.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 
 export interface DbxReadOptions {
   offset?: number

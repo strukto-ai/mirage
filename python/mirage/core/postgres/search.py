@@ -29,7 +29,7 @@ from mirage.core.postgres.client import (
 )
 from mirage.core.postgres.read import read_rows, row_line
 from mirage.core.postgres.semantic import build_entity_semantic_json
-from mirage.utils.errors import efbig
+from mirage.errors.fs import efbig
 from mirage.vfs.types import SearchQuery
 
 # Column types whose `::text` is the value exactly as a rows.jsonl line

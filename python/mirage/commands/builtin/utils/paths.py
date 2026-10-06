@@ -17,17 +17,12 @@ import os
 from collections.abc import Callable
 from dataclasses import replace
 
+from mirage.errors.fs import eexist, enoent
+from mirage.errors.render import operand_spelling
+from mirage.errors.types import DotWalkLoop, DotWalkMissing, DotWalkNotDir
 from mirage.ops.types import LinkView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec, StatFn
-from mirage.utils.errors import (
-    DotWalkLoop,
-    DotWalkMissing,
-    DotWalkNotDir,
-    eexist,
-    enoent,
-    operand_spelling,
-)
 from mirage.utils.key_prefix import rekey
 from mirage.utils.path import (
     CycleError,

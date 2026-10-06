@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import { ELOOP_STRERROR, isEnotdir, isMissError } from '../../../utils/errors.ts'
+import { ELOOP_STRERROR } from '../../../errors/constants.ts'
+import { isEnotdir, isMissError } from '../../../errors/fs.ts'
 import { gnuBasename, posixNormpath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { StatOverlay } from '../../../ops/types.ts'

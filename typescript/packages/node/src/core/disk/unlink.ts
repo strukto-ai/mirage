@@ -16,7 +16,7 @@ import type { DiskAccessor } from '../../accessor/disk.ts'
 import { stat as fsStat, unlink as fsUnlink } from 'node:fs/promises'
 import { invalidateAfterUnlink } from '@struktoai/mirage-core/cache/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { eisdir } from '@struktoai/mirage-core/utils/errors'
+import { eisdir } from '@struktoai/mirage-core/errors/fs'
 import { diskError } from './errors.ts'
 import { resolveInside } from './utils.ts'
 

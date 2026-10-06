@@ -1,7 +1,7 @@
 import pytest
 
+from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType
-from mirage.utils.errors import enoent
 from mirage.workspace.executor.builtins.script import read_script_text
 from mirage.workspace.session import SessionState
 

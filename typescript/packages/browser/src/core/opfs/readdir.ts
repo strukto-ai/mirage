@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { enoent, enotdir } from '@struktoai/mirage-core/utils/errors'
+import { enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
 import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'

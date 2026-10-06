@@ -14,7 +14,8 @@
 
 import { operandExitCode } from '../commands/spec/usage.ts'
 import { explaining, lineRunning, noteRefusal, runExplaining } from '../context/session_context.ts'
-import { eacces, erofsReadOnly, fsErrorLine } from '../utils/errors.ts'
+import { eacces, erofsReadOnly } from '../errors/fs.ts'
+import { fsErrorLine } from '../errors/render.ts'
 import { Limit, type PathSpec, type Refusal } from '../types.ts'
 import type { Policy } from './base.ts'
 import { HiddenPathsPolicy } from './builtin/hidden_paths.ts'

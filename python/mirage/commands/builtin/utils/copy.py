@@ -15,8 +15,9 @@
 import errno
 
 from mirage.commands.builtin.utils.paths import descendant_path
+from mirage.errors.constants import ELOOP_STRERROR
+from mirage.errors.types import DotWalkLoop
 from mirage.types import FileType, PathSpec, StatFn
-from mirage.utils.errors import ELOOP_STRERROR, DotWalkLoop
 
 # The destination verdicts GNU meets at the destination's own stat, before
 # any create or rename: a plain file in its chain, or a link loop in it.

@@ -15,7 +15,7 @@
 import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
-import { isEexist } from '../../../../utils/errors.ts'
+import { isEexist } from '../../../../errors/fs.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'

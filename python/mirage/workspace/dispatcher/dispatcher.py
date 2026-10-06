@@ -34,6 +34,16 @@ from mirage.context import (
     hidden_refusal,
     session_visibility,
 )
+from mirage.errors.constants import MISS_ERRORS
+from mirage.errors.fs import (
+    eisdir,
+    eloop,
+    enoent,
+    exdev,
+    no_mount,
+    no_xattr,
+    walk_refusal,
+)
 from mirage.io import IOResult, OpReport
 from mirage.observe.context import record, start_op
 from mirage.observe.record import OpRecord
@@ -57,16 +67,6 @@ from mirage.types import (
     MountMode,
     PathSpec,
     VFSName,
-)
-from mirage.utils.errors import (
-    MISS_ERRORS,
-    eisdir,
-    eloop,
-    enoent,
-    exdev,
-    no_mount,
-    no_xattr,
-    walk_refusal,
 )
 from mirage.utils.hidden import hidden_under, move_reveals, path_visible
 from mirage.utils.key_prefix import mount_key

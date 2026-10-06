@@ -38,8 +38,8 @@ import {
   noMount,
   noXattr,
   walkRefusal,
-  type FsError,
-} from '../../utils/errors.ts'
+} from '../../errors/fs.ts'
+import { type FsError } from '../../errors/types.ts'
 import { Policies, PolicyDenied } from '../../policy/index.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import { OpBoundary } from '../../ops/boundary.ts'
@@ -55,7 +55,7 @@ import type { OpsRegistry } from '../../ops/registry.ts'
 import { type OpKwargs } from '../../ops/registry.ts'
 import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../../ops/config.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../ops/namespace_view.ts'
-import { ebusy, isMissingPath } from '../../utils/errors.ts'
+import { ebusy, isMissingPath } from '../../errors/fs.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import {
   type CacheFacts,

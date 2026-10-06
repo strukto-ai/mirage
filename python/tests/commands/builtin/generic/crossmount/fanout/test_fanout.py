@@ -17,10 +17,10 @@ import asyncio
 import pytest
 
 from mirage.commands.builtin.generic.crossmount.fanout import run_fanout
+from mirage.errors.fs import enoent
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 class FakeRunSingle:

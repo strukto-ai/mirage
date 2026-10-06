@@ -13,13 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
-import {
-  ELOOP_STRERROR,
-  errorVirtualPath,
-  fsStrerror,
-  isFsError,
-  operandSpelling,
-} from '../../../../utils/errors.ts'
+import { ELOOP_STRERROR } from '../../../../errors/constants.ts'
+import { errorVirtualPath, fsStrerror, isFsError } from '../../../../errors/fs.ts'
+import { operandSpelling } from '../../../../errors/render.ts'
 import { DEFAULT_DIR_MODE, parseChmod } from '../../../../utils/mode.ts'
 import { DEFAULT_UMASK, sessionUmask, walkProbeFor } from '../../../../context/session_context.ts'
 import { specOf } from '../../../spec/builtins.ts'

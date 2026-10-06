@@ -18,7 +18,7 @@ import { VFSName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { createS3Client, isNotFoundError, loadS3Module, s3Key } from './client.ts'
 import { fpRevFromS3Response, read } from './read.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 
 const DEFAULT_CHUNK_SIZE = 8192

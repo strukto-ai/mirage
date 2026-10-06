@@ -18,8 +18,8 @@ import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
 from mirage.core.ssh.utils import join_root
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 async def set_attrs(

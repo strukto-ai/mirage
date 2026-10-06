@@ -12,11 +12,13 @@ from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.fs import fs_strerror
+from mirage.errors.render import ZERO_LENGTH_NAME
+from mirage.errors.types import DotWalkError
 from mirage.io.types import IOResult, SizedRun
 from mirage.ops.namespace_view import paths_scoped
 from mirage.ops.types import LinkView, MountView, NamespaceView, StatPath
 from mirage.types import FileStat, PathSpec, Visibility
-from mirage.utils.errors import ZERO_LENGTH_NAME, DotWalkError, fs_strerror
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import respell_raw

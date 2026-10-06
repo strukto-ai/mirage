@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isEnoent } from '../../utils/errors.ts'
+import { isEnoent } from '../../errors/fs.ts'
 import { type IndexEntry, LookupStatus } from './config.ts'
 import type { IndexCacheStore } from './store.ts'
 import { withIndexLock } from './lock.ts'

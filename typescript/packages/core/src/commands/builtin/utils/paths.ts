@@ -16,14 +16,9 @@ import type { LinkView, StatPath } from '../../../ops/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { FileStat } from '../../../types.ts'
 import { FileType, LINK_TARGET_KEY, PathSpec, type StatFn } from '../../../types.ts'
-import {
-  dotWalkError,
-  eexist,
-  enoent,
-  isMissingPath,
-  operandSpelling,
-  type FsError,
-} from '../../../utils/errors.ts'
+import { dotWalkError, eexist, enoent, isMissingPath } from '../../../errors/fs.ts'
+import { operandSpelling } from '../../../errors/render.ts'
+import { type FsError } from '../../../errors/types.ts'
 import { mountKey, rekey, respelled } from '../../../utils/key_prefix.ts'
 import {
   CycleError,

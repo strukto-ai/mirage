@@ -20,8 +20,8 @@ from mirage.cache.index import IndexCacheStore, IndexEntry
 from mirage.core.google.client import TokenManager
 from mirage.core.google.drive import get_file
 from mirage.core.hierarchy.scope import ScopeMatch
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 async def resolve_app_entry(

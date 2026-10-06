@@ -24,9 +24,9 @@ from mirage.cache.index.warm import entry_or_warm
 from mirage.core.box.api import download_file, download_file_stream
 from mirage.core.box.fingerprint import entry_token, read_token
 from mirage.core.box.readdir import readdir
+from mirage.errors.fs import enoent
 from mirage.observe.context import record, record_stream, start_op
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.ranges import window_for
 

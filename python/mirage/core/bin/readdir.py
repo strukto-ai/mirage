@@ -14,8 +14,8 @@
 
 from mirage.accessor.bin import BinAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.errors.fs import enoent, enotdir
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent, enotdir
 
 
 async def readdir(

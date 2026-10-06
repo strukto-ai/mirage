@@ -24,7 +24,7 @@ import { downloadFile, downloadFileStream } from './api.ts'
 import { entryToken, readToken } from './fingerprint.ts'
 import { readdir } from './readdir.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
-import { eisdir, enoent } from '../../utils/errors.ts'
+import { eisdir, enoent } from '../../errors/fs.ts'
 import { windowFor } from '../../utils/ranges.ts'
 
 /**

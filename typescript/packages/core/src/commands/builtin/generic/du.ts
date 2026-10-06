@@ -20,12 +20,8 @@ import { UsageError } from '../../errors.ts'
 import { IOResult, type SizedRun } from '../../../io/types.ts'
 import { pathsScoped } from '../../../ops/namespace_view.ts'
 import { pathVisible } from '../../../utils/hidden.ts'
-import {
-  ZERO_LENGTH_NAME,
-  fsStrerror,
-  isDotWalkError,
-  isMissingPath,
-} from '../../../utils/errors.ts'
+import { ZERO_LENGTH_NAME } from '../../../errors/render.ts'
+import { fsStrerror, isDotWalkError, isMissingPath } from '../../../errors/fs.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { respellRaw } from '../../../utils/path.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'

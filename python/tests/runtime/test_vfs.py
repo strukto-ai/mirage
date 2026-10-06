@@ -18,6 +18,7 @@ import logging
 
 import pytest
 
+from mirage.errors.types import OperationNotSupportedError
 from mirage.runtime.constants import LISTING_ENTRY_CONCURRENCY
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.handles import FlushStep
@@ -25,7 +26,6 @@ from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import VFSEntry, VFSStat
 from mirage.runtime.vfs import RuntimeVFS
 from mirage.types import DEVICE_NUMBERS_KEY, ContentType, FileStat, FileType
-from mirage.utils.errors import OperationNotSupportedError
 from mirage.utils.stat_view import (
     CHAR_MODE,
     DIR_MODE,

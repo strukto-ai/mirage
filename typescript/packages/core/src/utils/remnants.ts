@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FileStat, FileType, PathSpec } from '../types.ts'
-import { isEnotdir, isMissingPath } from './errors.ts'
+import { isEnotdir, isMissingPath } from '../errors/fs.ts'
 import { rstripSlash } from './slash.ts'
 
 export type Allowed = (virtual: string) => boolean

@@ -19,6 +19,7 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from mirage.errors.types import ReadOnlyError
 from mirage.types import (
     MOUNT_MODE_RANK,
     EntryGate,
@@ -29,7 +30,6 @@ from mirage.types import (
     WalkProbe,
     weaker_mode,
 )
-from mirage.utils.errors import ReadOnlyError
 from mirage.utils.hidden import (
     anchor_depth,
     is_glob,

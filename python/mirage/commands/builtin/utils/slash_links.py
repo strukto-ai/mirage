@@ -12,9 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.errors.constants import ELOOP_STRERROR
 from mirage.ops.types import LinkView
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import ELOOP_STRERROR
 from mirage.utils.path import CycleError
 
 

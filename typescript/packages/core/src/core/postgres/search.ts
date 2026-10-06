@@ -32,7 +32,7 @@ import { readRows, rowLine } from './read.ts'
 import { buildEntitySemanticJson } from './semantic.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { jsonText } from '../render/json.ts'
-import { efbig } from '../../utils/errors.ts'
+import { efbig } from '../../errors/fs.ts'
 
 // Column types whose `::text` is the value exactly as a rows.jsonl line spells
 // it, so a LIKE over the cast finds every row whose line holds the pattern

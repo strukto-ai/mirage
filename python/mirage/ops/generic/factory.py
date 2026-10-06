@@ -17,10 +17,10 @@ import os
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.errors.fs import eexist, einval, enotsup
 from mirage.ops.generic.types import OpCoreFn, OpsTable
 from mirage.ops.registry import RegisteredOp
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import eexist, einval, enotsup
 from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.ranges import (
     is_unsatisfiable_range,

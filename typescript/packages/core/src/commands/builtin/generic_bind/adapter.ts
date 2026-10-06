@@ -60,7 +60,7 @@ import {
   isEnoent,
   isMissError,
   walkRefusal,
-} from '../../../utils/errors.ts'
+} from '../../../errors/fs.ts'
 import { dotRefusal } from '../utils/paths.ts'
 import type { ChildMounts } from '../../../ops/types.ts'
 import { makeResolveGlob, type TargetStat } from '../../../utils/glob_walk.ts'

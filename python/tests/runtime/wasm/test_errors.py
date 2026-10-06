@@ -15,6 +15,7 @@
 import errno as host_errno
 
 from mirage.errors import FsCondition
+from mirage.errors.fs import no_mount
 from mirage.runtime.constants import HARD_LINK_REFUSAL
 from mirage.runtime.wasm.errors import (
     EINVAL,
@@ -26,7 +27,6 @@ from mirage.runtime.wasm.errors import (
     errno_for,
     wasi_errno,
 )
-from mirage.utils.errors import no_mount
 from mirage.utils.path import CycleError
 
 

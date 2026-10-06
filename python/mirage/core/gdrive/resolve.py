@@ -30,8 +30,8 @@ from mirage.core.google.drive import (
     list_files,
     list_shared_drives,
 )
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 logger = logging.getLogger(__name__)
 

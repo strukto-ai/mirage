@@ -15,7 +15,7 @@
 import type { Accessor } from '../../accessor/base.ts'
 import { ResourceType } from '../../cache/index/config.ts'
 import { FileStat, FileType } from '../../types.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'

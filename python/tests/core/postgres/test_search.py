@@ -25,7 +25,7 @@ from mirage.core.postgres.search import (
     search_kind,
     search_schema,
 )
-from mirage.utils.errors import FileTooLargeError
+from mirage.errors.types import FileTooLargeError
 from mirage.vfs.postgres.config import PostgresConfig
 from mirage.vfs.types import SearchQuery
 

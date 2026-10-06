@@ -15,7 +15,7 @@
 import { compareCodePoints } from '../../utils/sort.ts'
 import { contentSize } from '../../utils/stat_view.ts'
 import { resolvePath } from '../../utils/path.ts'
-import { enoent, gnuStrerror } from '../../utils/errors.ts'
+import { enoent, gnuStrerror } from '../../errors/fs.ts'
 import { failureText } from '../../errors/classify.ts'
 import { formatFindLs } from '../../commands/builtin/utils/formatting.ts'
 import {

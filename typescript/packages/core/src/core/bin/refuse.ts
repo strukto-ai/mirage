@@ -14,7 +14,7 @@
 
 import type { BinAccessor } from '../../accessor/bin.ts'
 import type { PathSpec } from '../../types.ts'
-import { erofsReadOnly } from '../../utils/errors.ts'
+import { erofsReadOnly } from '../../errors/fs.ts'
 
 /**
  * Refuse a write into the view, as a read-only file system does. What the

@@ -9,16 +9,12 @@ from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import eisdir, enoent, enotdir
+from mirage.errors.render import fs_error_line
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, PathSpec
-from mirage.utils.errors import (
-    FS_ERRORS,
-    eisdir,
-    enoent,
-    enotdir,
-    fs_error_line,
-)
 from mirage.utils.stat_view import is_dir
 
 # GNU truncate's letter set differs from split's and od's: lowercase

@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import { eacces, enoent } from '../../../utils/errors.ts'
+import { eacces, enoent } from '../../../errors/fs.ts'
 import { parseFlags, writeOutput } from './tee.ts'
 
 const DEC = new TextDecoder()

@@ -14,7 +14,7 @@
 
 import type { LinkView, MountView } from '../../../../ops/types.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { fsStrerror, isFsError, walkRefusal } from '../../../../utils/errors.ts'
+import { fsStrerror, isFsError, walkRefusal } from '../../../../errors/fs.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
 import { respellOne } from '../../../../utils/path.ts'
 import { lstripSlash, rstripSlash } from '../../../../utils/slash.ts'

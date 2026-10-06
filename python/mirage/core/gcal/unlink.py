@@ -19,7 +19,7 @@ from mirage.core.gcal.readdir import calendar_index, readdir
 from mirage.core.gcal.scope import detect_scope
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.unlink import make_unlink
-from mirage.utils.errors import enoent
+from mirage.errors.fs import enoent
 
 
 async def _delete(

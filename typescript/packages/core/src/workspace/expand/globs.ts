@@ -17,7 +17,7 @@ import { sessionVisibility } from '../../context/session_context.ts'
 import type { NamespaceLinks } from '../../ops/config.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { isFsError } from '../../utils/errors.ts'
+import { isFsError } from '../../errors/fs.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import {

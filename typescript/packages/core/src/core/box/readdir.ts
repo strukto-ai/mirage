@@ -22,7 +22,7 @@ import { FileType, PathSpec } from '../../types.ts'
 import { absentOn404, listFolderItems, type BoxItem } from './api.ts'
 import { SHA1 } from './constants.ts'
 import { tokenOf } from './fingerprint.ts'
-import { enotdir, enoent } from '../../utils/errors.ts'
+import { enotdir, enoent } from '../../errors/fs.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
 export function resourceTypeFor(item: BoxItem): string {

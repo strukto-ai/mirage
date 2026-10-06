@@ -32,8 +32,8 @@ from mirage.core.google.drive import (
     delete_file,
     list_files,
 )
+from mirage.errors.fs import eisdir, enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import eisdir, enoent
 
 
 async def copy_children(

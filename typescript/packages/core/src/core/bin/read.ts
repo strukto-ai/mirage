@@ -14,7 +14,7 @@
 
 import type { BinAccessor } from '../../accessor/bin.ts'
 import type { PathSpec } from '../../types.ts'
-import { eisdir, enoent } from '../../utils/errors.ts'
+import { eisdir, enoent } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { renderStub } from './render.ts'
 

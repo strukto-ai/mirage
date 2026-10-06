@@ -27,9 +27,9 @@ from mirage.core.dropbox.client import (
 from mirage.core.dropbox.constants import RESULT_HEADER
 from mirage.core.dropbox.fingerprint import result_token
 from mirage.core.dropbox.readdir import readdir
+from mirage.errors.fs import enoent
 from mirage.observe.context import record, record_stream, start_op
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.ranges import window_for
 

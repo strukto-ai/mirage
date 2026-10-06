@@ -5,7 +5,7 @@ from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.notion.client import NotionAPIError
 from mirage.core.notion.normalize import page_segment_name
 from mirage.core.notion.pages import get_page
-from mirage.utils.errors import enoent
+from mirage.errors.fs import enoent
 
 
 async def resolve_row(

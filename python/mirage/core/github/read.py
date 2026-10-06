@@ -20,9 +20,9 @@ from mirage.core.api.client import SessionArg
 from mirage.core.github.client import github_get
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.lookup import locate, lookup_retrying
+from mirage.errors.fs import enoent
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec, VFSName
-from mirage.utils.errors import enoent
 
 
 async def read_bytes(

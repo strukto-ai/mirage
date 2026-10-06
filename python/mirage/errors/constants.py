@@ -15,9 +15,16 @@
 import errno
 
 from mirage.errors.posix import POSIX
-from mirage.errors.types import FsCondition
+from mirage.errors.types import (
+    BadDescriptorError,
+    DotWalkLoop,
+    FileTooLargeError,
+    FsCondition,
+    NoMountError,
+    OperationNotSupportedError,
+    ReadOnlyError,
+)
 from mirage.runtime.errors import CrossMountError
-from mirage.utils.errors import NoMountError, OperationNotSupportedError
 from mirage.utils.path import CycleError
 
 # Exception class beats OSError.errno beats everything, because mirage
@@ -65,3 +72,56 @@ ERRNO_ARMS: dict[int, FsCondition] = {
     errno.EROFS: FsCondition.EROFS,
     POSIX[FsCondition.NO_XATTR].errno: FsCondition.NO_XATTR,
 }
+
+ELOOP_STRERROR = "Too many levels of symbolic links"
+
+
+FS_STRERROR: list[tuple[type[OSError], str]] = [
+    (BadDescriptorError, "Bad file descriptor"),
+    (FileNotFoundError, "No such file or directory"),
+    (NotADirectoryError, "Not a directory"),
+    (IsADirectoryError, "Is a directory"),
+    (DotWalkLoop, ELOOP_STRERROR),
+    (FileExistsError, "File exists"),
+    (ReadOnlyError, "Read-only file system"),
+    (PermissionError, "Permission denied"),
+    (OperationNotSupportedError, "Operation not supported"),
+    (FileTooLargeError, "File too large"),
+]
+
+
+# The recoverable per-operand filesystem errors: every catch site that
+# formats a GNU stderr line and keeps going uses this tuple, so the catch
+# set and the strerror table can never drift apart (mirrors TS isFsError).
+FS_ERRORS: tuple[type[OSError], ...] = tuple(t for t, _ in FS_STRERROR)
+
+
+# What a tree walk over a user operand tolerates: every recoverable
+# filesystem error, plus the ValueError store backends raise for "not a
+# directory". Catch sites that warn and keep walking (tree, grep -r, rg) use
+# this so an errno split like ENOENT/ENOTDIR cannot make one of them abort
+# while its siblings keep going.
+WALK_ERRORS: tuple[type[Exception], ...] = (*FS_ERRORS, ValueError)
+
+
+# What an existence probe reads as "nothing here": the path is absent, or
+# a component of it is not traversable. Deliberately narrower than
+# WALK_ERRORS, because a permission or missing-capability error is not
+# absence, and mapping it to one would report a path that exists as
+# missing. Mirrors TS isMissError.
+MISS_ERRORS: tuple[type[Exception], ...] = (
+    FileNotFoundError,
+    NotADirectoryError,
+    IsADirectoryError,
+    ValueError,
+)
+
+
+# The failures that happen after the open, which GNU words as the read
+# step: a directory opens and then refuses the read, and the backend
+# contract raises the other two for a read it will not serve.
+READ_FAILURES: tuple[type[OSError], ...] = (
+    IsADirectoryError,
+    FileTooLargeError,
+    BadDescriptorError,
+)

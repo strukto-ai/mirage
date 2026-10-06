@@ -33,6 +33,7 @@ import asyncssh
 from mirage import Workspace
 from mirage.errors import FsCondition, classify
 from mirage.errors.classify import failure_text
+from mirage.errors.types import NoMountError
 from mirage.fuse.core import MountCore
 from mirage.io.types import ByteSource
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
@@ -62,7 +63,6 @@ from mirage.server.ssh.stream import (
     encode,
 )
 from mirage.types import JsonValue
-from mirage.utils.errors import NoMountError
 from mirage.workspace.abort import MirageAbortError
 
 logger = logging.getLogger(__name__)

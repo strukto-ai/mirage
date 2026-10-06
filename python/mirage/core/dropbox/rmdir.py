@@ -18,9 +18,9 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dropbox.api import delete_path, get_metadata, list_folder
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.paths import dropbox_path_of
+from mirage.errors.fs import enoent, enotdir, enotempty
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent, enotdir, enotempty
 
 
 async def rmdir(

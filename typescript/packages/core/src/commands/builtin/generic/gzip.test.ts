@@ -14,7 +14,7 @@
 // Mirrors python/tests/commands/builtin/generic/test_gzip.py.
 
 import { expect, it } from 'vitest'
-import { eacces } from '../../../utils/errors.ts'
+import { eacces } from '../../../errors/fs.ts'
 import { gzipGeneric } from './gzip.ts'
 import { gunzip } from '../../../utils/compress.ts'
 import { PathSpec } from '../../../types.ts'

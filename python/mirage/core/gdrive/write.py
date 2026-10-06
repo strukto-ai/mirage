@@ -22,9 +22,9 @@ from mirage.core.gdrive.resolve import (
     resolve_parent,
 )
 from mirage.core.google.drive import update_file_content, upload_file
+from mirage.errors.fs import eisdir
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.errors import eisdir
 
 
 @eacces_on_denied

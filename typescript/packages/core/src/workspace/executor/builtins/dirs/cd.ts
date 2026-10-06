@@ -14,7 +14,7 @@
 
 import { dispatchStat, dotRefusal, typedSpec } from '../../../../commands/builtin/utils/paths.ts'
 import { dottedSpelling, resolvePath } from '../../../../utils/path.ts'
-import { fsStrerror } from '../../../../utils/errors.ts'
+import { fsStrerror } from '../../../../errors/fs.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { PathSpec, type StatFn } from '../../../../types.ts'
 import { FileType } from '../../../../types.ts'

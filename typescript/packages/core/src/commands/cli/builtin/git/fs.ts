@@ -17,7 +17,7 @@ import { FileSystem } from 'isomorphic-git/models'
 
 import { FileType, PathSpec } from '../../../../types.ts'
 import type { FileStat } from '../../../../types.ts'
-import { enoent } from '../../../../utils/errors.ts'
+import { enoent } from '../../../../errors/fs.ts'
 import { basename, ensureDir, exists, readNames, removeFile, under } from './io.ts'
 import type { Dispatch, RepoLocation } from './types.ts'
 import { posixNormpath } from '../../../../utils/path.ts'

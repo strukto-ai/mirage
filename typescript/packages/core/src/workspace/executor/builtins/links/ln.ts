@@ -42,7 +42,7 @@ import {
   isEnoent,
   isEnotdir,
   isErofs,
-} from '../../../../utils/errors.ts'
+} from '../../../../errors/fs.ts'
 import {
   CycleError,
   dottedSpelling,

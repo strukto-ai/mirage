@@ -17,8 +17,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.hierarchy.probe import A, assert_parent
 from mirage.core.hierarchy.scope import ROOT, DetectFn, ScopeMatch
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec, StatFn
-from mirage.utils.errors import enoent
 from mirage.utils.ranges import slice_window
 
 Reader = Callable[[A, ScopeMatch, PathSpec, IndexCacheStore], Awaitable[bytes]]

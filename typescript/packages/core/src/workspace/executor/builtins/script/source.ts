@@ -15,7 +15,7 @@
 import { type ByteSource, IOResult } from '../../../../io/types.ts'
 import type { JobConsole } from '../../../../shell/console/index.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { fsStrerror } from '../../../../utils/errors.ts'
+import { fsStrerror } from '../../../../errors/fs.ts'
 import { CallStack } from '../../../../shell/call_stack.ts'
 import { ReturnSignal } from '../../../../shell/errors.ts'
 import type { SessionState } from '../../../session/session.ts'

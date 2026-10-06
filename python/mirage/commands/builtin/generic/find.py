@@ -23,11 +23,12 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.core.generic.find import link_results, modified_ts, walk_find
 from mirage.errors.classify import failure_text
+from mirage.errors.constants import MISS_ERRORS
+from mirage.errors.fs import fs_strerror, walk_refusal
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, StatPath
 from mirage.types import FileStat, FileType, FindType, PathSpec, Visibility
 from mirage.utils.dates import matches_mtime
-from mirage.utils.errors import MISS_ERRORS, fs_strerror, walk_refusal
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import respell_one, respell_raw

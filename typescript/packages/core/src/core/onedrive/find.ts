@@ -15,7 +15,7 @@
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import { startBasename } from '../../commands/builtin/find_eval.ts'
 import { FileType, type PathSpec } from '../../types.ts'
-import { isEnoent } from '../../utils/errors.ts'
+import { isEnoent } from '../../errors/fs.ts'
 import type { FindOptions } from '../../vfs/base.ts'
 import { findItems } from '../msgraph/drive.ts'
 import { driveLoc } from './client.ts'

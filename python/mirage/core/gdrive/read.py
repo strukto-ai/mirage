@@ -31,6 +31,7 @@ from mirage.core.google.client import TokenManager
 from mirage.core.google.drive import download_file
 from mirage.core.gsheets.read import read_spreadsheet
 from mirage.core.gslides.read import read_presentation
+from mirage.errors.fs import enoent
 from mirage.observe.context import (
     active_recorder,
     record,
@@ -38,7 +39,6 @@ from mirage.observe.context import (
     start_op,
 )
 from mirage.types import JsonValue, PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.ranges import slice_window, window_for
 

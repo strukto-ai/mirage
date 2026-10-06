@@ -23,7 +23,7 @@ import {
   type PrimitiveMove,
   type ReaddirFn,
 } from '../../../types.ts'
-import { eacces, enoent, enotdir, enotsup } from '../../../utils/errors.ts'
+import { eacces, enoent, enotdir, enotsup } from '../../../errors/fs.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { mvFlags, mvGeneric, parseFlags, type MvFlags } from './mv.ts'
 import { FlagView } from '../../spec/flag_view.ts'

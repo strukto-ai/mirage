@@ -18,13 +18,13 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
+from mirage.errors.types import BadDescriptorError
 from mirage.io.async_line_iterator import SharedInput
 from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole, OwnedStream, Terminal
 from mirage.shell.constants import FD_BOTH, FD_CLOSE
 from mirage.shell.types import Redirect, RedirectKind
 from mirage.types import PathSpec
-from mirage.utils.errors import BadDescriptorError
 
 
 def unsupported_descriptor(redirects: Iterable[Redirect]) -> int | None:

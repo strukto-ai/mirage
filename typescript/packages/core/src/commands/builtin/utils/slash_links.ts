@@ -14,7 +14,7 @@
 
 import type { LinkView } from '../../../ops/types.ts'
 import { FileType, type PathSpec } from '../../../types.ts'
-import { ELOOP_STRERROR } from '../../../utils/errors.ts'
+import { ELOOP_STRERROR } from '../../../errors/constants.ts'
 import { CycleError } from '../../../utils/path.ts'
 
 // Whether an operand typed with a trailing slash names a symlink.

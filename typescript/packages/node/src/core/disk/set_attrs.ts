@@ -14,7 +14,7 @@
 
 import { chmod, stat as fsStat, utimes } from 'node:fs/promises'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { enoent } from '@struktoai/mirage-core/utils/errors'
+import { enoent } from '@struktoai/mirage-core/errors/fs'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { diskError } from './errors.ts'
 import { resolveInside } from './utils.ts'

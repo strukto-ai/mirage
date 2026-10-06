@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { runWithRedirectPaths } from '../../context/session_context.ts'
-import { fsStrerror, isFsError, isMissingPath } from '../../utils/errors.ts'
+import { fsStrerror, isFsError, isMissingPath } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { SharedInput, share } from '../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'

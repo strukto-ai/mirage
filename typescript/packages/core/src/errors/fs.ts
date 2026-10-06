@@ -12,31 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { gnuPhrase } from '../errors/posix.ts'
-import { dropTrailingSegments, respellOne } from './path.ts'
-import { quotesOperands, shellQuote, shellQuoteAlways } from './quote.ts'
-import { rstripSlash, stripSlash } from './slash.ts'
-import { encodeText } from '../shell/bytes.ts'
-
-export interface FsError extends Error {
-  code: string
-  // The virtual path the user typed (PathSpec.virtual) — the ONLY path that
-  // may ever reach a user-facing error message. Backends pass the PathSpec and
-  // the helper reads .virtual, so a stripped path or real fs path can never
-  // be stamped here by accident.
-  virtualPath: string
-}
+import { STRERROR } from './constants.ts'
+import type { DotWalkError, FsError, MissingOpError, NoMountError } from './types.ts'
+import { stripSlash } from '../utils/slash.ts'
 
 // Accepts a PathSpec (reads .rawPath, the word's spelling, which defaults
 // to .virtual) or a bare virtual-path string. Taking a structural shape
 // avoids importing the PathSpec class (no import cycle). .rawPath is always
 // a virtual-space path, never a real fs path.
-function virtualOf(path: string | { virtual: string; rawPath?: string }): string {
+export function virtualOf(path: string | { virtual: string; rawPath?: string }): string {
   if (typeof path === 'string') return path
   return path.rawPath ?? path.virtual
 }
 
-function fsError(path: string | { virtual: string }, code: string): FsError {
+export function fsError(path: string | { virtual: string }, code: string): FsError {
   const virtual = virtualOf(path)
   const err = new Error(virtual) as FsError
   err.code = code
@@ -79,31 +68,12 @@ export function enotdir(path: string | { virtual: string }): FsError {
   return fsError(path, 'ENOTDIR')
 }
 
-/**
- * A path the kernel walk does not resolve: its own `.` and `..`
- * (`dotRefusal`), ENOENT or ENOTDIR at a name in front of a dot, or an
- * operand whose `walkError` the walk answered before the command ran
- * (`walkRefusal`), the empty name's ENOENT or a link loop's ELOOP.
- *
- * Final, which is why it is marked: a keyed store's plain miss can still be
- * an implicit directory, and the layers that ask (the read commands'
- * directory probes) re-read ENOENT that way, but a name in front of a dot
- * that is missing or a plain file is not a directory under any reading, and
- * neither is the empty name or a link loop. Every catch site keyed on the
- * code still sees its own. Mirrors Python's DotWalkError.
- */
-export interface DotWalkError extends FsError {
-  readonly dotWalk: true
-}
-
 export function dotWalkError(
   path: string | { virtual: string },
   code: 'ENOENT' | 'ENOTDIR' | 'ELOOP',
 ): DotWalkError {
   return Object.assign(fsError(path, code), { dotWalk: true as const })
 }
-
-export const ELOOP_STRERROR = 'Too many levels of symbolic links'
 
 /** What an op raises for an operand the kernel walk did not resolve, named
  * as typed (the empty name included), since that is what the command
@@ -230,57 +200,6 @@ export async function listingError(
   return readdirError(path, key, (p) => stripSlash(p) !== leaf && isFile(p), isDir)
 }
 
-/**
- * Why `gzip -d` cannot decompress one input, in gzip's words.
- *
- * `fatal` is gzip 1.13's split: an input with no gzip header, or with a
- * header naming a method or flag gzip does not support, is reported and the
- * run moves on to the next operand, while a truncated or corrupt one ends the
- * run, as does a CRC or length mismatch unless `-t` is only testing. A
- * mismatch in both carries both reasons, in gzip's order. `keepsOutput` says
- * the bytes decoded before the failure are whole members: after a refusal of
- * a later member, of trailing garbage, or of a trailer. An in-place run still
- * writes them when the refusal is not fatal, and tar reads them whatever gzip
- * does. `firstHeader` says gzip stopped inside its first member's header,
- * before it would create an output file or read a body; on stdin that ends
- * the run, as gzip exits there. The reasons are gzip's own lines, each with
- * `{}` where the input's name goes, the program name and any leading newline
- * included, since gunzip, zcat, zgrep and tar's child all run gzip. Mirrors
- * Python's GzipDataError.
- */
-export class GzipDataError extends Error {
-  readonly reasons: readonly string[]
-  readonly fatal: boolean
-
-  constructor(
-    reasons: readonly string[],
-    fatal: boolean,
-    readonly exitCode = 1,
-    readonly keepsOutput = false,
-    readonly firstHeader = false,
-  ) {
-    super(reasons.join('\n'))
-    this.name = 'GzipDataError'
-    this.reasons = reasons
-    this.fatal = fatal
-  }
-
-  /** gzip's lines for the failure, the input named `label`. */
-  render(label: string): string {
-    return this.reasons.map((reason) => `${reason.split('{}').join(label)}\n`).join('')
-  }
-}
-
-// The registry's refusal for a path that falls outside every mount. Mirrors
-// Python's `ValueError("no mount matches path: ...")`; the stamp exists so
-// the exists-family probes can recognize it without sniffing message text,
-// and the message stays unstamped by a POSIX code so command stderr keeps
-// rendering it verbatim (parity with Python, where ValueError is not an
-// OSError and gets no strerror suffix).
-export interface NoMountError extends Error {
-  noMount: true
-}
-
 export function noMount(path: string): NoMountError {
   const err = new Error(`no mount matches path: ${path}`) as NoMountError
   err.noMount = true
@@ -319,13 +238,6 @@ export function isMissingPath(err: unknown): boolean {
   if (err === null || typeof err !== 'object') return false
   const stamped = err as { code?: unknown; noMount?: unknown }
   return stamped.code === 'ENOENT' || stamped.noMount === true
-}
-
-// A missing-op error also names the op the backend did not register, so
-// capability probes (metadata.ts) can test for one specific gap instead of
-// sniffing message text.
-export interface MissingOpError extends FsError {
-  op: string
 }
 
 // A mount was asked for an op its backend does not register (e.g. unlink on
@@ -380,32 +292,6 @@ export function erofsReadOnly(
   err.code = 'EROFS'
   err.virtualPath = virtualOf(path)
   return err
-}
-
-// The phrases live once, in the posix table. The DOMAIN here stays
-// deliberately narrower than the vocabulary: these are the per-operand
-// codes a read-family command skips-and-reports, and widening it (say
-// to EIO) would widen isFsError's swallow set, which mirrors python's
-// typed FS_ERRORS tuple, not the whole condition enum. ELOOP is in it
-// because a link loop is a walk refusal met per operand (python's
-// DotWalkLoop), widened in both languages together.
-const STRERROR: Record<string, string> = {
-  // A read from a closed or write-only descriptor (`cat 0<&1`), raised
-  // only by the shell's own unreadable stdin, not by any backend.
-  EBADF: 'Bad file descriptor',
-  ENOENT: gnuPhrase('ENOENT'),
-  ENOTDIR: gnuPhrase('ENOTDIR'),
-  EISDIR: gnuPhrase('EISDIR'),
-  ELOOP: gnuPhrase('ELOOP'),
-  EROFS: gnuPhrase('EROFS'),
-  EACCES: gnuPhrase('EACCES'),
-  EEXIST: gnuPhrase('EEXIST'),
-  ENOTEMPTY: gnuPhrase('ENOTEMPTY'),
-  ENOTSUP: gnuPhrase('ENOTSUP'),
-  EXDEV: gnuPhrase('EXDEV'),
-  // A read the backend refuses to render whole, raised by a mount's size
-  // cap (not a POSIX condition mirage names, the way EBADF is not).
-  EFBIG: 'File too large',
 }
 
 // GNU strerror text for a POSIX error code, or null if not a recognized
@@ -489,189 +375,4 @@ export function isErofs(err: unknown): boolean {
 // listing or being laundered into a GNU-shaped 'cannot access' line.
 export function isWalkError(err: unknown): boolean {
   return isFsError(err) || (err as { noMount?: unknown }).noMount === true
-}
-
-// Re-spell a reported path the way its operand was typed. Backends name paths
-// in virtual space, but GNU quotes the operand as the user wrote it:
-// `cd /data && mkdir -p f.txt/sub` reports 'f.txt', not '/data/f.txt'. The path
-// an error names is the operand itself, an ancestor of it (mkdir -p blames the
-// component of the chain it tripped on), or something under it, so all three
-// are rebased onto rawPath. An absolute operand rebases to itself, which is why
-// this is a no-op for most invocations. Mirrors Python's operand_spelling.
-export function operandSpelling(
-  path: string,
-  operand: { virtual: string; rawPath?: string },
-): string {
-  const virtual = operand.virtual
-  const raw = operand.rawPath ?? virtual
-  if (raw === virtual) return path
-  if (path === virtual) return raw
-  const base = rstripSlash(virtual)
-  if (path.startsWith(base + '/')) return respellOne(path, virtual, raw)
-  const trimmed = rstripSlash(path)
-  if (base.startsWith(trimmed + '/')) {
-    const segments = (p: string): number => p.split('/').filter((s) => s !== '').length
-    return dropTrailingSegments(raw, segments(base) - segments(trimmed))
-  }
-  return path
-}
-
-// The failures that happen after the open, which GNU words as the read
-// step: a directory opens and then refuses the read, and the backend
-// contract raises the other two for a read it will not serve. Mirrors
-// Python's READ_FAILURES.
-export const READ_FAILURES: ReadonlySet<string> = new Set(['EISDIR', 'EFBIG', 'EBADF'])
-
-const CANNOT_OPEN = 'cannot open {quoted} for reading: {strerror}'
-
-// How GNU words a failed operand for the commands that name the step that
-// failed instead of printing `<cmd>: <name>: <strerror>`. An entry is
-// [opening, reading]: the line for a name the command could not open, and
-// for one it opened that then refused the read (READ_FAILURES). null keeps
-// the plain line for that step, which is also the choice wherever GNU's own
-// line drops the name (`base64: read error`, `fmt: read error`): mirage
-// words a step GNU's way only while that still says which operand failed.
-// `{quoted}` is the name always quoted (gnulib's quoteaf), `{shown}` quoted
-// only when it needs it (quotef), `{bare}` as typed. Measured on coreutils
-// 9.7 and GNU sed 4.9 (debian:stable-slim), a directory read on tmpfs:
-// overlayfs answers a directory's read with EINVAL, so a tac there says
-// `read error: Invalid argument`. Mirrors Python's FAILURE_WORDING.
-export const FAILURE_WORDING: ReadonlyMap<string, readonly [string | null, string | null]> =
-  new Map([
-    ['csplit', [CANNOT_OPEN, null]],
-    ['du', ['cannot access {quoted}: {strerror}', null]],
-    ['find', ['{quoted}: {strerror}', '{quoted}: {strerror}']],
-    ['fmt', [CANNOT_OPEN, null]],
-    ['head', [CANNOT_OPEN, 'error reading {quoted}: {strerror}']],
-    ['ls', ['cannot access {quoted}: {strerror}', null]],
-    [
-      'mkdir',
-      [
-        'cannot create directory {quoted}: {strerror}',
-        'cannot create directory {quoted}: {strerror}',
-      ],
-    ],
-    ['rev', ['cannot open {bare}: {strerror}', null]],
-    ['rm', ['cannot remove {quoted}: {strerror}', 'cannot remove {quoted}: {strerror}']],
-    ['rmdir', ['failed to remove {quoted}: {strerror}', 'failed to remove {quoted}: {strerror}']],
-    ['sed', ["can't read {bare}: {strerror}", 'read error on {bare}: {strerror}']],
-    ['split', [CANNOT_OPEN, null]],
-    ['stat', ['cannot statx {quoted}: {strerror}', 'cannot statx {quoted}: {strerror}']],
-    ['tac', ['failed to open {quoted} for reading: {strerror}', '{shown}: read error: {strerror}']],
-    ['tail', [CANNOT_OPEN, 'error reading {quoted}: {strerror}']],
-    ['touch', ['cannot touch {quoted}: {strerror}', 'cannot touch {quoted}: {strerror}']],
-    [
-      'truncate',
-      [
-        'cannot open {quoted} for writing: {strerror}',
-        'cannot open {quoted} for writing: {strerror}',
-      ],
-    ],
-    ['tsort', [null, '{shown}: read error: {strerror}']],
-    ['uniq', [null, 'error reading {quoted}: {strerror}']],
-  ])
-
-// The command's own template for this failure, null for the plain line: no
-// entry, no template for the step, or standard input, whose `-` line is the
-// one GNU prints when it closes a stdin it could not read.
-// GNU wc and du vet every name the way their --files0-from reader does,
-// and refuse an empty one in these words before any open could answer
-// ENOENT for it (coreutils 9.7). Mirrors Python's ZERO_LENGTH_NAME.
-export const ZERO_LENGTH_NAME = 'invalid zero-length file name'
-const VETS_EMPTY_NAMES: ReadonlySet<string> = new Set(['du', 'wc'])
-
-function stepWording(cmdName: string, label: string, code: string | undefined): string | null {
-  const wording = FAILURE_WORDING.get(cmdName)
-  if (wording === undefined || label === '-') return null
-  return code !== undefined && READ_FAILURES.has(code) ? wording[1] : wording[0]
-}
-
-// GNU coreutils stderr line for one failed path operand, spelled as typed
-// (PathSpec.rawPath). Byte-identical with the executor chokepoint and the
-// Python fs_error_line. Used by read-family commands that keep processing
-// remaining operands after one fails, where the caller holds the operand.
-// A command in SHELL_QUOTED_COMMANDS reports the operand shell-quoted when
-// it needs it ('*.txt'), the way GNU does; every other command reports it
-// bare. A command in FAILURE_WORDING says which step failed instead.
-export function fsErrorLine(
-  cmdName: string,
-  path: string | { virtual: string; rawPath?: string },
-  err: unknown,
-): string {
-  const code = (err as { code?: string }).code
-  const typed = virtualOf(path)
-  if (typed === '' && VETS_EMPTY_NAMES.has(cmdName)) return `${cmdName}: ${ZERO_LENGTH_NAME}\n`
-  const strerror = gnuStrerror(code)
-  const template = stepWording(cmdName, typed, code)
-  if (template !== null && strerror !== null) {
-    // One pass, so a name that spells a placeholder is never substituted.
-    const values: Record<string, string> = {
-      quoted: shellQuoteAlways(typed),
-      shown: shellQuote(typed),
-      bare: typed,
-      strerror,
-    }
-    const line = template.replace(/\{(quoted|shown|bare|strerror)\}/g, (_, key: string) => {
-      return values[key] ?? ''
-    })
-    return `${cmdName}: ${line}\n`
-  }
-  const label = quotesOperands(cmdName) ? shellQuote(typed) : typed
-  if (strerror !== null) return `${cmdName}: ${label}: ${strerror}\n`
-  return `${cmdName}: ${label}\n`
-}
-
-// Re-say another command's failed-operand line in `cmdName`'s voice. A
-// command that reads its operands through another one (the cross-mount
-// stream strategy fetches each with cat) holds that command's rendered
-// line, not the error. When the line is the fetch command's own
-// fsErrorLine for `operand`, it is rendered again from the strerror it
-// names, so the prefix, the quoting and the step wording are all the real
-// command's; any other line only has its prefix swapped. Mirrors Python's
-// revoice_fs_error_line.
-export function revoiceFsErrorLine(
-  line: string,
-  fromCmd: string,
-  cmdName: string,
-  operand: string | { virtual: string; rawPath?: string },
-): string {
-  const prefix = `${fromCmd}: `
-  if (!line.startsWith(prefix)) return line
-  const strerror = line.slice(line.lastIndexOf(': ') + 2)
-  const code = Object.keys(STRERROR).find((key) => STRERROR[key] === strerror)
-  if (code !== undefined) {
-    const err = fsError(operand, code)
-    if (fsErrorLine(fromCmd, operand, err) === `${line}\n`) {
-      return fsErrorLine(cmdName, operand, err).replace(/\n$/, '')
-    }
-  }
-  return `${cmdName}: ${line.slice(prefix.length)}`
-}
-
-// The chokepoint variant of fsErrorLine for callers that only hold the
-// error, byte-identical with Python's format_fs_error: the path is
-// recovered from the error and, when `paths` is supplied, rewritten to the
-// as-typed spelling (PathSpec.rawPath) so a relative argument is reported
-// as typed, like GNU. Shared by the single-mount and cross-mount
-// chokepoints; takes a structural shape to avoid importing PathSpec (no
-// import cycle).
-export function formatFsError(
-  cmdName: string,
-  err: unknown,
-  paths?: readonly { virtual: string; rawPath: string }[],
-): Uint8Array {
-  const strerror = gnuStrerror((err as { code?: string }).code)
-  const vpath = errorVirtualPath(err)
-  const spelled = paths?.find((p) => p.virtual === vpath)?.rawPath ?? vpath
-  let line: string
-  if (strerror !== null) {
-    line = fsErrorLine(cmdName, spelled, err)
-  } else {
-    // A message that already carries the `<cmd>: ` prefix (many generic
-    // commands throw a fully GNU-formatted string, e.g. `uniq: invalid
-    // count`) is emitted verbatim so the prefix is not doubled.
-    const message = err instanceof Error ? err.message : String(err)
-    line = message.startsWith(`${cmdName}: `) ? `${message}\n` : `${cmdName}: ${message}\n`
-  }
-  return encodeText(line)
 }

@@ -23,8 +23,8 @@ from mirage.core.box.api import absent_on_404, list_folder_items
 from mirage.core.box.constants import SHA1
 from mirage.core.box.fingerprint import token_of
 from mirage.core.box.resolve import root_id
+from mirage.errors.fs import enoent
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 

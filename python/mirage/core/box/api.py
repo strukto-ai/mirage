@@ -27,7 +27,7 @@ from mirage.core.box.client import (
     box_put_json,
     box_upload_multipart,
 )
-from mirage.utils.errors import enoent
+from mirage.errors.fs import enoent
 from mirage.utils.ranges import ByteWindow
 
 T = TypeVar("T")

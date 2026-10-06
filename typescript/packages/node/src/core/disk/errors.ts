@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import type { FsError } from '@struktoai/mirage-core/utils/errors'
+import type { FsError } from '@struktoai/mirage-core/errors/types'
 
 // Restamp a raw node:fs error against the mount path. The disk backend
 // operates on a resolved host path, so a raw ErrnoException carries that host

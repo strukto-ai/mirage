@@ -39,8 +39,8 @@ from mirage.commands.builtin.trello.trello_card_update import (
 )
 from mirage.commands.config import CommandFn, CommandOpts
 from mirage.context import reset_mount_gate, set_mount_gate
+from mirage.errors.types import ReadOnlyError
 from mirage.types import MountMode
-from mirage.utils.errors import ReadOnlyError
 from mirage.vfs.trello.config import TrelloConfig
 
 _ACCESSOR = TrelloAccessor(TrelloConfig(api_key="k", api_token="t"))

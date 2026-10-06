@@ -17,7 +17,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { runWithSession } from '../context/session_context.ts'
 import { FileStat, FileType, PathSpec } from '../types.ts'
 import { SessionState } from '../workspace/session/session.ts'
-import { enoent } from './errors.ts'
+import { enoent } from '../errors/fs.ts'
 import {
   expandPattern,
   globPattern,

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isMissingPath } from '../../../../utils/errors.ts'
+import { isMissingPath } from '../../../../errors/fs.ts'
 import { isUnclassified, type RuntimeVFS } from '../../../vfs.ts'
 import type { VFSEntry, VFSStat } from '../../../types.ts'
 

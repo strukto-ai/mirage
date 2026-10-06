@@ -15,7 +15,7 @@
 from typing import TypeVar, overload
 
 from mirage.context import get_current_session
-from mirage.utils.errors import eacces, enoent
+from mirage.errors.fs import eacces, enoent
 from mirage.vfs.ram.store import RAMStore
 
 _DEV_NAMES = frozenset({"null", "zero"})

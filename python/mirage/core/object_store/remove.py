@@ -27,10 +27,10 @@ from mirage.core.object_store.driver import (
     RmdirFn,
 )
 from mirage.core.object_store.stat import make_stat
+from mirage.errors.fs import eisdir, enoent, enotempty
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils import key_prefix as kp
-from mirage.utils.errors import eisdir, enoent, enotempty
 from mirage.utils.stat_view import is_dir
 
 
