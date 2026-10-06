@@ -232,6 +232,87 @@
           "exit": 1
         }
       ]
+    },
+    {
+      "id": "delete_folder_invalidates_subtree",
+      "seed": {
+        "keep.txt": "keep\n",
+        "tree/sub/f.txt": "old\n"
+      },
+      "warm": [
+        {
+          "command": "ls {root}",
+          "stdout": "keep.txt\ntree\n"
+        },
+        {
+          "command": "ls {root}/tree/sub",
+          "stdout": "f.txt\n"
+        },
+        {
+          "command": "cat {root}/tree/sub/f.txt",
+          "stdout": "old\n",
+          "stale": false
+        }
+      ],
+      "delete": ["tree/sub/f.txt"],
+      "event": {
+        "kind": "delete",
+        "path": "tree"
+      },
+      "checks": [
+        {
+          "command": "test -e {root}/tree/sub/f.txt",
+          "stdout": "",
+          "exit": 1
+        },
+        {
+          "command": "test -e {root}/tree/sub",
+          "stdout": "",
+          "exit": 1
+        },
+        {
+          "command": "ls {root}",
+          "stdout": "keep.txt\n"
+        }
+      ]
+    },
+    {
+      "id": "move_folder_invalidates_old_subtree",
+      "seed": {
+        "tree/sub/f.txt": "old\n",
+        "dest/keep.txt": "keep\n"
+      },
+      "warm": [
+        {
+          "command": "ls {root}/tree/sub",
+          "stdout": "f.txt\n"
+        },
+        {
+          "command": "cat {root}/tree/sub/f.txt",
+          "stdout": "old\n",
+          "stale": false
+        }
+      ],
+      "write": {
+        "dest/moved/sub/f.txt": "old\n"
+      },
+      "delete": ["tree/sub/f.txt"],
+      "event": {
+        "kind": "move",
+        "path": "dest/moved",
+        "previous": "tree"
+      },
+      "checks": [
+        {
+          "command": "test -e {root}/tree/sub/f.txt",
+          "stdout": "",
+          "exit": 1
+        },
+        {
+          "command": "ls {root}/dest/moved/sub",
+          "stdout": "f.txt\n"
+        }
+      ]
     }
   ]
 }

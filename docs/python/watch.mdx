@@ -1,6 +1,6 @@
 ---
 title: Overview
-description: Subscribe to external file changes on any mount. Events arrive only after Mirage has invalidated its caches, so reacting to a change always reads fresh content.
+description: Subscribe to external file changes on any mount. Mirage invalidates the changed path and ancestor listings before delivering events, with the folder-removal limits described below.
 icon: circle-info
 ---
 
@@ -34,7 +34,7 @@ flowchart LR
     NC -->|delta pull| PL[Your poll loop]
     RX --> N["ws.notify(event)"]
     PL --> N
-    N --> INV[invalidate caches<br/>path + ancestor listings]
+    N --> INV[invalidate caches<br/>path + ancestor listings<br/>+ removed subtree if a listing is cached]
     INV --> Q[per-watch queues<br/>scope matching]
     Q --> W["async for event in ws.watch(...)"]
 ```
@@ -84,9 +84,12 @@ events collapse into one `unknown` event per watch root, meaning
 
 Events are **level-triggered**: an event says *what is dirty*, not every
 intermediate edit. Read current content through the workspace after receiving
-one. That read is guaranteed fresh, because Mirage invalidates the changed
-path's cache entries, and every cached ancestor listing up to the mount root,
-*before* the event reaches any subscriber.
+one. Mirage invalidates the changed path and every cached ancestor listing up
+to the mount root *before* the event reaches any subscriber.
+A `delete`, or the old path of a `move`, drops the cached subtree when a listing
+is retained at or below that path. Without one, descendant file bodies can
+remain cached until their TTL. An `unknown` event always invalidates the
+subtree, regardless of retained listings.
 
 ## Push Mode
 
