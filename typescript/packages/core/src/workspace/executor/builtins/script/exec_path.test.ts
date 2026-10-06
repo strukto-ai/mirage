@@ -51,6 +51,25 @@ describe('direct path execution', () => {
     expect(stdoutStr(io)).toBe('rel\n')
   })
 
+  // EXEC is the interpreters' grant: the shell runs a script itself and
+  // checks each of its commands like a typed one.
+  it.each([
+    'bash /work/run.sh',
+    'sh /work/run.sh',
+    '/work/run.sh',
+    'cd /work && ./run.sh',
+    'source /work/run.sh',
+    '. /work/run.sh',
+  ])('runs `%s` without exec mode', async (line) => {
+    const ws = await makeWs()
+    await ws.shell("printf 'echo ran\\n' > /work/run.sh")
+    await ws.shell("printf 'print(1)\\n' > /work/run.py")
+    expect((await ws.shell('python3 /work/run.py')).exitCode).toBe(126)
+    const io = await ws.shell(line)
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('ran\n')
+  })
+
   it('honors shebang interpreter options', async () => {
     const ws = await makeWs()
     await ws.shell("printf '#!/bin/bash -x\\necho traced\\n' > /work/t.sh")

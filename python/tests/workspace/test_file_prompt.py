@@ -91,4 +91,6 @@ def test_file_prompt_states_each_mount_mode():
     }
     assert "Mode: read-only; writes are refused." in sections["/data"]
     assert "Mode: read-write." in sections["/scratch"]
-    assert "Mode: read-write; programs can run." in sections["/"]
+    assert (
+        "Mode: read-write; python3 and js can run code here." in sections["/"]
+    )

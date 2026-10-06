@@ -278,6 +278,37 @@
         "stdout": "done\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "exec_mode_gates_python3_but_not_shell_scripts",
+      "seq": 962339,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'echo ran\\n' > /data/xmode.sh && printf 'print(1)\\n' > /data/xmode.py && bash /data/xmode.sh && /data/xmode.sh && source /data/xmode.sh; python3 /data/xmode.py; echo py=$?; rm /data/xmode.sh /data/xmode.py",
+      "expect": {
+        "exit": 0,
+        "stdout": "ran\nran\nran\npy=126\n",
+        "stderr": "python3: /data/xmode.py: not in EXEC mode\n"
+      }
     }
   ]
 }

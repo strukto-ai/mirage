@@ -346,6 +346,15 @@ MoveStrategy: TypeAlias = NativeMove | PrimitiveMove
 
 
 class MountMode(str, Enum):
+    """What a mount lets commands do, a cumulative ladder.
+
+    READ lists and reads. WRITE also creates, changes and deletes. EXEC
+    also lets the interpreter commands (python3, js) run code: a script
+    file they load must sit on an EXEC mount, and inline code needs one
+    somewhere in the workspace. The shell's own scripts need no EXEC,
+    since the shell checks each of their commands like a typed one.
+    """
+
     READ = "read"
     WRITE = "write"
     EXEC = "exec"

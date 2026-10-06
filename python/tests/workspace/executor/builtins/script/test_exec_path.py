@@ -51,6 +51,28 @@ def test_relative_path_resolves_against_cwd(ws):
     assert result.stdout == b"rel\n"
 
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        "bash /work/run.sh",
+        "sh /work/run.sh",
+        "/work/run.sh",
+        "cd /work && ./run.sh",
+        "source /work/run.sh",
+        ". /work/run.sh",
+    ],
+)
+def test_scripts_need_no_exec_mode(ws, line):
+    # EXEC is the interpreters' grant: the shell runs a script itself
+    # and checks each of its commands like a typed one.
+    _run(ws, "printf 'echo ran\\n' > /work/run.sh")
+    _run(ws, "printf 'print(1)\\n' > /work/run.py")
+    assert _run(ws, "python3 /work/run.py").exit_code == 126
+    result = _run(ws, line)
+    assert result.exit_code == 0
+    assert result.stdout == b"ran\n"
+
+
 def test_script_gets_dollar_zero_and_positionals(ws):
     # A line-final positional hits a pre-existing expansion bug that
     # `sh FILE` shows identically, so the line ends on a literal and

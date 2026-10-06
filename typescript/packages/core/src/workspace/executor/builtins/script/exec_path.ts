@@ -88,9 +88,11 @@ function quoteWord(word: string): string {
  * builtin, function, or install can claim it, and the file either runs
  * or the shell reports why not. Two deliberate divergences from bash,
  * both consequences of the VFS: there is no exec bit to check (`chmod`
- * is stored, not enforced; mount mode does real access control), so an
- * existing file runs without `+x`; and the shell prefix bash puts on
- * the diagnostic is dropped, matching every other mirage diagnostic.
+ * is stored, not enforced, and a mount's `exec` mode is for interpreters
+ * such as python3, not the shell), so an existing file runs without `+x`
+ * and each command it runs is checked like a typed one; and the shell
+ * prefix bash puts on the diagnostic is dropped, matching every other
+ * mirage diagnostic.
  *
  * A shebang naming sh or bash (directly or via env) runs through the
  * nested-shell machinery, as does a script with none. Any other

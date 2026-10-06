@@ -32,6 +32,14 @@ export type ErrorOf = (response: Response, body: string) => Error
 // mirror of python's mirage.types.PageFetch.
 export type PageFetch = (cursor: string | null) => Promise<Record<string, unknown>>
 
+/**
+ * What a mount lets commands do, a cumulative ladder. READ lists and
+ * reads. WRITE also creates, changes and deletes. EXEC also lets the
+ * interpreter commands (python3, js) run code: a script file they load
+ * must sit on an EXEC mount, and inline code needs one somewhere in the
+ * workspace. The shell's own scripts need no EXEC, since the shell
+ * checks each of their commands like a typed one.
+ */
 export const MountMode = Object.freeze({
   READ: 'read',
   WRITE: 'write',
