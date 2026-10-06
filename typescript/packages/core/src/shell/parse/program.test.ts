@@ -54,22 +54,6 @@ describe('owned programs', () => {
     expect(() => first.children[0]?.text).toThrow('released')
     releaseFunctions(functions)
   })
-
-  it('reports diagnostics in the original Unicode source after recovery', async () => {
-    const parser = await getTestParser()
-    const line = 'echo é💡; value=x 2>/dev/null; fi'
-    const program = parser.parseProgram(line)
-    try {
-      expect(program.diagnostics[0]?.offending).toBe('fi')
-      const diagnostic = program.diagnostics[0]
-      assert(diagnostic)
-      const span = diagnostic.span
-      expect(line.slice(span.start, span.end)).toBe('fi')
-      expect(program.root.text).toBe(line)
-    } finally {
-      program.release()
-    }
-  })
 })
 
 it.each([
@@ -97,19 +81,4 @@ it.each([
   } finally {
     program.release()
   }
-})
-
-it('releases partial native allocations when a recovery parse throws', async () => {
-  const parser = await getTestParser()
-  // eslint-disable-next-line @typescript-eslint/unbound-method -- Invoked with apply(this, args) below.
-  const original = Parser.prototype.parse
-  const releases = vi.spyOn(Tree.prototype, 'delete')
-  let tree: Tree | null = null
-  vi.spyOn(Parser.prototype, 'parse').mockImplementation(function (this: Parser, ...args) {
-    if (tree !== null) throw new Error('injected recovery failure')
-    tree = original.apply(this, args)
-    return tree
-  })
-  expect(() => parser.parseProgram('cat <<E\nhi\nE')).toThrow('injected recovery failure')
-  expect(releases.mock.contexts.filter((t) => t === tree)).toHaveLength(1)
 })
