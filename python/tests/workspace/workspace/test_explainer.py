@@ -18,7 +18,7 @@ import pytest
 import pytest_asyncio
 
 from mirage import Session, Workspace
-from mirage.policy import Deny
+from mirage.policy import Deny, OpsContext, Policy
 from mirage.policy.match import Outcome
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -97,3 +97,36 @@ async def test_a_hidden_path_explains_like_one_nothing_refuses(ws):
     missing = await explain.vfs.read("/data/nothing")
     assert hidden == dataclasses.replace(missing, argv=("/data/vault/k",))
     assert (missing.outcome, missing.error) == (Outcome.ALLOW, "")
+    exists = await explain.vfs.exists("/data/nothing")
+    assert (exists.command, exists.argv) == ("exists", ("/data/nothing",))
+
+
+@pytest.mark.asyncio
+async def test_a_dry_run_leaves_the_drift_checks_pending(ws):
+    ws._drift.queue("/data/sec/k", "fingerprint")
+    await Session(ws, "agent").explain.vfs.read("/data/sec/k")
+    assert ws._drift.pending
+
+
+class _Flag(Policy):
+    """Refuses writes while ``/data/flag`` reads ``closed``."""
+
+    def __init__(self, ws: Workspace) -> None:
+        self.ws = ws
+
+    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
+        if ctx.op != "write" or ctx.path.virtual == "/data/flag":
+            return None
+        flag = await self.ws.vfs.read("/data/flag")
+        return Deny("closed") if flag == b"closed" else None
+
+
+@pytest.mark.asyncio
+async def test_a_policy_reads_for_real_while_it_decides(ws):
+    await ws.vfs.write("/data/flag", b"closed")
+    ws.policies.add(_Flag(ws))
+    said = await Session(ws, "agent").explain.vfs.write("/data/new", b"x")
+    assert (said.reason, said.answers) == (
+        "closed",
+        (Deny("closed", policy="_Flag"),),
+    )

@@ -91,6 +91,7 @@ import {
 } from './constants.ts'
 import {
   effectivePathMode,
+  explaining,
   getCurrentSession,
   hiddenRefusal,
   sessionVisibility,
@@ -311,8 +312,9 @@ export class Dispatcher {
     // and the op facade come straight here, so a drain that lived any
     // higher would let a first write clobber drifted state. drain()
     // clears pending before it stats, so its own probes cannot recurse
-    // into it.
-    if (this.drift?.pending === true) {
+    // into it. A dry run leaves them pending: it touches no mount, and the
+    // op that does run still owes them.
+    if (this.drift?.pending === true && explaining() === null) {
       // Resolve backend IDs afresh without consulting the restored index.
       await this.drift.drain(this.namespace, async (p) => {
         const [stat] = await this.dispatch('stat', PathSpec.fromStrPath(p), [], {

@@ -429,14 +429,15 @@ export function getOpCall(owner: Decisions): HandOff | null {
   return call?.[0] === owner ? call[1] : null
 }
 
-const explainingStorage = createAsyncContext<Explanation[]>()
+const explainingStorage = createAsyncContext<Explanation[] | null>()
 
 /**
  * Run `fn` as a dry run: the op gate notes on `trace` what it would
- * answer and stops the op before any backend or cache is touched.
- * Mirrors Python's `set_explaining`.
+ * answer and stops the op before any backend or cache is touched. A null
+ * trace runs `fn` for real again, for what a policy does while it
+ * decides the op explained. Mirrors Python's `set_explaining`.
  */
-export function runExplaining<T>(trace: Explanation[], fn: () => Promise<T>): Promise<T> {
+export function runExplaining<T>(trace: Explanation[] | null, fn: () => Promise<T>): Promise<T> {
   return Promise.resolve(explainingStorage.run(trace, fn))
 }
 

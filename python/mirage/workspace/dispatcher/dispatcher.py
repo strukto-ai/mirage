@@ -29,6 +29,7 @@ from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.paths import dot_refusal, walk_spelling
 from mirage.commands.resolve import get_extension
 from mirage.context import (
+    explaining,
     get_current_session,
     hidden_refusal,
     session_visibility,
@@ -418,8 +419,13 @@ class Dispatcher:
         # FUSE and the ops facade come straight here, so a drain that
         # lived any higher would let a first write clobber drifted
         # state. drain() clears pending before it stats, so its own
-        # probes cannot recurse into it.
-        if self._drift is not None and self._drift.pending:
+        # probes cannot recurse into it. A dry run leaves them pending:
+        # it touches no mount, and the op that does run still owes them.
+        if (
+            self._drift is not None
+            and self._drift.pending
+            and explaining() is None
+        ):
             await self._drift.drain(self._namespace.registry.try_mount_for)
         # Hidden paths answer before anything else can: the typed path
         # is checked so a link inside hidden space cannot be followed

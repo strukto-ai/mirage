@@ -422,13 +422,15 @@ _explaining: ContextVar["list[Explanation] | None"] = ContextVar(
 )
 
 
-def set_explaining(trace: "list[Explanation]") -> Token[Any]:
+def set_explaining(trace: "list[Explanation] | None") -> Token[Any]:
     """Make the calls in this context a dry run: the op gate notes on
     ``trace`` what it would answer and stops the op before any backend
-    or cache is touched.
+    or cache is touched. None makes them run again, for what a policy
+    does while it decides the op explained.
 
     Args:
-        trace (list[Explanation]): where the gate notes its answers.
+        trace (list[Explanation] | None): where the gate notes its
+            answers, None to run.
     """
     return _explaining.set(trace)
 

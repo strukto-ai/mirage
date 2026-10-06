@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { operandExitCode } from '../commands/spec/usage.ts'
-import { explaining, lineRunning, noteRefusal } from '../context/session_context.ts'
+import { explaining, lineRunning, noteRefusal, runExplaining } from '../context/session_context.ts'
 import { eacces, fsErrorLine } from '../utils/errors.ts'
 import { Limit, type PathSpec, type Refusal } from '../types.ts'
 import type { Policy } from './base.ts'
@@ -287,8 +287,13 @@ export async function preOpsGate(
   }
   const trace = explaining()
   if (trace !== null) {
-    if (checkHidden && (await policies.hides(ctx))) throw new Explained()
-    const noted = await explainedOp(policies, ctx, decisions)
+    // The policies decide for real: what one reads while it decides (a
+    // profile script reading a mounted file) runs, and only the op
+    // explained stops here.
+    const noted = await runExplaining(null, async () =>
+      checkHidden && (await policies.hides(ctx)) ? null : explainedOp(policies, ctx, decisions),
+    )
+    if (noted === null) throw new Explained()
     trace.push(noted)
     if (final || noted.error !== '') throw new Explained()
     return

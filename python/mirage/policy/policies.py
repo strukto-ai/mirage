@@ -20,7 +20,13 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from mirage.commands.spec.usage import operand_exit_code
-from mirage.context import explaining, line_running, note_refusal
+from mirage.context import (
+    explaining,
+    line_running,
+    note_refusal,
+    reset_explaining,
+    set_explaining,
+)
 from mirage.policy.base import Policy
 from mirage.policy.builtin.hidden_paths import HiddenPathsPolicy
 from mirage.policy.builtin.mount_mode import MountModePolicy
@@ -260,10 +266,23 @@ async def pre_ops_gate(
     )
     trace = explaining()
     if trace is not None:
-        if check_hidden and await policies.hides(ctx):
+        # The policies decide for real: what one reads while it decides
+        # (a profile script reading a mounted file) runs, and only the op
+        # explained stops here.
+        token = set_explaining(None)
+        try:
+            hidden = check_hidden and await policies.hides(ctx)
+            noted = (
+                None
+                if hidden
+                else await _explained_op(policies, ctx, decisions)
+            )
+        finally:
+            reset_explaining(token)
+        if noted is None:
             raise Explained()
-        trace.append(await _explained_op(policies, ctx, decisions))
-        if final or trace[-1].error:
+        trace.append(noted)
+        if final or noted.error:
             raise Explained()
         return
     if not (

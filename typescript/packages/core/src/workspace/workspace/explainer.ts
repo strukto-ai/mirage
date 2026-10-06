@@ -100,9 +100,9 @@ export class VfsExplainer {
     return dry('readdir', [path], () => this.ops.readdir(path))
   }
 
-  /** Explain `session.vfs.exists`, which is the stat it makes. */
+  /** Explain `session.vfs.exists`, judged as the stat it makes. */
   exists(path: string): Promise<Explanation> {
-    return dry('stat', [path], () => this.ops.stat(path))
+    return dry('exists', [path], () => this.ops.stat(path))
   }
 
   /** Explain `session.vfs.mkdir`. */

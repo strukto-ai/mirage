@@ -13,11 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { Outcome } from '../../policy/index.ts'
+import { Outcome, type Deny, type OpsContext, type Policy } from '../../policy/index.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import type { DriftQueue } from '../snapshot/drift.ts'
 import { Session } from './handle.ts'
 import { Workspace } from './workspace.ts'
 
@@ -95,5 +96,28 @@ describe('session.explain.vfs', () => {
     const missing = await explain.vfs.read('/data/nothing')
     expect(hidden).toEqual({ ...missing, argv: ['/data/vault/k'] })
     expect([missing.outcome, missing.error]).toEqual([Outcome.ALLOW, ''])
+    const exists = await explain.vfs.exists('/data/nothing')
+    expect([exists.command, exists.argv]).toEqual(['exists', ['/data/nothing']])
+  })
+
+  it('leaves the drift checks pending', async () => {
+    const drift = (ws as unknown as { drift: DriftQueue }).drift
+    drift.queue('/data/sec/k', 'fingerprint')
+    await new Session(ws, 'agent').explain.vfs.read('/data/sec/k')
+    expect(drift.pending).toBe(true)
+  })
+
+  it('lets a policy read for real while it decides', async () => {
+    await ws.vfs.write('/data/flag', 'closed')
+    const flagged: Policy = {
+      async preOps(ctx: OpsContext): Promise<Deny | null> {
+        if (ctx.op !== 'write' || ctx.path.virtual === '/data/flag') return null
+        const flag = new TextDecoder().decode(await ws.vfs.read('/data/flag'))
+        return flag === 'closed' ? { kind: 'deny', reason: 'closed' } : null
+      },
+    }
+    ws.policies.add(flagged)
+    const said = await new Session(ws, 'agent').explain.vfs.write('/data/new', 'x')
+    expect([said.reason, said.answers.map((a) => a.reason)]).toEqual(['closed', ['closed']])
   })
 })

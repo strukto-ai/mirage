@@ -146,12 +146,12 @@ class VfsExplainer:
         return await _dry("readdir", (path,), lambda: self._vfs.readdir(path))
 
     async def exists(self, path: str) -> Explanation:
-        """Explain ``session.vfs.exists``, which is the stat it makes.
+        """Explain ``session.vfs.exists``, judged as the stat it makes.
 
         Args:
             path (str): the path.
         """
-        return await _dry("stat", (path,), lambda: self._vfs.stat(path))
+        return await _dry("exists", (path,), lambda: self._vfs.stat(path))
 
     async def mkdir(self, path: str) -> Explanation:
         """Explain ``session.vfs.mkdir``.
