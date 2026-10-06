@@ -55,13 +55,7 @@ export function registerDocumentsRoutes(app: FastifyInstance, deps: DocumentsRou
             const entry = deps.registry.visible(req.params.wsId, req.account)
             if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
             const ws = entry.runner.ws
-            await ws.ensureSessionsLoaded()
             const sessionId = req.params.sessionId ?? req.query.session_id
-            if (
-              sessionId !== undefined &&
-              !ws.listSessions().some((s) => s.sessionId === sessionId)
-            )
-              return reply.status(404).send({ detail: 'session not found' })
             const path = method === 'PUT' ? req.body.path : undefined
             try {
               const options = {
@@ -73,6 +67,10 @@ export function registerDocumentsRoutes(app: FastifyInstance, deps: DocumentsRou
                 : ws.skillMd(path, options))
               return await reply.type('text/markdown; charset=utf-8').send(content)
             } catch (error) {
+              // The session is looked up inside the call, as Python does, so
+              // one closed since the request arrived answers 404 too.
+              if (error instanceof Error && error.message.startsWith('unknown session'))
+                return reply.status(404).send({ detail: 'session not found' })
               const code = error instanceof Error && 'code' in error ? String(error.code) : ''
               const status = (
                 { ENOENT: 404, ENOTDIR: 422, EEXIST: 409, EACCES: 403 } as Record<string, number>
