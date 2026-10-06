@@ -26,29 +26,46 @@ export class EmailAccessor extends Accessor {
     this.config = config
   }
 
+  /**
+   * The connected IMAP client, connecting on first use and again after the
+   * last one failed. imapflow emits `error` when its socket times out, resets
+   * or fails outside a command, and Node throws an `error` event nobody
+   * listens for, which would end the process and every mount in it; the
+   * listener keeps the failure on this client and drops it, as `close` does,
+   * so the next access connects afresh instead of reusing a dead socket.
+   */
   async getImap(): Promise<ImapFlow> {
-    this.clientPromise ??= (async () => {
-      const mod = await loadOptionalPeer(
-        () =>
-          import('imapflow') as unknown as Promise<{
-            ImapFlow: typeof ImapFlow
-          }>,
-        { feature: 'EmailAccessor', packageName: 'imapflow' },
-      )
-      const client = new mod.ImapFlow({
-        host: this.config.imapHost,
-        port: this.config.imapPort,
-        secure: this.config.useSsl,
-        auth: { user: this.config.username, pass: this.config.password },
-        logger: false,
-      })
-      await client.connect()
-      return client
-    })()
+    if (this.clientPromise === null) {
+      const pending: Promise<ImapFlow> = (async () => {
+        const mod = await loadOptionalPeer(
+          () =>
+            import('imapflow') as unknown as Promise<{
+              ImapFlow: typeof ImapFlow
+            }>,
+          { feature: 'EmailAccessor', packageName: 'imapflow' },
+        )
+        const client = new mod.ImapFlow({
+          host: this.config.imapHost,
+          port: this.config.imapPort,
+          secure: this.config.useSsl,
+          auth: { user: this.config.username, pass: this.config.password },
+          logger: false,
+        })
+        const drop = (): void => {
+          if (this.clientPromise === pending) this.clientPromise = null
+        }
+        client.on('error', drop)
+        client.on('close', drop)
+        await client.connect()
+        return client
+      })()
+      this.clientPromise = pending
+    }
+    const current = this.clientPromise
     try {
-      return await this.clientPromise
+      return await current
     } catch (err) {
-      this.clientPromise = null
+      if (this.clientPromise === current) this.clientPromise = null
       throw err
     }
   }

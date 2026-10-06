@@ -52,3 +52,17 @@ it('reports a rejected credential with exit 1', async () => {
     await ws.close()
   }
 })
+
+it('refuses gh auth token for the configured host', async () => {
+  const ws = new Workspace({}, { shellParser: parser })
+  ws.registerCli('gh', GH, { token: 'secret-never-print', base_url: 'https://ghe.test/api/v3' })
+  try {
+    const result = await ws.shell('gh auth token')
+    expect([result.exitCode, result.stdout.length]).toEqual([1, 0])
+    expect(new TextDecoder().decode(result.stderr)).toBe(
+      'gh auth token: the token for ghe.test stays in Mirage configuration and is never printed; gh commands use it directly\n',
+    )
+  } finally {
+    await ws.close()
+  }
+})

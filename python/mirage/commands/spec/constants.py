@@ -676,11 +676,11 @@ FLOAT_VALUE = re.compile(
 )
 
 # GNU usage-error exit codes, pinned against debian coreutils/grep/diffutils
-# (plus ripgrep and jq upstream docs). Everything else exits 1. Keys are
-# plain strings, not CommandName members: types.py (the enum's home)
-# imports this module for flag_kwarg_name, so importing the enum here
-# would be a cycle; StrEnum members hash as their values, so lookups
-# with CommandName still hit.
+# and hostname 3.25 (plus ripgrep and jq upstream docs). Everything else
+# exits 1. Keys are plain strings, not CommandName members: types.py (the
+# enum's home) imports this module for flag_kwarg_name, so importing the
+# enum here would be a cycle; StrEnum members hash as their values, so
+# lookups with CommandName still hit.
 USAGE_EXIT = {
     "grep": 2,
     "egrep": 2,
@@ -697,6 +697,7 @@ USAGE_EXIT = {
     "patch": 2,
     "tar": 64,
     "timeout": 125,
+    "hostname": 255,
     "python": 2,
     "python3": 2,
 }

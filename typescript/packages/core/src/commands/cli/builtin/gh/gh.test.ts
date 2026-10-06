@@ -134,7 +134,15 @@ describe('gh tree', () => {
     const repo = GH.subcommands.find((c) => c.name === 'repo')
     expect(repo?.subcommands.map((c) => c.name)).toEqual([
       'list',
+      'clone',
       'view',
+      'create',
+      'fork',
+      'rename',
+      'edit',
+      'delete',
+    ])
+    expect(repo?.subcommands.filter((c) => c.write).map((c) => c.name)).toEqual([
       'create',
       'fork',
       'rename',

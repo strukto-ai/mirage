@@ -359,6 +359,16 @@ GIT_SYNOPSES: dict[str, tuple[str, ...]] = {
         "           [--work-tree=<path>] <command> [<args>]",
     ),
     "add": ("git add [<options>] [--] <pathspec>...",),
+    "cat-file": (
+        "git cat-file <type> <object>",
+        "git cat-file (-e | -p | -t | -s) <object>",
+        "git cat-file (--textconv | --filters)\n"
+        "                    [<rev>:<path|tree-ish> | --path=<path|tree-ish> <rev>]",
+        "git cat-file (--batch | --batch-check | --batch-command) "
+        "[--batch-all-objects]\n"
+        "                    [--buffer] [--follow-symlinks] [--unordered]\n"
+        "                    [--textconv | --filters] [-Z]",
+    ),
     "branch": (
         "git branch [<options>] [-r | -a] [--merged] [--no-merged]",
         "git branch [<options>] <branch-name> [<start-point>]",
@@ -433,6 +443,11 @@ GIT_SYNOPSES: dict[str, tuple[str, ...]] = {
     "stash show": ("git stash show [<diff-options>] [<stash>]",),
     "status": ("git status [<options>]",),
     "switch": ("git switch [<options>] [<branch>]",),
+    "hash-object": (
+        "git hash-object [-t <type>] [-w] [--path=<file> | --no-filters]\n"
+        "                       [--stdin [--literally]] [--] <file>...",
+        "git hash-object [-t <type>] [-w] --stdin-paths [--no-filters]",
+    ),
     "symbolic-ref": (
         "git symbolic-ref [-m <reason>] <name> <ref>",
         "git symbolic-ref [-q] [--short] [--no-recurse] <name>",

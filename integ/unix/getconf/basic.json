@@ -1,0 +1,46 @@
+{
+  "cases": [
+    {
+      "id": "getconf_variables",
+      "seq": 16100221,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "getconf ARG_MAX; getconf PAGE_SIZE; getconf LONG_BIT; getconf CLK_TCK; getconf VERSION; getconf _POSIX_VERSION; getconf PATH; getconf GNU_LIBC_VERSION; getconf LFS_CFLAGS | wc -c; getconf CHILD_MAX; getconf NAME_MAX /data; getconf PATH_MAX /data; getconf -v POSIX_V7_LP64_OFF64 ARG_MAX",
+      "expect": {
+        "exit": 0,
+        "stdout": "2097152\n4096\n64\n100\n200809\n200809\n/bin:/usr/bin\nglibc 2.41\n1\nundefined\n255\n4096\n2097152\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "getconf_all",
+      "seq": 16100222,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "getconf -a | wc -l; getconf -a | head -1; getconf -a /data/no-such-dir | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "322\nLINK_MAX                           127\nLINK_MAX                           \n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "getconf_refusals",
+      "seq": 16100223,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "getconf NAME_MAX; echo $?; getconf ARG_MAX /data; echo $?; getconf; echo $?; getconf NAME_MAX /data/no-such-dir; echo $?; getconf -- -a; echo $?; getconf NO_SUCH_VAR",
+      "expect": {
+        "exit": 2,
+        "stdout": "2\n2\n2\n3\n2\n",
+        "stderr": "Usage: getconf [-v specification] variable_name [pathname]\n       getconf -a [pathname]\nUsage: getconf [-v specification] variable_name [pathname]\n       getconf -a [pathname]\nUsage: getconf [-v specification] variable_name [pathname]\n       getconf -a [pathname]\ngetconf: pathconf: /data/no-such-dir: No such file or directory\ngetconf: Unrecognized variable `-a'\ngetconf: Unrecognized variable `NO_SUCH_VAR'\n"
+      }
+    }
+  ]
+}

@@ -120,23 +120,34 @@ def test_iso_datetime_with_offset_converts_under_utc():
     assert parsed.tzinfo == timezone.utc
 
 
-def test_iso_zone_past_a_day_is_invalid():
-    # GNU refuses `+99:99`; a zone strictly inside a day is also the
-    # rule datetime enforces, and the TypeScript twin mirrors it.
-    for zone in ("+99:99", "+24:00", "+23:60"):
-        assert (
-            parse_date_expr(f"2026-01-01T00:00{zone}", tz=timezone.utc) is None
-        )
-    assert (
-        parse_date_expr("2026-01-01T00:00+23:59", tz=timezone.utc) is not None
-    )
+@pytest.mark.parametrize(
+    "zone,epoch",
+    [
+        ("+23:59", 1767139260),
+        ("+24:00", 1767139200),
+        ("+23:60", 1767139200),
+        ("-24:00", 1767312000),
+        ("+2400", 1767139200),
+        ("+99:99", None),
+        ("+24:01", None),
+    ],
+)
+def test_iso_zone_reaches_a_whole_day(zone, epoch):
+    # gnulib's time_zone_hhmm takes up to 24 hours either way, a minute
+    # field past 59 included; GNU refuses `+99:99` and `+24:01`.
+    parsed = parse_date_expr(f"2026-01-01T00:00{zone}", tz=timezone.utc)
+    assert (None if parsed is None else parsed.timestamp()) == epoch
 
 
 def test_invalid_returns_none():
     assert parse_date_expr("not a date", now=NOW) is None
     assert parse_date_expr("24 hours agoo", now=NOW) is None
-    assert parse_date_expr("", now=NOW) is None
     assert parse_date_expr("@abc", now=NOW) is None
+
+
+def test_empty_is_midnight_today():
+    assert parse_date_expr("", now=NOW) == datetime(2026, 8, 16)
+    assert parse_date_expr("   ", now=NOW) == datetime(2026, 8, 16)
 
 
 def test_number_attached_to_unit():
@@ -177,6 +188,62 @@ def test_epoch_is_a_decimal_count_of_seconds(word, accepted):
     # findutils 4.10 (gnulib): float() would take `0x1`, `1e2`, `1.` and
     # `.5`, and GNU refuses every one of them.
     assert (parse_date_expr(word, tz=timezone.utc) is not None) is accepted
+
+
+GNU_NOW = 1791279160
+
+
+# gnulib's parse-datetime grammar as coreutils 9.7 reads it, measured on
+# debian:stable-slim with the clock at 2026-10-06 09:32:40 UTC (faketime)
+# and the zone in TZ: None is GNU's `invalid date`. Mirrored in
+# dates.test.ts.
+@pytest.mark.parametrize(
+    "zone,text,epoch",
+    [
+        ("Europe/Berlin", "2026-10-06 GMT", 1791244800),
+        ("UTC", "2026-10-06 09:32:40,5 +0100", 1791275560.5),
+        ("UTC", "2026-10-06 09:32 HKT", None),
+        ("UTC", "2026-10-06 09:32 EST DST", 1791293520),
+        ("UTC", "2026-10-06 09:00 UTC-1:30", 1791282600),
+        ("UTC", "2026-10-06 09:00 A", 1791273600),
+        ("UTC", "2026-10-06 09:00 T", 1791302400),
+        ("UTC", "2026-10-06 09:00 U.T.C.", 1791277200),
+        ("Europe/Berlin", "2026-10-06 9 a.m.", 1791270000),
+        ("UTC", "2026-10-06 9:30:15 PM", 1791322215),
+        ("UTC", "JUN-17-1992", 708739200),
+        ("UTC", "10/06/69", -7516800),
+        ("UTC", "monday", 1791763200),
+        ("UTC", "next tuesday", 1791849600),
+        ("UTC", "last tuesday", 1790640000),
+        ("UTC", "third friday", 1792713600),
+        ("UTC", "Wed,", 1791331200),
+        ("UTC", "3 days ago 10:00", 1791021600),
+        ("UTC", "1 year 2 months 3 days ago", 1827826360),
+        ("Europe/Berlin", "2 fortnights", 1793698360),
+        ("UTC", "2026-01-31 +1 month -1 day", 1772409600),
+        ("UTC", "20261006 0930", 1791279000),
+        ("UTC", "20261006 +2 days", 1791417600),
+        ("UTC", "2026", 1791318360),
+        ("UTC", "12345", None),
+        ("UTC", "10:00 -5 days", 1791385200),
+        ("UTC", "2026-10-06T0930", None),
+        ("UTC", "2026-10-06 T", None),
+        ("UTC", "2026-10-06 23:59:60", None),
+        ("UTC", "noon", None),
+        ("UTC", "monday tuesday", None),
+        ("UTC", "2026-10-06 10:00 UTC UTC", None),
+        ("UTC", "2026-10-06 (comment) 10:00", 1791280800),
+        ("Europe/Berlin", "2025-03-30 02:30", None),
+        ("Europe/Berlin", "2025-10-26 02:30", 1761442200),
+        ("UTC", "1969-12-31 23:00:00 -0100", 0),
+        ("Europe/Berlin", "", 1791237600),
+    ],
+)
+def test_gnu_grammar(zone, text, epoch):
+    tz = timezone.utc if zone == "UTC" else ZoneInfo(zone)
+    now = datetime.fromtimestamp(GNU_NOW, tz)
+    parsed = parse_date_expr(text, tz=tz, now=now)
+    assert (None if parsed is None else parsed.timestamp()) == epoch
 
 
 _NOW = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)

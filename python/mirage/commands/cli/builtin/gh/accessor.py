@@ -31,6 +31,7 @@ from mirage.commands.errors import PartialOutputError, UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.core.github.config import GhConfig
+from mirage.core.github.constants import API_BASE
 from mirage.core.github.repo import RepoRef, parse_repo, repo_host
 from mirage.core.jq import JqHalt, JqRun, jq_raised, jq_run
 from mirage.errors.fs import fs_strerror
@@ -64,6 +65,21 @@ def check_host(config: GhConfig, host: str | None) -> None:
     if config.base_url and urlsplit(config.base_url).hostname == host:
         return
     raise ValueError(f"error connecting to {host}\n{CONNECT_HINT}")
+
+
+def web_origin(config: GhConfig) -> str:
+    """The origin the install's GitHub serves its pages and git from:
+    github.com for GitHub's own API, else the API host's own origin, as a
+    GitHub Enterprise server and a local stand-in serve them.
+
+    Args:
+        config (GhConfig): the install's configuration.
+    """
+    base = config.base_url
+    if base is None or base.rstrip("/") == API_BASE:
+        return f"https://{GITHUB_HOST}"
+    parts = urlsplit(base)
+    return f"{parts.scheme}://{parts.netloc}"
 
 
 def gh_repo(config: GhConfig, spec: str | None) -> RepoRef:

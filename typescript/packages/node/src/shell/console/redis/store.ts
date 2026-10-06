@@ -19,7 +19,7 @@ import type {
   ConsoleStore,
   ReadResult,
 } from '@struktoai/mirage-core/shell/console/index'
-import { loadOptionalPeer } from '../../../optional_peer.ts'
+import { connectRedis } from '../../../optional_peer.ts'
 import { APPEND_LUA, POLL_MS } from './constants.ts'
 
 interface StreamEntry {
@@ -96,21 +96,12 @@ export class RedisConsoleStore implements ConsoleStore {
     // close() nulls the promise; building a new one here would open a
     // client that nothing quits, and in Node it holds the process alive.
     if (this.isClosed) throw new Error('RedisConsoleStore is closed')
-    this.clientPromise ??= (async () => {
-      const mod = await loadOptionalPeer(
-        () =>
-          import('redis') as unknown as Promise<{
-            createClient: (o: { url: string }) => RedisClientType
-          }>,
-        { feature: 'RedisConsoleStore', packageName: 'redis' },
-      )
-      const c = mod.createClient({
-        url: this.url,
-        socket: { reconnectStrategy: false },
-      } as Parameters<typeof mod.createClient>[0])
-      await c.connect()
-      return c
-    })()
+    if (this.clientPromise === null) {
+      const pending = connectRedis(this.url, 'RedisConsoleStore', () => {
+        if (this.clientPromise === pending) this.clientPromise = null
+      })
+      this.clientPromise = pending
+    }
     return this.clientPromise
   }
 

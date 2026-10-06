@@ -12,11 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import base64
 from dataclasses import dataclass
 from typing import Any, Literal
 
 from mirage.commands.cli.builtin.gh.accessor import (
     camel,
+    check_host,
     csv_values,
     gh_bool,
     gh_repo,
@@ -24,6 +26,7 @@ from mirage.commands.cli.builtin.gh.accessor import (
     list_limit,
     text_out,
     typed_out,
+    web_origin,
 )
 from mirage.commands.cli.builtin.gh.constants import REPO_EDIT_FIELDS
 from mirage.commands.cli.builtin.gh.shape import (
@@ -33,10 +36,15 @@ from mirage.commands.cli.builtin.gh.shape import (
     pointer,
     struct,
 )
+from mirage.commands.cli.builtin.git import GIT
+from mirage.commands.cli.builtin.git.clone import clone as git_clone
+from mirage.commands.cli.builtin.git.util import split_marked
 from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.cli.walk import find_node
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.constants import flag_kwarg_name
 from mirage.commands.spec.flag_view import FlagView
+from mirage.commands.spec.parser import parse_command, parse_to_kwargs
 from mirage.core.github.config import GhConfig
 from mirage.core.github.repo import (
     RepoRef,
@@ -47,8 +55,10 @@ from mirage.core.github.repo import (
     list_repos,
     list_repository_fields,
     login,
+    parse_repo,
     read_readme,
     rename_repo,
+    repo_host,
     repo_topics,
     repository_fields,
     set_repo_topics,
@@ -584,6 +594,63 @@ async def fork(
         else (f"{await login(inv.config)}/{name or source.repo}")
     )
     return text_out(f"✓ Created fork {full}\n")
+
+
+def token_header(config: GhConfig) -> dict[str, str]:
+    """The Authorization git sends GitHub for the install's token: Basic
+    with the token as the password, what gh's credential helper hands git.
+
+    Args:
+        config (GhConfig): the install's configuration.
+    """
+    secret = f"x-access-token:{config.token.get_secret_value()}"
+    return {
+        "Authorization": f"Basic {base64.b64encode(secret.encode()).decode()}"
+    }
+
+
+async def clone_cmd(
+    inv: CLIInvocation[GhConfig],
+) -> tuple[ByteSource | None, IOResult]:
+    """``gh repo clone``: mirage's ``git clone`` of the repository, the words
+    after ``--`` as git's options. The token rides only as the request's
+    Authorization, never on the line, in the config or in the output; a fork's
+    ``upstream`` remote is not added.
+
+    Args:
+        inv (CLIInvocation[GhConfig]): the repository, the directory and
+            git's options.
+    """
+    names, gitflags = split_marked(tuple(inv.texts), inv.argv)
+    if not names:
+        raise ValueError("cannot clone: repository argument required")
+    spec = names[0]
+    check_host(inv.config, repo_host(spec))
+    if "/" not in spec and ":" not in spec:
+        ref = RepoRef(owner=await login(inv.config), repo=spec)
+    else:
+        ref = parse_repo(spec)
+    url = f"{web_origin(inv.config)}/{ref.owner}/{ref.repo}.git"
+    target = names[1] if len(names) > 1 else ref.repo
+    leaf, _ = find_node(GIT, ["clone"]) or (GIT, ())
+    cwd = inv.env.get("PWD", "/")
+    words = [*gitflags, url, target]
+    parsed = parse_command(
+        leaf, words, cwd, "git clone", inv.env, unknown_is_operand=True
+    )
+    flags = dict(parse_to_kwargs(parsed))
+    flags["C"] = cwd
+    git = CLIInvocation[None](
+        None,
+        argv=("clone", *words),
+        texts=tuple(word for word, _ in parsed.args),
+        flags=flags,
+        stdin=inv.stdin,
+        env=inv.env,
+        doors=inv.doors,
+        spec=leaf,
+    )
+    return await git_clone(git, token_header(inv.config))
 
 
 async def rename(

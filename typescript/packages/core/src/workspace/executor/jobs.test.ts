@@ -21,6 +21,7 @@ import type { ShellParser } from '../../shell/parse/index.ts'
 import { MountMode } from '../../types.ts'
 import { getTestParser, stdoutStr, stderrStr } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
+import { parseSessionProfile } from '../../policy/profile.ts'
 import { ExecutionNode } from '../types.ts'
 import { handleFg, handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
 
@@ -660,6 +661,58 @@ it('ps lays columns out as procps does', async () => {
       if (out !== null) expect(stdoutStr(result), line).toBe(out)
       expect([result.exitCode, stderrStr(result)], line).toEqual([0, ''])
     }
+  } finally {
+    await ws.close()
+  }
+})
+
+// The issue's line: `$$` is the session's first line, which ps lists while it
+// runs as the session leader procps marks with `s`; the owner is the workspace
+// user and the group the session's profile.
+it('ps lists the session leader with its owner', async () => {
+  const ws = new Workspace(
+    { '/m': [new RAMVFS(), MountMode.WRITE] },
+    {
+      mode: MountMode.WRITE,
+      shellParser: parser,
+      agentId: 'alice',
+      profiles: { admin: parseSessionProfile({}) },
+      profile: 'admin',
+    },
+  )
+  try {
+    const line = 'ps -o pid,ppid,pgid,sid,stat,user,uid,group,gid,cmd -p $$'
+    expect(stdoutStr(await ws.shell(line))).toBe(
+      '    PID    PPID    PGID     SID STAT USER       UID GROUP      GID CMD\n' +
+        `      1       0       1       1 Rs   alice    alice admin    admin ${line}\n`,
+    )
+  } finally {
+    await ws.close()
+  }
+})
+
+it("ps does not name another session's group", async () => {
+  const ws = new Workspace(
+    { '/m': [new RAMVFS(), MountMode.WRITE] },
+    {
+      mode: MountMode.WRITE,
+      shellParser: parser,
+      profiles: {
+        admin: parseSessionProfile({ processes: 'workspace' }),
+        reader: parseSessionProfile({}),
+      },
+      profile: 'admin',
+    },
+  )
+  ws.createSession('r', { profile: 'reader' })
+  try {
+    const pid = stdoutStr(await ws.shell('sleep 30 & echo $!', { sessionId: 'r' })).trim()
+    const result = await ws.shell(`ps -o pid=,group= -p ${pid},$$`)
+    const words = stdoutStr(result).split(/\s+/).filter(Boolean)
+    const rows = new Map(words.flatMap((word, i) => (i % 2 === 0 ? [[word, words[i + 1]]] : [])))
+    expect(rows.get(pid)).toBe('-')
+    rows.delete(pid)
+    expect([...rows.values()]).toEqual(['admin'])
   } finally {
     await ws.close()
   }

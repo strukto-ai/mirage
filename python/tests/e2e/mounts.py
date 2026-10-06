@@ -73,7 +73,9 @@ def _make_ssh_vfs(state: MountState) -> SSHVFS:
     state.sftp_files = {}
     state.sftp_dirs = {SSH_ROOT}
     vfs.accessor._sftp = MockSFTPClient(state.sftp_files, state.sftp_dirs)
-    vfs.accessor._conn = MagicMock(wait_closed=AsyncMock())
+    vfs.accessor._conn = MagicMock(
+        wait_closed=AsyncMock(), is_closed=MagicMock(return_value=False)
+    )
     return vfs
 
 

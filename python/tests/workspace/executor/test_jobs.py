@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 
 from mirage.io import IOResult
+from mirage.policy.profile import SessionProfile
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.job_table import Job, JobStatus, JobTable
 from mirage.types import MountMode, PathSpec
@@ -1185,6 +1186,55 @@ async def test_ps_lays_columns_out_as_procps_does():
             if out is not None:
                 assert result.stdout.decode() == out, line
             assert (result.exit_code, result.stderr or b"") == (0, b""), line
+    finally:
+        await ws.close()
+
+
+# The issue's line: `$$` is the session's first line, which ps lists
+# while it runs as the session leader procps marks with `s`; the owner
+# is the workspace user and the group the session's profile.
+@pytest.mark.asyncio
+async def test_ps_lists_the_session_leader_with_its_owner():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode="exec",
+        agent_id="alice",
+        profiles={"admin": SessionProfile()},
+        profile="admin",
+    )
+    try:
+        line = "ps -o pid,ppid,pgid,sid,stat,user,uid,group,gid,cmd -p $$"
+        result = await ws.shell(line)
+        assert result.stdout.decode() == (
+            "    PID    PPID    PGID     SID STAT USER       UID GROUP      "
+            "GID CMD\n"
+            f"      1       0       1       1 Rs   alice    alice admin    "
+            f"admin {line}\n"
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_ps_does_not_name_another_sessions_group():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode="exec",
+        profiles={
+            "admin": SessionProfile(processes="workspace"),
+            "reader": SessionProfile(),
+        },
+        profile="admin",
+    )
+    ws.create_session("r", profile="reader")
+    try:
+        pid = int(
+            (await ws.shell("sleep 30 & echo $!", session_id="r")).stdout
+        )
+        result = await ws.shell(f"ps -o pid=,group= -p {pid},$$")
+        words = result.stdout.decode().split()
+        rows = dict(zip(words[::2], words[1::2], strict=True))
+        assert (rows.pop(str(pid)), list(rows.values())) == ("-", ["admin"])
     finally:
         await ws.close()
 

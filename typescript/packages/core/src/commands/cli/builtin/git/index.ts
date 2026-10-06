@@ -23,12 +23,14 @@ import { UsageStyle } from '../../../spec/types.ts'
 import { add } from './add.ts'
 import { init } from './init.ts'
 import { fsck } from './fsck.ts'
+import { hashObject, hashObjectReadOnly } from './hash_object.ts'
 import { stashList, stashShow } from './stash.ts'
 import { nodeHelp, findNode } from '../../walk.ts'
 import type { CLIInvocation } from '../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { branch, branchReadOnly } from './branch.ts'
+import { catFile } from './cat_file.ts'
 import { checkout, checkoutReadOnly } from './checkout.ts'
 import { commit } from './commit.ts'
 import { diff } from './diff.ts'
@@ -240,6 +242,16 @@ const LOG_OPTIONS = [
     short: '-S',
     type: 'str',
     description: 'Show commits that change the number of occurrences of the string',
+  }),
+  new Option({
+    short: '-G',
+    type: 'str',
+    description:
+      'Show commits whose diff adds or removes a line that matches the extended regular expression',
+  }),
+  new Option({
+    long: '--pickaxe-regex',
+    description: 'Treat the -S string as an extended regular expression',
   }),
   new Option({
     long: '--since',
@@ -622,6 +634,52 @@ export const GIT = new CLISpec({
       description: 'List references with a format',
       options: FOR_EACH_REF_OPTIONS,
       rest: REVISION,
+    }),
+    new CLISpec({
+      name: 'cat-file',
+      fn: verb(catFile),
+      description: 'Provide contents or details of repository objects',
+      options: [
+        new Option({ short: '-t', description: 'Show the object type' }),
+        new Option({ short: '-s', description: 'Show the object size' }),
+        new Option({ short: '-e', description: 'Check if <object> exists' }),
+        new Option({ short: '-p', description: 'Pretty-print <object> content' }),
+        new Option({
+          long: '--batch',
+          type: 'str',
+          valueOptional: true,
+          description: 'Show full <object> or <rev> contents',
+        }),
+        new Option({
+          long: '--batch-check',
+          type: 'str',
+          valueOptional: true,
+          description: "Like --batch, but don't emit <contents>",
+        }),
+      ],
+      rest: REVISION,
+    }),
+    new CLISpec({
+      name: 'hash-object',
+      fn: verb(hashObject, hashObjectReadOnly),
+      description: 'Compute object ID and optionally create an object from a file',
+      options: [
+        new Option({ short: '-t', type: 'str', description: 'Object type' }),
+        new Option({ short: '-w', description: 'Write the object into the object database' }),
+        new Option({ long: '--stdin', description: 'Read the object from stdin' }),
+        new Option({ long: '--stdin-paths', description: 'Read file names from stdin' }),
+        new Option({ long: '--no-filters', description: 'Store file as is without filters' }),
+        new Option({
+          long: '--literally',
+          description: 'Just hash any random garbage to create corrupt objects for debugging Git',
+        }),
+        new Option({
+          long: '--path',
+          type: 'str',
+          description: 'Process file as it were from this path',
+        }),
+      ],
+      rest: PATHSPEC,
     }),
     new CLISpec({
       name: 'ls-files',

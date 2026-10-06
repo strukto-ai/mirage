@@ -112,14 +112,14 @@ from mirage.workspace.mount.storage import make_storage_key
 from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecuteLine, ExecutionNode
 
-# One handler per JOB_BUILTINS member; lookup already narrowed the name.
+# One handler per JOB_BUILTINS member but ps, which also takes the
+# workspace user; lookup already narrowed the name.
 JOB_HANDLERS = {
     "wait": handle_wait,
     "fg": handle_fg,
     "kill": handle_kill,
     "jobs": handle_jobs,
     "disown": handle_disown,
-    "ps": handle_ps,
 }
 
 
@@ -245,6 +245,10 @@ async def handle_command(
         if cmd_name == "fg":
             # The one job builtin that writes before it blocks.
             return await handle_fg(job_table, text_parts, session, view, sink)
+        if cmd_name == "ps":
+            # The one job builtin that names an owner: the workspace user.
+            user = namespace.user if namespace is not None else None
+            return await handle_ps(job_table, text_parts, session, view, user)
         return await JOB_HANDLERS[cmd_name](
             job_table, text_parts, session, view
         )

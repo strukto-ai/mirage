@@ -217,6 +217,21 @@ export class TagWriteReadOnlyError extends GitError {
   }
 }
 
+/**
+ * An object `hash-object -w` a read-only mount will not let it write (pinned
+ * against git 2.47.3); git prints `(null)` for content read from stdin.
+ */
+export class ObjectWriteReadOnlyError extends GitError {
+  override readonly prefix = null
+
+  constructor(name: string) {
+    super(
+      'error: unable to create temporary file: Read-only file system\n' +
+        `fatal: Unable to add ${name} to database`,
+    )
+  }
+}
+
 /** `clone` into a directory a read-only mount will not let it make. */
 export class CloneReadOnlyError extends GitError {
   constructor(directory: string) {
@@ -1353,8 +1368,11 @@ export class IncompatibleOptionsError extends GitError {
  * 129: `log --graph --reverse` (pinned against git 2.50.1).
  */
 export class IncompatibleLogOptionsError extends GitError {
-  constructor(first: string, second: string) {
-    super(`options '${first}' and '${second}' cannot be used together`)
+  /** @param third a third option, where git names three (`-G`, `-S` and `--find-object`) */
+  constructor(first: string, second: string, third: string | null = null) {
+    const names =
+      third === null ? `'${first}' and '${second}'` : `'${first}', '${second}', and '${third}'`
+    super(`options ${names} cannot be used together`)
   }
 }
 

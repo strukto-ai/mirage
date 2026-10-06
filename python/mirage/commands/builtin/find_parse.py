@@ -671,15 +671,22 @@ def _parse_or(state: _State) -> PredNode:
             break
         _advance(state)
         _after_operator(state, tok)
-        # Each arm reaches its own actions, and a window under one cannot
-        # be exact.
-        state.positional = True
+        # A window under an -o cannot be exact.
         if state.nested == 0:
             state.in_or = True
             if state.newer_token is not None:
                 _check_window_placement(state, state.newer_token)
         terms.append(_parse_and(state))
-    return terms[0] if len(terms) == 1 else Or(terms)
+    if len(terms) == 1:
+        return terms[0]
+    node = Or(terms)
+    # Arms that reach actions leave the tree to decide which action a row
+    # reaches; an -o among tests alone is one more test, and the actions
+    # after it still run in order on every row it keeps
+    # (`( -name a -o -name b ) -print -exec ...`).
+    if tree_has_action(node):
+        state.positional = True
+    return node
 
 
 # GNU find's link-policy options are leading options, not predicates:

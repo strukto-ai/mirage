@@ -212,7 +212,9 @@ class SSHTestEnv:
         self._dirs: set[str] = {"/data"}
         self._sftp = MockSFTPClient(self._files, self._dirs)
         self.vfs.accessor._sftp = self._sftp
-        self.vfs.accessor._conn = MagicMock(wait_closed=AsyncMock())
+        self.vfs.accessor._conn = MagicMock(
+            wait_closed=AsyncMock(), is_closed=MagicMock(return_value=False)
+        )
         self.ws = Workspace(
             {"/ssh": (self.vfs, MountMode.WRITE)},
             mode=MountMode.WRITE,

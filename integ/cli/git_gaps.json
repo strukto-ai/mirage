@@ -1191,6 +1191,76 @@
         "stdout": "128\n128\n0\n",
         "stderr": "fatal: Unable to create '/repo/.git/index.lock': File exists.\n\nAnother git process seems to be running in this repository, e.g.\nan editor opened by 'git commit'. Please make sure all processes\nare terminated then try again. If it still fails, a git process\nmay have crashed in this repository earlier:\nremove the file manually to continue.\nerror: could not lock config file /repo/.git/config: File exists\nfatal: could not set 'core.repositoryformatversion' to '0'\n"
       }
+    },
+    {
+      "id": "git_log_regex_pickaxe",
+      "seq": 568084,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log -G 'del.a' --oneline; git -C /repo log -G '^two$' --format=%s; git -C /repo log -G DELTA -i --format=%s; git -C /repo log -S 'gam+a' --pickaxe-regex --format=%s; git -C /repo log -S 'GAM+A' --pickaxe-regex -i --format=%s; git -C /repo log -S 'gam+a' --format=%s | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "265ec3a add delta\nadd two\nadd delta\nfirst commit\nfirst commit\n0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_regex_pickaxe_refusals",
+      "seq": 568085,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log -G ''; echo $?; git -C /repo log -S ''; echo $?; git -C /repo log -G a -S b; echo $?; git -C /repo log -G '('; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "129\n129\n128\n128\n",
+        "stderr": "error: -G requires a non-empty argument\nerror: -S requires a non-empty argument\nfatal: options '-G', '-S', and '--find-object' cannot be used together\nfatal: invalid regex: Unmatched ( or \\(\n"
+      }
+    },
+    {
+      "id": "git_cat_file_reads_objects",
+      "seq": 568086,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo cat-file -t HEAD; git -C /repo cat-file -s HEAD:letters.txt; git -C /repo cat-file -p 'HEAD^{tree}'; git -C /repo cat-file -p :numbers.txt; git -C /repo cat-file -e HEAD:nope; echo $?; git -C /repo cat-file blob HEAD:numbers.txt; git -C /repo cat-file commit HEAD; printf 'HEAD\\nHEAD:numbers.txt rest\\nnope\\n' | git -C /repo cat-file --batch-check; printf 'HEAD:numbers.txt x y\\n' | git -C /repo cat-file --batch='%(objecttype) %(objectsize) %(objectname) %(rest)'; git -C /repo tag topic HEAD~2 && printf 'topic\\n' | git -C /repo cat-file --batch-check; git -C /repo tag -d topic > /dev/null",
+      "expect": {
+        "exit": 0,
+        "stdout": "commit\n23\n040000 tree 24f073f4fa69a811e1bb64f65729188ccc3ce32a\tdocs\n100644 blob 7a28df3c975fa62270a452251c4e0b24d685c4ba\tletters.txt\n100644 blob 814f4a422927b82f5f8a43f8fab6d3839e3983f2\tnumbers.txt\none\ntwo\n128\none\ntwo\ntree 213a314abdd4e23f24dccd80a763c4b533bdb01d\nparent 225f39c50d27e015653a38d589474ce2880399e6\nauthor Integ Author <integ@example.com> 1767883500 +0000\ncommitter Integ Author <integ@example.com> 1767883500 +0000\n\nadd two\n8ef25423772bbfe671c8e285ae1d63991d59db19 commit 220\nHEAD:numbers.txt rest missing\nnope missing\nblob 8 814f4a422927b82f5f8a43f8fab6d3839e3983f2 x y\none\ntwo\n\n265ec3adb16a0c90ad09a180687677927b9d7b7f commit 222\n",
+        "stderr": "fatal: path 'nope' does not exist in 'HEAD'\nwarning: refname 'topic' is ambiguous.\n"
+      }
+    },
+    {
+      "id": "git_cat_file_refusals",
+      "seq": 568087,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo cat-file -t nope; echo $?; git -C /repo cat-file -s -t HEAD; echo $?; git -C /repo cat-file foo HEAD; echo $?; git -C /repo cat-file blob HEAD; echo $?; git -C /repo cat-file --batch-check='%(foo)' </dev/null; echo $?; git -C /repo cat-file -t HEAD HEAD 2>&1 | head -2; git -C /repo cat-file -p 2>/dev/null; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "128\n129\n128\n128\n128\nfatal: too many arguments\n\n129\n",
+        "stderr": "fatal: Not a valid object name nope\nerror: options '-t' and '-s' cannot be used together\nfatal: invalid object type \"foo\"\nfatal: git cat-file HEAD: bad file\nfatal: bad cat-file format: %(foo)\n"
+      }
+    },
+    {
+      "id": "git_hash_object",
+      "seq": 568088,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'hello\\n' | git -C /repo hash-object --stdin; git -C /repo hash-object numbers.txt docs/readme.md; printf 'numbers.txt\\n' | git -C /repo hash-object --stdin-paths; git -C /repo hash-object -t blob --stdin < /dev/null; git -C /repo cat-file commit HEAD | git -C /repo hash-object -t commit --stdin; git -C /repo cat-file tree HEAD | git -C /repo hash-object -t tree --stdin; id=$(printf 'integ\\n' | git -C /repo hash-object -w --stdin); git -C /repo cat-file -p $id; rm /repo/.git/objects/${id:0:2}/${id:2}; git -C /repo cat-file -e $id; echo $?; printf junk | git -C /repo hash-object -t tree --stdin 2>&1 | tail -1; printf junk | git -C /repo hash-object -t commit --literally --stdin; git -C /repo hash-object -t foo numbers.txt; echo $?; git -C /repo hash-object nope; echo $?; git -C /repo hash-object docs; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "ce013625030ba8dba906f756967f9e9ca394464a\n814f4a422927b82f5f8a43f8fab6d3839e3983f2\nbfa655111293037a5564088d1a9bbca4cbcf446b\n814f4a422927b82f5f8a43f8fab6d3839e3983f2\ne69de29bb2d1d6434b8b29ae775ad8c2e48c5391\n8ef25423772bbfe671c8e285ae1d63991d59db19\n213a314abdd4e23f24dccd80a763c4b533bdb01d\ninteg\n1\nfatal: refusing to create malformed object\naa8f6d33b71dd1c53dad83401248342aa8bb8851\n128\n128\n128\n",
+        "stderr": "fatal: invalid object type \"foo\"\nfatal: could not open 'nope' for reading: No such file or directory\nfatal: Unable to hash docs\n"
+      }
     }
   ]
 }
