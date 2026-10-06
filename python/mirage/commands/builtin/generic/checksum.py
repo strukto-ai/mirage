@@ -26,11 +26,12 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import usage_exit_code, usage_hint
+from mirage.errors.constants import WALK_ERRORS
+from mirage.errors.fs import fs_strerror
 from mirage.io.stream import ensure_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
-from mirage.utils.errors import WALK_ERRORS, fs_strerror
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import resolve_path
 

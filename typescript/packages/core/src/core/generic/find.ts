@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { activeCacheManager } from '../../cache/context.ts'
-import { isEacces, isEnoent } from '../../utils/errors.ts'
+import { isEacces, isEnoent } from '../../errors/fs.ts'
 import { isEntryError } from '../../commands/errors.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'

@@ -16,10 +16,10 @@ import asyncio
 
 import pytest
 
+from mirage.errors.types import OperationNotSupportedError
 from mirage.observe.log_entry import EVENT_COMMAND, LogEntry
 from mirage.observe.observer import Observer
 from mirage.types import FileType, MountMode
-from mirage.utils.errors import OperationNotSupportedError
 from mirage.vfs.history import HistoryViewVFS
 from mirage.workspace.mount.registry import MountRegistry
 

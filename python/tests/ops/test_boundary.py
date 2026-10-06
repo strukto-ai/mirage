@@ -16,11 +16,11 @@ import errno
 
 import pytest
 
+from mirage.errors.types import ReadOnlyError
 from mirage.ops.boundary import OpBoundary
 from mirage.policy import Deny, Limit, Policies, Policy, PolicyDenied
 from mirage.policy.types import VfsContext, VfsResultContext
 from mirage.types import MountMode, PathSpec
-from mirage.utils.errors import ReadOnlyError
 
 
 class _Sealed(Policy):

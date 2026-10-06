@@ -22,8 +22,8 @@ from mirage.core.lancedb.query import row_record
 from mirage.core.lancedb.render import render_card
 from mirage.core.vector.read import blob_bytes
 from mirage.core.vector.scope import table_of
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 async def _row_of(

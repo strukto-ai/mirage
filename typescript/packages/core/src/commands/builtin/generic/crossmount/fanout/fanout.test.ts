@@ -15,7 +15,7 @@
 import { expect, it } from 'vitest'
 import { IOResult, materialize } from '../../../../../io/types.ts'
 import { PathSpec } from '../../../../../types.ts'
-import { enoent } from '../../../../../utils/errors.ts'
+import { enoent } from '../../../../../errors/fs.ts'
 import type { Cmd, CrossResult } from '../types.ts'
 import { runFanout } from './fanout.ts'
 

@@ -24,11 +24,11 @@ from mirage.commands.builtin.generic.crossmount.types import (
 )
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code_from_line
+from mirage.errors.render import revoice_fs_error_line
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize
 from mirage.io.types import ByteSource
 from mirage.types import PathSpec
-from mirage.utils.errors import revoice_fs_error_line
 
 
 def _has_active_flags(flag_kwargs: dict[str, FlagValue]) -> bool:

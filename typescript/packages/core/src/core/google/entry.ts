@@ -15,7 +15,7 @@
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { GoogleApiError, type TokenManager } from './client.ts'
 import { getFile } from './drive.ts'

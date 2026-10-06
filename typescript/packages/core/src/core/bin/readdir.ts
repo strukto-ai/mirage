@@ -14,7 +14,7 @@
 
 import type { BinAccessor } from '../../accessor/bin.ts'
 import type { PathSpec } from '../../types.ts'
-import { enoent, enotdir } from '../../utils/errors.ts'
+import { enoent, enotdir } from '../../errors/fs.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
 /** List one file per program the session can run, as sorted virtual paths. */

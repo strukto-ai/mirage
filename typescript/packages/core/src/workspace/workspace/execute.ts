@@ -39,7 +39,8 @@ import {
   findUnterminatedBacktick,
   type ShellParser,
 } from '../../shell/parse/index.ts'
-import { formatFsError, isFsError } from '../../utils/errors.ts'
+import { formatFsError } from '../../errors/render.ts'
+import { isFsError } from '../../errors/fs.ts'
 import {
   hasAborted,
   lineStatusWriter,

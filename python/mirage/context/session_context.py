@@ -12,13 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno
-import os
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from mirage.errors.fs import eacces, enoent, erofs
 from mirage.types import (
     MOUNT_MODE_RANK,
     EntryGate,
@@ -29,7 +28,6 @@ from mirage.types import (
     WalkProbe,
     weaker_mode,
 )
-from mirage.utils.errors import ReadOnlyError
 from mirage.utils.hidden import (
     anchor_depth,
     is_glob,
@@ -234,10 +232,8 @@ def hidden_refusal(
             rename or copy destination is one.
     """
     if create and path_visible(vis, parent(virtual.rstrip("/") or "/")):
-        return PermissionError(
-            errno.EACCES, os.strerror(errno.EACCES), virtual
-        )
-    return FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), virtual)
+        return eacces(virtual)
+    return enoent(virtual)
 
 
 _current_admission: ContextVar["EntryGate | None"] = ContextVar(
@@ -823,16 +819,12 @@ def require_paths_writable(
             effective_path_mode(path.virtual, mount_prefix, mount_mode)
             == MountMode.READ
         ):
-            raise ReadOnlyError(
-                errno.EROFS, "Read-only file system", path.virtual
-            )
+            raise erofs(path.virtual)
     if subtree:
         for path in paths:
             blame = readonly_below(path.virtual, mount_prefix, mount_mode)
             if blame is not None:
-                raise ReadOnlyError(
-                    errno.EROFS, "Read-only file system", blame
-                )
+                raise erofs(blame)
 
 
 def require_mount_writable() -> None:
@@ -854,4 +846,4 @@ def require_mount_writable() -> None:
         return
     prefix, mode = gate
     if effective_mount_mode(prefix, mode) == MountMode.READ:
-        raise ReadOnlyError(errno.EROFS, "Read-only file system", prefix)
+        raise erofs(prefix)

@@ -33,7 +33,7 @@ import { type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { versionLine } from '../../spec/standard.ts'
 import { UsageError } from '../../errors.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
-import { errorVirtualPath, fsStrerror, isFsError } from '../../../utils/errors.ts'
+import { errorVirtualPath, fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { isDirectory, pathExists } from '../utils/copy.ts'
 
 const ENC = new TextEncoder()

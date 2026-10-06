@@ -29,7 +29,7 @@ import { driveFingerprint, entryFingerprint } from './fingerprint.ts'
 import { md5HexAsync } from '../../utils/hash.ts'
 import { DIRECTORY_RESOURCE_TYPES, NATIVE_RESOURCE_TYPES, readdir } from './readdir.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import { eisdir, enoent } from '../../utils/errors.ts'
+import { eisdir, enoent } from '../../errors/fs.ts'
 import { sliceWindow, windowFor } from '../../utils/ranges.ts'
 
 // Whether a read returned the whole object rather than a window. A token

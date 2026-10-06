@@ -17,7 +17,7 @@ import errno
 import pytest
 
 from mirage.core.disk.errors import disk_errors
-from mirage.utils.errors import fs_strerror
+from mirage.errors.fs import fs_strerror
 
 
 def test_disk_errors_passes_success_through():

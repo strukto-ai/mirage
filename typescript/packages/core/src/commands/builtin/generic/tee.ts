@@ -15,16 +15,10 @@
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec, StatFn } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import {
-  eisdir,
-  enoent,
-  enotdir,
-  fsErrorLine,
-  isEnoent,
-  isFsError,
-  type FsError,
-} from '../../../utils/errors.ts'
-import { absentDestStrerror, entryKind } from '../utils/paths.ts'
+import { eisdir, enotdir, fsError, isEnoent, isFsError } from '../../../errors/fs.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
+import { type FsError } from '../../../errors/types.ts'
+import { absentDestError, entryKind } from '../utils/paths.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -146,9 +140,9 @@ export async function openRefusal(
   const { exists, isDir } = await entryKind(stat, path)
   if (isDir) return eisdir(path)
   if (exists) return null
-  const strerror = await absentDestStrerror(stat, path)
-  if (strerror === null) return null
-  return strerror === 'Not a directory' ? enotdir(path) : enoent(path)
+  const condition = await absentDestError(stat, path)
+  if (condition === null) return null
+  return fsError(path, condition)
 }
 
 export async function writeOutput(

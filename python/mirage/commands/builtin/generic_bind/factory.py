@@ -34,8 +34,8 @@ from mirage.commands.builtin.generic_bind.builders import BUILDERS
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
+from mirage.errors.fs import eisdir
 from mirage.types import PathSpec
-from mirage.utils.errors import eisdir
 
 
 def _cached_stat(

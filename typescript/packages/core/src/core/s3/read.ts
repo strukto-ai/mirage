@@ -18,7 +18,7 @@ import { record, revisionFor, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { createS3Client, isNotFoundError, loadS3Module, s3Key, streamToBuffer } from './client.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import { rangeHeader } from '../../utils/ranges.ts'
 
 export interface S3ReadOptions {

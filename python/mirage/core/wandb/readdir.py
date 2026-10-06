@@ -6,8 +6,8 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.wandb.errors import WandbAPIError
 from mirage.core.wandb.pathing import LEAVES, parts, run_vars, safe_name
 from mirage.core.wandb.queries import RUN_EXISTS
+from mirage.errors.fs import enoent, enotdir
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent, enotdir
 from mirage.utils.key_prefix import mount_prefix_of
 
 

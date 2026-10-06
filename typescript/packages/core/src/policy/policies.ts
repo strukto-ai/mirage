@@ -14,7 +14,8 @@
 
 import { operandExitCode } from '../commands/spec/usage.ts'
 import { explaining, lineRunning, noteRefusal, runExplaining } from '../context/session_context.ts'
-import { eacces, erofsReadOnly, fsErrorLine } from '../utils/errors.ts'
+import { eacces, erofs } from '../errors/fs.ts'
+import { fsErrorLine } from '../errors/render.ts'
 import { Limit, type PathSpec, type Refusal } from '../types.ts'
 import type { Policy } from './base.ts'
 import { HiddenPathsPolicy } from './builtin/hidden_paths.ts'
@@ -41,6 +42,7 @@ import {
   type VfsExplanation,
 } from './types.ts'
 import type { RouteContext } from '../runtime/routing/types.ts'
+import { posixPhrase } from '../errors/posix.ts'
 
 type Hook = keyof typeof VALIDITY
 
@@ -171,18 +173,19 @@ function denyOnly(hook: Hook, action: Deny | Ask | null): Deny | null {
 }
 
 /**
- * The error a door throws for a policy's Deny, its record noted for the
- * line running it. The message says what the terminal would
- * (`Permission denied` unless the door words its own); the reason rides
- * the record, on the error for a caller that catches it and on the
- * line's result for one that only reads what a command printed.
+ * The error a door throws for a policy's Deny, or for a question the host
+ * has not answered, its record noted for the line running it. The message
+ * says what the terminal would (`Permission denied` unless the door words
+ * its own); the reason (or the ask id the agent quotes) rides the record,
+ * on the error for a caller that catches it and on the line's result for
+ * one that only reads what a command printed.
  */
 export function policyDenied(
-  deny: Deny,
+  action: Deny | Pending,
   filename: string,
-  message = 'Permission denied',
+  message = posixPhrase('EACCES'),
 ): PolicyDenied {
-  const refusal = refusalOf(deny)
+  const refusal = refusalOf(action)
   noteRefusal(refusal)
   return new PolicyDenied(message, filename, refusal)
 }
@@ -296,7 +299,7 @@ export async function preVfsGate(
     return
   }
   const deciding = trace === DryRun.DECIDING
-  if (deciding && write) throw erofsReadOnly('Read-only file system', path)
+  if (deciding && write) throw erofs(path)
   if (!(policies.wants('preVfs') || checkHidden || (write && context.mode !== undefined))) {
     return
   }
@@ -311,22 +314,11 @@ export async function preVfsGate(
       ? await decisions.heldOp(ctx, answer)
       : await decisions.resolveOp(ctx, answer)
     if (settled === null) return
-    if (settled.kind === 'pending') throw policyPending(settled, path.virtual)
+    if (settled.kind === 'pending') throw policyDenied(settled, path.virtual)
     answer = settled
   }
   if (answer.error !== undefined) throw answer.error
   throw policyDenied(answer, path.virtual)
-}
-
-/**
- * The error a door throws for a question the host has not answered: a
- * plain EACCES, as the terminal would print it, with the ask id the agent
- * quotes on the record. Mirrors Python's `policy_pending`.
- */
-export function policyPending(pending: Pending, filename: string): PolicyDenied {
-  const refusal = refusalOf(pending)
-  noteRefusal(refusal)
-  return new PolicyDenied('Permission denied', filename, refusal)
 }
 
 /**

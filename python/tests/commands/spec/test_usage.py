@@ -22,7 +22,7 @@ from mirage.commands.spec.usage import (
     unknown_option_error,
     usage_exit_code,
 )
-from mirage.utils.errors import efbig
+from mirage.errors.fs import efbig
 
 
 def test_exit_codes_match_gnu():

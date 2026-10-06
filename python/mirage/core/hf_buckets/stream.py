@@ -22,9 +22,9 @@ from mirage.core.hf_buckets.read import is_missing
 from mirage.core.hf_hub.client import HfHubError, hub_stream
 from mirage.core.hf_hub.constants import REFUSED_STATUSES
 from mirage.core.hf_hub.lookup import refusals_denied
+from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import record_stream
 from mirage.types import PathSpec
-from mirage.utils.errors import eisdir, enoent
 
 
 async def read_stream(

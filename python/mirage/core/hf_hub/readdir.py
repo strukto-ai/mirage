@@ -24,8 +24,8 @@ from mirage.core.hf_hub.lookup import (
     probe_file,
     refusals_denied,
 )
+from mirage.errors.fs import listing_error
 from mirage.types import PathSpec
-from mirage.utils.errors import listing_error
 from mirage.utils.key_prefix import mount_prefix_of
 
 log = logging.getLogger(__name__)

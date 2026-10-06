@@ -16,7 +16,8 @@ import type { Accessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { BaseVFS } from '../vfs/base.ts'
 import type { PathSpec } from '../types.ts'
-import { enotsup, type MissingOpError } from '../utils/errors.ts'
+import { enotsup } from '../errors/fs.ts'
+import { type MissingOpError } from '../errors/types.ts'
 
 export interface OpKwargs {
   index?: IndexCacheStore

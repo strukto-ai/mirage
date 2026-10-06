@@ -28,7 +28,7 @@ from mirage.commands.builtin.utils.copy import (
 )
 from mirage.commands.builtin.utils.links import typed_link
 from mirage.commands.builtin.utils.paths import (
-    absent_dest_strerror,
+    absent_dest_error,
     descendant_path,
     nearest_ancestor,
     spelled_from,
@@ -37,6 +37,10 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import argmatch_error, extra_operand_error
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import DotWalkLoop, DotWalkMissing, FsCondition
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView
@@ -57,13 +61,6 @@ from mirage.types import (
     Visibility,
 )
 from mirage.utils.dates import iso_timestamp
-from mirage.utils.errors import (
-    ELOOP_STRERROR,
-    FS_ERRORS,
-    DotWalkLoop,
-    DotWalkMissing,
-    fs_strerror,
-)
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import CycleError, resolve_path
@@ -508,7 +505,9 @@ async def copy_tree_links(
         try:
             resolved = copies.links.resolve(virtual)
         except CycleError:
-            errors.append(f"cp: cannot stat '{shown}': {ELOOP_STRERROR}")
+            errors.append(
+                f"cp: cannot stat '{shown}': {posix_phrase(FsCondition.ELOOP)}"
+            )
             continue
         leads = await copies.links.target_stat(virtual)
         if leads is None:
@@ -613,7 +612,7 @@ def split_operands(
 async def target_dir_error(
     cmd_name: str, stat: StatFn, target: PathSpec
 ) -> str | None:
-    """GNU error line when a ``-t`` operand is missing or not a directory.
+    """The error line when a ``-t`` operand is missing or not a directory.
 
     Args:
         cmd_name (str): Command name for the error prefix.
@@ -623,32 +622,25 @@ async def target_dir_error(
     try:
         info = await stat(target)
     except NotADirectoryError:
-        return (
-            f"{cmd_name}: target directory '{target.raw_path}': "
-            "Not a directory"
-        )
-    except DotWalkLoop as exc:
-        return (
-            f"{cmd_name}: target directory '{target.raw_path}': "
-            f"{fs_strerror(exc)}"
-        )
+        condition = FsCondition.ENOTDIR
+    except DotWalkLoop:
+        condition = FsCondition.ELOOP
     except (FileNotFoundError, ValueError):
-        return (
-            f"{cmd_name}: target directory '{target.raw_path}': "
-            "No such file or directory"
-        )
-    if info.type != FileType.DIRECTORY:
-        return (
-            f"{cmd_name}: target directory '{target.raw_path}': "
-            "Not a directory"
-        )
-    return None
+        condition = FsCondition.ENOENT
+    else:
+        if info.type == FileType.DIRECTORY:
+            return None
+        condition = FsCondition.ENOTDIR
+    return (
+        f"{cmd_name}: target directory '{target.raw_path}': "
+        f"{posix_phrase(condition)}"
+    )
 
 
 async def dest_kind(
     stat: StatFn, target: PathSpec
-) -> tuple[bool, bool, str | None]:
-    """Probe a destination for ``(exists, is_dir, strerror)``.
+) -> tuple[bool, bool, FsCondition | None]:
+    """Probe a destination for ``(exists, is_dir, condition)``.
 
     ``cp`` and ``mv`` are not ``mkdir -p``: neither creates the
     destination's parent, so a missing or non-directory component is a
@@ -657,14 +649,14 @@ async def dest_kind(
     depth, and ``reg/`` typed with a slash over a plain file, are both
     ``cannot stat 'DST': Not a directory``. A merely absent parent fails
     the create or the rename (``cannot create regular file`` for cp,
-    ``cannot move`` for mv), so the strerror comes back bare and each
+    ``cannot move`` for mv), so the condition comes back bare and each
     caller words it in its own voice. None means the destination exists
     or its parent is a usable directory.
 
     The backends answer ENOENT for a path under a plain file just as
     they do for a genuinely absent one (only a slashed operand makes the
     stat itself say ENOTDIR), so the chain is walked upward until
-    something exists (:func:`absent_dest_strerror`); the common case
+    something exists (:func:`absent_dest_error`); the common case
     (the parent is there) costs a single stat.
 
     Args:
@@ -672,25 +664,25 @@ async def dest_kind(
         target (PathSpec): The destination operand.
 
     Returns:
-        tuple[bool, bool, str | None]: Whether it exists, whether it is
-        a directory, and the GNU strerror when it can be neither found
+        tuple[bool, bool, FsCondition | None]: Whether it exists, whether
+        it is a directory, and the condition when it can be neither found
         nor created there.
     """
     try:
         info = await stat(target)
     except NotADirectoryError:
-        return False, False, "Not a directory"
+        return False, False, FsCondition.ENOTDIR
     except DotWalkLoop:
-        return False, False, ELOOP_STRERROR
+        return False, False, FsCondition.ELOOP
     except DotWalkMissing:
         # Its `..` passes a name that is not there: the chain of the path
         # it simplifies to says nothing about this one.
-        return False, False, "No such file or directory"
+        return False, False, FsCondition.ENOENT
     except (FileNotFoundError, ValueError):
         pass
     else:
         return True, info.type == FileType.DIRECTORY, None
-    return False, False, await absent_dest_strerror(stat, target)
+    return False, False, await absent_dest_error(stat, target)
 
 
 def slash_refuses_file(
@@ -720,10 +712,10 @@ def slash_refuses_file(
 
 async def source_kind(
     stat: StatFn, path: PathSpec
-) -> tuple[bool, bool, str | None]:
-    """Probe a source operand for ``(exists, is_dir, strerror)``.
+) -> tuple[bool, bool, FsCondition | None]:
+    """Probe a source operand for ``(exists, is_dir, condition)``.
 
-    A source keeps the errno GNU reports: ``cp /plain/child /dst`` is
+    A source keeps the errno the kernel reports: ``cp /plain/child /dst`` is
     ``cannot stat 'X': Not a directory``, not "No such file or directory",
     and so is ``cp reg/ /dst``, where the stat itself says ENOTDIR
     because the operand carries a slash. The backends cannot otherwise
@@ -739,15 +731,15 @@ async def source_kind(
         path (PathSpec): The probed source operand.
 
     Returns:
-        tuple[bool, bool, str | None]: Whether it exists, whether it is a
-        directory, and the GNU strerror when it does not exist.
+        tuple[bool, bool, FsCondition | None]: Whether it exists, whether
+        it is a directory, and the condition when it does not exist.
     """
     try:
         info = await stat(path)
     except NotADirectoryError:
-        return False, False, "Not a directory"
+        return False, False, FsCondition.ENOTDIR
     except DotWalkLoop:
-        return False, False, ELOOP_STRERROR
+        return False, False, FsCondition.ELOOP
     except (FileNotFoundError, ValueError):
         pass
     else:
@@ -756,7 +748,7 @@ async def source_kind(
     return (
         False,
         False,
-        ("No such file or directory" if is_dir else "Not a directory"),
+        FsCondition.ENOENT if is_dir else FsCondition.ENOTDIR,
     )
 
 
@@ -1540,8 +1532,10 @@ async def cp_generic(
                 created.add(key_of(target))
             continue
         src_exists, src_is_dir, src_err = await source_kind(stat, src)
-        if not src_exists:
-            errors.append(f"cp: cannot stat '{src.raw_path}': {src_err}")
+        if src_err is not None:
+            errors.append(
+                f"cp: cannot stat '{src.raw_path}': {posix_phrase(src_err)}"
+            )
             continue
         if (
             flags.no_target_dir
@@ -1584,17 +1578,21 @@ async def cp_generic(
             target_exists, target_is_dir, target_err = await dest_kind(
                 stat, target
             )
-        if target_err in STAT_REFUSALS:
-            errors.append(f"cp: cannot stat '{target.raw_path}': {target_err}")
+        if target_err is not None and target_err in STAT_REFUSALS:
+            errors.append(
+                f"cp: cannot stat '{target.raw_path}': "
+                f"{posix_phrase(target_err)}"
+            )
             continue
         # The create fails on the absent parent before the slash matters,
         # so a chain verdict keeps its ENOENT (`cp f deep/missing/`).
         if slash_refuses_file(target, target_exists, src_is_dir):
-            target_err = target_err or "Not a directory"
+            target_err = target_err or FsCondition.ENOTDIR
         if target_err is not None:
             noun = "directory" if src_is_dir else "regular file"
             errors.append(
-                f"cp: cannot create {noun} '{target.raw_path}': {target_err}"
+                f"cp: cannot create {noun} '{target.raw_path}': "
+                f"{posix_phrase(target_err)}"
             )
             continue
         mismatch = overwrite_type_error(

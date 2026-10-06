@@ -18,7 +18,7 @@ from mirage.core.hierarchy.readdir import make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.postgres import client
 from mirage.core.postgres.scope import ENTITY_FILES, KIND_DIRS, detect_scope
-from mirage.utils.errors import enoent
+from mirage.errors.fs import enoent
 
 
 async def schema_guard(

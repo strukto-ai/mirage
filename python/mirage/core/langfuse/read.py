@@ -27,8 +27,8 @@ from mirage.core.langfuse.client import (
 )
 from mirage.core.langfuse.scope import detect_scope
 from mirage.core.render.json import json_bytes, jsonl_bytes
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 async def fetch_trace_file(

@@ -22,7 +22,7 @@ import {
   type StatFn,
   type WalkEntry,
 } from '../types.ts'
-import { isEnoent, isEnotdir } from '../utils/errors.ts'
+import { isEnoent, isEnotdir } from '../errors/fs.ts'
 import { mountKey, mountPrefixOf } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import { statFingerprint } from './fingerprint.ts'

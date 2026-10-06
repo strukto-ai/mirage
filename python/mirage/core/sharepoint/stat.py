@@ -18,8 +18,8 @@ from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.msgraph.drive import stat_item, virtual_key
 from mirage.core.sharepoint.resolve import drive_loc, require_item, resolve
+from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import enoent
 
 
 async def stat(

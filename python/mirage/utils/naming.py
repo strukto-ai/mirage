@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.errors.fs import enoent
 from mirage.utils.sanitize import (
     NAME_MAX_BYTES,
     byte_length,
@@ -149,9 +150,9 @@ def parse_id_name(
             with ``suffix``.
     """
     if suffix and not name.endswith(suffix):
-        raise FileNotFoundError(name)
+        raise enoent(name)
     raw = name[: -len(suffix)] if suffix else name
     label, sep, resource_id = raw.rpartition("__")
     if not sep or not resource_id:
-        raise FileNotFoundError(name)
+        raise enoent(name)
     return label, resource_id

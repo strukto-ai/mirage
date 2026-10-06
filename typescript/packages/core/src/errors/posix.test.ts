@@ -14,11 +14,12 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { gnuPhrase, POSIX, posixErrno } from './posix.ts'
+import { POSIX, posixErrno, posixPhrase } from './posix.ts'
 import { FS_CONDITIONS } from './types.ts'
 
 describe('the posix table', () => {
   it.each([
+    ['EBADF', 'Bad file descriptor'],
     ['ENOENT', 'No such file or directory'],
     ['ENOTDIR', 'Not a directory'],
     ['EISDIR', 'Is a directory'],
@@ -33,8 +34,9 @@ describe('the posix table', () => {
     ['EIO', 'Input/output error'],
     ['EBUSY', 'Device or resource busy'],
     ['EROFS', 'Read-only file system'],
-  ] as const)('speaks GNU strerror for %s', (cond, phrase) => {
-    expect(gnuPhrase(cond)).toBe(phrase)
+    ['EFBIG', 'File too large'],
+  ] as const)('speaks the strerror text for %s', (cond, phrase) => {
+    expect(posixPhrase(cond)).toBe(phrase)
   })
 
   it('gives every row a positive number and a phrase', () => {

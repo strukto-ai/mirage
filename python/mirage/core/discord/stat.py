@@ -21,8 +21,8 @@ from mirage.core.hierarchy.probe import resolve_entry
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.stat import entry_stat, make_stat
 from mirage.core.time_range import guard_day
+from mirage.errors.fs import enoent
 from mirage.types import ContentType, FileStat, FileType, PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.filetype import content_type_for_mime
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 

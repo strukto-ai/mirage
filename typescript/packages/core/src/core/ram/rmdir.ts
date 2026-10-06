@@ -15,7 +15,7 @@
 import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
-import { enotempty } from '../../utils/errors.ts'
+import { enotempty } from '../../errors/fs.ts'
 import { lookupError } from './dest.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { norm } from '../../utils/path.ts'

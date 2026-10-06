@@ -28,8 +28,8 @@ from mirage.core.postgres._schema_json import (
 from mirage.core.postgres.scope import detect_scope
 from mirage.core.postgres.semantic import build_entity_semantic_json
 from mirage.core.postgres.stat import stat
+from mirage.errors.fs import efbig
 from mirage.types import PathSpec
-from mirage.utils.errors import efbig
 
 
 def _entity_kind(match: ScopeMatch) -> str:

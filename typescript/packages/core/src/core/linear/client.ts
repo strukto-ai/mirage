@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { apiRequest } from '../api/client.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import {
   COMMENT_CREATE_MUTATION,
   COMMENT_UPDATE_MUTATION,

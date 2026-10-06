@@ -26,8 +26,8 @@ from mirage.core.hf_hub.lookup import (
     refusals_denied,
 )
 from mirage.core.hf_hub.repo import head_commit, mount_version
+from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_prefix_of
 

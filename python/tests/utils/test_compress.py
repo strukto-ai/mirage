@@ -21,13 +21,13 @@ from mirage.utils.compress import (
     GZIP_CHUNK_SIZE,
     GZIP_CRC,
     GZIP_LENGTH,
+    GzipDataError,
     GzipDecoder,
     gunzip_checked,
     gunzip_partial,
     gunzip_stream,
     gzip_compress,
 )
-from mirage.utils.errors import GzipDataError
 
 HELLO = gzip.compress(b"hello\n", mtime=0)
 HCRC_HEAD = HELLO[:3] + b"\x02" + HELLO[4:10]

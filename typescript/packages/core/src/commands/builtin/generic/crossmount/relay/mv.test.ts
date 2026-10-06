@@ -16,7 +16,7 @@ import { expect, it } from 'vitest'
 import { IOResult } from '../../../../../io/types.ts'
 import type { DispatchFn } from '../../../../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../../types.ts'
-import { enoent, eacces } from '../../../../../utils/errors.ts'
+import { enoent, eacces } from '../../../../../errors/fs.ts'
 import { guardDispatch } from '../../../../../workspace/abort.ts'
 import { runMv } from './mv.ts'
 

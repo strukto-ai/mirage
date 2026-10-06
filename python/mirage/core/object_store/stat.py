@@ -15,9 +15,9 @@
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, ResourceType
 from mirage.core.object_store.driver import A, C, ObjectStoreDriver, StatFn
 from mirage.core.object_store.readdir import cached_entry
+from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils import key_prefix as kp
-from mirage.utils.errors import enoent
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_prefix_of
 

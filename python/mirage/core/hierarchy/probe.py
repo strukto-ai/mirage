@@ -19,8 +19,8 @@ from typing import Protocol, TypeVar
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore, IndexEntry
 from mirage.cache.index.warm import entry_or_warm
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec, StatFn
-from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 A = TypeVar("A", bound=Accessor)

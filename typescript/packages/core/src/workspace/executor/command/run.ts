@@ -33,7 +33,7 @@ import type { ExecuteFn } from '../../expand/node.ts'
 import { CommandTimeoutError } from '../../../commands/errors.ts'
 import { UsageError } from '../../../commands/errors.ts'
 import { readFailExitCode } from '../../../commands/spec/usage.ts'
-import { formatFsError } from '../../../utils/errors.ts'
+import { formatFsError } from '../../../errors/render.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
 import { makeAbortError, mergeSignals } from '../../abort.ts'

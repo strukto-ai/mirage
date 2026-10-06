@@ -18,8 +18,8 @@ from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.context import invalidate_after_unlink
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.ssh.utils import join_root
+from mirage.errors.fs import enoent, enotdir, enotempty
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent, enotdir, enotempty
 
 
 async def _holds_entries(sftp: asyncssh.SFTPClient, remote: str) -> bool:

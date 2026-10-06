@@ -24,7 +24,7 @@ import {
   boxUploadMultipart,
 } from './client.ts'
 import type { BoxTokenManager } from './client.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
 
 // Box answers a folder id that has been deleted, or was never reachable,

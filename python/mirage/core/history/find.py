@@ -21,6 +21,7 @@ from mirage.commands.builtin.find_eval import (
     keep,
 )
 from mirage.core.history.read import VIEW_KEYS, VIEW_NAME, read
+from mirage.errors.fs import enoent
 from mirage.types import FindType, PathSpec
 
 
@@ -71,7 +72,7 @@ async def find(
     """
     key = path.mount_path if isinstance(path, PathSpec) else path
     if key.strip("/") not in VIEW_KEYS:
-        raise FileNotFoundError(key)
+        raise enoent(key)
     if maxdepth is not None and maxdepth < 0:
         return []
     is_empty: bool | None = None

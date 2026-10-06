@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { eisdir, enoent } from '@struktoai/mirage-core/utils/errors'
+import { eisdir, enoent } from '@struktoai/mirage-core/errors/fs'
 import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
 import { lstripSlash, rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { SFTPWrapper } from 'ssh2'

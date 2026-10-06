@@ -25,7 +25,47 @@ import {
 } from 'pako'
 import { yieldBytes } from '../io/stream.ts'
 import { concat } from '../io/cachable_iterator.ts'
-import { GzipDataError } from './errors.ts'
+
+/**
+ * Why `gzip -d` cannot decompress one input, in gzip's words.
+ *
+ * `fatal` is gzip 1.13's split: an input with no gzip header, or with a
+ * header naming a method or flag gzip does not support, is reported and the
+ * run moves on to the next operand, while a truncated or corrupt one ends the
+ * run, as does a CRC or length mismatch unless `-t` is only testing. A
+ * mismatch in both carries both reasons, in gzip's order. `keepsOutput` says
+ * the bytes decoded before the failure are whole members: after a refusal of
+ * a later member, of trailing garbage, or of a trailer. An in-place run still
+ * writes them when the refusal is not fatal, and tar reads them whatever gzip
+ * does. `firstHeader` says gzip stopped inside its first member's header,
+ * before it would create an output file or read a body; on stdin that ends
+ * the run, as gzip exits there. The reasons are gzip's own lines, each with
+ * `{}` where the input's name goes, the program name and any leading newline
+ * included, since gunzip, zcat, zgrep and tar's child all run gzip. Mirrors
+ * Python's GzipDataError.
+ */
+export class GzipDataError extends Error {
+  readonly reasons: readonly string[]
+  readonly fatal: boolean
+
+  constructor(
+    reasons: readonly string[],
+    fatal: boolean,
+    readonly exitCode = 1,
+    readonly keepsOutput = false,
+    readonly firstHeader = false,
+  ) {
+    super(reasons.join('\n'))
+    this.name = 'GzipDataError'
+    this.reasons = reasons
+    this.fatal = fatal
+  }
+
+  /** gzip's lines for the failure, the input named `label`. */
+  render(label: string): string {
+    return this.reasons.map((reason) => `${reason.split('{}').join(label)}\n`).join('')
+  }
+}
 
 // gzip 1.13's lines for the inputs `gzip -d` refuses, `{}` standing for the
 // input's name. gzip starts the ones its read, inflate and member checks

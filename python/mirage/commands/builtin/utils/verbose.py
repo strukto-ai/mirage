@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.errors.render import operand_spelling
 from mirage.types import PathSpec
-from mirage.utils.errors import operand_spelling
 
 
 def removal_lines(

@@ -14,7 +14,7 @@
 
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { listingError } from '@struktoai/mirage-core/utils/errors'
+import { listingError } from '@struktoai/mirage-core/errors/fs'
 import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import { keyOf, lookup, probeDir, probeFile, refusalsDenied } from './lookup.ts'

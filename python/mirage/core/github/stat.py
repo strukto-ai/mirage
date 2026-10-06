@@ -22,8 +22,8 @@ from mirage.cache.index.ram import ListingCheckStore
 from mirage.core.github.lookup import locate, lookup_retrying, point_lookup
 from mirage.core.github.repo import ensure_ref
 from mirage.core.github.tree import fetch_head
+from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.filetype import content_type_for_path
 
 log = logging.getLogger(__name__)

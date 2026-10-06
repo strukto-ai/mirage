@@ -28,8 +28,8 @@ import {
   isEnoent,
   isEnotdir,
   isFsError,
-  operandSpelling,
-} from '../../../../utils/errors.ts'
+} from '../../../../errors/fs.ts'
+import { operandSpelling } from '../../../../errors/render.ts'
 import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
 
 const rm: BuilderFn = async (ops, accessor, paths, _texts, opts) => {

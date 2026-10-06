@@ -15,6 +15,7 @@
 import { requirePathsWritable } from '../../context/session_context.ts'
 import type { Policy } from '../base.ts'
 import type { Deny, VfsContext } from '../types.ts'
+import { posixPhrase } from '../../errors/posix.ts'
 
 /** The configured mode and session grants bound every mutation. An op
  * outside every mount carries an empty prefix and is governed by `/`, the
@@ -26,7 +27,7 @@ export class MountModePolicy implements Policy {
       requirePathsWritable([ctx.path], ctx.prefix || '/', ctx.mode, ctx.subtree === true)
     } catch (error) {
       if (!(error instanceof Error)) throw error
-      return { kind: 'deny', reason: 'Read-only file system', error }
+      return { kind: 'deny', reason: posixPhrase('EROFS'), error }
     }
     return null
   }

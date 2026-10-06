@@ -23,8 +23,8 @@ from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.mem0.client import get_all_memories
 from mirage.core.mem0.scope import detect_scope
 from mirage.core.render.json import json_bytes
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 async def _list_memories(

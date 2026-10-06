@@ -14,7 +14,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
-import { enoent } from '../../../utils/errors.ts'
+import { enoent } from '../../../errors/fs.ts'
 import { UsageError } from '../../errors.ts'
 import { truncateGeneric } from './truncate.ts'
 

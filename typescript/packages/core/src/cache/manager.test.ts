@@ -28,7 +28,7 @@ import { runInCommandScope } from './index/scope.ts'
 import { IndexView } from './index/view.ts'
 import { CacheManager } from './manager.ts'
 import { shiftPerformanceNow } from './_test_util.ts'
-import { enoent } from '../utils/errors.ts'
+import { enoent } from '../errors/fs.ts'
 
 async function seeded(): Promise<[RAMFileCacheStore, RAMIndexCacheStore]> {
   const cache = new RAMFileCacheStore()

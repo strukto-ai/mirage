@@ -26,7 +26,7 @@ import {
   isFsError,
   isMissingOp,
   walkRefusal,
-} from '../../../../utils/errors.ts'
+} from '../../../../errors/fs.ts'
 import { CycleError } from '../../../../utils/path.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'

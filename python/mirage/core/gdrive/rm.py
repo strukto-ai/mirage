@@ -16,8 +16,8 @@ from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.context import invalidate_subtree
 from mirage.core.gdrive.resolve import eacces_on_denied, resolve_key
 from mirage.core.google.drive import delete_file
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 @eacces_on_denied

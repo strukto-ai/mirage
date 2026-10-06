@@ -33,14 +33,11 @@ from mirage.commands.builtin.utils.verbose import removal_lines
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import error_path, fs_strerror
+from mirage.errors.render import operand_spelling
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import (
-    FS_ERRORS,
-    error_path,
-    fs_strerror,
-    operand_spelling,
-)
 
 
 async def rm(

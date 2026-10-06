@@ -16,7 +16,7 @@ import { toIsoZ } from '../../utils/dates.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import { VFSName } from '../../types.ts'
-import { eaccesRefused } from '../../utils/errors.ts'
+import { eacces } from '../../errors/fs.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type {
   ChildEntry,
@@ -300,10 +300,10 @@ async function movePrefix(conn: S3Conn, srcPfx: string, dstPfx: string): Promise
     // refused delete is a lock or a policy in practice, and because it is
     // an fs error: mv reports the operand and keeps going instead of
     // aborting the whole command line.
-    throw eaccesRefused(
+    throw eacces(
+      `/${srcPfx}`,
       `S3 refused to delete ${String(failed.length)} source object(s) after ` +
         `copying, starting at '${failed[0] ?? ''}'`,
-      `/${srcPfx}`,
     )
   }
   return true

@@ -397,7 +397,9 @@ async def test_a_probe_that_fails_leaves_the_tool_error(monkeypatch):
     finally:
         await ws.close()
     # The read's own error stands, never the probe's.
-    assert read.is_error and read.text == "Error: /d/flaky.txt"
+    assert read.is_error and read.text == (
+        "Error: /d/flaky.txt: No such file or directory"
+    )
     assert written.is_error and "Input/output error" in written.text
 
 
@@ -506,7 +508,7 @@ async def test_a_path_ask_waits_on_the_host_outside_a_line():
     [record] = ws.decisions.pending("agent")
     assert (record.command, record.paths) == ("", ("/data/out/a.txt",))
     assert asked.text == (
-        "Error: [Errno 13] Permission denied: '/data/out/a.txt'\n"
+        "Error: /data/out/a.txt: Permission denied\n"
         f"requires approval: outbox needs a nod (ask {record.id})\n"
     )
     # Asking again quotes the same question.

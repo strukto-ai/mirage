@@ -18,7 +18,7 @@ import { VFSName, type PathSpec } from '../../types.ts'
 import { dbxFetch } from './client.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 
 const DEFAULT_CHUNK_SIZE = 8192
 

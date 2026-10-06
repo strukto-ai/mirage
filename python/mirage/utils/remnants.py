@@ -12,11 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno
-import os
 from collections.abc import Awaitable, Callable, Iterable
 from typing import Protocol
 
+from mirage.errors.posix import posix_errno, posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.types import FileStat, FileType, PathSpec
 
 Allowed = Callable[[str], bool]
@@ -36,7 +36,9 @@ class VisibleRemnant(OSError):
 
     def __init__(self, virtual: str) -> None:
         super().__init__(
-            errno.ENOTEMPTY, os.strerror(errno.ENOTEMPTY), virtual
+            posix_errno(FsCondition.ENOTEMPTY),
+            posix_phrase(FsCondition.ENOTEMPTY),
+            virtual,
         )
 
 

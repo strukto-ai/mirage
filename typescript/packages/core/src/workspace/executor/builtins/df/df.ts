@@ -23,11 +23,11 @@ import {
 import {
   enoent,
   enotdir,
-  fsErrorLine,
   isDotWalkError,
   isMissingPath,
   walkRefusal,
-} from '../../../../utils/errors.ts'
+} from '../../../../errors/fs.ts'
+import { fsErrorLine } from '../../../../errors/render.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { MountEntry } from '../../../mount/mount.ts'

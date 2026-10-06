@@ -18,7 +18,7 @@ import type { SessionManager } from '../workspace/session/manager.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import { rstripSlash, stripSlash } from '../utils/slash.ts'
 import { anchorDepth, isGlob, pathVisible, showHead, shownMode } from '../utils/hidden.ts'
-import { eacces, enoent, erofsReadOnly } from '../utils/errors.ts'
+import { eacces, enoent, erofs } from '../errors/fs.ts'
 import { parent } from '../utils/path.ts'
 import type { Decisions } from '../policy/decisions.ts'
 import type { Policies } from '../policy/policies.ts'
@@ -815,13 +815,13 @@ export function requirePathsWritable(
 ): void {
   for (const path of paths) {
     if (effectivePathMode(path.virtual, mountPrefix, mountMode) === MountMode.READ) {
-      throw erofsReadOnly(`mount ${mountPrefix} is read-only`, path)
+      throw erofs(path, `mount ${mountPrefix} is read-only`)
     }
   }
   if (subtree) {
     for (const path of paths) {
       const blame = readonlyBelow(path.virtual, mountPrefix, mountMode)
-      if (blame !== null) throw erofsReadOnly(`mount ${mountPrefix} is read-only`, blame)
+      if (blame !== null) throw erofs(blame, `mount ${mountPrefix} is read-only`)
     }
   }
 }
@@ -845,6 +845,6 @@ export function requireMountWritable(mountPrefix: string): void {
   if (gate === null) return
   const [prefix, mode] = gate
   if (effectiveMountMode(prefix, mode) === MountMode.READ) {
-    throw erofsReadOnly(`mount ${prefix} is read-only`, prefix)
+    throw erofs(prefix, `mount ${prefix} is read-only`)
   }
 }

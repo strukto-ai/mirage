@@ -17,7 +17,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { read as ramRead } from '../ram/read.ts'
 import { norm } from '../../utils/path.ts'
 import type { PathSpec } from '../../types.ts'
-import { einval } from '../../utils/errors.ts'
+import { einval } from '../../errors/fs.ts'
 import { activeDevice } from './device.ts'
 
 const ENDLESS_READ = 'cannot read an endless device without a size'

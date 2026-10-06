@@ -24,10 +24,10 @@ from mirage.core.object_store.driver import (
     ObjectStoreDriver,
     PairFn,
 )
+from mirage.errors.fs import enoent
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils import key_prefix as kp
-from mirage.utils.errors import enoent
 
 
 def make_rename(

@@ -17,8 +17,8 @@ from mirage.cache.context import invalidate_after_write
 from mirage.core.box.api import create_folder, list_folder_items
 from mirage.core.box.client import BoxApiError
 from mirage.core.box.resolve import path_parts, resolve_chain, root_id
+from mirage.errors.fs import eexist, enoent, enotdir
 from mirage.types import PathSpec
-from mirage.utils.errors import eexist, enoent, enotdir
 from mirage.utils.key_prefix import mount_key, mount_prefix_of, mounted_path
 
 

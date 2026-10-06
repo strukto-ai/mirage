@@ -20,7 +20,7 @@ import {
   invalidateSubtree,
 } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
-import { eisdir, enoent, enotempty } from '../../utils/errors.ts'
+import { eisdir, enoent, enotempty } from '../../errors/fs.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { isDir } from '../../utils/stat_view.ts'

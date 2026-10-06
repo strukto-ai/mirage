@@ -15,8 +15,8 @@
 import asyncssh
 
 from mirage.core.ssh.constants import FXF_CREAT, FXF_WRITE
+from mirage.errors.fs import eisdir, enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import eisdir, enoent
 
 
 def join_root(root: str, rel: str) -> str:

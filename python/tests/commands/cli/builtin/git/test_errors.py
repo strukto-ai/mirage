@@ -23,6 +23,7 @@ from mirage.commands.cli.builtin.git.errors import (
     NoWorkspaceError,
     RevisionResetError,
 )
+from mirage.errors.types import FsCondition
 
 
 def test_every_fatal_shares_one_base():
@@ -87,7 +88,7 @@ def test_unusable_directory_option_reads_like_gits_chdir_failure():
 
 
 def test_a_directory_option_naming_a_file_says_which_reason():
-    assert str(NoWorkingDirectoryError("a.txt", "Not a directory")) == (
+    assert str(NoWorkingDirectoryError("a.txt", FsCondition.ENOTDIR)) == (
         "cannot change to 'a.txt': Not a directory"
     )
 

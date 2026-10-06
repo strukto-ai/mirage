@@ -32,8 +32,8 @@ from mirage.cache.index.config import (
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW
 from mirage.cache.index.ram import ListingCheckStore, RAMIndexCacheStore
 from mirage.cache.index.scope import command_scope
+from mirage.errors.fs import enotsup
 from mirage.types import FileStat, FileType, PathSpec, ReadPolicy, ReadSpec
-from mirage.utils.errors import enotsup
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace.mount.namespace.namespace import NodeMeta

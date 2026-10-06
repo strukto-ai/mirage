@@ -55,12 +55,12 @@ import {
   enoent,
   enotdir,
   enotsup,
-  erofsReadOnly,
+  erofs,
   isDotWalkError,
   isEnoent,
   isMissError,
   walkRefusal,
-} from '../../../utils/errors.ts'
+} from '../../../errors/fs.ts'
 import { dotRefusal } from '../utils/paths.ts'
 import type { ChildMounts } from '../../../ops/types.ts'
 import { makeResolveGlob, type TargetStat } from '../../../utils/glob_walk.ts'
@@ -678,7 +678,7 @@ async function mkdirOnReadOnly<A extends Accessor>(
   const base = rstripSlash(prefix)
   const leaf = rstripSlash(path.virtual) || '/'
   if (leaf !== base && !leaf.startsWith(base + '/')) {
-    throw erofsReadOnly(`mount ${prefix} is read-only`, path.virtual)
+    throw erofs(path.virtual, `mount ${prefix} is read-only`)
   }
   // Each component's backend key keeps the leaf's own key prefix, recovered
   // from its (virtual, vfsPath) pair as PathSpec.dir does.
@@ -702,7 +702,7 @@ async function mkdirOnReadOnly<A extends Accessor>(
         chain
           .slice(index)
           .find((spec) => effectivePathMode(spec.virtual, prefix, mode) === MountMode.READ) ?? path
-      throw erofsReadOnly(`mount ${prefix} is read-only`, blame.virtual)
+      throw erofs(blame.virtual, `mount ${prefix} is read-only`)
     }
     if (row.type !== FileType.DIRECTORY) {
       if (index === chain.length - 1) throw eexist(path.virtual)

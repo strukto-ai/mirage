@@ -16,7 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { IOResult, materialize } from '../../../../io/types.ts'
 import { BaseVFS } from '../../../../vfs/base.ts'
 import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
-import { enoent } from '../../../../utils/errors.ts'
+import { enoent } from '../../../../errors/fs.ts'
 import { MountRegistry } from '../../../../workspace/mount/registry.ts'
 import { handleCrossMount, isCrossMount, type RunSingle } from './index.ts'
 

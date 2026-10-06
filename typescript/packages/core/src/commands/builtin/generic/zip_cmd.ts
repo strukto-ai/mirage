@@ -15,7 +15,7 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { fsStrerror, isFsError } from '../../../utils/errors.ts'
+import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { crc32, deflateRaw } from '../../../utils/compress.ts'

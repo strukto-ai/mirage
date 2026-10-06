@@ -21,6 +21,7 @@ import pytest
 
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import FsCondition, posix_errno
+from mirage.errors.types import ReadOnlyError
 from mirage.ops.registry import op as register_op
 from mirage.policy import (
     Action,
@@ -41,7 +42,6 @@ from mirage.types import (
     PathSpec,
     Visibility,
 )
-from mirage.utils.errors import ReadOnlyError
 from mirage.utils.ranges import slice_window, splice_window
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS

@@ -14,7 +14,7 @@
 
 import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { enotempty } from '../../utils/errors.ts'
+import { enotempty } from '../../errors/fs.ts'
 import { lookupError } from './dest.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'

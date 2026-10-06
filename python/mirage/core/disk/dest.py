@@ -18,8 +18,8 @@ from pathlib import Path
 import aiofiles.os
 
 from mirage.core.disk.utils import resolve_inside
+from mirage.errors.fs import enotdir
 from mirage.types import PathSpec
-from mirage.utils.errors import enotdir
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import ancestors
 

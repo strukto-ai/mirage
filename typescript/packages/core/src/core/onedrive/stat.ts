@@ -15,7 +15,7 @@
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import { GraphError, graphGet } from '../msgraph/client.ts'
 import { asNumber, folderChildCount, statItem, virtualKey } from '../msgraph/drive.ts'
 import { driveLoc } from './client.ts'

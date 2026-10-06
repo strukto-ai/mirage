@@ -17,9 +17,9 @@ from typing import Any, cast
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.errors.fs import efbig
 from mirage.io import IOResult
 from mirage.types import ContentType, FileStat, FileType, PathSpec
-from mirage.utils.errors import efbig
 from mirage.workspace.executor.builtins.condition import CondContext, eval_flat
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState

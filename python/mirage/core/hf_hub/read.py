@@ -17,9 +17,9 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.hf_hub.client import etag_value, hub_bytes_tagged, resolve_url
 from mirage.core.hf_hub.constants import REFUSED_STATUSES
 from mirage.core.hf_hub.lookup import key_of, lookup_retrying, refusals_denied
+from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.errors import eisdir, enoent
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.ranges import ByteWindow
 

@@ -19,6 +19,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.mem0.client import search_memories
 from mirage.core.mem0.readdir import readdir
 from mirage.core.mem0.scope import detect_scope
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_prefix_of
@@ -108,7 +109,7 @@ async def search_many(
     for path in targets:
         match = detect_scope(path)
         if match.kind != "memory":
-            raise FileNotFoundError(path.virtual)
+            raise enoent(path.virtual)
         if ids is not None:
             ids.add(match.slots["memory_id"])
     output = await search_memories_rendered(
