@@ -342,16 +342,15 @@ describe('opsScriptContext and sessionScriptContext', () => {
 })
 
 describe('scriptAction at the op and session doors', () => {
-  it('answers allow or deny, never ask', () => {
-    // The op and session doors cannot wait on a host, so the vocabulary
-    // there is allow or deny, and an ask is a wrong answer.
-    for (const hook of ['preOps', 'preSession'] as const) {
-      expect(scriptAction({ deny: 'frozen' }, hook)).toEqual({ kind: 'deny', reason: 'frozen' })
-      expect(scriptAction('deny', hook)).toEqual({ kind: 'deny', reason: DEFAULT_DENY_REASON })
-      expect(scriptAction(null, hook)).toBeNull()
-      expect(() => scriptAction('ask', hook)).toThrow(/must answer allow or deny/)
-      expect(() => scriptAction({ ask: 'nod' }, hook)).toThrow(/must answer allow or deny/)
-    }
+  it('answers allow or deny at the session door, never ask', () => {
+    // The session door cannot wait on a host, so the vocabulary there is
+    // allow or deny, and an ask is a wrong answer.
+    const hook = 'preSession'
+    expect(scriptAction({ deny: 'frozen' }, hook)).toEqual({ kind: 'deny', reason: 'frozen' })
+    expect(scriptAction('deny', hook)).toEqual({ kind: 'deny', reason: DEFAULT_DENY_REASON })
+    expect(scriptAction(null, hook)).toBeNull()
+    expect(() => scriptAction('ask', hook)).toThrow(/must answer allow or deny/)
+    expect(() => scriptAction({ ask: 'nod' }, hook)).toThrow(/must answer allow or deny/)
   })
 })
 
@@ -381,12 +380,11 @@ describe('ScriptPolicy at the op and session doors', () => {
     expect(await policy.preSession(sessionCtx('HOME'))).toBeNull()
   })
 
-  it('fails closed on an ask from an op hook', async () => {
-    const policy = track(policyOf(entry("function preOps() { return 'ask' }")))
-    const action = await policy.preOps(opsCtx())
-    expect((action as { reason: string }).reason).toMatch(
-      /profile 'release' policy must answer allow or deny/,
-    )
+  it('an op hook may ask', async () => {
+    // The door puts it to the host where no line is running, and refuses
+    // it inside one.
+    const policy = track(policyOf(entry("function preOps() { return { ask: 'nod' } }")))
+    expect(await policy.preOps(opsCtx())).toEqual({ kind: 'ask', reason: 'nod' })
   })
 
   it('fails closed at every door on a program that defines no hook', async () => {

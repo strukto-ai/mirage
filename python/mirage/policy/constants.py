@@ -60,7 +60,3 @@ SUBTREE_COMMANDS = frozenset({"rm", "rmdir", "mv"})
 # The command tier's guard leaves its ``stat`` slot unwrapped for the
 # same reason; a hidden path is the hide arm's, and stays ENOENT.
 METADATA_OPS = frozenset({"stat", "exists"})
-
-# How long one profile-script evaluation may run before the command it
-# is judging is refused.
-SCRIPT_EVAL_TIMEOUT_SECONDS = 10.0

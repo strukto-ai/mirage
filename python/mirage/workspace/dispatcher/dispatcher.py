@@ -29,6 +29,7 @@ from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.paths import dot_refusal, walk_spelling
 from mirage.commands.resolve import get_extension
 from mirage.context import (
+    explaining,
     get_current_session,
     hidden_refusal,
     session_visibility,
@@ -330,6 +331,7 @@ class Dispatcher:
             mount.prefix if mount is not None else "",
             mount.mode if mount is not None else MountMode.WRITE,
             _session_id(),
+            self._namespace.registry.decisions,
         )
 
     @property
@@ -419,8 +421,14 @@ class Dispatcher:
         # FUSE and the ops facade come straight here, so a drain that
         # lived any higher would let a first write clobber drifted
         # state. drain() clears pending before it stats, so its own
-        # probes cannot recurse into it.
-        if self._drift is not None and self._drift.pending:
+        # probes cannot recurse into it. A dry run leaves them pending,
+        # its policies' reads included: the check is no policy's answer,
+        # and the op that does run still owes it.
+        if (
+            self._drift is not None
+            and self._drift.pending
+            and explaining() is None
+        ):
             await self._drift.drain(self._namespace.registry.try_mount_for)
         # Hidden paths answer before anything else can: the typed path
         # is checked so a link inside hidden space cannot be followed
@@ -576,6 +584,7 @@ class Dispatcher:
             write,
             create=op in HIDDEN_CREATE_OPS,
             subtree=op == "rename",
+            final=op != "rename",
         )
         # A rename's destination is a create there: it passes the same
         # gate as the source, so a path rule holds against moving into
@@ -1047,7 +1056,13 @@ class Dispatcher:
         mount = self._namespace.try_mount_for(path.virtual)
         boundary = self._boundary(mount)
         write = op in POLICY_WRITE_OPS
-        await boundary.admit(op, path, write, create=op in HIDDEN_CREATE_OPS)
+        await boundary.admit(
+            op,
+            path,
+            write,
+            create=op in HIDDEN_CREATE_OPS,
+            final=op != "rename",
+        )
         result: str | FileStat | None = None
         if op == "unlink":
             target = self._namespace.readlink(path.virtual) or ""

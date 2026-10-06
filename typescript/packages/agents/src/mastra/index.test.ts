@@ -42,7 +42,7 @@ describe('mastra mirageTools', () => {
     expect(Object.keys(tools).sort()).toEqual(
       ['edit', 'glob', 'grep', 'ls', 'read', 'shell', 'write'].sort(),
     )
-    expect(tools.shell.id).toBe('mirage-shell')
+    expect(tools.shell?.id).toBe('mirage-shell')
   })
 
   it('answers as the MCP tools do', async () => {

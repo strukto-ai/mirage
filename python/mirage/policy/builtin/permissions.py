@@ -14,10 +14,11 @@
 
 from mirage.context.session_context import (
     get_admission,
+    line_running,
     redirect_target_judged,
 )
 from mirage.policy.base import Policy
-from mirage.policy.match import Outcome, decide, op_refusal, posix_level
+from mirage.policy.match import Outcome, decide, op_ruling, posix_level
 from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.types import (
     Action,
@@ -49,8 +50,11 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
     refused whole or per operand by whether it names paths, or taken to
     the approval door when it asks. ``pre_ops`` walks the deny rules
     that are pure paths, so FUSE, programmatic ops and the warm cache
-    cannot bypass a path the profile protects; there is no ask at the op
-    door, which cannot wait on a host.
+    cannot bypass a path the profile protects. A path rule that asks is
+    a question only where no line is running (a file tool, the host's
+    facade), which the door puts to the approval ledger keyed by rule
+    and path; inside a line it refuses, since the line was admitted
+    without it.
 
     Args:
         sessions (SessionCommandsQuery): the session manager, answering
@@ -71,8 +75,13 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
         if decision.outcome is Outcome.ASK:
             return Ask(rule.reason, rule, decision.asks)
         if decision.matched_path is None:
-            return Deny(rule.reason)
-        return Deny(rule.reason, DenyScope.OPERAND, path=decision.matched_path)
+            return Deny(rule.reason, rule=rule)
+        return Deny(
+            rule.reason,
+            DenyScope.OPERAND,
+            path=decision.matched_path,
+            rule=rule,
+        )
 
     async def pre_ops(self, ctx: OpsContext) -> Action | None:
         if redirect_target_judged(ctx.path.virtual):
@@ -83,10 +92,15 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
         # bound gate still remembers the nod.
         gate = get_admission()
         granted = gate.granted if gate is not None else ()
-        reason = op_refusal(
+        ruled = op_ruling(
             self._sessions.commands_of(ctx.session_id), ctx, granted
         )
-        return Deny(reason) if reason is not None else None
+        if ruled is None:
+            return None
+        rule, asks = ruled
+        if asks and gate is None and not line_running():
+            return Ask(rule.reason, rule)
+        return Deny(rule.reason, rule=rule)
 
     async def wants_for(self, hook: str, session_id: str) -> bool:
         """Whether this session's rules speak at ``hook``: always at the

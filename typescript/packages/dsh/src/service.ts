@@ -14,7 +14,7 @@
 
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Explanation } from '@struktoai/mirage-core/policy/types'
+import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
 import type { Runtime, RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import { parseMountMode } from '@struktoai/mirage-core/types'
@@ -279,9 +279,9 @@ export class MirageService extends Service {
   }
 
   /**
-   * What a line would do here, without doing it: one `Explanation` per
-   * command, carrying the outcome, the rule that spoke and the exact
-   * exit code and stderr the agent would get.
+   * What a line would do here, without doing it: the line's verdict, with
+   * the exact exit code and stderr the agent would get, and its parse tree,
+   * every command carrying its own outcome and the policies that spoke.
    *
    * A dry run through the same gate the dispatcher uses, so a host
    * reading this and an agent typing the line cannot be told different
@@ -292,9 +292,9 @@ export class MirageService extends Service {
    *
    * @param line the command line to judge.
    * @param sessionId the session to judge it in; the default when empty.
-   * @returns one explanation per command of the line.
+   * @returns the line's explanation.
    */
-  async explain(line: string, sessionId = ''): Promise<Explanation[]> {
+  async explain(line: string, sessionId = ''): Promise<ShellExplanation> {
     const ws = await this.ready
     return ws.explain(line, sessionId)
   }

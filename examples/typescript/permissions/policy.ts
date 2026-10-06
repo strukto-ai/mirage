@@ -132,6 +132,22 @@ async function main(): Promise<void> {
       console.log(`${pad(who, 9)} ${pad(line, 30)} ${answer(out, err, res.exitCode)}`)
       console.log(`${pad('', 9)} ${pad('', 30)} ${note}`)
     }
+
+    // A dry run names who would speak, through the session's own doors:
+    // a line, as the tree of its commands, and one VFS call of a door that
+    // sees no command (a file tool, FUSE).
+    const explain = (await ws.session('reviewer')).explain
+    const shellRes = await explain.shell('cat /repo/flagged.txt')
+    for (const cmd of shellRes.node.children) {
+      if (!('command' in cmd)) continue
+      for (const a of cmd.answers) {
+        console.log(`${pad('explain', 9)} ${pad('cat /repo/flagged.txt', 30)} ${a.policy ?? ''}: ${a.reason}`)
+      }
+    }
+    const vfsRes = await explain.vfs.write('/scratch/cold/f', 'draft')
+    for (const a of vfsRes.answers) {
+      console.log(`${pad('explain', 9)} ${pad('write /scratch/cold/f', 30)} ${a.policy ?? ''}: ${a.reason}`)
+    }
   } finally {
     await ws.close()
   }

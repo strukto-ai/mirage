@@ -18,3 +18,17 @@ RPC_METHOD_NOT_FOUND = -32601
 RPC_INVALID_PARAMS = -32602
 RPC_INTERNAL_ERROR = -32603
 RPC_NOT_FOUND = -32004
+
+VFS_OPS = (
+    "read",
+    "write",
+    "append",
+    "stat",
+    "readdir",
+    "exists",
+    "mkdir",
+    "rmdir",
+    "unlink",
+    "rename",
+    "truncate",
+)

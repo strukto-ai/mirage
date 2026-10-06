@@ -79,6 +79,10 @@ class _MirageTools:
             else MirageToolOperations(session, stale_write_protection=False)
         )
 
+    def names(self) -> tuple[str, ...]:
+        """The tools the session's profile leaves it."""
+        return self._ops.names()
+
     async def shell(self, args: dict[str, Any]) -> dict[str, Any]:
         return _to_sdk(await self._ops.call("shell", args))
 
@@ -106,7 +110,8 @@ def MirageServer(
     stale_write_protection: bool = True,
     session_id: str | None = None,
 ) -> Any:
-    """Create an in-process Mirage server for the Claude Agent SDK.
+    """Create an in-process Mirage server for the Claude Agent SDK, with
+    the tools the session's profile leaves it.
 
     Args:
         workspace (Workspace): The workspace to serve.
@@ -120,36 +125,45 @@ def MirageServer(
             ClaudeAgentOptions(mcp_servers=...).
     """
     tools_impl = _MirageTools(workspace, stale_write_protection, session_id)
+    names = tools_impl.names()
     return create_sdk_mcp_server(
         name="mirage",
         version=__version__,
         tools=[
-            tool("shell", SHELL_DESCRIPTION, SHELL_INPUT)(tools_impl.shell),
-            tool(
-                "read",
-                READ_DESCRIPTION,
-                READ_INPUT,
-                annotations=ToolAnnotations(readOnlyHint=True),
-            )(tools_impl.read),
-            tool("write", WRITE_DESCRIPTION, WRITE_INPUT)(tools_impl.write),
-            tool("edit", EDIT_DESCRIPTION, EDIT_INPUT)(tools_impl.edit),
-            tool(
-                "ls",
-                LS_DESCRIPTION,
-                LS_INPUT,
-                annotations=ToolAnnotations(readOnlyHint=True),
-            )(tools_impl.ls),
-            tool(
-                "grep",
-                GREP_DESCRIPTION,
-                GREP_INPUT,
-                annotations=ToolAnnotations(readOnlyHint=True),
-            )(tools_impl.grep),
-            tool(
-                "glob",
-                GLOB_DESCRIPTION,
-                GLOB_INPUT,
-                annotations=ToolAnnotations(readOnlyHint=True),
-            )(tools_impl.glob),
+            entry
+            for entry in (
+                tool("shell", SHELL_DESCRIPTION, SHELL_INPUT)(
+                    tools_impl.shell
+                ),
+                tool(
+                    "read",
+                    READ_DESCRIPTION,
+                    READ_INPUT,
+                    annotations=ToolAnnotations(readOnlyHint=True),
+                )(tools_impl.read),
+                tool("write", WRITE_DESCRIPTION, WRITE_INPUT)(
+                    tools_impl.write
+                ),
+                tool("edit", EDIT_DESCRIPTION, EDIT_INPUT)(tools_impl.edit),
+                tool(
+                    "ls",
+                    LS_DESCRIPTION,
+                    LS_INPUT,
+                    annotations=ToolAnnotations(readOnlyHint=True),
+                )(tools_impl.ls),
+                tool(
+                    "grep",
+                    GREP_DESCRIPTION,
+                    GREP_INPUT,
+                    annotations=ToolAnnotations(readOnlyHint=True),
+                )(tools_impl.grep),
+                tool(
+                    "glob",
+                    GLOB_DESCRIPTION,
+                    GLOB_INPUT,
+                    annotations=ToolAnnotations(readOnlyHint=True),
+                )(tools_impl.glob),
+            )
+            if entry.name in names
         ],
     )

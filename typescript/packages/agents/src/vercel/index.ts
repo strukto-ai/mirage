@@ -53,7 +53,8 @@ function answer(result: ToolResult): Answer {
 
 /**
  * Mirage's tool table as AI SDK tools: shell, read, write, edit, ls, grep
- * and glob, each with the shared input schema and answering
+ * and glob, each with the shared input schema, as far as the session's
+ * profile leaves them (`MirageToolOperations.names`), and answering
  * `{ text, isError }` as the MCP tool of the same name does. `read` also
  * hands an image or a PDF to the model as a file, which the AI SDK can
  * carry and the text answer cannot.
@@ -70,7 +71,7 @@ export function mirageTools(ws: Workspace, options: MirageToolOperationsOptions 
       inputSchema: jsonSchema<Record<string, unknown>>(input as never),
       execute: async (args: Record<string, unknown>) => answer(await operations.call(name, args)),
     })
-  return {
+  const all: ToolSet = {
     shell: mirageTool('shell', SHELL_DESCRIPTION, SHELL_INPUT),
     read: tool({
       description: `${READ_DESCRIPTION} Images and PDFs come back as files the model can see.`,
@@ -112,4 +113,6 @@ export function mirageTools(ws: Workspace, options: MirageToolOperationsOptions 
     grep: mirageTool('grep', GREP_DESCRIPTION, GREP_INPUT),
     glob: mirageTool('glob', GLOB_DESCRIPTION, GLOB_INPUT),
   }
+  const names = operations.names()
+  return Object.fromEntries(Object.entries(all).filter(([name]) => names.includes(name)))
 }

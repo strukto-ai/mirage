@@ -79,9 +79,17 @@ export type ScenarioStep =
     }
   | { command: string }
 
-export interface ExplainRow {
-  exitCode: number
-  stderr: string
+export interface ExplainedNode {
+  readonly children: readonly ExplainedNode[]
+  readonly command?: string
+  readonly exitCode?: number
+  readonly stderr?: string
+}
+
+export interface ExplainedLine {
+  readonly exitCode: number
+  readonly stderr: string
+  readonly node: ExplainedNode
 }
 
 export interface ExecResult {
@@ -121,7 +129,7 @@ export interface ExecWorkspace {
     pending(): readonly { id: string }[]
     answer(id: string, outcome: Outcome, scope?: Scope): Promise<void>
   }
-  explain(line: string, sessionId?: string): Promise<readonly ExplainRow[]>
+  explain(line: string, sessionId?: string): Promise<ExplainedLine>
   close(): Promise<void>
 }
 
@@ -292,10 +300,19 @@ export function ruleReasons(doc: unknown): string[] {
  */
 async function predictedRefusal(ws: ExecWorkspace, c: Case): Promise<[number, string] | null> {
   const said = await ws.explain(c.command, c.session ?? '')
-  const refused = said.filter((expl) => expl.exitCode !== 0)
-  const held =
-    refused.find((expl) => expl.rule !== null) ?? (said.length === 1 ? refused[0] : undefined)
-  return held === undefined ? null : [held.exitCode, held.stderr]
+  if (said.exitCode !== 0) return [said.exitCode, said.stderr]
+  const commands = commandsOf(said.node)
+  const [only] = commands
+  if (commands.length === 1 && only?.exitCode !== undefined && only.exitCode !== 0) {
+    return [only.exitCode, only.stderr ?? '']
+  }
+  return null
+}
+
+/** Every command under a node of an explained line, in source order. */
+function commandsOf(node: ExplainedNode): ExplainedNode[] {
+  const mine = node.command === undefined ? [] : [node]
+  return [...mine, ...node.children.flatMap(commandsOf)]
 }
 
 /**

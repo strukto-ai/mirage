@@ -14,10 +14,10 @@
 
 export {
   decideLine,
+  evaluateScript,
   evaluatorOf,
   parseVerdict,
   runtimeForLanguage,
-  POLICY_EVAL_TIMEOUT,
 } from './decide.ts'
 export { RouteDeny, RouteError } from './errors.ts'
 export { commandNodes, parsedCommands } from './facts.ts'

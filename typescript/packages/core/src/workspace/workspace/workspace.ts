@@ -37,6 +37,7 @@ import { cliSpecFor } from '../../commands/cli/specs.ts'
 import type { CLISpec } from '../../commands/cli/types.ts'
 import type { CLIInstall } from '../cli/types.ts'
 import { PermissionsPolicy } from '../../policy/builtin/permissions.ts'
+import { PlacementPolicy } from '../../policy/builtin/placement.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { Decisions } from '../../policy/decisions.ts'
 import { JobTable } from '../../shell/job_table/index.ts'
@@ -66,8 +67,8 @@ import {
   PathSpec,
   parseMountMode,
 } from '../../types.ts'
-import type { Explanation, Policies } from '../../policy/index.ts'
-import type { RoutePolicy } from '../../runtime/routing/index.ts'
+import type { Policies } from '../../policy/index.ts'
+import { DryRun, Outcome, type ShellExplanation } from '../../policy/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { Ops } from '../../ops/ops.ts'
 import type { MountEntry } from '../mount/mount.ts'
@@ -87,6 +88,8 @@ import { captureRecordingContext } from '../../observe/context.ts'
 import {
   captureSessionContext,
   getCurrentSessionUnlessForeign,
+  runExplaining,
+  runWithRefusalSink,
   runWithSession,
   runAsProgram,
 } from '../../context/session_context.ts'
@@ -103,7 +106,7 @@ import type { EvalResult } from '../../runtime/types.ts'
 import { PyodideUnavailableError } from '../../runtime/python/pyodide/errors.ts'
 import { Dispatcher } from '../dispatcher/index.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
-import { explainLine } from '../node/explain.ts'
+import { explainLine, explainedLine, holds } from '../node/explain.ts'
 import { Documents } from '../documentation/documents.ts'
 import { getCurrentSessionFor } from '../../context/session_context.ts'
 import { abortable, hasAborted, makeAbortError } from '../abort.ts'
@@ -140,6 +143,7 @@ import type { ExecuteOptions, ExecuteResult, MountSpec, WorkspaceOptions } from 
 import { Mount } from '../mount/spec.ts'
 import { WatchManager } from './watch.ts'
 import { encodeText } from '../../shell/bytes.ts'
+import { placementRefused } from './failure.ts'
 
 export { ExecuteResult } from './types.ts'
 export type { ExecuteOptions, MountSpec, WorkspaceOptions } from './types.ts'
@@ -225,7 +229,6 @@ export class Workspace {
   private secretSourcesBuilt: Readonly<Record<string, ResolvedSource>> | null = null
   private secretSourcesPending: Promise<Record<string, ResolvedSource>> | null = null
   private readonly router: Router
-  private readonly routePolicy: RoutePolicy | null
   private readonly scriptPolicy: ScriptPolicy
   private readonly profiles: Record<string, SessionProfile>
   private readonly defaultProfileName: string | null
@@ -333,7 +336,6 @@ export class Workspace {
       this.runtimeContext(),
     )
     rejectConfigScript('routePolicy', options.routePolicy)
-    this.routePolicy = options.routePolicy ?? null
     // The permission profiles: one per name, and the one a session
     // gets when it names none. A profile is the whole document a
     // session runs under, so there is no workspace-wide block above it.
@@ -427,6 +429,7 @@ export class Workspace {
       this.registry.policies,
       this.drift,
       (write) => this.admitWrite(write),
+      this.registry.decisions,
     )
     this.registry.setReconciler(this.dispatcher.reconciler)
     this.registry.setOpStat((mount, path) => this.dispatcher.opStat(mount, path))
@@ -497,13 +500,12 @@ export class Workspace {
       binding: this.runtimeBinding,
     })
     this.closers.push(() => this.runtimeWorld.close())
-    this.router = new Router(
-      this.registry,
-      this.runtimeWorld,
-      this.routePolicy,
-      this.agentId,
-      sandboxResolver,
-    )
+    this.router = new Router(this.registry, this.runtimeWorld, this.agentId, sandboxResolver)
+    if (options.routePolicy !== undefined) {
+      this.registry.policies.place(
+        new PlacementPolicy(options.routePolicy, () => this.runtimeWorld.entries),
+      )
+    }
   }
 
   /**
@@ -1132,28 +1134,47 @@ export class Workspace {
   }
 
   /**
-   * What a line would do under a session's profile, without running any
-   * it: one Explanation per command the gate reads, in gate order,
-   * nested lines included.
+   * What a line would do under a session's profile, without running any of
+   * it: the line's verdict and its parse tree.
    *
-   * The dry run of the gate every command passes through, so this and
-   * the refusal an agent would read come out of one place and cannot
-   * disagree. It runs no command, expands nothing, spends no grant and
-   * puts no question to a host, which is what makes it safe to call
-   * about a line nobody typed. The line is judged on the static bindings'
-   * route; a route policy is not consulted.
+   * The dry run of the gate every command passes through, so this and the
+   * refusal an agent would read come out of one place and cannot disagree.
+   * It runs no command, expands nothing, spends no grant and puts no
+   * question to a host, which is what makes it safe to call about a line
+   * nobody typed; a policy deciding it reads for real but changes nothing
+   * (`DryRun`), where the runtime isolates async tasks. The line carries
+   * the verdict its result would, every answer at `preExecute` and its
+   * parse tree, each command with every policy's answer to it and the
+   * runtime that would run it. A line a rule refuses, or that waits on the
+   * host, is never placed, as it is never placed when it runs, and a
+   * placement that refuses the line gives it the placement's refusal. A
+   * hidden path is no path to any of it. `session.explain` is
+   * the same dry run for each of a session's doors.
    *
    * Host-side only. The structure of a profile's rules is an operator's
    * business, so there is no builtin an agent can type to read it.
    */
-  async explain(line: string, sessionId = ''): Promise<Explanation[]> {
+  async explain(line: string, sessionId = ''): Promise<ShellExplanation> {
     await this.ensureSessionsLoaded()
+    // Without task isolation the bindings would reach other tasks' ops.
+    if (!asyncContextIsolatesTasks) return this.explained(line, sessionId)
+    // Judged inside a line, as the line runs: an ask a deciding policy's
+    // read meets refuses like a deny and records nothing.
+    return runWithRefusalSink(
+      () => undefined,
+      () => runExplaining(DryRun.DECIDING, () => this.explained(line, sessionId)),
+    )
+  }
+
+  /** `explain`'s judging, run with its policies deciding. */
+  private async explained(line: string, sessionId: string): Promise<ShellExplanation> {
     const session = this.getSession(sessionId === '' ? this.defaultSessionId : sessionId)
     const parser = new ParseScope(await this.getShellParser())
     try {
       const reparse = (text: string): TSNodeLike => parser.parse(text)
-      return await explainLine(
-        parser.parse(line),
+      const root = parser.parse(line)
+      const judged = await explainLine(
+        root,
         session,
         this.registry,
         this.namespace,
@@ -1161,6 +1182,30 @@ export class Workspace {
         reparse,
         this.runtimeWorld.wholeLineFor(null) !== null,
       )
+      if (holds(judged.map((one) => one.judgment))) {
+        return explainedLine(line, judged, () => '', reparse)
+      }
+      const [answers, placed] = await this.router.placement(root, line, session)
+      if (placed !== null && 'kind' in placed) {
+        const refused = placementRefused(placed, line)
+        return {
+          ...explainedLine(line, judged, () => '', reparse),
+          answers,
+          outcome: Outcome.DENY,
+          reason: placed.reason,
+          source: '',
+          refusal: refused.refusal,
+          exitCode: refused.exitCode,
+          stderr: refused.stderrText,
+        }
+      }
+      const said = explainedLine(
+        line,
+        judged,
+        (command) => this.router.runtimeFor(command, placed),
+        reparse,
+      )
+      return { ...said, answers }
     } finally {
       parser.release()
     }

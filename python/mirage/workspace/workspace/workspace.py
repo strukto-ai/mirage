@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import dataclasses
 import errno
 import logging
 import shutil
@@ -46,9 +47,13 @@ from mirage.context import (
     get_current_session_for,
     get_current_session_unless_foreign,
     reset_current_session,
+    reset_explaining,
     reset_program_invocation,
+    reset_refusal_sink,
     set_current_session,
+    set_explaining,
     set_program_invocation,
+    set_refusal_sink,
 )
 from mirage.io import IOResult
 from mirage.io.stream import materialize
@@ -60,15 +65,19 @@ from mirage.ops import Ops
 from mirage.policy import (
     AskHandler,
     Decisions,
-    Explanation,
+    Deny,
     HandOff,
+    Outcome,
     PermissionsPolicy,
     Policies,
     Policy,
     PolicyError,
     ScriptPolicy,
     SessionProfile,
+    ShellExplanation,
 )
+from mirage.policy.builtin import PlacementPolicy
+from mirage.policy.types import DryRun
 from mirage.process.child import ChildProcess
 from mirage.process.stdio import ProcessInput, ProcessOutput
 from mirage.process.supervisor import ProcessSupervisor
@@ -84,6 +93,7 @@ from mirage.secrets.registry import source_for
 from mirage.secrets.sources import resolve_sources
 from mirage.secrets.types import ResolvedSource
 from mirage.shell import parse
+from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.constants import BIN_PREFIX
@@ -124,7 +134,11 @@ from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.mount.namespace.view import namespace_view_of
 from mirage.workspace.mount.read_policy import check_read_capability
 from mirage.workspace.mount.spec import Mount
-from mirage.workspace.node.explain import explain_line
+from mirage.workspace.node.explain import (
+    explain_line,
+    explained_line,
+    holds,
+)
 from mirage.workspace.session import SessionManager, SessionState, SessionStore
 from mirage.workspace.session.constants import DEFAULT_PROFILE
 from mirage.workspace.session.resolve import (
@@ -162,6 +176,7 @@ from mirage.workspace.workspace.build import (
 )
 from mirage.workspace.workspace.cache import build_file_cache
 from mirage.workspace.workspace.execute import LineFrame, execute_line
+from mirage.workspace.workspace.failure import placement_refused
 from mirage.workspace.workspace.guard import reject_config_script
 from mirage.workspace.workspace.handle import Session
 from mirage.workspace.workspace.kernel_mounts import KernelMounts
@@ -477,7 +492,10 @@ class Workspace:
             self._registry, self._runtime_binding, runtimes
         )
         reject_config_script("route_policy", route_policy)
-        self._route_policy = route_policy
+        if route_policy is not None:
+            self._registry.policies.place(
+                PlacementPolicy(route_policy, lambda: self._runtimes.entries)
+            )
 
         # Installed CLIs, fully separate from mounts: the YAML `clis:`
         # section arrives as {head: (spec key or tree, config)}; a spec
@@ -505,7 +523,7 @@ class Workspace:
 
     async def explain(
         self, line: str, session_id: str = ""
-    ) -> list[Explanation]:
+    ) -> ShellExplanation:
         """What a line would do under a session's profile, without
         running any of it.
 
@@ -513,8 +531,16 @@ class Workspace:
         and the refusal an agent would read come out of one place and
         cannot disagree. It runs no command, expands nothing, spends no
         grant and puts no question to a host, which is what makes it
-        safe to call about a line nobody typed. The line is judged on
-        the static bindings' route; a route policy is not consulted.
+        safe to call about a line nobody typed; a policy deciding it
+        reads for real but changes nothing (``DryRun``). The line
+        carries the verdict its result would, every answer at
+        ``pre_execute`` and its parse tree, each command with every
+        policy's answer to it and the runtime that would run it. A line
+        a rule refuses, or that waits on the host, is never placed, as
+        it is never placed when it runs, and a placement that refuses
+        the line gives it the placement's refusal. A hidden path is no
+        path to any of it. ``session.explain`` is the same dry run for
+        each of a session's doors.
 
         Host-side only. The structure of a profile's rules is an
         operator's business, so there is no builtin an agent can type
@@ -526,18 +552,64 @@ class Workspace:
                 default session when empty.
 
         Returns:
-            list[Explanation]: one per command the gate reads, in gate
-            order, nested lines included.
+            ShellExplanation: the line's verdict and tree.
         """
         await self.ensure_sessions_loaded()
+        # Judged inside a line, as the line runs: an ask a deciding
+        # policy's read meets refuses like a deny and records nothing.
+        sink_token = set_refusal_sink(lambda refusal: None)
+        token = set_explaining(DryRun.DECIDING)
+        try:
+            return await self._explained(line, session_id)
+        finally:
+            reset_explaining(token)
+            reset_refusal_sink(sink_token)
+
+    async def _explained(self, line: str, session_id: str) -> ShellExplanation:
+        """:meth:`explain`'s judging, run with its policies deciding.
+
+        Args:
+            line (str): the line to judge.
+            session_id (str): whose profile to judge it under; the
+                default session when empty.
+        """
         session = self.get_session(session_id or self.default_session_id)
-        return await explain_line(
-            parse(line),
+        ast = parse(line)
+        judged = await explain_line(
+            ast,
             session,
             self._registry,
             self._namespace,
             whole_line=self._runtimes.whole_line(None) is not None,
         )
+        if holds([one.judgment for one in judged]):
+            return explained_line(line, judged, lambda command: "")
+        answers, placed = await self._router.placement(
+            ast,
+            line,
+            session,
+            session.session_id,
+            self._default_agent_id or "",
+        )
+        if isinstance(placed, Deny):
+            refused = placement_refused(placed, line)
+            said = explained_line(line, judged, lambda command: "")
+            return dataclasses.replace(
+                said,
+                answers=answers,
+                outcome=Outcome.DENY,
+                reason=placed.reason,
+                source="",
+                refusal=refused.refusal,
+                exit_code=refused.exit_code,
+                stderr=decode_text(await refused.materialize_stderr()),
+            )
+        said = explained_line(
+            line,
+            judged,
+            lambda command: self._router.runtime_for(command, placed),
+        )
+        return dataclasses.replace(said, answers=answers)
 
     @property
     def declared_sources(self) -> Mapping[str, SecretSource]:

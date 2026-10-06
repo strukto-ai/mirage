@@ -20,7 +20,8 @@ import type { JsonValue } from '@struktoai/mirage-core/types'
 import { VERSION } from '@struktoai/mirage-core/version'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { ioResultToDict } from '../io_serde.ts'
+import type { VfsExplanation } from '@struktoai/mirage-core/policy/types'
+import { explanationToDict, ioResultToDict } from '../io_serde.ts'
 import { TOOLS } from '../mcp/server.ts'
 import {
   RPC_INTERNAL_ERROR,
@@ -29,6 +30,7 @@ import {
   RPC_METHOD_NOT_FOUND,
   RPC_NOT_FOUND,
   RPC_PARSE_ERROR,
+  VFS_OPS,
 } from './constants.ts'
 
 const PROTOCOL_VERSION = '1'
@@ -93,9 +95,10 @@ export interface MirageRpcServerOptions {
  * Serves one session of a workspace over JSON-RPC 2.0. The methods are
  * the in-app Session API under the same names: `shell` is
  * `session.shell`, `glob` is `session.glob`, `vfs/<op>` is
- * `session.vfs.<op>`, and `tools/list` and `tools/call` serve the
- * session's agent tool table with MCP's schemas. Bytes travel as base64.
- * `$/cancelRequest` cancels a running request.
+ * `session.vfs.<op>`, `explain/shell` and `explain/vfs/<op>` are their
+ * dry runs under `session.explain`, and `tools/list` and `tools/call`
+ * serve the session's agent tool table with MCP's schemas. Bytes travel as
+ * base64. `$/cancelRequest` cancels a running request.
  */
 export class MirageRpcServer {
   readonly sessionId: string
@@ -189,9 +192,18 @@ export class MirageRpcServer {
         await vfs().truncate(text(params, 'path'), length)
         return {}
       },
-      'tools/list': () =>
-        Promise.resolve({
-          tools: TOOLS.map((tool) => ({
+      'explain/shell': async (params) =>
+        explanationToDict(await this.session.explain.shell(text(params, 'command'))),
+      ...Object.fromEntries(
+        VFS_OPS.map((op) => [
+          `explain/vfs/${op}`,
+          async (params: Params) => explanationToDict(await this.explainVfs(op, params)),
+        ]),
+      ),
+      'tools/list': async () => {
+        const names = await this.operations.offered()
+        return {
+          tools: TOOLS.filter((tool) => names.includes(tool.name)).map((tool) => ({
             name: tool.name,
             description: tool.description,
             inputSchema: tool.inputSchema as JsonValue,
@@ -199,7 +211,8 @@ export class MirageRpcServer {
               ? {}
               : { annotations: tool.annotations as JsonValue }),
           })),
-        }),
+        }
+      },
       'tools/call': (params, signal) => this.toolsCall(params, signal),
     }
   }
@@ -325,10 +338,46 @@ export class MirageRpcServer {
     )
   }
 
+  /**
+   * One op's dry run off its params, read as `vfs/<op>` reads them.
+   * Mirrors Python's `_explain_vfs`.
+   */
+  private explainVfs(op: (typeof VFS_OPS)[number], params: Params): Promise<VfsExplanation> {
+    const explain = this.session.explain.vfs
+    const path = (): string => text(params, 'path')
+    switch (op) {
+      case 'read': {
+        const offset = params.offset ?? 0
+        const size = params.size ?? null
+        if (!integer(offset) || (size !== null && !integer(size))) {
+          throw new RpcError(RPC_INVALID_PARAMS, 'offset and size are integers')
+        }
+        return explain.read(path(), { offset, size })
+      }
+      case 'write':
+        return explain.write(path(), bytes(params, 'data_base64'))
+      case 'append':
+        return explain.append(path(), bytes(params, 'data_base64'))
+      case 'stat':
+        return explain.stat(path(), { nofollow: params.nofollow === true })
+      case 'rename':
+        return explain.rename(text(params, 'src'), text(params, 'dst'))
+      case 'truncate': {
+        const length = params.length
+        if (!integer(length)) throw new RpcError(RPC_INVALID_PARAMS, 'length must be an integer')
+        return explain.truncate(path(), length)
+      }
+      default:
+        return explain[op](path())
+    }
+  }
+
   private async toolsCall(params: Params, signal?: AbortSignal): Promise<JsonValue> {
     const name = text(params, 'name')
     const tool = TOOLS.find((candidate) => candidate.name === name)
-    if (tool === undefined) throw new RpcError(RPC_INVALID_PARAMS, `Tool ${name} not found`)
+    if (tool === undefined || !(await this.operations.offered()).includes(name)) {
+      throw new RpcError(RPC_INVALID_PARAMS, `Tool ${name} not found`)
+    }
     const args = params.arguments ?? {}
     if (typeof args !== 'object' || Array.isArray(args)) {
       throw new RpcError(RPC_INVALID_PARAMS, 'arguments must be an object')

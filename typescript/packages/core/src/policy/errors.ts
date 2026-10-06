@@ -28,6 +28,18 @@ export class PolicyError extends Error {
 }
 
 /**
+ * A dry run reached the op gate: the door stops there, before any backend
+ * or cache is touched, with what the gate would answer noted for
+ * `session.explain.vfs`. Mirrors the Python `Explained`.
+ */
+export class Explained extends Error {
+  constructor() {
+    super('explained')
+    this.name = 'Explained'
+  }
+}
+
+/**
  * An op or a session write refused by an admission policy at a door.
  * Shaped like the FsError stamps (`code` EACCES plus the virtual path)
  * so every fs chokepoint renders GNU's "Permission denied" and the FUSE

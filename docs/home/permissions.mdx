@@ -1,17 +1,13 @@
 ---
 title: Permissions
-description: Profiles decide what each session may see and run; asks are the questions a guarded command raises and a host answers.
+description: Profiles decide what each session sees and may run; asks are questions a host answers.
 icon: shield-halved
 ---
 
-A workspace serves every agent the same mounts; a **profile** decides what
-one session sees of them and what it may run. Profiles are declared on the
-workspace, sessions are created under one, and every command line an agent
-types passes the same admission gate before anything runs. This page is
-about that gate as the profile document states it; the
-[policy engine](/home/policy-engine) is the mechanism underneath, and
-what a host extends in code. (Routing a line to a runtime is a
-different decision, made by the [route policy](/home/route-policy).)
+A **profile** decides what one session sees and may run. Profiles live on
+the workspace; a session binds one at creation, for life. The
+[policy engine](/home/policy-engine) enforces it; the
+[route policy](/home/route-policy) picks runtimes.
 
 ```yaml
 mode: WRITE
@@ -38,85 +34,47 @@ profiles:
       hide: [/vault]
 ```
 
-A session binds a profile by name at creation and keeps it for life:
-
 ```bash
 mirage workspace create workspace.yaml --id demo
 mirage session create demo --id agent_a --profile guarded
 mirage shell -w demo -s agent_a -c "cat /repo/notes.md"
 ```
 
-In code, the same two doors: `Workspace(mounts, profiles=...)` and
-`ws.create_session("agent_a", profile="guarded")` in Python,
-`new Workspace(mounts, { profiles })` and
-`ws.createSession('agent_a', { profile: 'guarded' })` in TypeScript.
-A session that names no profile runs under `profiles.default` when the
-workspace defines one, and unrestricted otherwise; the workspace's own
-default session follows the same rule, so a `default` profile governs
-bare `ws.shell(...)` too, and the op door with it: `ws.vfs`,
-`ws.dispatch`, `ws.stat` and `ws.readdir` read and write as the default
-session, so an agent whose file tool goes through `ws.vfs` is confined
-the way its shell is, and a kernel mount built on `ws.vfs` likewise.
-`ws.session("agent_a", profile="guarded")`
-(`ws.session('agent_a', { profile: 'guarded' })`) hands back both doors
-bound to one session: `handle.shell(line)` and `handle.vfs.read(path)`
-answer under the same profile, so one object per agent is enough. It
-creates the session when the id is new and adopts it as is otherwise;
-a profile for an existing session is refused, since a profile is set
-once. A session that names an explicit empty profile (`profile={}`)
-hides nothing, which is how a host seeds what the default profile
-hides. `Session(ws, "agent_a")` is the same pair for a session
-that already exists, since it adopts rather than creates.
+In code: `Workspace(mounts, profiles=...)` and
+`ws.create_session("agent_a", profile="guarded")` (TypeScript:
+`new Workspace(mounts, { profiles })`,
+`ws.createSession('agent_a', { profile: 'guarded' })`).
 
-Naming a session per call is the other half, and one rule decides
-between them: **a shell line sets the session, an op inherits it.**
-`ws.shell(line, session_id="agent_a")` runs that line as that session.
-`ws.vfs.read(path, session_id="agent_a")` (`ws.vfs.read(path, {},
-'agent_a')` in TypeScript) reads as it too, but only when no line is already running:
-inside a command handler, a runtime callback or a kernel mount, the
-line's own session wins, so a handler reaching this door can never
-widen the view it was given.
+- No profile means `profiles.default` if defined, else unrestricted. The
+  workspace's default session follows the same rule, so `default` also
+  governs bare `ws.shell(...)` and `ws.vfs`.
+- `ws.session("agent_a", profile="guarded")` returns one handle for both
+  doors, `handle.shell(line)` and `handle.vfs.read(path)`. It creates the
+  session or adopts an existing one. `Session(ws, "agent_a")` only adopts.
+- **A line sets the session; a VFS call inherits it.**
+  `ws.vfs.read(path, session_id=...)` applies only outside a running
+  line.
 
-## Two axes and a hider
+## How rules are read
 
-Every rule in a profile is read by one of two orderings, and hiding is
-neither:
+- **Command axis**: rules without paths, by verb: `deny` before `ask`.
+  `allow` decides whether a word is a command at all.
+- **Path axis**: rules with paths, and hides, by **anchor depth** (literal
+  components before the first wildcard). The deeper entry wins whatever
+  its verb: `/runbook/frozen/*` beats `/runbook/*`. Ties break by verb.
+- **Hiding is not refusing.** A hidden path is `ENOENT` and leaves no
+  record; a denied path is listed and fails when used.
 
-- **The command axis.** A rule naming no path is read by verb alone:
-  `deny` before `ask`, and the `allow` list decides whether the word is
-  a command at all.
-- **The path axis.** A rule carrying paths, and every hide, is read by
-  **anchor depth**: the number of literal components before the first
-  wildcard. `/runbook/frozen/*` is depth 2 and `/runbook/*` is depth 1,
-  so the deeper entry wins wherever both reach, whichever verb it
-  carries. Ties break by verb.
-- **Hiding is not a refusal.** A hidden path answers `ENOENT`, so the
-  session never learns the name; a denied path stays in the listing and
-  fails when read. The same `/vault` can be denied for one role and
-  hidden for another. A create under a hidden directory is `ENOENT`
-  too, the answer every read gives for that directory, so a write
-  cannot detect a hide a read could not; only a create at a hidden
-  name inside a visible directory answers `EACCES`, the way an existing
-  file the session cannot write does. A hide leaves no `refusal`
-  record, so nothing an agent reads names it.
+### `commands`
 
-### `commands`: allow, ask, deny
-
-`allow` is the session's tool set, not a filter over one: a word missing
-from the list is **not a command** (`sort: command not found`, exit 127,
-absent from `type`, `which` and `man`), an omitted list installs
-everything, and an empty list installs nothing. Shell builtins are
-subjects like everything else, so a list stating only `cat` leaves no
-`echo` and no `cd`. The agent's own shell functions are the one
-exemption, safe because every line of a body passes the gate itself.
-
-`ask` and `deny` take the same rule shape: a `reason`, plus what the rule
-covers.
+`allow` is the session's tool set. A word not in it is
+`command not found` (exit 127). Omitted means everything, empty means
+nothing, and builtins count: `allow: [cat]` leaves no `echo`.
 
 ```yaml
 deny:
   - reason: pushes go through CI
-    commands: [git push]    # whole lines, by prefix pattern
+    commands: [git push]    # whole lines, by prefix
   - reason: the rollback plan is frozen
     commands:               # one command, on these paths
       rm: ["/runbook/frozen/*"]
@@ -124,65 +82,28 @@ deny:
     paths: ["/vault/*"]     # any command, these paths
 ```
 
-A command pattern is a **prefix of the line**: `git push` covers
-`git push origin main`, a `*` token matches any one word, and a bare
-`*` is every command (`git push` and `git push *` are the same rule).
-The same patterns spell the `allow` list.
+A pattern is a prefix of the line: `git push` covers
+`git push origin main`, `*` matches one word, a bare `*` every command.
 
-A rule with `paths` and no command also reaches the VFS op door, so FUSE
-mounts and `ws.vfs` cannot go around it. Every other rule, and the
-`allow` list, judges a line, so a door that sees only ops (a FUSE mount,
-SFTP, codex-exec's file calls) cannot apply it and logs a warning naming
-what it skips when the session mounts. A whole-command `deny` refuses
-in bash's own voice, `<command>: Permission denied` at exit 126, and the
-reason rides beside the output as the result's `refusal` record
-(`{"kind": "deny", "reason": ..., "policy": ..., "scope": "command"}`,
-`null` on a line that ran). A `deny` matched through `paths` refuses the
-operand instead, with the command's own GNU line for an operand it may
-not open, at its operand exit code (`cat: /vault/aws.token: Permission
-denied`, `rm: cannot remove 'x': Permission denied`, exit 1), the reason
-on the record and its `scope` set to `operand`. An `ask` refuses at 126
-the same way, with a `pending` record naming the ask id, until a host
-answers; see [Asks](#asks) below.
+| Rule | The agent reads |
+| --- | --- |
+| `deny` by command | `git: Permission denied`, exit 126 |
+| `deny` by path | the command's own error, `cat: /vault/k: Permission denied`, exit 1 |
+| `ask` | `rm: Permission denied`, exit 126, until a host answers |
 
-The terminal's text never carries the policy's words. A surface that
-hands the agent text (the tools, MCP, HTTP, the CLI, the agent adapters,
-SSH) adds the record as one more line after the output,
+The reason is only on the result's `refusal` record. Text surfaces append
 `policy denied: <reason>` or `requires approval: <reason> (ask <id>)`.
-FUSE and SFTP can hand back only an errno, so they log the reason.
 
-A rule holds past the paths typed on the line:
+A rule also covers what a command reaches on its own: every entry of a
+walk (`grep -r`, `tar`, `cp -r`, `find -delete`), files a command opens
+(`awk print >`, `sed w`) and cached bytes. Only rules with paths and no
+command reach the VFS-only doors (FUSE, `ws.vfs`, SFTP).
 
-- **Walks and lines across mounts.** Every entry `grep -r`, `rg`, `tar`,
-  `cp -r` or `find -delete` reaches is refused in the command's own voice
-  for an entry it cannot open (`grep: <path>: Permission denied`), and
-  the line's record carries the rule's reason.
-- **Paths a command opens itself**, such as awk's `print >` and sed's `w`,
-  judged on the path as written and with every link followed.
-- **The read cache.** Bytes another session left in the shared cache are
-  refused exactly as a cold read of them.
+Not covered yet: file access inside a CLI or interpreter (`git`,
+`python3`) and in `getfattr`, `setfattr`, `ln`, `readlink`; backends that
+search on their own side (`grep -r` on a GitHub mount).
 
-Unlike GNU, a rule answers before "No such file or directory" does. A path
-typed on the line is refused even when it does not exist
-(`sed: can't read /data/nope/y: Permission denied`), and so is a path a command opens
-itself whose parent directory is missing or that is a dangling link. Only
-a `..` through a missing directory answers "No such file or directory"
-first, as GNU does.
-
-Not covered yet: the file access of a CLI or interpreter (`git`, `python3`)
-and of the builtins `getfattr`, `setfattr`, `ln` and `readlink`, which
-answer to their operands and to `paths` rules only; and a backend that
-searches on its own side, so `grep -r` and `rg` on a GitHub mount can print
-a file a rule refuses.
-
-### `paths` and `vars`: hide and show
-
-`paths.hide` makes entries nonexistent for the session: an entry with
-`*`, `?` or `[` is a pattern, anything else an exact path and its whole
-subtree. `paths.show` is the other half of the axis: a mapping of path
-to mode (or a plain list inheriting the mount's mode) that re-opens a
-subtree inside a hidden region when its anchor is deeper than the
-hide's, and states the mode in force below its anchor.
+### `paths` and `vars`
 
 ```yaml
 paths:
@@ -194,20 +115,14 @@ paths:
     /vault/policies: read
 ```
 
-A hide entry may be a group with a `reason`; the reason lands in an
-operator-only side table and is never shown to the session (a hidden
-path must not explain itself). `vars.hide` does the same for the
-environment: listed names (or globs over names) read as unset.
+`hide` takes exact paths (with their subtree) or patterns. `show` reopens
+a deeper subtree with a mode. A hide's `reason` is for operators only.
+`vars.hide` makes variables read as unset.
 
-### `mounts`: narrowing one mount
+### `mounts`
 
-A profile's `mounts` section is keyed by prefix and only ever narrows.
-A mount the mapping omits keeps the mode it declares in the workspace's
-`mounts:`; a profile can weaken that mode, never raise it. Name patterns
-written in a mount section anchor to that mount, and `commands` here
-carries `ask` and `deny` only, applied to lines working inside the mount
-by cwd or by operand (which is what a path-scoped rule cannot express:
-`cd /repo && git commit` names no path).
+Narrows one mount: a lower `mode`, patterns anchored at the mount, and
+`ask` / `deny` rules for lines working inside it by cwd or operand.
 
 ```yaml
 profiles:
@@ -225,23 +140,14 @@ profiles:
                 rm: ["/runbook/frozen/*"]
 ```
 
-A profile may also state `cwd` and `env` (seeded and exported at session
-creation), and a `policy`: a program that defines the admission hooks it
-answers at, the way a coded [Policy](/home/policy-engine) does, and the
-engine that runs it. `pre_command(ctx)` judges a command before it runs
-and returns `None` or `"allow"` for no opinion, `"deny"` or
-`{"deny": reason}`, `"ask"` or `{"ask": reason}`. `pre_ops(ctx)` judges
-one VFS op (`ctx["op"]`: `name`, `path`, `write`, `prefix`) and
-`pre_session(ctx)` one env write (`ctx["write"]`: `key`, `value`,
-`verb`); both answer allow or deny only. JavaScript spells them
-`preCommand`, `preOps`, `preSession`. Like every rule, a policy can only
-restrict, never grant past a deny.
+### `cwd`, `env`, `policy`
 
-The hook is told the line's facts as `ctx` (the command, its resolved
-paths, the session, the mounts), and its engine is attached to the
-workspace the way an agent's runtime is: a python policy may `open()` a
-file the line names and judge what it holds, not only what it is called.
-The read clears the op door like any other.
+`cwd` and `env` seed the session. `policy` is a script defining any of
+`pre_command(ctx)`, `pre_ops(ctx)` and `pre_session(ctx)` (`preCommand`,
+`preOps`, `preSession` in JavaScript). `pre_command` returns `None`,
+`{"deny": reason}` or `{"ask": reason}`; the others allow or deny. A file
+defining no hook fails closed. The script may read files, through the
+same gate.
 
 ```yaml
 profiles:
@@ -252,7 +158,6 @@ profiles:
 ```
 
 ```python ask_curl.py
-# Ask before a command reads a file that mentions curl.
 def pre_command(ctx):
     for path in ctx["command"]["paths"]:
         if "curl" in contents(path):
@@ -266,45 +171,24 @@ def contents(path):
         return ""
 ```
 
-A policy file defines any of the three admission hooks and nothing
-else; the output doors stay coded hooks. A hook the file leaves out is
-silence at that door, and a file defining none fails closed. `pre_ops`
-fires per op, thousands under one recursive command, so keep it cheap;
-the policy's own reads are not judged by it. One policy per profile: a
-file holds as many checks as it needs, and it stands in the chain beside
-the document's own rules and every coded policy, under the one rule that
-the first deny wins and an ask is kept only while nothing refuses.
-
 ## Asks
 
-An `ask` rule guards a command instead of refusing it outright. When a
-session runs the guarded line, the line does not run; the agent reads
-
-```
-rm: Permission denied
-```
-
-at exit 126 with a `pending` refusal record beside it,
+An `ask` holds the line. The agent reads `rm: Permission denied` at exit
+126 with a `pending` record:
 
 ```json
 {"kind": "pending", "reason": "removal needs sign-off", "policy": "", "scope": "command", "ask_id": "5b25c31eb62e"}
 ```
 
-(a text-only agent adapter renders that as
-`requires approval: removal needs sign-off (ask 5b25c31eb62e)` after
-stderr), and the ask lands in the workspace's decision ledger as a
-pending record carrying the session, command, argv, cwd, paths and the
-rule's reason. Decisions are session state, so they persist wherever the
-session store persists. A host answers **allow** or **deny**:
+The question waits in `ws.decisions` until a host answers:
 
-- `allow` with scope `once` (the default) answers exactly that line: the
-  agent's retry passes, and the answer is consumed by the retry that
-  used it.
-- `allow` with scope `session` answers every line the rule covers for
-  that session, and stays.
-- `deny` answers once: the retry is refused (`rm: Permission denied`,
-  with a `deny` record carrying the same reason), and running the line
-  again raises a new ask.
+- `allow`, scope `once` (default): the retry runs and spends it.
+- `allow`, scope `session`: every line the rule covers, from now on.
+- `deny`: the retry is refused; running the line again asks again.
+
+An `ask` with paths and no command also asks from a file tool or
+`session.vfs` when no line is running. `allow once` then covers one tool
+call.
 
 ### From the CLI
 
@@ -316,13 +200,7 @@ mirage workspace allow demo 5b25c31eb62e --scope session
 mirage workspace deny demo 5b25c31eb62e --note "not now"
 ```
 
-`list-asks` prints pending asks (every decision with `--all`); `allow`
-and `deny` answer one ask by the id quoted in the refusal and print the
-settled record.
-
 ### Over REST
-
-The daemon serves the same door:
 
 ```bash
 GET  /v1/workspaces/{id}/asks                # pending; ?all=true for every decision
@@ -331,121 +209,105 @@ POST /v1/workspaces/{id}/asks/{ask_id}
      {"answer": "allow", "scope": "once", "note": "reviewed"}
 ```
 
-Each record carries `id`, `session_id`, `agent_id`, `command`, `argv`,
-`cwd`, `paths`, `reason`, `outcome` (null while pending), `scope` and
-`note`. Field casing follows the serving daemon, as everywhere on this
-API: `session_id` from the Python daemon, `sessionId` from the
-TypeScript one. Answering an unknown id is 404; answering an id that was
-already answered is 409, so an operator retrying a click reads "already
-answered", not "not found". `deny` with scope `session` is refused
-(422): a deny answers once, and asking again raises a new record.
+A record has `id`, `session_id`, `agent_id`, `command`, `argv`, `cwd`,
+`paths`, `reason`, `outcome` (null while pending), `scope` and `note`.
+An unknown id is 404, an answered one 409, and `deny` with scope
+`session` 422.
 
 ### In code
 
-`ws.decisions` is the ledger the CLI and REST doors read:
-`pending(session_id)`, `list(session_id)` and
-`answer(ask_id, outcome, scope, note)`. A host that wants to answer
-inline instead of leaving the ask pending passes `on_ask` (`onAsk`) to
-the workspace: an async handler given the pending record, whose answer
-settles the ask while the line waits, like a tool-approval prompt. A
-`once` grant given that way is consumed by the line that asked, so the
-next identical line asks again; a refusal stands for the agent's
-immediate retry, which is refused from the record without the human
-being asked twice, and is spent by it. The literal commands of a compound
-line are judged before execution, and a `once` grant given for one of its commands,
-inline or out of band, is handed to the run; when a later command is
-refused instead, nothing runs and the refusal spends the grant, so the
-next line spelling that command asks again. Every grant a line was
-given is spent when the line ends, whether the run reached the command
-(a `&&` that short-circuited before it) or reached it more than once: a
-loop body is one place on the line, so
-`for f in a b; do touch $f; cat secret.txt; done` is one question, and
-the second iteration runs on the same nod rather than asking again
-after another `touch`. A grant is bound to the place on
-the line it was given for, so a command spelled twice on one line is two
-questions, a word that expands at run time into a command cannot run on
-the nod a literal spelling elsewhere on the line was given (`$S && cat
-secret.txt` asks for both), and a grant one line has claimed is not on
-offer to a line judged at the same time. The grants given to a line
-for the commands inside a background job it launches are shared with
-the job from the moment it is launched, and stand until the last of
-the line and its jobs ends: its commands reach their gates after the
-line has returned, a question that holds the rest of the line does not
-let go of them, and a loop that launches the same job again hands the
-next job the same grant. This also applies when `eval` launches the
-job: in `eval 'sleep 1 && cat secret.txt &'`, the outer line's approval
-stays reserved for the background `cat` after `eval` returns. And it
-applies to a line the job itself evaluates once it is running: in
-`sleep 1 && eval 'cat secret.txt' &`, the `cat` runs on the grant the
-job took with it, long after the line that launched the job has
-returned, and the job's end is what spends it. A line
-the shell evaluates from inside another (`$( )`, `eval`, `source`,
-`xargs`) runs on what the outer line was given for the words it runs,
-so `echo $(cat secret.txt)` is one question, not two, and two such
-bodies on one line are two; what such a line is given at its own gates
-stays with the outer line until that line ends, so every batch
-`xargs -n1 cat` hands on for one file runs on one answer. A line a
-whole-line runtime takes is judged the same
-way: an answer it was given stands while a later question on the same
-line waits, so the retry asks only for what is still unanswered.
+`ws.decisions` has `pending(session_id)`, `list(session_id)` and
+`answer(ask_id, outcome, scope, note)`. Pass `on_ask` (`onAsk`) to answer
+inline while the line waits.
 
-Preflight cannot determine every command produced by dynamic expansion.
-Those commands still pass the execution gate, but an ask there can arrive
-after earlier commands have run. For example,
-`F=/data/secret; echo before > /data/marker; cat $F` can write the marker
-before asking about the expanded `cat`. A pending result does not roll
-back earlier work, so retrying such a line can repeat it. The same holds
-for the operands a command appends at run time: `xargs cat` runs `cat`
-on the items it reads from its input, and `find -exec cat {} \;` on the
-paths it finds. So does a path only the runtime expands (`rm $F`) or
-one relative to a `cd` preflight cannot follow (`cd "$d" && rm x`): no
-rule is shown it before the line runs, and the gate judges the path it
-turns out to name. Preflight still refuses such a line for a `deny` on the
-command name, before anything runs, but it never asks about a spelling
-the gate will not read (`cat $F`, a bare `cat`): an answer to that
-question would cover nothing that runs, and the gate would ask again
-about the words that do. The one question is the gate's, about the
-real operands.
+How a grant is spent:
 
-## Dry runs
+- Every command of a line is judged before it runs. A grant belongs to
+  one place on the line, so a command spelled twice asks twice, and a
+  loop body is one place.
+- Grants are spent when the line ends, whether or not the command ran.
+- Nested lines (`$( )`, `eval`, `source`, `xargs`) use the outer line's
+  grants: `echo $(cat secret.txt)` asks once.
+- A background job keeps its line's grants until it ends.
+- A refused retry spends the refusal; the next run asks again.
 
-`ws.explain(line, session_id)` runs the same gate without running the
-line: one `Explanation` per command, with the outcome, the rule that
-spoke and where it was written, the matched operand, and the exact
-`exit_code` and `stderr` the agent would see, byte-identical to the real
-refusal. What a host reads in an explanation and what an agent sees at
-the prompt cannot disagree, because they are the same computation.
+A command only expansion reveals (`cat $F`, `xargs cat`, `find -exec`, a
+path after a `cd` to a variable) is asked at its own gate, possibly after
+earlier commands ran; a pending answer does not undo them.
 
-## The worked example
+## Explain
 
-The permissions example builds an incident-response workspace in which
-three roles read the same three mounts and see three different
-filesystems, one line per rule interaction:
-[python](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/permissions.py),
-[typescript](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/permissions.ts).
-Its printed table is pinned in CI, so the behaviors this page describes
-are the behaviors the build enforces.
+`session.explain` shows what a call would do, without doing it:
+`explain.shell(line)` for `session.shell(line)`, and
+`explain.vfs.<call>(...)` for each POSIX VFS call on `session.vfs`
+(`read`, `write`, `pwrite`, `stat`, `rename`, `setxattr`, ...). Nothing
+runs, nothing is recorded and no grant is spent. A policy that reads a
+file to decide still reads it; its writes fail with `EROFS`.
 
-The policy example puts a coded `Policy` beside a profile's `policy`
-block in code, then loads the same block from a document:
-[policy.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/policy.py),
-[policy.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/policy.ts);
-[workspace.yaml](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/workspace.yaml)
-with its program in
-[guard.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/guard.py),
-loaded by
-[policy_yaml.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/policy_yaml.py)
-and
-[policy_yaml.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/policy_yaml.ts).
-Both tables are pinned the same way.
+```python
+explain = (await ws.session("reviewer")).explain
+shell_res = await explain.shell("rm /data/x")
+vfs_res = await explain.vfs.write("/vault/key", b"x")
+```
 
-The ask examples show the two kinds of host. An `on_ask` reviewer
-allows one guarded `rm` inline, once, so the same line asks again:
-[ask.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/ask.py),
-[ask.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/ask.ts).
-With no reviewer, two asked lines wait in the ledger, and the host reads
-`pending` as a queue, one record per question, and answers each by id,
-the `cat` once and the `rm` for the session, so their retries run and
-only the `cat` asks again:
-[ask_pending.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/ask_pending.py),
-[ask_pending.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/ask_pending.ts).
+```typescript
+const explain = (await ws.session('reviewer')).explain
+const shellRes = await explain.shell('rm /data/x')
+const vfsRes = await explain.vfs.write('/vault/key', 'x')
+```
+
+Every result has `outcome` (`allow`, `deny`, `ask`), `reason`, `source`
+(where the rule is written: `top`, `mounts./runbook`, `commands.allow`),
+`answers` (each policy's answer, in order) and `refusal`.
+
+| Result | Adds |
+| --- | --- |
+| line (`ShellExplanation`) | `exit_code` and `stderr` the agent reads if the line is refused whole, else 0; `answers` from placement; `node`, the parse tree |
+| command (a tree node) | `command`, `argv`, its own `exit_code` and `stderr`, `operands` (`text`, `path`, `matched`), `runtime` |
+| VFS call (`VfsExplanation`) | `call`, `paths`, `error` (`EACCES`, `EROFS`, or empty) |
+
+A line is refused whole by a rule or an unanswered ask; anything else
+fails only its own command. Tree nodes are `list`, `pipeline`,
+`subshell`, `group`, `substitution`, `line` (`bash -c`, `eval`, `xargs`)
+and `command`. `mirage workspace explain` prints it:
+
+```text
+cat /data/a | wc -l && echo $(cat /data/keys/a)  [deny, exit 1: sealed]
+  list: cat /data/a | wc -l && echo $(cat /data/keys/a)
+    pipeline: cat /data/a | wc -l
+      cat /data/a  [allow]
+      wc -l  [allow]
+    echo $(cat /data/keys/a)  [allow]
+      substitution: cat /data/keys/a
+        cat /data/keys/a  [deny, exit 1: sealed]  top
+```
+
+- A hidden path explains like a path no rule matches.
+- `list_files` is judged at its listing, not per entry.
+- In TypeScript without async task isolation (a browser),
+  `explain.vfs` throws and `explain.shell`'s policies act for real.
+
+The same results come over `POST /v1/workspaces/{id}/explain/shell`, RPC
+`explain/shell` and `explain/vfs/<call>`, and `mirage workspace explain`.
+
+## Examples
+
+- Roles over the same mounts:
+  [permissions.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/permissions.py),
+  [permissions.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/permissions.ts).
+- A coded policy beside a profile `policy`, and explain:
+  [policy.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/policy.py),
+  [policy.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/policy.ts);
+  from YAML:
+  [workspace.yaml](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/workspace.yaml),
+  [guard.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/guard.py),
+  [policy_yaml.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/policy_yaml.py),
+  [policy_yaml.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/policy_yaml.ts).
+- Asks answered inline:
+  [ask.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/ask.py),
+  [ask.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/ask.ts);
+  from the ledger:
+  [ask_pending.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/ask_pending.py),
+  [ask_pending.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/ask_pending.ts).
+
+Their output is pinned in CI.

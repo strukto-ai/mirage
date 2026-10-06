@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { getAdmission, redirectTargetJudged } from '../../context/session_context.ts'
+import { getAdmission, lineRunning, redirectTargetJudged } from '../../context/session_context.ts'
 import type { Policy } from '../base.ts'
 import { decide } from '../match/decide.ts'
-import { opRefusal, posixLevel } from '../match/rule.ts'
+import { opRuling, posixLevel } from '../match/rule.ts'
 import { SESSION_SCOPED, type SessionScoped } from '../mixin.ts'
 import {
   Outcome,
@@ -44,8 +44,10 @@ import {
  * per operand by whether it names paths, or taken to the approval door
  * when it asks. `preOps` walks the deny rules that are pure paths, so
  * FUSE, programmatic ops and the warm cache cannot bypass a path the
- * profile protects; there is no ask at the op door, which cannot wait on a
- * host.
+ * profile protects. A path rule that asks is a question only where no
+ * line is running (a file tool, the host's facade), which the door puts
+ * to the approval ledger keyed by rule and path; inside a line it
+ * refuses, since the line was admitted without it.
  */
 export class PermissionsPolicy implements Policy, SessionScoped {
   readonly [SESSION_SCOPED] = true as const
@@ -68,8 +70,14 @@ export class PermissionsPolicy implements Policy, SessionScoped {
     if (decision.outcome === Outcome.ASK) {
       return { kind: 'ask', reason: rule.reason, rule, rules: decision.asks }
     }
-    if (decision.matchedPath === null) return { kind: 'deny', reason: rule.reason }
-    return { kind: 'deny', reason: rule.reason, scope: 'operand', path: decision.matchedPath }
+    if (decision.matchedPath === null) return { kind: 'deny', reason: rule.reason, rule }
+    return {
+      kind: 'deny',
+      reason: rule.reason,
+      scope: 'operand',
+      path: decision.matchedPath,
+      rule,
+    }
   }
 
   preOps(ctx: OpsContext): Action | null {
@@ -78,9 +86,12 @@ export class PermissionsPolicy implements Policy, SessionScoped {
     // spent as the command is admitted, so by the time its own walk
     // reaches this door the session holds nothing and only the bound
     // gate still remembers the nod.
-    const granted = getAdmission()?.granted ?? []
-    const reason = opRefusal(this.sessions.commandsOf(ctx.sessionId ?? ''), ctx, granted)
-    return reason === null ? null : { kind: 'deny', reason }
+    const gate = getAdmission()
+    const ruled = opRuling(this.sessions.commandsOf(ctx.sessionId ?? ''), ctx, gate?.granted ?? [])
+    if (ruled === null) return null
+    const [rule, asks] = ruled
+    if (asks && gate === null && !lineRunning()) return { kind: 'ask', reason: rule.reason, rule }
+    return { kind: 'deny', reason: rule.reason, rule }
   }
 
   /**

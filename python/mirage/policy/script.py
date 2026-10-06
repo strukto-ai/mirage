@@ -23,7 +23,6 @@ from mirage.policy.base import Policy
 from mirage.policy.constants import (
     DEFAULT_ASK_REASON,
     DEFAULT_DENY_REASON,
-    SCRIPT_EVAL_TIMEOUT_SECONDS,
 )
 from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.types import (
@@ -39,6 +38,7 @@ from mirage.policy.types import (
 )
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding
+from mirage.runtime.constants import SCRIPT_EVAL_TIMEOUT_SECONDS
 from mirage.runtime.errors import EvalError
 from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.resolver import MountResolver
@@ -248,11 +248,11 @@ def script_action(
     The vocabulary is the coded hook's own, spelled as data: ``None``
     or ``'allow'`` is no opinion (the command runs unless another rule
     refuses it, and can never override one that does), ``'deny'`` /
-    ``{'deny': reason}`` refuses, and at ``pre_command`` alone ``'ask'``
-    / ``{'ask': reason}`` takes the line to the approval door, since the
-    op and session doors cannot wait on a host (``VALIDITY``). The bare
-    strings carry the document's default reasons, the same ones a rule
-    stating no reason gets.
+    ``{'deny': reason}`` refuses, and at ``pre_command`` and ``pre_ops``
+    ``'ask'`` / ``{'ask': reason}`` takes the line (or an op no line is
+    running behind) to the approval door, since the session door cannot
+    wait on a host (``VALIDITY``). The bare strings carry the document's
+    default reasons, the same ones a rule stating no reason gets.
 
     Args:
         value (EvalValue): what the script evaluated to.

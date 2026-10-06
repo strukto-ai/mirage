@@ -15,7 +15,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 
+import { runExplaining, runWithRefusalSink } from '../../context/session_context.ts'
 import { Outcome, Scope } from '../../policy/index.ts'
+import { DryRun } from '../../policy/types.ts'
 import type { Action, AskHandler, CommandContext, Policy } from '../../policy/index.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Runtime } from '../../runtime/base.ts'
@@ -27,6 +29,8 @@ import { MountMode } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { Workspace } from '../workspace/workspace.ts'
+import { Session } from '../workspace/handle.ts'
+import { explainLine, type Judgment } from './explain.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -97,6 +101,37 @@ async function ws(): Promise<Workspace> {
 }
 
 /**
+ * A line's per-command judgments, read as `Workspace.explain` reads
+ * them; `wholeLine` when a runtime takes the line whole.
+ */
+async function judged(
+  w: Workspace,
+  line: string,
+  sessionId = '',
+  wholeLine = false,
+): Promise<Judgment[]> {
+  await w.ensureSessionsLoaded()
+  const session = w.getSession(sessionId === '' ? w.defaultSessionId : sessionId)
+  const parser = await getTestParser()
+  const said = await runWithRefusalSink(
+    () => undefined,
+    () =>
+      runExplaining(DryRun.DECIDING, () =>
+        explainLine(
+          parser.parse(line),
+          session,
+          w.registry,
+          w.namespace,
+          '',
+          (text) => parser.parse(text),
+          wholeLine,
+        ),
+      ),
+  )
+  return said.map((one) => one.judgment)
+}
+
+/**
  * The same world as `ws`, with a host that answers an ask inline, under
  * `profile` for session `s`.
  */
@@ -156,18 +191,18 @@ function answering(asked: string[], outcome: Outcome, scope = Scope.ONCE): AskHa
 describe('explain', () => {
   it('answers each verb and names the rule', async () => {
     const w = await ws()
-    const [allowed] = await w.explain('cat /data/a.txt', 's')
+    const [allowed] = await judged(w, 'cat /data/a.txt', 's')
     expect(allowed?.outcome).toBe(Outcome.ALLOW)
     expect(allowed?.exitCode).toBe(0)
     expect(allowed?.rule).toBeNull()
 
-    const [denied] = await w.explain('rm /data/prod/x.txt', 's')
+    const [denied] = await judged(w, 'rm /data/prod/x.txt', 's')
     expect(denied?.outcome).toBe(Outcome.DENY)
     expect(denied?.reason).toBe('production data is protected')
     expect(denied?.source).toBe('top')
     expect(denied?.matchedPath).toBe('/data/prod/x.txt')
 
-    const [asked] = await w.explain('git push origin main', 's')
+    const [asked] = await judged(w, 'git push origin main', 's')
     expect(asked?.outcome).toBe(Outcome.ASK)
     expect(asked?.reason).toBe('pushes need sign-off')
   })
@@ -177,7 +212,7 @@ describe('explain', () => {
     // exit code is what separates a head word the session cannot see
     // from a line no allow entry covers.
     const w = await ws()
-    const [missing] = await w.explain('gerp x', 's')
+    const [missing] = await judged(w, 'gerp x', 's')
     expect(missing?.outcome).toBe(Outcome.DENY)
     expect(missing?.rule).toBeNull()
     expect(missing?.source).toBe('commands.allow')
@@ -201,7 +236,7 @@ describe('explain', () => {
     open.push(w)
     w.createSession('s', { profile: 'r' })
     const ran = await w.shell(line, { sessionId: 's' })
-    const missing = (await w.explain(line, 's')).at(-1)
+    const missing = (await judged(w, line, 's')).at(-1)
     expect([ran.exitCode, DEC.decode(ran.stderr)]).toEqual([127, said])
     expect([missing?.exitCode, missing?.stderr]).toEqual([127, said])
     expect([missing?.command, missing?.source]).toEqual(['gerp', 'commands.allow'])
@@ -209,7 +244,7 @@ describe('explain', () => {
 
   it('reads every command of a line', async () => {
     const w = await ws()
-    const [first, second] = await w.explain('cat /data/a.txt && rm /data/prod/x.txt', 's')
+    const [first, second] = await judged(w, 'cat /data/a.txt && rm /data/prod/x.txt', 's')
     expect([first?.command, first?.outcome]).toEqual(['cat', Outcome.ALLOW])
     expect([second?.command, second?.outcome]).toEqual(['rm', Outcome.DENY])
   })
@@ -218,10 +253,34 @@ describe('explain', () => {
     const w = await ws()
     for (const line of ['rm /data/prod/x.txt', 'git push origin main', 'gerp x']) {
       const ran = await w.shell(line, { sessionId: 's' })
-      const [said] = await w.explain(line, 's')
+      const [said] = await judged(w, line, 's')
       expect(said?.exitCode).toBe(ran.exitCode)
       expect(said?.stderr).toBe(DEC.decode(ran.stderr))
     }
+  })
+
+  it('refuses the whole line only for a verdict', async () => {
+    // A word the session cannot see fails where it stands and the rest of
+    // the line runs; a rule's refusal holds the whole line, whatever
+    // failed before it.
+    const w = await ws()
+    let said = await w.explain('gerp x; echo ok', 's')
+    let ran = await w.shell('gerp x; echo ok', { sessionId: 's' })
+    expect([ran.exitCode, said.outcome, said.exitCode]).toEqual([0, Outcome.ALLOW, 0])
+    const [gerp] = said.node.children
+    expect(
+      gerp !== undefined && 'command' in gerp
+        ? [gerp.outcome, gerp.exitCode, gerp.stderr, gerp.source]
+        : null,
+    ).toEqual([Outcome.DENY, 127, 'gerp: command not found\n', 'commands.allow'])
+    const line = 'gerp x; rm /data/prod/x.txt'
+    said = await w.explain(line, 's')
+    ran = await w.shell(line, { sessionId: 's' })
+    expect([said.exitCode, said.stderr, said.refusal?.reason]).toEqual([
+      ran.exitCode,
+      DEC.decode(ran.stderr),
+      ran.refusal?.reason,
+    ])
   })
 
   it('spends nothing', async () => {
@@ -298,7 +357,7 @@ describe('explain', () => {
     // different things about where the line ends up.
     const w = await ws()
     const line = 'cd /data/prod && rm x.txt'
-    const [, removed] = await w.explain(line, 's')
+    const [, removed] = await judged(w, line, 's')
     expect(removed?.outcome).toBe(Outcome.DENY)
     const ran = await w.shell(line, { sessionId: 's' })
     expect(removed?.exitCode).toBe(ran.exitCode)
@@ -339,10 +398,17 @@ describe('explain', () => {
     await w.decisions.answer(pending?.id ?? '', Outcome.ALLOW, Scope.SESSION)
     // The document still says ask, because that is what it says; the
     // exit code says 0, because that is what the line would now do.
-    const [asked] = await w.explain('git push origin main', 's')
+    const [asked] = await judged(w, 'git push origin main', 's')
     expect(asked?.outcome).toBe(Outcome.ASK)
     expect(asked?.exitCode).toBe(0)
     expect(asked?.stderr).toBe('')
+    const said = await w.explain('git push origin main', 's')
+    expect([said.outcome, said.reason, said.exitCode, said.refusal]).toEqual([
+      Outcome.ASK,
+      'pushes need sign-off',
+      0,
+      null,
+    ])
   })
 })
 
@@ -381,7 +447,7 @@ describe('prejudge', () => {
     // of the command. The dry run has to read it the same way or it
     // answers ALLOW for a line the run refuses.
     const w = await sealedWs()
-    const [said] = await w.explain('echo x > /data/prod/x.txt', 's')
+    const [said] = await judged(w, 'echo x > /data/prod/x.txt', 's')
     expect(said?.outcome).toBe(Outcome.DENY)
     expect(said?.reason).toBe('sealed until review')
   })
@@ -576,7 +642,7 @@ describe('prejudge', () => {
     const ran = await w.shell(line, { sessionId: 's' })
     expect(ran.exitCode).toBe(0)
     expect(w.decisions.list('s')).toHaveLength(1)
-    const elsewhere = await w.explain('cat /data/secret.txt', 's')
+    const elsewhere = await judged(w, 'cat /data/secret.txt', 's')
     expect(elsewhere[0]?.outcome).toBe(Outcome.ASK)
     const waited = await w.shell('wait', { sessionId: 's' })
     expect(waited.exitCode).toBe(0)
@@ -688,7 +754,7 @@ describe('prejudge', () => {
       )
       open.push(w)
       w.createSession('s', { profile: 'r' })
-      const said = await w.explain(line, 's')
+      const said = await judged(w, line, 's', whole)
       const ran = await w.shell(line, { sessionId: 's' })
       expect(ran.exitCode).toBe(code)
       expect(said.filter((e) => e.exitCode !== 0).map((e) => [e.exitCode, e.stderr])).toEqual(
@@ -731,7 +797,7 @@ describe('prejudge', () => {
       ],
       ['t', 'cd /data; d=prod; cd "$d" && tar -cf /data/t.tar . && echo ok', 0],
     ] as const) {
-      const said = await w.explain(line, session)
+      const said = await judged(w, line, session)
       const ran = await w.shell(line, { sessionId: session })
       const err = DEC.decode(ran.stderr)
       expect([ran.exitCode, err]).toEqual([code, code === 0 ? '' : err])
@@ -1239,5 +1305,70 @@ describe('prejudge scope', () => {
     )
     expect(seen).toEqual([['cat', '/data/secret.txt', '0', 'x']])
     expect(w.decisions.list('s')).toEqual([])
+  })
+})
+
+class AskRm implements Policy {
+  preCommand(ctx: CommandContext): Action | null {
+    return ctx.command === 'rm' ? { kind: 'ask', reason: 'sign-off' } : null
+  }
+}
+
+class DenyRm implements Policy {
+  preCommand(ctx: CommandContext): Action | null {
+    return ctx.command === 'rm' ? { kind: 'deny', reason: 'no' } : null
+  }
+}
+
+class Broken implements Policy {
+  preCommand(): Action | null {
+    throw new Error('broken')
+  }
+}
+
+describe('explain answers and the op form', () => {
+  it("shows every policy's answer in chain order", async () => {
+    const ws = new Workspace(
+      { '/data/': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: await getTestParser(),
+        policies: [new AskRm(), new DenyRm()],
+      },
+    )
+    try {
+      const said = await ws.explain('rm /data/x')
+      const [rm] = said.node.children
+      // The Ask comes first and is still shown: no answer stops the loop,
+      // and the Deny is what the line meets.
+      expect(rm !== undefined && 'command' in rm ? rm.answers : null).toEqual([
+        { kind: 'ask', reason: 'sign-off', policy: 'AskRm' },
+        { kind: 'deny', reason: 'no', policy: 'DenyRm' },
+      ])
+      expect([said.exitCode, said.refusal?.reason]).toEqual([126, 'no'])
+      expect(await new Session(ws, null).explain.shell('rm /data/x')).toEqual(said)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('explains a policy that fails as a deny', async () => {
+    const ws = new Workspace(
+      { '/data/': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser(), policies: [new Broken()] },
+    )
+    try {
+      const said = await ws.explain('echo hi')
+      const ran = await ws.shell('echo hi')
+      const [echo] = said.node.children
+      expect([
+        said.outcome,
+        echo !== undefined && 'command' in echo ? echo.outcome : null,
+        said.refusal?.kind,
+      ]).toEqual([Outcome.DENY, Outcome.DENY, 'failed'])
+      expect([said.exitCode, said.stderr]).toEqual([ran.exitCode, DEC.decode(ran.stderr)])
+    } finally {
+      await ws.close()
+    }
   })
 })

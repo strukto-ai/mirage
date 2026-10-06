@@ -79,6 +79,3 @@ export const SUBTREE_COMMANDS: ReadonlySet<string> = new Set(['rm', 'rmdir', 'mv
  * hidden path is the hide arm's, and stays ENOENT.
  */
 export const METADATA_OPS: ReadonlySet<string> = new Set(['stat', 'exists'])
-
-/** How long one profile script may run before its profile is refused. */
-export const SCRIPT_EVAL_TIMEOUT_SECONDS = 10.0

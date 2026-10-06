@@ -515,6 +515,217 @@
           }
         }
       ]
+    },
+    {
+      "id": "pre_execute_places_the_line",
+      "note": "A coded policy answers at pre_execute like the route policy does: a Route places the line on the runtime it names.",
+      "world": {
+        "runtimes": [
+          "monty",
+          "local",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        },
+        "policies": [
+          {
+            "name": "place_line",
+            "contains": "go-local",
+            "runtime": "local"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(argv[0])\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "-c\n"
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print('went-local')\" && echo go-local",
+          "expect": {
+            "exit": 0,
+            "stdout": "went-local\ngo-local\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pre_execute_deny_outranks_a_route",
+      "note": "A Deny at pre_execute refuses the line whoever placed it, in bash's words.",
+      "world": {
+        "runtimes": [
+          "monty",
+          "local",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        },
+        "route_policy": "'local'",
+        "policies": [
+          {
+            "name": "place_line",
+            "contains": "blocked",
+            "deny": "blocked here"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print('blocked')\"",
+          "expect": {
+            "exit": 126,
+            "stderr": "python3: Permission denied\n"
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print('went-local')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "went-local\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "placements_that_disagree_refuse_the_line",
+      "note": "Two policies placing one line on different runtimes refuse it: neither choice is the line's.",
+      "world": {
+        "runtimes": [
+          "monty",
+          "local",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        },
+        "route_policy": "'local'",
+        "policies": [
+          {
+            "name": "place_line",
+            "contains": "python3",
+            "runtime": "monty"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(1)\"",
+          "expect": {
+            "exit": 126,
+            "stderr": "python3: Permission denied\n"
+          }
+        },
+        {
+          "command": "echo still-open",
+          "expect": {
+            "exit": 0,
+            "stdout": "still-open\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "admission_comes_before_placement",
+      "note": "A line a rule refuses is never shown to a placing policy: the rule's refusal arrives in GNU's words, not the route policy's deny, which still answers every line the rules admit.",
+      "world": {
+        "runtimes": [
+          "monty",
+          "local",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        },
+        "route_policy": "{'deny': 'routed away'}",
+        "profiles": {
+          "sealed": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "sealed",
+                  "paths": [
+                    "/ram/sec/*"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "profile": "sealed"
+      },
+      "steps": [
+        {
+          "command": "cat /ram/sec/x",
+          "expect": {
+            "exit": 1,
+            "stderr": "cat: /ram/sec/x: Permission denied\n"
+          }
+        },
+        {
+          "command": "echo hi",
+          "expect": {
+            "exit": 126,
+            "stderr": "echo: Permission denied\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_runtime_that_declines_its_placement_refuses_the_line",
+      "note": "A runtime a policy places the line on is asked too: its own script declining the line conflicts with the placement and refuses it. The caller's runtime argument forces its runtime.",
+      "world": {
+        "runtimes": [
+          {
+            "name": "local",
+            "script": "'heavy' in ctx['line']"
+          },
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        },
+        "route_policy": "'local'"
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import sys; print('heavy')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "heavy\n"
+          }
+        },
+        {
+          "command": "python3 -c \"print(1)\"",
+          "expect": {
+            "exit": 126,
+            "stderr": "python3: Permission denied\n"
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print(1)\"",
+          "runtime": "local",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n"
+          }
+        }
+      ]
     }
   ]
 }

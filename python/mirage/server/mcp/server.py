@@ -165,9 +165,10 @@ class MirageMcpServer:
                 every tool fits on one page.
 
         Returns:
-            ListToolsResult: Every tool this server serves.
+            ListToolsResult: The tools the session's profile leaves it.
         """
-        return ListToolsResult(tools=list(TOOLS))
+        names = await self._ops.offered()
+        return ListToolsResult(tools=[t for t in TOOLS if t.name in names])
 
     async def call_tool(
         self,
@@ -176,8 +177,9 @@ class MirageMcpServer:
     ) -> CallToolResult:
         """Run one tool call.
 
-        A tool this server does not serve is a protocol error, as the
-        TypeScript twin answers it. Arguments outside the tool's input
+        A tool this server does not serve, or one the session's profile
+        does not leave it, is a protocol error, as the TypeScript twin
+        answers it. Arguments outside the tool's input
         schema and a raised exception are the tool's answer, with
         `is_error` set, so the agent reads them and can retry.
 
@@ -193,7 +195,7 @@ class MirageMcpServer:
             MCPError: The tool name is not one this server serves.
         """
         tool = next((t for t in TOOLS if t.name == params.name), None)
-        if tool is None:
+        if tool is None or tool.name not in await self._ops.offered():
             raise MCPError(INVALID_PARAMS, f"Tool {params.name} not found")
         arguments = params.arguments or {}
         try:

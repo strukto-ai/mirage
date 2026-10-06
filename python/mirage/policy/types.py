@@ -91,6 +91,8 @@ class Deny:
             typed: the door prints the command's own line for it and
             ``Permission denied``, the reason riding the record. None
             leaves the reason as the diagnostic.
+        rule (CommandRule | None): the profile rule that refused, as an
+            Ask carries the rule that asked; None for a coded condition.
     """
 
     kind: ClassVar[str] = "deny"
@@ -101,6 +103,7 @@ class Deny:
     failed: bool = False
     error: OSError | None = None
     path: str | None = None
+    rule: "CommandRule | None" = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +124,28 @@ class Hide:
     kind: ClassVar[str] = "hide"
 
     error: OSError
+
+
+@dataclass(frozen=True, slots=True)
+class Route:
+    """Place a line on a runtime, the answer ``pre_execute`` gives
+    beside a Deny.
+
+    The runtime serves every command it captures on the line, as a
+    ``route_policy`` verdict naming it does. A Deny at the stage
+    outranks it, and two policies placing one line on different
+    runtimes refuse the line, since neither choice is the line's.
+
+    Args:
+        runtime (str): the runtime entry's name.
+        policy (str): the policy that placed the line; the chain fills
+            it in.
+    """
+
+    kind: ClassVar[str] = "route"
+
+    runtime: str
+    policy: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,8 +255,9 @@ class Ask:
     ``commands.ask`` rule, a custom policy for a coded condition, and
     both route to the workspace's decision ledger (``Decisions``). A Deny
     from any policy outranks it: the chain keeps looking past an Ask
-    for a Deny, so an approval can never re-open a refusal. Command
-    plane only: the op doors cannot wait on a host.
+    for a Deny, so an approval can never re-open a refusal. A pre_ops
+    answer too, where the door puts it to the ledger when no line is
+    running behind the op and refuses it inside one.
 
     Args:
         reason (str): why the line needs sign-off, shown to the agent
@@ -247,6 +273,7 @@ class Ask:
             the line only once each is answered, so a nod given for one
             operand cannot carry another. Empty for a coded Ask, whose
             one rule the door synthesizes.
+        policy (str): the policy that asked, as ``explain`` names it.
     """
 
     kind: ClassVar[str] = "ask"
@@ -254,15 +281,17 @@ class Ask:
     reason: str
     rule: CommandRule | None = None
     rules: tuple[CommandRule, ...] = ()
+    policy: str = ""
 
 
 # The closed vocabulary of policy answers, ranked by kind: Hide (the
 # built-in's, the path is absent), then Deny (first opinion wins), then
 # Ask (defers to the host; a Deny anywhere in the chain still wins), then
-# Limit (every opinion merges to the tightest, Limit.aggr). A hook
-# returns an Action to state an opinion or None to stay silent; each
-# hook accepts a fixed set of kinds (VALIDITY), enforced loud.
-Action = Hide | Deny | Limit | Ask
+# Route and Limit (every Route has to agree; every Limit merges to the
+# tightest, Limit.aggr). A hook returns an Action to state an opinion or
+# None to stay silent; each hook accepts a fixed set of kinds
+# (VALIDITY), enforced loud.
+Action = Hide | Deny | Limit | Ask | Route
 
 
 class Scope(StrEnum):
@@ -753,56 +782,185 @@ class SessionContext:
 
 VALIDITY: dict[str, frozenset[str]] = {
     "pre_command": frozenset({Deny.kind, Ask.kind}),
-    "pre_ops": frozenset({Deny.kind}),
+    "pre_execute": frozenset({Deny.kind, Route.kind}),
+    "pre_ops": frozenset({Deny.kind, Ask.kind}),
     "post_ops": frozenset({Deny.kind, Limit.kind}),
     "post_execute": frozenset({Limit.kind}),
     "pre_session": frozenset({Deny.kind}),
 }
 
 
-@dataclass(frozen=True, slots=True)
-class Explanation:
-    """What one command of a line would do, without doing it.
+class DryRun(StrEnum):
+    """What a dry run's calls are while the policies decide the op it
+    explains.
 
-    Produced by the same gate the dispatcher runs, so a host reading
-    this and an agent typing the line cannot be told different things.
-    Everything the agent would see is here as it would arrive:
-    ``exit_code`` and ``stderr`` come out of the one outcome table, so
-    an explanation of a refused line is byte-identical to the refusal.
-
-    ``outcome`` is the document's answer and ``rule`` says who gave it.
-    The two refusals the allow list produces both arrive as ``DENY``
-    with no rule, and ``exit_code`` separates them: 127 for a head word
-    the session cannot see, which reads as bash's "command not found"
-    so an unlisted tool never leaks that it exists, and 126 for a line
-    whose head was visible but which no allow entry covers.
-
-    Args:
-        command (str): the head word, as the gate read it.
-        argv (tuple[str, ...]): the words after it.
-        outcome (Outcome): what the profile's rules say.
-        rule (CommandRule | None): the rule that spoke, None when the
-            allow list did or when nothing did.
-        reason (str): the rule's reason, empty when there is no rule.
-        source (str): where in the document the rule was written.
-        matched_path (str | None): the operand a path-scoped rule
-            matched, as typed.
-        paths (tuple[str, ...]): the paths the rules were shown, after
-            the session's hides dropped what it cannot see.
-        exit_code (int): what the line would exit with, 0 to run.
-        stderr (str): what the agent would read, empty to run.
-        refusal (Refusal | None): the record the refused result
-            would carry, None when the line would run.
+    DECIDING is a policy's own ops: a read runs for real, a refusal
+    raises the door's error with no question recorded, and a write is
+    refused as on a read-only mount, so an explanation changes nothing.
     """
 
-    command: str
-    argv: tuple[str, ...] = ()
+    DECIDING = "deciding"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Explanation:
+    """What the policies decide about one thing a session would do,
+    without doing it: the verdict every explanation carries.
+
+    Produced by the same gates the dispatcher runs, so a host reading
+    one and an agent running the call cannot be told different things.
+    A line (:class:`ShellExplanation`), each of its commands
+    (:class:`CommandExplanation`) and a VFS call
+    (:class:`VfsExplanation`) extend it with what is theirs; ``answers``
+    holds what the hook judging that level said.
+
+    Args:
+        outcome (Outcome): ``ALLOW``, ``DENY`` or ``ASK`` (an ask an
+            approval already covers stays ``ASK`` with no refusal).
+        reason (str): why, in the deciding policy's words; empty when
+            nothing refuses or asks.
+        source (str): where in the profile the deciding rule is written
+            (``top``, ``mounts./runbook``, ``commands.allow`` for the
+            allow list); empty when no rule decided.
+        answers (tuple[Deny | Ask | Route, ...]): every policy's answer,
+            in the order the chain asks them, each naming its policy;
+            the profile's rules answer as ``PermissionsPolicy``. A hide
+            is never among them.
+        refusal (Refusal | None): the record a refused run carries,
+            None when it would run.
+    """
+
     outcome: Outcome = Outcome.ALLOW
-    rule: CommandRule | None = None
     reason: str = ""
     source: str = ""
-    matched_path: str | None = None
-    paths: tuple[str, ...] = ()
+    answers: "tuple[Deny | Ask | Route, ...]" = ()
+    refusal: Refusal | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ShellOperand:
+    """One path argument of a command, as the rules read it.
+
+    A path the session cannot see is listed like any path no rule
+    matches: ``path`` is resolved from the cwd alone, links unfollowed,
+    so it names nothing the session could not type.
+
+    Args:
+        text (str): the argument as typed.
+        path (str): the absolute path it names.
+        matched (bool): whether the deciding rule matched it.
+    """
+
+    text: str
+    path: str
+    matched: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ShellNode:
+    """One piece of a line's structure, as the shell parses it.
+
+    Args:
+        type (str): ``list`` (``;`` ``&&`` ``||`` ``&``), ``pipeline``,
+            ``subshell``, ``group`` (braces and the bodies of ``if``,
+            ``for``, ``while``, ``case`` and functions), ``line`` (a line
+            a command runs: ``bash -c``, ``eval``, ``xargs``) or
+            ``substitution`` (``$( )``, backticks, ``<( )``).
+        text (str): the node's source text.
+        children (tuple[ShellNode | CommandExplanation, ...]): what it
+            holds, in source order.
+    """
+
+    type: str
+    text: str
+    children: "tuple[ShellNode | CommandExplanation, ...]" = ()
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CommandExplanation(Explanation):
+    """One command of a line, explained: whether it may run (its
+    ``pre_command`` answers) and where it would run.
+
+    Args:
+        answers (tuple[Deny | Ask, ...]): every policy's answer to the
+            command (``pre_command``).
+        command (str): the program, as the gate read it.
+        argv (tuple[str, ...]): the words after it.
+        exit_code (int): what the command would exit with where it
+            stands, 0 to run.
+        stderr (str): what the agent would read from it, empty to run.
+        runtime (str): the runtime entry that would run it, empty when
+            the workspace runs it itself.
+        operands (tuple[ShellOperand, ...]): its path arguments,
+            redirect targets included.
+        text (str): the command's source text.
+        children (tuple[ShellNode, ...]): the lines it runs in turn
+            (``$( )`` in its words, a ``bash -c`` string), in source
+            order.
+    """
+
+    type: ClassVar[str] = "command"
+
+    answers: "tuple[Deny | Ask, ...]" = ()
+    command: str
+    argv: tuple[str, ...] = ()
     exit_code: int = 0
     stderr: str = ""
-    refusal: Refusal | None = None
+    runtime: str = ""
+    operands: tuple[ShellOperand, ...] = ()
+    text: str = ""
+    children: tuple[ShellNode, ...] = ()
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ShellExplanation(Explanation):
+    """A line, explained: what the agent would read, where the line
+    would run (its ``pre_execute`` answers) and every command in it.
+
+    The verdict is whether the line runs at all: a rule's refusal, or a
+    question still waiting on the host, refuses the whole line before
+    any of it runs, as does a placement's refusal; the first in the
+    order the gate reads them is the line's, byte-identical to the
+    refusal the run reports. A line that runs exits 0 here, and one an
+    approval lets run carries the ask it covers. A command refused
+    where it stands while the rest of the line runs (a word the session
+    cannot see, a policy refusing one operand) says so on its own node.
+
+    Args:
+        answers (tuple[Deny | Route, ...]): every policy's answer to
+            where the line runs (``pre_execute``), the route policy's
+            first; empty when nothing places it or a command refuses it
+            first.
+        line (str): the line as given.
+        exit_code (int): what the line is refused with, 0 when it runs.
+        stderr (str): what the agent would read then, empty when it
+            runs.
+        node (ShellNode): the parsed line, of type ``line``.
+    """
+
+    answers: "tuple[Deny | Route, ...]" = ()
+    line: str
+    exit_code: int = 0
+    stderr: str = ""
+    node: ShellNode
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class VfsExplanation(Explanation):
+    """A VFS call, explained: the POSIX-shaped call on ``session.vfs``
+    (``read``, ``pwrite``, ``rename``, ``setxattr``, ...) and what its
+    gate (``pre_ops``) would answer.
+
+    Args:
+        answers (tuple[Deny | Ask, ...]): every policy's answer to the
+            call (``pre_ops``).
+        call (str): the call's name.
+        paths (tuple[str, ...]): its path arguments, as given.
+        error (str): the errno name the call would raise (``EACCES``,
+            ``EROFS``), empty when it would run.
+    """
+
+    answers: "tuple[Deny | Ask, ...]" = ()
+    call: str
+    paths: tuple[str, ...] = ()
+    error: str = ""

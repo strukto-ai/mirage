@@ -38,7 +38,8 @@ import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 
 /**
  * Mirage's tool table as OpenAI Agents function tools: shell, read, write,
- * edit, ls, grep and glob, each with the shared input schema and answering
+ * edit, ls, grep and glob, each with the shared input schema, as far as the session's
+ * profile leaves them (`MirageToolOperations.names`), and answering
  * with the text the MCP tool of the same name answers. `read` also hands an
  * image or a PDF to the model as input it can see. They work with Chat
  * Completions and Responses; with Responses, `shellTool` over
@@ -51,6 +52,7 @@ export function mirageTools(ws: Workspace, options: MirageToolOperationsOptions 
     options.staleWriteProtection === false
       ? new MirageToolOperations(session, false)
       : session.tools
+  const names = operations.names()
   const call = async (name: string, args: unknown): Promise<string> =>
     (await operations.call(name, args as Record<string, unknown>)).content[0]?.text ?? ''
   const mirageTool = (name: string, description: string, input: object) =>
@@ -87,5 +89,5 @@ export function mirageTools(ws: Workspace, options: MirageToolOperationsOptions 
     mirageTool('ls', LS_DESCRIPTION, LS_INPUT),
     mirageTool('grep', GREP_DESCRIPTION, GREP_INPUT),
     mirageTool('glob', GLOB_DESCRIPTION, GLOB_INPUT),
-  ]
+  ].filter((entry) => names.includes(entry.name))
 }

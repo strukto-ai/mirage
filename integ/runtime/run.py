@@ -56,10 +56,11 @@ from mirage.policy.types import (  # noqa: E402
     ExecuteResultContext,
     OpsContext,
     OpsResultContext,
+    Route,
 )
 from mirage.runtime.base import Runtime  # noqa: E402
 from mirage.runtime.mixin import LineExecutorMixin  # noqa: E402
-from mirage.runtime.routing import ScriptSource  # noqa: E402
+from mirage.runtime.routing import RouteContext, ScriptSource  # noqa: E402
 from mirage.runtime.table import build_runtime, register_runtime  # noqa: E402
 from mirage.runtime.types import RunResult  # noqa: E402
 from mirage.types import Limit, PathSpec  # noqa: E402
@@ -217,6 +218,25 @@ class DenyFlag(Policy):
         return None
 
 
+class PlaceLine(Policy):
+    """Test-only pre_execute policy: place a line holding a word on a
+    runtime, or refuse it when the entry names a ``deny`` reason."""
+
+    HOOK = "pre_execute"
+
+    def __init__(self, spec: dict[str, Any]) -> None:
+        self._contains = spec["contains"]
+        self._runtime = spec.get("runtime", "")
+        self._deny = spec.get("deny")
+
+    def decide(self, ctx: RouteContext) -> Deny | Route | None:
+        if self._contains not in ctx.line:
+            return None
+        if self._deny is not None:
+            return Deny(self._deny)
+        return Route(self._runtime)
+
+
 class LockWrites(Policy):
     """Test-only pre_ops policy: refuse write ops under a prefix."""
 
@@ -305,6 +325,7 @@ class Boom(Policy):
 
 POLICY_KINDS = {
     "deny_flag": DenyFlag,
+    "place_line": PlaceLine,
     "lock_writes": LockWrites,
     "seal_reads": SealReads,
     "redact_reads": RedactReads,
@@ -502,7 +523,6 @@ class FailingRAMVFS(RAMVFS):
     def _guard(
         self, fn: Callable[..., Awaitable[Any]]
     ) -> Callable[..., Awaitable[Any]]:
-
         async def guarded(
             accessor: Accessor, path: PathSpec, *args: Any, **kwargs: Any
         ) -> Any:

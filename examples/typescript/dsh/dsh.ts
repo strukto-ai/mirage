@@ -177,9 +177,9 @@ async function permissions(ctx: Context): Promise<void> {
     console.log('after approval:', retry.exitCode)
   }
 
-  // A dry run through the same gate: no question raised, nothing spent.
-  const [what] = await ctx.mirage.explain('rm -rf /tmp/scratch')
-  console.log('explain:', what?.outcome, '-', what?.reason)
+  // Explain through the same gate: no question raised, nothing spent.
+  const what = await ctx.mirage.explain('rm -rf /tmp/scratch')
+  console.log('explain:', what.outcome, '-', what.reason)
 }
 
 async function main(): Promise<void> {

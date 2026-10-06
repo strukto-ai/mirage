@@ -53,8 +53,8 @@ import {
 } from '../abort.ts'
 import type { Dispatcher } from '../dispatcher/index.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
-import { RouteDeny, type RouteDecision } from '../../runtime/routing/index.ts'
-import { refusalOf, renderDeny, type Deny, type HandOff } from '../../policy/index.ts'
+import type { RouteDecision } from '../../runtime/routing/index.ts'
+import type { Deny, HandOff } from '../../policy/index.ts'
 import type { Refusal } from '../../types.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { inputSubstitutionRedirect } from '../../shell/helpers.ts'
@@ -69,7 +69,14 @@ import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import { withHandOff } from '../node/execute_node.ts'
 import type { ExecuteNodeDeps } from '../node/execute_node.ts'
-import { prejudgeLine, unrefusedNodes } from '../node/explain.ts'
+import {
+  lineHeld,
+  lineJudgments,
+  prejudgeLine,
+  unrefusedNodes,
+  type Judged,
+  type Walked,
+} from '../node/explain.ts'
 import { runCommandTree } from '../node/run_tree.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
 import type { SessionManager } from '../session/manager.ts'
@@ -77,7 +84,7 @@ import { type SessionState } from '../session/session.ts'
 import { type StatusWriter, newStatusWriter } from '../abort.ts'
 import { ExecutionNode } from '../types.ts'
 import { abortable, joinOrAbort } from '../abort.ts'
-import { failureResult, isControlFlowError } from './failure.ts'
+import { failureResult, isControlFlowError, placementRefused } from './failure.ts'
 import { ended, isUnwinding } from '../executor/control.ts'
 import { finishShell, inheritExitTrap } from '../executor/traps.ts'
 import { expandingAliases } from '../executor/builtins/alias/index.ts'
@@ -431,33 +438,8 @@ async function runPreparedLine(
             )
           }
           const rootNode = root as unknown as TSNodeLike
-          let routingDecision: RouteDecision | null
-          try {
-            routingDecision = await abortable(
-              env.router.decide(rootNode, command, options, targetSession),
-              options.signal,
-            )
-          } catch (caught) {
-            if (caught instanceof RouteDeny) {
-              // A deny is a policy outcome, not a mistake: it folds into the line's
-              // result the way a timeout does, never a throw. The denied party is
-              // the command, so the message carries its name like every
-              // per-command error, in bash's voice; the reason rides `refusal`.
-              const deny: Deny = { kind: 'deny', reason: caught.reason, scope: 'command' }
-              const [msg, exitCode] = renderDeny(commandName(command) || command, deny)
-              return await answerLine(
-                env,
-                command,
-                options,
-                targetSession,
-                new ExecuteResult(new Uint8Array(), msg, exitCode, refusalOf(deny)),
-              )
-            }
-            throw caught
-          }
-
-          const dispatch: DispatchFn = env.dispatcher.dispatch
-
+          const reparse = (source: string): TSNodeLike =>
+            parser.parse(source) as unknown as TSNodeLike
           const nested: NestedRefusal = { latest: null }
 
           // The line's hand-off: the grants its passes and gates claim for its
@@ -467,6 +449,65 @@ async function runPreparedLine(
           // not this line's: a background job's subtree runs on a hand-off of
           // the job's own.
           const handed: HandOff = options.handed ?? { claimed: [], parent: null, origin: null }
+          // The line's commands judged once, for placement and the pass that
+          // refuses the line alike.
+          let judgments: [Walked, Judged[]][] | null = null
+          const judged = async (): Promise<[Walked, Judged[]][]> =>
+            (judgments ??= await lineJudgments(
+              rootNode,
+              effectiveSession,
+              env.registry,
+              env.namespace,
+              options.agentId ?? env.agentId ?? '',
+              handed,
+              reparse,
+            ))
+          // Placement waits on admission, judged with the line's refusal sink
+          // bound, so an op a policy script makes while the line is judged is
+          // inside the line, never a question of its own.
+          const held = (): Promise<boolean> =>
+            runWithRefusalSink(
+              (refusal: Refusal) => {
+                nested.latest = refusal
+              },
+              async () =>
+                lineHeld(
+                  await judged(),
+                  env.registry,
+                  handed,
+                  mergeSignals(options.signal, effectiveSession.abortSignal),
+                ),
+            )
+          // A line placement refuses ends here, so what admission claimed
+          // for it is swept as the line's end sweeps it.
+          const sweep = async (): Promise<void> => {
+            if (handed.parent !== null)
+              env.registry.decisions.handUp(effectiveSession.sessionId, handed)
+            else await env.registry.decisions.revoke(effectiveSession.sessionId, handed)
+          }
+          let placed: RouteDecision | Deny | null
+          try {
+            placed = await abortable(
+              env.router.decide(rootNode, command, options, targetSession, held),
+              options.signal,
+            )
+          } catch (err) {
+            await sweep()
+            throw err
+          }
+          if (placed !== null && 'kind' in placed) {
+            await sweep()
+            return await answerLine(
+              env,
+              command,
+              options,
+              targetSession,
+              placementRefused(placed, command),
+            )
+          }
+          const routingDecision: RouteDecision | null = placed
+
+          const dispatch: DispatchFn = env.dispatcher.dispatch
 
           const executeFn: ExecuteFn = async (cmd, opts) => {
             // The executor's internal evals ($(), eval, source, xargs) are
@@ -657,6 +698,7 @@ async function runPreparedLine(
                 (line) => parser.parse(line),
                 nested,
                 handed,
+                judged,
               ),
             env.sessions,
           )
@@ -698,6 +740,7 @@ async function runParsedLine(
   reparse: (line: string) => TSNodeLike,
   nested: NestedRefusal,
   handed: HandOff,
+  judged: () => Promise<[Walked, Judged[]][]>,
 ): Promise<ExecuteResult> {
   const cacheFacts = env.dispatcher.captureCacheFacts()
   const callAgentId = options.agentId ?? env.agentId ?? ''
@@ -909,6 +952,7 @@ async function runParsedLine(
       handed,
       reparse,
       killed,
+      await judged(),
     )
     if (prejudged !== null) {
       // A question left waiting holds the line for its retry, which has

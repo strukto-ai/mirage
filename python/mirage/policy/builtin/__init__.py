@@ -21,6 +21,7 @@ from mirage.policy.builtin.output_cap import (
     resolve_producer,
 )
 from mirage.policy.builtin.permissions import PermissionsPolicy
+from mirage.policy.builtin.placement import PlacementPolicy
 
 __all__ = [
     "DEFAULT_COMMAND_LIMITS",
@@ -28,6 +29,7 @@ __all__ = [
     "MountRootPolicy",
     "OutputCapPolicy",
     "PermissionsPolicy",
+    "PlacementPolicy",
     "resolve_producer",
     "resolve_limit",
 ]
