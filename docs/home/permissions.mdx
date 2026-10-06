@@ -143,8 +143,8 @@ profiles:
 ### `cwd`, `env`, `policy`
 
 `cwd` and `env` seed the session. `policy` is a script defining any of
-`pre_command(ctx)`, `pre_ops(ctx)` and `pre_session(ctx)` (`preCommand`,
-`preOps`, `preSession` in JavaScript). `pre_command` returns `None`,
+`pre_command(ctx)`, `pre_vfs(ctx)` and `pre_session(ctx)` (`preCommand`,
+`preVfs`, `preSession` in JavaScript). `pre_command` returns `None`,
 `{"deny": reason}` or `{"ask": reason}`; the others allow or deny. A file
 defining no hook fails closed. The script may read files, through the
 same gate.

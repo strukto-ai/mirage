@@ -138,8 +138,8 @@ export interface SessionProfile {
   /**
    * The profile's policy: a program defining the admission hooks it
    * answers at, the way a coded Policy defines only the hooks it cares
-   * about: `preCommand(ctx)` per command, `preOps(ctx)` per VFS op,
-   * `preSession(ctx)` per env write (`pre_command`, `pre_ops`,
+   * about: `preCommand(ctx)` per command, `preVfs(ctx)` per VFS op,
+   * `preSession(ctx)` per env write (`pre_command`, `pre_vfs`,
    * `pre_session` in python). Each is handed the door's facts as `ctx`
    * and answers with `return`: null or 'allow' for no opinion, 'deny' /
    * {deny: reason}, and at the command gate 'ask' / {ask: reason}. A block

@@ -26,11 +26,11 @@ from mirage.policy import (
     Action,
     CommandRule,
     Deny,
-    OpsContext,
-    OpsResultContext,
     Policies,
     Policy,
     PolicyDenied,
+    VfsContext,
+    VfsResultContext,
 )
 from mirage.policy.rule import RulePolicy
 from mirage.types import (
@@ -54,28 +54,28 @@ from mirage.workspace.session import SessionState
 
 
 class DenyLocked(Policy):
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         if ctx.path.virtual.startswith("/data/locked/"):
             return Deny("locked\n")
         return None
 
 
 class DenyWrites(Policy):
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         if ctx.write:
             return Deny("no writes\n")
         return None
 
 
 class DenyRemnantUnlink(Policy):
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         if ctx.op == "unlink" and ctx.path.virtual == "/a/d/sec/k":
             return Deny("protected\n")
         return None
 
 
 class DenyUnlinkAfter(Policy):
-    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
         return Deny("too late") if ctx.op == "unlink" else None
 
 
@@ -113,7 +113,7 @@ def _dispatcher(policies: Policies) -> tuple[Dispatcher, MagicMock]:
 
 
 @pytest.mark.asyncio
-async def test_warm_cache_read_cannot_bypass_pre_ops():
+async def test_warm_cache_read_cannot_bypass_pre_vfs():
     # The #241 failure class: a cached read served without consulting
     # the policy would make the cache a policy bypass. The hook fires
     # before the cache lookup, so the warm path refuses identically.
@@ -682,7 +682,7 @@ async def test_the_remnant_channel_invalidates_each_deletion():
     # The cascade's execute_op calls run outside the cache-manager
     # context command execution establishes, so the channel discharges
     # the dispatcher's write invalidation itself, per deletion, and
-    # holds each deletion to the pre-ops admission with its own child
+    # holds each deletion to the pre-vfs admission with its own child
     # path; the dispatch-level invalidation of the rmdir target covers
     # only the root and its ancestors. Reads stay gate- and
     # invalidation-free, and a failing deletion still invalidates: a
@@ -752,7 +752,7 @@ async def test_ops_rmdir_cascade_invalidates_each_remnant(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_policy_denied_remnant_keeps_the_refusal():
     # The gate that admitted the rmdir judged the directory; each
-    # cascade deletion answers pre_ops with its own child path, so a
+    # cascade deletion answers pre_vfs with its own child path, so a
     # policy that protects the hidden file refuses its unlink, the
     # cascade folds the denial into the original not-empty refusal,
     # and the protected content survives.
@@ -774,8 +774,8 @@ async def test_a_policy_denied_remnant_keeps_the_refusal():
 
 
 @pytest.mark.asyncio
-async def test_a_post_ops_deny_does_not_strand_the_cascade():
-    # A deletion is done by the time post_ops could speak, so the
+async def test_a_post_vfs_deny_does_not_strand_the_cascade():
+    # A deletion is done by the time post_vfs could speak, so the
     # cascade never asks it: the rmdir takes the hidden remnant and the
     # directory, rather than refusing with a child already gone.
     ws = Workspace(

@@ -36,12 +36,12 @@ from mirage.policy.types import (
     CommandContext,
     CommandExplanation,
     Deny,
-    OpsContext,
     Route,
     Scope,
     SessionContext,
     ShellExplanation,
     ShellNode,
+    VfsContext,
     VfsExplanation,
 )
 from mirage.process.types import SpawnRequest
@@ -90,7 +90,7 @@ class RulePolicy(Policy):
             return Deny(self.rule["reason"])
         return None
 
-    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Deny | None:
         if ctx.path.virtual in self.rule.get("paths", []):
             return Deny(self.rule["reason"])
         return None

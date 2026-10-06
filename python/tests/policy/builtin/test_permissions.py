@@ -21,9 +21,9 @@ from mirage.policy import (
     CommandRule,
     Deny,
     DenyScope,
-    OpsContext,
     PermissionsPolicy,
     Policies,
+    VfsContext,
 )
 from mirage.types import PathSpec
 
@@ -106,8 +106,8 @@ async def test_no_rules_means_no_opinion():
     policy = PermissionsPolicy(_Sessions({}))
     assert await policy.pre_command(_ctx("rm", "-rf", "/")) is None
     assert (
-        await policy.pre_ops(
-            OpsContext(op="unlink", path=_path("/x"), write=True, prefix="/")
+        await policy.pre_vfs(
+            VfsContext(op="unlink", path=_path("/x"), write=True, prefix="/")
         )
         is None
     )
@@ -341,21 +341,21 @@ async def test_an_ask_rule_speaks_after_every_deny():
 
 
 @pytest.mark.asyncio
-async def test_pre_ops_holds_the_pure_path_rules():
+async def test_pre_vfs_holds_the_pure_path_rules():
     policy = _policy()
-    locked = OpsContext(
+    locked = VfsContext(
         op="write",
         path=_path("/repo/locked/a"),
         write=True,
         prefix="/repo/",
         session_id="s",
     )
-    assert await policy.pre_ops(locked) == Deny("frozen", rule=FULL.deny[2])
+    assert await policy.pre_vfs(locked) == Deny("frozen", rule=FULL.deny[2])
     # Command-scoped rules do not reach the op door: an op does not
     # know which command issued it.
     assert (
-        await policy.pre_ops(
-            OpsContext(
+        await policy.pre_vfs(
+            VfsContext(
                 op="unlink",
                 path=_path("/repo/x"),
                 write=True,
@@ -378,14 +378,14 @@ async def test_seeded_in_a_policies_chain_after_the_builtins():
         policy="PermissionsPolicy",
         rule=MOUNT_DENY,
     )
-    assert policies.wants("pre_ops")
+    assert policies.wants("pre_vfs")
 
 
 @pytest.mark.asyncio
 async def test_speaks_at_the_op_door_only_through_a_pure_path_rule():
     p = _policy()
-    assert await p.wants_for("pre_ops", "s")
-    assert not await p.wants_for("pre_ops", "rev")
-    assert not await p.wants_for("pre_ops", "nobody")
+    assert await p.wants_for("pre_vfs", "s")
+    assert not await p.wants_for("pre_vfs", "rev")
+    assert not await p.wants_for("pre_vfs", "nobody")
     assert await p.wants_for("pre_command", "rev")
-    assert not await Policies([p]).wants_for("pre_ops", "rev")
+    assert not await Policies([p]).wants_for("pre_vfs", "rev")

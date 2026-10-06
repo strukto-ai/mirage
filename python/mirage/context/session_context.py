@@ -286,7 +286,7 @@ def set_op_policies(policies: "Policies") -> Token[Any]:
 
     Set by command dispatch around routing, the same window the
     admission gate binds in, so the command tier's policy guard can
-    fire ``pre_ops`` for the backend I/O a handler performs. Read at
+    fire ``pre_vfs`` for the backend I/O a handler performs. Read at
     call time by ``with_policy_guard``; unset outside a dispatched
     command (a generic invoked directly in a test), where the guard
     is inert.

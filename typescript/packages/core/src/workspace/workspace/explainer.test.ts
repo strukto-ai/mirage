@@ -18,7 +18,7 @@ import {
   Scope,
   type CommandContext,
   type Deny,
-  type OpsContext,
+  type VfsContext,
   type Policy,
 } from '../../policy/index.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
@@ -66,7 +66,7 @@ describe('session.explain.vfs', () => {
   it('lets a policy read for real while it decides', async () => {
     await ws.vfs.write('/data/flag', 'closed')
     const flagged: Policy = {
-      async preOps(ctx: OpsContext): Promise<Deny | null> {
+      async preVfs(ctx: VfsContext): Promise<Deny | null> {
         if (ctx.op !== 'write' || ctx.path.virtual === '/data/flag') return null
         const flag = new TextDecoder().decode(await ws.vfs.read('/data/flag'))
         return flag === 'closed' ? { kind: 'deny', reason: 'closed' } : null
@@ -91,7 +91,7 @@ describe('session.explain.vfs', () => {
       return null
     }
     return {
-      async preOps(ctx: OpsContext): Promise<null> {
+      async preVfs(ctx: VfsContext): Promise<null> {
         return ctx.op === 'write' && ctx.path.virtual === '/data/new' ? work() : null
       },
       async preCommand(ctx: CommandContext): Promise<null> {

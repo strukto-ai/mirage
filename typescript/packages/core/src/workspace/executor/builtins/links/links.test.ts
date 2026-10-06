@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { Policy } from '../../../../policy/base.ts'
-import type { Action, OpsContext } from '../../../../policy/types.ts'
+import type { Action, VfsContext } from '../../../../policy/types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
 import { getTestParser } from '../../../fixtures/workspace_fixture.ts'
@@ -26,7 +26,7 @@ import type { DispatchFn } from '../../../../runtime/types.ts'
 const DEC = new TextDecoder()
 
 class PinLinks implements Policy {
-  preOps(ctx: OpsContext): Action | null {
+  preVfs(ctx: VfsContext): Action | null {
     if (ctx.op === 'unlink' && ctx.path.virtual.endsWith('.pinned')) {
       return { kind: 'deny', reason: 'pinned' }
     }
@@ -35,7 +35,7 @@ class PinLinks implements Policy {
 }
 
 class SealReads implements Policy {
-  preOps(ctx: OpsContext): Action | null {
+  preVfs(ctx: VfsContext): Action | null {
     if (ctx.op === 'read' && ctx.path.virtual.endsWith('.sealed')) {
       return { kind: 'deny', reason: 'sealed' }
     }
@@ -230,7 +230,7 @@ describe('ln with a source it cannot read', () => {
 
 describe('rm and unlink reach a link through the op door', () => {
   it('rm of a link goes through the door', async () => {
-    // The strip used to write the node table directly, so a preOps
+    // The strip used to write the node table directly, so a preVfs
     // policy protecting a link never fired for `rm` while it fired for
     // every other door (the FUSE unlink hole, one tier up). The mount is
     // writable, so only the policy can be what refuses.
@@ -509,7 +509,7 @@ it.each(['missing', 'a.txt', 'loop'])(
 )
 
 class RefuseLinkCreation implements Policy {
-  preOps(ctx: OpsContext): Action | null {
+  preVfs(ctx: VfsContext): Action | null {
     return ctx.op === 'symlink' && ctx.path.virtual === '/other/tree/loop'
       ? { kind: 'deny', reason: 'sealed' }
       : null

@@ -42,7 +42,7 @@
       ]
     },
     {
-      "id": "hook_pre_ops_sync",
+      "id": "hook_pre_vfs_sync",
       "note": "The same policy written as a plain function: python `def` instead of `async def`, TypeScript a value instead of a promise. The seam awaits whatever a hook returns, so both shapes decide identically; before that a plain `def` raised inside python's fail-closed arm and every command read `policy X failed`.",
       "world": {
         "mounts": {
@@ -89,7 +89,7 @@
       ]
     },
     {
-      "id": "hook_post_ops_sync",
+      "id": "hook_post_vfs_sync",
       "note": "The same policy written as a plain function: python `def` instead of `async def`, TypeScript a value instead of a promise. The seam awaits whatever a hook returns, so both shapes decide identically; before that a plain `def` raised inside python's fail-closed arm and every command read `policy X failed`.",
       "world": {
         "mounts": {

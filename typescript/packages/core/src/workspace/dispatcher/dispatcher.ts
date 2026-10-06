@@ -153,7 +153,7 @@ function sessionId(): string {
  *
  * A caller that stamps its ops (a profile policy's bridge) does so as
  * an argument, and the door consumes it here: it reaches every gate the
- * dispatch clears as `OpsContext.issuer`, probes and cascades included,
+ * dispatch clears as `VfsContext.issuer`, probes and cascades included,
  * and is never forwarded to a backend, which has no such argument.
  */
 function takeIssuer(
@@ -960,7 +960,7 @@ export class Dispatcher {
     const write = this.opsRegistry.find(opName, vfs)?.write === true
     const boundary = new OpBoundary(this.policies, mountPrefix, mode, sessionId(), this.decisions)
     if (write) {
-      // The same pre-ops admission a dispatched op answers, with the
+      // The same pre-vfs admission a dispatched op answers, with the
       // walk's own child path: the gate that admitted the rmdir judged
       // the directory, not what the cascade found under it, and a
       // policy that protects one of those paths must refuse its
@@ -989,7 +989,7 @@ export class Dispatcher {
         )
         return wrapOpStream(answer, mount.mountId, mount.activity)
       })
-      // A deletion is not completed through postOps, which could only
+      // A deletion is not completed through postVfs, which could only
       // refuse after the entry is gone and strand the cascade.
       return result
     } finally {

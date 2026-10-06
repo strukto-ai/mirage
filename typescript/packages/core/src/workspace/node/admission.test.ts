@@ -525,7 +525,7 @@ describe('admission', () => {
       true,
       false,
     ])
-    // A pre_ops policy judges every op, so every walk is the guard's.
+    // A pre_vfs policy judges every op, so every walk is the guard's.
     const judged = new Admitted({
       rules,
       tokens: ['find', '/other'],

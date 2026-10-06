@@ -224,7 +224,7 @@ export class Ops {
       owner = this.ownerOf(followed)
     } catch (err) {
       owner = this.ownerOf(followed)
-      // Anything thrown after the op ran (a postOps deny, a hard
+      // Anything thrown after the op ran (a postVfs deny, a hard
       // output cap, a bookkeeping failure) suppresses the result, not
       // the effect, so observation must reflect the op before the
       // error propagates. The door stamps the report at the moment of

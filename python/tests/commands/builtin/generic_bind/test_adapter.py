@@ -30,7 +30,7 @@ from mirage.context import (
     set_mount_gate,
 )
 from mirage.ops.types import NamespaceView
-from mirage.policy import Action, Deny, OpsContext, Policy
+from mirage.policy import Action, Deny, Policy, VfsContext
 from mirage.types import (
     ContentType,
     FileStat,
@@ -388,7 +388,7 @@ class _SealedRead(Policy):
         self.sealed = sealed
         self.asked: list[tuple[str, str, bool]] = []
 
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         self.asked.append((ctx.op, ctx.path.virtual, ctx.write))
         if not ctx.write and ctx.path.virtual == self.sealed:
             return Deny("sealed")

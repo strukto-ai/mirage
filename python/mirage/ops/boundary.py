@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from mirage.commands.builtin.utils.limit import apply_op_limit
-from mirage.policy.policies import Policies, post_ops_gate, pre_ops_gate
+from mirage.policy.policies import Policies, post_vfs_gate, pre_vfs_gate
 from mirage.types import MountMode, PathSpec
 
 if TYPE_CHECKING:
@@ -53,7 +53,7 @@ class OpBoundary:
         check_hidden: bool = True,
         final: bool = True,
     ) -> None:
-        await pre_ops_gate(
+        await pre_vfs_gate(
             self.policies,
             op,
             path,
@@ -71,7 +71,7 @@ class OpBoundary:
     async def complete(
         self, op: str, path: PathSpec, write: bool, result: Any
     ) -> Any:
-        bound = await post_ops_gate(
+        bound = await post_vfs_gate(
             self.policies, op, path, write, self.prefix, result
         )
         return await apply_op_limit(result, bound)

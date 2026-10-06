@@ -31,10 +31,10 @@ from mirage.policy.types import (
     Deny,
     HandOff,
     Occurrence,
-    OpsContext,
     Pending,
     Scope,
     SessionDecisionsQuery,
+    VfsContext,
 )
 
 # A host that answers an Ask inside the line.
@@ -200,13 +200,13 @@ class Unmounted:
 UNMOUNTED = Unmounted()
 
 
-def op_question(ctx: OpsContext, ask: Ask) -> tuple[CommandContext, Ask]:
+def op_question(ctx: VfsContext, ask: Ask) -> tuple[CommandContext, Ask]:
     """An op's question as the ledger keys it: no command, the path as
     the one word asked about, and one rule, the document's or for a
     coded Ask one over the path.
 
     Args:
-        ctx (OpsContext): the op asked about.
+        ctx (VfsContext): the op asked about.
         ask (Ask): the chain's answer.
     """
     asked = CommandContext(
@@ -461,7 +461,7 @@ class Decisions:
         return None
 
     async def resolve_op(
-        self, ctx: OpsContext, ask: Ask
+        self, ctx: VfsContext, ask: Ask
     ) -> Deny | Pending | None:
         """An Ask from the op door where no line is running: a standing
         answer settles it, else the question is raised now.
@@ -474,7 +474,7 @@ class Decisions:
         passes every one the rule covers, lines included.
 
         Args:
-            ctx (OpsContext): the op asked about.
+            ctx (VfsContext): the op asked about.
             ask (Ask): the chain's answer.
 
         Returns:
@@ -490,13 +490,13 @@ class Decisions:
         said = await self.resolve(*op_question(ctx, ask), claimant=claimant)
         return Deny(ask.reason) if isinstance(said, Abandoned) else said
 
-    def held_op(self, ctx: OpsContext, ask: Ask) -> Deny | Pending | None:
+    def held_op(self, ctx: VfsContext, ask: Ask) -> Deny | Pending | None:
         """What the settled records alone say about an op asked about
         outside a line: the read-only half of :meth:`resolve_op`, the one
         ``explain`` may take.
 
         Args:
-            ctx (OpsContext): the op asked about.
+            ctx (VfsContext): the op asked about.
             ask (Ask): the chain's answer.
         """
         return self.held(*op_question(ctx, ask))

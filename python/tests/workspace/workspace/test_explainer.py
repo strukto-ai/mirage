@@ -18,7 +18,7 @@ import pytest
 import pytest_asyncio
 
 from mirage import Session, Workspace
-from mirage.policy import CommandContext, Deny, OpsContext, Policy
+from mirage.policy import CommandContext, Deny, Policy, VfsContext
 from mirage.policy.match import Outcome
 from mirage.policy.types import Scope
 from mirage.types import MountMode
@@ -60,7 +60,7 @@ class _Flag(Policy):
     def __init__(self, ws: Workspace) -> None:
         self.ws = ws
 
-    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Deny | None:
         if ctx.op != "write" or ctx.path.virtual == "/data/flag":
             return None
         flag = await self.ws.vfs.read("/data/flag")
@@ -96,7 +96,7 @@ class _Busy(Policy):
         except PermissionError as exc:
             self.errors.append(exc.errno)
 
-    async def pre_ops(self, ctx: OpsContext) -> None:
+    async def pre_vfs(self, ctx: VfsContext) -> None:
         if ctx.op == "write" and ctx.path.virtual == "/data/new":
             await self._busy()
         return None

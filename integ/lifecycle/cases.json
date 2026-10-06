@@ -1387,7 +1387,7 @@
           "profile": {
             "policy": {
               "script": {
-                "source": "def pre_ops(ctx):\n    if ctx['op']['path'] == '/work/data':\n        return {'deny': 'op gate'}\n",
+                "source": "def pre_vfs(ctx):\n    if ctx['op']['path'] == '/work/data':\n        return {'deny': 'op gate'}\n",
                 "language": "python"
               },
               "runtime": "monty"

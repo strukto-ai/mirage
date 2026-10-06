@@ -23,10 +23,10 @@ from mirage.ops import Ops
 from mirage.policy import (
     Action,
     Deny,
-    OpsContext,
-    OpsResultContext,
     Policy,
     PolicyDenied,
+    VfsContext,
+    VfsResultContext,
 )
 from mirage.types import FileType, HiddenPaths, MountMode, Visibility
 from mirage.vfs.ram import RAMVFS
@@ -240,7 +240,7 @@ async def test_a_namespace_answer_is_not_a_backend_op(deep_only_session):
 
 
 class DenyInner(Policy):
-    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
         if ctx.path.virtual == "/m/inner":
             return Deny(message="no")
         return None
@@ -389,7 +389,7 @@ class TestOpsAgainstSeededStore:
 
 
 class _SealInner(Policy):
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         if ctx.path.virtual == "/data/inner":
             return Deny("sealed\n")
         return None
@@ -472,7 +472,7 @@ class _CountingPre(Policy):
     def __init__(self):
         self.calls = []
 
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         self.calls.append((ctx.op, ctx.path.virtual))
         return None
 
@@ -481,13 +481,13 @@ class _WriteOnly(Policy):
     def __init__(self):
         self.calls = []
 
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         self.calls.append((ctx.op, ctx.write))
         return Deny("write-only") if ctx.op == "read" else None
 
 
 class _DenyEverything(Policy):
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         return Deny("sealed\n")
 
 
@@ -521,7 +521,7 @@ class TestAttachedOpsOneDoor:
             await ws.close()
 
     @pytest.mark.asyncio
-    async def test_a_pre_ops_deny_records_nothing(self):
+    async def test_a_pre_vfs_deny_records_nothing(self):
         # The mirror of "a post deny still records the completed op"
         # (pinned in tests/workspace/workspace/test_policies.py): a pre
         # deny means the backend never ran, so nothing is recorded.

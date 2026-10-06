@@ -24,7 +24,7 @@
     "reviewer  cat /repo/flagged.txt          [126] cat: Permission denied",
     "                                         and refuses one that holds it; the reason is for the operator",
     "reviewer  cat /scratch/cold/k            [0] keep",
-    "                                         pre_ops lets a read through",
+    "                                         pre_vfs lets a read through",
     "reviewer  echo x > /scratch/cold/f       [1] /scratch/cold/f: Permission denied",
     "                                         and refuses a write at the op door",
     "reviewer  rm /scratch/cold/k             [1] rm: cannot remove '/scratch/cold/k': Permission denied",

@@ -315,7 +315,7 @@ class Ops:
                 run() if self._bind is None else self._bind(bound, run)
             )
         except BaseException:
-            # Anything raised after the op ran (a post_ops deny, a hard
+            # Anything raised after the op ran (a post_vfs deny, a hard
             # output cap, a bookkeeping failure) suppresses the result,
             # not the effect, so observation must reflect the op before
             # the error propagates. The door stamps the report at the

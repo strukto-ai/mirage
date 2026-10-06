@@ -194,7 +194,7 @@
    "id": "a_profile_script_decides_commands_and_vfs_calls",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "runtimes": ["monty", "workspace"]},
    "steps": [
-    {"op": "session", "id": "agent", "profile": {"policy": {"script": {"source": "def pre_command(ctx):\n    if ctx['command']['name'] == 'touch':\n        return {'deny': 'script says no'}\n    return None\n\ndef pre_ops(ctx):\n    if ctx['op']['path'] == '/data/s':\n        return {'deny': 'script guards s'}\n    return None\n", "language": "python"}, "runtime": "monty"}}},
+    {"op": "session", "id": "agent", "profile": {"policy": {"script": {"source": "def pre_command(ctx):\n    if ctx['command']['name'] == 'touch':\n        return {'deny': 'script says no'}\n    return None\n\ndef pre_vfs(ctx):\n    if ctx['op']['path'] == '/data/s':\n        return {'deny': 'script guards s'}\n    return None\n", "language": "python"}, "runtime": "monty"}}},
     {"op": "exec", "command": "echo s > /data/s", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
     {"op": "exec", "session": "agent", "command": "touch /data/t", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "touch: Permission denied\n", "refusal": "script says no"}}},
     {"op": "exec", "session": "agent", "command": "cat /data/s", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cat: /data/s: Permission denied\n", "refusal": "script guards s"}}},

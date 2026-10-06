@@ -14,7 +14,7 @@ from mirage.policy.types import (
     AdmissionRules,
     CommandRule,
     HideReason,
-    OpsContext,
+    VfsContext,
 )
 from mirage.shell.variable import VarAttr
 from mirage.types import (
@@ -230,8 +230,8 @@ def test_compile_commands_anchors_a_name_pattern_to_its_mount():
     assert not match_op(rule, scope, _read_op("/other/key.pem"))
 
 
-def _read_op(virtual: str) -> OpsContext:
-    return OpsContext(
+def _read_op(virtual: str) -> VfsContext:
+    return VfsContext(
         op="read",
         path=PathSpec(
             virtual=virtual,

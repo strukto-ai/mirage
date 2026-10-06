@@ -14,7 +14,7 @@
 
 import { hiddenRefusal, sessionVisibility } from '../../context/session_context.ts'
 import { pathVisible } from '../../utils/hidden.ts'
-import type { Hide, OpsContext } from '../types.ts'
+import type { Hide, VfsContext } from '../types.ts'
 
 /**
  * Hidden paths answer as absent, including at subtree boundaries. The
@@ -23,7 +23,7 @@ import type { Hide, OpsContext } from '../types.ts'
  */
 export class HiddenPathsPolicy {
   /** Hide the op's path when the bound session cannot see it. */
-  preOps(ctx: OpsContext): Promise<Hide | null> {
+  preVfs(ctx: VfsContext): Promise<Hide | null> {
     const vis = sessionVisibility()
     if (pathVisible(vis, ctx.path.virtual)) return Promise.resolve(null)
     return Promise.resolve({

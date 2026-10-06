@@ -43,7 +43,7 @@ import {
   type CommandContext,
   type CommandExplanation,
   type Deny,
-  type OpsContext,
+  type VfsContext,
   type Route,
   type SessionContext,
   type ShellExplanation,
@@ -143,7 +143,7 @@ class RulePolicy implements Policy {
       : null
   }
 
-  preOps(ctx: OpsContext): Deny | null {
+  preVfs(ctx: VfsContext): Deny | null {
     return this.rule.paths?.includes(ctx.path.virtual) === true
       ? { kind: 'deny', reason: this.rule.reason }
       : null

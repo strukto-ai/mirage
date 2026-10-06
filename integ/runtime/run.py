@@ -54,9 +54,9 @@ from mirage.policy.types import (  # noqa: E402
     CommandContext,
     Deny,
     ExecuteResultContext,
-    OpsContext,
-    OpsResultContext,
     Route,
+    VfsContext,
+    VfsResultContext,
 )
 from mirage.runtime.base import Runtime  # noqa: E402
 from mirage.runtime.mixin import LineExecutorMixin  # noqa: E402
@@ -238,42 +238,42 @@ class PlaceLine(Policy):
 
 
 class LockWrites(Policy):
-    """Test-only pre_ops policy: refuse write ops under a prefix."""
+    """Test-only pre_vfs policy: refuse write ops under a prefix."""
 
-    HOOK = "pre_ops"
+    HOOK = "pre_vfs"
 
     def __init__(self, spec: dict[str, Any]) -> None:
         self._prefix = spec["prefix"]
 
-    def decide(self, ctx: OpsContext) -> Deny | None:
+    def decide(self, ctx: VfsContext) -> Deny | None:
         if ctx.write and ctx.path.virtual.startswith(self._prefix):
             return Deny("locked")
         return None
 
 
 class SealReads(Policy):
-    """Test-only pre_ops policy: refuse read ops on a path suffix."""
+    """Test-only pre_vfs policy: refuse read ops on a path suffix."""
 
-    HOOK = "pre_ops"
+    HOOK = "pre_vfs"
 
     def __init__(self, spec: dict[str, Any]) -> None:
         self._suffix = spec["suffix"]
 
-    def decide(self, ctx: OpsContext) -> Deny | None:
+    def decide(self, ctx: VfsContext) -> Deny | None:
         if not ctx.write and ctx.path.virtual.endswith(self._suffix):
             return Deny("sealed")
         return None
 
 
 class RedactReads(Policy):
-    """Test-only post_ops policy: refuse read results holding a marker."""
+    """Test-only post_vfs policy: refuse read results holding a marker."""
 
-    HOOK = "post_ops"
+    HOOK = "post_vfs"
 
     def __init__(self, spec: dict[str, Any]) -> None:
         self._marker = spec["marker"].encode()
 
-    def decide(self, ctx: OpsResultContext) -> Deny | None:
+    def decide(self, ctx: VfsResultContext) -> Deny | None:
         data = (
             ctx.result if isinstance(ctx.result, (bytes, bytearray)) else None
         )
@@ -283,15 +283,15 @@ class RedactReads(Policy):
 
 
 class OpReadCap(Policy):
-    """Test-only post_ops policy: cap read bytes on a path suffix."""
+    """Test-only post_vfs policy: cap read bytes on a path suffix."""
 
-    HOOK = "post_ops"
+    HOOK = "post_vfs"
 
     def __init__(self, spec: dict[str, Any]) -> None:
         self._suffix = spec["suffix"]
         self._max_bytes = spec["max_bytes"]
 
-    def decide(self, ctx: OpsResultContext) -> Limit | None:
+    def decide(self, ctx: VfsResultContext) -> Limit | None:
         if ctx.op == "read" and ctx.path.virtual.endswith(self._suffix):
             return Limit(max_bytes=self._max_bytes)
         return None
@@ -886,7 +886,7 @@ async def _run_step(
         return []
     if "read_op" in step:
         # Reads through the op door (the surface FUSE and programmatic
-        # access share), where pre_ops/post_ops policies fire.
+        # access share), where pre_vfs/post_vfs policies fire.
         content = ""
         try:
             result, _ = await ws.dispatch(

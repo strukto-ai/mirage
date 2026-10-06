@@ -25,18 +25,18 @@ from mirage.policy import (
     DenyScope,
     ExecuteResultContext,
     MountRootPolicy,
-    OpsContext,
-    OpsResultContext,
     Pending,
     Policies,
     Policy,
     PolicyDenied,
     PolicyError,
     Route,
+    VfsContext,
+    VfsResultContext,
     describe_refusal,
     post_execute_gate,
-    post_ops_gate,
-    pre_ops_gate,
+    post_vfs_gate,
+    pre_vfs_gate,
     refusal_of,
     render_deny,
     render_pending,
@@ -92,7 +92,7 @@ class DenyRm(Policy):
 
 
 class AskOnOps(Policy):
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         return Ask("cannot wait here")
 
 
@@ -219,59 +219,59 @@ async def test_an_illegal_return_raises_policy_error():
 
 
 class DenyReadOps(Policy):
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         if ctx.op == "read":
             return Deny("no reads")
         return None
 
 
 class DenyBigResults(Policy):
-    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
         if isinstance(ctx.result, bytes) and len(ctx.result) > 8:
             return Deny("result too large")
         return None
 
 
 @pytest.mark.asyncio
-async def test_pre_ops_first_deny_wins_and_wants_gates():
+async def test_pre_vfs_first_deny_wins_and_wants_gates():
     policies = Policies()
-    assert not policies.wants("pre_ops")
+    assert not policies.wants("pre_vfs")
     policies.add(DenyReadOps())
-    assert policies.wants("pre_ops")
-    assert not policies.wants("post_ops")
-    ctx = OpsContext(
+    assert policies.wants("pre_vfs")
+    assert not policies.wants("post_vfs")
+    ctx = VfsContext(
         op="read", path=_path("/data/x"), write=False, prefix="/data/"
     )
-    deny = await policies.pre_ops(ctx)
+    deny = await policies.pre_vfs(ctx)
     assert deny == Deny("no reads", policy="DenyReadOps")
-    write_ctx = OpsContext(
+    write_ctx = VfsContext(
         op="write", path=_path("/data/x"), write=True, prefix="/data/"
     )
-    assert await policies.pre_ops(write_ctx) is None
+    assert await policies.pre_vfs(write_ctx) is None
 
 
 @pytest.mark.asyncio
-async def test_pre_ops_gate_raises_eacces():
+async def test_pre_vfs_gate_raises_eacces():
     policies = Policies()
     policies.add(DenyReadOps())
     with pytest.raises(PermissionError) as excinfo:
-        await pre_ops_gate(policies, "read", _path("/data/x"), False, "/data/")
+        await pre_vfs_gate(policies, "read", _path("/data/x"), False, "/data/")
     assert excinfo.value.errno == errno.EACCES
     assert excinfo.value.filename == "/data/x"
     assert excinfo.value.refusal and "no reads" in excinfo.value.refusal.reason
     # No opinion on writes: the gate passes silently.
-    await pre_ops_gate(policies, "write", _path("/data/x"), True, "/data/")
+    await pre_vfs_gate(policies, "write", _path("/data/x"), True, "/data/")
 
 
 @pytest.mark.asyncio
-async def test_post_ops_gate_suppresses_the_result():
+async def test_post_vfs_gate_suppresses_the_result():
     policies = Policies()
     policies.add(DenyBigResults())
-    await post_ops_gate(
+    await post_vfs_gate(
         policies, "read", _path("/data/x"), False, "/data/", b"tiny"
     )
     with pytest.raises(PermissionError) as excinfo:
-        await post_ops_gate(
+        await post_vfs_gate(
             policies,
             "read",
             _path("/data/x"),
@@ -286,12 +286,12 @@ async def test_post_ops_gate_suppresses_the_result():
 
 
 class CapFour(Policy):
-    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
         return Limit(max_bytes=4)
 
 
 class CapTwo(Policy):
-    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
         return Limit(max_bytes=2)
 
 
@@ -305,8 +305,8 @@ class CapLines(Policy):
         return Limit(max_lines=2)
 
 
-def _ops_result_ctx() -> OpsResultContext:
-    return OpsResultContext(
+def _ops_result_ctx() -> VfsResultContext:
+    return VfsResultContext(
         op="read",
         path=_path("/data/x"),
         write=False,
@@ -316,21 +316,21 @@ def _ops_result_ctx() -> OpsResultContext:
 
 
 @pytest.mark.asyncio
-async def test_post_ops_limits_merge_to_the_tightest():
+async def test_post_vfs_limits_merge_to_the_tightest():
     policies = Policies()
     policies.add(CapFour())
     policies.add(CapTwo())
-    deny, bound = await policies.post_ops(_ops_result_ctx())
+    deny, bound = await policies.post_vfs(_ops_result_ctx())
     assert deny is None
     assert bound is not None
     assert bound.max_bytes == 2
 
 
 @pytest.mark.asyncio
-async def test_post_ops_gate_returns_the_merged_bound():
+async def test_post_vfs_gate_returns_the_merged_bound():
     policies = Policies()
     policies.add(CapFour())
-    bound = await post_ops_gate(
+    bound = await post_vfs_gate(
         policies, "read", _path("/data/x"), False, "/data/", b"payload"
     )
     assert bound is not None
@@ -384,7 +384,7 @@ async def test_an_op_ask_with_no_ledger_refuses_like_a_deny():
     # deny voice, with the reason on the record.
     policies = Policies([AskOnOps()])
     with pytest.raises(PolicyDenied) as info:
-        await pre_ops_gate(policies, "write", _path("/data/x"), True, "/data/")
+        await pre_vfs_gate(policies, "write", _path("/data/x"), True, "/data/")
     assert info.value.errno == errno.EACCES
     assert info.value.refusal is not None
     assert info.value.refusal.kind == "deny"
@@ -517,7 +517,7 @@ async def test_wants_for_refines_wants_per_session():
     assert scoped.wants("pre_session")
     assert await scoped.wants_for("pre_session", "a") is True
     assert await scoped.wants_for("pre_session", "b") is False
-    assert await scoped.wants_for("pre_ops", "a") is False
+    assert await scoped.wants_for("pre_vfs", "a") is False
     # A policy speaking for every session settles it, wherever it stands.
     both = Policies([ForSomeSessions(), ForEveryone()])
     assert await both.wants_for("pre_session", "b") is True

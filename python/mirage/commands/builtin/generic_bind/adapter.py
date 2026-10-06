@@ -47,7 +47,7 @@ from mirage.ops.types import (
     StatOverlay,
 )
 from mirage.policy.constants import METADATA_OPS
-from mirage.policy.policies import Policies, pre_ops_gate
+from mirage.policy.policies import Policies, pre_vfs_gate
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec, WalkProbe
 from mirage.utils.errors import (
@@ -1231,7 +1231,7 @@ def with_write_guards(fn: OperationFn) -> OperationFn:
     unlink): the same chain in the same order, judging the call's
     PathSpec positionals. A hidden path answers ENOENT, the flavor of
     the flat mutation slots; the command's path restrictions speak
-    before the coded pre_ops hooks, as ``with_policy_guard`` orders
+    before the coded pre_vfs hooks, as ``with_policy_guard`` orders
     them for a ``CommandIO``.
 
     Args:
@@ -1351,11 +1351,11 @@ def _op_policy_scope() -> _PolicyScope:
     the session the command runs under.
 
     None is the fast path: no dispatched command bound policies, or
-    none of them override pre_ops, at the cost of two contextvar reads
+    none of them override pre_vfs, at the cost of two contextvar reads
     and one O(1) probe per slot call.
     """
     policies = get_op_policies()
-    if policies is None or not policies.wants("pre_ops"):
+    if policies is None or not policies.wants("pre_vfs"):
         return _UNBOUND_SCOPE
     gate = get_mount_gate()
     sess = get_current_session()
@@ -1395,7 +1395,7 @@ async def _policy_admit(
     first_source: bool,
     args: tuple[Any, ...],
 ) -> None:
-    """Fire pre_ops for each PathSpec positional of one slot call.
+    """Fire pre_vfs for each PathSpec positional of one slot call.
 
     The hides are not judged here: the command guards wrapped around
     this one answer them first, and the remnant cascade reaches below
@@ -1415,7 +1415,7 @@ async def _policy_admit(
     for arg in args:
         if isinstance(arg, PathSpec):
             mutates = write and not (first and first_source)
-            await pre_ops_gate(
+            await pre_vfs_gate(
                 policies,
                 op,
                 arg,
@@ -1436,7 +1436,7 @@ async def _policy_call(
     *args: Any,
     **kwargs: Any,
 ) -> Any:
-    """Call a backend op after admitting its paths through pre_ops.
+    """Call a backend op after admitting its paths through pre_vfs.
 
     Async, unlike the sync guards it wraps: the hooks are user
     coroutines. Every slot this wraps returns an awaitable, so the
@@ -1464,7 +1464,7 @@ async def _policy_call(
 async def _policy_readdir(
     scope: _PolicyScope, fn: OperationFn, *args: Any, **kwargs: Any
 ) -> list[str]:
-    """Readdir admitted through pre_ops for the directory it lists.
+    """Readdir admitted through pre_vfs for the directory it lists.
 
     Args:
         scope (_PolicyScope): the wrap-time capture.
@@ -1476,7 +1476,7 @@ async def _policy_readdir(
     policies, prefix, session_id = _live_policy_scope(scope)
     if policies is not None:
         parent_spec = next(a for a in args if isinstance(a, PathSpec))
-        await pre_ops_gate(
+        await pre_vfs_gate(
             policies,
             "readdir",
             parent_spec,
@@ -1492,7 +1492,7 @@ async def _policy_readdir(
 def _policy_stream(
     scope: _PolicyScope, fn: OperationFn, *args: Any, **kwargs: Any
 ) -> Any:
-    """Read-stream admitted through pre_ops before the first chunk.
+    """Read-stream admitted through pre_vfs before the first chunk.
 
     A plain def for the reason ``_guarded_read_stream`` is one: the
     inner op captures per-call scope eagerly (the read-through cache
@@ -1533,7 +1533,7 @@ async def _policy_stream_drain(
         source (AsyncIterator[bytes]): the not-yet-started inner stream.
     """
     try:
-        await pre_ops_gate(
+        await pre_vfs_gate(
             policies,
             "read_stream",
             path,
@@ -1553,7 +1553,7 @@ async def _policy_stream_drain(
 
 def with_policy_guard(ops: CommandIO) -> CommandIO:
     """Return ``ops`` whose content and mutation slots admit each
-    PathSpec through the workspace's coded pre_ops hooks.
+    PathSpec through the workspace's coded pre_vfs hooks.
 
     The coded-policy arm of the guard chain, applied outside the cache
     wraps so admission fires before a warm serve, the dispatcher's own
@@ -1566,7 +1566,7 @@ def with_policy_guard(ops: CommandIO) -> CommandIO:
     meets the guarded readdir. Ops are named by slot; a
     policy portable across the tiers keys on ``write`` and ``path``.
     Inert unless a dispatched command bound policies overriding
-    pre_ops (``_op_policy_scope``, with the mount prefix and session
+    pre_vfs (``_op_policy_scope``, with the mount prefix and session
     identity captured at wrap time so a lazily drained reader still
     answers as the command that bound it, see ``_live_policy_scope``).
 
@@ -1602,7 +1602,7 @@ def scoped_io(
     prefix: str,
 ) -> CommandIO:
     """Drop the native walks when a hide, a path rule or a coded
-    pre_ops policy judges the command's paths.
+    pre_vfs policy judges the command's paths.
 
     Args:
         ops (CommandIO): command-guarded backend capabilities.

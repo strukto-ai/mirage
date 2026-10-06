@@ -14,13 +14,13 @@
 
 import { requirePathsWritable } from '../../context/session_context.ts'
 import type { Policy } from '../base.ts'
-import type { Deny, OpsContext } from '../types.ts'
+import type { Deny, VfsContext } from '../types.ts'
 
 /** The configured mode and session grants bound every mutation. An op
  * outside every mount carries an empty prefix and is governed by `/`, the
  * turf a profile's root mode is written under. */
 export class MountModePolicy implements Policy {
-  preOps(ctx: OpsContext): Deny | null {
+  preVfs(ctx: VfsContext): Deny | null {
     if (!ctx.write || ctx.mode === undefined) return null
     try {
       requirePathsWritable([ctx.path], ctx.prefix || '/', ctx.mode, ctx.subtree === true)

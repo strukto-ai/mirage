@@ -156,9 +156,9 @@ class Admitted:
             under a grant for: the one the door answered for this
             line, and the session's standing ones.
         scoped (bool): whether a path rule in force reads this
-            command's paths, or a pre_ops policy speaks for its session
+            command's paths, or a pre_vfs policy speaks for its session
             (``EntryGate.scoped``).
-        ops_judged (bool): whether a coded or scripted pre_ops policy
+        ops_judged (bool): whether a coded or scripted pre_vfs policy
             speaks for the session, which judges every path.
     """
 
@@ -171,7 +171,7 @@ class Admitted:
 
     def scopes(self, virtual: str) -> bool:
         """Whether anything at or under this path could be refused for
-        the running command: a coded or scripted pre_ops policy judges
+        the running command: a coded or scripted pre_vfs policy judges
         every path, and a rule in force any path its scope could cover.
 
         Args:
@@ -529,7 +529,7 @@ async def admit(
             granted.insert(0, ask_rule(ctx, asked))
         rules = session.commands
         ops_judged = await registry.policies.wants_for(
-            "pre_ops", session.session_id
+            "pre_vfs", session.session_id
         )
         return Admitted(
             rules=rules,

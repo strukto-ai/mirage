@@ -207,7 +207,7 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
     // refuses an explicit `undefined` for an optional field, so an absent
     // namespace has to mean an absent key rather than an undefined value.
     // Python's `glob_children` is `| None` and takes the uniform path.
-    // Command path restrictions speak first, then the coded preOps
+    // Command path restrictions speak first, then the coded preVfs
     // hooks, both outside the cache wraps (`finish`) so a refusal fires
     // before a warm serve, the dispatcher's own order at the op door. A
     // probe answer is served below them (withProbeAnswers on the raw
