@@ -20,9 +20,9 @@ from mirage.commands.config import CommandOpts, command
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.constants import WALK_ERRORS
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-from mirage.utils.errors import WALK_ERRORS
 
 # Exit codes GNU wget uses for the failures mirage can hit. Unlike curl, wget
 # treats any 4xx/5xx as a failure (EXIT_SERVER_ERROR) and needs no flag to do

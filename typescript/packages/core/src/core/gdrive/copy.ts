@@ -15,7 +15,7 @@
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { eisdir, enoent, enotdir } from '../../utils/errors.ts'
+import { eisdir, enoent, enotdir } from '../../errors/fs.ts'
 import type { TokenManager } from '../google/client.ts'
 import { FOLDER_MIME, copyFile, createFolder, deleteFile, listFiles } from '../google/drive.ts'
 import type { DriveNode } from './resolve.ts'

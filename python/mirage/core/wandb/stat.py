@@ -3,8 +3,8 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore, RAMIndexCacheStore
 from mirage.core.hierarchy.probe import assert_listed, resolve_entry
 from mirage.core.wandb.pathing import parts
 from mirage.core.wandb.readdir import readdir
+from mirage.errors.fs import enoent
 from mirage.types import ContentType, FileStat, FileType, PathSpec
-from mirage.utils.errors import enoent
 
 
 async def stat(

@@ -28,9 +28,11 @@
  *
  * One member is mirage's own condition rather than a POSIX spelling:
  * `NO_XATTR` is "attribute not set", which POSIX names ENOATTR on macOS
- * and ENODATA on Linux.
+ * and ENODATA on Linux. `EBADF` is the shell's own: no mount raises it,
+ * only a standard input that is closed or write-only.
  */
 export type FsCondition =
+  | 'EBADF'
   | 'ENOENT'
   | 'ENOTDIR'
   | 'EISDIR'
@@ -45,9 +47,11 @@ export type FsCondition =
   | 'EIO'
   | 'EBUSY'
   | 'EROFS'
+  | 'EFBIG'
   | 'NO_XATTR'
 
 export const FS_CONDITIONS: readonly FsCondition[] = [
+  'EBADF',
   'ENOENT',
   'ENOTDIR',
   'EISDIR',
@@ -62,11 +66,55 @@ export const FS_CONDITIONS: readonly FsCondition[] = [
   'EIO',
   'EBUSY',
   'EROFS',
+  'EFBIG',
   'NO_XATTR',
 ]
 
-/** One condition's POSIX rendering: errno plus GNU strerror. */
+/** One condition's POSIX rendering: errno plus strerror text. */
 export interface PosixErrno {
   errno: number
   phrase: string
+}
+
+export interface FsError extends Error {
+  code: string
+  // The virtual path the user typed (PathSpec.virtual) — the ONLY path that
+  // may ever reach a user-facing error message. Backends pass the PathSpec and
+  // the helper reads .virtual, so a stripped path or real fs path can never
+  // be stamped here by accident.
+  virtualPath: string
+}
+
+/**
+ * A path the kernel walk does not resolve: its own `.` and `..`
+ * (`dotRefusal`), ENOENT or ENOTDIR at a name in front of a dot, or an
+ * operand whose `walkError` the walk answered before the command ran
+ * (`walkRefusal`), the empty name's ENOENT or a link loop's ELOOP.
+ *
+ * Final, which is why it is marked: a keyed store's plain miss can still be
+ * an implicit directory, and the layers that ask (the read commands'
+ * directory probes) re-read ENOENT that way, but a name in front of a dot
+ * that is missing or a plain file is not a directory under any reading, and
+ * neither is the empty name or a link loop. Every catch site keyed on the
+ * code still sees its own. Mirrors Python's DotWalkError.
+ */
+export interface DotWalkError extends FsError {
+  readonly dotWalk: true
+}
+
+// The registry's refusal for a path that falls outside every mount. Mirrors
+// Python's `ValueError("no mount matches path: ...")`; the stamp exists so
+// the exists-family probes can recognize it without sniffing message text,
+// and the message stays unstamped by a POSIX code so command stderr keeps
+// rendering it verbatim (parity with Python, where ValueError is not an
+// OSError and gets no strerror suffix).
+export interface NoMountError extends Error {
+  noMount: true
+}
+
+// A missing-op error also names the op the backend did not register, so
+// capability probes (metadata.ts) can test for one specific gap instead of
+// sniffing message text.
+export interface MissingOpError extends FsError {
+  op: string
 }

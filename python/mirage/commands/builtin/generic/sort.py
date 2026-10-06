@@ -20,14 +20,11 @@ from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import argmatch_error
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror
+from mirage.errors.types import BadDescriptorError, FileTooLargeError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-from mirage.utils.errors import (
-    FS_ERRORS,
-    BadDescriptorError,
-    FileTooLargeError,
-    fs_strerror,
-)
 from mirage.utils.quote import shell_quote
 
 # `check_args` as gnulib's `argmatch_valid` prints it: `quiet` and

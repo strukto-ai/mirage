@@ -35,7 +35,8 @@ from mirage.core.jq.types import (
     JqParseError,
     NoValue,
 )
-from mirage.utils.errors import FS_ERRORS, READ_FAILURES, fs_strerror
+from mirage.errors.constants import FS_ERRORS, READ_FAILURES
+from mirage.errors.fs import fs_strerror
 
 # The most bytes one read of jq's input reader takes (jq 1.8's util.c):
 # fgets into a 4096-byte buffer, less the four bytes it keeps for UTF-8

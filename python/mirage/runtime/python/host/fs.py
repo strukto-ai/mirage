@@ -23,6 +23,8 @@ from collections.abc import Callable, Iterator
 from typing import Any, cast
 
 from mirage.errors import FsCondition
+from mirage.errors.fs import eexist, fs_error
+from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.ops import Ops
 from mirage.runtime.python.host.constants import (
     REFUSED_CALLS,
@@ -30,7 +32,6 @@ from mirage.runtime.python.host.constants import (
     XATTR_CREATE,
     XATTR_REPLACE,
 )
-from mirage.runtime.python.host.errors import refused
 from mirage.runtime.python.host.host_io import in_host_io
 from mirage.runtime.python.host.list import (
     MountDirEntry,
@@ -682,9 +683,7 @@ class HostFs:
         if not missing:
             if exist_ok and self._isdir(virtual):
                 return
-            raise FileExistsError(
-                errno.EEXIST, _real_os.strerror(errno.EEXIST), virtual
-            )
+            raise eexist(virtual)
         for path in reversed(missing):
             self._door.run(self._ops.mkdir(path))
 
@@ -779,8 +778,8 @@ class HostFs:
             return
         if source is None or dest is None:
             raise OSError(
-                errno.EXDEV,
-                _real_os.strerror(errno.EXDEV),
+                posix_errno(FsCondition.EXDEV),
+                posix_phrase(FsCondition.EXDEV),
                 _spelled(src),
                 None,
                 _spelled(dst),
@@ -887,7 +886,7 @@ def _refusal(
         for value in (*args, *kwargs.values()):
             virtual = router._virtual(value)
             if virtual is not None:
-                raise refused(condition, virtual)
+                raise fs_error(virtual, condition)
         return real(*args, **kwargs)
 
     return refuse

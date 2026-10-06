@@ -18,8 +18,8 @@ import pytest
 
 from mirage.accessor.bin import BinAccessor
 from mirage.core.bin.refuse import refuse
+from mirage.errors.types import ReadOnlyError
 from mirage.types import PathSpec
-from mirage.utils.errors import ReadOnlyError
 
 
 @pytest.mark.asyncio

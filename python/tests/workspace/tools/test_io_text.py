@@ -69,7 +69,7 @@ def test_io_to_str_starts_a_line_for_the_refusal_when_needed():
 
 def test_io_to_str_leaves_an_operand_refusal_alone():
     # An operand-scoped refusal already carries its reason on the
-    # stderr line, GNU-style; repeating it would say nothing new.
+    # command's stderr line; repeating it would say nothing new.
     io = IOResult(
         stderr=b"rm: cannot remove 'x': keys\n",
         exit_code=1,
@@ -120,7 +120,7 @@ def test_with_refusal_bytes_leaves_the_bytes_alone_otherwise():
 
 
 def test_with_refusal_describes_an_operand_refusal_whose_line_is_gone():
-    # `cat /protected 2>/dev/null`: the GNU line was redirected away, so
+    # `cat /protected 2>/dev/null`: cat's line was redirected away, so
     # the record is the only reason left to hand over.
     operand = Refusal(
         kind="deny",
@@ -172,7 +172,7 @@ def test_with_refusal_describes_an_operand_refusal_the_output_only_quotes():
 
 
 def test_with_refusal_trusts_the_reason_wherever_the_line_landed():
-    # `2>&1` moved the GNU line onto stdout; the text still says why,
+    # `2>&1` moved cat's line onto stdout; the text still says why,
     # so nothing is repeated.
     operand = Refusal(
         kind="deny",
@@ -210,8 +210,15 @@ def test_error_text_adds_the_policy_line_to_a_plain_eacces():
         refusal=Refusal(kind="deny", reason="sealed"),
     )
     assert error_text(refused) == (
-        "Error: [Errno 13] Permission denied: '/data/x'\n"
-        "policy denied: sealed\n"
+        "Error: /data/x: Permission denied\npolicy denied: sealed\n"
     )
     missing = FileNotFoundError(errno.ENOENT, "No such file or directory")
-    assert error_text(missing) == "Error: [Errno 2] No such file or directory"
+    assert error_text(missing) == "Error: No such file or directory"
+    assert error_text(PermissionError("Permission denied")) == (
+        "Error: Permission denied"
+    )
+    assert error_text(FileNotFoundError("/data/x")) == (
+        "Error: /data/x: No such file or directory"
+    )
+    named = IsADirectoryError(errno.EISDIR, "Is a directory", "Is a directory")
+    assert error_text(named) == "Error: Is a directory: Is a directory"

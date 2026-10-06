@@ -17,7 +17,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { modifiedTs } from '../../../core/generic/find.ts'
-import { fsStrerror, isEnoent, isEnotdir, isMissError, walkRefusal } from '../../../utils/errors.ts'
+import { fsStrerror, isEnoent, isEnotdir, isMissError, walkRefusal } from '../../../errors/fs.ts'
 import { dotRefusal, linkFollow, statOrEnoent } from '../utils/paths.ts'
 import { failureText } from '../../../errors/classify.ts'
 import { IOResult } from '../../../io/types.ts'
@@ -45,6 +45,7 @@ import { printfKind } from '../find_printf.ts'
 import { pathVisible } from '../../../utils/hidden.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { linkResults } from '../../../core/generic/find.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
 
 const ENC = new TextEncoder()
 
@@ -249,15 +250,15 @@ async function missingStartDetail(
   root: PathSpec,
   stat: ((spec: PathSpec) => Promise<FileStat>) | undefined,
 ): Promise<string> {
-  if (stat === undefined) return 'No such file or directory'
+  if (stat === undefined) return posixPhrase('ENOENT')
   try {
     await stat(root)
   } catch (err) {
-    if (isEnotdir(err)) return 'Not a directory'
-    if (isMissError(err)) return 'No such file or directory'
+    if (isEnotdir(err)) return posixPhrase('ENOTDIR')
+    if (isMissError(err)) return posixPhrase('ENOENT')
     throw err
   }
-  return 'No such file or directory'
+  return posixPhrase('ENOENT')
 }
 
 interface FindFlags {
@@ -415,7 +416,7 @@ export function findGeneric(
         // name, a link loop), and every probe below goes by the path it
         // simplifies to. Mirrors Python's resolve_start.
         missing.push(
-          `find: '${root.rawPath}': ${fsStrerror(walkRefusal(root)) ?? 'No such file or directory'}`,
+          `find: '${root.rawPath}': ${fsStrerror(walkRefusal(root)) ?? posixPhrase('ENOENT')}`,
         )
         continue
       }
@@ -425,7 +426,7 @@ export function findGeneric(
         const refusal = await dotRefusal(statOrEnoent(startStat), root, linkFollow(opts.ns?.links))
         if (refusal !== null) {
           const label = root.rawPath !== '' ? root.rawPath : root.virtual
-          missing.push(`find: '${label}': ${fsStrerror(refusal) ?? 'No such file or directory'}`)
+          missing.push(`find: '${label}': ${fsStrerror(refusal) ?? posixPhrase('ENOENT')}`)
           continue
         }
       }

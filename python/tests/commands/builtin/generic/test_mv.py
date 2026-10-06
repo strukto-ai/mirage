@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.commands.builtin.generic.mv import MvFlags, mv_generic
+from mirage.errors.fs import enoent, enotdir, enotsup
 from mirage.types import (
     ContentType,
     FileStat,
@@ -23,7 +24,6 @@ from mirage.types import (
     PathSpec,
     PrimitiveMove,
 )
-from mirage.utils.errors import enoent, enotdir, enotsup
 
 
 def _spec(path: str) -> PathSpec:

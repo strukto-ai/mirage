@@ -24,9 +24,10 @@ async def _seed(accessor: RedisAccessor) -> None:
     await accessor.store.add_dir("/d")
 
 
-# GNU resolves a path one component at a time and stops at the first that
-# is not a directory; measured against coreutils 9.7 (`cat a.txt/x` is
-# "Not a directory", `cat nope/x` is "No such file or directory").
+# The kernel resolves a path one component at a time and stops at the
+# first that is not a directory; measured on debian:stable-slim (`cat
+# a.txt/x` is "Not a directory", `cat nope/x` is "No such file or
+# directory").
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "key,kind",
@@ -42,7 +43,7 @@ async def test_lookup_error_stops_at_the_first_non_directory(store, key, kind):
     await _seed(store)
     error = await lookup_error(store.store, _spec(key), key)
     assert type(error) is kind
-    assert str(error) == key
+    assert error.filename == key
 
 
 async def _drain(accessor: RedisAccessor, spec: PathSpec) -> None:
@@ -69,6 +70,6 @@ async def test_every_lookup_names_a_plain_file_parent(store, name):
     op = _OPS[name]
     with pytest.raises(NotADirectoryError) as exc:
         await op(store, _spec("/a.txt/x"))
-    assert str(exc.value) == "/a.txt/x"
+    assert exc.value.filename == "/a.txt/x"
     with pytest.raises(FileNotFoundError):
         await op(store, _spec("/nope/x"))

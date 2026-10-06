@@ -27,10 +27,11 @@ from mirage.commands.spec.constants import OPERAND
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.standard import version_line
 from mirage.commands.spec.types import FlagValue
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import error_path, fs_strerror
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-from mirage.utils.errors import FS_ERRORS, error_path, fs_strerror
 
 logger = logging.getLogger(__name__)
 

@@ -21,11 +21,12 @@ from mirage.commands.builtin.utils.paths import (
     typed_spec,
 )
 from mirage.commands.spec.usage import missing_operand_error
+from mirage.errors.fs import fs_strerror, walk_refusal
+from mirage.errors.render import fs_error_line
 from mirage.io import IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
-from mirage.utils.errors import fs_error_line, fs_strerror, walk_refusal
 from mirage.workspace.executor.builtins.links.ln import operand_abs
 from mirage.workspace.executor.builtins.shared import (
     fail,

@@ -21,8 +21,8 @@ from mirage.core.msgraph.drive import (
     virtual_key,
 )
 from mirage.core.onedrive.client import drive_loc
+from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import enoent
 
 
 async def stat(

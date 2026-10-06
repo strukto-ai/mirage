@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isEacces, isEnotdir, isMissingPath } from '../../../../utils/errors.ts'
+import { isEacces, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import { mountKey, mountPrefixOf, rekey } from '../../../../utils/key_prefix.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'

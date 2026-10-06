@@ -15,12 +15,12 @@
 import logging
 
 from mirage.context import DEFAULT_UMASK
+from mirage.errors.constants import FS_ERRORS
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import materialize
 from mirage.runtime.types import DispatchFn
 from mirage.shell.descriptors import FileDescription
 from mirage.types import PathSpec
-from mirage.utils.errors import FS_ERRORS
 from mirage.utils.ranges import splice_window
 from mirage.workspace.session import SessionState
 

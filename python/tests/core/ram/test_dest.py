@@ -47,7 +47,7 @@ def accessor() -> RAMAccessor:
 def test_lookup_error_stops_at_the_first_non_directory(accessor, key, kind):
     error = lookup_error(accessor.store, _spec(key), key)
     assert type(error) is kind
-    assert str(error) == key
+    assert error.filename == key
 
 
 async def _drain(accessor: RAMAccessor, spec: PathSpec) -> None:
@@ -73,6 +73,6 @@ async def test_every_lookup_names_a_plain_file_parent(accessor, name):
     op = _OPS[name]
     with pytest.raises(NotADirectoryError) as exc:
         await op(accessor, _spec("/a.txt/x"))
-    assert str(exc.value) == "/a.txt/x"
+    assert exc.value.filename == "/a.txt/x"
     with pytest.raises(FileNotFoundError):
         await op(accessor, _spec("/nope/x"))

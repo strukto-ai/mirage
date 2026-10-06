@@ -14,7 +14,7 @@
 
 import type { DocumentAccessor } from '../../accessor/document.ts'
 import type { PathSpec } from '../../types.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 
 export function read(accessor: DocumentAccessor, path: PathSpec): Promise<Uint8Array> {
   if (path.mountPath.replaceAll('/', '') !== '') return Promise.reject(enoent(path))

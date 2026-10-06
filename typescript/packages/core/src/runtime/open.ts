@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { classify } from '../errors/index.ts'
-import { eexist, eisdir, enoent } from '../utils/errors.ts'
+import { eexist, eisdir, enoent } from '../errors/fs.ts'
 import type { OpenMode } from './handles/mode.ts'
 import type { VFSEntry, VFSStat } from './types.ts'
 

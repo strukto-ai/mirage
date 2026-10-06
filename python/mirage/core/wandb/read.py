@@ -8,8 +8,8 @@ from mirage.core.wandb.metadata import run_metadata
 from mirage.core.wandb.pathing import LEAVES, parts, run_vars
 from mirage.core.wandb.queries import RUN, RUN_CONFIG, RUN_SUMMARY
 from mirage.core.wandb.stat import stat
+from mirage.errors.fs import eisdir, enoent
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import eisdir, enoent
 
 
 async def read_stream(

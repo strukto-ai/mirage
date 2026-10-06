@@ -7,6 +7,9 @@ from mirage.commands.builtin.generic.archive.types import (
     Scan,
     Walked,
 )
+from mirage.errors.classify import classify
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.ops.types import LinkView, MountView
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -17,16 +20,6 @@ from mirage.utils.path import CycleError
 # archive by accident exactly what the mount-root refusal forbids on
 # purpose.
 OTHER_FILESYSTEM = "file is on a different filesystem; not dumped"
-# Why a path could not be reached, in GNU's strerror wording. Both ride
-# on a fatal Problem; tar prints them after "Cannot stat: " and Info-ZIP
-# words every unreachable name the same way, so it ignores the reason.
-_NO_SUCH = "No such file or directory"
-_NOT_DIR = "Not a directory"
-_TOO_MANY_LEVELS = "Too many levels of symbolic links"
-# A directory below the operand the walk could not open: a rule refused
-# it. Rides on an ``unreadable`` Problem; tar prints it after "Cannot
-# open: " and fails the run, Info-ZIP stores the directory and is silent.
-_PERMISSION_DENIED = "Permission denied"
 
 StatFn = Callable[[PathSpec], Awaitable[FileStat]]
 WalkFn = Callable[[PathSpec, str], Awaitable[Walked]]
@@ -192,16 +185,16 @@ async def _follow(
     try:
         target = links.resolve(virtual)
     except CycleError:
-        return [], [], _TOO_MANY_LEVELS, []
+        return [], [], posix_phrase(FsCondition.ELOOP), []
     if not _same_mount(mounts, virtual, target):
         return [], [OTHER_FILESYSTEM], "", []
     spec = _child_spec(target, root)
     try:
         target_stat = await stat(spec)
     except NotADirectoryError:
-        return [], [], _NOT_DIR, []
+        return [], [], posix_phrase(FsCondition.ENOTDIR), []
     except (FileNotFoundError, ValueError):
-        return [], [], _NO_SUCH, []
+        return [], [], posix_phrase(FsCondition.ENOENT), []
     if target_stat.type != FileType.DIRECTORY:
         return [Entry(name_path=virtual, kind="file", read=spec)], [], "", []
     if not recurse:
@@ -221,11 +214,18 @@ async def _follow(
 def _unreadable_problems(closed: list[str]) -> list[Problem]:
     """The problems for directories a walk could not open.
 
+    A rule refused each one. tar prints the reason after "Cannot open: "
+    and fails the run; Info-ZIP stores the directory and is silent.
+
     Args:
         closed (list[str]): their absolute virtual paths, walk order.
     """
     return [
-        Problem(path=virtual, reason=_PERMISSION_DENIED, unreadable=True)
+        Problem(
+            path=virtual,
+            reason=posix_phrase(FsCondition.EACCES),
+            unreadable=True,
+        )
         for virtual in closed
     ]
 
@@ -286,9 +286,7 @@ async def scan_operand(
         try:
             root_stat = await stat(path)
         except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
-            reason = (
-                _NOT_DIR if isinstance(exc, NotADirectoryError) else _NO_SUCH
-            )
+            reason = posix_phrase(classify(exc) or FsCondition.ENOENT)
             return Scan(
                 problems=(Problem(path=base, reason=reason, fatal=True),),
                 missing=True,

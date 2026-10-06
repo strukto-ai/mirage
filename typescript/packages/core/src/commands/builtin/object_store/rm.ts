@@ -15,7 +15,7 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, type PathSpec } from '../../../types.ts'
-import { fsStrerror, isFsError } from '../../../utils/errors.ts'
+import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'

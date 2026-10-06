@@ -1,7 +1,7 @@
 from mirage.accessor.wandb import WandbAccessor
 from mirage.core.wandb.types import RunVariables
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 LEAVES = ("run.json", "config.json", "summary.json", "history.jsonl")
 

@@ -14,7 +14,7 @@
 
 import { once } from 'node:events'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { enoent } from '@struktoai/mirage-core/utils/errors'
+import { enoent } from '@struktoai/mirage-core/errors/fs'
 import type { ReadStream } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { isNoSuchFile, joinRoot, stripPrefix } from './utils.ts'

@@ -14,8 +14,8 @@
 
 import { stat as fsStat } from 'node:fs/promises'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { enotdir } from '@struktoai/mirage-core/utils/errors'
-import type { FsError } from '@struktoai/mirage-core/utils/errors'
+import { enotdir } from '@struktoai/mirage-core/errors/fs'
+import type { FsError } from '@struktoai/mirage-core/errors/types'
 import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
 import { ancestors } from '@struktoai/mirage-core/utils/path'
 import { resolveInside } from './utils.ts'

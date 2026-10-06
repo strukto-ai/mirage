@@ -42,7 +42,7 @@ import {
 } from '../../../../core/linear/normalize.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { IOResult } from '../../../../io/types.ts'
-import { enoent } from '../../../../utils/errors.ts'
+import { enoent } from '../../../../errors/fs.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import type { CLIInvocation } from '../../types.ts'
 import { firstText, linearTransport, resolveIssue } from './util.ts'

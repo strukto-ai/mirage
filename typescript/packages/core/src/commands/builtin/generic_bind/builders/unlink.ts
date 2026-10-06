@@ -16,7 +16,7 @@ import { UsageError } from '../../../errors.ts'
 import { extraOperandError } from '../../../spec/usage.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { FileType } from '../../../../types.ts'
-import { fsStrerror, isFsError } from '../../../../utils/errors.ts'
+import { fsStrerror, isFsError } from '../../../../errors/fs.ts'
 import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
 
 const unlink: BuilderFn = async (ops, accessor, paths, _texts, opts) => {

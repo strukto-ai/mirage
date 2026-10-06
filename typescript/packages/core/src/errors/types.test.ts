@@ -29,6 +29,7 @@ describe('the condition vocabulary', () => {
   it('names the probed conditions', () => {
     expect(new Set(FS_CONDITIONS)).toEqual(
       new Set([
+        'EBADF',
         'ENOENT',
         'ENOTDIR',
         'EISDIR',
@@ -43,6 +44,7 @@ describe('the condition vocabulary', () => {
         'EIO',
         'EBUSY',
         'EROFS',
+        'EFBIG',
         'NO_XATTR',
       ]),
     )

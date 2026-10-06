@@ -15,7 +15,7 @@
 import type { GCalAccessor } from '../../accessor/gcal.ts'
 import { parseEventFilename } from '../../vfs/gcal/event_entry.ts'
 import type { PathSpec } from '../../types.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import { makeRead } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { compactJsonBytes } from '../render/json.ts'

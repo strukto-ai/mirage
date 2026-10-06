@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno
-import os
 from dataclasses import replace
 
 from mirage.accessor.base import Accessor
@@ -33,16 +31,14 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.context import DEFAULT_UMASK, get_walk_probe, session_umask
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import error_path, fs_strerror
+from mirage.errors.posix import posix_phrase
+from mirage.errors.render import operand_spelling
+from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import (
-    ELOOP_STRERROR,
-    FS_ERRORS,
-    error_path,
-    fs_strerror,
-    operand_spelling,
-)
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.mode import DEFAULT_DIR_MODE, parse_chmod
 from mirage.utils.path import CycleError, norm, parent, walk_nodes
@@ -248,7 +244,7 @@ async def _make_walked(
                 mkdir_fn, accessor, path, node, root, links
             )
         except FileExistsError:
-            why = os.strerror(errno.ENOTDIR)
+            why = posix_phrase(FsCondition.ENOTDIR)
         except FS_ERRORS as exc:
             why = fs_strerror(exc)
         if why is not None:
@@ -287,12 +283,12 @@ async def _enter_node(
         try:
             links.resolve(node)
         except CycleError:
-            return ELOOP_STRERROR
+            return posix_phrase(FsCondition.ELOOP)
         target = await links.target_stat(node)
         if target is None:
-            return os.strerror(errno.EEXIST)
+            return posix_phrase(FsCondition.EEXIST)
         if target.type != FileType.DIRECTORY:
-            return os.strerror(errno.ENOTDIR)
+            return posix_phrase(FsCondition.ENOTDIR)
         return None
     probe = get_walk_probe()
     if probe is not None:
@@ -300,7 +296,7 @@ async def _enter_node(
             probe.stat, PathSpec.from_str_path(node)
         )
         if exists:
-            return None if is_dir else os.strerror(errno.ENOTDIR)
+            return None if is_dir else posix_phrase(FsCondition.ENOTDIR)
     real = links.resolve(node) if links is not None else node
     if real.startswith(root + "/"):
         await mkdir_fn(accessor, descendant_path(path, real), parents=True)

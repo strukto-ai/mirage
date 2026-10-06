@@ -7,9 +7,10 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.errors.constants import FS_ERRORS, READ_FAILURES
+from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-from mirage.utils.errors import FS_ERRORS, READ_FAILURES, fs_strerror
 
 _HINT = "Try `iconv --help' or `iconv --usage' for more information."
 _INCOMPLETE = "incomplete character or shift sequence at end of buffer"

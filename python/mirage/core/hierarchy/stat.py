@@ -25,8 +25,8 @@ from mirage.core.hierarchy.probe import (
 )
 from mirage.core.hierarchy.readdir import Guard
 from mirage.core.hierarchy.scope import ROOT, DetectFn, ScopeMatch
+from mirage.errors.fs import enoent
 from mirage.types import ContentType, FileStat, FileType, PathSpec
-from mirage.utils.errors import enoent
 
 ExtraFn = Callable[[ScopeMatch], dict[str, str]]
 StatHook = Callable[

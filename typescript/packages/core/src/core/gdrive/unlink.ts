@@ -15,7 +15,7 @@
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { eisdir, enoent } from '../../utils/errors.ts'
+import { eisdir, enoent } from '../../errors/fs.ts'
 import { deleteFile } from '../google/drive.ts'
 import { eaccesOnDenied, isFolder, resolveKey } from './resolve.ts'
 

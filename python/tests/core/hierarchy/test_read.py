@@ -144,7 +144,7 @@ def test_a_read_proves_its_parent_through_stat(accessor):
     # file itself, and its reader never runs.
     with pytest.raises(FileNotFoundError) as caught:
         asyncio.run(PROVEN_READ(accessor, spec("/rooms/green/a.json")))
-    assert caught.value.args == ("/h/rooms/green/a.json",)
+    assert caught.value.filename == "/h/rooms/green/a.json"
     assert accessor.calls == ["rooms"]
     out = asyncio.run(PROVEN_READ(accessor, spec("/rooms/red/z.json")))
     # The parent is proven; the file stays the reader's to prove.

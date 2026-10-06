@@ -16,8 +16,8 @@ from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dev.device import active_device
 from mirage.core.ram.read import read as ram_read
+from mirage.errors.fs import einval
 from mirage.types import PathSpec
-from mirage.utils.errors import einval
 from mirage.utils.path import norm
 
 

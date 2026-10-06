@@ -15,7 +15,7 @@
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import { invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { enotdir, isEexist, isEnoent } from '../../utils/errors.ts'
+import { enotdir, isEexist, isEnoent } from '../../errors/fs.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { baseName, createChildFolder, parentPath } from '../msgraph/drive.ts'

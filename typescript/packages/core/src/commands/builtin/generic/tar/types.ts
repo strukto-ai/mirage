@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { TarEntry } from '../../tar_helper.ts'
-import type { GzipDataError } from '../../../../utils/errors.ts'
+import type { GzipDataError } from '../../../../utils/compress.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { MemberKind } from '../archive/types.ts'
 

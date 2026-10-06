@@ -14,7 +14,7 @@
 
 import git from 'isomorphic-git'
 import { IOResult } from '../../../../io/types.ts'
-import { fsStrerror, isEisdir, isEnotdir, isMissingPath } from '../../../../utils/errors.ts'
+import { fsStrerror, isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import { sha1Hex } from '../../../../utils/hash.ts'
 import { posixNormpath } from '../../../../utils/path.ts'
 import { readStdinAsync } from '../../../builtin/utils/stream.ts'

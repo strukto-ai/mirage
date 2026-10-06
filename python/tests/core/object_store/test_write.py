@@ -148,7 +148,7 @@ def test_mkdir_refuses_a_directory_under_a_file(accessor):
     ):
         with pytest.raises(NotADirectoryError) as caught:
             _managed(mkdir(accessor, spec(path), parents=parents))
-        assert caught.value.args == (named,)
+        assert caught.value.filename == named
     assert store.puts == []
 
 
@@ -189,18 +189,18 @@ def test_write_names_the_path_not_the_key_when_the_container_is_gone(accessor):
     exc = _enoent_from(
         lambda d, s: make_write(d)(accessor, s, b"hi"), "/a/b/c.txt"
     )
-    assert str(exc) == "/mnt/a/b/c.txt"
+    assert exc.filename == "/mnt/a/b/c.txt"
 
 
 def test_create_and_truncate_name_the_path_too(accessor):
     created = _enoent_from(
         lambda d, s: make_create(d)(accessor, s), "/a/new.txt"
     )
-    assert str(created) == "/mnt/a/new.txt"
+    assert created.filename == "/mnt/a/new.txt"
     cut = _enoent_from(
         lambda d, s: make_truncate(d)(accessor, s, 4), "/a/cut.txt"
     )
-    assert str(cut) == "/mnt/a/cut.txt"
+    assert cut.filename == "/mnt/a/cut.txt"
 
 
 def test_a_store_error_that_is_not_a_missing_container_propagates(accessor):

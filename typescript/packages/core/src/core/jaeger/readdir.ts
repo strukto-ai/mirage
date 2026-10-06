@@ -14,7 +14,7 @@
 
 import type { JaegerAccessor } from '../../accessor/jaeger.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import { makeReaddir, type DirListing } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { jsonBytes } from '../render/json.ts'

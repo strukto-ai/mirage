@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expect, it } from 'vitest'
-import { eacces, enoent } from '../../../utils/errors.ts'
+import { eacces, enoent } from '../../../errors/fs.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { unzipGeneric } from './unzip.ts'
 

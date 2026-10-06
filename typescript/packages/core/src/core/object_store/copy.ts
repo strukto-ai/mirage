@@ -15,7 +15,7 @@
 import type { Accessor } from '../../accessor/base.ts'
 import { evictAfter, invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import type { ExistsFn, ObjectStoreDriver, PairFn } from './driver.ts'
 

@@ -10,9 +10,10 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import extra_operand_error
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import eexist, fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.path import resolve_path
 
 _ALPHABET = string.ascii_letters + string.digits
@@ -189,7 +190,7 @@ async def mktemp(
                 break
             name = draw()
         else:
-            raise FileExistsError(path.virtual)
+            raise eexist(path.virtual)
         if not dry_run:
             try:
                 await create(path)

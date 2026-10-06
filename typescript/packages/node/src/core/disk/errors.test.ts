@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PathSpec } from '@struktoai/mirage-core/types'
-import type { FsError } from '@struktoai/mirage-core/utils/errors'
+import type { FsError } from '@struktoai/mirage-core/errors/types'
 import { describe, expect, it } from 'vitest'
 import { diskError } from './errors.ts'
 

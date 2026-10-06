@@ -15,7 +15,6 @@
 import errno
 import inspect
 import logging
-import os
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -27,6 +26,10 @@ from mirage.context import (
     reset_explaining,
     set_explaining,
 )
+from mirage.errors.fs import eacces, erofs
+from mirage.errors.posix import posix_errno, posix_phrase
+from mirage.errors.render import fs_error_line
+from mirage.errors.types import FsCondition
 from mirage.policy.base import Policy
 from mirage.policy.builtin.hidden_paths import HiddenPathsPolicy
 from mirage.policy.builtin.mount_mode import MountModePolicy
@@ -53,7 +56,6 @@ from mirage.policy.types import (
 )
 from mirage.runtime.routing.types import RouteContext
 from mirage.types import Limit, MountMode, PathSpec, Refusal
-from mirage.utils.errors import ReadOnlyError, eacces, fs_error_line
 
 if TYPE_CHECKING:
     from mirage.policy.decisions import Decisions
@@ -167,40 +169,29 @@ def says_why(text: str, refusal: Refusal) -> bool:
 
 
 def policy_denied(
-    deny: Deny, filename: str, strerror: str = os.strerror(errno.EACCES)
+    action: Deny | Pending,
+    filename: str,
+    strerror: str = posix_phrase(FsCondition.EACCES),
 ) -> PolicyDenied:
-    """The error a door raises for a policy's Deny, its record noted for
-    the line running it.
+    """The error a door raises for a policy's Deny, or for a question the
+    host has not answered, its record noted for the line running it.
 
     The error says what the terminal would, EACCES and ``strerror``;
-    the reason rides the record, on the error for a caller that catches
-    it and on the line's result for one that only reads what a command
-    printed.
+    the reason (or the ask id the agent quotes) rides the record, on the
+    error for a caller that catches it and on the line's result for one
+    that only reads what a command printed.
 
     Args:
-        deny (Deny): the policy's refusal.
+        action (Deny | Pending): the policy's refusal or the ledger's
+            answer.
         filename (str): the path or name refused.
         strerror (str): the terminal's words, ``Permission denied``
             unless the door words its own.
     """
-    refusal = refusal_of(deny)
-    note_refusal(refusal)
-    return PolicyDenied(errno.EACCES, strerror, filename, refusal=refusal)
-
-
-def policy_pending(pending: Pending, filename: str) -> PolicyDenied:
-    """The error a door raises for a question the host has not answered:
-    a plain EACCES, as the terminal would print it, with the ask id the
-    agent quotes on the record.
-
-    Args:
-        pending (Pending): the ledger's answer.
-        filename (str): the path asked about.
-    """
-    refusal = refusal_of(pending)
+    refusal = refusal_of(action)
     note_refusal(refusal)
     return PolicyDenied(
-        errno.EACCES, os.strerror(errno.EACCES), filename, refusal=refusal
+        posix_errno(FsCondition.EACCES), strerror, filename, refusal=refusal
     )
 
 
@@ -289,7 +280,7 @@ async def pre_ops_gate(
         return
     deciding = trace is DryRun.DECIDING
     if deciding and write:
-        raise ReadOnlyError(errno.EROFS, "Read-only file system", path.virtual)
+        raise erofs(path.virtual)
     if not (
         policies.wants("pre_ops")
         or check_hidden
@@ -310,7 +301,7 @@ async def pre_ops_gate(
         if settled is None:
             return
         if isinstance(settled, Pending):
-            raise policy_pending(settled, path.virtual)
+            raise policy_denied(settled, path.virtual)
         answer = settled
     if answer is not None:
         if answer.error is not None:

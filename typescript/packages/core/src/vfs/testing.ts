@@ -5,7 +5,7 @@ import type { CommandIO } from '../commands/builtin/generic_bind/adapter.ts'
 import { type ByteSource, materialize } from '../io/types.ts'
 import type { OpKwargs, RegisteredOp } from '../ops/registry.ts'
 import { type FileStat, FileType, type PathSpec } from '../types.ts'
-import { isEnoent } from '../utils/errors.ts'
+import { isEnoent } from '../errors/fs.ts'
 import { VFSAdapter } from './adapter.ts'
 import type { BaseVFS } from './base.ts'
 

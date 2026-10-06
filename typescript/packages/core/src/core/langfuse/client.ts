@@ -14,7 +14,7 @@
 
 import type { PathSpec } from '../../types.ts'
 import { apiRequest } from '../api/client.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
 export class LangfuseApiError extends Error {

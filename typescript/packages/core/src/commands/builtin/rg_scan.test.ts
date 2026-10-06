@@ -20,7 +20,7 @@ import { specOf } from '../spec/builtins.ts'
 import { FlagView } from '../spec/flag_view.ts'
 import type { FlagValue } from '../spec/types.ts'
 import { parseFlags, rgGeneric, walkFilter } from './generic/rg.ts'
-import { eacces, enoent } from '../../utils/errors.ts'
+import { eacces, enoent } from '../../errors/fs.ts'
 import { decodeText } from '../../shell/bytes.ts'
 import {
   type WalkFilter,

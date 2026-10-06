@@ -14,7 +14,7 @@
 
 import type { LinkView, MountView } from '../../../../ops/types.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { fsStrerror, isFsError, walkRefusal } from '../../../../utils/errors.ts'
+import { fsStrerror, isFsError, walkRefusal } from '../../../../errors/fs.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
 import { respellOne } from '../../../../utils/path.ts'
 import { lstripSlash, rstripSlash } from '../../../../utils/slash.ts'
@@ -36,6 +36,7 @@ import {
   USAGE_HINT,
 } from './constants.ts'
 import type { CreateResult, Member } from './types.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
 
 export type { DirProbe, StatFn, WalkFn }
 
@@ -160,7 +161,7 @@ export async function checkDirectories(
       if (directory.walkError !== null) throw walkRefusal(directory)
       if (await isDir(directory)) continue
       await stat(directory)
-      reason = 'Not a directory'
+      reason = posixPhrase('ENOTDIR')
     } catch (err) {
       if (!isFsError(err)) throw err
       reason = fsStrerror(err) ?? String(err)

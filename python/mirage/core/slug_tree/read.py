@@ -12,12 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno
 from collections.abc import AsyncIterator
 
 from mirage.cache.index import IndexCacheStore, IndexEntry
 from mirage.core.slug_tree.tree import SlugTree
 from mirage.core.slug_tree.types import A
+from mirage.errors.fs import eisdir
 from mirage.types import PathSpec
 
 
@@ -34,7 +34,7 @@ async def file_entry(
     """
     resolved = await tree.resolve(accessor, path, index)
     if resolved.is_dir:
-        raise IsADirectoryError(errno.EISDIR, "Is a directory", path.virtual)
+        raise eisdir(path.virtual)
     return resolved.entry
 
 

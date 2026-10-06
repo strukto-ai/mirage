@@ -11,11 +11,13 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.core.jq import load_failure
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import eisdir, fs_strerror
+from mirage.errors.render import fs_error_line
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import FS_ERRORS, eisdir, fs_error_line, fs_strerror
 
 # The commands whose program files the executor reads before routing and
 # lowers to their inline form. jq reads its -f file itself, after its

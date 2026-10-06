@@ -14,7 +14,7 @@
 
 import type { LinkView } from '../../../ops/types.ts'
 import { FileType, type PathSpec } from '../../../types.ts'
-import { ELOOP_STRERROR } from '../../../utils/errors.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
 import { CycleError } from '../../../utils/path.ts'
 
 // Whether an operand typed with a trailing slash names a symlink.
@@ -74,7 +74,7 @@ export async function mkdirLinkRefusal(
       links.resolve(p.virtual)
     } catch (err) {
       if (!(err instanceof CycleError)) throw err
-      return { taken: true, message: `mkdir: cannot stat '${p.rawPath}': ${ELOOP_STRERROR}` }
+      return { taken: true, message: `mkdir: cannot stat '${p.rawPath}': ${posixPhrase('ELOOP')}` }
     }
   }
   const target = await links.targetStat(p.virtual)

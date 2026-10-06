@@ -6,10 +6,10 @@ from mirage import RAMVFS, Workspace
 from mirage.commands.config import command
 from mirage.commands.errors import CommandTimeoutError
 from mirage.commands.spec import SPECS
+from mirage.errors.fs import eacces
 from mirage.io.types import IOResult, materialize
 from mirage.ops.registry import op as register_op
 from mirage.types import PathSpec
-from mirage.utils.errors import eacces
 from mirage.workspace.mount.mount import MountEntry
 
 

@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
+import type { FsCondition } from '../../../../errors/types.ts'
 
 // git exits 128 for every fatal, which is neither the argparse usage exit (2)
 // nor the generic command failure (1) the CLI dispatcher applies to a thrown
@@ -275,9 +277,9 @@ export class CannotMkdirError extends GitError {
 export class ConfigLockError extends GitError {
   override readonly prefix = null
 
-  constructor(path: string, reason: string) {
+  constructor(path: string, reason: FsCondition) {
     super(
-      `error: could not lock config file ${path}: ${reason}\n` +
+      `error: could not lock config file ${path}: ${posixPhrase(reason)}\n` +
         "fatal: could not set 'core.repositoryformatversion' to '0'",
     )
   }
@@ -417,8 +419,8 @@ export class BareResetError extends GitError {
  * the read-only ones included (pinned against git 2.54).
  */
 export class WorkTreeChdirError extends GitError {
-  constructor(path: string, reason = 'No such file or directory') {
-    super(`cannot chdir to '${path}': ${reason}`)
+  constructor(path: string, reason: FsCondition = 'ENOENT') {
+    super(`cannot chdir to '${path}': ${posixPhrase(reason)}`)
   }
 }
 
@@ -431,8 +433,8 @@ export class WorkTreeChdirError extends GitError {
  * tolerated finds the repository above it and quietly runs there instead.
  */
 export class NoWorkingDirectoryError extends GitError {
-  constructor(path: string, reason = 'No such file or directory') {
-    super(`cannot change to '${path}': ${reason}`)
+  constructor(path: string, reason: FsCondition = 'ENOENT') {
+    super(`cannot change to '${path}': ${posixPhrase(reason)}`)
   }
 }
 
@@ -1012,8 +1014,8 @@ export class RemovalRefusedError extends GitError {
 export class RemovePathError extends GitError {
   override readonly report: string
 
-  constructor(path: string, report = '', reason = 'Is a directory') {
-    super(`git rm: '${path}': ${reason}`)
+  constructor(path: string, report = '', reason: FsCondition = 'EISDIR') {
+    super(`git rm: '${path}': ${posixPhrase(reason)}`)
     this.report = report
   }
 }
@@ -1082,8 +1084,8 @@ export class NotADirectoryDestinationError extends GitError {
  * neither does this.
  */
 export class RenameFailedError extends GitError {
-  constructor(source: string, reason = 'No such file or directory') {
-    super(`renaming '${source}' failed: ${reason}`)
+  constructor(source: string, reason: FsCondition = 'ENOENT') {
+    super(`renaming '${source}' failed: ${posixPhrase(reason)}`)
   }
 }
 

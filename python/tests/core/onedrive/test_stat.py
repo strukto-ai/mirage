@@ -104,7 +104,7 @@ async def test_stat_missing_raises_file_not_found():
                     mount_key("/od/Docs/report.docx", "/od"),
                 ),
             )
-    assert str(exc.value) == "/od/Docs/report.docx"
+    assert exc.value.filename == "/od/Docs/report.docx"
 
 
 @pytest.mark.asyncio

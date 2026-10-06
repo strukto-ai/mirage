@@ -14,6 +14,7 @@
 
 import re
 
+from mirage.errors.fs import enoent
 from mirage.utils.naming import make_id_name
 from mirage.utils.sanitize import (
     NAME_MAX_BYTES,
@@ -114,11 +115,11 @@ def parse_event_filename(name: str) -> tuple[str, str | None]:
         (None in a one-day bucket, whose directory is the day).
     """
     if not name.endswith(EVENT_SUFFIX):
-        raise FileNotFoundError(name)
+        raise enoent(name)
     event_id, sep, rest = name[: -len(EVENT_SUFFIX)].partition("__")
     label = LABEL_RE.match(rest)
     if not sep or not event_id or label is None:
-        raise FileNotFoundError(name)
+        raise enoent(name)
     return event_id, label.group(1)
 
 

@@ -15,6 +15,7 @@
 import asyncssh
 
 from mirage.core.ssh.utils import join_root
+from mirage.errors.fs import enoent
 from mirage.vfs.ssh.config import SSHConfig
 
 
@@ -37,7 +38,7 @@ async def walk(
     try:
         listing = await sftp.readdir(join_root(config.root, path))
     except asyncssh.SFTPNoSuchFile:
-        raise FileNotFoundError(path)
+        raise enoent(path)
     for entry in listing:
         filename = (
             entry.filename.decode("utf-8")

@@ -20,7 +20,7 @@ import {
   type LookupResult,
 } from '@struktoai/mirage-core/cache/index/config'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { eacces } from '@struktoai/mirage-core/utils/errors'
+import { eacces } from '@struktoai/mirage-core/errors/fs'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import { HfHubError } from './client.ts'
 import { ABSENT_STATUSES } from './constants.ts'

@@ -15,7 +15,8 @@
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { ancestors } from '../../utils/path.ts'
-import { eexist, eisdir, enoent, enotdir, type FsError } from '../../utils/errors.ts'
+import { eexist, eisdir, enoent, enotdir } from '../../errors/fs.ts'
+import { type FsError } from '../../errors/types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 
 // Reject a destination whose parent chain is not all directories. Mirrors how

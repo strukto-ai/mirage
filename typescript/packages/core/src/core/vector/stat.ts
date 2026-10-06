@@ -15,7 +15,7 @@
 import type { Accessor } from '../../accessor/base.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { perAccessor } from '../hierarchy/bind.ts'
 import type { ReaddirFn } from '../hierarchy/probe.ts'

@@ -10,10 +10,11 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import missing_operand_error
+from mirage.errors.fs import eloop, enoent, enotdir
+from mirage.errors.render import fs_error_line
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec, StatFn, Visibility
-from mirage.utils.errors import eloop, enoent, enotdir, fs_error_line
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mount_prefix_of
 

@@ -51,11 +51,11 @@ from mirage.core.jq.types import (
     JqRun,
     StreamReads,
 )
+from mirage.errors.constants import FS_ERRORS
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
-from mirage.utils.errors import FS_ERRORS
 
 INDENT_MIN = -1
 INDENT_MAX = 7

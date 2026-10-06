@@ -4,6 +4,8 @@ import pytest
 
 from mirage.commands.builtin.generic.archive import walk as aw
 from mirage.commands.builtin.generic.archive.types import Walked
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.ops.types import LinkView, MountView
 from mirage.types import (
     LINK_TARGET_KEY,
@@ -215,8 +217,8 @@ async def test_a_real_cycle_is_one_fatal_problem_per_member():
         tree, _spec("/d"), links=links, dereference=True, recurse=True
     )
     assert [(p.path, p.reason, p.fatal) for p in scan.problems] == [
-        ("/d/a", aw._TOO_MANY_LEVELS, True),
-        ("/d/b", aw._TOO_MANY_LEVELS, True),
+        ("/d/a", posix_phrase(FsCondition.ELOOP), True),
+        ("/d/b", posix_phrase(FsCondition.ELOOP), True),
     ]
     # GNU keeps the directory entry and exits 2; it does not abort.
     assert [e.name_path for e in scan.entries] == ["/d"]
@@ -230,7 +232,7 @@ async def test_a_dangling_link_is_fatal_with_the_enoent_wording():
         tree, _spec("/d"), links=links, dereference=True, recurse=True
     )
     assert [(p.reason, p.fatal) for p in scan.problems] == [
-        (aw._NO_SUCH, True)
+        (posix_phrase(FsCondition.ENOENT), True)
     ]
 
 

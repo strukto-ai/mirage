@@ -14,7 +14,7 @@
 
 import { vi } from 'vitest'
 import { FileStat, FileType, MountMode, type PathSpec, ReadPolicy } from '../../types.ts'
-import { enotsup } from '../../utils/errors.ts'
+import { enotsup } from '../../errors/fs.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { Reconciler } from '../reconcile.ts'

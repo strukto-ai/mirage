@@ -16,10 +16,10 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from mirage.commands.config import CommandOpts
+from mirage.errors.fs import eloop
 from mirage.ops.types import LinkView
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec
-from mirage.utils.errors import eloop
 from mirage.utils.path import CycleError, resolve_path
 
 

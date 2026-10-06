@@ -7,6 +7,7 @@ from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.fs import eisdir
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec, PolymorphicReadFn, StatFn
 
@@ -48,7 +49,7 @@ async def zcat_generic(
 
     async def read(path: PathSpec) -> AsyncIterator[bytes]:
         if (await stat(path)).type is FileType.DIRECTORY:
-            raise IsADirectoryError(path.virtual)
+            raise eisdir(path.virtual)
         async for chunk in read_stream(path):
             yield chunk
 

@@ -30,13 +30,11 @@ from mirage.commands.config import CommandOpts, command
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.constants import WALK_ERRORS
+from mirage.errors.fs import fs_strerror
+from mirage.errors.types import OperationNotSupportedError
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import PathSpec
-from mirage.utils.errors import (
-    WALK_ERRORS,
-    OperationNotSupportedError,
-    fs_strerror,
-)
 
 # Exit codes real curl uses for the failures mirage can hit. An HTTP error
 # status is deliberately absent: curl treats 4xx/5xx as a successful transfer

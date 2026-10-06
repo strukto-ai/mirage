@@ -23,11 +23,12 @@ from mirage.commands.builtin.utils.identity import (
 )
 from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
 from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.fs import fs_strerror, walk_refusal
+from mirage.errors.render import format_fs_error
 from mirage.policy import PolicyDenied
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import format_fs_error, fs_strerror, walk_refusal
 from mirage.utils.path import CycleError
 from mirage.utils.quote import shell_quote_always
 from mirage.workspace.executor.builtins.shared import expand_operands, result

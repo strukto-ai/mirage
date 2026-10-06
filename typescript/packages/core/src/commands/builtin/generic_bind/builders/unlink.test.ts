@@ -18,7 +18,7 @@ import { RAMIndexCacheStore } from '../../../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import { materialize } from '../../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
-import { eacces, enoent } from '../../../../utils/errors.ts'
+import { eacces, enoent } from '../../../../errors/fs.ts'
 import type { CommandIO } from '../adapter.ts'
 import { BUILDER } from './unlink.ts'
 

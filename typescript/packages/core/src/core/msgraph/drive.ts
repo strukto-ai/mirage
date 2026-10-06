@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { enotsup } from '../../utils/errors.ts'
+import { enotsup } from '../../errors/fs.ts'
 import { IndexEntry, ResourceType } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { buildTree, emitStartPath, keep, type PredNode } from '../../commands/builtin/find_eval.ts'
@@ -25,7 +25,7 @@ import {
 } from '../../observe/context.ts'
 import type { FindOptions } from '../../vfs/base.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
-import { eexist, enoent, enotdir, listingError } from '../../utils/errors.ts'
+import { eexist, enoent, enotdir, listingError } from '../../errors/fs.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { windowFor } from '../../utils/ranges.ts'

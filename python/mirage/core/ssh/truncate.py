@@ -15,9 +15,9 @@
 from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.context import invalidate_after_write
 from mirage.core.ssh.utils import join_root, open_for_write
+from mirage.errors.fs import enotsup
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.errors import enotsup
 
 
 async def truncate(

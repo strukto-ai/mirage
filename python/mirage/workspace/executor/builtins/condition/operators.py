@@ -19,12 +19,12 @@ from mirage.commands.builtin.utils.paths import (
     dot_refusal,
     typed_spec,
 )
+from mirage.errors.types import FileTooLargeError
 from mirage.io.types import materialize
 from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ArithError, ExitSignal
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import iso_timestamp
-from mirage.utils.errors import FileTooLargeError
 from mirage.utils.path import (
     CycleError,
     dotted_spelling,

@@ -112,6 +112,7 @@
     {"id": "read_numbers_lines", "input": {"tool": "read", "arguments": {"path": "/src/a.py"}}, "expect": {"text": "     1\tNeedle\n     2\thay\n", "is_error": false}},
     {"id": "read_takes_a_window", "input": {"tool": "read", "arguments": {"path": "/src/a.py", "offset": 1, "limit": 1}}, "expect": {"text": "     2\thay\n", "is_error": false}},
     {"id": "read_reports_a_missing_file", "input": {"tool": "read", "arguments": {"path": "/src/none.txt"}}, "expect": {"text": "Error: file '/src/none.txt' not found", "is_error": true}},
+    {"id": "read_reports_a_directory", "input": {"tool": "read", "arguments": {"path": "/src/deep"}}, "expect": {"text": "Error: /src/deep: Is a directory", "is_error": true}},
     {"id": "ls_lists_a_directory", "input": {"tool": "ls", "arguments": {"path": "/src"}}, "expect": {"text": "a.py\nb.txt\ndeep\n", "is_error": false}},
     {"id": "grep_searches_recursively", "input": {"tool": "grep", "arguments": {"pattern": "needle", "path": "/src"}}, "expect": {"text": "/src/b.txt:1:needle\n", "is_error": false}},
     {"id": "grep_ignores_case_in_included_files", "input": {"tool": "grep", "arguments": {"pattern": "needle", "path": "/src", "ignore_case": true, "include": "*.py"}}, "expect": {"text": "/src/a.py:1:Needle\n", "is_error": false}},

@@ -17,8 +17,8 @@ from mirage.cache.context import invalidate_after_unlink
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gdrive.resolve import eacces_on_denied, resolve_key
 from mirage.core.google.drive import delete_file, list_files
+from mirage.errors.fs import enoent, enotdir, enotempty
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent, enotdir, enotempty
 
 
 @eacces_on_denied

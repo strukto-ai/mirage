@@ -17,9 +17,9 @@ import pytest
 from mirage.commands.builtin.generic.crossmount.relay.wc import run_wc
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS
+from mirage.errors.fs import enoent
 from mirage.io.types import CountedRun, IOResult, materialize
 from mirage.types import FileStat, FileType, MountMode, PathSpec
-from mirage.utils.errors import enoent
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 

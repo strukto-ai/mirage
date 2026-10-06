@@ -16,8 +16,8 @@ import asyncio
 
 import pytest
 
+from mirage.errors.types import ReadOnlyError
 from mirage.types import MountMode
-from mirage.utils.errors import ReadOnlyError
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.session import reset_current_session, set_current_session

@@ -15,7 +15,7 @@
 import type { Stats } from 'ssh2'
 import { FileStat, FileType, type PathSpec } from '@struktoai/mirage-core/types'
 import { epochToIso } from '@struktoai/mirage-core/utils/dates'
-import { eacces, enoent } from '@struktoai/mirage-core/utils/errors'
+import { eacces, enoent } from '@struktoai/mirage-core/errors/fs'
 import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
