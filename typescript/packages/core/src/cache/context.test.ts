@@ -22,6 +22,8 @@ import { shiftPerformanceNow } from './_test_util.ts'
 import { PathSpec } from '../types.ts'
 import {
   activeCacheManager,
+  captureRead,
+  publishRead,
   evictAfter,
   invalidateAfterMove,
   invalidateAfterUnlink,
@@ -208,4 +210,23 @@ describe('evictAfter', () => {
       warn.mockRestore()
     },
   )
+})
+
+it.each([['verified'], [null], ['first', 'second']])(
+  'capture keeps exact-object facts, including %j',
+  async (...tokens) => {
+    const data = new Uint8Array([1])
+    const [result, facts] = await captureRead('/m/x', () => {
+      publishRead('/m/other', data, 'wrong-path')
+      publishRead('/m/x', new Uint8Array([1]), 'wrong-object')
+      for (const token of tokens) publishRead('/m/x', data, token)
+      return Promise.resolve(data)
+    })
+    expect(result).toBe(data)
+    expect(facts).toEqual(tokens)
+  },
+)
+
+it('capture preserves non-byte results', async () => {
+  expect(await captureRead('/m/x', () => Promise.resolve(42))).toEqual([42, []])
 })

@@ -12,16 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
 from typing import Any
 
 from mirage.accessor.box import BoxAccessor
+from mirage.cache.context import active_cache_manager
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
+from mirage.cache.index.warm import entry_or_warm
 from mirage.core.box.api import absent_on_404, list_folder_items
-from mirage.types import PathSpec
+from mirage.core.box.constants import SHA1
+from mirage.core.box.fingerprint import token_of
+from mirage.core.box.resolve import root_id
+from mirage.types import FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
-
-ROOT_FOLDER_ID = "0"
 
 
 def resource_type_for(item: dict[str, Any]) -> str:
@@ -48,24 +52,26 @@ async def readdir(
         return cached.entries
 
     if not key:
-        folder_id = accessor.config.root_folder_id or ROOT_FOLDER_ID
+        folder_id = root_id(accessor)
     else:
-        result = await index.get(virtual_key)
-        if result.entry is None:
-            parent_virtual = virtual_key.rstrip("/").rsplit("/", 1)[0] or "/"
-            if parent_virtual != virtual_key:
-                parent_path = PathSpec.from_str_path(
-                    parent_virtual, mount_key(parent_virtual, prefix)
-                )
-                await readdir(accessor, parent_path, index)
-                result = await index.get(virtual_key)
-            if result.entry is None:
-                raise enoent(virtual)
-        if result.entry.resource_type != "box/folder":
-            # Listing a file id would 404 on /folders/{id}/items; surface
-            # the POSIX error so generic ls falls back to the file entry.
+        manager = active_cache_manager()
+        probed = (
+            manager.probed_stat(path_spec) if manager is not None else None
+        )
+        if probed is not None and probed.type != FileType.DIRECTORY:
             raise NotADirectoryError(virtual)
-        folder_id = result.entry.id
+        parent_virtual = virtual_key.rstrip("/").rsplit("/", 1)[0] or "/"
+        parent_path = PathSpec.from_str_path(
+            parent_virtual, mount_key(parent_virtual, prefix)
+        )
+        entry = await entry_or_warm(
+            index, virtual_key, partial(readdir, accessor, parent_path, index)
+        )
+        if entry is None:
+            raise enoent(virtual)
+        if entry.resource_type != "box/folder":
+            raise NotADirectoryError(virtual)
+        folder_id = entry.id
 
     items = await absent_on_404(
         virtual, lambda: list_folder_items(accessor.token_manager, folder_id)
@@ -78,7 +84,7 @@ async def readdir(
             continue
         is_dir = it.get("type") == "folder"
         filename = it["name"]
-        sha1 = it.get("sha1")
+        sha1 = token_of(it.get(SHA1))
         entry = IndexEntry(
             id=it["id"],
             name=filename,
@@ -86,7 +92,7 @@ async def readdir(
             remote_time=it.get("modified_at") or "",
             vfs_name=filename,
             size=None if is_dir else it.get("size"),
-            extra={"sha1": sha1} if sha1 else {},
+            extra={SHA1: sha1} if sha1 else {},
         )
         entries.append((filename, entry, is_dir))
 

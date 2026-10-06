@@ -30,7 +30,7 @@ from mirage.cache.index.config import (
     RedisIndexConfig,
 )
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW
-from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.cache.index.ram import ListingCheckStore, RAMIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.types import FileStat, FileType, PathSpec, ReadPolicy, ReadSpec
 from mirage.utils.errors import enotsup
@@ -1104,3 +1104,42 @@ async def test_listing_gate_forgets_its_checks_when_the_store_changes():
             mount.index_store = replacement
             assert (await mount.index.list_dir("/m/a")).entries == []
         assert vfs.stats == ["/m", "/m"]
+
+
+@pytest.mark.asyncio
+async def test_the_probe_hints_the_mount_index_row():
+    # The probe stats through a scratch store whose only lead is the
+    # mount's own row: a backend with no path lookup (box) may address
+    # that id once, and must confirm what comes back.
+    resource = RAMVFS()
+    resource._store.files["/f.txt"] = b"v1"
+    ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+    try:
+        await ws.namespace.ensure_loaded()
+        mount = ws.namespace.mount_for("/data/f.txt")
+        mount.read = ReadSpec(policy=ReadPolicy.FRESH)
+        row = IndexEntry(id="F1", name="f.txt", resource_type="file")
+        await mount.index_store.set_dir("/data", [("f.txt", row)])
+        await mount.index_store.set_dir("/elsewhere", [("g.txt", row)])
+        assert (await mount.index.get("/data/f.txt")).entry is not None
+        assert (await mount.index_store.get("/elsewhere/g.txt")).entry
+        seen = []
+
+        async def capture(op, path, **kwargs):
+            index = kwargs["index"]
+            assert isinstance(index, ListingCheckStore)
+            # Hints come through the mount's view, whose ownership check
+            # keeps a row outside the mount from passing as a lead.
+            assert await index.hint("/elsewhere/g.txt") is None
+            seen.append(await index.hint("/data/f.txt"))
+            return FileStat(
+                name="f.txt", type=FileType.FILE, fingerprint="fp1"
+            )
+
+        mount.execute_op = capture
+        await ws.cache.set("/data/f.txt", b"v1", fingerprint="fp1")
+        rec = Reconciler(ws.cache, ws.namespace)
+        assert await rec.may_serve_cached(mount, "/data/f.txt") is True
+        assert seen == [(await mount.index.get("/data/f.txt")).entry]
+    finally:
+        await ws.close()

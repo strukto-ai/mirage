@@ -54,6 +54,42 @@ describe.skipIf(skip)('RedisIndexCacheStore', () => {
     return (store as unknown as { client: () => Promise<RedisClientLike> }).client()
   }
 
+  it.each(['none', 'replace', 'delete'])('conditional replacement is atomic: %s', async (peer) => {
+    await store.setDir('/dir', [['a', entry('old', 'a')]], undefined, { version: 'v1' })
+    const old = (await store.get('/dir/a')).entry
+
+    if (old == null) throw new Error('missing seeded row')
+    const client = await redis()
+    const key = (store as unknown as { entryKey: (path: string) => string }).entryKey('/dir/a')
+    const raw = JSON.stringify(Object.fromEntries(Object.entries(old.toJSON()).reverse()), null, 2)
+    await client.set(key, raw)
+    const latest = old.copyWith({ size: 9 })
+    const listingKey = (store as unknown as { childrenKey: (path: string) => string }).childrenKey(
+      '/dir',
+    )
+    const listingRaw = await client.get(listingKey)
+    const evaluate = client.eval.bind(client)
+    const spy = vi.spyOn(client, 'eval').mockImplementation(async (script, options) => {
+      expect(options.keys).toEqual([key])
+      expect(options.arguments[0]).toBe(raw)
+      if (peer === 'replace') await client.set(key, JSON.stringify(latest))
+      else if (peer === 'delete') await client.del(key)
+      return evaluate(script, options)
+    })
+    try {
+      expect(
+        await store.replaceIfUnchanged('/dir/a', JSON.stringify(old), entry('confirmed', 'a')),
+      ).toBe(peer === 'none')
+      expect(spy).toHaveBeenCalledTimes(1)
+    } finally {
+      spy.mockRestore()
+    }
+    const current = (await store.get('/dir/a')).entry ?? null
+    if (peer === 'none') expect(current?.id).toBe('confirmed')
+    else expect(current).toEqual(peer === 'replace' ? latest : null)
+    expect(await client.get(listingKey)).toBe(listingRaw)
+  })
+
   it('evicts a subtree without scanning unrelated Redis keys', async () => {
     const client = await redis()
     const child = entry('child', 'child')
@@ -818,7 +854,7 @@ ${script}`,
   })
 })
 
-describe('deferred Redis seeds', () => {
+describe('Redis client protocol', () => {
   function client() {
     const pipeline: ReturnType<RedisClientLike['multi']> = {
       eval: vi.fn(),
@@ -843,6 +879,46 @@ describe('deferred Redis seeds', () => {
     }
     return { value, pipeline }
   }
+
+  it.each([0, 1])('conditional replacement passes exact wire bytes to CAS: %s', async (result) => {
+    const { value, pipeline } = client()
+    const old = entry('old', 'a')
+    const raw = ' { "resource_type": "file", "name": "a", "id": "old" } '
+    vi.mocked(value.get).mockResolvedValue(raw)
+    vi.mocked(value.eval).mockResolvedValue(result)
+    const store = new RedisIndexCacheStore({ client: value })
+    expect(await store.replaceIfUnchanged('/a', JSON.stringify(old), entry('confirmed', 'a'))).toBe(
+      result === 1,
+    )
+    expect(value.get).toHaveBeenCalledTimes(1)
+    expect(value.eval).toHaveBeenCalledTimes(1)
+    const call = vi.mocked(value.eval).mock.calls[0]
+    if (call === undefined) throw new Error('missing CAS call')
+    expect(call[1].keys).toEqual(vi.mocked(value.get).mock.calls[0])
+    expect(call[1].arguments[0]).toBe(raw)
+    const replacement = call[1].arguments[1]
+    if (replacement === undefined) throw new Error('missing CAS replacement')
+    expect(IndexEntry.fromJSON(replacement).id).toBe('confirmed')
+    expect(value.set).not.toHaveBeenCalled()
+    expect(pipeline.exec).not.toHaveBeenCalled()
+  })
+
+  it.each([null, JSON.stringify(entry('other', 'a'))])(
+    'conditional replacement skips absent or changed rows: %s',
+    async (raw) => {
+      const { value } = client()
+      vi.mocked(value.get).mockResolvedValue(raw)
+      const store = new RedisIndexCacheStore({ client: value })
+      expect(
+        await store.replaceIfUnchanged(
+          '/a',
+          JSON.stringify(entry('old', 'a')),
+          entry('confirmed', 'a'),
+        ),
+      ).toBe(false)
+      expect(value.eval).not.toHaveBeenCalled()
+    },
+  )
 
   it('retains failed seeds for a close retry', async () => {
     const { value, pipeline } = client()

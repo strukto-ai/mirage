@@ -75,6 +75,20 @@ class IndexCacheStore:
     async def put(self, vfs_path: str, entry: IndexEntry) -> None:
         raise NotImplementedError
 
+    async def replace_if_unchanged(
+        self, vfs_path: str, predecessor: str, entry: IndexEntry
+    ) -> bool:
+        """Replace an existing row atomically without renewing its listing.
+
+        Custom stores may decline this optimization without writing.
+
+        Args:
+            vfs_path (str): mount-absolute entry key.
+            predecessor (str): serialized row captured before the probe.
+            entry (IndexEntry): confirmed replacement metadata.
+        """
+        return False
+
     async def list_dir(self, vfs_path: str) -> ListResult:
         raise NotImplementedError
 

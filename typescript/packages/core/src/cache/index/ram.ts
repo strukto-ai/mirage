@@ -87,6 +87,22 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     })
   }
 
+  override replaceIfUnchanged(
+    path: string,
+    predecessor: string,
+    entry: IndexEntry,
+  ): Promise<boolean> {
+    return this.lock.withLock(path, () => {
+      const current = this.entryMap.get(path)
+      if (current === undefined || JSON.stringify(current) !== predecessor)
+        return Promise.resolve(false)
+      const stored =
+        entry.indexTime === '' ? entry.copyWith({ indexTime: toIsoZ(new Date()) }) : entry
+      this.entryMap.set(path, stored)
+      return Promise.resolve(true)
+    })
+  }
+
   listDir(vfsPath: string): Promise<ListResult> {
     const exp = this.expiry.get(vfsPath)
     if (exp === undefined) return Promise.resolve({ status: LookupStatus.NOT_FOUND })
@@ -298,4 +314,20 @@ export class RAMIndexCacheStore extends IndexCacheStore {
  *
  * Mirrors Python's `ListingCheckStore`.
  */
-export class ListingCheckStore extends RAMIndexCacheStore {}
+export class ListingCheckStore extends RAMIndexCacheStore {
+  readonly hintedRows = new Map<string, string>()
+  private readonly hints: IndexCacheStore | null
+
+  constructor(options: { hints?: IndexCacheStore } = {}) {
+    super()
+    this.hints = options.hints ?? null
+  }
+
+  /** Offer the mount row as a lead that the backend must confirm live. */
+  async hint(vfsPath: string): Promise<IndexEntry | null> {
+    if (this.hints === null) return null
+    const entry = (await this.hints.get(vfsPath)).entry ?? null
+    if (entry !== null) this.hintedRows.set(vfsPath, JSON.stringify(entry))
+    return entry
+  }
+}

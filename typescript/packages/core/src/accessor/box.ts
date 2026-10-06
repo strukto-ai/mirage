@@ -14,6 +14,7 @@
 
 import { Accessor } from './base.ts'
 import type { BoxTokenManager } from '../core/box/client.ts'
+import { ALL_FILES_FOLDER_ID } from '../core/box/constants.ts'
 
 export class BoxAccessor extends Accessor {
   readonly tokenManager: BoxTokenManager
@@ -30,7 +31,7 @@ export class BoxAccessor extends Accessor {
   }) {
     super()
     this.tokenManager = opts.tokenManager
-    this.rootFolderId = opts.rootFolderId ?? '0'
+    this.rootFolderId = opts.rootFolderId ?? ALL_FILES_FOLDER_ID
     this.contentSearch = opts.contentSearch === true
   }
 }

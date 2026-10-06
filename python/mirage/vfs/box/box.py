@@ -36,6 +36,10 @@ class BoxVFS(BaseVFS):
     # Box item listings carry an exact byte `size` for every file (0
     # included); sizeless weblinks are filtered out of listings.
     sizes_always_known: bool = True
+    # stat and every whole read stamp the file's sha1, which a listing row
+    # and GET /files/{id} carry. A download names no version, so a read
+    # checks its bytes against the row it resolved through.
+    read_revalidatable: bool = True
     prompt: str = PROMPT
 
     def __init__(self, config: BoxConfig) -> None:

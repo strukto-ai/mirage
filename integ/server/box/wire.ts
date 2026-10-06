@@ -56,6 +56,15 @@ export function render(item: Item): JsonValue {
   return out
 }
 
+// The chain from the account root down to an item's parent, the vendor's
+// path_collection shape, shared by every row that places an item.
+export function pathCollection(ancestors: Item[]): JsonValue {
+  return {
+    total_count: ancestors.length,
+    entries: ancestors.map((a) => ({ type: 'folder', id: a.id, name: a.name })),
+  }
+}
+
 // The vendor's search rows carry the ancestor chain instead of a parent
 // reference, so a consumer can render a path without a call per level.
 export function searchEntry(item: Item, ancestors: Item[]): JsonValue {
@@ -63,10 +72,7 @@ export function searchEntry(item: Item, ancestors: Item[]): JsonValue {
     type: item.type,
     id: item.id,
     name: item.name,
-    path_collection: {
-      total_count: ancestors.length,
-      entries: ancestors.map((a) => ({ type: 'folder', id: a.id, name: a.name })),
-    },
+    path_collection: pathCollection(ancestors),
   }
 }
 
@@ -75,10 +81,7 @@ export function searchEntry(item: Item, ancestors: Item[]): JsonValue {
 export function eventSource(item: Item, ancestors: Item[]): JsonValue {
   return {
     ...(render(item) as Record<string, JsonValue>),
-    path_collection: {
-      total_count: ancestors.length,
-      entries: ancestors.map((a) => ({ type: 'folder', id: a.id, name: a.name })),
-    },
+    path_collection: pathCollection(ancestors),
   }
 }
 

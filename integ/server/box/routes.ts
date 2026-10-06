@@ -41,6 +41,7 @@ import {
   listOrder,
   nameInUse,
   notFound,
+  pathCollection,
   render,
   searchEntry,
   unauthorized,
@@ -102,11 +103,19 @@ async function listItems(ctx: Ctx<C>): Promise<Reply> {
   const kids = await children(ctx.db, ctx.tenant, folder.id)
   const offset = intQuery(ctx, 'offset', 0)
   const limit = intQuery(ctx, 'limit', DEFAULT_LIMIT)
+  const page = kids.slice(offset, offset + limit)
+  const placement = page.some((item) => item.type === 'file')
+    ? pathCollection([...(await ancestors(ctx.db, ctx.tenant, folder)), folder])
+    : null
   return {
     status: 200,
     body: {
       total_count: kids.length,
-      entries: kids.slice(offset, offset + limit).map(render),
+      entries: page.map((item) =>
+        item.type === 'file'
+          ? { ...obj(render(item)), item_status: 'active', path_collection: placement }
+          : render(item),
+      ),
       offset,
       limit,
     },
@@ -128,7 +137,11 @@ async function fileInfo(ctx: Ctx<C>): Promise<Reply> {
   if (!authed(ctx)) return unauthorized()
   const item = await typedItem(ctx.db, ctx.tenant, ctx.params.file_id ?? '', 'file')
   if (item === null) return notFound('file')
+  // The vendor places a file with its live ancestry and status, which is
+  // what a fresh check by id confirms before trusting the sha1 beside them.
   const out = obj(render(item))
+  out.path_collection = pathCollection(await ancestors(ctx.db, ctx.tenant, item))
+  out.item_status = 'active'
   if ((ctx.query.get('fields') ?? '').includes('representations')) {
     // Real Box transcodes many formats server-side; the fake advertises
     // extracted_text only when a fixture attached one.
@@ -381,7 +394,7 @@ async function search(ctx: Ctx<C>): Promise<Reply> {
   const page = hits.slice(offset, offset + limit)
   const entries: JsonValue[] = []
   for (const item of page) {
-    entries.push(searchEntry(item, await ancestors(ctx.db, ctx.tenant, item.id)))
+    entries.push(searchEntry(item, await ancestors(ctx.db, ctx.tenant, item)))
   }
   return { status: 200, body: { total_count: hits.length, entries, offset, limit } }
 }

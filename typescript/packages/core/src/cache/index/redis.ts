@@ -39,6 +39,12 @@ import {
 } from './constants.ts'
 import { globEscape } from '../file/utils.ts'
 
+const REPLACE_ENTRY = `
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[1], ARGV[2])
+return 1
+`
+
 const PATH_RANGE = `
 local function path_range(root)
   root = string.gsub(root, '/+$', '')
@@ -597,6 +603,23 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     this.trackPaths(pipe, [vfsPath])
     pipe.set(this.entryKey(vfsPath), JSON.stringify(stored))
     await pipe.exec()
+  }
+
+  override async replaceIfUnchanged(
+    path: string,
+    predecessor: string,
+    entry: IndexEntry,
+  ): Promise<boolean> {
+    await this.flushSeed()
+    const c = await this.client()
+    const key = this.entryKey(path)
+    const raw = await c.get(key)
+    if (raw === null || JSON.stringify(IndexEntry.fromJSON(raw)) !== predecessor) return false
+    const stored =
+      entry.indexTime === '' ? entry.copyWith({ indexTime: toIsoZ(new Date()) }) : entry
+    return (
+      (await c.eval(REPLACE_ENTRY, { keys: [key], arguments: [raw, JSON.stringify(stored)] })) === 1
+    )
   }
 
   async listDir(vfsPath: string): Promise<ListResult> {

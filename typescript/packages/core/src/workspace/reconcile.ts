@@ -95,11 +95,14 @@ export class Reconciler {
     const scope = scopeOf(mount, path)
     const manager = mount.cacheManager
     let remoteStat: unknown = manager?.probedStat(scope) ?? null
+    let scratch: ListingCheckStore | null = null
+    const generation = manager?.generation
     if (remoteStat === null) {
-      const generation = manager?.generation
+      scratch = new ListingCheckStore({ hints: mount.index })
       try {
+        // No cached row answers; the mount's rows ride along as hints.
         remoteStat = await this.opsRegistry.call('stat', vfs, vfs.accessor, scope, [], {
-          index: new ListingCheckStore(),
+          index: scratch,
         })
       } catch (err) {
         if (isEnoent(err) || isEnotdir(err)) {
@@ -135,6 +138,17 @@ export class Reconciler {
       await this.cache.remove(path)
       await mount.index.clear()
       return Verdict.STALE
+    }
+    const predecessor = scratch?.hintedRows.get(path)
+    if (
+      scratch !== null &&
+      predecessor !== undefined &&
+      manager !== null &&
+      generation !== undefined
+    ) {
+      const confirmed = (await scratch.get(path)).entry
+      if (confirmed != null)
+        await manager.retainResolvedEntry(scope, generation, predecessor, confirmed)
     }
     return Verdict.FRESH
   }

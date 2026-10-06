@@ -58,6 +58,12 @@ _PendingSeed = tuple[
     dict[str, IndexEntry], dict[str, list[str]], datetime, str | None
 ]
 
+_REPLACE_ENTRY = """
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[1], ARGV[2])
+return 1
+"""
+
 _PATH_RANGE = """
 local function path_range(root)
   root = string.gsub(root, '/+$', '')
@@ -632,6 +638,28 @@ class RedisIndexCacheStore(IndexCacheStore):
         self._track_paths(pipe, [vfs_path])
         pipe.set(self._entry_key(vfs_path), entry.model_dump_json())
         await pipe.execute()
+
+    async def replace_if_unchanged(
+        self, vfs_path: str, predecessor: str, entry: IndexEntry
+    ) -> bool:
+        await self._flush_seed()
+        key = self._entry_key(vfs_path)
+        raw = await self._client.get(key)
+        if raw is None or IndexEntry.model_validate_json(
+            raw
+        ).model_dump() != json.loads(predecessor):
+            return False
+        if not entry.index_time:
+            entry = entry.model_copy(
+                update={"index_time": to_iso_z(datetime.now(timezone.utc))}
+            )
+        result = await cast(
+            Awaitable[int],
+            self._client.eval(
+                _REPLACE_ENTRY, 1, key, raw, entry.model_dump_json()
+            ),
+        )
+        return result == 1
 
     async def list_dir(self, vfs_path: str) -> ListResult:
         await self._flush_seed()
