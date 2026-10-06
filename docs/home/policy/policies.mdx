@@ -33,12 +33,12 @@ These fire when an agent runs a line: `ws.shell`, `session.shell`, the
 `shell`, `ls` and `grep` tools, `mirage shell`, HTTP `/shell`, RPC
 `shell` and SSH.
 
-| Hook | Fires | Reads | May answer |
-| --- | --- | --- | --- |
-| `pre_command` | before each command | `command`, `argv`, `paths`, `operands`, `program`, `cwd`, `session_id` | Deny, Ask |
-| `pre_execute` | once per line, before it runs | `line`, `commands`, `cwd`, `env`, `session_id` | Deny, Route |
-| `post_execute` | after each line | `producer`, `exit_code` | Limit |
-| `pre_session` | before each env write (`export`, `X=1`) | `verb`, `key`, `value`, `session_id` | Deny |
+| Hook | Fires | Reads | May answer | [Explain](/home/policy/explain#what-it-asks) asks it |
+| --- | --- | --- | --- | --- |
+| `pre_command` | before each command | `command`, `argv`, `paths`, `operands`, `program`, `cwd`, `session_id` | Deny, Ask | yes |
+| `pre_execute` | once per line, before it runs | `line`, `commands`, `cwd`, `env`, `session_id` | Deny, Route | yes |
+| `post_execute` | after each line | `producer`, `exit_code` | Limit | no |
+| `pre_session` | before each env write (`export`, `X=1`) | `verb`, `key`, `value`, `session_id` | Deny | no |
 
 Every command on a line passes `pre_command` before any of them runs, so
 a line refused whole never runs halfway.
@@ -160,10 +160,10 @@ and `glob` tools, `mirage vfs`, HTTP `/vfs/<call>`, RPC `vfs/<call>`,
 FUSE, FSKit and SFTP. `pre_vfs` also fires for every file a shell command
 reads or writes.
 
-| Hook | Fires | Reads | May answer |
-| --- | --- | --- | --- |
-| `pre_vfs` | before each VFS call, and each file a command touches | `op`, `path`, `write`, `create`, `session_id` | Deny, Ask |
-| `post_vfs` | after each VFS call | `op`, `path`, `result` | Deny, Limit |
+| Hook | Fires | Reads | May answer | [Explain](/home/policy/explain#what-it-asks) asks it |
+| --- | --- | --- | --- | --- |
+| `pre_vfs` | before each VFS call, and each file a command touches | `op`, `path`, `write`, `create`, `session_id` | Deny, Ask | for a VFS call, not inside a line |
+| `post_vfs` | after each VFS call | `op`, `path`, `result` | Deny, Limit | no |
 
 `pre_vfs` fires thousands of times under one `grep -r`, so keep it cheap.
 An Ask from it reaches a host only from `session.vfs` or a file tool;
