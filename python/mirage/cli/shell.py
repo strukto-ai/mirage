@@ -66,6 +66,11 @@ def shell_cmd(
         "--bg",
         help="Don't wait; return job_id immediately.",
     ),
+    explain: bool = typer.Option(
+        False,
+        "--explain",
+        help="Say what the line would do, as a tree; run nothing.",
+    ),
 ) -> None:
     """Run a shell line in a workspace.
 
@@ -75,11 +80,22 @@ def shell_cmd(
     job, and exits 130. Without piped stdin it is submitted, then
     waited on, and Ctrl-C, from the submit on, cancels it through
     ``DELETE /v1/jobs/{id}``. ``--background`` returns the job id at
-    once instead, after any piped stdin has been sent.
+    once instead, after any piped stdin has been sent. ``--explain``
+    prints what the line would do instead, running none of it.
     """
+    query: dict[str, str] = {"session_id": session_id} if session_id else {}
     payload: dict[str, Any] = {"command": command}
-    if session_id:
-        payload["session_id"] = session_id
+    if explain:
+        with make_client() as client:
+            client.ensure_running(allow_spawn=False)
+            r = client.request(
+                "POST",
+                f"/v1/workspaces/{quote(workspace_id, safe='')}/shell",
+                params={**query, "explain": "true"},
+                json=payload,
+            )
+        emit(handle_response(r), human=_format_explanation)
+        return
     if cwd:
         payload["cwd"] = cwd
     if runtime:
@@ -91,7 +107,11 @@ def shell_cmd(
         if piped and not background:
             try:
                 r = client.request(
-                    "POST", path, files=_upload(payload), timeout=None
+                    "POST",
+                    path,
+                    params=query,
+                    files=_upload(payload),
+                    timeout=None,
                 )
             except KeyboardInterrupt:
                 raise typer.Exit(code=INTERRUPTED) from None
@@ -112,12 +132,15 @@ def shell_cmd(
                 r = client.request(
                     "POST",
                     path,
-                    params={"background": "true"},
+                    params={**query, "background": "true"},
                     files=_upload(payload),
                 )
             else:
                 r = client.request(
-                    "POST", path, params={"background": "true"}, json=payload
+                    "POST",
+                    path,
+                    params={**query, "background": "true"},
+                    json=payload,
                 )
         finally:
             if held is not None:
@@ -174,6 +197,47 @@ def _upload(
             "application/octet-stream",
         ),
     }
+
+
+def _format_explanation(data: dict[str, Any]) -> str:
+    """An explained line as a tree, one node a row, each command with
+    its verdict.
+
+    Args:
+        data (dict[str, Any]): the ``explain/shell`` answer.
+    """
+    verdict = f"{data['outcome']}, exit {data['exit_code']}"
+    if data["reason"]:
+        verdict += f": {data['reason']}"
+    out = [f"{data['line']}  [{verdict}]"]
+    for child in data["node"]["children"]:
+        _explained_lines(child, 1, out)
+    return "\n".join(out)
+
+
+def _explained_lines(node: dict[str, Any], depth: int, out: list[str]) -> None:
+    """Append one node of an explained line, and what it holds, as rows.
+
+    Args:
+        node (dict[str, Any]): the node.
+        depth (int): how deep it sits under the line.
+        out (list[str]): the rows so far.
+    """
+    pad = "  " * depth
+    if "outcome" not in node:
+        out.append(f"{pad}{node['type']}: {node['text']}")
+    else:
+        line = f"{pad}{node['text']}  [{node['outcome']}"
+        if node["exit_code"]:
+            line += f", exit {node['exit_code']}"
+        line += f": {node['reason']}]" if node["reason"] else "]"
+        if node["source"]:
+            line += f"  {node['source']}"
+        if node["runtime"]:
+            line += f"  on {node['runtime']}"
+        out.append(line)
+    for child in node["children"]:
+        _explained_lines(child, depth + 1, out)
 
 
 def wait_job(client: DaemonClient, job_id: str) -> dict[str, Any]:

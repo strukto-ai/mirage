@@ -45,6 +45,19 @@ interface RawResultDict {
 
 export type ResultDict = IoResultDict | RawResultDict
 
+/** A refusal record as the server's doors carry it. Mirrors Python's `refusal_to_dict`. */
+export function refusalToDict(refusal: Refusal | null): IoResultDict['refusal'] {
+  return refusal === null
+    ? null
+    : {
+        kind: refusal.kind,
+        reason: refusal.reason,
+        policy: refusal.policy,
+        scope: refusal.scope,
+        ask_id: refusal.askId,
+      }
+}
+
 export function ioResultToDict(result: unknown): ResultDict & JsonValue {
   if (result instanceof ExecuteResult) {
     return {
@@ -52,16 +65,7 @@ export function ioResultToDict(result: unknown): ResultDict & JsonValue {
       exit_code: result.exitCode,
       stdout: result.stdoutText,
       stderr: result.stderrText,
-      refusal:
-        result.refusal === null
-          ? null
-          : {
-              kind: result.refusal.kind,
-              reason: result.refusal.reason,
-              policy: result.refusal.policy,
-              scope: result.refusal.scope,
-              ask_id: result.refusal.askId,
-            },
+      refusal: refusalToDict(result.refusal),
     }
   }
   return { kind: 'raw', value: String(result) }
@@ -77,7 +81,7 @@ function answerToDict(action: Deny | Ask | Route): Record<string, JsonValue> {
 
 /**
  * An explanation as the server's doors answer it: a line with its tree
- * (`explain/shell`) or a VFS call (`explain/vfs/<call>`). Mirrors Python's
+ * (`shell` explained) or a VFS call (`vfs/<call>` explained). Mirrors Python's
  * `explanation_to_dict`.
  */
 export function explanationToDict(
@@ -87,16 +91,7 @@ export function explanationToDict(
     outcome: expl.outcome,
     reason: expl.reason,
     source: expl.source,
-    refusal:
-      expl.refusal === null
-        ? null
-        : {
-            kind: expl.refusal.kind,
-            reason: expl.refusal.reason,
-            policy: expl.refusal.policy,
-            scope: expl.refusal.scope,
-            ask_id: expl.refusal.askId,
-          },
+    refusal: refusalToDict(expl.refusal),
     answers: expl.answers.map(answerToDict),
   }
   if ('line' in expl) {

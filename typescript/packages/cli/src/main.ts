@@ -20,6 +20,7 @@ import { registerConfigCommands } from './config.ts'
 import { registerDaemonCommands } from './daemon.ts'
 import { registerShellCommand } from './shell.ts'
 import { registerToolCommands } from './tools.ts'
+import { registerVfsCommands } from './vfs.ts'
 import { registerJobCommands } from './job.ts'
 import { registerLoginCommands } from './login.ts'
 import { registerMcpCommand } from './mcp.ts'
@@ -55,6 +56,7 @@ export function buildProgram(): Command {
   registerSessionCommands(program)
   registerJobCommands(program)
   registerShellCommand(program)
+  registerVfsCommands(program)
   registerToolCommands(program)
   registerMcpCommand(program)
   registerRpcCommand(program)

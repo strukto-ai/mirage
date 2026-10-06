@@ -20,8 +20,8 @@ import type { JsonValue } from '@struktoai/mirage-core/types'
 import { VERSION } from '@struktoai/mirage-core/version'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import type { VfsExplanation } from '@struktoai/mirage-core/policy/types'
-import { explanationToDict, ioResultToDict } from '../io_serde.ts'
+import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
+import { explanationToDict, ioResultToDict, refusalToDict } from '../io_serde.ts'
 import { TOOLS } from '../mcp/server.ts'
 import {
   RPC_INTERNAL_ERROR,
@@ -30,8 +30,8 @@ import {
   RPC_METHOD_NOT_FOUND,
   RPC_NOT_FOUND,
   RPC_PARSE_ERROR,
-  VFS_OPS,
 } from './constants.ts'
+import { VFS_CALLS, CallArgsError, answered, checked, type VfsCall } from '../vfs_calls.ts'
 
 const PROTOCOL_VERSION = '1'
 export const CANCEL_REQUEST = '$/cancelRequest'
@@ -78,8 +78,11 @@ function bytes(params: Params, name: string): Uint8Array {
   return new Uint8Array(Buffer.from(value, 'base64'))
 }
 
-function integer(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value)
+function flag(params: Params, name: string): boolean {
+  const value = params[name] ?? false
+  if (typeof value !== 'boolean')
+    throw new RpcError(RPC_INVALID_PARAMS, `${name} must be a boolean`)
+  return value
 }
 
 export interface MirageRpcServerOptions {
@@ -94,10 +97,11 @@ export interface MirageRpcServerOptions {
 /**
  * Serves one session of a workspace over JSON-RPC 2.0. The methods are
  * the in-app Session API under the same names: `shell` is
- * `session.shell`, `glob` is `session.glob`, `vfs/<op>` is
- * `session.vfs.<op>`, `explain/shell` and `explain/vfs/<op>` are their
- * dry runs under `session.explain`, and `tools/list` and `tools/call`
- * serve the session's agent tool table with MCP's schemas. Bytes travel as
+ * `session.shell`, `glob` is `session.glob`, `vfs/<call>` is
+ * `session.vfs.<call>`, and `tools/<tool>` runs one of the session's agent
+ * tools, which `tools/list` and `tools/call` also serve with MCP's
+ * schemas. `shell` and `vfs/<call>` take `explain: true` to answer what the
+ * call would do instead of doing it (`session.explain`). Bytes travel as
  * base64. `$/cancelRequest` cancels a running request.
  */
 export class MirageRpcServer {
@@ -119,7 +123,6 @@ export class MirageRpcServer {
     this.operations = options.operations ?? this.session.tools
     this.name = options.name ?? 'mirage'
     this.version = options.version ?? VERSION
-    const vfs = (): ReturnType<Session['vfs']['forSession']> => this.session.vfs
     this.table = {
       initialize: () =>
         Promise.resolve({
@@ -131,74 +134,8 @@ export class MirageRpcServer {
         }),
       shell: (params, signal) => this.shell(params, signal),
       glob: async (params) => ({ paths: await this.session.glob(text(params, 'pattern')) }),
-      'vfs/read': async (params) => {
-        const offset = params.offset ?? 0
-        const size = params.size ?? null
-        if (!integer(offset) || (size !== null && !integer(size))) {
-          throw new RpcError(RPC_INVALID_PARAMS, 'offset and size are integers')
-        }
-        const data = await vfs().read(text(params, 'path'), { offset, size })
-        return { data_base64: Buffer.from(data).toString('base64') }
-      },
-      'vfs/write': async (params) => {
-        await vfs().write(text(params, 'path'), bytes(params, 'data_base64'))
-        return {}
-      },
-      'vfs/append': async (params) => {
-        await vfs().append(text(params, 'path'), bytes(params, 'data_base64'))
-        return {}
-      },
-      'vfs/stat': async (params) => {
-        const stat = await vfs().stat(text(params, 'path'), undefined, {
-          nofollow: params.nofollow === true,
-        })
-        return {
-          name: stat.name,
-          size: stat.size,
-          modified: stat.modified,
-          fingerprint: stat.fingerprint,
-          revision: stat.revision,
-          type: stat.type,
-          content: stat.content,
-          mode: stat.mode,
-          uid: stat.uid,
-          gid: stat.gid,
-          atime: stat.atime,
-          ctime: stat.ctime,
-          birthtime: stat.birthtime,
-        }
-      },
-      'vfs/readdir': async (params) => ({ entries: await vfs().readdir(text(params, 'path')) }),
-      'vfs/exists': async (params) => ({ exists: await vfs().exists(text(params, 'path')) }),
-      'vfs/mkdir': async (params) => {
-        await vfs().mkdir(text(params, 'path'))
-        return {}
-      },
-      'vfs/rmdir': async (params) => {
-        await vfs().rmdir(text(params, 'path'))
-        return {}
-      },
-      'vfs/unlink': async (params) => {
-        await vfs().unlink(text(params, 'path'))
-        return {}
-      },
-      'vfs/rename': async (params) => {
-        await vfs().rename(text(params, 'src'), text(params, 'dst'))
-        return {}
-      },
-      'vfs/truncate': async (params) => {
-        const length = params.length
-        if (!integer(length)) throw new RpcError(RPC_INVALID_PARAMS, 'length must be an integer')
-        await vfs().truncate(text(params, 'path'), length)
-        return {}
-      },
-      'explain/shell': async (params) =>
-        explanationToDict(await this.session.explain.shell(text(params, 'command'))),
       ...Object.fromEntries(
-        VFS_OPS.map((op) => [
-          `explain/vfs/${op}`,
-          async (params: Params) => explanationToDict(await this.explainVfs(op, params)),
-        ]),
+        VFS_CALLS.map((call) => [`vfs/${call.name}`, (params: Params) => this.vfs(call, params)]),
       ),
       'tools/list': async () => {
         const names = await this.operations.offered()
@@ -214,6 +151,13 @@ export class MirageRpcServer {
         }
       },
       'tools/call': (params, signal) => this.toolsCall(params, signal),
+      ...Object.fromEntries(
+        TOOLS.map((tool) => [
+          `tools/${tool.name}`,
+          (params: Params, signal?: AbortSignal) =>
+            this.toolsCall({ name: tool.name, arguments: params }, signal),
+        ]),
+      ),
     }
   }
 
@@ -270,6 +214,7 @@ export class MirageRpcServer {
       const code = condition === 'ENOENT' ? RPC_NOT_FOUND : RPC_INTERNAL_ERROR
       const data: Record<string, JsonValue> = { detail: failureText(err) }
       if (condition !== null) data.errno = condition
+      if (err instanceof PolicyDenied) data.refusal = refusalToDict(err.refusal)
       return errorResponse(requestId, code, failureText(err), data)
     }
   }
@@ -315,6 +260,12 @@ export class MirageRpcServer {
   }
 
   private async shell(params: Params, signal?: AbortSignal): Promise<JsonValue> {
+    if (flag(params, 'explain')) {
+      if (Object.keys(params).some((key) => key !== 'command' && key !== 'explain')) {
+        throw new RpcError(RPC_INVALID_PARAMS, 'explain takes the line alone: no cwd, env or stdin')
+      }
+      return explanationToDict(await this.session.explain.shell(text(params, 'command')))
+    }
     const { cwd, env } = params
     if (cwd !== undefined && typeof cwd !== 'string') {
       throw new RpcError(RPC_INVALID_PARAMS, 'cwd must be a string')
@@ -338,38 +289,18 @@ export class MirageRpcServer {
     )
   }
 
-  /**
-   * One op's dry run off its params, read as `vfs/<op>` reads them.
-   * Mirrors Python's `_explain_vfs`.
-   */
-  private explainVfs(op: (typeof VFS_OPS)[number], params: Params): Promise<VfsExplanation> {
-    const explain = this.session.explain.vfs
-    const path = (): string => text(params, 'path')
-    switch (op) {
-      case 'read': {
-        const offset = params.offset ?? 0
-        const size = params.size ?? null
-        if (!integer(offset) || (size !== null && !integer(size))) {
-          throw new RpcError(RPC_INVALID_PARAMS, 'offset and size are integers')
-        }
-        return explain.read(path(), { offset, size })
-      }
-      case 'write':
-        return explain.write(path(), bytes(params, 'data_base64'))
-      case 'append':
-        return explain.append(path(), bytes(params, 'data_base64'))
-      case 'stat':
-        return explain.stat(path(), { nofollow: params.nofollow === true })
-      case 'rename':
-        return explain.rename(text(params, 'src'), text(params, 'dst'))
-      case 'truncate': {
-        const length = params.length
-        if (!integer(length)) throw new RpcError(RPC_INVALID_PARAMS, 'length must be an integer')
-        return explain.truncate(path(), length)
-      }
-      default:
-        return explain[op](path())
+  /** One VFS call, or its explanation with `explain: true`. Mirrors Python's `_vfs`. */
+  private async vfs(call: VfsCall, params: Params): Promise<JsonValue> {
+    const explain = flag(params, 'explain')
+    const rest = Object.fromEntries(Object.entries(params).filter(([key]) => key !== 'explain'))
+    let args: Record<string, unknown>
+    try {
+      args = await checked(call, rest)
+    } catch (err) {
+      if (err instanceof CallArgsError) throw new RpcError(RPC_INVALID_PARAMS, err.message)
+      throw err
     }
+    return answered(this.session, call, args, explain)
   }
 
   private async toolsCall(params: Params, signal?: AbortSignal): Promise<JsonValue> {

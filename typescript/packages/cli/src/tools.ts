@@ -36,7 +36,7 @@ async function callTool(
   await c.ensureRunning({ allowSpawn: false })
   const query =
     target.session === undefined ? '' : `?session_id=${encodeURIComponent(target.session)}`
-  const path = `/v1/workspaces/${encodeURIComponent(target.workspace)}/${name}${query}`
+  const path = `/v1/workspaces/${encodeURIComponent(target.workspace)}/tools/${name}${query}`
   const response = (await handleResponse(
     await c.request('POST', path, { body: JSON.stringify(args) }),
   )) as { text: string; is_error: boolean }
@@ -52,8 +52,16 @@ function toolCommand(program: Command, name: string, description: string): Comma
     .option('-s, --session <id>', 'Session id')
 }
 
-/** The tools beside `shell`, one verb each, run as MCP runs them. */
-export function registerToolCommands(program: Command): void {
+/** `mirage tools <tool>`: the session's agent tools, one verb each, run as MCP runs them. */
+export function registerToolCommands(parent: Command): void {
+  const program = parent
+    .command('tools')
+    .description("The session's agent tools, as MCP serves them.")
+  toolCommand(program, 'shell', 'Run a command line and read its output as the agent does.')
+    .argument('<command>', 'The command line to run')
+    .action(async (command: string, opts: Target) => {
+      await callTool(opts, 'shell', { command })
+    })
   toolCommand(program, 'read', 'Read a file with line numbers.')
     .argument('<path>', 'File to read')
     .option('--offset <n>', 'Line to start at (0-based)', Number)

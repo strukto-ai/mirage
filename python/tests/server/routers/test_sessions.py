@@ -236,8 +236,9 @@ async def test_session_cancel_stops_its_jobs_and_spares_the_others():
         jobs = {}
         for sid in ("a", "b"):
             r = await client.post(
-                f"/v1/workspaces/{wid}/shell?background=true",
-                json={"command": "sleep 30", "session_id": sid},
+                f"/v1/workspaces/{wid}/shell",
+                params={"session_id": sid, "background": "true"},
+                json={"command": "sleep 30"},
             )
             jobs[sid] = r.json()["job_id"]
             await _wait_status(client, jobs[sid], "running")
@@ -270,13 +271,15 @@ async def test_session_kill_stops_background_jobs_and_keeps_the_session():
         )
         await client.post(
             f"/v1/workspaces/{wid}/shell",
-            json={"command": "sleep 30 &", "session_id": "a"},
+            params={"session_id": "a"},
+            json={"command": "sleep 30 &"},
         )
         r = await client.post(f"/v1/workspaces/{wid}/sessions/a/kill")
         assert r.json() == {"killed": 1}
         r = await client.post(
             f"/v1/workspaces/{wid}/shell",
-            json={"command": "jobs; echo alive", "session_id": "a"},
+            params={"session_id": "a"},
+            json={"command": "jobs; echo alive"},
         )
         assert "alive" in r.json()["stdout"]
         await client.delete(f"/v1/workspaces/{wid}")

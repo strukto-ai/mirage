@@ -21,6 +21,7 @@ export default defineConfig({
     'src/paths.ts',
     'src/env.ts',
     'src/daemon_config.ts',
+    'src/vfs_calls.ts',
     'src/host_validation_constants.ts',
     'src/workspace_config.ts',
     'src/auth/config.ts',

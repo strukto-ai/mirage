@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}")
 
 INPUTS: dict[str, dict[str, JsonValue]] = {
-    tool.name: tool.input_schema for tool in TOOLS if tool.name != "shell"
+    tool.name: tool.input_schema for tool in TOOLS
 }
 
 
@@ -118,7 +118,7 @@ def tool_route(name: str) -> Callable[..., Awaitable[ToolResponse]]:
 
 for _name in INPUTS:
     router.add_api_route(
-        f"/{_name}",
+        f"/tools/{_name}",
         tool_route(_name),
         methods=["POST"],
         response_model=ToolResponse,

@@ -14,12 +14,14 @@
 
 import { Buffer } from 'node:buffer'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { WorkspaceRegistry } from '../registry.ts'
 import { JobStatus, type JobEntry, type JobTable } from '../jobs.ts'
-import { ioResultToDict } from '../io_serde.ts'
+import { explanationToDict, ioResultToDict } from '../io_serde.ts'
 import { MAX_REQUEST_PART, MultipartError, partEvents, type PartEvent } from '../multipart.ts'
 import { UploadStdin } from '../stdin.ts'
+import { RouteError, failure, queryFlag, requireEntry, sessionOf } from './vfs.ts'
 
 export interface ShellRoutesDeps {
   registry: WorkspaceRegistry
@@ -33,7 +35,6 @@ interface ShellParams {
 const ShellBodySchema = z
   .object({
     command: z.string(),
-    session_id: z.string().optional(),
     agent_id: z.string().optional(),
     cwd: z.string().optional(),
     runtime: z.string().optional(),
@@ -211,12 +212,49 @@ function refuse(req: FastifyRequest, reply: FastifyReply, error: unknown): Fasti
 
 interface ShellQuery {
   background?: string
+  session_id?: string
+  explain?: string
+}
+
+/**
+ * What a line would do as a session, without running any of it
+ * (`session.explain.shell`). Only the line is read: a working directory, a
+ * runtime, stdin or a background job would change what runs, which an
+ * explanation cannot follow, so each is refused. Mirrors Python's
+ * `_explained`.
+ */
+async function explained(
+  req: FastifyRequest<{ Params: ShellParams; Body: ShellBody; Querystring: ShellQuery }>,
+  reply: FastifyReply,
+  deps: ShellRoutesDeps,
+): Promise<FastifyReply> {
+  let said: ShellExplanation
+  try {
+    const entry = requireEntry(deps.registry, req.params.wsId, req.account)
+    if (
+      queryFlag(req.query.background, 'background') ||
+      req.headers['content-type']?.startsWith('multipart/') === true
+    ) {
+      throw new RouteError(400, 'explain takes the line alone: no stdin, no background')
+    }
+    const parsed = ShellBodySchema.safeParse(req.body)
+    if (!parsed.success) throw new RouteError(400, `bad shell request: ${parsed.error.message}`)
+    if (parsed.data.cwd !== undefined || parsed.data.runtime !== undefined) {
+      throw new RouteError(400, 'explain takes the line alone: no cwd, no runtime')
+    }
+    const session = await sessionOf(entry.runner.ws, req.query.session_id)
+    said = await session.explain.shell(parsed.data.command)
+  } catch (err) {
+    return failure(reply, err)
+  }
+  return reply.send(explanationToDict(said))
 }
 
 export function registerShellRoutes(app: FastifyInstance, deps: ShellRoutesDeps): void {
   app.post<{ Params: ShellParams; Body: ShellBody; Querystring: ShellQuery }>(
     '/v1/workspaces/:wsId/shell',
     async (req, reply) => {
+      if (req.query.explain === 'true') return explained(req, reply, deps)
       const { wsId } = req.params
       if (deps.registry.visible(wsId, req.account) === null) {
         return reply.status(404).send({ detail: 'workspace not found' })
@@ -231,7 +269,7 @@ export function registerShellRoutes(app: FastifyInstance, deps: ShellRoutesDeps)
       const { body, stdin } = upload
       const entry = deps.registry.get(wsId)
       await entry.runner.ws.ensureSessionsLoaded()
-      const sessionId = body.session_id ?? entry.runner.ws.defaultSessionId
+      const sessionId = req.query.session_id ?? entry.runner.ws.defaultSessionId
       let job = await deps.jobs.submit(
         wsId,
         body.command,

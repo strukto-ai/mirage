@@ -49,7 +49,6 @@ from mirage.server.registry import OWNERS_PREFIX, WorkspaceRegistry
 from mirage.server.routers import (
     asks,
     documents,
-    explain,
     health,
     jobs,
     oauth,
@@ -57,6 +56,7 @@ from mirage.server.routers import (
     shell,
     ssh,
     tools,
+    vfs,
     workspaces,
 )
 from mirage.server.rpc.http import register_rpc_routes
@@ -258,9 +258,9 @@ def build_app(
     app.include_router(sessions.router)
     app.include_router(asks.router)
     app.include_router(shell.router)
-    app.include_router(explain.router)
     app.include_router(ssh.router)
     app.include_router(tools.router)
+    app.include_router(vfs.router)
     app.include_router(jobs.router)
     app.include_router(health.router)
     app.include_router(oauth.router)

@@ -18,14 +18,19 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from functools import partial
-from typing import Any, TypeGuard, TypeVar
+from typing import Any, TypeVar
 
 import jsonschema
 
 from mirage import __version__
 from mirage.errors.classify import classify, failure_text
 from mirage.errors.types import FsCondition
-from mirage.server.io_serde import explanation_to_dict, io_result_to_dict
+from mirage.policy.errors import PolicyDenied
+from mirage.server.io_serde import (
+    explanation_to_dict,
+    io_result_to_dict,
+    refusal_to_dict,
+)
 from mirage.server.mcp.server import TOOLS
 from mirage.server.rpc.constants import (
     RPC_INTERNAL_ERROR,
@@ -34,7 +39,13 @@ from mirage.server.rpc.constants import (
     RPC_METHOD_NOT_FOUND,
     RPC_NOT_FOUND,
     RPC_PARSE_ERROR,
-    VFS_OPS,
+)
+from mirage.server.vfs_calls import (
+    VFS_CALLS,
+    CallArgsError,
+    VfsCall,
+    answered,
+    checked,
 )
 from mirage.types import JsonValue
 from mirage.workspace.tools.tool_operations import MirageToolOperations
@@ -101,8 +112,11 @@ def _text(params: Params, name: str) -> str:
     return value
 
 
-def _integer(value: JsonValue) -> TypeGuard[int]:
-    return isinstance(value, int) and not isinstance(value, bool)
+def _flag(params: Params, name: str) -> bool:
+    value = params.get(name, False)
+    if not isinstance(value, bool):
+        raise RpcError(RPC_INVALID_PARAMS, f"{name} must be a boolean")
+    return value
 
 
 def _bytes(params: Params, name: str) -> bytes:
@@ -112,49 +126,17 @@ def _bytes(params: Params, name: str) -> bytes:
         raise RpcError(RPC_INVALID_PARAMS, f"{name} must be base64") from exc
 
 
-def _vfs_args(
-    op: str, params: Params
-) -> tuple[tuple[Any, ...], dict[str, Any]]:
-    """One op's arguments off its params, read the same way for
-    ``vfs/<op>`` and its dry run ``explain/vfs/<op>``.
-
-    Args:
-        op (str): the op's name.
-        params (Params): the request's params.
-    """
-    if op == "read":
-        offset = params.get("offset", 0)
-        size = params.get("size")
-        if not _integer(offset):
-            raise RpcError(RPC_INVALID_PARAMS, "offset must be an integer")
-        if size is not None and not _integer(size):
-            raise RpcError(RPC_INVALID_PARAMS, "size must be an integer")
-        return (_text(params, "path"), offset, size), {}
-    if op in ("write", "append"):
-        return (_text(params, "path"), _bytes(params, "data_base64")), {}
-    if op == "stat":
-        nofollow = bool(params.get("nofollow", False))
-        return (_text(params, "path"),), {"nofollow": nofollow}
-    if op == "rename":
-        return (_text(params, "src"), _text(params, "dst")), {}
-    if op == "truncate":
-        length = params.get("length")
-        if not _integer(length):
-            raise RpcError(RPC_INVALID_PARAMS, "length must be an integer")
-        return (_text(params, "path"), length), {}
-    return (_text(params, "path"),), {}
-
-
 class MirageRpcServer:
     """Serves one session of a workspace over JSON-RPC 2.0.
 
     The methods are the in-app Session API under the same names: ``shell``
-    is ``session.shell``, ``glob`` is ``session.glob``, ``vfs/<op>`` is
-    ``session.vfs.<op>``, ``explain/shell`` and ``explain/vfs/<op>`` are
-    their dry runs under ``session.explain``, and ``tools/list`` and
-    ``tools/call`` serve the session's agent tool table with MCP's
-    schemas. Bytes travel as base64. ``$/cancelRequest`` cancels a
-    running request.
+    is ``session.shell``, ``glob`` is ``session.glob``, ``vfs/<call>`` is
+    ``session.vfs.<call>``, and ``tools/<tool>`` runs one of the
+    session's agent tools, which ``tools/list`` and ``tools/call`` also
+    serve with MCP's schemas. ``shell`` and ``vfs/<call>`` take
+    ``explain: true`` to answer what the call would do instead of doing
+    it (``session.explain``). Bytes travel as base64.
+    ``$/cancelRequest`` cancels a running request.
 
     Args:
         workspace (Workspace): the workspace to serve.
@@ -186,24 +168,16 @@ class MirageRpcServer:
             "initialize": self._initialize,
             "shell": self._shell,
             "glob": self._glob,
-            "vfs/read": self._read,
-            "vfs/write": self._write,
-            "vfs/append": self._append,
-            "vfs/stat": self._stat,
-            "vfs/readdir": self._readdir,
-            "vfs/exists": self._exists,
-            "vfs/mkdir": self._mkdir,
-            "vfs/rmdir": self._rmdir,
-            "vfs/unlink": self._unlink,
-            "vfs/rename": self._rename,
-            "vfs/truncate": self._truncate,
-            "explain/shell": self._explain_shell,
             **{
-                f"explain/vfs/{op}": partial(self._explain_vfs, op)
-                for op in VFS_OPS
+                f"vfs/{call.name}": partial(self._vfs, call)
+                for call in VFS_CALLS
             },
             "tools/list": self._tools_list,
             "tools/call": self._tools_call,
+            **{
+                f"tools/{tool.name}": partial(self._tool, tool.name)
+                for tool in TOOLS
+            },
         }
 
     @property
@@ -302,6 +276,8 @@ class MirageRpcServer:
             data: dict[str, JsonValue] = {"detail": failure_text(exc)}
             if condition is not None:
                 data["errno"] = condition.name
+            if isinstance(exc, PolicyDenied):
+                data["refusal"] = refusal_to_dict(exc.refusal)
             return error_response(request_id, code, failure_text(exc), data)
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
@@ -384,6 +360,16 @@ class MirageRpcServer:
         }
 
     async def _shell(self, params: Params) -> JsonValue:
+        if _flag(params, "explain"):
+            if set(params) - {"command", "explain"}:
+                raise RpcError(
+                    RPC_INVALID_PARAMS,
+                    "explain takes the line alone: no cwd, env or stdin",
+                )
+            said = await self.hop(
+                self._session.explain.shell(_text(params, "command"))
+            )
+            return explanation_to_dict(said)
         cwd = params.get("cwd")
         env = params.get("env")
         if cwd is not None and not isinstance(cwd, str):
@@ -409,68 +395,20 @@ class MirageRpcServer:
         paths = await self.hop(self._session.glob(_text(params, "pattern")))
         return {"paths": list(paths)}
 
-    async def _read(self, params: Params) -> JsonValue:
-        args, _ = _vfs_args("read", params)
-        data = await self.hop(self._session.vfs.read(*args))
-        return {"data_base64": base64.b64encode(data).decode()}
+    async def _vfs(self, call: VfsCall, params: Params) -> JsonValue:
+        explain = _flag(params, "explain")
+        try:
+            args = checked(
+                call, {k: v for k, v in params.items() if k != "explain"}
+            )
+        except CallArgsError as exc:
+            raise RpcError(RPC_INVALID_PARAMS, str(exc)) from exc
+        return await self.hop(answered(self._session, call, args, explain))
 
-    async def _write(self, params: Params) -> JsonValue:
-        args, _ = _vfs_args("write", params)
-        await self.hop(self._session.vfs.write(*args))
-        return {}
-
-    async def _append(self, params: Params) -> JsonValue:
-        args, _ = _vfs_args("append", params)
-        await self.hop(self._session.vfs.append(*args))
-        return {}
-
-    async def _stat(self, params: Params) -> JsonValue:
-        args, kwargs = _vfs_args("stat", params)
-        stat = await self.hop(self._session.vfs.stat(*args, **kwargs))
-        return stat.model_dump(mode="json", exclude={"extra"})
-
-    async def _readdir(self, params: Params) -> JsonValue:
-        names = await self.hop(
-            self._session.vfs.readdir(_text(params, "path"))
+    async def _tool(self, name: str, params: Params) -> JsonValue:
+        return await self._tools_call(
+            {"name": name, "arguments": dict(params)}
         )
-        return {"entries": list(names)}
-
-    async def _exists(self, params: Params) -> JsonValue:
-        found = await self.hop(self._session.vfs.exists(_text(params, "path")))
-        return {"exists": found}
-
-    async def _mkdir(self, params: Params) -> JsonValue:
-        await self.hop(self._session.vfs.mkdir(_text(params, "path")))
-        return {}
-
-    async def _rmdir(self, params: Params) -> JsonValue:
-        await self.hop(self._session.vfs.rmdir(_text(params, "path")))
-        return {}
-
-    async def _unlink(self, params: Params) -> JsonValue:
-        await self.hop(self._session.vfs.unlink(_text(params, "path")))
-        return {}
-
-    async def _rename(self, params: Params) -> JsonValue:
-        args, _ = _vfs_args("rename", params)
-        await self.hop(self._session.vfs.rename(*args))
-        return {}
-
-    async def _truncate(self, params: Params) -> JsonValue:
-        args, _ = _vfs_args("truncate", params)
-        await self.hop(self._session.vfs.truncate(*args))
-        return {}
-
-    async def _explain_shell(self, params: Params) -> JsonValue:
-        said = await self.hop(
-            self._session.explain.shell(_text(params, "command"))
-        )
-        return explanation_to_dict(said)
-
-    async def _explain_vfs(self, op: str, params: Params) -> JsonValue:
-        args, kwargs = _vfs_args(op, params)
-        explain = getattr(self._session.explain.vfs, op)
-        return explanation_to_dict(await self.hop(explain(*args, **kwargs)))
 
     async def _tools_list(self, params: Params) -> JsonValue:
         names = await self._ops.offered()

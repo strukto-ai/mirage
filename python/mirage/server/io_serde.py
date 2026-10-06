@@ -26,7 +26,17 @@ from mirage.policy.types import (
     ShellNode,
     VfsExplanation,
 )
-from mirage.types import JsonValue
+from mirage.types import JsonValue, Refusal
+
+
+def refusal_to_dict(refusal: Refusal | None) -> dict[str, JsonValue] | None:
+    """A refusal record as the server's doors carry it.
+
+    Args:
+        refusal (Refusal | None): the record, or None when nothing was
+            refused.
+    """
+    return asdict(refusal) if refusal is not None else None
 
 
 async def io_result_to_dict(result: IOResult | None) -> dict[str, Any]:
@@ -46,16 +56,14 @@ async def io_result_to_dict(result: IOResult | None) -> dict[str, Any]:
             "exit_code": result.exit_code,
             "stdout": stdout.decode(errors="replace"),
             "stderr": stderr.decode(errors="replace"),
-            "refusal": (
-                asdict(result.refusal) if result.refusal is not None else None
-            ),
+            "refusal": refusal_to_dict(result.refusal),
         }
     return {"kind": "raw", "value": str(result)}
 
 
 def explanation_to_dict(expl: Explanation) -> dict[str, JsonValue]:
     """An explanation as the server's doors answer it: a line with its
-    tree (``explain/shell``) or a VFS call (``explain/vfs/<call>``).
+    tree (``shell`` explained) or a VFS call (``vfs/<call>`` explained).
 
     Args:
         expl (Explanation): what a line or a VFS call would do.
@@ -67,7 +75,7 @@ def explanation_to_dict(expl: Explanation) -> dict[str, JsonValue]:
         "outcome": expl.outcome.value,
         "reason": expl.reason,
         "source": expl.source,
-        "refusal": asdict(expl.refusal) if expl.refusal is not None else None,
+        "refusal": refusal_to_dict(expl.refusal),
         "answers": [answer_to_dict(a) for a in expl.answers],
     }
     if isinstance(expl, ShellExplanation):
