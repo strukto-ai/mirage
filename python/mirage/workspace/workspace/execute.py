@@ -968,13 +968,14 @@ async def run_prepared_line(
             effective_session.functions.clear()
         scope.close()
         reset_current_evaluation(session_token)
-        await ws._session_mgr.flush(session.session_id)
-        # The marks were only for this line's apply_io; the seal stops a
-        # background command that returns later from marking a record
-        # persisted here, which nothing outside FUSE ever trims.
+        # The marks were only for this line's apply_io, so they go before
+        # the save can raise; the seal stops a background command that
+        # returns later from marking a record persisted here, which
+        # nothing outside FUSE ever trims.
         for rec in scope.records:
             rec.claimed = None
             rec.sealed = True
+        await ws._session_mgr.flush(session.session_id)
         ws._ops.records.extend(scope.records)
         # bash adds a line to history only when it is non-empty
         # (`shell_input_line[0]`): a blank line is skipped, while a

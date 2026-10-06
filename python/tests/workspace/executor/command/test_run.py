@@ -141,6 +141,31 @@ async def test_no_record_keeps_its_mark_after_the_line(
 
 
 @pytest.mark.asyncio
+async def test_a_failed_session_save_still_clears_and_seals_the_marks():
+    ws = caching_ram_workspace()
+    applied: list[list[OpRecord]] = []
+    orig_apply = ws._dispatcher.apply_io
+
+    async def keep_records(result, records=None, cache_facts=None):
+        applied.append(records)
+        await orig_apply(result, records=records, cache_facts=cache_facts)
+
+    async def failing_flush(session_id: str) -> None:
+        raise OSError("session store down")
+
+    ws._dispatcher.apply_io = keep_records
+    ws._session_mgr.flush = failing_flush
+    try:
+        with pytest.raises(OSError, match="session store down"):
+            await ws.shell("echo a | tee /r/f")
+    finally:
+        await ws.close()
+    [records] = applied
+    assert [r for r in records if r.op == "write"]
+    assert all(r.claimed is None and r.sealed for r in records)
+
+
+@pytest.mark.asyncio
 async def test_a_background_claimer_ending_after_the_line_marks_nothing(
     monkeypatch,
 ):
