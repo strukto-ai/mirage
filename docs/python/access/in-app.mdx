@@ -253,7 +253,7 @@ await session.explain.shell(line) -> ShellExplanation
 await session.explain.vfs.<call>(...) -> VfsExplanation
 ```
 
-The session's doors as a dry run, under the same names: what a line, or one POSIX-shaped VFS call, would do as the session, without running it. A line gets the refusal the agent would read, its placement and its parse tree, each command in it with every policy's answer; a VFS call gets every policy's answer and the error the call would raise. See [Dry runs](/home/permissions#dry-runs).
+What `session.shell` or a `session.vfs` call would do, without running it: a line's verdict and parse tree, a VFS call's verdict and error, each with every policy's answer. See [Explain](/home/permissions#explain).
 
 ```python
 shell_res = await session.explain.shell("rm /data/x")

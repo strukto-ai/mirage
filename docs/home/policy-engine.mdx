@@ -1,26 +1,17 @@
 ---
 title: Policy Engine
-description: Every line, command, VFS op and session write clears one ordered stack of Policy hooks; profiles compile into it, the route policy places lines through it, and a host extends it with policies of its own.
+description: One ordered stack of Policy hooks judges every line, command, VFS call and session write.
 icon: gavel
 ---
 
-The admission gate that [Permissions](/home/permissions) describes
-declaratively is one client of a general mechanism: the **policy
-engine**, an ordered stack of `Policy` objects the workspace consults at
-every state-changing surface. It answers two questions for everything a
-session touches (files, commands and CLIs, variables, processes):
+Every line, command, VFS call and session write passes one ordered stack
+of `Policy` objects. [Profiles](/home/permissions) compile into it, the
+[route policy](/home/route-policy) places lines through it, and a host
+adds its own.
 
-1. **Does it exist for this session?** A hidden path, variable, process
-   or command is absent: `ENOENT`, missing from every listing, `command
-   not found`, unset. The session's visibility answers this, through the
-   views and the built-in hide, before any policy is asked.
-2. **May the session do this?** Every policy answers in its own words:
-   refuse, ask a host, place the line on a runtime, or bound the result.
-
-A `Policy` is one concern's answers to the workspace lifecycle. It
-overrides only the hooks it cares about, answers an action to state an
-opinion or nothing to stay silent, and a hook that raises fails closed:
-the command or op is refused, naming the policy.
+A policy overrides only the hooks it needs and returns an answer, or
+`None` for no opinion. A hook that raises refuses the action, naming the
+policy.
 
 ```python
 from mirage import Workspace
@@ -47,207 +38,103 @@ const noForcePush: Policy = {
 const ws = new Workspace(mounts, { policies: [noForcePush] })
 ```
 
-More arrive later through `ws.policies.add(...)`. Hooks left
-un-overridden are detected at the seam and never called, so an empty
-policy costs nothing.
+Add more later with `ws.policies.add(...)`. A hook a policy does not
+override is never called.
 
-## The six hooks
+## Hooks
 
-Each hook fires on one plane, and each accepts a fixed set of answers:
-returning a kind the hook cannot carry is a loud `PolicyError`, never a
-silent allow.
+| Hook | Fires | May answer |
+| --- | --- | --- |
+| `pre_command` | per command, before it runs | Deny, Ask |
+| `pre_execute` | per line, after admission | Deny, Route |
+| `pre_ops` | per VFS call, before any backend or cache read | Deny, Ask |
+| `pre_session` | per session write (`export`, `X=1`, `printf -v`, ...) | Deny |
+| `post_ops` | after a VFS call | Deny, Limit |
+| `post_execute` | after a line | Limit |
 
-- **`pre_command`**: once per classified command, before it runs. The
-  `CommandContext` carries the name, the raw `argv`, every path the
-  line names (`paths`, with `operands` alone beside it for rules that
-  read a slot by position), the admission `tokens` with their `program`
-  head (a CLI's verb path canonicalized), the cwd, and the session and
-  agent ids. May answer **Deny or Ask**.
-- **`pre_execute`**: once per typed line, after the line clears
-  admission and before it runs. The context is the `RouteContext` a
-  [route policy](/home/route-policy) reads: the line, its commands and
-  their paths, the cwd, env, session and agent. May answer **Deny or
-  Route**. The workspace's `route_policy` answers here as a built-in,
-  ahead of the policies registered in code. Nested lines (`$()`,
-  `eval`, `source`, `xargs`) keep the placement of the line that ran
-  them.
-- **`pre_ops`**: once per VFS op at the op doors (the dispatcher and
-  the `ws.vfs` facade, which is also how FUSE, the runtime guests,
-  `find -delete` and the warm cache arrive) and on the command tier's
-  backend I/O, before any backend or cache read. The op is named per
-  door, so a portable policy keys on `write` and `path`. May answer
-  **Deny**, which the doors raise as `EACCES`, or **Ask**, which a door
-  puts to the host only when no line is running behind the op (a file
-  tool, the host's own `session.vfs` call) and refuses inside one,
-  since the line was admitted without it. This is the hot path,
-  thousands of ops under one recursive command, so keep it cheap;
-  expensive decisions belong at `pre_command` or precomputed into
-  policy state. A denied directory reads like a mode-000 one: it still
-  lists and stats, and a walk (`find`, `du`, `ls -R`, `grep -r`)
-  reports `Permission denied` for it. A command you register yourself
-  and that reads its accessor directly never reaches a door, so this
-  hook never sees those reads; that handler is trusted host code.
-- **`pre_session`**: once per session-state write, before it lands.
-  `export`, a plain assignment, `${X:=default}`, `$((X=5))` and
-  `printf -v` all clear the same gate, because every writer goes
-  through `SessionView.set`. The context carries a key, never a
-  pseudo-path, so a path-scoped rule cannot match one by accident. May
-  answer **Deny**.
-- **`post_ops`**: one completed op at the doors. A **Deny** suppresses
-  the result; a **Limit** caps a byte-producing one.
-- **`post_execute`**: one finished `execute()` line. A **Limit**
-  returned here merges with every other opining policy's and caps the
-  line's output at the workspace boundary. This caps the whole response,
-  on top of each command's own `command_limits`.
+Any other answer raises `PolicyError`.
 
-## The answers
+- `pre_command` reads a `CommandContext`: the command, `argv`, `paths`,
+  `operands`, `program` (a CLI's verb path), the cwd and the session.
+- `pre_execute` reads the [route policy's](/home/route-policy) context.
+  Nested lines
+  (`$( )`, `eval`, `source`, `xargs`) keep the outer line's placement.
+- `pre_ops` runs thousands of times under one `grep -r`: keep it cheap.
+  Its Deny is `EACCES`. Its Ask reaches the host only when no line is
+  running (a file tool, `session.vfs`); inside a line it refuses.
 
-- **Silence** (`None`/`null`): no opinion, the next policy speaks.
-- **`Hide`** is the built-in's alone: the op answers as absent
-  (`ENOENT`) before any other policy is asked, and leaves no record. No
-  surface ever names a hide, `explain` included.
-- **`Deny(reason, scope)`**: with the default `COMMAND` scope the line
-  reads `<command>: Permission denied` at exit 126, bash's own wording,
-  and the reason travels as the result's `refusal` record
-  (`kind: deny`, the reason, the policy's class name, the scope); the
-  `OPERAND` scope keeps the GNU operand voice instead: the command's
-  own line for an operand it may not open, at its operand exit code
-  (`cat: /vault/aws.token: Permission denied`, exit 1), the reason
-  again on the record. Exit codes derive from the plane and the scope,
-  never from a number a policy returns. At the op and session doors a
-  Deny is `EACCES` (`<NAME>: permission denied` for a session write),
-  and the reason rides the raised `PolicyDenied`'s `refusal` and the
-  line's record. A surface that hands the agent text appends the record
-  as one line, `policy denied: <reason>`.
-- **`Ask(reason)`** (`pre_command`, and `pre_ops` where no line is
-  running): the line or the op does not run, the agent reads
-  `Permission denied` with a `pending` refusal record naming the ask id,
-  and the question lands in `ws.decisions` for a host to answer: the
-  same ledger, `on_ask` handler, CLI and REST doors as a profile's `ask`
-  rules; see [Asks](/home/permissions#asks).
-- **`Route(runtime)`** (`pre_execute` only): the named runtime serves
-  every command it captures on the line, as a route policy's verdict
-  naming it does.
-- **`Limit(max_bytes, max_lines, timeout_seconds, on_exceed)`**: a
-  bound on a result. Every opining policy's limits merge to the
-  tightest value per field.
+## Answers
 
-Answers rank **by kind**, not by who registered first: a Hide outranks
-everything, then a Deny, then an Ask, then a Route or a Limit. So a
-later policy's Deny is never re-opened as a question, an approval never
-re-opens a refusal, and a Deny at `pre_execute` refuses the line
-whoever placed it. Two Routes that name different runtimes refuse the
-line (`policies place the line on different runtimes: ...`), since
-neither choice is the line's.
+| Answer | Effect |
+| --- | --- |
+| `None` | no opinion |
+| `Deny(reason)` | `<cmd>: Permission denied`, exit 126; `EACCES` at the VFS and session doors |
+| `Deny(reason, DenyScope.OPERAND)` | the command's own error for that operand (`cat: /vault/k: Permission denied`, exit 1) |
+| `Ask(reason)` | refused until a host answers; see [Asks](/home/permissions#asks) |
+| `Route(runtime)` | that runtime serves the commands it captures |
+| `Limit(...)` | bounds a result (`max_bytes`, `max_lines`, `timeout_seconds`); limits merge to the tightest |
 
-## The stack and its order
+stderr never carries the reason. It rides the result's `refusal` record
+(`kind`, `reason`, `policy`, `scope`, `ask_id`); text surfaces append
+`policy denied: <reason>`.
 
-Within one kind, registration order picks which answer shows: the
-first Deny's reason is the one the agent reads. The order is the
-tie-breaker, not the security model: a policy can only tighten the
-workspace, never loosen it.
+Answers rank by kind: Hide, then Deny, then Ask, then Route and Limit.
+A Deny beats any Ask, and two Routes to different runtimes refuse the
+line. Within a kind, the first registered speaks. A policy can only
+tighten.
 
-The registry seeds two built-ins ahead of everything: `MountRootPolicy`
-(mount-root semantics are mount semantics: the POSIX `EBUSY` rules for
-`rm`/`rmdir`/`mv`/`mkdir`/`touch`/`ln` on a mount root, and the refusal
-to read one whole into an archive or copy) and `OutputCapPolicy` (the
-per-command output caps, fed the per-mount overrides). The workspace
-follows with the profile pair, `PermissionsPolicy`, reading each
-session's compiled [profile](/home/permissions), and `ScriptPolicy` for
-profile policies, the `policy:` file a profile names, then `policies=`
-in list order, then anything added later through `ws.policies.add()`.
-At `pre_execute` the workspace's `route_policy` answers first, as the
-built-in `PlacementPolicy` the workspace installs (`policies.place`); at
-`pre_ops` the hide answers before every policy and the mount mode
-(`MountModePolicy`) after them.
+A **Hide** is the built-in's alone: the path is `ENOENT`, leaves no
+record, and no surface names it.
 
-A policy that raises does not fail open: the loop answers a Deny naming
-the policy and the error is logged. The route policy is the one
-exception: a mistake in it (an unknown runtime, a verdict it cannot
-parse) is the deployment's to fix, so it raises to the caller as it
-always has.
+## Order
 
-## One line, its judgments
+The stack: `MountRootPolicy`, `OutputCapPolicy`, the profile's
+`PermissionsPolicy` and `ScriptPolicy`, `policies=` in order, then
+`ws.policies.add()`. The route policy answers `pre_execute` first; the
+hide answers `pre_ops` first and the mount mode last.
 
-A typed line clears them in a fixed order:
+A line runs in four steps:
 
-1. **Syntax.** An unparsable line exits 2 and no policy is consulted.
-2. **Admission.** Every command in the line is judged before any of it
-   runs, so a rule-refused line never runs halfway, and a line the rules
-   refuse, or that waits on a question to the host, is never placed: no
-   placing policy, route script included, ever sees it. The question is
-   recorded here, once, and the command's own gate finds the answer.
-3. **Placement.** `pre_execute` places the line: the route policy, then
-   the coded policies, then each runtime's own `script:` when nothing
-   placed it. A Deny refuses the line whole, at exit 126.
-4. **Execution.** Each command clears its own gate where it runs, which
-   reads the values the runtime expanded. A whole line handed to a
-   runtime clears the same per-command gate before the runtime sees a
-   byte of it. Each VFS op clears `pre_ops`, including ops a routed
-   runtime performs against the mounts, every env write clears
-   `pre_session`, and the finished line is bounded by `post_ops` and
-   `post_execute`.
+1. **Syntax**: an unparsable line exits 2.
+2. **Admission**: every command is judged before any runs. A refused or
+   asked line never runs halfway and is never placed.
+3. **Placement**: `pre_execute`.
+4. **Execution**: each command clears its own gate with its expanded
+   words, each VFS call `pre_ops`, each session write `pre_session`.
+
+A raising policy denies; only the route policy's errors raise to the
+caller.
 
 ## What a profile compiles to
 
-A [profile](/home/permissions) compiles once per session into three
-parts, and nothing else reads the session's rules:
+- **Setup**: `cwd`, `env`.
+- **Visibility**: `paths`, `vars`, `processes.list`, `commands.allow`.
+- **Policies**: mount modes, `commands` rules, `policy:`,
+  `command_limits`, `processes.max`.
 
-- **Setup**: the `cwd` and `env` a session starts with.
-- **Visibility**: `paths` (hide and show), `vars`, `processes.list` and
-  `commands.allow`, which say what exists. The views (listings, globs,
-  walks, command lookup, `env`, `ps`) filter through it, and the op
-  doors answer a hidden path as absent.
-- **Policies**: the mount modes, the `commands` rules (as
-  `PermissionsPolicy`), the profile's `policy:` script (as
-  `ScriptPolicy`), `command_limits` and `processes.max`.
-
-A rule is **POSIX level** when it names paths and no command (`deny:
-[{paths: ["/vault/*"]}]`): it holds at every door, a command's or an
-op's. A rule that names a command, or no path, is **command level**: it
-holds where a line is judged.
+A rule naming paths and no command is **POSIX level** and holds at every
+door. Any other rule is **command level** and holds where a line is
+judged.
 
 ## Which door enforces what
 
-| Door | Command level: `commands.allow`, rules naming a command, `pre_command`, `pre_execute` | POSIX level: hides, path rules, mount modes, `pre_ops` / `post_ops` |
+| Door | Command level | POSIX level |
 | --- | --- | --- |
-| `ws.shell`, `session.shell`, the `shell` / `ls` / `grep` tools, `ssh ws@host [cmd]`, codex-exec commands | yes | yes |
-| The `read` / `write` / `edit` / `glob` tools, `ws.vfs`, `session.vfs`, FUSE / FSKit, `sftp` / `scp`, codex-exec file ops, a runtime guest's own file ops | no | yes |
+| `ws.shell`, `session.shell`, the `shell` / `ls` / `grep` tools, SSH, codex-exec commands | yes | yes |
+| the `read` / `write` / `edit` / `glob` tools, `ws.vfs`, `session.vfs`, FUSE, FSKit, SFTP, a runtime guest's file calls | no | yes |
 
-A door that sees only ops warns at startup about the command-level rules
-it skips. The agent tools follow the same profile: each session's tool
-list is derived from it, so a door never offers a tool every call of
-which would be refused. `shell` needs a command the allow list installs,
-`ls` and `grep` need those commands, `write` and `edit` need somewhere
-the session may write; `session.tools.names()` is the list, and MCP,
-RPC and the agent adapters offer exactly it. A path rule that asks is
-put to the host from a file tool too, keyed by the rule and the path:
-an `allow` once covers one tool call, every op it makes on that path.
+A VFS-only door logs the command-level rules it skips. The agent's tools
+follow the profile: `session.tools.names()` lists only the tools the
+session can use, and MCP, RPC and the agent adapters offer exactly that.
 
-## Scripts by job
+## Scripts
 
-Scripts come in two jobs, and each job runs one way:
+A policy script (`policy:`, `route_policy`, a runtime's `script:`) runs
+on the workspace's evaluator runtime, reads `ctx` and returns data; after
+10 seconds the line is refused. A script CLI (`clis:`) runs as the
+session, judged like any line.
 
-- **Policy scripts judge.** A profile's `policy:`, the workspace's
-  `route_policy` and a runtime's `script:` answer a question about a
-  line, a command, an op or a write. They run on the workspace's
-  evaluator runtime, see a `ctx` payload, and answer with data. Each
-  evaluation is bounded by one timeout, 10 seconds, after which the
-  judged line is refused (or, for a route policy, fails).
-- **Program scripts run as the session.** A script CLI (`clis:`) is a
-  program: it runs as the session, so everything it does is judged like
-  any line the agent types.
+## Explain
 
-## Dry runs
-
-`session.explain` runs a session's doors as a dry run under the same
-names. `session.explain.shell(line)` gives whether the line runs (a
-line refused whole with the exact `exit_code` and `stderr` the agent
-would see), every answer at
-`pre_execute` (`answers`) and its parse tree, each command in it with
-every policy's answer to it (`pre_command`) and the runtime that would
-serve it (`runtime`). `session.explain.vfs.<call>(...)` walks the real
-door of a POSIX-shaped VFS call and stops at its gate, with every
-`pre_ops` answer and the error the call would raise. Each is asked
-once: the answers shown are the ones the outcome came from. A hide is
-never among the answers; see [Dry runs](/home/permissions#dry-runs).
+`session.explain` shows what a line or a VFS call would do, and every
+policy's answer, without doing it. See [Explain](/home/permissions#explain).
