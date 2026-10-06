@@ -517,7 +517,7 @@ def _parse_file_redirect(child: TSNodeLike) -> Redirect:
     when there is one, is kept as typed: `3<f` claims fd 3 and `<&3`
     duplicates from it (`shell/descriptors.py`); the parser's redirect
     shield lets the grammar see `0<f` and `3<<< w` that way too
-    (`_operator_source`). A redirect whose text opens with `<<<` is a
+    (`operator_source`). A redirect whose text opens with `<<<` is a
     herestring. Three forms carry an int target: a dup (`2>&1`, `>&2`,
     `<&0`) names the descriptor it copies, a close (`>&-`, `<&-`)
     carries FD_CLOSE, and `&>` claims FD_BOTH.

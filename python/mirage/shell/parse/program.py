@@ -6,6 +6,21 @@ from mirage.shell.types import TSNodeLike
 
 
 class ParsedProgram:
+    """One parse of a line: its tree, where each of its bytes sits in the
+    line as typed, and the references that keep it.
+
+    Python frees the tree with the last reference to it; the count is what
+    makes a read after the last release fail, as TypeScript's native tree
+    is freed then.
+
+    Args:
+        original (str): the line as typed.
+        root (TSNodeLike): the parsed tree.
+        offsets (tuple[int, ...]): ``source_offsets(original, root)``.
+        diagnose (Callable[[], tuple[SyntaxDiagnostic, ...]]): finds the
+            line's syntax errors, run once on the first read.
+    """
+
     def __init__(
         self,
         original: str,
@@ -16,7 +31,6 @@ class ParsedProgram:
         self._diagnose = diagnose
         self._diagnostics: tuple[SyntaxDiagnostic, ...] | None = None
         self.original = original
-        self.normalized = root.text or b""
         self.offsets = offsets
         self.references = 1
         self._released = False
@@ -54,6 +68,13 @@ class ParsedProgram:
 
 
 class ProgramNode:
+    """A node of a parsed program; every read checks the program is held.
+
+    Args:
+        node (TSNodeLike): the node it reads.
+        program (ParsedProgram): the program the node belongs to.
+    """
+
     def __init__(self, node: TSNodeLike, program: ParsedProgram) -> None:
         self._node = node
         self.program = program
@@ -108,6 +129,12 @@ class ProgramNode:
 
 
 def retain_programs(nodes: Sequence[TSNodeLike]) -> Callable[[], None]:
+    """Retain each program the nodes come from, once; return the release.
+
+    Args:
+        nodes (Sequence[TSNodeLike]): nodes, or synthetic wrappers holding
+            them, that must outlive their defining line.
+    """
     programs: set[ParsedProgram] = set()
     pending = list(nodes)
     while pending:

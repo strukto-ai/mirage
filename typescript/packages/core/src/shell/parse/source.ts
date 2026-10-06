@@ -20,6 +20,14 @@ import { HeredocNode } from './heredoc/node.ts'
 import { PrefixNode } from './timing.ts'
 import type { ShellNode, TSNodeLike } from '../types.ts'
 
+/**
+ * A node of a shielded parse that reads the original text.
+ *
+ * Every shield keeps the source's width, so a span names the same text in
+ * both and only `text` differs. Reparsing the original against the
+ * shielded tree did the same until tree-sitter relexed a statement on its
+ * own, which it does at a line's end. Mirrors Python's SourceNode.
+ */
 export class SourceNode implements WrappedNode {
   constructor(
     protected readonly node: ShellNode,
@@ -87,6 +95,10 @@ export class SourceNode implements WrappedNode {
   }
 }
 
+/**
+ * Spans whose backslashes escape nothing: comments and strings in single
+ * quotes, ANSI-C ones included.
+ */
 function verbatimSpans(root: Node): [number, number][] {
   const spans: [number, number][] = []
   const stack: Node[] = [root]
@@ -102,6 +114,19 @@ function verbatimSpans(root: Node): [number, number][] {
   return spans.sort((a, b) => a[0] - b[0])
 }
 
+/**
+ * Offsets of the characters bash's reader deletes as line continuations.
+ *
+ * The reader removes `\<newline>` before a token is read, so the halves it
+ * joins are one word (`a\<newline>b` is `ab`, `$\<newline>{x}` an
+ * expansion); tree-sitter reads the pair as whitespace instead.
+ * Single-quoted and ANSI-C text and a comment keep theirs, and an escaped
+ * backslash continues nothing: only an odd-length run of backslashes
+ * before the newline ends in a live one. A live backslash ending the
+ * input continues onto nothing and goes too: `echo a\` runs `echo a`. A
+ * heredoc body is lowered into a quoted word before this runs, where
+ * every backslash it holds is escaped, so no body loses a character here.
+ */
 export function continuationIndices(parser: NativeParser, text: string): number[] {
   if (!text.includes('\\\n') && !text.endsWith('\\')) return []
   if (!(parser instanceof ParseTrees)) {
@@ -132,6 +157,13 @@ export function continuationIndices(parser: NativeParser, text: string): number[
   return dropped
 }
 
+/**
+ * Where each char of the source `parse` read sits in `command`. `parse`
+ * deletes line continuations and inserts text to repair the grammar, so a
+ * node's offsets index the source it read rather than the line as typed;
+ * indexed by one of them, this gives the char of `command` it came from, and
+ * an inserted char gives the char after it. Mirrors Python's source_offsets.
+ */
 export function sourceOffsets(
   parser: NativeParser,
   command: string,
@@ -150,6 +182,7 @@ export function sourceOffsets(
   return rebaseSource(source, source.source.slice(0, root.startIndex ?? 0) + root.text).offsets
 }
 
+/** The line as bash's reader hands it on, continuations removed. */
 export function joinContinuations(parser: NativeParser, command: string): string {
   return dropChars(command, continuationIndices(parser, command))
 }

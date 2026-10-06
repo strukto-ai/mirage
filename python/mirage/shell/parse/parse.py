@@ -17,8 +17,7 @@ from functools import partial
 from mirage.shell.bytes import encode_text
 from mirage.shell.parse.assignment import repair_assignments
 from mirage.shell.parse.diagnostics import diagnose
-from mirage.shell.parse.engine import BASH_LANGUAGE as BASH_LANGUAGE
-from mirage.shell.parse.engine import TS_PARSER as TS_PARSER
+from mirage.shell.parse.engine import TS_PARSER
 from mirage.shell.parse.heredoc import heredoc_operators
 from mirage.shell.parse.heredoc.lower import (
     drop_source_bytes,
@@ -30,23 +29,19 @@ from mirage.shell.parse.heredoc.reader import discover_heredocs
 from mirage.shell.parse.heredoc.types import HeredocSource
 from mirage.shell.parse.program import ParsedProgram
 from mirage.shell.parse.recovery import (
-    _failed_arith_openers,
-    _is_arithmetic,
-    _operator_source,
-    _parse_bytes,
-    _repair_for_headers,
-    _repair_orphaned_dollars,
-    _repair_redirect_dashes,
-    _statement_boundaries,
+    failed_arith_openers,
+    is_arithmetic,
+    operator_source,
+    parse_protected,
+    repair_for_headers,
+    repair_orphaned_dollars,
+    repair_redirect_dashes,
+    statement_boundaries,
 )
 from mirage.shell.parse.source import (
     continuation_bytes,
-)
-from mirage.shell.parse.source import (
-    join_continuations as join_continuations,
-)
-from mirage.shell.parse.source import (
-    source_offsets as source_offsets,
+    join_continuations,
+    source_offsets,
 )
 from mirage.shell.parse.timing import lower_timing, wrap_timing
 from mirage.shell.types import TSNodeLike
@@ -86,7 +81,7 @@ def parse(command: str) -> TSNodeLike:
     if b"<<" in original:
         # The operators are read off a tree that lexes `0<<EOF` as one.
         hinted = TS_PARSER.parse(original).root_node
-        lexed = _operator_source(original, hinted)
+        lexed = operator_source(original, hinted)
         if lexed != original:
             hinted = TS_PARSER.parse(lexed).root_node
         documents = discover_heredocs(original, heredoc_operators(hinted))
@@ -110,8 +105,8 @@ def parse(command: str) -> TSNodeLike:
             )
         source, timing_marks = lower_timing(TS_PARSER, source)
         data = source.source
-    data = _statement_boundaries(data)
-    root = _parse_bytes(data)
+    data = statement_boundaries(data)
+    root = parse_protected(data)
     if root.has_error:
         # Sitting inside an ERROR is not evidence that an opener is
         # broken: tree-sitter's error region swallows neighbouring
@@ -123,8 +118,8 @@ def parse(command: str) -> TSNodeLike:
         # reports are byte offsets.
         offsets = [
             offset
-            for offset in set(_failed_arith_openers(root))
-            if not _is_arithmetic(data, offset)
+            for offset in set(failed_arith_openers(root))
+            if not is_arithmetic(data, offset)
         ]
         if offsets:
             retried_data = data
@@ -134,15 +129,15 @@ def parse(command: str) -> TSNodeLike:
                     + b" "
                     + retried_data[offset + 1 :]
                 )
-            retried = _parse_bytes(retried_data)
+            retried = parse_protected(retried_data)
             if not retried.has_error:
                 root = retried
                 data = retried_data
-    root, data = _repair_redirect_dashes(root, data)
+    root, data = repair_redirect_dashes(root, data)
     if b"for" in data or b"select" in data:
-        root, data = _repair_for_headers(root, data)
+        root, data = repair_for_headers(root, data)
     if b"$" in data:
-        root = _repair_orphaned_dollars(root, data)
+        root = repair_orphaned_dollars(root, data)
     root = repair_assignments(
         root, data[: root.start_byte] + (root.text or b"")
     )
@@ -157,8 +152,13 @@ def parse(command: str) -> TSNodeLike:
 
 
 def parse_program(command: str) -> ParsedProgram:
+    """Parse a line into a program its holders release when done with it.
+
+    Args:
+        command (str): shell source to parse.
+    """
     root = parse(command)
-    offsets = tuple(source_offsets(command, root))
+    offsets = source_offsets(command, root)
     return ParsedProgram(
         command, root, offsets, partial(diagnose, root, offsets, parse)
     )

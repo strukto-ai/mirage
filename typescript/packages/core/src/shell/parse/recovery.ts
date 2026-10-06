@@ -21,6 +21,13 @@ import { delimiterEnd } from './heredoc/reader.ts'
 import { SourceNode } from './source.ts'
 import type { ShellNode } from '../types.ts'
 
+/**
+ * Index just past the `)` closing the `(` at `start`.
+ *
+ * Parens inside quotes and backslash escapes do not count, so a command
+ * substitution or a literal `")"` cannot throw off the depth. Returns
+ * null when the parens never balance.
+ */
 function balancedEnd(text: string, start: number): number | null {
   let depth = 0
   let index = start
@@ -52,6 +59,15 @@ function balancedEnd(text: string, start: number): number | null {
   return null
 }
 
+/**
+ * Whether the construct at `start` is a real arithmetic command.
+ *
+ * Decided by parsing the balanced span on its own: `((i++))` stands
+ * alone cleanly, while `((echo x); echo $i)` does not. Judging each
+ * opener separately is what keeps a valid `((i++))` safe when it shares
+ * a line with a broken one, since tree-sitter's error region covers
+ * both. An unbalanced span is assumed arithmetic and left alone.
+ */
 export function isArithmetic(parser: NativeParser, command: string, start: number): boolean {
   const end = balancedEnd(command, start)
   if (end === null) return true
@@ -79,6 +95,10 @@ const DIGITS = /\d+/y
 
 const LAST_ARM = /^\s*esac(?![^\s;&|()<>])/
 
+// Tokens the grammar lexes apart from a word in an argument list, where
+// bash reads a word, by the node they stand under. A bare `$` in a command
+// is already kept as a word, and only an error region loses it; the `$`
+// opening `$"..."` is the translation marker, never a word.
 const BARE_WORDS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['command', new Set(['==', '=~'])],
   ['ERROR', new Set(['==', '=~', '$'])],
@@ -96,10 +116,21 @@ const TEST_PARTS = new Set([
   'ERROR',
 ])
 
+/** Whether `text[at]` ends a word: the end of the text, a blank or an operator. */
 function breaksWord(text: string, at: number): boolean {
   return at < 0 || at >= text.length || WORD_BREAK.includes(text[at] ?? '')
 }
 
+/**
+ * Whether bash reads a `[ ... ]` the grammar built as a test as a command.
+ *
+ * `[` is a command to bash: its words end at the first list or pipe operator,
+ * and the last of them has to be a `]` of its own. The grammar folds `&&`,
+ * `||` and `|` into the expression, closes it at a `]` that bash reads inside
+ * `]]` or `]x`, and builds one whose `]` is missing; bash runs the builtin on
+ * each, which refuses with "[: missing `]'". Mirrors Python's
+ * _bracket_is_a_command.
+ */
 function bracketIsACommand(text: string, node: ShellNode): boolean {
   const children = node.children
   if (children[0]?.type !== '[') return false
@@ -114,6 +145,27 @@ function bracketIsACommand(text: string, node: ShellNode): boolean {
   return false
 }
 
+/**
+ * Spell operators the way the grammar can lex them.
+ *
+ * bash reads `<>` and `<<<` as one operator each, and a digit string that
+ * starts a word and touches `<` or `>` as the descriptor. tree-sitter-bash
+ * reads `<>` as `<` then `>`, `<<<` after a compound command or a
+ * descriptor as `<<` then `<`, and a digit string with a leading zero
+ * (`0<f`) as a number. The same-width spelling here hands it `>>`, `<  `
+ * and a nonzero first digit; `SourceNode` reads the original text, so a
+ * redirect whose text opens with `<<<` is the herestring it was. A last case
+ * arm's `;&` or `;;&`, which the grammar refuses, ends it as `;;` does, there
+ * being no arm after it, so it is spelled so. An argument of `==` or `=~`,
+ * which the grammar reads as a test operator wanting an operand (so `echo ==`
+ * is an error and `echo == x` drops it), and a bare `$` before a terminator
+ * are words to bash; spelled as `_` filler they parse as the words they are,
+ * and `SourceNode` gives back their text. So is the `[` of a test bash reads
+ * as a `[` command (`bracketIsACommand`, or one an error region opens), which
+ * then runs as the builtin. An operator inside an error region gets its own
+ * token only once the operators before it are respelled, so the pass repeats
+ * on its own parse until nothing changes. Mirrors Python's operator_source.
+ */
 export function operatorSource(parser: NativeParser, text: string, root: ShellNode): string {
   let current = text
   let lexed = respelled(current, root)
@@ -170,6 +222,13 @@ function respelled(text: string, root: ShellNode): string {
   return out.join('')
 }
 
+/**
+ * Parse structure using same-width lexical shields. Heredoc bodies,
+ * substring operands and redirect operators need word grammar where
+ * tree-sitter otherwise rejects them. The shielded tree is read against the
+ * original text (`SourceNode`). When shielding adds an error, keep the
+ * original parse so structural errors still reach syntax validation.
+ */
 export function parseProtected(parser: NativeParser, text: string): ShellNode {
   const tree = parser.parse(text)
   if (tree === null) throw new Error('shell parse returned null')
@@ -186,6 +245,14 @@ export function parseProtected(parser: NativeParser, text: string): ShellNode {
   return new SourceNode(shielded.rootNode, text)
 }
 
+/**
+ * Offsets of `((` tokens the parser could not make sense of.
+ *
+ * Only openers inside an ERROR subtree, or opening a construct that holds
+ * one (`((exit 3) & a=$!; ...)` lexes as arithmetic up to the error), are
+ * reported. A genuine `((i++))` parses as an arithmetic command with no
+ * error in it, so it cannot be picked up here.
+ */
 export function failedArithOpeners(root: ShellNode): number[] {
   const offsets: number[] = []
   const stack: [ShellNode, boolean][] = [[root, false]]
@@ -204,6 +271,18 @@ export function failedArithOpeners(root: ShellNode): number[] {
   return offsets
 }
 
+/**
+ * Offsets of literal `$` tokens cut off from their variable name.
+ *
+ * tree-sitter-bash 0.25.1 stops lexing a later unbraced expansion in a
+ * word when a name-terminating character follows it, so
+ * `> /api/$c/$id.json` parses as `/api/$c/$` plus a sibling word
+ * `id.json`: the `$` lands in the tree as a literal token and the
+ * expansion is gone. A literal `$` starting a recognized unbraced
+ * parameter is a shape no correct bash lex produces (bash would have
+ * read an expansion), so each one marks a mis-parse. The `$` opening a
+ * simple_expansion is that expansion's own token and is skipped.
+ */
 function orphanedDollarOffsets(root: ShellNode, text: string): number[] {
   const offsets: number[] = []
   const stack: ShellNode[] = [root]
@@ -226,6 +305,13 @@ function orphanedDollarOffsets(root: ShellNode, text: string): number[] {
   return offsets
 }
 
+/**
+ * Rewrite the expansion at `offset` into its braced spelling.
+ *
+ * `$id.json` becomes `${id}.json`, which says the same thing and is the
+ * spelling the grammar reads correctly. Bash reads a single digit after
+ * `$` as one positional parameter, so `$12` rebraces as `${1}2`.
+ */
 function rebraceDollar(text: string, offset: number): string {
   const ref = scanParameter(text, offset)
   if (ref === null) return text
@@ -233,6 +319,13 @@ function rebraceDollar(text: string, offset: number): string {
   return `${text.slice(0, offset)}\${${name}}${text.slice(end)}`
 }
 
+/**
+ * Rebrace mis-lexed expansions and reparse until none remain.
+ *
+ * Every rebrace consumes one bare `$` and never writes a new one, so
+ * the loop is bounded by the count of `$` characters. A retry that
+ * parses worse than what it replaces is discarded.
+ */
 export function repairOrphanedDollars(
   parser: NativeParser,
   root: ShellNode,
@@ -341,6 +434,13 @@ function errors(root: ShellNode): Set<string> {
   return spans
 }
 
+/**
+ * Make statement newlines swallowed between simple-command words explicit.
+ * Quoted newlines are inside a child and continuations were already removed.
+ * Insertion preserves the source maps used by lowered heredocs. The separator
+ * goes before a comment that ends the statement, since one after it would be
+ * read as part of the comment.
+ */
 export function statementBoundaries(parser: NativeParser, text: string): string {
   if (!text.includes('\n')) return text
   const root = parser.parse(text)?.rootNode

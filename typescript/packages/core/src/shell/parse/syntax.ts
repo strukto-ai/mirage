@@ -348,6 +348,11 @@ function issue(node: TSNodeLike, offending: string | null): SyntaxIssue | null {
     : { offending, span: { start: node.startIndex ?? 0, end: node.endIndex ?? node.text.length } }
 }
 
+/** The first syntax error in the tree and the span it covers; `findSyntaxError`
+ * keeps only its text. An error the walk finds only by reparsing a `$(...)`
+ * body spans that substitution, since the reparse reads the body in its own
+ * coordinates; one the walk sees directly, such as a stray `fi` inside the
+ * body, keeps its own span. */
 export function findSyntaxIssue(
   node: TSNodeLike,
   parse?: (command: string) => TSNodeLike,

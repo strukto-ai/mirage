@@ -2,6 +2,7 @@ import type { TSNodeLike } from '../types.ts'
 import type { SyntaxDiagnostic } from './types.ts'
 import { findSyntaxIssue, findUnterminatedBacktick, syntaxErrorMessage } from './syntax.ts'
 
+/** The line's syntax errors, each span mapped back into the line as typed. */
 export function diagnose(
   root: TSNodeLike,
   offsets: readonly number[],

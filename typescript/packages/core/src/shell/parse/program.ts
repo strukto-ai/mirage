@@ -33,9 +33,11 @@ function releaseResource(resource: Resource): void {
 // uses explicit leases; this fallback never determines a running scope's lifetime.
 const collected = new FinalizationRegistry<Resource>(releaseResource)
 
+/** One parse of a line: its tree, where each of its chars sits in the line as
+ * typed, and the references that keep it; the last release frees the native
+ * tree. */
 export class ParsedProgram {
   readonly root: ProgramNode
-  readonly normalized: string
   private readonly resource: Resource
   private released = false
   private diagnosed: readonly SyntaxDiagnostic[] | null = null
@@ -47,7 +49,6 @@ export class ParsedProgram {
     dispose: () => void,
     private readonly diagnose: () => readonly SyntaxDiagnostic[] = () => [],
   ) {
-    this.normalized = root.text
     this.resource = { references: 1, dispose }
     this.root = new ProgramNode(root, this)
     collected.register(this, this.resource, this)
@@ -93,6 +94,7 @@ export class ParsedProgram {
   }
 }
 
+/** A node of a parsed program; every read checks the program is still held. */
 export class ProgramNode implements ShellNode {
   constructor(
     private readonly borrowed: ShellNode,

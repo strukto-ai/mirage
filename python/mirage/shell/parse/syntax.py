@@ -314,7 +314,10 @@ def find_syntax_issue(
     """Locate structural errors and missing tokens throughout a parsed AST.
 
     Of the tokens the grammar accepts and bash refuses, the first on the
-    line is the one reported, as bash stops there.
+    line is the one reported, as bash stops there. An error the walk finds
+    only by reparsing a ``$(...)`` body spans that substitution, since the
+    reparse reads the body in its own coordinates; one the walk sees
+    directly, such as a stray ``fi`` inside the body, keeps its own span.
 
     Args:
         node (TSNodeLike): root node from parse().
@@ -470,7 +473,7 @@ def find_unterminated_quote(node: TSNodeLike) -> str | None:
     return None
 
 
-def _innermost_unclosed(children: list[TSNodeLike]) -> str | None:
+def _innermost_unclosed(children: Sequence[TSNodeLike]) -> str | None:
     """What the innermost construct an ERROR's tokens open still waits for.
 
     A double quote nests inside a substitution as bash reads it (``"$("``
@@ -479,7 +482,7 @@ def _innermost_unclosed(children: list[TSNodeLike]) -> str | None:
     is an unexpected token rather than the end of input.
 
     Args:
-        children (list[TSNodeLike]): the ERROR node's children, in order.
+        children (Sequence[TSNodeLike]): the ERROR node's children, in order.
     """
     pending: list[tuple[str, str]] = []
     for child in children:

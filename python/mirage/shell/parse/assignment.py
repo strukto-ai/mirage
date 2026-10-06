@@ -1,6 +1,6 @@
 from typing import Any
 
-from mirage.shell.parse.recovery import _parse_bytes
+from mirage.shell.parse.recovery import parse_protected
 from mirage.shell.parse.source import SourceNode
 from mirage.shell.types import TSNodeLike
 
@@ -35,7 +35,7 @@ def repair_assignments(root: TSNodeLike, data: bytes) -> TSNodeLike:
         for at in reversed(ordered):
             amended = amended[:at] + MARKER + amended[at:]
         current = AssignmentNode(
-            _parse_bytes(amended),
+            parse_protected(amended),
             data,
             tuple(at + i * len(MARKER) for i, at in enumerate(ordered)),
         )
@@ -78,6 +78,14 @@ def _assignment_ends(root: TSNodeLike) -> set[int]:
 
 
 class AssignmentNode(SourceNode):
+    """A node of the repaired parse that hides the inserted assignments.
+
+    Args:
+        node (Any): the node of the parse with the markers.
+        data (bytes): the source without them.
+        inserted (tuple[int, ...]): where each marker starts in the parse.
+    """
+
     def __init__(
         self, node: Any, data: bytes, inserted: tuple[int, ...]
     ) -> None:

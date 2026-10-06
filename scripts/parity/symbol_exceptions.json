@@ -1,5 +1,5 @@
 {
- "baseline": 4072,
+ "baseline": 4070,
  "modules": {
   "ops/registry": {
    "typescript_only": {
@@ -314,9 +314,8 @@
    "typescript_only": {
     "NativeParser": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker.",
     "ParseTrees": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker.",
-    "linkTree": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker.",
     "treeOf": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker.",
-    "trees": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker."
+    "WrappedNode": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker."
    }
   },
   "shell/parse/program": {

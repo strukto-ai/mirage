@@ -19,14 +19,12 @@ import { ParseTrees, type NativeParser } from './engine.ts'
 import { ParsedProgram, ProgramNode } from './program.ts'
 import { Language, Parser } from 'web-tree-sitter'
 import type { ShellParserConfig } from './config.ts'
-export type { ShellParserConfig } from './config.ts'
 import { heredocOperators } from './heredoc/index.ts'
 import { lowerTiming, wrapTiming, type TimingMark } from './timing.ts'
 import { discoverHeredocs } from './heredoc/reader.ts'
 import { dropSourceChars, lowerHeredocs, rebaseSource } from './heredoc/lower.ts'
 import { HeredocNode } from './heredoc/node.ts'
 import { continuationIndices, joinContinuations, sourceOffsets } from './source.ts'
-export { joinContinuations } from './source.ts'
 import {
   isArithmetic,
   operatorSource,
@@ -47,6 +45,11 @@ export interface ShellParser {
   sourceOffsets(command: string, root: TSNodeLike): readonly number[]
 }
 
+// `Parser.init` boots one wasm module for the whole process, so two callers
+// that start at the same time used to race it: the second read the language
+// out of a half-built module and threw "Incompatible language version 0".
+// Every caller now awaits the same boot. A failed boot is not kept, or one bad
+// start would poison every later parser.
 let engineBoot: Promise<void> | null = null
 
 export async function createShellParser(config: ShellParserConfig): Promise<ShellParser> {

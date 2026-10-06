@@ -70,7 +70,7 @@ def _balanced_end(data: bytes, start: int) -> int | None:
     return None
 
 
-def _is_arithmetic(data: bytes, start: int) -> bool:
+def is_arithmetic(data: bytes, start: int) -> bool:
     """Whether the construct at ``start`` is a real arithmetic command.
 
     Decided by parsing the balanced span on its own: ``((i++))`` stands
@@ -116,7 +116,10 @@ _DIGITS = re.compile(rb"\d+")
 
 _LAST_ARM = re.compile(rb"\s*esac(?![^\s;&|()<>])")
 
-
+# Tokens the grammar lexes apart from a word in an argument list, where
+# bash reads a word, by the node they stand under. A bare `$` in a command
+# is already kept as a word, and only an error region loses it; the `$`
+# opening `$"..."` is the translation marker, never a word.
 _BARE_WORDS = {
     "command": frozenset({"==", "=~"}),
     "ERROR": frozenset({"==", "=~", "$"}),
@@ -182,7 +185,7 @@ def _bracket_is_a_command(data: bytes, node: TSNodeLike) -> bool:
     return False
 
 
-def _operator_source(data: bytes, root: TSNodeLike) -> bytes:
+def operator_source(data: bytes, root: TSNodeLike) -> bytes:
     """Spell operators the way the grammar can lex them.
 
     bash reads ``<>`` and ``<<<`` as one operator each, and a digit
@@ -262,7 +265,7 @@ def _respelled(data: bytes, root: TSNodeLike) -> bytes:
     return bytes(out)
 
 
-def _parse_bytes(data: bytes) -> TSNodeLike:
+def parse_protected(data: bytes) -> TSNodeLike:
     """Parse structure using same-width lexical shields.
 
     Heredoc bodies, substring operands and redirect operators need word
@@ -279,7 +282,7 @@ def _parse_bytes(data: bytes) -> TSNodeLike:
         protected_source(data, tree.root_node) if b"<<" in data else None
     ) or data
     shielded_data = expansion_source(shielded_data, tree.root_node)
-    shielded_data = _operator_source(shielded_data, tree.root_node)
+    shielded_data = operator_source(shielded_data, tree.root_node)
     if shielded_data == data:
         return tree.root_node
     shielded = TS_PARSER.parse(shielded_data).root_node
@@ -288,7 +291,7 @@ def _parse_bytes(data: bytes) -> TSNodeLike:
     return SourceNode(shielded, data)
 
 
-def _failed_arith_openers(root: TSNodeLike) -> list[int]:
+def failed_arith_openers(root: TSNodeLike) -> list[int]:
     """Byte offsets of ``((`` tokens the parser could not make sense of.
 
     Only openers inside an ERROR subtree, or opening a construct that
@@ -372,7 +375,7 @@ def _rebrace_dollar(data: bytes, offset: int) -> bytes:
     )
 
 
-def _repair_orphaned_dollars(root: TSNodeLike, data: bytes) -> TSNodeLike:
+def repair_orphaned_dollars(root: TSNodeLike, data: bytes) -> TSNodeLike:
     """Rebrace mis-lexed expansions and reparse until none remain.
 
     Every rebrace consumes one bare ``$`` and never writes a new one,
@@ -389,14 +392,14 @@ def _repair_orphaned_dollars(root: TSNodeLike, data: bytes) -> TSNodeLike:
             break
         for offset in sorted(offsets, reverse=True):
             data = _rebrace_dollar(data, offset)
-        retried = _parse_bytes(data)
+        retried = parse_protected(data)
         if retried.has_error:
             break
         root = retried
     return root
 
 
-def _repair_redirect_dashes(
+def repair_redirect_dashes(
     root: TSNodeLike, data: bytes
 ) -> tuple[TSNodeLike, bytes]:
     # tree-sitter-bash drops a bare dash immediately before an explicit fd.
@@ -417,7 +420,7 @@ def _repair_redirect_dashes(
     repaired = data
     for offset in sorted(set(offsets), reverse=True):
         repaired = repaired[:offset] + b"'-'" + repaired[offset + 1 :]
-    retried = _parse_bytes(repaired)
+    retried = parse_protected(repaired)
     return (root, data) if retried.has_error else (retried, repaired)
 
 
@@ -457,7 +460,7 @@ def _header_inserts(root: TSNodeLike, data: bytes) -> list[tuple[int, bytes]]:
     return inserts
 
 
-def _repair_for_headers(
+def repair_for_headers(
     root: TSNodeLike, data: bytes
 ) -> tuple[TSNodeLike, bytes]:
     # Encode invalid names for runtime validation and supply omitted "$@".
@@ -466,7 +469,7 @@ def _repair_for_headers(
     while inserts := _header_inserts(retried, repaired):
         for offset, text in sorted(inserts, reverse=True):
             repaired = repaired[:offset] + text + repaired[offset:]
-        retried = _parse_bytes(repaired)
+        retried = parse_protected(repaired)
     clean = retried is not root and len(_errors(retried)) <= len(_errors(root))
     return (retried, repaired) if clean else (root, data)
 
@@ -481,7 +484,7 @@ def _errors(root: TSNodeLike) -> set[tuple[int, int]]:
     return spans
 
 
-def _statement_boundaries(data: bytes) -> bytes:
+def statement_boundaries(data: bytes) -> bytes:
     """Make newlines swallowed between command words explicit separators.
 
     tree-sitter-bash can absorb a statement newline into a nested pipeline

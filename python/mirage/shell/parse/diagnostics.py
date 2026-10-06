@@ -16,6 +16,15 @@ def diagnose(
     parse_fn: Callable[[str], TSNodeLike] | None = None,
     aliases: frozenset[str] = frozenset(),
 ) -> tuple[SyntaxDiagnostic, ...]:
+    """The line's syntax errors, each span mapped back into the line.
+
+    Args:
+        root (TSNodeLike): the parsed line.
+        offsets (Sequence[int]): ``source_offsets`` of that parse.
+        parse_fn (Callable[[str], TSNodeLike] | None): parses a ``$(...)``
+            body so its own syntax is judged.
+        aliases (frozenset[str]): alias names the shell would expand.
+    """
     found = find_syntax_issue(root, aliases, parse_fn=parse_fn)
     unclosed = find_unterminated_backtick(decode_text(root.text or b""))
     if found is None and unclosed is not None:
