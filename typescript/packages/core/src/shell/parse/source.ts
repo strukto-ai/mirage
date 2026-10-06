@@ -13,19 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Node } from 'web-tree-sitter'
-import { ParseTrees, linkTree, type NativeParser } from './engine.ts'
+import { ParseTrees, type NativeParser, type WrappedNode } from './engine.ts'
 import { VERBATIM_TYPES } from './constants.ts'
 import { dropChars, dropSourceChars, rebaseSource } from './heredoc/lower.ts'
 import { HeredocNode } from './heredoc/node.ts'
 import { PrefixNode } from './timing.ts'
 import type { ShellNode, TSNodeLike } from '../types.ts'
 
-export class SourceNode implements ShellNode {
+export class SourceNode implements WrappedNode {
   constructor(
     protected readonly node: ShellNode,
     protected readonly original: string,
-  ) {
-    linkTree(this, node)
+  ) {}
+  get inner(): ShellNode {
+    return this.node
   }
   get type(): string {
     return this.node.type

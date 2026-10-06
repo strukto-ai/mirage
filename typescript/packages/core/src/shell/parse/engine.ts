@@ -17,16 +17,19 @@ import type { ShellNode } from '../types.ts'
 
 export type NativeParser = Pick<Parser, 'parse'>
 
-const trees = new WeakMap<ShellNode, Tree>()
-
-export function treeOf(node: ShellNode): Tree {
-  const tree = node instanceof Node ? node.tree : trees.get(node)
-  if (tree === undefined) throw new Error('shell node has no owning tree')
-  return tree
+/** A node that reads another node of the same tree. */
+export interface WrappedNode extends ShellNode {
+  readonly inner: ShellNode
 }
 
-export function linkTree(wrapper: ShellNode, node: ShellNode): void {
-  trees.set(wrapper, treeOf(node))
+/** The native tree under a node, found through its wrappers when asked. */
+export function treeOf(node: ShellNode): Tree {
+  let at: ShellNode = node
+  while (!(at instanceof Node)) {
+    if (!('inner' in at)) throw new Error('shell node has no owning tree')
+    at = (at as WrappedNode).inner
+  }
+  return at.tree
 }
 
 /** All native allocations of one synchronous parse, including recovery. */

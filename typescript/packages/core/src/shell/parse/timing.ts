@@ -1,4 +1,4 @@
-import { linkTree, type NativeParser } from './engine.ts'
+import type { NativeParser, WrappedNode } from './engine.ts'
 import type { HeredocNode } from './heredoc/node.ts'
 import type { ShellNode } from '../types.ts'
 import type { HeredocSource } from './heredoc/types.ts'
@@ -94,7 +94,7 @@ export function lowerTiming(
   return [{ ...source, source: text }, marks]
 }
 
-export class PrefixNode implements ShellNode {
+export class PrefixNode implements WrappedNode {
   readonly timing: readonly boolean[]
   private readonly prefixes: readonly (readonly [string, boolean])[]
   constructor(
@@ -105,10 +105,12 @@ export class PrefixNode implements ShellNode {
     private readonly skip = 0,
     private readonly parentNode: PrefixNode | null = null,
   ) {
-    linkTree(this, node)
     this.prefixes = (targets.get(node.id) ?? []).slice(skip)
     const first = this.prefixes[0]
     this.timing = first === undefined ? [] : [first[1]]
+  }
+  get inner(): ShellNode {
+    return this.node
   }
   get type(): string {
     return this.prefixes[0]?.[0] ?? this.node.type
