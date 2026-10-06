@@ -253,7 +253,7 @@ await session.explain.shell(line) -> ShellExplanation
 await session.explain.vfs.<call>(...) -> VfsExplanation
 ```
 
-What `session.shell` or a `session.vfs` call would do, without running it: a line's verdict and parse tree, a VFS call's verdict and error, each with every policy's answer. See [Explain](/home/permissions#explain).
+What `session.shell` or a `session.vfs` call would do, without running it: a line's verdict and parse tree, a VFS call's verdict and error, each with every policy's answer. See [Explain](/home/explain).
 
 ```python
 shell_res = await session.explain.shell("rm /data/x")

@@ -258,7 +258,7 @@ session.explain.shell(line): Promise<ShellExplanation>
 session.explain.vfs.<call>(...): Promise<VfsExplanation>
 ```
 
-What `session.shell` or a `session.vfs` call would do, without running it: a line's verdict and parse tree, a VFS call's verdict and error, each with every policy's answer. In a browser (no async task isolation) `explain.vfs` throws and `explain.shell`'s policies act for real. See [Explain](/home/permissions#explain).
+What `session.shell` or a `session.vfs` call would do, without running it: a line's verdict and parse tree, a VFS call's verdict and error, each with every policy's answer. In a browser (no async task isolation) `explain.vfs` throws and `explain.shell`'s policies act for real. See [Explain](/home/explain).
 
 ```ts
 const shellRes = await session.explain.shell('rm /data/x')

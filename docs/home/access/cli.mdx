@@ -49,14 +49,14 @@ mirage workspace delete demo
 
 ## Run lines, VFS calls and tools
 
-`-w` names the workspace and `-s` the session, the default one when absent. `--explain` prints what a line or a VFS call would do, running nothing; see [Explain](/home/permissions#explain).
+`-w` names the workspace and `-s` the session, the default one when absent. `--explain` prints what a line or a VFS call would do, running nothing; see [Explain](/home/explain).
 
 | Command | Does |
 | --- | --- |
-| `mirage shell -w ID -c LINE [--cwd PATH] [--bg] [--explain]` | Run a line. Piped stdin streams to it, Ctrl-C cancels it, and `--bg` returns a job id at once. |
-| `mirage vfs CALL -w ID ARGS [--explain]` | One of the 24 [VFS calls](/home/access/http#call-the-vfs): its required arguments in order, the rest as `--name VALUE`, bytes from `--data` / `--value` or stdin. Calls are spelled with dashes: `mirage vfs is-dir`. |
-| `mirage glob -w ID PATTERN` | Every path a pattern matches. |
-| `mirage tools TOOL -w ID ARGS` | One of the [agent tools](/home/access/mcp#tools): `shell`, `read`, `write`, `edit`, `ls`, `grep`, `glob`. |
+| `mirage shell -w ID [-s SESSION] -c LINE [--cwd PATH] [--runtime NAME] [--bg] [--explain]` | Run a line. Piped stdin streams to it, Ctrl-C cancels it, and `--bg` returns a job id at once. |
+| `mirage vfs CALL ARGS -w ID [-s SESSION] [--explain]` | One of the 24 [VFS calls](/home/access/http#call-the-vfs): its required arguments in order, the rest as `--name VALUE`, bytes from `--data` / `--value` or stdin. Calls are spelled with dashes: `mirage vfs is-dir`. |
+| `mirage glob PATTERN -w ID [-s SESSION]` | Every path a pattern matches. |
+| `mirage tools TOOL ARGS -w ID [-s SESSION]` | One of the [agent tools](/home/access/mcp#tools): `shell`, `read`, `write`, `edit`, `ls`, `grep`, `glob`. |
 
 ### `mirage mcp`
 

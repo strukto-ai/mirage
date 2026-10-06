@@ -96,6 +96,7 @@
               "home/observer",
               "home/permissions",
               "home/policy-engine",
+              "home/explain",
               "home/route-policy"
             ]
           },

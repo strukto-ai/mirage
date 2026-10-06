@@ -237,57 +237,8 @@ earlier commands ran; a pending answer does not undo them.
 
 ## Explain
 
-`session.explain` shows what a call would do, without doing it:
-`explain.shell(line)` for `session.shell(line)`, and
-`explain.vfs.<call>(...)` for each POSIX VFS call on `session.vfs`
-(`read`, `write`, `pwrite`, `stat`, `rename`, `setxattr`, ...). Nothing
-runs, nothing is recorded and no grant is spent. A policy that reads a
-file to decide still reads it; its writes fail with `EROFS`.
-
-```python
-explain = (await ws.session("reviewer")).explain
-shell_res = await explain.shell("rm /data/x")
-vfs_res = await explain.vfs.write("/vault/key", b"x")
-```
-
-```typescript
-const explain = (await ws.session('reviewer')).explain
-const shellRes = await explain.shell('rm /data/x')
-const vfsRes = await explain.vfs.write('/vault/key', 'x')
-```
-
-Every result has `outcome` (`allow`, `deny`, `ask`), `reason`, `source`
-(where the rule is written: `top`, `mounts./runbook`, `commands.allow`),
-`answers` (each policy's answer, in order) and `refusal`.
-
-| Result | Adds |
-| --- | --- |
-| line (`ShellExplanation`) | `exit_code` and `stderr` the agent reads if the line is refused whole, else 0; `answers` from placement; `node`, the parse tree |
-| command (a tree node) | `command`, `argv`, its own `exit_code` and `stderr`, `operands` (`text`, `path`, `matched`), `runtime` |
-| VFS call (`VfsExplanation`) | `call`, `paths`, `error` (`EACCES`, `EROFS`, or empty) |
-
-A line is refused whole by a rule or an unanswered ask; anything else
-fails only its own command. Tree nodes are `list`, `pipeline`,
-`subshell`, `group`, `substitution`, `line` (`bash -c`, `eval`, `xargs`)
-and `command`. `mirage shell --explain` prints it:
-
-```text
-cat /data/a | wc -l && echo $(cat /data/keys/a)  [deny, exit 1: sealed]
-  list: cat /data/a | wc -l && echo $(cat /data/keys/a)
-    pipeline: cat /data/a | wc -l
-      cat /data/a  [allow]
-      wc -l  [allow]
-    echo $(cat /data/keys/a)  [allow]
-      substitution: cat /data/keys/a
-        cat /data/keys/a  [deny, exit 1: sealed]  top
-```
-
-- A hidden path explains like a path no rule matches.
-- `list_files` is judged at its listing, not per entry.
-- In TypeScript without async task isolation (a browser),
-  `explain.vfs` throws and `explain.shell`'s policies act for real.
-
-Every door takes the same option: `?explain=true` on HTTP's `shell` and `vfs/<call>` routes, `explain: true` on RPC and on MCP's `shell` and `vfs_<call>` tools with [all calls](/home/access/mcp#vfs-calls-and-explain), `--explain` on `mirage shell` and `mirage vfs`, each answering the same fields as JSON.
+To see what a profile would do to a line or a VFS call without running
+it, use [Explain](/home/explain).
 
 ## Examples
 
