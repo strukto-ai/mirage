@@ -186,7 +186,7 @@ export function namespaceStat(
 }
 
 /**
- * Whether a hide, a path rule or a preOps policy judges anything a
+ * Whether a hide, a path rule or a preVfs policy judges anything a
  * command's operands reach, so a native walk that classifies the raw
  * tree gives way to the checked one.
  *

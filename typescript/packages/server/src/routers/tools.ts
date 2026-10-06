@@ -26,7 +26,7 @@ export interface ToolsRoutesDeps {
 }
 
 const INPUTS: ReadonlyMap<string, JsonSchemaType> = new Map(
-  TOOLS.filter((tool) => tool.name !== 'shell').map((tool) => [tool.name, tool.inputSchema]),
+  TOOLS.map((tool) => [tool.name, tool.inputSchema]),
 )
 
 interface ToolResponse {
@@ -75,14 +75,13 @@ async function callTool(
 }
 
 /**
- * Serve each tool but `shell` at `POST /v1/workspaces/:wsId/<tool>`, with
- * the MCP route's body limit, so an input MCP takes is one these take.
- * `shell` keeps its own route.
+ * Serve each tool at `POST /v1/workspaces/:wsId/tools/<tool>`, with the
+ * MCP route's body limit, so an input MCP takes is one these take.
  */
 export function registerToolsRoutes(app: FastifyInstance, deps: ToolsRoutesDeps): void {
   for (const [name, input] of INPUTS) {
     app.post<{ Params: { wsId: string }; Querystring: { session_id?: string } }>(
-      `/v1/workspaces/:wsId/${name}`,
+      `/v1/workspaces/:wsId/tools/${name}`,
       { bodyLimit: DEFAULT_MAX_REQUEST_BODY_SIZE },
       async (req, reply) => {
         const { status, body } = await callTool(

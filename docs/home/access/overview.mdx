@@ -5,7 +5,7 @@ description: How agents and people reach a Mirage virtual terminal.
 icon: cube
 ---
 
-A Mirage virtual terminal is a workspace: one terminal over your mounted backends, with sessions inside it and [profiles](/home/permissions) and [policies](/home/policy-engine) that decide what each agent may see and run. Its core is the Mirage library in Python and TypeScript, running in your app. Every other way in reaches that same core.
+A Mirage virtual terminal is a workspace: one terminal over your mounted backends, with sessions inside it and [profiles](/home/permissions) and [policies](/home/policy/overview) that decide what each agent may see and run. Its core is the Mirage library in Python and TypeScript, running in your app. Every other way in reaches that same core.
 
 <div className="my-6">
   <img noZoom src="/images/access-light.svg" alt="Every client reaches one core, the Workspace. An app calls it directly. The mirage CLI, MCP clients and RPC clients reach the server's HTTP routes. SSH clients reach its SSH server. Both servers call the Workspace." className="block dark:hidden w-full" />
@@ -38,14 +38,15 @@ Each way in exposes what its own protocol defines. A dash means the protocol has
 | Cancel or kill all of a session's or workspace's work | ✓ | ✓ | – | – | ✓ | – |
 | VFS.md, SKILL.md and session profiles | ✓ | ✓ | – | – | ✓ | – |
 | The seven agent tools | ✓ | ✓ | ✓ | ✓ | ✓ | – |
-| File operations on bytes | ✓ | via RPC | – | ✓ | – | `sftp`, `scp`, `sshfs` |
+| File operations on bytes | ✓ | ✓ | ✓ | ✓ | ✓ | `sftp`, `scp`, `sshfs` |
+| Explain a line or a VFS call | ✓ | ✓ | ✓ | ✓ | ✓ | – |
 | Snapshots | ✓ | ✓ | – | – | ✓ | – |
 | Asks | ✓ | ✓ | – | – | ✓ | – |
 | Jobs | – | ✓ | – | – | ✓ | – |
 
 ## Sessions
 
-Every call acts as one session, with its own working directory and environment, under the [profile](/home/permissions) it was created with. HTTP picks the session with `session_id`, MCP and RPC with `?session_id=` or `-s`, and the CLI with `-s`; each SSH login, an `sshfs` mount among them, gets a fresh session under its key's profile. Without one, a call runs in the workspace's default session, under the default profile: the one the config's `profile:` names, else the profile called `default`, else none. A FUSE folder the server mounts is the exception: it belongs to no session, so no profile applies.
+Every call acts as one session, with its own working directory and environment, under the [profile](/home/permissions) it was created with. HTTP, MCP and RPC pick the session with `?session_id=` (or `-s` on stdio), and the CLI with `-s`; each SSH login, an `sshfs` mount among them, gets a fresh session under its key's profile. Without one, a call runs in the workspace's default session, under the default profile: the one the config's `profile:` names, else the profile called `default`, else none. A FUSE folder the server mounts is the exception: it belongs to no session, so no profile applies.
 
 ## Cancel
 

@@ -1,5 +1,5 @@
 {
- "baseline": 4082,
+ "baseline": 4072,
  "modules": {
   "ops/registry": {
    "typescript_only": {
@@ -40,7 +40,9 @@
     "grep_cmd": "Typer registers one function per verb, so each tool verb is a module-level `*_cmd`; the TypeScript CLI builds the same verbs on a commander program inside registerToolCommands.",
     "ls_cmd": "Typer registers one function per verb, so each tool verb is a module-level `*_cmd`; the TypeScript CLI builds the same verbs on a commander program inside registerToolCommands.",
     "read_cmd": "Typer registers one function per verb, so each tool verb is a module-level `*_cmd`; the TypeScript CLI builds the same verbs on a commander program inside registerToolCommands.",
-    "write_cmd": "Typer registers one function per verb, so each tool verb is a module-level `*_cmd`; the TypeScript CLI builds the same verbs on a commander program inside registerToolCommands."
+    "write_cmd": "Typer registers one function per verb, so each tool verb is a module-level `*_cmd`; the TypeScript CLI builds the same verbs on a commander program inside registerToolCommands.",
+    "app": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function.",
+    "shell_cmd": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function."
    },
    "typescript_only": {
     "Target": "commander builds every tool verb inside one register function, with toolCommand adding the shared -w/-s options and Target typing them; Python's Typer takes one function per verb instead.",
@@ -78,7 +80,12 @@
   "cli/shell": {
    "python_only": {
     "_Pipe": "The TypeScript CLI builds the streamed multipart body in DaemonClient.requestUpload (cli/client.ts); Python hands httpx the parts, with stdin wrapped so httpx sends it chunked.",
-    "_upload": "The TypeScript CLI builds the streamed multipart body in DaemonClient.requestUpload (cli/client.ts); Python hands httpx the parts, with stdin wrapped so httpx sends it chunked."
+    "_upload": "The TypeScript CLI builds the streamed multipart body in DaemonClient.requestUpload (cli/client.ts); Python hands httpx the parts, with stdin wrapped so httpx sends it chunked.",
+    "app": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function.",
+    "shell_cmd": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function."
+   },
+   "typescript_only": {
+    "ExplainedNode": "The shape of one node of the explain/shell answer, typed for the printer; Python's printer reads the same JSON as a dict."
    }
   },
   "server/routers/shell": {
@@ -154,9 +161,6 @@
     "_document_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
     "skill_md_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
     "vfs_md_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access."
-   },
-   "typescript_only": {
-    "ExplainedNode": "The shape of one node of the explain/shell answer, typed for the printer; Python's printer reads the same JSON as a dict."
    }
   },
   "server/auth/middleware": {
@@ -310,6 +314,52 @@
    "typescript_only": {
     "Scope": "explainedLine groups judgments by the scope they were evaluated from; Python keys a dict by (parent occurrence, text), which needs no named shape.",
     "sameAt": "Occurrences compare by reference in TypeScript, so finding a scope compares them field by field; Python's frozen dataclass equality does it."
+   }
+  },
+  "cli/vfs": {
+   "python_only": {
+    "app": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function.",
+    "glob_cmd": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function.",
+    "EXPLAIN": "Typer reads a command's options off its function signature, so the generated commands are built from shared Option values and an inspect.Parameter per argument; commander adds each option to the command directly.",
+    "SESSION": "Typer reads a command's options off its function signature, so the generated commands are built from shared Option values and an inspect.Parameter per argument; commander adds each option to the command directly.",
+    "WORKSPACE": "Typer reads a command's options off its function signature, so the generated commands are built from shared Option values and an inspect.Parameter per argument; commander adds each option to the command directly.",
+    "_parameter": "Typer reads a command's options off its function signature, so the generated commands are built from shared Option values and an inspect.Parameter per argument; commander adds each option to the command directly."
+   },
+   "typescript_only": {
+    "registerVfsCommands": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function.",
+    "Target": "Commander hands an action its options as one camelCased object, which TypeScript types as Target and maps back to the call's snake_case argument names; Typer passes each option as its own keyword argument.",
+    "camel": "Commander hands an action its options as one camelCased object, which TypeScript types as Target and maps back to the call's snake_case argument names; Typer passes each option as its own keyword argument."
+   }
+  },
+  "server/routers/vfs": {
+   "python_only": {
+    "glob": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
+    "router": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
+    "vfs_route": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
+    "json_body": "FastAPI hands a route the raw request, so the VFS, glob and tool routes read their JSON object through json_body, bounded by MCP's size limit; Fastify parses and bounds the body itself (bodyLimit)."
+   },
+   "typescript_only": {
+    "CallQuery": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
+    "RouteError": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
+    "VfsRoutesDeps": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
+    "queryFlag": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
+    "registerVfsRoutes": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access."
+   }
+  },
+  "server/vfs_calls": {
+   "typescript_only": {
+    "attrs": "TypeScript methods take positional arguments and option objects, so each row's run reads its arguments off the checked record through typed accessors and is built with row(); Python calls the method of the same name with the arguments by keyword.",
+    "bin": "TypeScript methods take positional arguments and option objects, so each row's run reads its arguments off the checked record through typed accessors and is built with row(); Python calls the method of the same name with the arguments by keyword.",
+    "flag": "TypeScript methods take positional arguments and option objects, so each row's run reads its arguments off the checked record through typed accessors and is built with row(); Python calls the method of the same name with the arguments by keyword.",
+    "int": "TypeScript methods take positional arguments and option objects, so each row's run reads its arguments off the checked record through typed accessors and is built with row(); Python calls the method of the same name with the arguments by keyword.",
+    "nofollow": "TypeScript methods take positional arguments and option objects, so each row's run reads its arguments off the checked record through typed accessors and is built with row(); Python calls the method of the same name with the arguments by keyword.",
+    "str": "TypeScript methods take positional arguments and option objects, so each row's run reads its arguments off the checked record through typed accessors and is built with row(); Python calls the method of the same name with the arguments by keyword.",
+    "row": "TypeScript methods take positional arguments and option objects, so each row's run reads its arguments off the checked record through typed accessors and is built with row(); Python calls the method of the same name with the arguments by keyword."
+   }
+  },
+  "server/mcp/http": {
+   "python_only": {
+    "DaemonMcpServer": "A Python Session call runs on the workspace runner's loop, so the daemon serves MCP with a subclass whose hop does it, as DaemonRpcServer does for RPC; TypeScript has one loop and hands its tool table to createMirageMcpServer."
    }
   }
  }

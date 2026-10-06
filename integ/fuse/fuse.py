@@ -25,7 +25,7 @@ from typing import IO
 from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.fuse.mount import mount_background, resolve_fusermount_binary
 from mirage.policy import Policy
-from mirage.policy.types import Deny, OpsContext, OpsResultContext
+from mirage.policy.types import Deny, VfsContext, VfsResultContext
 from mirage.types import FileStat
 from mirage.vfs.ram import RAMVFS
 
@@ -58,18 +58,18 @@ API_CONTENT = b'{"messages": 2}\n'
 
 
 class SealReadsPolicy(Policy):
-    """pre_ops deny: a sealed path never reaches the backend."""
+    """pre_vfs deny: a sealed path never reaches the backend."""
 
-    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Deny | None:
         if not ctx.write and ctx.path.virtual.endswith(".sealed"):
             return Deny("sealed")
         return None
 
 
 class RedactReadsPolicy(Policy):
-    """post_ops deny: refuse read results carrying a marker."""
+    """post_vfs deny: refuse read results carrying a marker."""
 
-    async def post_ops(self, ctx: OpsResultContext) -> Deny | None:
+    async def post_vfs(self, ctx: VfsResultContext) -> Deny | None:
         data = (
             ctx.result if isinstance(ctx.result, (bytes, bytearray)) else None
         )
@@ -79,9 +79,9 @@ class RedactReadsPolicy(Policy):
 
 
 class PinLinksPolicy(Policy):
-    """pre_ops deny: a pinned link never leaves the node table."""
+    """pre_vfs deny: a pinned link never leaves the node table."""
 
-    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Deny | None:
         if ctx.op == "unlink" and ctx.path.virtual.endswith(".pinned"):
             return Deny("pinned")
         return None
@@ -91,7 +91,7 @@ def run_link_probe(result: dict[str, ProbeValue]) -> None:
     """Record that removing a link through the kernel goes through the door.
 
     FUSE used to drop a link straight into the namespace table, at a
-    layer no policy or session view covers, so a pre_ops deny never
+    layer no policy or session view covers, so a pre_vfs deny never
     fired on one and the removal left no OpRecord. Routing the removal
     through the op door is exactly what makes the two answers below
     differ, and unlink is a LINK_ENTRY_OPS member so the door answers a
@@ -157,8 +157,8 @@ def run_link_probe(result: dict[str, ProbeValue]) -> None:
 def run_policy_probe(result: dict[str, ProbeValue]) -> None:
     """Record that op policies gate the kernel path too.
 
-    FUSE serves the workspace's op door, so a pre_ops deny (sealed
-    path) and a post_ops deny (redacted content) must both surface as
+    FUSE serves the workspace's op door, so a pre_vfs deny (sealed
+    path) and a post_vfs deny (redacted content) must both surface as
     EACCES to ordinary file APIs, while unguarded reads pass.
 
     Args:

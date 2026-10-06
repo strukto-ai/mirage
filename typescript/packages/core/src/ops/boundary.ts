@@ -15,7 +15,7 @@
 import { applyOpLimit } from '../commands/builtin/utils/limit.ts'
 import type { Decisions } from '../policy/decisions.ts'
 import type { Policies } from '../policy/policies.ts'
-import { postOpsGate, preOpsGate } from '../policy/policies.ts'
+import { postVfsGate, preVfsGate } from '../policy/policies.ts'
 import type { MountMode, PathSpec } from '../types.ts'
 
 /** The POSIX policy boundary for dispatched filesystem operations: the
@@ -39,7 +39,7 @@ export class OpBoundary {
     access: { create?: boolean; subtree?: boolean; checkHidden?: boolean; final?: boolean } = {},
     issuer?: symbol,
   ): Promise<void> {
-    await preOpsGate(this.policies, op, path, write, this.prefix, this.sessionId, issuer, {
+    await preVfsGate(this.policies, op, path, write, this.prefix, this.sessionId, issuer, {
       ...(this.mode === undefined ? {} : { mode: this.mode }),
       decisions: this.decisions,
       ...access,
@@ -49,7 +49,7 @@ export class OpBoundary {
   async complete(op: string, path: PathSpec, write: boolean, result: unknown): Promise<unknown> {
     return applyOpLimit(
       result,
-      await postOpsGate(this.policies, op, path, write, this.prefix, result),
+      await postVfsGate(this.policies, op, path, write, this.prefix, result),
     )
   }
 }

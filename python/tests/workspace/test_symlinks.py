@@ -1330,7 +1330,7 @@ async def test_readlink_does_not_probe_past_a_policy_that_denies_stat():
     """
 
     class NoStat(Policy):
-        async def pre_ops(self, ctx):
+        async def pre_vfs(self, ctx):
             if ctx.op in ("stat", "readdir"):
                 return Deny(reason="no probing")
             return None
@@ -1416,7 +1416,7 @@ async def test_mv_of_a_link_passes_the_admission_gate():
     """
 
     class NoRename(Policy):
-        async def pre_ops(self, ctx):
+        async def pre_vfs(self, ctx):
             if ctx.op == "rename":
                 return Deny(reason="frozen")
             return None

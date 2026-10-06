@@ -27,6 +27,7 @@ export interface McpConfigResolutionOptions {
 interface McpCommandOptions {
   workspace?: string
   session?: string
+  allCalls?: boolean
 }
 
 export function resolveMcpConfig(
@@ -71,7 +72,8 @@ async function hasSession(
  * config's name with the live workspace created from that same config,
  * and refuses it when the live one came from another. `--session` serves
  * the tools as that session, under its profile, as it does for
- * `mirage shell`.
+ * `mirage shell`. `--all-calls` also serves each VFS call as a
+ * `vfs_<call>` tool, and `explain` on `shell` and on each of them.
  */
 async function runMcp(config: string | undefined, options: McpCommandOptions): Promise<void> {
   if (options.workspace !== undefined && config !== undefined) {
@@ -86,7 +88,14 @@ async function runMcp(config: string | undefined, options: McpCommandOptions): P
     }
   }
   const { relayStdio } = await import('@struktoai/mirage-server/mcp')
-  await relayWorkspace(path, options.workspace, options.session, 'mcp', relayStdio)
+  await relayWorkspace(
+    path,
+    options.workspace,
+    options.session,
+    'mcp',
+    relayStdio,
+    options.allCalls === true,
+  )
 }
 
 /**
@@ -125,7 +134,7 @@ async function deleteWorkspace(client: DaemonClient, workspaceId: string): Promi
  * workspace is created from `path`, or `workspace` names one the daemon
  * holds; a created workspace with no `workspace_id` in its config is
  * deleted when the relay ends (see `deleteWorkspace`). A named session
- * must exist.
+ * must exist. `allCalls` asks the MCP endpoint for the VFS calls too.
  */
 export async function relayWorkspace(
   path: string | undefined,
@@ -133,6 +142,7 @@ export async function relayWorkspace(
   session: string | undefined,
   endpoint: 'mcp' | 'rpc',
   relay: (url: string, token: () => Promise<string>) => Promise<void>,
+  allCalls = false,
 ): Promise<void> {
   const client = makeClient(loadDaemonSettings())
   try {
@@ -156,8 +166,11 @@ export async function relayWorkspace(
     )
   }
   const workspacePath = `/v1/workspaces/${encodeURIComponent(workspaceId)}`
-  const query = session === undefined ? '' : `?session_id=${encodeURIComponent(session)}`
-  const url = `${client.settings.url}${workspacePath}/${endpoint}${query}`
+  const query = new URLSearchParams()
+  if (session !== undefined) query.set('session_id', session)
+  if (allCalls) query.set('calls', 'all')
+  const suffix = query.size === 0 ? '' : `?${query.toString()}`
+  const url = `${client.settings.url}${workspacePath}/${endpoint}${suffix}`
   let refusal: string | undefined
   try {
     if (session !== undefined) {
@@ -179,6 +192,7 @@ export function registerMcpCommand(program: Command): void {
     .argument('[config]', 'Mirage workspace YAML config')
     .option('-w, --workspace <id>', 'Serve this daemon workspace instead of loading a config')
     .option('-s, --session <id>', "Session the tools act as; the workspace's default when absent")
+    .option('--all-calls', 'Also serve each VFS call as a tool, and explain')
     .description("Serve a Mirage workspace's MCP tools over stdio.")
     .action(runMcp)
 }

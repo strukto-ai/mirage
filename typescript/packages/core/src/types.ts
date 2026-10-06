@@ -196,7 +196,7 @@ export const DEFAULT_VISIBILITY: Visibility = Object.freeze({
  * context for the command's run, and the commands tier reads it there,
  * so the tier that enforces the rules never imports the tier that
  * states them. `scoped` is whether a path rule in force reads this
- * command's paths at all, or a coded or scripted preOps policy speaks
+ * command's paths at all, or a coded or scripted preVfs policy speaks
  * for its session; a native walk (a backend's own find or du)
  * yields to the guarded readdir walk while it is set, so each entry
  * passes the gate. `check` throws when a rule in force refuses the entry

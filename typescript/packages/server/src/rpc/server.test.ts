@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Readable } from 'node:stream'
-import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '@struktoai/mirage-node'
@@ -67,10 +66,9 @@ describe('MirageRpcServer', () => {
     const sliced = (await call(rpc, 'vfs/read', { path: '/d/a.txt', offset: 4, size: 3 }))
       .result as { data_base64: string }
     expect(Buffer.from(sliced.data_base64, 'base64').toString()).toBe('two')
-    const stat = (await call(rpc, 'vfs/stat', { path: '/d/a.txt' })).result as Record<
-      string,
-      unknown
-    >
+    const { stat } = (await call(rpc, 'vfs/stat', { path: '/d/a.txt' })).result as {
+      stat: Record<string, unknown>
+    }
     expect([stat.type, stat.size]).toEqual(['file', 8])
     await call(rpc, 'vfs/rename', { src: '/d/a.txt', dst: '/d/b.txt' })
     await call(rpc, 'vfs/truncate', { path: '/d/b.txt', length: 3 })
@@ -81,43 +79,6 @@ describe('MirageRpcServer', () => {
     await call(rpc, 'vfs/unlink', { path: '/d/b.txt' })
     await call(rpc, 'vfs/rmdir', { path: '/d' })
     expect((await call(rpc, 'vfs/exists', { path: '/d' })).result).toEqual({ exists: false })
-  })
-
-  it('explain methods are the dry runs of their doors', async () => {
-    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
-    ws.createSession('agent', {
-      profile: parseSessionProfile({
-        commands: { deny: [{ reason: 'sealed', paths: ['/sec/*'] }] },
-      }),
-    })
-    const rpc = new MirageRpcServer(ws, { sessionId: 'agent' })
-    expect(rpc.methods).toContain('explain/vfs/rename')
-    const said = (await call(rpc, 'explain/shell', { command: 'rm /sec/k' })).result as {
-      line: string
-      outcome: string
-      source: string
-      exit_code: number
-      node: { children: { command: string; answers: unknown[] }[] }
-    }
-    const [rm] = said.node.children
-    expect([rm?.command, said.outcome, said.exit_code]).toEqual(['rm', 'deny', 1])
-    expect(rm?.answers).toEqual([{ kind: 'deny', reason: 'sealed', policy: 'PermissionsPolicy' }])
-    expect([said.line, said.source]).toEqual(['rm /sec/k', 'top'])
-    const written = (
-      await call(rpc, 'explain/vfs/write', { path: '/sec/k', data_base64: b64('x') })
-    ).result as { call: string; paths: string[]; outcome: string; error: string }
-    expect([written.call, written.paths]).toEqual(['write', ['/sec/k']])
-    expect([written.outcome, written.error]).toEqual(['deny', 'EACCES'])
-    const free = (await call(rpc, 'explain/vfs/write', { path: '/f', data_base64: '' })).result as {
-      outcome: string
-      error: string
-    }
-    expect([free.outcome, free.error]).toEqual(['allow', ''])
-    expect((await call(rpc, 'vfs/exists', { path: '/f' })).result).toEqual({ exists: false })
-    const bad = (await call(rpc, 'explain/vfs/truncate', { path: '/f' })).error as {
-      message: string
-    }
-    expect(bad.message).toBe('length must be an integer')
   })
 
   it('tools are the MCP tools', async () => {

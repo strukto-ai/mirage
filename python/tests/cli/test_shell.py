@@ -79,3 +79,63 @@ def test_ctrl_c_during_the_submit_cancels_the_job(monkeypatch):
     result = CliRunner().invoke(shell.app, ["-w", "w", "-c", "sleep 20"])
     assert result.exit_code == 130
     assert ("DELETE", "/v1/jobs/j1") in client.calls
+
+
+def _command(
+    text: str, outcome: str, reason: str = "", exit_code: int = 0
+) -> dict[str, Any]:
+    return {
+        "type": "command",
+        "text": text,
+        "outcome": outcome,
+        "exit_code": exit_code,
+        "reason": reason,
+        "source": "top" if reason else "",
+        "runtime": "",
+        "children": [],
+    }
+
+
+def test_explain_prints_the_line_as_its_tree():
+    cat = _command("cat /data/keys/a", "deny", "sealed", 1)
+    echo = _command("echo $(cat /data/keys/a)", "allow")
+    echo["children"] = [
+        {"type": "substitution", "text": "cat /data/keys/a", "children": [cat]}
+    ]
+    said = {
+        "line": "ls | wc -l && echo $(cat /data/keys/a)",
+        "outcome": "deny",
+        "reason": "sealed",
+        "exit_code": 1,
+        "node": {
+            "type": "line",
+            "text": "ls | wc -l && echo $(cat /data/keys/a)",
+            "children": [
+                {
+                    "type": "list",
+                    "text": "ls | wc -l && echo $(cat /data/keys/a)",
+                    "children": [
+                        {
+                            "type": "pipeline",
+                            "text": "ls | wc -l",
+                            "children": [
+                                _command("ls", "allow"),
+                                _command("wc -l", "allow"),
+                            ],
+                        },
+                        echo,
+                    ],
+                }
+            ],
+        },
+    }
+    assert shell._format_explanation(said).splitlines() == [
+        "ls | wc -l && echo $(cat /data/keys/a)  [deny, exit 1: sealed]",
+        "  list: ls | wc -l && echo $(cat /data/keys/a)",
+        "    pipeline: ls | wc -l",
+        "      ls  [allow]",
+        "      wc -l  [allow]",
+        "    echo $(cat /data/keys/a)  [allow]",
+        "      substitution: cat /data/keys/a",
+        "        cat /data/keys/a  [deny, exit 1: sealed]  top",
+    ]

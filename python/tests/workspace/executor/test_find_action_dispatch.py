@@ -962,7 +962,7 @@ async def test_exec_runs_a_program_a_function_shadows():
 
 
 class _NoRmdir(Policy):
-    async def pre_ops(self, ctx):
+    async def pre_vfs(self, ctx):
         if ctx.op == "rmdir":
             return Deny(reason="no rmdir")
         return None

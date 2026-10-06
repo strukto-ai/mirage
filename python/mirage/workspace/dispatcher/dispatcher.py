@@ -224,7 +224,7 @@ class _MountChannel:
     would. Only the dispatcher's own visibility filter sits above that
     door, which is what lets the cascade see hidden entries.
 
-    Each deletion answers the same pre-ops admission a dispatched op
+    Each deletion answers the same pre-vfs admission a dispatched op
     answers, with its own child path: the gate that admitted the rmdir
     judged the directory, not what the cascade found under it, and a
     policy that protects one of those paths must refuse its deletion
@@ -243,7 +243,7 @@ class _MountChannel:
         mount (MountEntry): the mount owning the subtree.
         boundary (OpBoundary): the dispatcher's op boundary for that
             mount; its admit raises to refuse a deletion. A deletion is
-            not completed through post_ops, which could only refuse
+            not completed through post_vfs, which could only refuse
             after the entry is gone and strand the cascade.
         invalidate (Callable): the dispatcher's write invalidation,
             bound to that mount.

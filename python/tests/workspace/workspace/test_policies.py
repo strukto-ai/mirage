@@ -23,9 +23,9 @@ from mirage.io import IOResult
 from mirage.policy import (
     CommandRule,
     ExecuteResultContext,
-    OpsContext,
-    OpsResultContext,
     PolicyError,
+    VfsContext,
+    VfsResultContext,
 )
 from mirage.policy.profile import (
     CommandsBlock,
@@ -193,7 +193,7 @@ async def test_guards_cover_path_valued_flags():
 
 
 class ReadOnlyProd(Policy):
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         if ctx.write and ctx.path.virtual.startswith("/data/prod/"):
             return Deny("prod is read-only")
         return None
@@ -231,7 +231,7 @@ async def test_path_guards_hold_at_the_programmatic_door():
 
 
 class SuppressProdWrites(Policy):
-    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
         if ctx.write and ctx.path.virtual.startswith("/data/prod/"):
             return Deny("write suppressed")
         return None
@@ -254,7 +254,7 @@ async def test_touch_on_an_existing_file_is_a_write_at_the_op_door():
 
 
 @pytest.mark.asyncio
-async def test_post_ops_deny_still_records_the_completed_write():
+async def test_post_vfs_deny_still_records_the_completed_write():
     # A post deny suppresses the result, not the effect: the backend
     # already mutated, so observation and caches must reflect the op.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
@@ -270,14 +270,14 @@ async def test_post_ops_deny_still_records_the_completed_write():
 
 
 class SuppressCapacity(Policy):
-    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
         if ctx.op == "statfs":
             return Deny("no capacity")
         return None
 
 
 @pytest.mark.asyncio
-async def test_post_ops_deny_suppresses_a_capacity_reply():
+async def test_post_vfs_deny_suppresses_a_capacity_reply():
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         await ws.shell("touch /data/f")
@@ -294,14 +294,14 @@ async def test_post_ops_deny_suppresses_a_capacity_reply():
 
 
 class SuppressProdReads(Policy):
-    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
         if not ctx.write and ctx.path.virtual.startswith("/data/prod/"):
             return Deny("no reads")
         return None
 
 
 @pytest.mark.asyncio
-async def test_post_ops_deny_records_the_bytes_a_denied_read_moved():
+async def test_post_vfs_deny_records_the_bytes_a_denied_read_moved():
     # The suppressed result is the only place a read's byte count
     # lived, so without carrying it on the exception the record says
     # zero and network_bytes under-reports traffic that happened.
@@ -321,7 +321,7 @@ async def test_post_ops_deny_records_the_bytes_a_denied_read_moved():
 
 
 class CapProdReads(Policy):
-    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
         if not ctx.write and ctx.path.virtual.startswith("/data/prod/"):
             return Limit(max_bytes=3)
         return None
@@ -340,7 +340,7 @@ class CachingRAM(RAMVFS):
 
 @pytest.mark.asyncio
 async def test_a_capped_read_records_what_the_backend_moved():
-    # A post_ops Limit truncates what the caller receives; the transfer
+    # A post_vfs Limit truncates what the caller receives; the transfer
     # already happened, so recording the capped length would under-report
     # network_bytes by whatever the cap removed.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
@@ -384,7 +384,7 @@ async def test_a_denied_warm_read_is_not_counted_as_network_traffic():
 
 
 class HardCapProdReads(Policy):
-    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
         if not ctx.write and ctx.path.virtual.startswith("/data/prod/"):
             return Limit(max_bytes=3, on_exceed=OnExceed.ERROR)
         return None
@@ -447,8 +447,8 @@ async def test_a_hard_capped_warm_read_is_not_network_traffic():
         await ws.close()
 
 
-class BrokenPostOps(Policy):
-    async def post_ops(self, ctx: OpsResultContext):
+class BrokenPostVfs(Policy):
+    async def post_vfs(self, ctx: VfsResultContext):
         if ctx.write and ctx.path.virtual == "/data/prod/x.txt":
             return 42
         return None
@@ -457,7 +457,7 @@ class BrokenPostOps(Policy):
 @pytest.mark.asyncio
 async def test_a_committed_write_is_recorded_when_bookkeeping_fails():
     # The backend applied the write, then a step after it (here an
-    # invalid post_ops return, but any foreign bookkeeping error looks
+    # invalid post_vfs return, but any foreign bookkeeping error looks
     # the same) blew up. The error must propagate AND the transfer must
     # stay on the books: the door stamped the report at completion, so
     # the record does not depend on what kind of exception followed.
@@ -465,7 +465,7 @@ async def test_a_committed_write_is_recorded_when_bookkeeping_fails():
     try:
         await ws.shell("mkdir -p /data/prod")
         ws.vfs.records.clear()
-        ws.policies.add(BrokenPostOps())
+        ws.policies.add(BrokenPostVfs())
         with pytest.raises(PolicyError):
             await ws.vfs.write("/data/prod/x.txt", b"123456")
         assert await ws.vfs.read("/data/prod/x.txt") == b"123456"
@@ -477,9 +477,9 @@ async def test_a_committed_write_is_recorded_when_bookkeeping_fails():
 
 
 @pytest.mark.asyncio
-async def test_pre_ops_policy_holds_on_the_dispatcher_door():
+async def test_pre_vfs_policy_holds_on_the_dispatcher_door():
     # touch routes through the shell's internal dispatcher, not
-    # handle_command; a pre_ops-only policy must still refuse it.
+    # handle_command; a pre_vfs-only policy must still refuse it.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         ws.policies.add(ReadOnlyProd())
@@ -494,11 +494,11 @@ async def test_pre_ops_policy_holds_on_the_dispatcher_door():
 
 
 class SealedPaths(Policy):
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         if not ctx.write and ctx.path.virtual == "/data/secret.txt":
             return Deny("secret is sealed")
         # The subtree spelling covers the root too: a native tree op
-        # (rm_r) admits as one op on the root, per the pre_ops
+        # (rm_r) admits as one op on the root, per the pre_vfs
         # docstring.
         if ctx.write and (
             ctx.path.virtual == "/data/prod"
@@ -509,8 +509,8 @@ class SealedPaths(Policy):
 
 
 @pytest.mark.asyncio
-async def test_pre_ops_binds_op_doors_and_command_tier_io():
-    # The documented boundary (Policy.pre_ops): coded op hooks fire at
+async def test_pre_vfs_binds_op_doors_and_command_tier_io():
+    # The documented boundary (Policy.pre_vfs): coded op hooks fire at
     # the op doors AND for the backend I/O inside a mount command's
     # handler (with_policy_guard). Both tiers are pinned so a move of
     # the boundary is loud.
@@ -545,7 +545,7 @@ async def test_pre_ops_binds_op_doors_and_command_tier_io():
 
 
 @pytest.mark.asyncio
-async def test_pre_ops_holds_walks_and_lazy_readers():
+async def test_pre_vfs_holds_walks_and_lazy_readers():
     # A walk is held per entry (GNU's unreadable-file shape: the other
     # entries still serve, stderr names the refused one), and a reader
     # the output pipeline drains after dispatch (head binds a lazy
@@ -578,7 +578,7 @@ async def test_pre_ops_holds_walks_and_lazy_readers():
 
 
 @pytest.mark.asyncio
-async def test_pre_ops_denied_entries_still_list_and_stat():
+async def test_pre_vfs_denied_entries_still_list_and_stat():
     # Presence facts stay unguarded on the command tier (mode-000
     # shape): a read-denied entry lists and stats, the read of it is
     # what fails.
@@ -600,13 +600,13 @@ class OpRecorder(Policy):
     def __init__(self) -> None:
         self.asked: list[tuple[str, str, bool]] = []
 
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         self.asked.append((ctx.op, ctx.path.virtual, ctx.write))
         return None
 
 
 @pytest.mark.asyncio
-async def test_shell_rm_r_admits_through_pre_ops():
+async def test_shell_rm_r_admits_through_pre_vfs():
     # The cascade asymmetry closed: an ops-door rmdir cascade always
     # admitted per deletion while a shell rm -r admitted nothing. The
     # shell tree removal now admits the op the backend performs (the
@@ -660,8 +660,8 @@ async def test_find_delete_admits_each_deletion_exactly_once():
 
 
 @pytest.mark.asyncio
-async def test_pre_ops_sees_the_session_on_the_command_tier():
-    # OpsContext.session_id names the session on the command tier
+async def test_pre_vfs_sees_the_session_on_the_command_tier():
+    # VfsContext.session_id names the session on the command tier
     # exactly as at the op doors, including for a reader the pipeline
     # drains after dispatch (head), so a session-scoped policy holds on
     # both.
@@ -685,7 +685,7 @@ class SessionRecorder(Policy):
     def __init__(self) -> None:
         self.asked: list[tuple[str, str, str]] = []
 
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         self.asked.append((ctx.op, ctx.path.virtual, ctx.session_id))
         return None
 
@@ -696,7 +696,7 @@ class CapLines(Policy):
 
 
 class CapReadBytes(Policy):
-    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
         if ctx.op == "read":
             return Limit(max_bytes=4)
         return None
@@ -719,7 +719,7 @@ async def test_user_limit_policy_caps_line_output():
 
 @pytest.mark.asyncio
 async def test_user_limit_policy_caps_op_reads():
-    # A post_ops Limit bounds the programmatic door too: ws.vfs (and
+    # A post_vfs Limit bounds the programmatic door too: ws.vfs (and
     # FUSE behind it) serve capped bytes.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:
@@ -741,7 +741,7 @@ class Boom(Policy):
 
 
 class DenyReads(Policy):
-    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
         if ctx.op == "read":
             return Deny("reads are suppressed")
         return None
@@ -795,7 +795,7 @@ async def test_error_mode_limit_fails_the_line():
 
 
 @pytest.mark.asyncio
-async def test_a_post_ops_deny_beats_a_limit():
+async def test_a_post_vfs_deny_beats_a_limit():
     # A refusal suppresses the result; bounding it would be meaningless.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:
@@ -1247,7 +1247,7 @@ async def test_a_policy_defining_no_hook_fails_closed():
         assert refused.exit_code == 126
         assert refused.refusal is not None
         assert refused.refusal.reason == (
-            "profile 'release' policy defines no hook: pre_command, pre_ops "
+            "profile 'release' policy defines no hook: pre_command, pre_vfs "
             "or pre_session"
         )
     finally:
@@ -1275,7 +1275,7 @@ async def test_an_inline_document_may_not_add_a_policy():
 # /data/frozen are refused, so is an AWS_* variable, and a command is
 # never judged.
 GATES = """\
-def pre_ops(ctx):
+def pre_vfs(ctx):
     op = ctx['op']
     if op['write'] and op['path'].startswith('/data/frozen/'):
         return {'deny': 'frozen by ' + ctx['profile']}
@@ -1288,11 +1288,11 @@ def pre_session(ctx):
 """
 
 # The content judge with an op hook beside it: its own reads have to
-# pass the door its pre_ops guards.
+# pass the door its pre_vfs guards.
 READER_AND_GATE = (
     READER
     + """
-def pre_ops(ctx):
+def pre_vfs(ctx):
     op = ctx['op']
     if op['write'] and op['path'].startswith('/data/frozen/'):
         return {'deny': 'frozen'}
@@ -1349,7 +1349,7 @@ async def test_a_profile_policy_judges_the_session_door():
 @pytest.mark.asyncio
 async def test_a_policys_own_read_passes_the_door_its_op_hook_guards():
     # pre_command opens the operand through the workspace's door while
-    # pre_ops stands at it: the read is the policy's own and is let
+    # pre_vfs stands at it: the read is the policy's own and is let
     # through rather than re-entering the evaluation waiting on it, so
     # the content verdict lands and the op hook still refuses a write.
     ws = Workspace(
@@ -1427,7 +1427,7 @@ async def test_recursive_commands_enforce_admitted_path_rules(
 class SealedSubtree(Policy):
     """Refuse listing /data/sec, as a mode 0300 directory does."""
 
-    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Deny | None:
         if ctx.op == "readdir" and ctx.path.virtual.startswith("/data/sec"):
             return Deny("sealed")
         return None
@@ -1449,7 +1449,7 @@ class SealedSubtree(Policy):
         ),
     ],
 )
-async def test_native_walks_meet_a_coded_pre_ops_deny(command_line, refusal):
+async def test_native_walks_meet_a_coded_pre_vfs_deny(command_line, refusal):
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     try:
         await ws.shell("mkdir -p /data/sec && echo SECRET > /data/sec/k.txt")

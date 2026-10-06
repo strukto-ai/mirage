@@ -19,19 +19,19 @@ import pytest
 from mirage.errors.types import ReadOnlyError
 from mirage.ops.boundary import OpBoundary
 from mirage.policy import Deny, Limit, Policies, Policy, PolicyDenied
-from mirage.policy.types import OpsContext, OpsResultContext
+from mirage.policy.types import VfsContext, VfsResultContext
 from mirage.types import MountMode, PathSpec
 
 
 class _Sealed(Policy):
-    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Deny | None:
         if ctx.path.virtual.startswith("/d/sec"):
             return Deny("sealed")
         return None
 
 
 class _Capped(Policy):
-    async def post_ops(self, ctx: OpsResultContext) -> Limit:
+    async def post_vfs(self, ctx: VfsResultContext) -> Limit:
         return Limit(max_bytes=3)
 
 
@@ -58,7 +58,7 @@ async def test_admit_holds_the_mount_mode():
 
 
 @pytest.mark.asyncio
-async def test_complete_applies_the_post_ops_limit():
+async def test_complete_applies_the_post_vfs_limit():
     capped = OpBoundary(Policies([_Capped()]), "/d/")
     assert await capped.complete("read", _path("/d/f"), False, b"abcdef") == (
         b"abc"

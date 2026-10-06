@@ -14,7 +14,7 @@ async def _create_workspace(client: AsyncClient) -> str:
 
 
 async def _tool(client: AsyncClient, wid: str, name: str, body: dict) -> dict:
-    r = await client.post(f"/v1/workspaces/{wid}/{name}", json=body)
+    r = await client.post(f"/v1/workspaces/{wid}/tools/{name}", json=body)
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -44,12 +44,14 @@ async def test_every_tool_answers_over_http():
             {"pattern": "PIN", "path": "/src", "ignore_case": True},
         )
         globbed = await _tool(client, wid, "glob", {"pattern": "**/*.py"})
+        shelled = await _tool(client, wid, "shell", {"command": "echo hi"})
     assert written == {"text": "Written: /src/a.py", "is_error": False}
     assert read == {"text": "     1\tNeedle\n", "is_error": False}
     assert edited["is_error"] is False
     assert listed["text"] == "a.py\n"
     assert found == {"text": "/src/a.py:1:pin\n", "is_error": False}
     assert globbed == {"text": "/src/a.py\n", "is_error": False}
+    assert shelled == {"text": "hi\n", "is_error": False}
 
 
 @pytest.mark.asyncio
@@ -80,12 +82,12 @@ async def test_bad_arguments_and_unknown_targets_are_refused():
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         wid = await _create_workspace(client)
-        bad = await client.post(f"/v1/workspaces/{wid}/read", json={})
+        bad = await client.post(f"/v1/workspaces/{wid}/tools/read", json={})
         workspace = await client.post(
-            "/v1/workspaces/nope/read", json={"path": "/a"}
+            "/v1/workspaces/nope/tools/read", json={"path": "/a"}
         )
         session = await client.post(
-            f"/v1/workspaces/{wid}/read",
+            f"/v1/workspaces/{wid}/tools/read",
             params={"session_id": "nope"},
             json={"path": "/a"},
         )
@@ -105,6 +107,7 @@ async def test_a_body_over_the_limit_is_refused():
     ) as client:
         wid = await _create_workspace(client)
         r = await client.post(
-            f"/v1/workspaces/{wid}/read", content=b" " * (4 * 1024 * 1024 + 1)
+            f"/v1/workspaces/{wid}/tools/read",
+            content=b" " * (4 * 1024 * 1024 + 1),
         )
         assert r.status_code == 413

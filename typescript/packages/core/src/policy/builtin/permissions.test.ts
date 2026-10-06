@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 
 import { PathSpec } from '../../types.ts'
 import { Policies } from '../policies.ts'
-import type { CommandContext, AdmissionRules, CommandRule, OpsContext } from '../types.ts'
+import type { CommandContext, AdmissionRules, CommandRule, VfsContext } from '../types.ts'
 import { PermissionsPolicy } from './permissions.ts'
 
 const registry = { isMountRoot: () => false }
@@ -87,7 +87,7 @@ describe('PermissionsPolicy', () => {
   it('no rules means no opinion', () => {
     const p = new PermissionsPolicy(new Sessions({}))
     expect(p.preCommand(ctx('rm', ['-rf', '/']))).toBeNull()
-    expect(p.preOps({ op: 'unlink', path: path('/x'), write: true, prefix: '/' })).toBeNull()
+    expect(p.preVfs({ op: 'unlink', path: path('/x'), write: true, prefix: '/' })).toBeNull()
   })
 
   it('the allow list refuses a visible head it does not cover', () => {
@@ -280,20 +280,20 @@ describe('PermissionsPolicy', () => {
     expect(door.preCommand(ctx('rm', ['/repo/b'], { paths: [path('/repo/b')] }))).toBeNull()
   })
 
-  it('preOps holds the pure path rules', () => {
+  it('preVfs holds the pure path rules', () => {
     const p = policy()
-    const locked: OpsContext = {
+    const locked: VfsContext = {
       op: 'write',
       path: path('/repo/locked/a'),
       write: true,
       prefix: '/repo/',
       sessionId: 's',
     }
-    expect(p.preOps(locked)).toEqual({ kind: 'deny', reason: 'frozen', rule: FULL.deny[2] })
+    expect(p.preVfs(locked)).toEqual({ kind: 'deny', reason: 'frozen', rule: FULL.deny[2] })
     // Command-scoped rules do not reach the op door: an op does not
     // know which command issued it.
     expect(
-      p.preOps({
+      p.preVfs({
         op: 'unlink',
         path: path('/repo/x'),
         write: true,
@@ -313,15 +313,15 @@ describe('PermissionsPolicy', () => {
       policy: 'PermissionsPolicy',
       rule: MOUNT_DENY,
     })
-    expect(policies.wants('preOps')).toBe(true)
+    expect(policies.wants('preVfs')).toBe(true)
   })
 
   it('speaks at the op door only through a pure path rule', async () => {
     const p = policy()
-    expect(await p.wantsFor('preOps', 's')).toBe(true)
-    expect(await p.wantsFor('preOps', 'rev')).toBe(false)
-    expect(await p.wantsFor('preOps', 'nobody')).toBe(false)
+    expect(await p.wantsFor('preVfs', 's')).toBe(true)
+    expect(await p.wantsFor('preVfs', 'rev')).toBe(false)
+    expect(await p.wantsFor('preVfs', 'nobody')).toBe(false)
     expect(await p.wantsFor('preCommand', 'rev')).toBe(true)
-    expect(await new Policies([p]).wantsFor('preOps', 'rev')).toBe(false)
+    expect(await new Policies([p]).wantsFor('preVfs', 'rev')).toBe(false)
   })
 })

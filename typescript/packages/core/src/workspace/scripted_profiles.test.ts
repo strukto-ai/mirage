@@ -280,7 +280,7 @@ describe('profile policies', () => {
 // A program at the op and session doors and nowhere else: writes under
 // /data/frozen and AWS_* variables are refused, and no command is judged.
 const GATES = `\
-function preOps(ctx) {
+function preVfs(ctx) {
   const op = ctx.op
   return op.write && op.path.startsWith('/data/frozen/') ? { deny: 'frozen by ' + ctx.profile } : null
 }
@@ -290,9 +290,9 @@ function preSession(ctx) {
 `
 
 // The content judge with an op hook beside it: its own reads have to
-// pass the door its pre_ops guards.
+// pass the door its pre_vfs guards.
 const READER_AND_GATE_PY = `${READER_PY}
-def pre_ops(ctx):
+def pre_vfs(ctx):
     op = ctx['op']
     if op['write'] and op['path'].startswith('/data/frozen/'):
         return {'deny': 'frozen'}
@@ -342,7 +342,7 @@ describe('profile policies at the op and session doors', () => {
 
   it("a policy's own read passes the door its op hook guards", async () => {
     // preCommand opens the operand through the workspace's door while
-    // preOps stands at it: the read is the policy's own and is let
+    // preVfs stands at it: the read is the policy's own and is let
     // through rather than re-entering the evaluation waiting on it, so
     // the content verdict lands and the op hook still refuses a write.
     const ws = await build(scripted(READER_AND_GATE_PY, 'monty', 'python'))

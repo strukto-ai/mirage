@@ -849,8 +849,8 @@ describe('workspace cancel, kill and close', () => {
       })
       await app.inject({
         method: 'POST',
-        url: `/v1/workspaces/${wid}/shell`,
-        payload: { command: 'sleep 30 &', session_id: 'a' },
+        url: `/v1/workspaces/${wid}/shell?session_id=a`,
+        payload: { command: 'sleep 30 &' },
       })
       const jobId = (
         await app.inject({

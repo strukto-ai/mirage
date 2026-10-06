@@ -1168,7 +1168,8 @@ async def test_workspace_cancel_and_kill_reach_every_session(tmp_path):
         )
         await client.post(
             f"/v1/workspaces/{wid}/shell",
-            json={"command": "sleep 30 &", "session_id": "a"},
+            params={"session_id": "a"},
+            json={"command": "sleep 30 &"},
         )
         r = await client.post(
             f"/v1/workspaces/{wid}/shell?background=true",

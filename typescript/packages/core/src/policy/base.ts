@@ -17,8 +17,8 @@ import type {
   Action,
   CommandContext,
   ExecuteResultContext,
-  OpsContext,
-  OpsResultContext,
+  VfsContext,
+  VfsResultContext,
   SessionContext,
 } from './types.ts'
 
@@ -62,15 +62,15 @@ export interface Policy {
    * recursive command), so keep the hook cheap; expensive decisions
    * belong at preCommand or precomputed into policy state.
    */
-  preOps?(ctx: OpsContext): Action | null | Promise<Action | null>
+  preVfs?(ctx: VfsContext): Action | null | Promise<Action | null>
   /** Observe one completed VFS op; a Deny suppresses its result, a
-   * Limit caps a byte-producing one. Narrower than preOps: the
+   * Limit caps a byte-producing one. Narrower than preVfs: the
    * dispatcher and facade doors only. The backend I/O inside a mount
    * command's handler and each `find -delete` deletion admit through
-   * preOps and report no per-op result here; the command tier's
+   * preVfs and report no per-op result here; the command tier's
    * result plane is postExecute, which bounds the finished line's
    * output. */
-  postOps?(ctx: OpsResultContext): Action | null | Promise<Action | null>
+  postVfs?(ctx: VfsResultContext): Action | null | Promise<Action | null>
   /**
    * Bound one finished execute() line's output. A Limit returned here
    * merges with every other opining policy's (tightest per field) and

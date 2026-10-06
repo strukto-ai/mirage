@@ -8,7 +8,7 @@ from mirage.context.session_context import (
     set_current_session,
 )
 from mirage.ops.ops import Ops
-from mirage.policy import OpsContext, Outcome
+from mirage.policy import Outcome, VfsContext
 from mirage.workspace.store.ram import RAMWorkspaceStateStore
 from mirage.workspace.tools.tool_operations import TOOL_NAMES, number_lines
 
@@ -342,7 +342,7 @@ async def test_a_refused_write_or_edit_is_a_tool_error():
 class LockedFile(Policy):
     """Refuse every op on one file, a stat included."""
 
-    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Deny | None:
         if ctx.path.virtual == "/d/locked.txt":
             return Deny("locked")
         return None

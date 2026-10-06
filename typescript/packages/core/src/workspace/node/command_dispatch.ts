@@ -654,7 +654,7 @@ async function runArgv(
   // after, so its own I/O can ask about the entries the gate did not see
   // and a nested line binds its own (see `Admitted`). The workspace's
   // policies bind in the same window, whether or not a gate judged the
-  // line, so the command tier's policy guard can fire preOps for the
+  // line, so the command tier's policy guard can fire preVfs for the
   // backend I/O a handler performs.
   const route = () =>
     routeArgv(

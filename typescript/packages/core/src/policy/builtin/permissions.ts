@@ -21,7 +21,7 @@ import {
   Outcome,
   type Action,
   type CommandContext,
-  type OpsContext,
+  type VfsContext,
   type PolicyHook,
   type SessionCommandsQuery,
 } from '../types.ts'
@@ -42,7 +42,7 @@ import {
  * the allow list first (a line it does not cover is refused whole,
  * though its head was visible), then the winning rule, refused whole or
  * per operand by whether it names paths, or taken to the approval door
- * when it asks. `preOps` walks the deny rules that are pure paths, so
+ * when it asks. `preVfs` walks the deny rules that are pure paths, so
  * FUSE, programmatic ops and the warm cache cannot bypass a path the
  * profile protects. A path rule that asks is a question only where no
  * line is running (a file tool, the host's facade), which the door puts
@@ -80,7 +80,7 @@ export class PermissionsPolicy implements Policy, SessionScoped {
     }
   }
 
-  preOps(ctx: OpsContext): Action | null {
+  preVfs(ctx: VfsContext): Action | null {
     if (redirectTargetJudged(ctx.path.virtual)) return null
     // The grants belong to the line, not the session: a once grant is
     // spent as the command is admitted, so by the time its own walk
@@ -100,7 +100,7 @@ export class PermissionsPolicy implements Policy, SessionScoped {
    * an op can meet (`opReach`).
    */
   wantsFor(hook: PolicyHook, sessionId: string): Promise<boolean> {
-    if (hook !== 'preOps') return Promise.resolve(true)
+    if (hook !== 'preVfs') return Promise.resolve(true)
     const rules = this.sessions.commandsOf(sessionId)
     if (rules === null) return Promise.resolve(false)
     return Promise.resolve([...rules.deny, ...rules.ask].some(posixLevel))

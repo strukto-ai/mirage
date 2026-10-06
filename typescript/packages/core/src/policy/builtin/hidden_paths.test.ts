@@ -20,10 +20,10 @@ import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { SessionState } from '../../workspace/session/session.ts'
 import type { Policy } from '../base.ts'
-import type { Action, OpsContext } from '../types.ts'
+import type { Action, VfsContext } from '../types.ts'
 import { HiddenPathsPolicy } from './hidden_paths.ts'
 
-function ctx(virtual: string, create = false): OpsContext {
+function ctx(virtual: string, create = false): VfsContext {
   return {
     op: create ? 'write' : 'read',
     path: PathSpec.fromStrPath(virtual),
@@ -41,23 +41,23 @@ describe('HiddenPathsPolicy', () => {
     })
     await runWithSession(sess, async () => {
       const policy = new HiddenPathsPolicy()
-      expect(await policy.preOps(ctx('/w/open.txt'))).toBeNull()
-      const under = await policy.preOps(ctx('/w/vault/k'))
+      expect(await policy.preVfs(ctx('/w/open.txt'))).toBeNull()
+      const under = await policy.preVfs(ctx('/w/vault/k'))
       expect(under?.kind).toBe('hide')
       expect(under?.error).toMatchObject({ code: 'ENOENT' })
-      const named = await policy.preOps(ctx('/w/vault', true))
+      const named = await policy.preVfs(ctx('/w/vault', true))
       expect(named?.kind).toBe('hide')
       expect(named?.error).toMatchObject({ code: 'EACCES' })
     })
   })
 
   it('without a session nothing is hidden', async () => {
-    expect(await new HiddenPathsPolicy().preOps(ctx('/w/vault/k'))).toBeNull()
+    expect(await new HiddenPathsPolicy().preVfs(ctx('/w/vault/k'))).toBeNull()
   })
 
   it('a hide answers before any policy and leaves no record', async () => {
     const sealedReads: Policy = {
-      preOps: (c: OpsContext): Action | null =>
+      preVfs: (c: VfsContext): Action | null =>
         !c.write && c.path.virtual === '/data/secret' ? { kind: 'deny', reason: 'sealed' } : null,
     }
     const ws = new Workspace(

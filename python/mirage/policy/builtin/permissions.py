@@ -26,8 +26,8 @@ from mirage.policy.types import (
     CommandContext,
     Deny,
     DenyScope,
-    OpsContext,
     SessionCommandsQuery,
+    VfsContext,
 )
 
 
@@ -48,7 +48,7 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
     law lives: the allow list first (a line it does not cover is
     refused whole, though its head was visible), then the winning rule,
     refused whole or per operand by whether it names paths, or taken to
-    the approval door when it asks. ``pre_ops`` walks the deny rules
+    the approval door when it asks. ``pre_vfs`` walks the deny rules
     that are pure paths, so FUSE, programmatic ops and the warm cache
     cannot bypass a path the profile protects. A path rule that asks is
     a question only where no line is running (a file tool, the host's
@@ -83,7 +83,7 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
             rule=rule,
         )
 
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         if redirect_target_judged(ctx.path.virtual):
             return None
         # The grants belong to the line, not the session: a once grant
@@ -111,7 +111,7 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
             hook (str): the hook in python spelling.
             session_id (str): the session the door serves.
         """
-        if hook != "pre_ops":
+        if hook != "pre_vfs":
             return True
         rules = self._sessions.commands_of(session_id)
         if rules is None:
