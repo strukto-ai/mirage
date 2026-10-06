@@ -10,7 +10,12 @@ SEPARATORS = frozenset({b";", b"&", b"&&", b"||", b"|"})
 
 def repair_assignments(root: TSNodeLike, data: bytes) -> TSNodeLike:
     """Select the assignment-only redirect production with an invisible second
-    assignment, removed by the adapter before execution sees the tree."""
+    assignment, removed by the adapter before execution sees the tree.
+
+    Args:
+        root (TSNodeLike): the parsed tree to repair.
+        data (bytes): the source ``root`` was parsed from.
+    """
     if not root.has_error:
         return root
     positions: set[int] = set()

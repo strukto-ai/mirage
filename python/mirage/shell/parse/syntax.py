@@ -323,9 +323,13 @@ def find_syntax_issue(
         offsets (Sequence[int] | None): where each byte the parser read
             sits in that line (``source_offsets``); None where the two are
             the same.
+        parse_fn (Callable[[str], TSNodeLike] | None): parses the body of
+            a ``$(...)`` substitution so its own syntax is judged too;
+            None leaves substitution bodies unchecked.
 
     Returns:
-        str | None: text of the offending region, or None if the AST is clean.
+        SyntaxIssue | None: the offending region's text and span, or None
+        if the AST is clean.
     """
     # Parameter syntax is judged during expansion (bad substitution), and
     # `[` is a builtin whose argument grammar is judged by that builtin.
