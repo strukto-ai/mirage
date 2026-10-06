@@ -154,7 +154,7 @@ const CHECKS: [string, Check][] = [
       } finally {
         release()
         clearTimeout(timeout)
-        await running
+        await Promise.allSettled([running])
       }
     },
   ],

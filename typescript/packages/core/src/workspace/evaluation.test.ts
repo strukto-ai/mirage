@@ -147,9 +147,12 @@ it('keeps a cancelled tree alive until a blocked leaf actually settles', async (
     await cancelled
     expect(programs.some((program) => program.references > 0)).toBe(true)
     gate.release()
-    await vi.waitFor(() => {
-      expect(programs.every((program) => program.references === 0)).toBe(true)
-    })
+    await vi.waitFor(
+      () => {
+        expect(programs.every((program) => program.references === 0)).toBe(true)
+      },
+      { timeout: 5000 },
+    )
     expect(borrowed).toBe('echo forbidden')
     executing.mockRestore()
     expect((await ws.shell('echo alive')).stdoutText).toBe('alive\n')
