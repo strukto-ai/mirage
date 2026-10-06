@@ -14,10 +14,13 @@
 
 import type { BoxAccessor } from '../../accessor/box.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
+import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
-import { uploadFileVersion, uploadNewFile } from './api.ts'
+import { uploadReceipt } from '../../utils/sizes.ts'
+import { type BoxItem, uploadFileVersion, uploadNewFile } from './api.ts'
 import { pathParts, resolveItem, resolveParentId } from './resolve.ts'
+import { statFromItem } from './stat.ts'
 
 export async function write(
   accessor: BoxAccessor,
@@ -27,15 +30,24 @@ export async function write(
   const parts = pathParts(path)
   if (parts.length === 0) throw eisdir(path.virtual)
   const tm = accessor.tokenManager
+  const timer = startOp()
   const existing = await resolveItem(accessor, parts)
+  let reply: unknown
   if (existing !== null && existing.type === 'file') {
     // Overwrite uploads a new version under the same id, keeping Box's own
     // name so a box-native file isn't renamed with the vfs suffix.
-    await uploadFileVersion(tm, existing.id, existing.name, data)
+    reply = await uploadFileVersion(tm, existing.id, existing.name, data)
   } else {
     const parentId = await resolveParentId(accessor, parts)
     if (parentId === null) throw enoent(path.virtual)
-    await uploadNewFile(tm, parentId, parts[parts.length - 1] ?? '', data)
+    reply = await uploadNewFile(tm, parentId, parts[parts.length - 1] ?? '', data)
   }
+  const entries: unknown =
+    typeof reply === 'object' && reply !== null && !Array.isArray(reply)
+      ? (reply as { entries?: unknown }).entries
+      : undefined
+  const first = Array.isArray(entries) ? (entries[0] as BoxItem | undefined) : undefined
+  const [nbytes, token] = uploadReceipt(first, statFromItem, data.length, path.virtual)
+  record('write', path.virtual, 'box', nbytes, timer, { fingerprint: token })
   await invalidateAfterWrite(path)
 }

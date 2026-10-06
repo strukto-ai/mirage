@@ -16,9 +16,11 @@ from mirage.accessor.box import BoxAccessor
 from mirage.cache.context import invalidate_after_write
 from mirage.core.box.api import upload_file_version, upload_new_file
 from mirage.core.box.resolve import path_parts, resolve_item, resolve_parent_id
+from mirage.core.box.stat import stat_from_item
 from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
+from mirage.utils.sizes import upload_receipt
 
 
 async def write(accessor: BoxAccessor, path: PathSpec, data: bytes) -> None:
@@ -31,11 +33,18 @@ async def write(accessor: BoxAccessor, path: PathSpec, data: bytes) -> None:
     if existing is not None and existing.get("type") == "file":
         # Overwrite uploads a new version under the same id, keeping Box's
         # own name so a box-native file isn't renamed with the vfs suffix.
-        await upload_file_version(tm, existing["id"], existing["name"], data)
+        reply = await upload_file_version(
+            tm, existing["id"], existing["name"], data
+        )
     else:
         parent_id = await resolve_parent_id(accessor, parts)
         if parent_id is None:
             raise enoent(path.virtual)
-        await upload_new_file(tm, parent_id, parts[-1], data)
-    record("write", path.virtual, "box", len(data), timer)
+        reply = await upload_new_file(tm, parent_id, parts[-1], data)
+    entries = reply.get("entries") if isinstance(reply, dict) else None
+    item = entries[0] if isinstance(entries, list) and entries else None
+    nbytes, token = upload_receipt(
+        item, stat_from_item, len(data), path.virtual
+    )
+    record("write", path.virtual, "box", nbytes, timer, fingerprint=token)
     await invalidate_after_write(path)

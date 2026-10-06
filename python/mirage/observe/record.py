@@ -73,12 +73,16 @@ class OpRecord:
         op (str): Operation type ("read", "write", "stat", "readdir", etc.).
         path (str): Virtual path, mount prefix included.
         source (str): VFS name ("s3", "ram", "disk").
-        bytes (int): Bytes transferred (0 for metadata ops).
+        bytes (int): Bytes transferred (0 for metadata ops). A ``write``
+            a backend writer records (a shell line's) carries the size the
+            backend reports storing, falling back to the bytes sent; one
+            the ``Ops`` facade records (``ws.ops``, FUSE) the bytes sent.
         timestamp (int): UTC epoch milliseconds.
         duration_ms (int): Wall-clock duration.
-        fingerprint (str | None): On a read, and on an object store's
-            write, create and truncate, the content-derived identifier
-            the backend returned (e.g. S3 ``ETag``, md5). Used to detect
+        fingerprint (str | None): On a read, on an object store's
+            write, create and truncate, and on a Box, Dropbox or Google
+            Drive write, the content-derived identifier the backend
+            returned (e.g. S3 ``ETag``, md5, Box ``sha1``). Used to detect
             drift at replay time. Captured as the op completes, so it
             describes the bytes that op moved. None for metadata ops and
             backends that return no token.

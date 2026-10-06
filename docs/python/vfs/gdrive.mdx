@@ -115,6 +115,14 @@ a write mount can still hold items you may not edit. A mutation the
 API denies fails with `EACCES` (Permission denied) on that operand,
 like a real filesystem; the rest of the mount keeps working.
 
+A write records the `md5Checksum` (else the `headRevisionId`) and the size
+that the upload reply names for the stored file. A command that reports
+the bytes it wrote, such as `tee` or `sed -i`, keeps them in the file
+cache under that token, so a fresh read right after the write checks that
+token and downloads nothing. When the reply reports a size other than the
+bytes sent, nothing is cached and the next read downloads the file. See
+[Writes](/home/cache#writes).
+
 ### Writing inside a Shared Drive
 
 A Shared Drive is not a read-only corner of the mount. Every Drive call
@@ -141,7 +149,9 @@ mount. If you want a mount that cannot write at all, use
 The VFS supports workspace snapshots. Recorded reads capture the
 file's Drive revision (`headRevisionId`), and a loaded snapshot pins
 reads to that revision via the Drive Revisions API, so replay serves
-the exact bytes the agent saw.
+the exact bytes the agent saw. A path the agent wrote carries its write's
+token and no revision: loading checks the live file against that token,
+and replay reads the live file rather than a pinned revision.
 
 ## Cache
 

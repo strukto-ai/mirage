@@ -13,7 +13,23 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as ObserveModule from '../../observe/context.ts'
 import type * as ApiModule from './api.ts'
+
+const H = vi.hoisted(() => ({
+  order: [] as string[],
+}))
+
+vi.mock('../../observe/context.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof ObserveModule>()
+  return {
+    ...actual,
+    record: (...args: Parameters<typeof actual.record>) => {
+      H.order.push('record')
+      actual.record(...args)
+    },
+  }
+})
 
 vi.mock('./api.ts', async () => {
   const actual = await vi.importActual<typeof ApiModule>('./api.ts')
@@ -46,6 +62,7 @@ import {
   invalidateAfterWrite,
   invalidateSubtree,
 } from '../../cache/context.ts'
+import { runWithRecording } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import { BoxApiError, type BoxTokenManager } from './client.ts'
 import * as api from './api.ts'
@@ -75,6 +92,21 @@ const TREE: Record<string, ApiModule.BoxItem[]> = {
 
 function spec(virtual: string): PathSpec {
   return new PathSpec({ vfsPath: virtual.replace(/^\/+/, ''), virtual, directory: virtual })
+}
+
+// Box's upload reply: a one-entry collection of the stored file.
+function uploadReply(fields: Record<string, unknown> = {}): unknown {
+  const entry = {
+    type: 'file',
+    id: '500',
+    name: 'f.txt',
+    size: 5,
+    sha1: 's5',
+    modified_at: '2026-01-01T00:00:00Z',
+    etag: '1',
+    ...fields,
+  }
+  return { total_count: 1, entries: [entry] }
 }
 
 describe('box write ops', () => {
@@ -274,5 +306,46 @@ describe('box write ops', () => {
   it('copy copies a file into the dst parent', async () => {
     await copy(makeAccessor(), spec('/data/a.txt'), spec('/data/c.txt'))
     expect(vi.mocked(api.copyFile)).toHaveBeenCalledWith(STUB_TM, '200', '100', 'c.txt')
+  })
+})
+
+// [name, upload reply, expected bytes, expected fingerprint] for 5 written
+// bytes. 's5' is a token no local hash produces.
+const BOX_REPLY_ROWS: [string, unknown, number, string | null][] = [
+  ['agrees', uploadReply(), 5, 's5'],
+  ['stored size differs', uploadReply({ size: 9 }), 9, 's5'],
+  ['no entries', { total_count: 0, entries: [] }, 5, null],
+  ['non-dict reply', ['not', 'a', 'dict'], 5, null],
+]
+
+describe.each([
+  ['new', '/data/new.txt'],
+  ['version', '/data/a.txt'],
+])('box write records the upload reply (%s)', (_kind, virtual) => {
+  beforeEach(() => {
+    H.order = []
+    vi.mocked(api.listFolderItems).mockImplementation((_tm, folderId) =>
+      Promise.resolve(TREE[folderId] ?? []),
+    )
+    vi.mocked(invalidateAfterWrite).mockImplementation(() => {
+      H.order.push('invalidate')
+      return Promise.resolve()
+    })
+  })
+
+  async function writeRecorded(reply: unknown): Promise<unknown[][]> {
+    vi.mocked(api.uploadNewFile).mockResolvedValue(reply as never)
+    vi.mocked(api.uploadFileVersion).mockResolvedValue(reply as never)
+    const [, records] = await runWithRecording(() =>
+      write(makeAccessor(), spec(virtual), new TextEncoder().encode('hello')),
+    )
+    return records.map((r) => [r.op, r.path, r.bytes, r.fingerprint, r.revision])
+  }
+
+  it.each(BOX_REPLY_ROWS)('%s', async (_name, reply, bytes, token) => {
+    expect(await writeRecorded(reply)).toEqual([['write', virtual, bytes, token, null]])
+    // Recorded before the eviction, so the record exists when the cache
+    // reacts to the write.
+    expect(H.order).toEqual(['record', 'invalidate'])
   })
 })

@@ -21,10 +21,12 @@ from mirage.core.gdrive.resolve import (
     resolve_key,
     resolve_parent,
 )
+from mirage.core.gdrive.stat import stat_from_item
 from mirage.core.google.drive import update_file_content, upload_file
 from mirage.errors.fs import eacces, eisdir
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
+from mirage.utils.sizes import upload_receipt
 
 
 @eacces_on_denied
@@ -43,11 +45,12 @@ async def write(accessor: GDriveAccessor, path: PathSpec, data: bytes) -> None:
     if node is not None and node.is_native:
         raise eacces(virtual)
     if node is not None:
-        await update_file_content(token_manager, node.id, data)
+        item = await update_file_content(token_manager, node.id, data)
     else:
         parent_id, _ = await resolve_parent(accessor, path)
-        await upload_file(
+        item = await upload_file(
             token_manager, posixpath.basename(key), parent_id, data
         )
-    record("write", virtual, "gdrive", len(data), timer)
+    nbytes, token = upload_receipt(item, stat_from_item, len(data), virtual)
+    record("write", virtual, "gdrive", nbytes, timer, fingerprint=token)
     await invalidate_after_write(path)

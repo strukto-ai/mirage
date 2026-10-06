@@ -64,6 +64,8 @@ class FakeGraph:
     - ``/versions/{id}/content`` serves the bytes that version was written
       with, and 404s an id the item never had, so a pinned read after a
       rewrite gets the old content.
+    - A ``PUT`` to ``/content`` stores the body as a content write does.
+      It is logged as ``upload``, never counted as a fetch.
 
     Args:
         drives (dict): drive id (``me`` for OneDrive) to ``{path: bytes}``.
@@ -188,6 +190,8 @@ class FakeGraph:
         return sorted(names)
 
     async def handle(self, request: web.Request) -> web.StreamResponse:
+        if request.method == "PUT":
+            return await self._put(request)
         tail = request.match_info["tail"]
         query = unquote(request.query_string)
         parts = tail.split("/")
@@ -203,6 +207,25 @@ class FakeGraph:
         if parts[0] == "drives" and len(parts) >= 2:
             return self._drive(request, parts[1], "/".join(parts[2:]), query)
         return self._unrouted(tail, query)
+
+    async def _put(self, request: web.Request) -> web.Response:
+        tail = request.match_info["tail"]
+        query = unquote(request.query_string)
+        parts = tail.split("/")
+        if parts[:2] == ["me", "drive"]:
+            drive, rest = ME, "/".join(parts[2:])
+        elif parts[0] == "drives" and len(parts) >= 2:
+            drive, rest = parts[1], "/".join(parts[2:])
+        else:
+            return self._unrouted(tail, query)
+        if not rest.startswith("root:/"):
+            return self._unrouted(rest, query)
+        path, _, action = rest[len("root:/") :].partition(":")
+        if action != "/content":
+            return self._unrouted(rest, query)
+        self.log.append(("upload", path, query))
+        self.write(drive, path, await request.read())
+        return web.json_response({})
 
     def _unrouted(self, tail: str, query: str) -> web.Response:
         self.log.append(("unrouted", tail, query))
@@ -326,6 +349,7 @@ def serve(graph: FakeGraph | None = None) -> Iterator[FakeGraph]:
     graph = graph or FakeGraph()
     app = web.Application()
     app.router.add_get("/v1.0/{tail:.*}", graph.handle)
+    app.router.add_put("/v1.0/{tail:.*}", graph.handle)
     loop = asyncio.new_event_loop()
     ready = threading.Event()
     runner = web.AppRunner(app)

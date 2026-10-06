@@ -28,6 +28,7 @@ from mirage.core.dropbox.constants import (
     RESULT_HEADER,
     TOKEN_BUFFER_SECONDS,
 )
+from mirage.types import JsonValue
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.dropbox.config import DropboxConfig
 from mirage.vfs.secrets import reveal_secret
@@ -146,7 +147,18 @@ def _upload_error(
 
 async def dropbox_upload(
     tm: DropboxTokenManager, path: str, data: bytes
-) -> None:
+) -> JsonValue:
+    """Upload one file, overwriting, and return the reply as decoded.
+
+    The reply is the stored FileMetadata; it is not checked here, since
+    the upload has landed once the call returns and the writer's
+    :func:`upload_receipt` reads it without raising.
+
+    Args:
+        tm (DropboxTokenManager): token manager.
+        path (str): the Dropbox path to write.
+        data (bytes): file content.
+    """
     headers = await dropbox_auth_headers(tm)
     headers["Dropbox-API-Arg"] = json.dumps(
         {
@@ -156,15 +168,17 @@ async def dropbox_upload(
         }
     )
     headers["Content-Type"] = "application/octet-stream"
-    await api_request(
+    resp = await api_request(
         "POST",
         f"{tm.content_base}/files/upload",
         error_of=partial(_upload_error, path=path),
         headers=headers,
         data=data,
-        read="none",
+        read="response",
         session=tm.pool,
     )
+    reply: JsonValue = resp.data
+    return reply
 
 
 def _download_error(

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from functools import partial
+from typing import Any
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
@@ -27,6 +28,53 @@ from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
+
+
+def stat_from_item(item: dict[str, Any]) -> FileStat:
+    """The stat of one Drive file resource, as ``files.get`` returns it.
+
+    Pure, so an upload's reply parses the same as a stat. A missing
+    ``mimeType`` reads as a plain file: natives are refused before any
+    upload, so a reply without one names bytes.
+
+    Args:
+        item (dict[str, Any]): a Drive file resource with ``ITEM_FIELDS``.
+    """
+    file_id = item.get("id")
+    name = item.get("name", "")
+    mime = item.get("mimeType") or ""
+    modified = item.get("modifiedTime", "")
+    if mime == FOLDER_MIME:
+        return FileStat(
+            name=name,
+            type=FileType.DIRECTORY,
+            modified=modified,
+            extra={"file_id": file_id},
+        )
+    resource_type = resource_type_for(mime)
+    ext = MIME_TO_EXT.get(mime)
+    vfs_name = f"{name}{ext}" if ext else name
+    # Native renders are size-unknown (see the CLAUDE.md FileStat.size rule).
+    size = (
+        int(item["size"]) if not ext and item.get("size") is not None else None
+    )
+    return FileStat(
+        name=vfs_name,
+        size=size,
+        type=FileType.FILE,
+        content=content_type_for_path(vfs_name),
+        modified=modified,
+        fingerprint=drive_fingerprint(
+            resource_type,
+            item.get("md5Checksum"),
+            item.get("headRevisionId"),
+            modified,
+        ),
+        extra={
+            "file_id": file_id,
+            "resource_type": resource_type,
+        },
+    )
 
 
 async def stat_from_api(
@@ -46,37 +94,10 @@ async def stat_from_api(
     if node is None:
         raise enoent(virtual)
     item = await get_file(accessor.token_manager, node.id)
-    modified = item.get("modifiedTime", "")
-    if node.mime_type == FOLDER_MIME:
-        return FileStat(
-            name=node.name,
-            type=FileType.DIRECTORY,
-            modified=modified,
-            extra={"file_id": node.id},
-        )
-    resource_type = resource_type_for(node.mime_type)
-    ext = MIME_TO_EXT.get(node.mime_type)
-    vfs_name = f"{node.name}{ext}" if ext else node.name
-    # Native renders are size-unknown (see the CLAUDE.md FileStat.size rule).
-    size = (
-        int(item["size"]) if not ext and item.get("size") is not None else None
-    )
-    return FileStat(
-        name=vfs_name,
-        size=size,
-        type=FileType.FILE,
-        content=content_type_for_path(vfs_name),
-        modified=modified,
-        fingerprint=drive_fingerprint(
-            resource_type,
-            item.get("md5Checksum"),
-            item.get("headRevisionId"),
-            modified,
-        ),
-        extra={
-            "file_id": node.id,
-            "resource_type": resource_type,
-        },
+    # The resolved node names the path: a shared drive resolves to a
+    # synthesized folder whose Drive item says otherwise.
+    return stat_from_item(
+        {**item, "id": node.id, "name": node.name, "mimeType": node.mime_type}
     )
 
 

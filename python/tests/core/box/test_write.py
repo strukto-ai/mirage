@@ -526,3 +526,84 @@ async def test_write_records_the_virtual_path(root_accessor):
     finally:
         scope.close()
     assert [r.path for r in scope.records] == ["/m/m/k.txt"]
+
+
+def _file_entry(**fields) -> dict:
+    return {
+        "type": "file",
+        "id": "500",
+        "name": "f.txt",
+        "size": 5,
+        "sha1": "s5",
+        "modified_at": "2026-01-01T00:00:00Z",
+        "etag": "1",
+        **fields,
+    }
+
+
+# (upload reply, expected (bytes, fingerprint)) for 5 written bytes. "s5"
+# is a token no local hash produces.
+_BOX_REPLY_ROWS = [
+    ({"total_count": 1, "entries": [_file_entry()]}, (5, "s5")),
+    # The stored size is the reply's, not the bytes sent.
+    ({"total_count": 1, "entries": [_file_entry(size=9)]}, (9, "s5")),
+    # Totality: shapes that hold no file entry fall back to the bytes sent.
+    ({"total_count": 0, "entries": []}, (5, None)),
+    (["not", "a", "dict"], (5, None)),
+]
+_BOX_REPLY_IDS = [
+    "agrees",
+    "stored-size-differs",
+    "no-entries",
+    "non-dict",
+]
+
+
+async def _box_write_recorded(accessor, virtual: str, reply):
+    order: list[tuple[str, int]] = []
+    scope = RecordingScope()
+
+    async def _spy(path):
+        order.append(("invalidate", len(scope.records)))
+
+    try:
+        with (
+            patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+            patch(
+                "mirage.core.box.write.upload_new_file",
+                new_callable=AsyncMock,
+                return_value=reply,
+            ),
+            patch(
+                "mirage.core.box.write.upload_file_version",
+                new_callable=AsyncMock,
+                return_value=reply,
+            ),
+            patch("mirage.core.box.write.invalidate_after_write", new=_spy),
+        ):
+            await write(accessor, _spec(virtual), b"hello")
+    finally:
+        scope.close()
+    rows = [
+        (r.op, r.path, r.bytes, r.fingerprint, r.revision)
+        for r in scope.records
+    ]
+    return rows, order
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "virtual", ["/data/new.txt", "/data/a.txt"], ids=["new", "version"]
+)
+@pytest.mark.parametrize(
+    ("reply", "expected"), _BOX_REPLY_ROWS, ids=_BOX_REPLY_IDS
+)
+async def test_write_records_the_reply_token_and_stored_size(
+    root_accessor, virtual, reply, expected
+):
+    rows, order = await _box_write_recorded(root_accessor, virtual, reply)
+    nbytes, token = expected
+    assert rows == [("write", virtual, nbytes, token, None)]
+    # Recorded before the eviction, so the record exists when the cache
+    # reacts to the write.
+    assert order == [("invalidate", 1)]

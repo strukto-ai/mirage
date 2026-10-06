@@ -37,7 +37,9 @@ class LogEntry:
         op (str | None): Operation name (for type="op").
         path (str | None): Virtual path (for type="op").
         source (str | None): VFS name (for type="op").
-        bytes (int | None): Bytes transferred (for type="op").
+        bytes (int | None): Bytes transferred (for type="op"), copied
+            from the op's :class:`OpRecord`, whose ``bytes`` says what a
+            ``write`` counts.
         duration_ms (int | None): Duration in ms (for type="op").
         command (str | None): Shell command (for type="command").
         exit_code (int | None): Exit code (for type="command").

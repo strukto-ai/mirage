@@ -25,6 +25,7 @@ from mirage.core.dropbox.client import (
     _token_url_of,
     dropbox_download,
     dropbox_download_stream,
+    dropbox_upload,
     summary_of,
 )
 from mirage.core.dropbox.constants import (
@@ -187,3 +188,37 @@ async def test_a_stream_hands_its_headers_before_the_first_chunk():
 )
 def test_a_body_without_a_string_summary_is_empty(text):
     assert summary_of(text) == ""
+
+
+UPLOAD_URL = f"{DROPBOX_CONTENT_BASE}/files/upload"
+
+
+async def _upload(body: bytes, content_type: str):
+    tm = DropboxTokenManager(make_config())
+    with patch(
+        "mirage.core.dropbox.client.dropbox_auth_headers",
+        new_callable=AsyncMock,
+        return_value={},
+    ):
+        with aioresponses() as m:
+            m.post(
+                UPLOAD_URL,
+                status=200,
+                body=body,
+                headers={"Content-Type": content_type},
+            )
+            return await dropbox_upload(tm, "/a.txt", b"hello")
+
+
+@pytest.mark.asyncio
+async def test_an_upload_hands_back_the_stored_file_metadata():
+    entry = {".tag": "file", "name": "a.txt", "size": 5, "content_hash": "h5"}
+    got = await _upload(json.dumps(entry).encode(), "application/json")
+    assert got == entry
+
+
+@pytest.mark.asyncio
+async def test_an_upload_with_a_non_json_body_hands_it_back_unchecked():
+    # The upload has landed; an unreadable reply must not raise. The
+    # writer's upload_receipt reads it as no metadata.
+    assert await _upload(b"not json", "text/plain") == "not json"

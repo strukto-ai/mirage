@@ -843,7 +843,12 @@ class Ops:
 
     @property
     def network_bytes(self) -> int:
-        """Total bytes transferred over the network."""
+        """Total bytes transferred over the network.
+
+        A shell line's ``write`` counts the size the backend reports
+        storing, falling back to the bytes sent; a ``write`` through this
+        facade counts the bytes sent.
+        """
         return sum(r.bytes for r in self.records if not r.is_cache)
 
     @property

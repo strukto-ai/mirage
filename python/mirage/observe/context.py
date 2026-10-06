@@ -238,7 +238,8 @@ def finish_record(
         op (str): Operation name ("read", "write").
         path (str): The full virtual path, stored as given.
         source (str): VFS name ("s3", "ram", "disk").
-        nbytes (int): Bytes transferred.
+        nbytes (int): Bytes transferred, as :class:`OpRecord` ``bytes``
+            describes them.
         timer (OpTimer): the timer opened when the op started.
         fingerprint (str | None): Content-derived identifier returned by
             the backend (ETag, md5). Used for drift detection at replay.
@@ -275,7 +276,8 @@ def record(
         op (str): Operation name ("read", "write").
         path (str): The full virtual path.
         source (str): VFS name ("s3", "ram", "disk").
-        nbytes (int): Bytes transferred.
+        nbytes (int): Bytes transferred; for a ``write``, the size the
+            backend reports storing, falling back to the bytes sent.
         timer (OpTimer): the timer opened by :func:`start_op` when the
             op started.
         fingerprint (str | None): Content-derived identifier returned by

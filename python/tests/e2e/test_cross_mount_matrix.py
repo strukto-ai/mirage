@@ -27,7 +27,10 @@ from tests.e2e.gdrive_mock import patch_gdrive
 from tests.e2e.mounts import REDIS_URL, MountState, build_mount
 from tests.e2e.s3_mock import patch_s3_multi
 
-WRITABLE = {"ram", "disk", "redis", "s3"}
+# gdrive_mock answers uploads but not deletes, so a gdrive destination
+# takes a write while a gdrive source cannot be removed by mv.
+WRITABLE = {"ram", "disk", "redis", "s3", "gdrive"}
+DELETABLE = {"ram", "disk", "redis", "s3"}
 
 _PAIRS = [
     ("ram", "s3"),
@@ -52,7 +55,7 @@ def _supports_write(ptype: str) -> bool:
 
 
 def _supports_delete(ptype: str) -> bool:
-    return ptype in WRITABLE
+    return ptype in DELETABLE
 
 
 async def _populate_file_async(

@@ -16,8 +16,10 @@ from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.dropbox.client import dropbox_upload
 from mirage.core.dropbox.paths import dropbox_path_of
+from mirage.core.dropbox.stat import stat_from_entry
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
+from mirage.utils.sizes import upload_receipt
 
 
 async def write(
@@ -32,9 +34,12 @@ async def write(
         data (bytes): file content.
     """
     timer = start_op()
-    await dropbox_upload(
+    entry = await dropbox_upload(
         accessor.token_manager, dropbox_path_of(accessor, path), data
     )
-    record("write", path.virtual, "dropbox", len(data), timer)
+    nbytes, token = upload_receipt(
+        entry, stat_from_entry, len(data), path.virtual
+    )
+    record("write", path.virtual, "dropbox", nbytes, timer, fingerprint=token)
     await invalidate_after_write(path)
     await invalidate_ancestors(path)

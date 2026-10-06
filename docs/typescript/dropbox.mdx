@@ -100,6 +100,15 @@ listing. A download names the hash in its `Dropbox-API-Result` header, full
 or ranged, so a read stamps it with no extra request. `server_modified` is
 not used: Dropbox repeats it across same-size rewrites.
 
+## Writes
+
+A write records the `content_hash` and the size that the upload reply
+names for the stored file. A command that reports the bytes it wrote, such
+as `tee` or `sed -i`, keeps them in the file cache under that token, so a
+fresh read right after the write checks that token and downloads nothing.
+When the reply reports a size other than the bytes sent, nothing is cached
+and the next read downloads the file. See [Writes](/home/cache#writes).
+
 ## Browser (PKCE, no client secret)
 
 ```bash

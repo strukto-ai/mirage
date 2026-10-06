@@ -81,12 +81,19 @@ export interface OpRecordInit {
   op: string
   path: string
   source: string
+  /**
+   * Bytes transferred (0 for metadata ops). A `write` a backend writer
+   * records (a shell line's) carries the size the backend reports storing,
+   * falling back to the bytes sent; one the `Ops` facade records
+   * (`ws.ops`, FUSE) the bytes sent.
+   */
   bytes: number
   timestamp: number
   durationMs: number
   /**
-   * On a read, and on an object store's write, create and truncate, the
-   * content-derived identifier the backend returned (ETag, md5).
+   * On a read, on an object store's write, create and truncate, and on a
+   * Box, Dropbox or Google Drive write, the content-derived identifier the
+   * backend returned (ETag, md5, Box sha1).
    * Captured as the op completes, so it describes the bytes that op
    * moved. Null for metadata ops and backends that return no token.
    */

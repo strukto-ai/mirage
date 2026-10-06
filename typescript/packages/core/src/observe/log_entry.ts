@@ -31,6 +31,10 @@ export interface LogEntryInit {
   op?: string
   path?: string
   source?: string
+  /**
+   * Bytes transferred (for type "op"), copied from the op's `OpRecord`,
+   * whose `bytes` says what a `write` counts.
+   */
   bytes?: number
   durationMs?: number
   command?: string
