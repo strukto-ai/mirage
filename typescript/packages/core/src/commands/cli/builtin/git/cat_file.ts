@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import git from 'isomorphic-git'
-import { concat } from '../../../../io/cachable_iterator.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { readStdinAsync } from '../../../builtin/utils/stream.ts'
 import type { CommandFnResult } from '../../../config.ts'
@@ -160,6 +159,16 @@ async function batchLine(
   return out
 }
 
+/** Each line's batch answer as it is read, so a long batch never holds every object at once. */
+async function* batchLines(
+  repo: Repo,
+  lines: readonly string[],
+  template: string,
+  contents: boolean,
+): AsyncIterable<Uint8Array> {
+  for (const line of lines) yield await batchLine(repo, line, template, contents)
+}
+
 /**
  * `git cat-file`: an object's type, size, existence or content, for one name, a
  * `<type> <object>` pair or each stdin line under `--batch`. Pinned against git
@@ -193,9 +202,7 @@ export async function catFile(inv: CLIInvocation): Promise<CommandFnResult> {
       const text = DEC.decode((await readStdinAsync(inv.stdin ?? null)) ?? new Uint8Array())
       const lines = text.split('\n')
       if (lines.at(-1) === '') lines.pop()
-      const parts: Uint8Array[] = []
-      for (const line of lines) parts.push(await batchLine(repo, line, template, batch === 'batch'))
-      return [concat(parts), new IOResult()]
+      return [batchLines(repo, lines, template, batch === 'batch'), new IOResult()]
     }
     if (first === undefined && texts.length === 0) throw new UsageError('', verbUsage(inv))
     if (first !== undefined) {

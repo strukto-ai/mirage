@@ -1167,7 +1167,8 @@ function started(fact: string, info: ProcessInfo, ctx: PsContext): string {
 /**
  * One -o cell for a managed runner. The owner columns print the workspace user
  * and the session's profile, names in the id columns too, as `id` does, and
- * `-` where nobody claimed one. A runner of the calling session belongs to the
+ * `-` where nobody claimed one or the runner is another session's, whose
+ * profile this one cannot name. A runner of the calling session belongs to the
  * session `$$` leads; another session's to its own group.
  */
 function psCell(key: string, info: ProcessInfo, ctx: PsContext): string {
@@ -1190,7 +1191,7 @@ function psCell(key: string, info: ProcessInfo, ctx: PsContext): string {
     return (head.split('/').pop() ?? '').slice(0, 15)
   }
   if (fact === 'user') return ctx.user ?? UNKNOWN_NAME
-  if (fact === 'group') return ctx.group ?? UNKNOWN_NAME
+  if (fact === 'group') return (info.sessionId === ctx.sessionId ? ctx.group : null) ?? UNKNOWN_NAME
   const age = Math.max(0, Math.floor(ctx.now - info.startedAt))
   if (fact === 'etime') return elapsed(age)
   if (fact === 'etimes') return String(age)

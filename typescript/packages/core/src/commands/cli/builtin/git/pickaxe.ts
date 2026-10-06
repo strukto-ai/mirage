@@ -35,8 +35,54 @@ async function blob(repo: Repo, oid: string | null): Promise<Uint8Array> {
 }
 
 /**
- * How many times a string appears in one blob, or a pattern matches it line by
- * line as git counts under `--pickaxe-regex`.
+ * The first match at or after `start` inside one line, as glibc's regexec finds
+ * it under REG_NEWLINE: `^` holds after each newline past `start`, and at
+ * `start` itself only while `bol`. `pattern` carries the `g` flag.
+ */
+function matchFrom(
+  text: string,
+  pattern: RegExp,
+  start: number,
+  bol: boolean,
+): [number, number] | null {
+  let at = start
+  for (;;) {
+    const begin = at === 0 ? 0 : text.lastIndexOf('\n', at - 1) + 1
+    const newline = text.indexOf('\n', at)
+    const end = newline < 0 ? text.length : newline
+    const resumed = at === start && at === begin && !bol
+    pattern.lastIndex = resumed ? 1 : at - begin
+    const found = pattern.exec(resumed ? `\0${text.slice(begin, end)}` : text.slice(begin, end))
+    if (found !== null) {
+      const shift = resumed ? begin - 1 : begin
+      return [found.index + shift, found.index + found[0].length + shift]
+    }
+    if (end === text.length) return null
+    at = end + 1
+  }
+}
+
+/**
+ * How many times a pattern matches a blob, git's `contains` under
+ * `--pickaxe-regex`: each search resumes where the last match ended, a step
+ * further after an empty one, and `^` never holds where it resumes.
+ */
+export function contains(text: string, needle: RegExp): number {
+  const pattern = new RegExp(needle.source, needle.flags.replace('g', '') + 'g')
+  let count = 0
+  let start = 0
+  while (start < text.length) {
+    const found = matchFrom(text, pattern, start, count === 0)
+    if (found === null) break
+    count += 1
+    start = found[1] + (found[0] === found[1] && found[1] < text.length ? 1 : 0)
+  }
+  return count
+}
+
+/**
+ * How many times a string appears in one blob, or a pattern matches it as git
+ * counts under `--pickaxe-regex`.
  */
 async function occurrences(
   repo: Repo,
@@ -45,23 +91,7 @@ async function occurrences(
   ignoreCase: boolean,
 ): Promise<number> {
   const data = await blob(repo, oid)
-  if (needle instanceof RegExp) {
-    const sticky = new RegExp(needle.source, needle.flags.replace('g', '') + 'g')
-    let count = 0
-    for (const raw of lines(data)) {
-      const line = raw.endsWith('\n') ? raw.slice(0, -1) : raw
-      let at = 0
-      while (at < line.length) {
-        sticky.lastIndex = at
-        const found = sticky.exec(line)
-        if (found === null) break
-        count += 1
-        const end = found.index + found[0].length
-        at = end + (found[0].length === 0 ? 1 : 0)
-      }
-    }
-    return count
-  }
+  if (needle instanceof RegExp) return contains(DEC.decode(data), needle)
   const text = ignoreCase ? foldAscii(DEC.decode(data)) : DEC.decode(data)
   if (needle === '') return 0
   let count = 0

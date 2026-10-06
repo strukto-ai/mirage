@@ -31,6 +31,11 @@ const MODE_OPTIONS: Readonly<Record<MountMode, string>> = {
   [MountMode.EXEC]: 'rw',
 }
 
+// The flags that ask for a mount, which with no operand is a bad usage rather
+// than the listing.
+const MOUNTING = ['bind', 'move', 'rbind', 'read_only', 'rw']
+const BAD_USAGE = "mount: bad usage\nTry 'mount --help' for more information.\n"
+
 function superuser(target: string): string {
   return (
     `mount: ${target}: must be superuser to use mount.\n` +
@@ -59,8 +64,9 @@ function matchType(name: string, pattern: string): boolean {
 /**
  * mount [-l] [-t TYPES]: list the mounts the session sees, util-linux 2.41.5's
  * way, with the session's mode as the options (`MODE_OPTIONS`). Mounting is an
- * unprivileged user's refusal, since mounts come from the configuration, and
- * `-a` mounts the empty fstab.
+ * unprivileged user's refusal, since mounts come from the configuration, a
+ * mounting flag with no operand is a bad usage, and `-a` mounts the empty
+ * fstab.
  */
 export function handleMount(
   registry: MountRegistry,
@@ -75,6 +81,9 @@ export function handleMount(
   const only = words[0]
   if (only !== undefined) return fail('mount', `mount: ${only}: can't find in /etc/fstab.\n`)
   if (fl.asBool('all')) return ok('mount')
+  if (fl.asStr('options') !== undefined || MOUNTING.some((dest) => fl.asBool(dest))) {
+    return fail('mount', BAD_USAGE)
+  }
   const types = fl.asStr('types')
   const lines = [...registry.visibleMounts()]
     .sort((a, b) => compareCodePoints(a.prefix, b.prefix))

@@ -193,6 +193,13 @@ def test_registers_itself_under_the_grammar_gh_uses():
         "edit",
         "delete",
     ]
+    assert [c.name for c in repo.subcommands if c.write] == [
+        "create",
+        "fork",
+        "rename",
+        "edit",
+        "delete",
+    ]
     groups = {
         c.name: [leaf.name for leaf in c.subcommands]
         for c in GH.subcommands

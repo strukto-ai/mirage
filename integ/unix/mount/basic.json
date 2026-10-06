@@ -46,11 +46,11 @@
       "targets": [
         "ram"
       ],
-      "command": "mount -x; echo $?; mount /mnt; echo $?; mount -a; echo $?; mount /dev/sda1 /mnt",
+      "command": "mount -B; echo $?; mount -o ro; echo $?; mount -x; echo $?; mount /mnt; echo $?; mount -a; echo $?; mount /dev/sda1 /mnt",
       "expect": {
         "exit": 32,
-        "stdout": "1\n1\n0\n",
-        "stderr": "mount: invalid option -- 'x'\nTry 'mount --help' for more information.\nmount: /mnt: can't find in /etc/fstab.\nmount: /mnt: must be superuser to use mount.\n       dmesg(1) may have more information after failed mount system call.\n"
+        "stdout": "1\n1\n1\n1\n0\n",
+        "stderr": "mount: bad usage\nTry 'mount --help' for more information.\nmount: bad usage\nTry 'mount --help' for more information.\nmount: invalid option -- 'x'\nTry 'mount --help' for more information.\nmount: /mnt: can't find in /etc/fstab.\nmount: /mnt: must be superuser to use mount.\n       dmesg(1) may have more information after failed mount system call.\n"
       }
     },
     {

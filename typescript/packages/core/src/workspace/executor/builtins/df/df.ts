@@ -167,9 +167,10 @@ function pctCell(cap: CapacityResult, inodes: boolean): string {
 
 // Resolve df operands to the mounts to report, deduped and ordered. No
 // operand (or the workspace root `/`) reports every mount the session's
-// profile leaves visible; a path operand reports the mount containing it. GNU df maps each FILE to its filesystem;
-// one it cannot reach is reported in its own words and the rest still print,
-// exit 1. Mirrors Python's _target_mounts.
+// profile leaves visible; a path operand reports the mount containing it, and
+// one inside a hidden mount is absent. GNU df maps each FILE to its
+// filesystem; one it cannot reach is reported in its own words and the rest
+// still print, exit 1. Mirrors Python's _target_mounts.
 async function targetMounts(
   registry: MountRegistry,
   dispatch: DispatchFn,
@@ -203,7 +204,7 @@ async function targetMounts(
       continue
     }
     const mount = registry.tryMountFor(virtual)
-    if (mount === null) {
+    if (mount === null || !ordered.includes(mount)) {
       errors.push(fsErrorLine('df', spec, enoent(spec)))
       continue
     }

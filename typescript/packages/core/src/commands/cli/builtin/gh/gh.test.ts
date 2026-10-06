@@ -142,6 +142,13 @@ describe('gh tree', () => {
       'edit',
       'delete',
     ])
+    expect(repo?.subcommands.filter((c) => c.write).map((c) => c.name)).toEqual([
+      'create',
+      'fork',
+      'rename',
+      'edit',
+      'delete',
+    ])
     const groups = Object.fromEntries(
       GH.subcommands.map((group) => [group.name, group.subcommands.map((leaf) => leaf.name)]),
     )

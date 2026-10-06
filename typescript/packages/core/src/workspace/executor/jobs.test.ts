@@ -691,6 +691,33 @@ it('ps lists the session leader with its owner', async () => {
   }
 })
 
+it("ps does not name another session's group", async () => {
+  const ws = new Workspace(
+    { '/m': [new RAMVFS(), MountMode.WRITE] },
+    {
+      mode: MountMode.WRITE,
+      shellParser: parser,
+      profiles: {
+        admin: parseSessionProfile({ processes: 'workspace' }),
+        reader: parseSessionProfile({}),
+      },
+      profile: 'admin',
+    },
+  )
+  ws.createSession('r', { profile: 'reader' })
+  try {
+    const pid = stdoutStr(await ws.shell('sleep 30 & echo $!', { sessionId: 'r' })).trim()
+    const result = await ws.shell(`ps -o pid=,group= -p ${pid},$$`)
+    const words = stdoutStr(result).split(/\s+/).filter(Boolean)
+    const rows = new Map(words.flatMap((word, i) => (i % 2 === 0 ? [[word, words[i + 1]]] : [])))
+    expect(rows.get(pid)).toBe('-')
+    rows.delete(pid)
+    expect([...rows.values()]).toEqual(['admin'])
+  } finally {
+    await ws.close()
+  }
+})
+
 const PS_USAGE =
   '\nUsage:\n ps [options]\n\n' +
   " Try 'ps --help <simple|list|output|threads|misc|all>'\n" +

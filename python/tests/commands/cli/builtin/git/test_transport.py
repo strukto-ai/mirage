@@ -189,7 +189,7 @@ def _redirector(target: str) -> ThreadingHTTPServer:
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            known = self.path == INFO_REFS
+            known = self.path.endswith(INFO_REFS)
             self.send_response(302 if known else 404)
             if known:
                 self.send_header("Location", f"{target}{INFO_REFS}")
@@ -348,17 +348,26 @@ async def test_a_ref_named_outside_the_repository_is_ignored(repos):
 
 
 @pytest.mark.asyncio
-async def test_url_credentials_stay_with_the_origin_they_were_typed_for(repos):
+@pytest.mark.parametrize(
+    "line",
+    ["git clone http://me:secret@{hop}/repo.git c", "gh repo clone o/repo c"],
+)
+async def test_credentials_stay_with_the_origin_they_were_meant_for(
+    repos, line
+):
     pytest.importorskip("httpx")
     _, root = repos
     seen: list[tuple[str, str | None]] = []
     server = _backend(root, seen=seen)
     hop = _redirector(f"http://127.0.0.1:{server.server_address[1]}")
-    url = f"http://me:secret@127.0.0.1:{hop.server_address[1]}/repo.git"
+    origin = f"127.0.0.1:{hop.server_address[1]}"
     try:
         with Workspace({"/w/": RAMVFS()}, mode=MountMode.WRITE) as ws:
             ws.register_cli("git", GIT)
-            result = await ws.shell(f"cd /w && git clone {url} c")
+            ws.register_cli(
+                "gh", GH, {"token": "t0k", "base_url": f"http://{origin}"}
+            )
+            result = await ws.shell("cd /w && " + line.format(hop=origin))
     finally:
         hop.shutdown()
         server.shutdown()

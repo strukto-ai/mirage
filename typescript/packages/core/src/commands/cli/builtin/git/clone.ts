@@ -86,13 +86,13 @@ export function remoteHead(
  * one is fetched over smart HTTP. Every branch lands as a remote-tracking ref
  * and every tag as a tag, and the remote's HEAD branch is checked out. A failed
  * clone removes what it wrote, and keeps a directory that was already there,
- * empty, as git does. `headers` ride on top of `http.extraHeader`, which is
- * how `gh repo clone` authenticates; they are never written to the clone's
+ * empty, as git does. `credentials` is the Authorization `gh repo clone` sends,
+ * scoped to the URL's origin as userinfo is and never written to the clone's
  * config.
  */
 export async function clone(
   inv: CLIInvocation,
-  headers: Readonly<Record<string, string>> = {},
+  credentials: Readonly<Record<string, string>> = {},
 ): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   const doors = inv.doors ?? {}
@@ -127,10 +127,13 @@ export async function clone(
     )
       throw new GitError(`destination path '${name}' already exists and is not an empty directory.`)
     fresh = info === null
-    transport = await openTransport(url, start, doors, {
-      ...(await configuredHeaders(inv, null)),
-      ...headers,
-    })
+    transport = await openTransport(
+      url,
+      start,
+      doors,
+      await configuredHeaders(inv, null),
+      credentials,
+    )
   } catch (err) {
     if (err instanceof GitError) return fatal(err)
     throw err

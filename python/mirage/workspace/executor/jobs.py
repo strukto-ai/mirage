@@ -1372,8 +1372,9 @@ def _ps_cell(key: str, info: ProcessInfo, ctx: _PsContext) -> str:
 
     The owner columns print the workspace user and the session's
     profile, names in the id columns too, as ``id`` does, and ``-``
-    where nobody claimed one. A runner of the calling session belongs to
-    the session ``$$`` leads; another session's to its own group.
+    where nobody claimed one or the runner is another session's, whose
+    profile this one cannot name. A runner of the calling session belongs
+    to the session ``$$`` leads; another session's to its own group.
 
     Args:
         key (str): the column key.
@@ -1405,7 +1406,8 @@ def _ps_cell(key: str, info: ProcessInfo, ctx: _PsContext) -> str:
     if fact == "user":
         return ctx.user or UNKNOWN_NAME
     if fact == "group":
-        return ctx.group or UNKNOWN_NAME
+        own = info.session_id == ctx.session_id
+        return (ctx.group if own else None) or UNKNOWN_NAME
     elapsed = max(0, int(ctx.now - info.started_at))
     if fact == "etime":
         return _elapsed(elapsed)

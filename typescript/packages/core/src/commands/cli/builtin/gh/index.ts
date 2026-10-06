@@ -351,7 +351,6 @@ function repo(): CLISpec {
         name: 'clone',
         description: 'Clone a repository locally',
         fn: repoClone,
-        write: true,
         positional: [
           new Operand({ type: 'str', name: 'REPOSITORY' }),
           new Operand({ type: 'str', name: 'DIRECTORY' }),

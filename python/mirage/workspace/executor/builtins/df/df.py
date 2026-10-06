@@ -231,7 +231,7 @@ async def _target_mounts(
 
     No operand (or the workspace root ``/``) reports every mount the
     session's profile leaves visible; a path operand reports the mount
-    that contains it. GNU df maps each FILE to
+    that contains it, and one inside a hidden mount is absent. GNU df maps each FILE to
     its filesystem and lists all with no args; one it cannot reach is
     reported in its own words and the rest still print, exit 1.
 
@@ -274,7 +274,7 @@ async def _target_mounts(
                     out.append(m)
             continue
         mount = registry.try_mount_for(virtual)
-        if mount is None:
+        if mount is None or mount not in ordered:
             errors.append(fs_error_line("df", spec, enoent(spec)))
             continue
         # The mount root is the filesystem itself (always present); a

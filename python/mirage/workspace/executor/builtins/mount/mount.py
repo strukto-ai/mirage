@@ -30,6 +30,12 @@ MODE_OPTIONS = {
 }
 
 
+# The flags that ask for a mount, which with no operand is a bad usage
+# rather than the listing.
+MOUNTING = ("bind", "move", "rbind", "read_only", "rw")
+BAD_USAGE = "mount: bad usage\nTry 'mount --help' for more information.\n"
+
+
 def superuser(target: str) -> str:
     """util-linux's refusal of a mount an unprivileged user asks for.
 
@@ -70,7 +76,8 @@ async def handle_mount(
     """mount [-l] [-t TYPES]: list the mounts the session sees, util-linux
     2.41.5's way, with the session's mode as the options (``MODE_OPTIONS``).
     Mounting is an unprivileged user's refusal, since mounts come from the
-    configuration, and ``-a`` mounts the empty fstab.
+    configuration, a mounting flag with no operand is a bad usage, and ``-a``
+    mounts the empty fstab.
 
     Args:
         registry (MountRegistry): mount registry (mount enumeration).
@@ -87,6 +94,8 @@ async def handle_mount(
         return fail("mount", f"mount: {words[0]}: can't find in /etc/fstab.\n")
     if fl.as_bool("all"):
         return ok("mount")
+    if fl.as_str("options") is not None or any(map(fl.as_bool, MOUNTING)):
+        return fail("mount", BAD_USAGE)
     types = fl.as_str("types")
     lines = [
         f"{m.vfs.name} on {m.prefix.rstrip('/') or '/'} type {m.vfs.name} "

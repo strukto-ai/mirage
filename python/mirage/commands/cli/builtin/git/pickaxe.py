@@ -40,6 +40,55 @@ def _blob(store: BaseObjectStore, sha: ObjectID | None) -> bytes:
     return obj.data if isinstance(obj, Blob) else b""
 
 
+def _match_from(
+    text: str, pattern: re.Pattern[str], start: int, bol: bool
+) -> tuple[int, int] | None:
+    """The first match at or after ``start`` inside one line, as glibc's
+    regexec finds it under REG_NEWLINE: ``^`` holds after each newline past
+    ``start``, and at ``start`` itself only while ``bol``.
+
+    Args:
+        text (str): the blob's text.
+        pattern (re.Pattern[str]): the compiled expression.
+        start (int): where the search starts.
+        bol (bool): whether ``start`` may match ``^``, git's first search.
+    """
+    at = start
+    while True:
+        begin = text.rfind("\n", 0, at) + 1
+        end = text.find("\n", at)
+        end = len(text) if end < 0 else end
+        if at == start == begin and not bol:
+            found = pattern.search("\0" + text[begin:end], 1)
+            shift = begin - 1
+        else:
+            found, shift = pattern.search(text[begin:end], at - begin), begin
+        if found is not None:
+            return found.start() + shift, found.end() + shift
+        if end == len(text):
+            return None
+        at = end + 1
+
+
+def contains(text: str, pattern: re.Pattern[str]) -> int:
+    """How many times a pattern matches a blob, git's ``contains`` under
+    ``--pickaxe-regex``: each search resumes where the last match ended, a
+    step further after an empty one, and ``^`` never holds where it resumes.
+
+    Args:
+        text (str): the blob's text.
+        pattern (re.Pattern[str]): the compiled expression.
+    """
+    count, start = 0, 0
+    while start < len(text):
+        found = _match_from(text, pattern, start, count == 0)
+        if found is None:
+            break
+        count += 1
+        start = found[1] + (found[0] == found[1] and found[1] < len(text))
+    return count
+
+
 def _occurrences(
     store: BaseObjectStore,
     sha: ObjectID | None,
@@ -47,7 +96,7 @@ def _occurrences(
     ignore_case: bool,
 ) -> int:
     """How many times a string appears in one blob, or a pattern matches it
-    line by line as git counts under ``--pickaxe-regex``.
+    as git counts under ``--pickaxe-regex``.
 
     Args:
         store (BaseObjectStore): object database holding the blob.
@@ -61,17 +110,7 @@ def _occurrences(
     data = _blob(store, sha)
     if not isinstance(needle, re.Pattern):
         return (data.lower() if ignore_case else data).count(needle)
-    count = 0
-    for raw in byte_lines(data):
-        line = raw.decode("utf-8", "replace").removesuffix("\n")
-        at = 0
-        while at < len(line):
-            found = needle.search(line, at)
-            if found is None:
-                break
-            count += 1
-            at = found.end() + (found.end() == found.start())
-    return count
+    return contains(data.decode("utf-8", "replace"), needle)
 
 
 def _changes(

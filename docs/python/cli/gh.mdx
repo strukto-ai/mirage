@@ -200,7 +200,8 @@ REST object.
 named after the repository, and the words after `--` are git's clone
 options. A bare `REPO` is the account's own. The token travels as the
 request's `Authorization` and never reaches the line, `.git/config` or the
-output; the `upstream` remote gh adds for a fork is not added.
+output. The `upstream` remote gh adds for a fork is not added, so `-u`
+names a remote Mirage never adds and `--no-upstream` is what it always does.
 
 `rename` takes the **new name** as the operand and the repository to
 rename on `-R`, which is the reverse of what the shape of the line
@@ -321,7 +322,7 @@ prints `error: boom` alone.
 | `pr create` requires explicit title, head, base, and body/body-file | there is no host checkout from which to infer or fill them |
 | `repo fork` refuses `--clone`, and `--remote` without a repository; release asset upload and `run watch` are absent | those require host files, checkout state, or a streaming surface not modeled here |
 | `gh help` answers the `environment` and `exit-codes` topics only; `formatting`, `mintty`, `reference` and `telemetry` are unknown topics | those describe a terminal, a config directory or a manual a workspace does not have |
-| `repo` has no `archive`, `unarchive`, `sync`, `deploy-key`, `autolink`, `gitignore`, `license`, `clone` or `set-default` | `clone` and `set-default` act on a host checkout; the others are not implemented |
+| `repo` has no `archive`, `unarchive`, `sync`, `deploy-key`, `autolink`, `gitignore`, `license` or `set-default` | `set-default` acts on a host checkout; the others are not implemented |
 | Outside `issue`, `pr` and `repo`, typed `--json` exposes a REST-backed field subset | upstream's full field sets include GraphQL-only data; use `gh api` for arbitrary REST fields |
 | `gh api --input` accepts JSON, and pagination follows REST `Link` headers only | arbitrary byte bodies and GraphQL cursor pagination are not implemented |
 | `gh api` has no verbose/cache flags | output is optimized for agents and shell composition rather than wire debugging |

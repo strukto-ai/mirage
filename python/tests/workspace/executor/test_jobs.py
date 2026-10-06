@@ -1215,6 +1215,30 @@ async def test_ps_lists_the_session_leader_with_its_owner():
         await ws.close()
 
 
+@pytest.mark.asyncio
+async def test_ps_does_not_name_another_sessions_group():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode="exec",
+        profiles={
+            "admin": SessionProfile(processes="workspace"),
+            "reader": SessionProfile(),
+        },
+        profile="admin",
+    )
+    ws.create_session("r", profile="reader")
+    try:
+        pid = int(
+            (await ws.shell("sleep 30 & echo $!", session_id="r")).stdout
+        )
+        result = await ws.shell(f"ps -o pid=,group= -p {pid},$$")
+        words = result.stdout.decode().split()
+        rows = dict(zip(words[::2], words[1::2], strict=True))
+        assert (rows.pop(str(pid)), list(rows.values())) == ("-", ["admin"])
+    finally:
+        await ws.close()
+
+
 _PS_USAGE = (
     b"\nUsage:\n ps [options]\n\n"
     b" Try 'ps --help <simple|list|output|threads|misc|all>'\n"

@@ -14,6 +14,7 @@
 
 import asyncio
 import re
+from collections.abc import AsyncIterator
 
 from dulwich.objects import Commit, ObjectID, ShaFile, Tag, Tree
 from dulwich.repo import BaseRepo
@@ -150,6 +151,24 @@ def _batch_line(
     return head + raw + b"\n" if contents else head
 
 
+async def _batch_lines(
+    repo: BaseRepo, lines: list[str], template: str, contents: bool
+) -> AsyncIterator[bytes]:
+    """Each line's batch answer as it is read, so a long batch never holds
+    every object at once.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        lines (list[str]): the names stdin listed.
+        template (str): the format.
+        contents (bool): ``--batch``, which prints the bytes too.
+    """
+    for line in lines:
+        yield await asyncio.to_thread(
+            _batch_line, repo, line, template, contents
+        )
+
+
 async def cat_file(
     inv: CLIInvocation[None],
 ) -> tuple[ByteSource | None, IOResult]:
@@ -190,15 +209,8 @@ async def cat_file(
             lines = text.split("\n")
             if lines[-1] == "":
                 lines.pop()
-            out = b"".join(
-                [
-                    await asyncio.to_thread(
-                        _batch_line, repo, line, template, batch[-1] == "batch"
-                    )
-                    for line in lines
-                ]
-            )
-            return out, IOResult()
+            contents = batch[-1] == "batch"
+            return _batch_lines(repo, lines, template, contents), IOResult()
         if not modes and not texts:
             raise UsageError("", verb_usage(inv))
         if modes:

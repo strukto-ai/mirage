@@ -381,7 +381,6 @@ def _repo() -> CLISpec:
                 name="clone",
                 description="Clone a repository locally",
                 fn=repo_commands.clone_cmd,
-                write=True,
                 positional=(
                     Operand(type="str", name="REPOSITORY"),
                     Operand(type="str", name="DIRECTORY"),
