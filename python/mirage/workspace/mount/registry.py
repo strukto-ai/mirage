@@ -504,10 +504,11 @@ class MountRegistry:
     def exec_allowed_at(self, virtual: str) -> bool:
         """Whether code may be loaded from this path: the per-script
         form of ``is_exec_allowed``, read by an interpreter running a
-        file operand (``python3 path.py``, ``js app.js``). The shell's
-        own scripts (``bash script.sh``, ``./script.sh``, ``source``)
-        never ask: they run in the shell, which checks each of their
-        commands like a typed one.
+        file operand (``python3 path.py``, ``js app.js``, or a
+        ``./script`` whose shebang names one). Shell scripts (``bash
+        script.sh``, ``source``, a ``./script`` with no shebang or an sh
+        one) never ask: they run in the shell, which checks each of
+        their commands like a typed one.
 
         Args:
             virtual (str): the script's absolute virtual path.

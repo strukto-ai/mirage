@@ -303,11 +303,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'echo ran\\n' > /data/xmode.sh && printf 'print(1)\\n' > /data/xmode.py && bash /data/xmode.sh && /data/xmode.sh && source /data/xmode.sh; python3 /data/xmode.py; echo py=$?; rm /data/xmode.sh /data/xmode.py",
+      "command": "printf 'echo ran\\n' > /data/xmode.sh && printf '#!/usr/bin/env python3\\nprint(1)\\n' > /data/xmode.py && bash /data/xmode.sh && /data/xmode.sh && source /data/xmode.sh; python3 /data/xmode.py; echo py=$?; /data/xmode.py; echo direct=$?; rm /data/xmode.sh /data/xmode.py",
       "expect": {
         "exit": 0,
-        "stdout": "ran\nran\nran\npy=126\n",
-        "stderr": "python3: /data/xmode.py: not in EXEC mode\n"
+        "stdout": "ran\nran\nran\npy=126\ndirect=126\n",
+        "stderr": "python3: /data/xmode.py: not in EXEC mode\npython3: /data/xmode.py: not in EXEC mode\n"
       }
     }
   ]

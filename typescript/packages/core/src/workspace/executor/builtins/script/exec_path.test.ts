@@ -52,7 +52,8 @@ describe('direct path execution', () => {
   })
 
   // EXEC is the interpreters' grant: the shell runs a script itself and
-  // checks each of its commands like a typed one.
+  // checks each of its commands like a typed one, while a python3 shebang
+  // hands the file to python3, which checks.
   it.each([
     'bash /work/run.sh',
     'sh /work/run.sh',
@@ -63,8 +64,9 @@ describe('direct path execution', () => {
   ])('runs `%s` without exec mode', async (line) => {
     const ws = await makeWs()
     await ws.shell("printf 'echo ran\\n' > /work/run.sh")
-    await ws.shell("printf 'print(1)\\n' > /work/run.py")
+    await ws.shell("printf '#!/usr/bin/env python3\\nprint(1)\\n' > /work/run.py")
     expect((await ws.shell('python3 /work/run.py')).exitCode).toBe(126)
+    expect((await ws.shell('/work/run.py')).exitCode).toBe(126)
     const io = await ws.shell(line)
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('ran\n')

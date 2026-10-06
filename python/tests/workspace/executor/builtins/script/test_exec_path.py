@@ -64,10 +64,12 @@ def test_relative_path_resolves_against_cwd(ws):
 )
 def test_scripts_need_no_exec_mode(ws, line):
     # EXEC is the interpreters' grant: the shell runs a script itself
-    # and checks each of its commands like a typed one.
+    # and checks each of its commands like a typed one, while a python3
+    # shebang hands the file to python3, which checks.
     _run(ws, "printf 'echo ran\\n' > /work/run.sh")
-    _run(ws, "printf 'print(1)\\n' > /work/run.py")
+    _run(ws, "printf '#!/usr/bin/env python3\\nprint(1)\\n' > /work/run.py")
     assert _run(ws, "python3 /work/run.py").exit_code == 126
+    assert _run(ws, "/work/run.py").exit_code == 126
     result = _run(ws, line)
     assert result.exit_code == 0
     assert result.stdout == b"ran\n"
