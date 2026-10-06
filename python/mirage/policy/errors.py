@@ -26,6 +26,12 @@ class PolicyError(Exception):
     """
 
 
+class Explained(Exception):
+    """A dry run reached the op gate: the door stops there, before any
+    backend or cache is touched, with what the gate would answer noted
+    for ``session.explain.vfs``."""
+
+
 class PolicyDenied(PermissionError):
     """An op or a session write refused by an admission policy at a door.
 

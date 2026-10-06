@@ -19,7 +19,8 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Session } from '../workspace/handle.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { MirageToolOperations } from './tool_operations.ts'
+import { MirageToolOperations, TOOL_NAMES } from './tool_operations.ts'
+import { Outcome } from '../../policy/types.ts'
 import type { Policy } from '../../policy/base.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import type { OpsContext } from '../../policy/types.ts'
@@ -326,5 +327,64 @@ describe('a session', () => {
       await writer.close()
       await attached.close()
     }
+  })
+})
+
+describe('the tool list', () => {
+  it.each([
+    [null, MountMode.WRITE, TOOL_NAMES],
+    [null, MountMode.READ, ['shell', 'read', 'ls', 'grep', 'glob']],
+    [{ commands: { allow: ['cat'] } }, MountMode.WRITE, ['shell', 'read', 'write', 'edit', 'glob']],
+    [{ commands: { allow: [] } }, MountMode.WRITE, ['read', 'write', 'edit', 'glob']],
+    [
+      { commands: { deny: [{ reason: 'no', commands: ['grep'] }] } },
+      MountMode.WRITE,
+      ['shell', 'read', 'write', 'edit', 'ls', 'glob'],
+    ],
+    [{ mounts: { '/': 'read' } }, MountMode.WRITE, ['shell', 'read', 'ls', 'grep', 'glob']],
+    [{ mounts: { '/': 'read' }, paths: { show: { '/out': 'rw' } } }, MountMode.WRITE, TOOL_NAMES],
+  ] as const)('follows the profile: %j on %s', (profile, mode, names) => {
+    const own = new Workspace({ '/': new RAMVFS() }, { mode, shellParser })
+    if (profile !== null) own.createSession('agent', { profile: parseSessionProfile(profile) })
+    const session = new Session(own, profile === null ? null : 'agent')
+    expect(session.tools.names()).toEqual(names)
+  })
+
+  it('a tool the profile does not offer is no tool', async () => {
+    const own = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE, shellParser })
+    own.createSession('ro', { profile: parseSessionProfile({ mounts: { '/': 'read' } }) })
+    await expect(
+      new Session(own, 'ro').tools.call('write', { path: '/x', content: 'y' }),
+    ).rejects.toThrow(/unknown tool: write/)
+  })
+})
+
+describe('a path ask outside a line', () => {
+  it('waits on the host, runs one call on a nod and asks again', async () => {
+    const own = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE, shellParser })
+    own.createSession('agent', {
+      profile: {
+        commands: { ask: [{ reason: 'outbox needs a nod', paths: ['/data/out/*'] }] },
+      },
+    })
+    const tools = new Session(own, 'agent').tools
+    const asked = await tools.write('/data/out/a.txt', 'hi')
+    expect(asked.isError).toBe(true)
+    const [record] = own.decisions.pending('agent')
+    expect([record?.command, record?.paths]).toEqual(['', ['/data/out/a.txt']])
+    expect(asked.content[0]?.text).toBe(
+      `Error: Permission denied\nrequires approval: outbox needs a nod (ask ${record?.id ?? ''})\n`,
+    )
+    // Asking again quotes the same question.
+    await tools.write('/data/out/a.txt', 'hi')
+    expect(own.decisions.pending('agent').map((r) => r.id)).toEqual([record?.id])
+    await own.decisions.answer(record?.id ?? '', Outcome.ALLOW)
+    expect((await tools.write('/data/out/a.txt', 'hi')).isError).toBeUndefined()
+    // The nod was for one call on that path, and it is spent.
+    expect((await tools.write('/data/out/a.txt', 'again')).isError).toBe(true)
+    // A line holds no question for its ops: the redirect is the line's to
+    // ask about, at the command door.
+    const io = await own.shell('echo hi > /data/out/b.txt', { sessionId: 'agent' })
+    expect(io.exitCode).not.toBe(0)
   })
 })

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { getOpCall, runWithOpCall } from '../context/session_context.ts'
 import { sha256Hex } from '../utils/hash.ts'
 import { Outcome } from './types.ts'
 import type {
@@ -24,12 +25,26 @@ import type {
   Deny,
   HandOff,
   Occurrence,
+  OpsContext,
   Pending,
   SessionDecisionsQuery,
 } from './types.ts'
 import { Scope } from './types.ts'
 
 const ABANDONED: Abandoned = { kind: 'abandoned' }
+
+/**
+ * The mount table of an op asked about outside a line, which the ledger
+ * never reads: its record names a path, not a command. Mirrors Python's
+ * `UNMOUNTED`.
+ */
+class Unmounted {
+  isMountRoot(): boolean {
+    return false
+  }
+}
+
+const UNMOUNTED = new Unmounted()
 
 /**
  * Tell the abandonment of a question from a host's answer.
@@ -200,6 +215,24 @@ export function sameOccurrence(a: Occurrence | null, b: Occurrence | null): bool
     y = y.parent
   }
   return x === null && y === null
+}
+
+/**
+ * An op's question as the ledger keys it: no command, the path as the one
+ * word asked about, and one rule, the document's or for a coded Ask one
+ * over the path. Mirrors Python's `op_question`.
+ */
+export function opQuestion(ctx: OpsContext, ask: Ask): [CommandContext, Ask] {
+  const asked: CommandContext = {
+    command: '',
+    paths: [ctx.path],
+    argv: [ctx.path.virtual],
+    cwd: '',
+    registry: UNMOUNTED,
+    sessionId: ctx.sessionId ?? '',
+  }
+  const rule = ask.rule ?? { reason: ask.reason, paths: [ctx.path.virtual] }
+  return [asked, { ...ask, rule, rules: [rule] }]
 }
 
 /**
@@ -404,6 +437,57 @@ export class Decisions {
     const live = this.live.get(sessionId) ?? new Set<HandOff>()
     live.add(handed)
     this.live.set(sessionId, live)
+  }
+
+  /**
+   * An Ask from the op door where no line is running: a standing answer
+   * settles it, else the question is raised now. The op has no command
+   * behind it, so its record names none: the rule and the path are the
+   * key, the path standing as the one word asked about. A ONCE answer
+   * passes the next call on that path under that rule (every op of it,
+   * `withinCall`; a bare op is a call of its own) and is spent when the
+   * call ends; a SESSION answer passes every one the rule covers, lines
+   * included. Mirrors Python's `resolve_op`.
+   */
+  async resolveOp(ctx: OpsContext, ask: Ask): Promise<Deny | Pending | null> {
+    const call = getOpCall(this)
+    const claimant: Claimant | null =
+      call === null
+        ? null
+        : { line: call, occurrence: { parent: null, source: ctx.path.virtual, start: 0, end: 0 } }
+    const [asked, keyed] = opQuestion(ctx, ask)
+    const said = await this.resolve(asked, keyed, undefined, claimant)
+    return said?.kind === 'abandoned' ? { kind: 'deny', reason: ask.reason } : said
+  }
+
+  /**
+   * What the settled records alone say about an op asked about outside a
+   * line: the read-only half of `resolveOp`, the one `explain` may take.
+   * Mirrors Python's `held_op`.
+   */
+  heldOp(ctx: OpsContext, ask: Ask): Promise<Deny | Pending | null> {
+    const [asked, keyed] = opQuestion(ctx, ask)
+    return this.held(asked, keyed)
+  }
+
+  /**
+   * Run one call made outside a line (a file tool's) as the unit an
+   * op-level answer covers. A ONCE grant one of its ops is answered by is
+   * claimed for the call, so every op of the call on that path runs on it
+   * (a write tool reads the file back to stamp its version), and the
+   * call's end spends it. A call made inside another runs in the outer
+   * one; a call another ledger runs (a host callback reaching a second
+   * workspace mid-call) is no call of this one's. Mirrors Python's
+   * `within_call`.
+   */
+  async withinCall<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
+    if (getOpCall(this) !== null) return run()
+    const handed: HandOff = { claimed: [], parent: null, origin: null }
+    try {
+      return await runWithOpCall(this, handed, run)
+    } finally {
+      await this.revoke(sessionId, handed)
+    }
   }
 
   /**

@@ -299,6 +299,19 @@ Every shell line is a job: `pending`, `running`, then `done`, `failed` or `cance
 
 <Badge color="red">DELETE</Badge> `/v1/jobs/{job_id}`
 
+## Explain
+
+### Explain a shell line
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/explain/shell`
+
+What [running the line](#run-a-shell-line) would do, without running it: its verdict, `exit_code`, `stderr` and parse tree (`node`), each command with every policy's answer. See [Explain](/home/permissions#explain).
+
+<ParamField body="command" type="string" required>The line, as the agent would type it.</ParamField>
+<ParamField body="session_id" type="string">Whose profile to judge it under; the default session when absent.</ParamField>
+
+VFS calls are not on REST yet; explain them over [RPC](/home/access/rpc#methods) with `explain/vfs/<call>`.
+
 ## Asks
 
 ### List asks

@@ -20,8 +20,11 @@ from mirage.io.types import ByteSource
 from mirage.ops.ops import Ops
 from mirage.types import PathSpec
 from mirage.workspace.session import SessionState
+from mirage.workspace.workspace.explainer import Explainer
 
 if TYPE_CHECKING:
+    from mirage.policy.decisions import Decisions
+    from mirage.workspace.mount.registry import MountEntry
     from mirage.workspace.tools.file_version import FileVersionTracker
     from mirage.workspace.tools.tool_operations import MirageToolOperations
     from mirage.workspace.workspace.workspace import Workspace
@@ -31,7 +34,8 @@ class Session:
     """One session's doors, bound together.
 
     ``shell`` runs a line as the session, ``vfs`` is the op facade run
-    as it and ``tools`` the agent tools over both, so a host holds one
+    as it, ``tools`` the agent tools over both and ``explain`` the same
+    doors as a dry run, so a host holds one
     object per agent and every door answers under the same profile:
     hides, mount modes, grants and standing decisions. Nothing is
     stored here; the session record stays with the session manager and
@@ -58,6 +62,16 @@ class Session:
         return self._ws.get_session(self.session_id)
 
     @property
+    def decisions(self) -> "Decisions":
+        """The workspace's approval ledger, which this session's asked
+        commands and ops are recorded in."""
+        return self._ws.decisions
+
+    def mounts(self) -> list["MountEntry"]:
+        """The workspace's mounts, which the session's profile narrows."""
+        return self._ws.mounts()
+
+    @property
     def vfs(self) -> Ops:
         """The op facade run as this session."""
         if self._id is None:
@@ -65,10 +79,20 @@ class Session:
         return self._ws.vfs._for_session(self._id)
 
     @property
+    def explain(self) -> Explainer:
+        """This session's calls explained instead of run, under the same
+        names: ``explain.shell(line)``, ``explain.vfs.<call>(...)``."""
+        return Explainer(self._ws, self._id, self.vfs)
+
+    @property
     def tools(self) -> "MirageToolOperations":
         """The agent tools run as this session: one table per session,
         shared by every caller in the process."""
         return self._ws._session_tools(self._id)
+
+    async def _loaded(self) -> None:
+        """Hydrate the workspace's sessions, so a stored one is known."""
+        await self._ws.ensure_sessions_loaded()
 
     async def _reads(self) -> "FileVersionTracker":
         """The read history the session's agent tools share."""

@@ -16,7 +16,9 @@ import asyncio
 import dataclasses
 import hashlib
 from collections.abc import Awaitable, Callable, Sequence
+from typing import TypeVar
 
+from mirage.context import get_op_call, reset_op_call, set_op_call
 from mirage.policy.match import Outcome
 from mirage.policy.types import (
     Abandoned,
@@ -29,6 +31,7 @@ from mirage.policy.types import (
     Deny,
     HandOff,
     Occurrence,
+    OpsContext,
     Pending,
     Scope,
     SessionDecisionsQuery,
@@ -47,6 +50,8 @@ from mirage.policy.types import (
 AskHandler = Callable[[Decision], Awaitable[Decision | None]]
 
 ABANDONED = Abandoned()
+
+T = TypeVar("T")
 
 
 async def answered(
@@ -182,6 +187,38 @@ def encloses(scope: Occurrence, occurrence: Occurrence) -> bool:
             return scope.start <= within.start and within.end <= scope.end
         within = within.parent
     return False
+
+
+class Unmounted:
+    """The mount table of an op asked about outside a line, which the
+    ledger never reads: its record names a path, not a command."""
+
+    def is_mount_root(self, path: str) -> bool:
+        return False
+
+
+UNMOUNTED = Unmounted()
+
+
+def op_question(ctx: OpsContext, ask: Ask) -> tuple[CommandContext, Ask]:
+    """An op's question as the ledger keys it: no command, the path as
+    the one word asked about, and one rule, the document's or for a
+    coded Ask one over the path.
+
+    Args:
+        ctx (OpsContext): the op asked about.
+        ask (Ask): the chain's answer.
+    """
+    asked = CommandContext(
+        command="",
+        paths=(ctx.path,),
+        argv=(ctx.path.virtual,),
+        cwd="",
+        registry=UNMOUNTED,
+        session_id=ctx.session_id,
+    )
+    rule = ask.rule or CommandRule(ask.reason, paths=(ctx.path.virtual,))
+    return asked, dataclasses.replace(ask, rule=rule, rules=(rule,))
 
 
 class Decisions:
@@ -422,6 +459,77 @@ class Decisions:
             return None
         self._claim(ctx.session_id, claimant, once)
         return None
+
+    async def resolve_op(
+        self, ctx: OpsContext, ask: Ask
+    ) -> Deny | Pending | None:
+        """An Ask from the op door where no line is running: a standing
+        answer settles it, else the question is raised now.
+
+        The op has no command behind it, so its record names none: the
+        rule and the path are the key, the path standing as the one word
+        asked about. A ONCE answer passes the next call on that path under
+        that rule (every op of it, :meth:`within_call`; a bare op is a
+        call of its own) and is spent when the call ends; a SESSION answer
+        passes every one the rule covers, lines included.
+
+        Args:
+            ctx (OpsContext): the op asked about.
+            ask (Ask): the chain's answer.
+
+        Returns:
+            None to run the op, a Deny to refuse it, a Pending when the
+            host has not decided.
+        """
+        call = get_op_call(self)
+        claimant = (
+            Claimant(call, Occurrence(None, ctx.path.virtual, 0, 0))
+            if call is not None
+            else None
+        )
+        said = await self.resolve(*op_question(ctx, ask), claimant=claimant)
+        return Deny(ask.reason) if isinstance(said, Abandoned) else said
+
+    def held_op(self, ctx: OpsContext, ask: Ask) -> Deny | Pending | None:
+        """What the settled records alone say about an op asked about
+        outside a line: the read-only half of :meth:`resolve_op`, the one
+        ``explain`` may take.
+
+        Args:
+            ctx (OpsContext): the op asked about.
+            ask (Ask): the chain's answer.
+        """
+        return self.held(*op_question(ctx, ask))
+
+    async def within_call(
+        self, session_id: str, run: Callable[[], Awaitable[T]]
+    ) -> T:
+        """Run one call made outside a line (a file tool's) as the unit an
+        op-level answer covers.
+
+        A ONCE grant one of its ops is answered by is claimed for the
+        call, so every op of the call on that path runs on it (a write
+        tool reads the file back to stamp its version), and the call's
+        end spends it. A call made inside another runs in the outer one;
+        a call another ledger runs (a host callback reaching a second
+        workspace mid-call) is no call of this one's.
+
+        Args:
+            session_id (str): the session the call runs as.
+            run (Callable[[], Awaitable[T]]): the call.
+
+        Returns:
+            T: what the call returned.
+        """
+        if get_op_call(self) is not None:
+            return await run()
+        handed = HandOff()
+        token = set_op_call(self, handed)
+        try:
+            return await run()
+        finally:
+            reset_op_call(token)
+            await self.revoke(session_id, handed)
 
     def _claim(
         self, session_id: str, claimant: Claimant, once: tuple[Decision, ...]

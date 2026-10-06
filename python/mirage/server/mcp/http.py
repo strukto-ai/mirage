@@ -140,6 +140,19 @@ class DaemonToolOperations(MirageToolOperations):
 
         return await self._entry.runner.call(on_loop())
 
+    async def offered(self) -> tuple[str, ...]:
+        """The tools the session can use, read on the workspace's loop,
+        where its sessions load.
+
+        Returns:
+            tuple[str, ...]: the tool names.
+        """
+
+        async def on_loop() -> tuple[str, ...]:
+            return await self._session.tools.offered()
+
+        return await self._entry.runner.call(on_loop())
+
 
 class McpDoor:
     """Serves every workspace's tools over MCP's streamable HTTP.

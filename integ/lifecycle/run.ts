@@ -36,6 +36,20 @@ import { classify } from '@struktoai/mirage-core/errors/classify'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { Channel, JobConsole } from '@struktoai/mirage-core/shell/console/index'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
+import {
+  Outcome,
+  Scope,
+  type Ask,
+  type CommandExplanation,
+  type Deny,
+  type Route,
+  type ShellExplanation,
+  type ShellNode,
+  type VfsExplanation,
+} from '@struktoai/mirage-core/policy/types'
+import type { RouteContext } from '@struktoai/mirage-core/runtime/routing/types'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
+import type { VfsExplainer } from '@struktoai/mirage-core/workspace/workspace/explainer'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
@@ -90,8 +104,14 @@ type Step = (
       commands?: string[]
       paths?: string[]
       vars?: string[]
+      lines?: string[]
       reason: string
     }
+  | { op: 'tools' | 'asks' }
+  | { op: 'tool'; tool: string; arguments: Record<string, unknown> }
+  | { op: 'answer'; outcome?: Outcome; scope?: Scope }
+  | { op: 'explain'; command: string }
+  | { op: 'explain_vfs'; name: string; args: string[] }
   | { op: 'unregister_policy'; id: string }
   | {
       op: 'mounts' | 'clis' | 'runtimes' | 'close' | 'snapshot' | 'checkout' | 'drain_processes'
@@ -158,6 +178,75 @@ for (const register of [registerNodeVfs, registerBrowserVfs]) {
     })
     return Promise.resolve(vfs)
   })
+}
+
+/** Each policy answer as a case pins it: its kind, who gave it, and its reason or runtime. */
+function answered(answers: readonly (Deny | Ask | Route)[]): Record<string, string>[] {
+  return answers.map((a) => ({
+    kind: a.kind,
+    policy: a.policy ?? '',
+    ...(a.kind === 'route' ? { runtime: a.runtime } : { reason: a.reason }),
+  }))
+}
+
+// One call of `session.explain.vfs`, its arguments as a case spells them:
+// the paths, then the bytes a write or an append carries.
+function explainVfs(
+  vfs: VfsExplainer,
+  step: { name: string; args: string[] },
+): Promise<VfsExplanation> {
+  const [first = '', second = ''] = step.args
+  switch (step.name) {
+    case 'write':
+      return vfs.write(first, second)
+    case 'append':
+      return vfs.append(first, new TextEncoder().encode(second))
+    case 'rename':
+      return vfs.rename(first, second)
+    case 'truncate':
+      return vfs.truncate(first, Number(second))
+    case 'read':
+    case 'stat':
+    case 'readdir':
+    case 'exists':
+    case 'mkdir':
+    case 'rmdir':
+    case 'unlink':
+      return vfs[step.name](first)
+    default:
+      throw new Error(`unknown vfs op: ${step.name}`)
+  }
+}
+
+/**
+ * An explanation as a case pins it: a VFS call's verdict, or a line's with
+ * its commands in the order the line reads them.
+ */
+function explained(expl: ShellExplanation | VfsExplanation): Record<string, unknown> {
+  const verdict = {
+    outcome: expl.outcome,
+    reason: expl.reason,
+    answers: answered(expl.answers),
+    refusal: expl.refusal?.kind ?? null,
+  }
+  if ('call' in expl) return { call: expl.call, ...verdict, error: expl.error }
+  return {
+    ...verdict,
+    exit_code: expl.exitCode,
+    stderr: expl.stderr,
+    commands: commandsOf(expl.node).map((c) => ({
+      command: c.command,
+      outcome: c.outcome,
+      answers: answered(c.answers),
+      runtime: c.runtime,
+    })),
+  }
+}
+
+/** Every command under a node of a line's tree, in source order. */
+function commandsOf(node: ShellNode | CommandExplanation): CommandExplanation[] {
+  const mine = 'command' in node ? [node] : []
+  return [...mine, ...node.children.flatMap(commandsOf)]
 }
 
 // What earlier steps put aside for later ones: `snapshot` stores the
@@ -243,6 +332,14 @@ async function action(
           step.paths?.includes(ctx.path.virtual) ? { kind: 'deny', reason: step.reason } : null,
         preSession: (ctx) =>
           step.vars?.includes(ctx.key) ? { kind: 'deny', reason: step.reason } : null,
+        ...(step.lines === undefined
+          ? {}
+          : {
+              preExecute: (ctx: RouteContext) =>
+                (step.lines ?? []).some((word) => ctx.line.includes(word))
+                  ? { kind: 'deny', reason: step.reason }
+                  : null,
+            }),
       }
       ws.policies.add(policy)
       policies.set(step.id, policy)
@@ -326,6 +423,32 @@ async function action(
     case 'close':
       await ws.close()
       break
+    case 'tools':
+      return [...new Session(ws, step.session ?? null).tools.names()]
+    case 'tool': {
+      const result = await new Session(ws, step.session ?? null).tools.call(
+        step.tool,
+        step.arguments,
+      )
+      return { text: result.content[0]?.text ?? '', is_error: result.isError === true }
+    }
+    case 'asks':
+      return ws.decisions
+        .pending(step.session ?? '')
+        .map((r) => ({ command: r.command, paths: [...r.paths], reason: r.reason }))
+    case 'answer':
+      for (const record of ws.decisions.pending()) {
+        await ws.decisions.answer(
+          record.id,
+          step.outcome ?? Outcome.ALLOW,
+          step.scope ?? Scope.ONCE,
+        )
+      }
+      break
+    case 'explain':
+      return explained(await new Session(ws, step.session ?? null).explain.shell(step.command))
+    case 'explain_vfs':
+      return explained(await explainVfs(new Session(ws, step.session ?? null).explain.vfs, step))
     default:
       throw new Error(`unknown lifecycle action: ${String((step as { op: string }).op)}`)
   }

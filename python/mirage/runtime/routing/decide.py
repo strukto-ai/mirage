@@ -18,6 +18,7 @@ from collections.abc import Container, Mapping
 from typing import Any
 
 from mirage.runtime.base import Runtime
+from mirage.runtime.constants import SCRIPT_EVAL_TIMEOUT_SECONDS
 from mirage.runtime.errors import EvalError
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import EvaluatorMixin
@@ -35,8 +36,6 @@ from mirage.runtime.routing.types import (
 from mirage.runtime.script import eval_with_ctx
 from mirage.runtime.table import bind_commands, catch_all, runtime_bindings_for
 from mirage.runtime.types import EvalValue, Language
-
-POLICY_EVAL_TIMEOUT_SECONDS = 10.0
 
 
 def evaluator_of(
@@ -126,11 +125,11 @@ async def _eval_source(
         )
     try:
         return await eval_with_ctx(
-            source, ctx_payload, evaluator, POLICY_EVAL_TIMEOUT_SECONDS
+            source, ctx_payload, evaluator, SCRIPT_EVAL_TIMEOUT_SECONDS
         )
     except asyncio.TimeoutError as exc:
         raise RouteError(
-            f"policy script timed out after {POLICY_EVAL_TIMEOUT_SECONDS:g}s"
+            f"policy script timed out after {SCRIPT_EVAL_TIMEOUT_SECONDS:g}s"
         ) from exc
     except EvalError as exc:
         prefix = (

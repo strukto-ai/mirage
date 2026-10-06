@@ -46,6 +46,7 @@ import {
   type OpsContext,
   type OpsResultContext,
   type Policy,
+  type RouteContext,
   type BaseVFS,
   type RunResult,
   type RuntimeEntry,
@@ -158,6 +159,9 @@ interface World {
 interface PolicySpec {
   name: string
   sync?: boolean
+  contains?: string
+  runtime?: string
+  deny?: string
   command?: string
   flag?: string
   reason?: string
@@ -256,7 +260,7 @@ function registerRuntimes(entries: Record<string, string>): void {
 // itself (`"sync": true`), so one case runs under both shapes on both
 // hosts. The seam awaits whatever a hook returns, which is what let a
 // plain `def` hook stop failing closed on the python side.
-type HookName = 'preCommand' | 'preOps' | 'postOps' | 'postExecute'
+type HookName = 'preCommand' | 'preExecute' | 'preOps' | 'postOps' | 'postExecute'
 
 interface TestPolicy<C> {
   readonly hook: HookName
@@ -274,6 +278,19 @@ class DenyFlag implements TestPolicy<CommandContext> {
       return { kind: 'deny', reason: this.spec.reason ?? '' }
     }
     return null
+  }
+}
+
+class PlaceLine implements TestPolicy<RouteContext> {
+  readonly hook = 'preExecute'
+  private readonly spec: PolicySpec
+  constructor(spec: PolicySpec) {
+    this.spec = spec
+  }
+  decide(ctx: RouteContext): Action | null {
+    if (!ctx.line.includes(this.spec.contains ?? '')) return null
+    if (this.spec.deny !== undefined) return { kind: 'deny', reason: this.spec.deny }
+    return { kind: 'route', runtime: this.spec.runtime ?? '' }
   }
 }
 
@@ -358,6 +375,7 @@ class Boom implements TestPolicy<ExecuteResultContext> {
 
 const POLICY_KINDS: Record<string, new (spec: PolicySpec) => TestPolicy<never>> = {
   deny_flag: DenyFlag,
+  place_line: PlaceLine,
   lock_writes: LockWrites,
   seal_reads: SealReads,
   redact_reads: RedactReads,

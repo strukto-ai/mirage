@@ -3598,6 +3598,404 @@
           "op": "drain_processes"
         }
       ]
+    },
+    {
+      "id": "the_tool_list_follows_the_profile",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/": {
+            "vfs": "ram",
+            "config": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "tools",
+          "expect": {
+            "value": ["shell", "read", "write", "edit", "ls", "grep", "glob"]
+          }
+        },
+        {
+          "op": "session",
+          "id": "reader",
+          "profile": {
+            "mounts": {
+              "/": "read"
+            },
+            "commands": {
+              "allow": ["cat", "ls"]
+            }
+          }
+        },
+        {
+          "op": "tools",
+          "session": "reader",
+          "expect": {
+            "value": ["shell", "read", "ls", "glob"]
+          }
+        },
+        {
+          "op": "write",
+          "path": "/a.txt",
+          "data": "x\n"
+        },
+        {
+          "op": "tool",
+          "session": "reader",
+          "tool": "read",
+          "arguments": {
+            "path": "/a.txt"
+          },
+          "expect": {
+            "value": {
+              "text": "     1\tx\n",
+              "is_error": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_path_ask_outside_a_line_waits_on_the_host",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/": {
+            "vfs": "ram",
+            "config": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "session",
+          "id": "agent",
+          "profile": {
+            "commands": {
+              "ask": [
+                {
+                  "reason": "outbox needs a nod",
+                  "paths": ["/out/*"]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "op": "tool",
+          "session": "agent",
+          "tool": "write",
+          "arguments": {
+            "path": "/out/a.txt",
+            "content": "hi\n"
+          },
+          "expect": {
+            "value": {
+              "is_error": true,
+              "text_contains": "requires approval: outbox needs a nod (ask "
+            }
+          }
+        },
+        {
+          "op": "asks",
+          "expect": {
+            "value": [
+              {
+                "command": "",
+                "paths": ["/out/a.txt"],
+                "reason": "outbox needs a nod"
+              }
+            ]
+          }
+        },
+        {
+          "op": "answer",
+          "outcome": "allow",
+          "scope": "once"
+        },
+        {
+          "op": "tool",
+          "session": "agent",
+          "tool": "write",
+          "arguments": {
+            "path": "/out/a.txt",
+            "content": "hi\n"
+          },
+          "expect": {
+            "value": {
+              "text": "Written: /out/a.txt",
+              "is_error": false
+            }
+          }
+        },
+        {
+          "op": "asks",
+          "expect": {
+            "value": []
+          }
+        },
+        {
+          "op": "tool",
+          "session": "agent",
+          "tool": "write",
+          "arguments": {
+            "path": "/out/b.txt",
+            "content": "hi\n"
+          },
+          "expect": {
+            "value": {
+              "is_error": true,
+              "text_contains": "requires approval: outbox needs a nod"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "session": "agent",
+          "command": "echo hi > /out/c.txt",
+          "expect": {
+            "value": {
+              "exit_code": 126,
+              "refusal": "outbox needs a nod"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "explain_shows_every_answer_and_the_vfs_form",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/": {
+            "vfs": "ram",
+            "config": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "session",
+          "id": "agent",
+          "profile": {
+            "paths": {
+              "hide": ["/vault"]
+            },
+            "commands": {
+              "deny": [
+                {
+                  "reason": "no deletes",
+                  "commands": ["rm"]
+                },
+                {
+                  "reason": "sealed",
+                  "paths": ["/sec/*"]
+                }
+              ],
+              "ask": [
+                {
+                  "reason": "nod",
+                  "paths": ["/out/*"]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "op": "register_policy",
+          "id": "lines",
+          "lines": ["blocked"],
+          "reason": "blocked here"
+        },
+        {
+          "op": "explain",
+          "session": "agent",
+          "command": "rm /x",
+          "expect": {
+            "value": {
+              "outcome": "deny",
+              "exit_code": 126,
+              "answers": [],
+              "commands": [
+                {
+                  "command": "rm",
+                  "outcome": "deny",
+                  "answers": [
+                    {
+                      "kind": "deny",
+                      "policy": "PermissionsPolicy",
+                      "reason": "no deletes"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "op": "explain",
+          "session": "agent",
+          "command": "echo blocked",
+          "expect": {
+            "value": {
+              "outcome": "deny",
+              "exit_code": 126,
+              "stderr": "echo: Permission denied\n",
+              "answers": [
+                {
+                  "kind": "deny",
+                  "reason": "blocked here"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "op": "explain",
+          "session": "agent",
+          "command": "echo hi",
+          "expect": {
+            "value": {
+              "outcome": "allow",
+              "exit_code": 0,
+              "answers": [],
+              "commands": [
+                {
+                  "command": "echo",
+                  "runtime": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "op": "explain_vfs",
+          "session": "agent",
+          "name": "read",
+          "args": ["/sec/k"],
+          "expect": {
+            "value": {
+              "outcome": "deny",
+              "error": "EACCES",
+              "refusal": "deny",
+              "answers": [
+                {
+                  "kind": "deny",
+                  "policy": "PermissionsPolicy",
+                  "reason": "sealed"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "op": "explain_vfs",
+          "session": "agent",
+          "name": "write",
+          "args": ["/out/a", "x"],
+          "expect": {
+            "value": {
+              "outcome": "ask",
+              "error": "EACCES",
+              "refusal": "pending"
+            }
+          }
+        },
+        {
+          "op": "explain_vfs",
+          "session": "agent",
+          "name": "rename",
+          "args": ["/a", "/sec/b"],
+          "expect": {
+            "value": {
+              "call": "rename",
+              "outcome": "deny",
+              "error": "EACCES"
+            }
+          }
+        },
+        {
+          "op": "asks",
+          "expect": {
+            "value": []
+          }
+        },
+        {
+          "op": "explain_vfs",
+          "session": "agent",
+          "name": "read",
+          "args": ["/vault/k"],
+          "expect": {
+            "value": {
+              "outcome": "allow",
+              "error": "",
+              "answers": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "an_ask_comes_before_placement",
+      "note": "A line a rule asks about is not shown to a placing policy: the question is recorded and the line waits on it, rather than a placement deny answering first.",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/": {
+            "vfs": "ram",
+            "config": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "session",
+          "id": "agent",
+          "profile": {
+            "commands": {
+              "ask": [
+                {
+                  "reason": "nod",
+                  "commands": ["rm"]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "op": "register_policy",
+          "id": "lines",
+          "lines": ["rm"],
+          "reason": "routed away"
+        },
+        {
+          "op": "exec",
+          "session": "agent",
+          "command": "rm /x",
+          "expect": {
+            "value": {
+              "exit_code": 126,
+              "stderr": "rm: Permission denied\n",
+              "refusal": "nod"
+            }
+          }
+        },
+        {
+          "op": "asks",
+          "session": "agent",
+          "expect": {
+            "value": [
+              {
+                "command": "rm",
+                "paths": ["/x"],
+                "reason": "nod"
+              }
+            ]
+          }
+        }
+      ]
     }
   ]
 }

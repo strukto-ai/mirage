@@ -17,15 +17,22 @@ import inspect
 import logging
 import os
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mirage.commands.spec.usage import operand_exit_code
-from mirage.context import note_refusal
+from mirage.context import (
+    explaining,
+    line_running,
+    note_refusal,
+    reset_explaining,
+    set_explaining,
+)
 from mirage.policy.base import Policy
 from mirage.policy.builtin.hidden_paths import HiddenPathsPolicy
 from mirage.policy.builtin.mount_mode import MountModePolicy
 from mirage.policy.constants import POLICY_DENIED_EXIT
-from mirage.policy.errors import PolicyDenied, PolicyError
+from mirage.policy.errors import Explained, PolicyDenied, PolicyError
+from mirage.policy.match.decide import source_of
 from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.types import (
     VALIDITY,
@@ -33,20 +40,29 @@ from mirage.policy.types import (
     CommandContext,
     Deny,
     DenyScope,
+    DryRun,
     ExecuteResultContext,
     Hide,
     OpsContext,
     OpsResultContext,
+    Outcome,
     Pending,
+    Route,
     SessionContext,
+    VfsExplanation,
 )
+from mirage.runtime.routing.types import RouteContext
 from mirage.types import Limit, MountMode, PathSpec, Refusal
-from mirage.utils.errors import eacces, fs_error_line
+from mirage.utils.errors import ReadOnlyError, eacces, fs_error_line
+
+if TYPE_CHECKING:
+    from mirage.policy.decisions import Decisions
 
 logger = logging.getLogger(__name__)
 
 HookContext = (
     CommandContext
+    | RouteContext
     | OpsContext
     | OpsResultContext
     | ExecuteResultContext
@@ -172,6 +188,22 @@ def policy_denied(
     return PolicyDenied(errno.EACCES, strerror, filename, refusal=refusal)
 
 
+def policy_pending(pending: Pending, filename: str) -> PolicyDenied:
+    """The error a door raises for a question the host has not answered:
+    a plain EACCES, as the terminal would print it, with the ask id the
+    agent quotes on the record.
+
+    Args:
+        pending (Pending): the ledger's answer.
+        filename (str): the path asked about.
+    """
+    refusal = refusal_of(pending)
+    note_refusal(refusal)
+    return PolicyDenied(
+        errno.EACCES, os.strerror(errno.EACCES), filename, refusal=refusal
+    )
+
+
 async def pre_ops_gate(
     policies: "Policies",
     op: str,
@@ -184,6 +216,8 @@ async def pre_ops_gate(
     create: bool = False,
     subtree: bool = False,
     check_hidden: bool = True,
+    decisions: "Decisions | None" = None,
+    final: bool = True,
 ) -> None:
     """Fire pre_ops at an op door; a Deny becomes EACCES.
 
@@ -191,7 +225,12 @@ async def pre_ops_gate(
     call, so a refusal is byte-identical however the mount is reached:
     PermissionError with errno EACCES and the virtual path as filename,
     which the shell renders as "<cmd>: <path>: Permission denied" and
-    FUSE translates to -EACCES.
+    FUSE translates to -EACCES. An Ask is a question only where no line
+    is running and the door holds the ledger (a file tool, the host's
+    facade): the ledger answers it from a standing grant or records it,
+    and an unanswered one refuses with the ask id on the record. Inside
+    a line an Ask refuses like a deny, since the line was admitted
+    without it.
 
     Args:
         policies (Policies): the workspace's admission policies.
@@ -207,32 +246,127 @@ async def pre_ops_gate(
         subtree (bool): the op mutates the path's descendants too.
         check_hidden (bool): False only for a door that has already
             answered the hides itself.
+        decisions (Decisions | None): the approval ledger, None at a
+            door that cannot ask.
+        final (bool): the op's last gate; False for a rename's source,
+            whose destination is gated next.
+
+    Raises:
+        Explained: in a dry run (``explaining``), once the gate's answer
+            is noted and the op would refuse or has no gate left: the
+            door stops before any backend or cache is touched.
+        ReadOnlyError: a write a policy makes while it decides a dry
+            run's op, which the dry run may not let change anything (an
+            ask its read meets reads the ledger and records nothing).
     """
+    ctx = OpsContext(
+        op=op,
+        path=path,
+        write=write,
+        prefix=prefix,
+        session_id=session_id,
+        mode=mode,
+        create=create,
+        subtree=subtree,
+    )
+    trace = explaining()
+    if isinstance(trace, list):
+        token = set_explaining(DryRun.DECIDING)
+        try:
+            hidden = check_hidden and await policies.hides(ctx)
+            noted = (
+                None
+                if hidden
+                else await _explained_op(policies, ctx, decisions)
+            )
+        finally:
+            reset_explaining(token)
+        if noted is None:
+            raise Explained()
+        trace.append(noted)
+        if final or noted.error:
+            raise Explained()
+        return
+    deciding = trace is DryRun.DECIDING
+    if deciding and write:
+        raise ReadOnlyError(errno.EROFS, "Read-only file system", path.virtual)
     if not (
         policies.wants("pre_ops")
         or check_hidden
         or (write and mode is not None)
     ):
         return
-    answer = await policies.pre_ops(
-        OpsContext(
-            op=op,
-            path=path,
-            write=write,
-            prefix=prefix,
-            session_id=session_id,
-            mode=mode,
-            create=create,
-            subtree=subtree,
-        ),
-        check_hidden=check_hidden,
-    )
+    answer = await policies.pre_ops(ctx, check_hidden=check_hidden)
     if isinstance(answer, Hide):
         raise answer.error
+    if isinstance(answer, Ask):
+        if decisions is None or line_running():
+            raise policy_denied(Deny(answer.reason), path.virtual)
+        settled = (
+            decisions.held_op(ctx, answer)
+            if deciding
+            else await decisions.resolve_op(ctx, answer)
+        )
+        if settled is None:
+            return
+        if isinstance(settled, Pending):
+            raise policy_pending(settled, path.virtual)
+        answer = settled
     if answer is not None:
         if answer.error is not None:
             raise answer.error
         raise policy_denied(answer, path.virtual)
+
+
+async def _explained_op(
+    policies: "Policies", ctx: OpsContext, decisions: "Decisions | None"
+) -> VfsExplanation:
+    """What the gate would answer one VFS call, as ``pre_ops_gate``
+    decides it and without its consequences: every policy's answer, the
+    one that wins, and the error the door would raise. A question reads
+    the ledger's settled records and records nothing.
+
+    Args:
+        policies (Policies): the workspace's admission policies.
+        ctx (OpsContext): the call the gate sees.
+        decisions (Decisions | None): the approval ledger, None at a
+            door that cannot ask.
+    """
+    said = await policies.answers("pre_ops", ctx)
+    answers = tuple(a for a in said if isinstance(a, (Deny, Ask)))
+    first = answers[0] if answers else None
+    winner = next((a for a in answers if isinstance(a, Deny)), first)
+    base = VfsExplanation(
+        call=ctx.op, paths=(ctx.path.virtual,), answers=answers
+    )
+    if winner is None:
+        return base
+    action: Deny | Pending | None = (
+        winner if isinstance(winner, Deny) else None
+    )
+    if isinstance(winner, Ask):
+        action = (
+            Deny(winner.reason, policy=winner.policy)
+            if decisions is None or line_running()
+            else decisions.held_op(ctx, winner)
+        )
+    decided = replace(
+        base,
+        outcome=Outcome.ASK if isinstance(winner, Ask) else Outcome.DENY,
+        reason=winner.reason,
+        source="" if winner.rule is None else source_of(winner.rule),
+    )
+    if action is None:
+        return decided
+    error = action.error if isinstance(action, Deny) else None
+    return replace(
+        decided,
+        refusal=None if error is not None else refusal_of(action),
+        error=errno.errorcode.get(
+            error.errno if error is not None and error.errno else errno.EACCES,
+            "EACCES",
+        ),
+    )
 
 
 async def post_ops_gate(
@@ -312,6 +446,41 @@ async def post_execute_gate(
     return await policies.post_execute(ctx)
 
 
+def agreed(routes: list[Route]) -> Deny | Route | None:
+    """The placement the policies agree on: their one runtime, None
+    when none placed the line, and a Deny when two disagree.
+
+    Args:
+        routes (list[Route]): every Route the stage answered, in order.
+    """
+    runtimes = dict.fromkeys(route.runtime for route in routes)
+    if len(runtimes) < 2:
+        return routes[0] if routes else None
+    said = ", ".join(f"{r.policy} on {r.runtime}" for r in routes)
+    return Deny(
+        f"policies place the line on different runtimes: {said}",
+        policy=", ".join(dict.fromkeys(r.policy for r in routes)),
+    )
+
+
+def settled(
+    answers: tuple[Deny | Ask | Route, ...],
+) -> Deny | Ask | Route | None:
+    """What a stage's answers come to, by kind: the first Deny, else the
+    first Ask, else the Route every placing answer agrees on.
+
+    Args:
+        answers (tuple[Deny | Ask | Route, ...]): every answer, in order.
+    """
+    deny = next((a for a in answers if isinstance(a, Deny)), None)
+    if deny is not None:
+        return deny
+    ask = next((a for a in answers if isinstance(a, Ask)), None)
+    if ask is not None:
+        return ask
+    return agreed([a for a in answers if isinstance(a, Route)])
+
+
 def _deny_only(hook: str, action: Deny | Ask | None) -> Deny | None:
     """Narrow a hook's answer where VALIDITY admits no Ask.
 
@@ -356,10 +525,26 @@ class Policies:
 
     def __init__(self, policies: list[Policy] | None = None) -> None:
         self._policies: list[Policy] = list(policies or [])
+        self._placement: Policy | None = None
         self._wanted: frozenset[str] = frozenset()
         self._rescan()
         self._hidden = HiddenPathsPolicy()
         self._mode = MountModePolicy()
+
+    def place(self, placement: Policy | None) -> None:
+        """Install the built-in placement, the workspace's ``route_policy``
+        compiled as a policy, which answers ``pre_execute`` ahead of every
+        registered one.
+
+        It sits outside the fail-closed fold: a misconfigured route
+        policy raises ``RouteError`` to the caller rather than refusing
+        the line, since the mistake is the deployment's to fix.
+
+        Args:
+            placement (Policy | None): the built-in, None for none.
+        """
+        self._placement = placement
+        self._rescan()
 
     def add(self, policy: Policy) -> None:
         """Register a policy after the existing ones.
@@ -426,37 +611,61 @@ class Policies:
 
     def _rescan(self) -> None:
         wanted = set()
+        policies = [*self._policies, *filter(None, [self._placement])]
         for hook in VALIDITY:
             base = getattr(Policy, hook)
-            for policy in self._policies:
+            for policy in policies:
                 if getattr(type(policy), hook) is not base:
                     wanted.add(hook)
                     break
         self._wanted = frozenset(wanted)
 
-    async def _fire(
-        self, hook: str, ctx: HookContext
-    ) -> tuple[Deny | Ask | None, Limit | None]:
-        """One loop for every hook: first Deny wins, Limits merge.
+    def _chain(self, hook: str, placed: bool) -> tuple[Policy, ...]:
+        """The policies a stage asks, in order: the built-in placement
+        first at ``pre_execute`` (unless the caller placed the line),
+        the registered ones, and the built-in mount mode last at
+        ``pre_ops``, after every policy that could explain the refusal
+        in its own words.
 
-        A refusal short-circuits (limits are moot once the result is
-        suppressed); Limit actions accumulate and aggregate to the
-        tightest value per field. An Ask is remembered and the loop
-        goes on looking for a Deny, so a later policy's refusal
-        outranks an earlier policy's question and an approval can never
-        re-open a deny; the first Ask is returned when nothing refused.
+        Args:
+            hook (str): the hook in python spelling.
+            placed (bool): the caller placed the line itself.
         """
-        base = getattr(Policy, hook)
-        limits: list[Limit] = []
-        asked: Ask | None = None
-        # Keep this gate's order stable if the host edits registrations
+        # A snapshot, so the order holds if the host edits registrations
         # while a hook awaits. Changes take effect at the next gate.
         chain: tuple[Policy, ...] = tuple(self._policies)
+        if hook == "pre_execute" and self._placement and not placed:
+            chain = (self._placement, *chain)
         if hook == "pre_ops":
-            # The mode answers last, after every policy that could
-            # explain the refusal in its own words.
             chain = (*chain, self._mode)
-        for policy in chain:
+        return chain
+
+    async def _said(
+        self, hook: str, ctx: HookContext, every: bool, placed: bool = False
+    ) -> tuple[list[Deny | Ask | Route], list[Limit]]:
+        """The one loop every stage runs: each policy's answer, named and
+        checked against what the hook may carry.
+
+        The door stops at the first Deny, since nothing after it can
+        change the outcome; ``every`` goes on, so ``explain`` shows the
+        answers a Deny would hide. A policy that raises answers with a
+        Deny naming it (fail closed), except the built-in placement,
+        which raises to the caller. A kind the hook cannot carry
+        (VALIDITY) raises PolicyError: a programming error, not a
+        refusal, and as loud in a dry run as at the door.
+
+        Args:
+            hook (str): the hook in python spelling.
+            ctx (HookContext): the context the stage sees.
+            every (bool): ask every policy, past a Deny.
+            placed (bool): the caller placed the line itself, so the
+                built-in placement is not asked.
+        """
+        base = getattr(Policy, hook)
+        legal = VALIDITY[hook]
+        said: list[Deny | Ask | Route] = []
+        limits: list[Limit] = []
+        for policy in self._chain(hook, placed):
             if getattr(type(policy), hook) is base:
                 continue
             name = type(policy).__name__
@@ -465,30 +674,82 @@ class Policies:
                 if inspect.isawaitable(action):
                     action = await action
             except Exception as exc:
+                if policy is self._placement:
+                    raise
                 # The agent reads which policy broke, never what it
                 # raised: the exception text is the deployment's to
                 # debug, in the log.
                 logger.error("%s policy %s raised: %s", hook, name, exc)
-                return Deny(f"{name} failed", policy=name, failed=True), None
+                said.append(Deny(f"{name} failed", policy=name, failed=True))
+                if not every:
+                    return said, []
+                continue
             if action is None:
                 continue
-            legal = VALIDITY[hook]
-            if isinstance(action, Deny) and Deny.kind in legal:
-                if action.policy == "":
-                    action = replace(action, policy=name)
-                return action, None
-            if isinstance(action, Ask) and Ask.kind in legal:
-                if asked is None:
-                    asked = action
-                continue
-            if isinstance(action, Limit) and Limit.kind in legal:
+            if not isinstance(action, (Deny, Ask, Route, Limit)) or (
+                action.kind not in legal
+            ):
+                raise PolicyError(
+                    f"{hook} of {name} returned {action!r}; "
+                    f"legal kinds here: {sorted(legal)}"
+                )
+            if isinstance(action, Limit):
                 limits.append(action)
                 continue
-            raise PolicyError(
-                f"{hook} of {name} returned {action!r}; "
-                f"legal kinds here: {sorted(legal)}"
+            said.append(
+                action if action.policy else replace(action, policy=name)
             )
-        return asked, Limit.aggr(limits)
+            if isinstance(action, Deny) and not every:
+                return said, []
+        return said, limits
+
+    async def _fire(
+        self, hook: str, ctx: HookContext, placed: bool = False
+    ) -> tuple[Deny | Ask | None, Limit | None, tuple[Route, ...]]:
+        """One stage at a door: the first Deny wins, Limits merge.
+
+        A refusal short-circuits (limits are moot once the result is
+        suppressed); Limit actions aggregate to the tightest value per
+        field, and Routes are collected for the caller to reconcile. An
+        Ask is remembered and the loop goes on looking for a Deny, so a
+        later policy's refusal outranks an earlier policy's question and
+        an approval can never re-open a deny; the first Ask is returned
+        when nothing refused.
+
+        Args:
+            hook (str): the hook in python spelling.
+            ctx (HookContext): the context the stage sees.
+            placed (bool): the caller placed the line itself.
+        """
+        said, limits = await self._said(hook, ctx, False, placed)
+        deny = next((a for a in said if isinstance(a, Deny)), None)
+        if deny is not None:
+            return deny, None, ()
+        asked = next((a for a in said if isinstance(a, Ask)), None)
+        routes = tuple(a for a in said if isinstance(a, Route))
+        return asked, Limit.aggr(limits), routes
+
+    async def answers(
+        self, hook: str, ctx: HookContext, every: bool = True
+    ) -> tuple[Deny | Ask | Route, ...]:
+        """The policies' answers at one stage, in the order the stage
+        asks them, each naming its policy: what ``explain`` shows, from
+        the same loop the door runs.
+
+        With ``every`` no answer stops the loop, so a Deny does not hide
+        the answers after it; without it the answers end at the first
+        Deny, as the door's do. The built-in hides never answer here,
+        since a hide never surfaces; the built-in placement answers first
+        at ``pre_execute`` and the built-in mount mode last at
+        ``pre_ops``, as they do at the door.
+
+        Args:
+            hook (str): the hook in python spelling.
+            ctx (HookContext): the context the stage would see.
+            every (bool): ask every policy, past a Deny.
+        """
+        said, _ = await self._said(hook, ctx, every)
+        return tuple(said)
 
     async def pre_command(self, ctx: CommandContext) -> Deny | Ask | None:
         """Fire pre_command across the policies; first Deny wins, else
@@ -497,13 +758,41 @@ class Policies:
         Args:
             ctx (CommandContext): the classified command.
         """
-        action, _ = await self._fire("pre_command", ctx)
+        action, _, _ = await self._fire("pre_command", ctx)
         return action
+
+    async def pre_execute(
+        self, ctx: RouteContext, placed: bool = False
+    ) -> Deny | Route | None:
+        """Fire pre_execute: a Deny wins, else the Route every placing
+        policy agrees on; two placing the line on different runtimes
+        refuse it.
+
+        Args:
+            ctx (RouteContext): the line about to run.
+            placed (bool): the caller placed the line (the runtime
+                argument), so the built-in placement is not asked and a
+                Route is moot; a Deny still refuses the line.
+        """
+        action, _, routes = await self._fire("pre_execute", ctx, placed)
+        if isinstance(action, Deny):
+            return action
+        return None if placed else agreed(list(routes))
+
+    async def hides(self, ctx: OpsContext) -> bool:
+        """Whether the built-in hides answer the op as absent, before any
+        policy is asked.
+
+        Args:
+            ctx (OpsContext): the op about to run.
+        """
+        return await self._hidden.pre_ops(ctx) is not None
 
     async def pre_ops(
         self, ctx: OpsContext, *, check_hidden: bool = True
-    ) -> Hide | Deny | None:
-        """Fire pre_ops across the policies; first Deny wins.
+    ) -> Hide | Deny | Ask | None:
+        """Fire pre_ops across the policies; first Deny wins, else the
+        first Ask, which the door decides how to put.
 
         The built-in hides answer before every policy, with a Hide that
         outranks whatever a policy would say, so a refusal never tells a
@@ -520,8 +809,8 @@ class Policies:
             hidden = await self._hidden.pre_ops(ctx)
             if hidden is not None:
                 return hidden
-        action, _ = await self._fire("pre_ops", ctx)
-        return _deny_only("pre_ops", action)
+        action, _, _ = await self._fire("pre_ops", ctx)
+        return action
 
     async def pre_session(self, ctx: SessionContext) -> Deny | None:
         """Fire pre_session across the policies; first Deny wins.
@@ -529,7 +818,7 @@ class Policies:
         Args:
             ctx (SessionContext): the mutation about to land.
         """
-        action, _ = await self._fire("pre_session", ctx)
+        action, _, _ = await self._fire("pre_session", ctx)
         return _deny_only("pre_session", action)
 
     async def post_ops(
@@ -540,7 +829,7 @@ class Policies:
         Args:
             ctx (OpsResultContext): the op and its raw result.
         """
-        action, limit = await self._fire("post_ops", ctx)
+        action, limit, _ = await self._fire("post_ops", ctx)
         return _deny_only("post_ops", action), limit
 
     async def post_execute(
@@ -551,5 +840,5 @@ class Policies:
         Args:
             ctx (ExecuteResultContext): the finished line's facts.
         """
-        action, limit = await self._fire("post_execute", ctx)
+        action, limit, _ = await self._fire("post_execute", ctx)
         return _deny_only("post_execute", action), limit

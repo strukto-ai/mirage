@@ -184,6 +184,7 @@ One session's handle, from [`ws.session`](#ws-session). Every call on it answers
 <ResponseField name="state" type="SessionState">The session's record, as [`ws.list_sessions`](#ws-list_sessions-ws-close_session) answers it.</ResponseField>
 <ResponseField name="vfs" type="Ops">The file API, below.</ResponseField>
 <ResponseField name="tools" type="MirageToolOperations">The agent tools, below.</ResponseField>
+<ResponseField name="decisions" type="Decisions">The workspace's [asks](/home/permissions#asks) ledger, which this session's questions land in.</ResponseField>
 
 ### session.shell
 
@@ -245,6 +246,25 @@ The paths a pattern matches, as the session sees them.
 paths = await session.glob("/src/**/*.py")
 ```
 
+### session.explain
+
+```python
+await session.explain.shell(line) -> ShellExplanation
+await session.explain.vfs.<call>(...) -> VfsExplanation
+```
+
+What `session.shell` or a `session.vfs` call would do, without running it: a line's verdict and parse tree, a VFS call's verdict and error, each with every policy's answer. See [Explain](/home/permissions#explain).
+
+```python
+shell_res = await session.explain.shell("rm /data/x")
+print(shell_res.exit_code, shell_res.reason)
+for node in shell_res.node.children:
+    if isinstance(node, CommandExplanation):
+        print(node.command, [a.policy for a in node.answers])
+vfs_res = await session.explain.vfs.write("/data/x", b"hi")
+print(vfs_res.error, [a.policy for a in vfs_res.answers])
+```
+
 ### session.vfs
 
 The file API, run as the session. Paths are absolute, bytes are `bytes`. A missing path raises `FileNotFoundError` and a refused one `PermissionError`.
@@ -291,9 +311,10 @@ await session.tools.ls(path) -> ToolResult
 await session.tools.grep(pattern, path, ignore_case=False, ...)
 await session.tools.glob(pattern, path="/") -> ToolResult
 await session.tools.call(name, arguments) -> ToolResult
+session.tools.names() -> tuple[str, ...]
 ```
 
-The seven agent tools, for a model rather than a program: every answer is text, and a failure is `is_error`, never an exception. `call` takes a tool's name and its JSON input, the form an agent loop gets from the model. The session has one table, shared by every caller, so `write` and `edit` refuse a file the agent has not read in full, or one that changed since it read it.
+The seven agent tools, for a model rather than a program: every answer is text, and a failure is `is_error`, never an exception. `call` takes a tool's name and its JSON input, the form an agent loop gets from the model. The session has one table, shared by every caller, so `write` and `edit` refuse a file the agent has not read in full, or one that changed since it read it. `names()` is the tools the session's [profile](/home/policy-engine#which-door-enforces-what) leaves it, which MCP, RPC and the agent adapters offer: `shell` needs a command the allow list installs, `ls` and `grep` those commands, `write` and `edit` a mount the session may write.
 
 | Tool | Answers |
 | --- | --- |

@@ -334,10 +334,13 @@ async def gate(
     redirects: Sequence[PathSpec] = (),
     intrinsic: bool = False,
     unread: frozenset[str] = frozenset(),
-) -> Refused | tuple[CommandContext, Deny | Ask | None]:
+    every: bool = False,
+) -> (
+    Refused | tuple[CommandContext, Deny | Ask | None, tuple[Deny | Ask, ...]]
+):
     """Everything the gate decides about one command before anything is
     spent on it: visibility, the classified context, and the policy
-    chain's answer.
+    chain's answer with the answers it came from.
 
     Split out of :func:`admit` so a dry run can have the answer without
     the consequences. Nothing here records a request, consumes a grant
@@ -364,10 +367,13 @@ async def gate(
             names, or a relative word after a ``cd`` it could not
             follow. No policy is shown them; the per-command gate reads
             the real ones and passes none.
+        every (bool): ask every policy past a Deny, for ``explain``;
+            the gate's own answers end at the first Deny.
 
     Returns:
         A Refused when the session cannot see the head word, else the
-        context and whatever the policy chain answered.
+        context, the chain's answer (the first Deny, else the first
+        Ask) and every answer it came from.
     """
     tool = intrinsic or is_tool(name, session)
     if tool and not listed(name, session):
@@ -410,7 +416,14 @@ async def gate(
         tool=tool,
         walks=walks_mounts(name, [name, *args]),
     )
-    return ctx, await registry.policies.pre_command(ctx)
+    said = await registry.policies.answers("pre_command", ctx, every)
+    answers = tuple(a for a in said if isinstance(a, (Deny, Ask)))
+    first = answers[0] if answers else None
+    return (
+        ctx,
+        next((a for a in answers if isinstance(a, Deny)), first),
+        answers,
+    )
 
 
 async def admit(
@@ -491,7 +504,7 @@ async def admit(
     )
     if isinstance(gated, Refused):
         return gated
-    ctx, asked = gated
+    ctx, asked, _ = gated
     # An Ask is the chain's answer only after every Deny had its say;
     # the ledger answers it from the session's records or the host, so
     # an answer never re-opens a deny.

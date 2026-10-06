@@ -40,7 +40,9 @@ import {
 
 /**
  * The SDK takes zod shapes, so each one restates its tool's input schema
- * from `tool_descriptions`, descriptions read off the same constants.
+ * from `tool_descriptions`, descriptions read off the same constants. The
+ * server carries the tools the session's profile leaves it
+ * (`MirageToolOperations.names`).
  */
 export function MirageServer(workspace: Workspace, options: MirageToolOperationsOptions = {}) {
   const session = new Session(workspace, options.sessionId ?? null)
@@ -51,6 +53,7 @@ export function MirageServer(workspace: Workspace, options: MirageToolOperations
   const read = READ_INPUT.properties
   const edit = EDIT_INPUT.properties
   const grep = GREP_INPUT.properties
+  const names = operations.names()
   return createSdkMcpServer({
     name: 'mirage',
     version: VERSION,
@@ -127,6 +130,6 @@ export function MirageServer(workspace: Workspace, options: MirageToolOperations
         (args) => operations.call('glob', args),
         { annotations: { readOnlyHint: true } },
       ),
-    ],
+    ].filter((entry) => names.includes(entry.name)),
   })
 }

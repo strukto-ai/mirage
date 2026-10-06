@@ -506,10 +506,10 @@ def test_defined_hooks_refuses_anything_else(value):
         defined_hooks(ScriptSource("x"), value)
 
 
-@pytest.mark.parametrize("hook", ["pre_ops", "pre_session"])
-def test_an_op_or_session_hook_may_not_ask(hook):
-    # The op and session doors cannot wait on a host, so the vocabulary
-    # there is allow or deny, and an ask is a wrong answer.
+def test_a_session_hook_may_not_ask():
+    # The session door cannot wait on a host, so the vocabulary there is
+    # allow or deny, and an ask is a wrong answer.
+    hook = "pre_session"
     assert script_action({"deny": "frozen"}, hook) == Deny("frozen")
     assert script_action("deny", hook) == Deny(DEFAULT_DENY_REASON)
     assert script_action(None, hook) is None
@@ -558,15 +558,11 @@ async def test_a_session_hook_it_defines_judges_the_write_with_its_facts():
 
 
 @pytest.mark.asyncio
-async def test_an_ask_from_an_op_hook_fails_closed():
-    # Refused here, in the policy's own words, before the seam could see
-    # it as a programming error.
+async def test_an_op_hook_may_ask():
+    # The door puts it to the host where no line is running, and refuses
+    # it inside one.
     policy = _policy({"ask": "nod"}, hooks=("pre_ops",))
-    action = await policy.pre_ops(_ops_ctx())
-    assert isinstance(action, Deny)
-    assert (
-        "profile 'release' policy must answer allow or deny" in action.reason
-    )
+    assert await policy.pre_ops(_ops_ctx()) == Ask("nod")
 
 
 @pytest.mark.asyncio

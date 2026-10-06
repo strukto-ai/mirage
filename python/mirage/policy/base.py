@@ -20,6 +20,7 @@ from mirage.policy.types import (
     OpsResultContext,
     SessionContext,
 )
+from mirage.runtime.routing.types import RouteContext
 
 
 class Policy:
@@ -37,6 +38,23 @@ class Policy:
 
         Args:
             ctx (CommandContext): the classified command.
+        """
+        return None
+
+    async def pre_execute(self, ctx: RouteContext) -> Action | None:
+        """Place or refuse one typed line before any of it runs.
+
+        Fires once per line, after the line clears admission (a line a
+        rule refuses is never placed) and before it runs, with the
+        payload a ``route_policy`` reads; a nested line keeps the
+        placement of the line that ran it. A Route names the runtime
+        that serves the line, and a Deny refuses it whole, exit 126 and
+        ``<command>: Permission denied``. The workspace's
+        ``route_policy`` answers here as a built-in, ahead of the
+        policies registered in code.
+
+        Args:
+            ctx (RouteContext): the line, its commands, cwd and session.
         """
         return None
 

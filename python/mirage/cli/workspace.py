@@ -398,6 +398,72 @@ def list_asks_cmd(
     emit(handle_response(r), human=_format_asks)
 
 
+def _format_explanation(data: dict[str, Any]) -> str:
+    """An explained line as a tree, one node a row, each command with
+    its verdict.
+
+    Args:
+        data (dict[str, Any]): the ``explain/shell`` answer.
+    """
+    verdict = f"{data['outcome']}, exit {data['exit_code']}"
+    if data["reason"]:
+        verdict += f": {data['reason']}"
+    out = [f"{data['line']}  [{verdict}]"]
+    for child in data["node"]["children"]:
+        _explained_lines(child, 1, out)
+    return "\n".join(out)
+
+
+def _explained_lines(node: dict[str, Any], depth: int, out: list[str]) -> None:
+    """Append one node of an explained line, and what it holds, as rows.
+
+    Args:
+        node (dict[str, Any]): the node.
+        depth (int): how deep it sits under the line.
+        out (list[str]): the rows so far.
+    """
+    pad = "  " * depth
+    if "outcome" not in node:
+        out.append(f"{pad}{node['type']}: {node['text']}")
+    else:
+        line = f"{pad}{node['text']}  [{node['outcome']}"
+        if node["exit_code"]:
+            line += f", exit {node['exit_code']}"
+        line += f": {node['reason']}]" if node["reason"] else "]"
+        if node["source"]:
+            line += f"  {node['source']}"
+        if node["runtime"]:
+            line += f"  on {node['runtime']}"
+        out.append(line)
+    for child in node["children"]:
+        _explained_lines(child, depth + 1, out)
+
+
+@app.command("explain")
+def explain_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace id."),
+    command: str = typer.Argument(
+        ..., help="The line, as the agent would type it."
+    ),
+    session: str = typer.Option(
+        "", "--session", help="Whose profile to judge it under."
+    ),
+) -> None:
+    """What a line would do, without running it: the line's verdict and
+    each command's, as the line parses."""
+    body = {"command": command}
+    if session:
+        body["session_id"] = session
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request(
+            "POST",
+            f"/v1/workspaces/{quote(workspace_id, safe='')}/explain/shell",
+            json=body,
+        )
+    emit(handle_response(r), human=_format_explanation)
+
+
 @app.command("allow")
 def allow_cmd(
     workspace_id: str = typer.Argument(..., help="Workspace id."),

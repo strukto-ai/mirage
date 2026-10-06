@@ -35,3 +35,11 @@ export const LISTING_ENTRY_CONCURRENCY = 16
  * tell from a real one, so nothing else belongs here.
  */
 export const ABSENT_PATH: ReadonlySet<FsCondition> = new Set<FsCondition>(['ENOENT', 'ENOTDIR'])
+
+/**
+ * How long one policy script (a profile's `policy:`, a `routePolicy` or a
+ * runtime's `script:`) may run before the line it judges is refused or
+ * the route it decides fails. One bound for every stage; a holder object
+ * so tests can tighten it.
+ */
+export const SCRIPT_EVAL_TIMEOUT = { seconds: 10 }

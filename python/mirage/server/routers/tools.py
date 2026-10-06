@@ -88,6 +88,8 @@ async def call_tool(
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=exc.args[0]) from exc
+    if name not in await tools.offered():
+        raise HTTPException(status_code=404, detail=f"Tool {name} not found")
     try:
         result = await tools.call(name, arguments)
     except Exception as exc:

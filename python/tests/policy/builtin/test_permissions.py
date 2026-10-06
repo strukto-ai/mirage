@@ -150,7 +150,7 @@ async def test_a_deny_rule_speaks_by_scope_and_by_where_it_was_written():
     # works inside that mount (here by cwd).
     assert await policy.pre_command(
         _ctx("git", "push", cwd="/repo/sub", program=("git", "push"))
-    ) == Deny("history is read-only here")
+    ) == Deny("history is read-only here", rule=MOUNT_DENY)
     # Off the mount, the same line falls through to the ask rule: the
     # deny rules ran first and had no opinion.
     assert await policy.pre_command(
@@ -159,7 +159,12 @@ async def test_a_deny_rule_speaks_by_scope_and_by_where_it_was_written():
     # Operand-scoped rule: the operand as typed, in the GNU voice.
     assert await policy.pre_command(
         _ctx("rm", "x", paths=(_path("/repo/x", raw="x"),), cwd="/repo")
-    ) == Deny("no deletes in the repo", DenyScope.OPERAND, path="x")
+    ) == Deny(
+        "no deletes in the repo",
+        DenyScope.OPERAND,
+        path="x",
+        rule=FULL.deny[1],
+    )
     assert (
         await policy.pre_command(
             _ctx("rm", "/scratch/x", paths=(_path("/scratch/x"),))
@@ -169,7 +174,9 @@ async def test_a_deny_rule_speaks_by_scope_and_by_where_it_was_written():
     # A pure path rule refuses any command that names the path.
     assert await policy.pre_command(
         _ctx("cat", "/repo/locked/a", paths=(_path("/repo/locked/a"),))
-    ) == Deny("frozen", DenyScope.OPERAND, path="/repo/locked/a")
+    ) == Deny(
+        "frozen", DenyScope.OPERAND, path="/repo/locked/a", rule=FULL.deny[2]
+    )
 
 
 @pytest.mark.asyncio
@@ -188,7 +195,7 @@ async def test_the_deeper_anchor_wins_and_deny_breaks_a_tie():
     )
     assert await policy.pre_command(
         _ctx("rm", "/repo/sealed/y", paths=(_path("/repo/sealed/y"),))
-    ) == Deny("sealed", DenyScope.OPERAND, path="/repo/sealed/y")
+    ) == Deny("sealed", DenyScope.OPERAND, path="/repo/sealed/y", rule=deep)
     # Outside the deeper rule's anchor the shallow one is what is left.
     assert await policy.pre_command(
         _ctx("rm", "/repo/x", paths=(_path("/repo/x"),))
@@ -243,7 +250,7 @@ async def test_an_unrelated_entry_does_not_lend_a_rule_its_depth():
     )
     assert await policy.pre_command(
         _ctx("cat", "/repo/private/x", paths=(_path("/repo/private/x"),))
-    ) == Deny("private", DenyScope.OPERAND, path="/repo/private/x")
+    ) == Deny("private", DenyScope.OPERAND, path="/repo/private/x", rule=deny)
     # The unrelated entry still speaks where it does anchor.
     answer = await policy.pre_command(
         _ctx("cat", "/else/very/deep/x", paths=(_path("/else/very/deep/x"),))
@@ -268,7 +275,7 @@ async def test_a_pathless_rule_is_read_by_verb_wherever_it_is_written():
     )
     assert await policy.pre_command(
         _ctx("git", "branch", cwd="/repo", program=("git", "branch"))
-    ) == Deny("no branches")
+    ) == Deny("no branches", rule=deny)
     # Give the mount rule a path and it is on the other axis, where
     # being deeper is what lets it carve out the exception.
     scoped = CommandRule(
@@ -312,7 +319,7 @@ async def test_an_ask_rule_speaks_after_every_deny():
     # grant could never re-open it because no Ask is raised.
     assert await policy.pre_command(
         _ctx("git", "push", cwd="/repo", program=("git", "push"))
-    ) == Deny("history is read-only here")
+    ) == Deny("history is read-only here", rule=MOUNT_DENY)
     # An operand-scoped ask rule asks only when the line names the path.
     shared = AdmissionRules(
         ask=(
@@ -343,7 +350,7 @@ async def test_pre_ops_holds_the_pure_path_rules():
         prefix="/repo/",
         session_id="s",
     )
-    assert await policy.pre_ops(locked) == Deny("frozen")
+    assert await policy.pre_ops(locked) == Deny("frozen", rule=FULL.deny[2])
     # Command-scoped rules do not reach the op door: an op does not
     # know which command issued it.
     assert (
@@ -367,7 +374,9 @@ async def test_seeded_in_a_policies_chain_after_the_builtins():
         _ctx("git", "push", cwd="/repo", program=("git", "push"))
     )
     assert deny == Deny(
-        "history is read-only here", policy="PermissionsPolicy"
+        "history is read-only here",
+        policy="PermissionsPolicy",
+        rule=MOUNT_DENY,
     )
     assert policies.wants("pre_ops")
 

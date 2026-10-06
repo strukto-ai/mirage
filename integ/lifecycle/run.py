@@ -29,19 +29,28 @@ from mirage.config import load_config
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import classify
 from mirage.policy import Policy, PolicyDenied
+from mirage.policy.match import Outcome
 from mirage.policy.types import (
+    Ask,
     CommandContext,
+    CommandExplanation,
     Deny,
     OpsContext,
+    Route,
+    Scope,
     SessionContext,
+    ShellExplanation,
+    ShellNode,
+    VfsExplanation,
 )
 from mirage.process.types import SpawnRequest
+from mirage.runtime.routing import RouteContext
 from mirage.runtime.types import ScriptSource
 from mirage.shell.console import Channel, JobConsole
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs, register_vfs
-from mirage.workspace import Workspace
+from mirage.workspace import Session, Workspace
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.snapshot import apply_state_dict, to_state_dict
 
@@ -87,6 +96,63 @@ class RulePolicy(Policy):
         if ctx.key in self.rule.get("vars", []):
             return Deny(self.rule["reason"])
         return None
+
+    async def pre_execute(self, ctx: RouteContext) -> Deny | None:
+        if any(word in ctx.line for word in self.rule.get("lines", [])):
+            return Deny(self.rule["reason"])
+        return None
+
+
+def answered(answers: tuple[Deny | Ask | Route, ...]) -> list[dict[str, Any]]:
+    """Each policy answer as a case pins it: its kind, who gave it, and
+    its reason or the runtime it names."""
+    return [
+        {
+            "kind": a.kind,
+            "policy": a.policy,
+            **(
+                {"runtime": a.runtime}
+                if isinstance(a, Route)
+                else {"reason": a.reason}
+            ),
+        }
+        for a in answers
+    ]
+
+
+def explained(expl: ShellExplanation | VfsExplanation) -> dict[str, Any]:
+    """An explanation as a case pins it: a VFS call's verdict, or a
+    line's with its commands in the order the line reads them."""
+    verdict = {
+        "outcome": expl.outcome.value,
+        "reason": expl.reason,
+        "answers": answered(expl.answers),
+        "refusal": expl.refusal.kind if expl.refusal is not None else None,
+    }
+    if isinstance(expl, VfsExplanation):
+        return {"call": expl.call, **verdict, "error": expl.error}
+    return {
+        **verdict,
+        "exit_code": expl.exit_code,
+        "stderr": expl.stderr,
+        "commands": [
+            {
+                "command": c.command,
+                "outcome": c.outcome.value,
+                "answers": answered(c.answers),
+                "runtime": c.runtime,
+            }
+            for c in commands_of(expl.node)
+        ],
+    }
+
+
+def commands_of(
+    node: ShellNode | CommandExplanation,
+) -> list[CommandExplanation]:
+    """Every command under a node of a line's tree, in source order."""
+    mine = [node] if isinstance(node, CommandExplanation) else []
+    return mine + [c for child in node.children for c in commands_of(child)]
 
 
 class SlowSink(JobConsole):
@@ -268,6 +334,34 @@ async def action(
         await apply_state_dict(ws, held["state"])
     elif op == "mounts":
         return sorted(m.prefix for m in ws.mounts())
+    elif op == "tools":
+        return list(Session(ws, step.get("session")).tools.names())
+    elif op == "tool":
+        tools = Session(ws, step.get("session")).tools
+        result = await tools.call(step["tool"], step["arguments"])
+        return {"text": result.text, "is_error": result.is_error}
+    elif op == "asks":
+        return [
+            {"command": r.command, "paths": list(r.paths), "reason": r.reason}
+            for r in ws.decisions.pending(step.get("session", ""))
+        ]
+    elif op == "answer":
+        for record in ws.decisions.pending():
+            await ws.decisions.answer(
+                record.id,
+                Outcome(step.get("outcome", "allow")),
+                Scope(step.get("scope", "once")),
+            )
+    elif op == "explain":
+        explain = Session(ws, step.get("session")).explain
+        return explained(await explain.shell(step["command"]))
+    elif op == "explain_vfs":
+        vfs = Session(ws, step.get("session")).explain.vfs
+        args = [
+            a.encode() if i and step["name"] in ("write", "append") else a
+            for i, a in enumerate(step["args"])
+        ]
+        return explained(await getattr(vfs, step["name"])(*args))
     elif op == "close":
         await ws.close()
     else:

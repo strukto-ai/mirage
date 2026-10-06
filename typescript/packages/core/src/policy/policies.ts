@@ -13,16 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { operandExitCode } from '../commands/spec/usage.ts'
-import { noteRefusal } from '../context/session_context.ts'
-import { eacces, fsErrorLine } from '../utils/errors.ts'
+import { explaining, lineRunning, noteRefusal, runExplaining } from '../context/session_context.ts'
+import { eacces, erofsReadOnly, fsErrorLine } from '../utils/errors.ts'
 import { Limit, type PathSpec, type Refusal } from '../types.ts'
 import type { Policy } from './base.ts'
 import { HiddenPathsPolicy } from './builtin/hidden_paths.ts'
 import { MountModePolicy } from './builtin/mount_mode.ts'
 import { POLICY_DENIED_EXIT } from './constants.ts'
-import { PolicyDenied, PolicyError } from './errors.ts'
+import { Explained, PolicyDenied, PolicyError } from './errors.ts'
+import { sourceOf } from './match/decide.ts'
 import { isSessionScoped } from './mixin.ts'
+import type { Decisions } from './decisions.ts'
 import {
+  DryRun,
+  Outcome,
   VALIDITY,
   type Ask,
   type CommandContext,
@@ -32,8 +36,11 @@ import {
   type OpsContext,
   type OpsResultContext,
   type Pending,
+  type Route,
   type SessionContext,
+  type VfsExplanation,
 } from './types.ts'
+import type { RouteContext } from '../runtime/routing/types.ts'
 
 type Hook = keyof typeof VALIDITY
 
@@ -124,6 +131,35 @@ export function saysWhy(text: string, refusal: Refusal): boolean {
 }
 
 /**
+ * The placement the policies agree on: their one runtime, null when none
+ * placed the line, and a Deny when two disagree. Mirrors the Python
+ * `agreed`.
+ */
+export function agreed(routes: readonly Route[]): Deny | Route | null {
+  const runtimes = new Set(routes.map((route) => route.runtime))
+  if (runtimes.size < 2) return routes[0] ?? null
+  const said = routes.map((r) => `${r.policy ?? ''} on ${r.runtime}`).join(', ')
+  return {
+    kind: 'deny',
+    reason: `policies place the line on different runtimes: ${said}`,
+    policy: [...new Set(routes.map((r) => r.policy ?? ''))].join(', '),
+  }
+}
+
+/**
+ * What a stage's answers come to, by kind: the first Deny, else the first
+ * Ask, else the Route every placing answer agrees on. Mirrors the Python
+ * `settled`.
+ */
+export function settled(answers: readonly (Deny | Ask | Route)[]): Deny | Ask | Route | null {
+  const deny = answers.find((a): a is Deny => a.kind === 'deny')
+  if (deny !== undefined) return deny
+  const ask = answers.find((a): a is Ask => a.kind === 'ask')
+  if (ask !== undefined) return ask
+  return agreed(answers.filter((a): a is Route => a.kind === 'route'))
+}
+
+/**
  * Narrow a hook's answer where VALIDITY admits no Ask, which the loop
  * already refuses inside; reaching one here is a programming error.
  */
@@ -152,14 +188,78 @@ export function policyDenied(
 }
 
 /**
+ * What the gate would answer one VFS call, as `preOpsGate` decides it and
+ * without its consequences: every policy's answer, the one that wins,
+ * and the error the door would throw. A question reads the ledger's
+ * settled records and records nothing. Mirrors the Python `_explained_op`.
+ */
+async function explainedOp(
+  policies: Policies,
+  ctx: OpsContext,
+  decisions: Decisions | null,
+): Promise<VfsExplanation> {
+  const answers = (await policies.answers('preOps', ctx)).filter(
+    (a): a is Deny | Ask => a.kind !== 'route',
+  )
+  const winner = answers.find((a) => a.kind === 'deny') ?? answers[0] ?? null
+  const base: VfsExplanation = {
+    call: ctx.op,
+    paths: [ctx.path.virtual],
+    outcome: Outcome.ALLOW,
+    reason: '',
+    source: '',
+    answers,
+    refusal: null,
+    error: '',
+  }
+  if (winner === null) return base
+  let action: Deny | Pending | null = winner.kind === 'deny' ? winner : null
+  if (winner.kind === 'ask') {
+    action =
+      decisions === null || lineRunning()
+        ? {
+            kind: 'deny',
+            reason: winner.reason,
+            ...(winner.policy ? { policy: winner.policy } : {}),
+          }
+        : await decisions.heldOp(ctx, winner)
+  }
+  const decided: VfsExplanation = {
+    ...base,
+    outcome: winner.kind === 'ask' ? Outcome.ASK : Outcome.DENY,
+    reason: winner.reason,
+    source: winner.rule === undefined ? '' : sourceOf(winner.rule),
+  }
+  if (action === null) return decided
+  const error = action.kind === 'deny' ? action.error : undefined
+  const code: unknown = (error as { code?: unknown } | undefined)?.code
+  return {
+    ...decided,
+    refusal: error !== undefined ? null : refusalOf(action),
+    error: typeof code === 'string' && code !== '' ? code : 'EACCES',
+  }
+}
+
+/**
  * Fire preOps at the op door; a Deny becomes a PolicyDenied (EACCES),
  * or the built-in's own error (ENOENT for a hide, EROFS for a mode).
  * The one seam helper the dispatcher calls, so a refusal is identical
  * however the mount is reached: shell internals, programmatic access,
  * FUSE, and the warm cache all pass through it. `access` carries the
  * owning mount's mode (unset at a door that judges it itself), whether
- * the op creates the path or mutates below it, and `checkHidden` false
- * only for a door that has already answered the hides itself.
+ * the op creates the path or mutates below it, `checkHidden` false only
+ * for a door that has already answered the hides itself, and the
+ * approval ledger. An Ask is a question only where no line is running and
+ * the door holds the ledger (a file tool, the host's facade): the ledger
+ * answers it from a standing grant or records it, and an unanswered one
+ * refuses with the ask id on the record. Inside a line an Ask refuses
+ * like a deny, since the line was admitted without it. `final` is false
+ * only for a rename's source, whose destination is gated next. In a dry
+ * run (`explaining`) the gate notes its answer and throws `Explained`
+ * once the op would refuse or has no gate left, so the door stops before
+ * any backend or cache is touched; a write a policy makes while it
+ * decides that op throws EROFS, since the dry run may change nothing, and
+ * an ask its read meets reads the ledger and records nothing.
  */
 export async function preOpsGate(
   policies: Policies,
@@ -169,28 +269,64 @@ export async function preOpsGate(
   prefix: string,
   sessionId = '',
   issuer?: symbol,
-  access: Pick<OpsContext, 'mode' | 'create' | 'subtree'> & { checkHidden?: boolean } = {},
+  access: Pick<OpsContext, 'mode' | 'create' | 'subtree'> & {
+    checkHidden?: boolean
+    decisions?: Decisions | null
+    final?: boolean
+  } = {},
 ): Promise<void> {
-  const { checkHidden = true, ...context } = access
+  const { checkHidden = true, decisions = null, final = true, ...context } = access
+  const ctx: OpsContext = {
+    op,
+    path,
+    write,
+    prefix,
+    sessionId,
+    ...(issuer !== undefined ? { issuer } : {}),
+    ...context,
+  }
+  const trace = explaining()
+  if (Array.isArray(trace)) {
+    const noted = await runExplaining(DryRun.DECIDING, async () =>
+      checkHidden && (await policies.hides(ctx)) ? null : explainedOp(policies, ctx, decisions),
+    )
+    if (noted === null) throw new Explained()
+    trace.push(noted)
+    if (final || noted.error !== '') throw new Explained()
+    return
+  }
+  const deciding = trace === DryRun.DECIDING
+  if (deciding && write) throw erofsReadOnly('Read-only file system', path)
   if (!(policies.wants('preOps') || checkHidden || (write && context.mode !== undefined))) {
     return
   }
-  const answer = await policies.preOps(
-    {
-      op,
-      path,
-      write,
-      prefix,
-      sessionId,
-      ...(issuer !== undefined ? { issuer } : {}),
-      ...context,
-    },
-    checkHidden,
-  )
+  let answer: Hide | Deny | Ask | null = await policies.preOps(ctx, checkHidden)
   if (answer === null) return
   if (answer.kind === 'hide') throw answer.error
+  if (answer.kind === 'ask') {
+    if (decisions === null || lineRunning()) {
+      throw policyDenied({ kind: 'deny', reason: answer.reason }, path.virtual)
+    }
+    const settled = deciding
+      ? await decisions.heldOp(ctx, answer)
+      : await decisions.resolveOp(ctx, answer)
+    if (settled === null) return
+    if (settled.kind === 'pending') throw policyPending(settled, path.virtual)
+    answer = settled
+  }
   if (answer.error !== undefined) throw answer.error
   throw policyDenied(answer, path.virtual)
+}
+
+/**
+ * The error a door throws for a question the host has not answered: a
+ * plain EACCES, as the terminal would print it, with the ask id the agent
+ * quotes on the record. Mirrors Python's `policy_pending`.
+ */
+export function policyPending(pending: Pending, filename: string): PolicyDenied {
+  const refusal = refusalOf(pending)
+  noteRefusal(refusal)
+  return new PolicyDenied('Permission denied', filename, refusal)
 }
 
 /**
@@ -267,10 +403,23 @@ export class Policies {
   private readonly policies: Policy[]
   private readonly hidden = new HiddenPathsPolicy()
   private readonly mode: Policy = new MountModePolicy()
+  private placement: Policy | null = null
   private wanted: ReadonlySet<Hook> = new Set()
 
   constructor(policies?: readonly Policy[]) {
     this.policies = [...(policies ?? [])]
+    this.rescan()
+  }
+
+  /**
+   * Install the built-in placement, the workspace's `routePolicy`
+   * compiled as a policy, which answers `preExecute` ahead of every
+   * registered one. It sits outside the fail-closed fold: a misconfigured
+   * route policy throws `RouteError` to the caller rather than refusing
+   * the line, since the mistake is the deployment's to fix.
+   */
+  place(placement: Policy | null): void {
+    this.placement = placement
     this.rescan()
   }
 
@@ -302,10 +451,28 @@ export class Policies {
 
   private rescan(): void {
     const wanted = new Set<Hook>()
+    const policies = this.placement === null ? this.policies : [...this.policies, this.placement]
     for (const hook of Object.keys(VALIDITY) as Hook[]) {
-      if (this.policies.some((p) => p[hook] !== undefined)) wanted.add(hook)
+      if (policies.some((p) => p[hook] !== undefined)) wanted.add(hook)
     }
     this.wanted = wanted
+  }
+
+  /**
+   * The policies a stage asks, in order: the built-in placement first at
+   * `preExecute` (unless the caller placed the line), the registered
+   * ones, and the built-in mount mode last at `preOps`, after every
+   * policy that could explain the refusal in its own words. A snapshot,
+   * so the order holds if the host edits registrations while a hook
+   * awaits; changes take effect at the next gate.
+   */
+  private chain(hook: Hook, placed: boolean): Policy[] {
+    let chain = [...this.policies]
+    if (hook === 'preExecute' && this.placement !== null && !placed) {
+      chain = [this.placement, ...chain]
+    }
+    if (hook === 'preOps') chain = [...chain, this.mode]
+    return chain
   }
 
   /**
@@ -328,28 +495,30 @@ export class Policies {
   }
 
   /**
-   * One loop for every hook: the first Deny wins (limits are moot once
-   * the result is suppressed), Limit actions accumulate and merge
-   * to the tightest value per field. An Ask is remembered and the
-   * loop goes on looking for a Deny, so a later policy's refusal
-   * outranks an earlier policy's question and an approval can never
-   * re-open a deny; the first Ask is returned when nothing refused.
+   * The one loop every stage runs: each policy's answer, named and checked
+   * against what the hook may carry. The door stops at the first Deny,
+   * since nothing after it can change the outcome; `every` goes on, so
+   * `explain` shows the answers a Deny would hide. A policy that throws
+   * answers with a Deny naming it (fail closed), except the built-in
+   * placement, which throws to the caller. A kind the hook cannot carry
+   * (VALIDITY) throws PolicyError: a programming error, not a refusal, and
+   * as loud in a dry run as at the door. Mirrors the Python `_said`.
    */
-  private async fire(
+  private async said(
     hook: Hook,
-    ctx: CommandContext | OpsContext | OpsResultContext | ExecuteResultContext | SessionContext,
-  ): Promise<[Deny | Ask | null, Limit | null]> {
+    ctx:
+      | CommandContext
+      | RouteContext
+      | OpsContext
+      | OpsResultContext
+      | ExecuteResultContext
+      | SessionContext,
+    every: boolean,
+    placed = false,
+  ): Promise<[(Deny | Ask | Route)[], Limit[]]> {
+    const said: (Deny | Ask | Route)[] = []
     const limits: Limit[] = []
-    let asked: Ask | null = null
-    // Keep this gate's order stable if the host edits registrations
-    // while a hook awaits. Changes take effect at the next gate.
-    let chain = [...this.policies]
-    if (hook === 'preOps') {
-      // The mode answers last, after every policy that could explain the
-      // refusal in its own words.
-      chain = [...chain, this.mode]
-    }
-    for (const policy of chain) {
+    for (const policy of this.chain(hook, placed)) {
       const fn = policy[hook]
       if (fn === undefined) continue
       const name = policy.constructor.name || 'policy'
@@ -358,17 +527,21 @@ export class Policies {
         action = await fn.call(
           policy,
           ctx as CommandContext &
+            RouteContext &
             OpsContext &
             OpsResultContext &
             ExecuteResultContext &
             SessionContext,
         )
       } catch (err) {
+        if (policy === this.placement) throw err
         // The agent reads which policy broke, never what it threw: the
         // error text is the deployment's to debug, in the log.
         const detail = err instanceof Error ? err.message : String(err)
         console.error(`${hook} policy ${name} raised: ${detail}`)
-        return [{ kind: 'deny', reason: `${name} failed`, policy: name, failed: true }, null]
+        said.push({ kind: 'deny', reason: `${name} failed`, policy: name, failed: true })
+        if (!every) return [said, []]
+        continue
       }
       if (action === null) continue
       const kind: unknown = typeof action === 'object' ? action.kind : undefined
@@ -378,21 +551,69 @@ export class Policies {
             `legal kinds here: ${[...VALIDITY[hook]].join(', ')}`,
         )
       }
-      if (action.kind === 'deny') {
-        return [
-          action.policy === undefined || action.policy === ''
-            ? { ...action, policy: name }
-            : action,
-          null,
-        ]
-      }
-      if (action.kind === 'ask') {
-        asked ??= action
+      if (action instanceof Limit) {
+        limits.push(action)
         continue
       }
-      if (action instanceof Limit) limits.push(action)
+      if (action.kind === 'hide') continue
+      said.push(
+        action.policy === undefined || action.policy === '' ? { ...action, policy: name } : action,
+      )
+      if (action.kind === 'deny' && !every) return [said, []]
     }
-    return [asked, Limit.aggr(limits)]
+    return [said, limits]
+  }
+
+  /**
+   * One stage at a door: the first Deny wins (limits are moot once the
+   * result is suppressed), Limit actions merge to the tightest value per
+   * field, and Routes are collected for the caller to reconcile. An Ask is
+   * remembered and the loop goes on looking for a Deny, so a later
+   * policy's refusal outranks an earlier policy's question and an approval
+   * can never re-open a deny; the first Ask is returned when nothing
+   * refused.
+   */
+  private async fire(
+    hook: Hook,
+    ctx:
+      | CommandContext
+      | RouteContext
+      | OpsContext
+      | OpsResultContext
+      | ExecuteResultContext
+      | SessionContext,
+    placed = false,
+  ): Promise<[Deny | Ask | null, Limit | null, Route[]]> {
+    const [said, limits] = await this.said(hook, ctx, false, placed)
+    const deny = said.find((a): a is Deny => a.kind === 'deny')
+    if (deny !== undefined) return [deny, null, []]
+    const asked = said.find((a): a is Ask => a.kind === 'ask') ?? null
+    return [asked, Limit.aggr(limits), said.filter((a): a is Route => a.kind === 'route')]
+  }
+
+  /**
+   * The policies' answers at one stage, in the order the stage asks them,
+   * each naming its policy: what `explain` shows, from the same loop the
+   * door runs. With `every` no answer stops the loop, so a Deny does not
+   * hide the answers after it; without it the answers end at the first
+   * Deny, as the door's do. The built-in hides never answer here, since a
+   * hide never surfaces; the built-in placement answers first at
+   * `preExecute` and the built-in mount mode last at `preOps`, as they do
+   * at the door. Mirrors the Python `answers`.
+   */
+  async answers(
+    hook: Hook,
+    ctx:
+      | CommandContext
+      | RouteContext
+      | OpsContext
+      | OpsResultContext
+      | ExecuteResultContext
+      | SessionContext,
+    every = true,
+  ): Promise<(Deny | Ask | Route)[]> {
+    const [said] = await this.said(hook, ctx, every)
+    return said
   }
 
   /** Fire preCommand across the policies; the first Deny wins, else the first Ask. */
@@ -402,20 +623,39 @@ export class Policies {
   }
 
   /**
-   * Fire preOps across the policies; the first Deny wins. The built-in
+   * Fire preExecute: a Deny wins, else the Route every placing policy
+   * agrees on; two placing the line on different runtimes refuse it.
+   * `placed` says the caller placed the line (the runtime argument), so
+   * the built-in placement is not asked and a Route is moot; a Deny still
+   * refuses the line.
+   */
+  async preExecute(ctx: RouteContext, placed = false): Promise<Deny | Route | null> {
+    const [action, , routes] = await this.fire('preExecute', ctx, placed)
+    if (action?.kind === 'deny') return action
+    return placed ? null : agreed(routes)
+  }
+
+  /** Whether the built-in hides answer the op as absent, before any policy is asked. */
+  async hides(ctx: OpsContext): Promise<boolean> {
+    return (await this.hidden.preOps(ctx)) !== null
+  }
+
+  /**
+   * Fire preOps across the policies; the first Deny wins, else the first
+   * Ask, which the door decides how to put. The built-in
    * hides answer before every policy, with a Hide that outranks whatever
    * a policy would say, so a refusal never tells a session a hidden name
    * exists; the built-in mount mode answers after them. Both hold
    * whether or not any policy overrides the hook; `checkHidden` false
    * only for a door that has already answered the hides itself.
    */
-  async preOps(ctx: OpsContext, checkHidden = true): Promise<Hide | Deny | null> {
+  async preOps(ctx: OpsContext, checkHidden = true): Promise<Hide | Deny | Ask | null> {
     if (checkHidden) {
       const hidden = await this.hidden.preOps(ctx)
       if (hidden !== null) return hidden
     }
     const [action] = await this.fire('preOps', ctx)
-    return denyOnly('preOps', action)
+    return action
   }
 
   /** Fire postOps; a Deny suppresses the result, Limits merge. */

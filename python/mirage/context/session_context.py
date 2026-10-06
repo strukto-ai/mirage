@@ -40,7 +40,9 @@ from mirage.utils.hidden import (
 from mirage.utils.path import parent
 
 if TYPE_CHECKING:
+    from mirage.policy.decisions import Decisions
     from mirage.policy.policies import Policies
+    from mirage.policy.types import DryRun, HandOff, VfsExplanation
     from mirage.workspace.session.manager import SessionManager
     from mirage.workspace.session.session import SessionState
 
@@ -371,6 +373,82 @@ def reset_refusal_sink(token: Token[Any]) -> None:
     _refusal_sink.reset(token)
 
 
+def line_running() -> bool:
+    """Whether a typed line is running in this context: the door it
+    reaches is inside a command, not a file tool's or the host's own
+    call."""
+    return _refusal_sink.get() is not None
+
+
+_op_call: ContextVar["tuple[Decisions, HandOff] | None"] = ContextVar(
+    "mirage_op_call",
+    default=None,
+)
+
+
+def set_op_call(owner: "Decisions", handed: "HandOff") -> Token[Any]:
+    """Bind one call made outside a line (a file tool's), the unit an
+    op-level answer covers: a grant one of its ops is answered by is
+    claimed on ``handed`` for the call's other ops on that path.
+
+    Args:
+        owner (Decisions): the ledger the call runs under, the only one
+            that claims on ``handed`` and spends it.
+        handed (HandOff): the call's hand-off, spent when it ends.
+    """
+    return _op_call.set((owner, handed))
+
+
+def reset_op_call(token: Token[Any]) -> None:
+    """Restore the previous call binding."""
+    _op_call.reset(token)
+
+
+def get_op_call(owner: "Decisions") -> "HandOff | None":
+    """The call made outside a line running in this context under
+    ``owner``'s ledger, None for a bare op or for a call another ledger
+    runs (a host callback reaching a second workspace mid-call).
+
+    Args:
+        owner (Decisions): the ledger asking.
+    """
+    call = _op_call.get()
+    return call[1] if call is not None and call[0] is owner else None
+
+
+_explaining: ContextVar["list[VfsExplanation] | DryRun | None"] = ContextVar(
+    "mirage_explaining",
+    default=None,
+)
+
+
+def set_explaining(
+    trace: "list[VfsExplanation] | DryRun | None",
+) -> Token[Any]:
+    """Make the calls in this context a dry run: the op gate notes on
+    ``trace`` what it would answer and stops the op before any backend
+    or cache is touched. ``DryRun.DECIDING`` is what a policy does while
+    it decides the op explained: its reads run, nothing changes.
+
+    Args:
+        trace (list[VfsExplanation] | DryRun | None): where the gate notes
+            its answers, DECIDING for a deciding policy's ops, None to
+            run.
+    """
+    return _explaining.set(trace)
+
+
+def reset_explaining(token: Token[Any]) -> None:
+    """Restore the previous dry-run binding."""
+    _explaining.reset(token)
+
+
+def explaining() -> "list[VfsExplanation] | DryRun | None":
+    """The dry run's trace when the calls in this context only explain,
+    DECIDING while its policies decide, None when they run."""
+    return _explaining.get()
+
+
 def note_refusal(refusal: Refusal) -> None:
     """Hand a door's refusal to the line running in this context; a
     door reached outside any line (a programmatic op) has no line to
@@ -623,25 +701,25 @@ def _reaches_under(head: str, prefix: str) -> bool:
     )
 
 
-def strongest_mode_under(
-    mount_prefix: str, mount_mode: MountMode
+def strongest_under_session(
+    sess: "SessionState", mount_prefix: str, mount_mode: MountMode
 ) -> MountMode:
-    """The strongest mode the current session reaches anywhere under a
-    mount: its mount-wide effective mode, or a deeper show grant, still
-    capped by the mount's configured mode.
-
-    What the whole-mount gates read: a write command stays runnable on
-    a mount whose only writable region is a show entry (the op door
-    then refuses per path), and the interpreters' any-``x`` rule counts
-    a show grant the way it counts a whole mount.
+    """The strongest mode one session reaches anywhere under a mount:
+    its mount-wide mode, or a deeper show grant, still capped by the
+    mount's configured mode.
 
     Args:
+        sess (SessionState): the session.
         mount_prefix (str): the mount's prefix.
         mount_mode (MountMode): the mount's configured mode.
     """
-    best = effective_mount_mode(mount_prefix, mount_mode)
-    sess = get_current_session()
-    shown = sess.visibility.shown if sess is not None else None
+    cap = (
+        sess.mount_modes.get(_norm_prefix(mount_prefix), MountMode.EXEC)
+        if sess.mount_modes is not None
+        else MountMode.EXEC
+    )
+    best = weaker_mode(mount_mode, cap)
+    shown = sess.visibility.shown
     if shown is None:
         return best
     prefix = _norm_prefix(mount_prefix)
@@ -653,6 +731,28 @@ def strongest_mode_under(
             if MOUNT_MODE_RANK[reached] > MOUNT_MODE_RANK[best]:
                 best = reached
     return best
+
+
+def strongest_mode_under(
+    mount_prefix: str, mount_mode: MountMode
+) -> MountMode:
+    """The strongest mode the current session reaches anywhere under a
+    mount (:func:`strongest_under_session`), the mount's own mode when no
+    session is bound.
+
+    What the whole-mount gates read: a write command stays runnable on
+    a mount whose only writable region is a show entry (the op door
+    then refuses per path), and the interpreters' any-``x`` rule counts
+    a show grant the way it counts a whole mount.
+
+    Args:
+        mount_prefix (str): the mount's prefix.
+        mount_mode (MountMode): the mount's configured mode.
+    """
+    sess = get_current_session()
+    if sess is None:
+        return mount_mode
+    return strongest_under_session(sess, mount_prefix, mount_mode)
 
 
 def readonly_below(

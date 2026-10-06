@@ -114,7 +114,7 @@ describe('PermissionsPolicy', () => {
     // works inside that mount (here by cwd).
     expect(
       p.preCommand(ctx('git', ['push'], { cwd: '/repo/sub', program: ['git', 'push'] })),
-    ).toEqual({ kind: 'deny', reason: 'history is read-only here' })
+    ).toEqual({ kind: 'deny', reason: 'history is read-only here', rule: MOUNT_DENY })
     // Off the mount, the same line falls through to the ask rule: the
     // deny rules ran first and had no opinion.
     expect(
@@ -127,13 +127,20 @@ describe('PermissionsPolicy', () => {
         reason: 'no deletes in the repo',
         scope: 'operand',
         path: 'x',
+        rule: FULL.deny[1],
       },
     )
     expect(p.preCommand(ctx('rm', ['/scratch/x'], { paths: [path('/scratch/x')] }))).toBeNull()
     // A pure path rule refuses any command that names the path.
     expect(
       p.preCommand(ctx('cat', ['/repo/locked/a'], { paths: [path('/repo/locked/a')] })),
-    ).toEqual({ kind: 'deny', reason: 'frozen', scope: 'operand', path: '/repo/locked/a' })
+    ).toEqual({
+      kind: 'deny',
+      reason: 'frozen',
+      scope: 'operand',
+      path: '/repo/locked/a',
+      rule: FULL.deny[2],
+    })
   })
 
   it('the deeper anchor wins and deny breaks a tie', () => {
@@ -147,7 +154,13 @@ describe('PermissionsPolicy', () => {
     )
     expect(
       p.preCommand(ctx('rm', ['/repo/sealed/y'], { paths: [path('/repo/sealed/y')] })),
-    ).toEqual({ kind: 'deny', reason: 'sealed', scope: 'operand', path: '/repo/sealed/y' })
+    ).toEqual({
+      kind: 'deny',
+      reason: 'sealed',
+      scope: 'operand',
+      path: '/repo/sealed/y',
+      rule: deep,
+    })
     // Outside the deeper rule's anchor the shallow one is what is left.
     expect(p.preCommand(ctx('rm', ['/repo/x'], { paths: [path('/repo/x')] }))).toEqual({
       kind: 'ask',
@@ -186,7 +199,13 @@ describe('PermissionsPolicy', () => {
     const p = new PermissionsPolicy(new Sessions({ s: { allow: null, ask: [ask], deny: [deny] } }))
     expect(
       p.preCommand(ctx('cat', ['/repo/private/x'], { paths: [path('/repo/private/x')] })),
-    ).toEqual({ kind: 'deny', reason: 'private', scope: 'operand', path: '/repo/private/x' })
+    ).toEqual({
+      kind: 'deny',
+      reason: 'private',
+      scope: 'operand',
+      path: '/repo/private/x',
+      rule: deny,
+    })
     // The unrelated entry still speaks where it does anchor.
     expect(
       p.preCommand(ctx('cat', ['/else/very/deep/x'], { paths: [path('/else/very/deep/x')] })),
@@ -209,7 +228,7 @@ describe('PermissionsPolicy', () => {
     const p = new PermissionsPolicy(new Sessions({ s: { allow: null, ask: [ask], deny: [deny] } }))
     expect(
       p.preCommand(ctx('git', ['branch'], { cwd: '/repo', program: ['git', 'branch'] })),
-    ).toEqual({ kind: 'deny', reason: 'no branches' })
+    ).toEqual({ kind: 'deny', reason: 'no branches', rule: deny })
     // Give the mount rule a path and it is on the other axis, where
     // being deeper is what lets it carve out the exception.
     const scopedRule: CommandRule = {
@@ -246,6 +265,7 @@ describe('PermissionsPolicy', () => {
     expect(p.preCommand(ctx('git', ['push'], { cwd: '/repo', program: ['git', 'push'] }))).toEqual({
       kind: 'deny',
       reason: 'history is read-only here',
+      rule: MOUNT_DENY,
     })
     // An operand-scoped ask rule asks only when the line names the path.
     const shared: AdmissionRules = {
@@ -269,7 +289,7 @@ describe('PermissionsPolicy', () => {
       prefix: '/repo/',
       sessionId: 's',
     }
-    expect(p.preOps(locked)).toEqual({ kind: 'deny', reason: 'frozen' })
+    expect(p.preOps(locked)).toEqual({ kind: 'deny', reason: 'frozen', rule: FULL.deny[2] })
     // Command-scoped rules do not reach the op door: an op does not
     // know which command issued it.
     expect(
@@ -287,7 +307,12 @@ describe('PermissionsPolicy', () => {
     const policies = new Policies([policy()])
     expect(
       await policies.preCommand(ctx('git', ['push'], { cwd: '/repo', program: ['git', 'push'] })),
-    ).toEqual({ kind: 'deny', reason: 'history is read-only here', policy: 'PermissionsPolicy' })
+    ).toEqual({
+      kind: 'deny',
+      reason: 'history is read-only here',
+      policy: 'PermissionsPolicy',
+      rule: MOUNT_DENY,
+    })
     expect(policies.wants('preOps')).toBe(true)
   })
 

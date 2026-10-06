@@ -22,12 +22,9 @@ import type { ScriptSource } from '../runtime/types.ts'
 import { evalWithCtx, scriptEngine } from '../runtime/script.ts'
 import type { BridgeDispatchFn, EvalValue } from '../runtime/types.ts'
 import type { Policy } from './base.ts'
-import {
-  DEFAULT_ASK_REASON,
-  DEFAULT_DENY_REASON,
-  SCRIPT_EVAL_TIMEOUT_SECONDS,
-} from './constants.ts'
+import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
 import { SESSION_SCOPED, type SessionScoped } from './mixin.ts'
+import { SCRIPT_EVAL_TIMEOUT } from '../runtime/constants.ts'
 import {
   VALIDITY,
   type Action,
@@ -133,10 +130,11 @@ export function sessionScriptContext(
  * The vocabulary is the coded hook's own, spelled as data: null or
  * `'allow'` is no opinion (the command runs unless another rule refuses
  * it, and can never override one that does), `'deny'` / `{deny: reason}`
- * refuses, and at `preCommand` alone `'ask'` / `{ask: reason}` takes the
- * line to the approval door, since the op and session doors cannot wait
- * on a host (`VALIDITY`). The bare strings carry the document's default
- * reasons, the same ones a rule stating no reason gets.
+ * refuses, and at `preCommand` and `preOps` `'ask'` / `{ask: reason}`
+ * takes the line (or an op no line is running behind) to the approval
+ * door, since the session door cannot wait on a host (`VALIDITY`). The
+ * bare strings carry the document's default reasons, the same ones a rule
+ * stating no reason gets.
  *
  * Throws a plain Error whose message is a clause about "script", for
  * the caller to prefix with whose policy it is.
@@ -384,7 +382,7 @@ export class ScriptPolicy implements Policy, SessionScoped {
       value = await this.evaluate(entry, hookCall(entry.script, hook), facts(entry))
     } catch (err) {
       if (err instanceof CommandTimeoutError) {
-        return failed(entry, `timed out after ${String(SCRIPT_EVAL_TIMEOUT_SECONDS)}s`)
+        return failed(entry, `timed out after ${String(SCRIPT_EVAL_TIMEOUT.seconds)}s`)
       }
       if (err instanceof EvalError) {
         return failed(entry, `${err.syntax ? 'syntax error' : 'failed'}: ${err.message}`)
@@ -437,7 +435,7 @@ export class ScriptPolicy implements Policy, SessionScoped {
         `${entry.script.source}\n\n${tail}\n`,
         ctx,
         engine,
-        SCRIPT_EVAL_TIMEOUT_SECONDS,
+        SCRIPT_EVAL_TIMEOUT.seconds,
         `profile '${entry.profile}' policy`,
       )
     })

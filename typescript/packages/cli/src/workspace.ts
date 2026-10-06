@@ -168,6 +168,51 @@ function formatAsks(items: AskRecord[]): string {
   )
 }
 
+interface ExplainedNode {
+  type: string
+  text: string
+  outcome?: string
+  exit_code?: number
+  reason?: string
+  source?: string
+  runtime?: string
+  children: ExplainedNode[]
+}
+
+export interface ExplanationRecord {
+  line: string
+  outcome: string
+  reason: string
+  exit_code: number
+  node: ExplainedNode
+}
+
+/** An explained line as a tree, one node a row, each command with its verdict. */
+export function formatExplanation(data: ExplanationRecord): string {
+  let verdict = `${data.outcome}, exit ${String(data.exit_code)}`
+  if (data.reason !== '') verdict += `: ${data.reason}`
+  const out = [`${data.line}  [${verdict}]`]
+  for (const child of data.node.children) explainedLines(child, 1, out)
+  return out.join('\n')
+}
+
+/** Append one node of an explained line, and what it holds, as rows. */
+function explainedLines(node: ExplainedNode, depth: number, out: string[]): void {
+  const pad = '  '.repeat(depth)
+  if (node.outcome === undefined) {
+    out.push(`${pad}${node.type}: ${node.text}`)
+  } else {
+    let line = `${pad}${node.text}  [${node.outcome}`
+    if (node.exit_code !== undefined && node.exit_code !== 0)
+      line += `, exit ${String(node.exit_code)}`
+    line += node.reason !== undefined && node.reason !== '' ? `: ${node.reason}]` : ']'
+    if (node.source !== undefined && node.source !== '') line += `  ${node.source}`
+    if (node.runtime !== undefined && node.runtime !== '') line += `  on ${node.runtime}`
+    out.push(line)
+  }
+  for (const child of node.children) explainedLines(child, depth + 1, out)
+}
+
 export function registerWorkspaceCommands(program: Command): void {
   const ws = program.command('workspace').description('Manage workspaces.')
   for (const kind of ['vfs', 'skill']) {
@@ -335,6 +380,24 @@ export function registerWorkspaceCommands(program: Command): void {
         `/v1/workspaces/${encodeURIComponent(id)}/asks${qs === '' ? '' : `?${qs}`}`,
       )
       emit((await handleResponse(r)) as AskRecord[], formatAsks)
+    })
+
+  ws.command('explain')
+    .description(
+      "What a line would do, without running it: the line's verdict and each command's, as the line parses.",
+    )
+    .argument('<id>')
+    .argument('<command>', 'The line, as the agent would type it')
+    .option('--session <sessionId>', 'Whose profile to judge it under')
+    .action(async (id: string, command: string, opts: { session?: string }) => {
+      const body: Record<string, string> = { command }
+      if (opts.session !== undefined) body.session_id = opts.session
+      const c = buildClient()
+      await c.ensureRunning({ allowSpawn: false })
+      const r = await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/explain/shell`, {
+        body: JSON.stringify(body),
+      })
+      emit((await handleResponse(r)) as ExplanationRecord, formatExplanation)
     })
 
   ws.command('allow')

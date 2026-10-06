@@ -526,12 +526,13 @@ def match_op(
     return op_reach(rule, scope, ctx) is not None
 
 
-def op_refusal(
+def op_ruling(
     rules: AdmissionRules | None,
     ctx: OpsContext,
     granted: Collection[CommandRule],
-) -> str | None:
-    """The reason an op may not run, None when it may.
+) -> tuple[CommandRule, bool] | None:
+    """The rule an op meets and whether it asks, None when the op may
+    run.
 
     The op-door twin of :func:`io_refusal`, and the same law: anchor
     depth first, deny before ask at equal depth, and an ask satisfied
@@ -541,10 +542,10 @@ def op_refusal(
     just admitted the line under could not authorize the redirect it
     was written for: the write reached this door and was refused there.
 
-    An op reached with no admitted command behind it (FUSE, the cache,
-    the host's own facade) holds no grant, so an ask that wins here is
-    a refusal like a deny: there is no line to ask about and this door
-    cannot wait on a host.
+    What an ask means is the door's to say: inside a running line it
+    refuses like a deny, since the line was admitted without it, and
+    outside one (a file tool, the host's facade) it goes to the
+    approval door, keyed by rule and path.
 
     Args:
         rules (AdmissionRules | None): the session's admission rules.
@@ -568,4 +569,22 @@ def op_refusal(
     rule, verb = chosen
     if verb == ASK_SECOND and rule in granted:
         return None
-    return rule.reason
+    return rule, verb == ASK_SECOND
+
+
+def op_refusal(
+    rules: AdmissionRules | None,
+    ctx: OpsContext,
+    granted: Collection[CommandRule],
+) -> str | None:
+    """The reason an op may not run, None when it may: the reason of
+    :func:`op_ruling`'s rule, an ask read as a refusal.
+
+    Args:
+        rules (AdmissionRules | None): the session's admission rules.
+        ctx (OpsContext): the op about to run.
+        granted (Collection[CommandRule]): the ask rules the running
+            line holds a grant under, empty when no command is bound.
+    """
+    ruled = op_ruling(rules, ctx, granted)
+    return ruled[0].reason if ruled is not None else None

@@ -309,11 +309,16 @@ export {
   type AskHandler,
   type Decision,
   Decisions,
+  type CommandExplanation,
   type Deny,
   type Explanation,
   Outcome,
   Scope,
   type SessionContext,
+  type ShellExplanation,
+  type ShellNode,
+  type ShellOperand,
+  type VfsExplanation,
 } from '@struktoai/mirage-core/policy/index'
 export { LanguageRuntime } from '@struktoai/mirage-core/runtime/language'
 export { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'

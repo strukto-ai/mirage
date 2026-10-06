@@ -30,7 +30,9 @@ from mirage.policy import (
     Pending,
     Policies,
     Policy,
+    PolicyDenied,
     PolicyError,
+    Route,
     describe_refusal,
     post_execute_gate,
     post_ops_gate,
@@ -43,6 +45,7 @@ from mirage.policy import (
 from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.rule import RulePolicy
 from mirage.policy.types import SessionContext
+from mirage.runtime.routing import RouteContext
 from mirage.types import Limit, MountMode, PathSpec, Producer, Refusal
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.mount import MountRegistry
@@ -367,19 +370,54 @@ async def test_a_deny_anywhere_in_the_chain_outranks_an_ask():
         )
     # With nothing refusing, the first Ask is the answer.
     policies = Policies([AskRm(), AskAll()])
-    assert await policies.pre_command(_ctx("rm")) == Ask("sign-off")
-    assert await policies.pre_command(_ctx("ls")) == Ask("second opinion")
+    assert await policies.pre_command(_ctx("rm")) == Ask(
+        "sign-off", policy="AskRm"
+    )
+    assert await policies.pre_command(_ctx("ls")) == Ask(
+        "second opinion", policy="AskAll"
+    )
 
 
 @pytest.mark.asyncio
-async def test_an_ask_is_illegal_off_the_command_plane():
+async def test_an_op_ask_with_no_ledger_refuses_like_a_deny():
+    # A door that cannot put the question (no ledger) refuses it, in the
+    # deny voice, with the reason on the record.
     policies = Policies([AskOnOps()])
-    with pytest.raises(PolicyError, match="AskOnOps"):
-        await policies.pre_ops(
-            OpsContext(
-                op="write", path=_path("/data/x"), write=True, prefix="/data/"
-            )
-        )
+    with pytest.raises(PolicyDenied) as info:
+        await pre_ops_gate(policies, "write", _path("/data/x"), True, "/data/")
+    assert info.value.errno == errno.EACCES
+    assert info.value.refusal is not None
+    assert info.value.refusal.kind == "deny"
+
+
+class OnBeta(Policy):
+    async def pre_execute(self, ctx: RouteContext) -> Action | None:
+        return Route("beta")
+
+
+class AskToPlace(Policy):
+    async def pre_execute(self, ctx: RouteContext) -> Action | None:
+        return Ask("where?")
+
+
+@pytest.mark.asyncio
+async def test_pre_execute_routes_agree_and_asks_are_illegal():
+    line = RouteContext(
+        line="python3 x",
+        commands=(),
+        command="python3",
+        builtin=False,
+        cwd="/",
+        env={},
+        session_id="",
+        agent_id="",
+        mounts=(),
+    )
+    # Two policies naming one runtime agree; the first names the line.
+    agreed = await Policies([OnBeta(), OnBeta()]).pre_execute(line)
+    assert agreed == Route("beta", policy="OnBeta")
+    with pytest.raises(PolicyError, match="AskToPlace"):
+        await Policies([AskToPlace()]).pre_execute(line)
 
 
 def test_render_pending_names_the_approval():

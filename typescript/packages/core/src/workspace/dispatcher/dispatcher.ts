@@ -41,6 +41,7 @@ import {
   type FsError,
 } from '../../utils/errors.ts'
 import { Policies, PolicyDenied } from '../../policy/index.ts'
+import type { Decisions } from '../../policy/decisions.ts'
 import { OpBoundary } from '../../ops/boundary.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
@@ -90,6 +91,7 @@ import {
 } from './constants.ts'
 import {
   effectivePathMode,
+  explaining,
   getCurrentSession,
   hiddenRefusal,
   sessionVisibility,
@@ -244,6 +246,9 @@ export class Dispatcher {
   // So does the workspace's write admission, which holds a write while a
   // capture reads.
   private readonly admitWrite: AdmitWrite | null
+  // And the approval ledger, which a path rule that asks is put to where
+  // no line is running.
+  private readonly decisions: Decisions | null
   private readonly writers = new KeyLock()
   private readonly stores = new WeakMap<BaseVFS, number>()
   private storeCount = 0
@@ -256,6 +261,7 @@ export class Dispatcher {
     policies?: Policies,
     drift?: DriftQueue,
     admitWrite?: AdmitWrite,
+    decisions?: Decisions,
   ) {
     this.namespace = namespace
     this.cache = cache
@@ -263,6 +269,7 @@ export class Dispatcher {
     this.policies = policies ?? new Policies()
     this.drift = drift ?? null
     this.admitWrite = admitWrite ?? null
+    this.decisions = decisions ?? null
     this.reconciler = new Reconciler(cache, namespace, opsRegistry)
   }
 
@@ -305,8 +312,10 @@ export class Dispatcher {
     // and the op facade come straight here, so a drain that lived any
     // higher would let a first write clobber drifted state. drain()
     // clears pending before it stats, so its own probes cannot recurse
-    // into it.
-    if (this.drift?.pending === true) {
+    // into it. A dry run leaves them pending, its policies' reads included:
+    // the check is no policy's answer, and the op that does run still owes
+    // it.
+    if (this.drift?.pending === true && explaining() === null) {
       // Resolve backend IDs afresh without consulting the restored index.
       await this.drift.drain(this.namespace, async (p) => {
         const [stat] = await this.dispatch('stat', PathSpec.fromStrPath(p), [], {
@@ -455,7 +464,11 @@ export class Dispatcher {
         opName,
         p,
         opWrite,
-        { create: HIDDEN_CREATE_OPS.has(opName), subtree: opName === 'rename' },
+        {
+          create: HIDDEN_CREATE_OPS.has(opName),
+          subtree: opName === 'rename',
+          final: opName !== 'rename',
+        },
         issuer,
       )
       // A rename's destination is a create there: it passes the same gate
@@ -914,6 +927,7 @@ export class Dispatcher {
       mount?.prefix ?? '',
       mount?.mode ?? MountMode.WRITE,
       sessionId(),
+      this.decisions,
     )
   }
 
@@ -944,7 +958,7 @@ export class Dispatcher {
   ): Promise<unknown> {
     const mount = this.namespace.mountFor(spec.virtual)
     const write = this.opsRegistry.find(opName, vfs)?.write === true
-    const boundary = new OpBoundary(this.policies, mountPrefix, mode, sessionId())
+    const boundary = new OpBoundary(this.policies, mountPrefix, mode, sessionId(), this.decisions)
     if (write) {
       // The same pre-ops admission a dispatched op answers, with the
       // walk's own child path: the gate that admitted the rmdir judged
@@ -1187,7 +1201,13 @@ export class Dispatcher {
     const mount = this.namespace.tryMountFor(path.virtual)
     const boundary = this.boundary(mount)
     const write = POLICY_WRITE_OPS.has(opName)
-    await boundary.admit(opName, path, write, { create: HIDDEN_CREATE_OPS.has(opName) }, issuer)
+    await boundary.admit(
+      opName,
+      path,
+      write,
+      { create: HIDDEN_CREATE_OPS.has(opName), final: opName !== 'rename' },
+      issuer,
+    )
     let target: string
     let result: string | FileStat | null = null
     if (opName === 'unlink') {
