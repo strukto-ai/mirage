@@ -12,654 +12,39 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
-from typing import Any
+from functools import partial
 
-import tree_sitter
-import tree_sitter_bash
-
-from mirage.shell.bytes import decode_text, encode_text
-from mirage.shell.parameter import scan_parameter
-from mirage.shell.parse.constants import (
-    ARITH_OPEN_TOKEN,
-    QUOTES,
-    VERBATIM_TYPES,
-)
-from mirage.shell.parse.expansion import expansion_source
-from mirage.shell.parse.heredoc import heredoc_operators, protected_source
-from mirage.shell.parse.heredoc.constants import BACKSLASH
+from mirage.shell.bytes import encode_text
+from mirage.shell.parse.assignment import repair_assignments
+from mirage.shell.parse.diagnostics import diagnose
+from mirage.shell.parse.engine import TS_PARSER
+from mirage.shell.parse.heredoc import heredoc_operators
 from mirage.shell.parse.heredoc.lower import (
-    drop_bytes,
     drop_source_bytes,
     lower_heredocs,
     rebase_source,
 )
 from mirage.shell.parse.heredoc.node import HeredocNode
-from mirage.shell.parse.heredoc.reader import delimiter_end, discover_heredocs
+from mirage.shell.parse.heredoc.reader import discover_heredocs
 from mirage.shell.parse.heredoc.types import HeredocSource
-from mirage.shell.parse.timing import PrefixNode, lower_timing, wrap_timing
+from mirage.shell.parse.program import ParsedProgram
+from mirage.shell.parse.recovery import (
+    failed_arith_openers,
+    is_arithmetic,
+    operator_source,
+    parse_protected,
+    repair_for_headers,
+    repair_orphaned_dollars,
+    repair_redirect_dashes,
+    statement_boundaries,
+)
+from mirage.shell.parse.source import (
+    continuation_bytes,
+    join_continuations,
+    source_offsets,
+)
+from mirage.shell.parse.timing import lower_timing, wrap_timing
 from mirage.shell.types import TSNodeLike
-
-BASH_LANGUAGE = tree_sitter.Language(tree_sitter_bash.language())
-TS_PARSER = tree_sitter.Parser(BASH_LANGUAGE)
-
-
-def _balanced_end(data: bytes, start: int) -> int | None:
-    """Index just past the ``)`` closing the ``(`` at ``start``.
-
-    Parens inside quotes and backslash escapes do not count, so a
-    command substitution or a literal ``")"`` cannot throw off the
-    depth. Scanned as bytes because tree-sitter reports byte offsets;
-    the delimiters are all ASCII, so multibyte characters pass through
-    without matching anything.
-
-    Args:
-        data (bytes): encoded shell source.
-        start (int): byte offset of the opening paren.
-
-    Returns:
-        int | None: end offset, or None when the parens never balance.
-    """
-    depth = 0
-    index = start
-    quote: bytes | None = None
-    while index < len(data):
-        char = data[index : index + 1]
-        if quote is not None:
-            if char == b"\\" and quote == b'"':
-                index += 2
-                continue
-            if char == quote:
-                quote = None
-            index += 1
-            continue
-        if char in QUOTES:
-            quote = char
-        elif char == b"\\":
-            index += 2
-            continue
-        elif char == b"(":
-            depth += 1
-        elif char == b")":
-            depth -= 1
-            if depth == 0:
-                return index + 1
-        index += 1
-    return None
-
-
-def _is_arithmetic(data: bytes, start: int) -> bool:
-    """Whether the construct at ``start`` is a real arithmetic command.
-
-    Decided by parsing the balanced span on its own: ``((i++))`` stands
-    alone cleanly, while ``((echo x); echo $i)`` does not. Judging each
-    opener separately is what keeps a valid ``((i++))`` safe when it
-    shares a line with a broken one, since tree-sitter's error region
-    covers both.
-
-    Args:
-        data (bytes): encoded shell source.
-        start (int): byte offset of the opener's first paren.
-    """
-    end = _balanced_end(data, start)
-    if end is None:
-        # Unbalanced: no span to judge, so assume arithmetic and leave
-        # the construct alone rather than risk rewriting it.
-        return True
-    return not TS_PARSER.parse(data[start:end]).root_node.has_error
-
-
-_UNLEXED = frozenset(
-    {
-        "test_command",
-        "arithmetic_expansion",
-        "string_content",
-        "raw_string",
-        "ansi_c_string",
-        "expansion",
-        "heredoc_content",
-        "comment",
-        "binary_expression",
-        "unary_expression",
-        "postfix_expression",
-    }
-)
-_WORD_START = b" \t\n;&|(){}"
-_DIGITS = re.compile(rb"\d+")
-_LAST_ARM = re.compile(rb"\s*esac(?![^\s;&|()<>])")
-# Tokens the grammar lexes apart from a word in an argument list, where
-# bash reads a word, by the node they stand under. A bare `$` in a command
-# is already kept as a word, and only an error region loses it; the `$`
-# opening `$"..."` is the translation marker, never a word.
-_BARE_WORDS = {
-    "command": frozenset({"==", "=~"}),
-    "ERROR": frozenset({"==", "=~", "$"}),
-}
-_WORD_BREAK = b" \t\n;&|()<>"
-_LIST_TOKENS = frozenset({"&&", "||", "|", "|&", ";", "&", ";;"})
-_TEST_PARTS = frozenset(
-    {
-        "binary_expression",
-        "unary_expression",
-        "negation_expression",
-        "parenthesized_expression",
-        "ERROR",
-    }
-)
-
-
-def _breaks_word(data: bytes, at: int) -> bool:
-    """Whether ``data[at]`` ends a word: the end, a blank or an operator.
-
-    Args:
-        data (bytes): shell source.
-        at (int): byte offset, which may fall outside ``data``.
-    """
-    return at < 0 or at >= len(data) or data[at : at + 1] in _WORD_BREAK
-
-
-def _bracket_is_a_command(data: bytes, node: TSNodeLike) -> bool:
-    """Whether bash reads a ``[ ... ]`` the grammar built as a test as a command.
-
-    ``[`` is a command to bash: its words end at the first list or pipe
-    operator, and the last of them has to be a ``]`` of its own. The
-    grammar folds ``&&``, ``||`` and ``|`` into the expression, closes it
-    at a ``]`` that bash reads inside ``]]`` or ``]x``, and builds one
-    whose ``]`` is missing; bash runs the builtin on each, which refuses
-    with ``[: missing `]'``.
-
-    Args:
-        data (bytes): shell source.
-        node (TSNodeLike): a ``test_command`` node.
-    """
-    children = node.children
-    if not children or children[0].type != "[":
-        return False
-    close = children[-1]
-    if close.type != "]" or close.is_missing:
-        return True
-    if not _breaks_word(data, close.end_byte):
-        return True
-    stack = list(children[1:-1])
-    while stack:
-        part = stack.pop()
-        if not part.is_named and part.type in _LIST_TOKENS:
-            return True
-        if part.type in _TEST_PARTS:
-            stack.extend(part.children)
-    return False
-
-
-def _operator_source(data: bytes, root: TSNodeLike) -> bytes:
-    """Spell operators the way the grammar can lex them.
-
-    bash reads ``<>`` and ``<<<`` as one operator each, and a digit
-    string that starts a word and touches ``<`` or ``>`` as the
-    descriptor. tree-sitter-bash reads ``<>`` as ``<`` then ``>``,
-    ``<<<`` after a compound command or a descriptor as ``<<`` then
-    ``<``, and a digit string with a leading zero (``0<f``) as a
-    number. The same-width spelling here hands it ``>>``, ``<  `` and a
-    nonzero first digit; ``SourceNode`` reads the original bytes, so a
-    redirect whose text opens with ``<<<`` is the herestring it was. A
-    last case arm's ``;&`` or ``;;&``, which the grammar refuses, ends it
-    as ``;;`` does, there being no arm after it, so it is spelled so. An
-    argument of ``==`` or ``=~``, which the grammar reads as a test
-    operator wanting an operand (so ``echo ==`` is an error and
-    ``echo == x`` drops it), and a bare ``$`` before a terminator are
-    words to bash; spelled as ``_`` filler they parse as the words they
-    are, and ``SourceNode`` gives back their text. So is the ``[`` of a
-    test bash reads as a ``[`` command (``_bracket_is_a_command``, or one
-    an error region opens), which then runs as the builtin. An operator
-    inside an error region gets its own token only once the operators
-    before it are respelled, so the pass repeats on its own parse until
-    nothing changes.
-
-    Args:
-        data (bytes): shell source.
-        root (TSNodeLike): the parse of ``data``.
-    """
-    lexed = _respelled(data, root)
-    while lexed != data:
-        data = lexed
-        lexed = _respelled(data, TS_PARSER.parse(data).root_node)
-    return data
-
-
-def _respelled(data: bytes, root: TSNodeLike) -> bytes:
-    out = bytearray(data)
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        if node.type == "test_command" and _bracket_is_a_command(data, node):
-            out[node.start_byte] = ord("_")
-        if node.type in _UNLEXED:
-            continue
-        stack.extend(node.children)
-        for child in node.children:
-            lo, hi = child.start_byte, child.end_byte
-            if child.is_named:
-                continue
-            if child.type in _BARE_WORDS.get(node.type, ()) and not (
-                child.type == "$" and data[hi : hi + 1] == b'"'
-            ):
-                out[lo:hi] = b"_" * (hi - lo)
-            elif (
-                node.type == "ERROR"
-                and child.type == "["
-                and _breaks_word(data, lo - 1)
-                and _breaks_word(data, hi)
-            ):
-                out[lo] = ord("_")
-        start = node.start_byte
-        if node.type == "<" and data[start : start + 2] == b"<>":
-            out[start] = ord(">")
-        elif node.type in ("<<<", "<<") and data[start : start + 3] == b"<<<":
-            out[start + 1 : start + 3] = b"  "
-        elif node.type in (";&", ";;&") and _LAST_ARM.match(
-            data, node.end_byte
-        ):
-            out[start : node.end_byte] = b";;".ljust(node.end_byte - start)
-        digits = None if node.children else _DIGITS.match(data, start)
-        if (
-            digits is not None
-            and data[start] == ord("0")
-            and data[digits.end() : digits.end() + 1] in (b"<", b">")
-            and (start == 0 or data[start - 1] in _WORD_START)
-        ):
-            out[start] = ord("1")
-    return bytes(out)
-
-
-class SourceNode:
-    """A node of a shielded parse that reads the original bytes.
-
-    Every shield keeps the source's width, so a span names the same bytes
-    in both and only ``text`` differs. Reparsing the original against the
-    shielded tree did the same until tree-sitter relexed a statement on
-    its own, which it does at a line's end.
-    """
-
-    def __init__(self, node: tree_sitter.Node, data: bytes) -> None:
-        self._node = node
-        self._data = data
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._node, name)
-
-    def _wrap(self, node: tree_sitter.Node | None) -> "SourceNode | None":
-        return None if node is None else SourceNode(node, self._data)
-
-    @property
-    def text(self) -> bytes:
-        return self._data[self._node.start_byte : self._node.end_byte]
-
-    @property
-    def children(self) -> list["SourceNode"]:
-        return [SourceNode(node, self._data) for node in self._node.children]
-
-    @property
-    def named_children(self) -> list["SourceNode"]:
-        return [
-            SourceNode(node, self._data) for node in self._node.named_children
-        ]
-
-    @property
-    def parent(self) -> "SourceNode | None":
-        return self._wrap(self._node.parent)
-
-    @property
-    def prev_sibling(self) -> "SourceNode | None":
-        return self._wrap(self._node.prev_sibling)
-
-    @property
-    def next_sibling(self) -> "SourceNode | None":
-        return self._wrap(self._node.next_sibling)
-
-    def child_by_field_name(self, name: str) -> "SourceNode | None":
-        return self._wrap(self._node.child_by_field_name(name))
-
-
-def _parse_bytes(data: bytes) -> TSNodeLike:
-    """Parse structure using same-width lexical shields.
-
-    Heredoc bodies, substring operands and redirect operators need word
-    grammar where tree-sitter's lexer otherwise rejects them. The shielded
-    tree is read against the original bytes (``SourceNode``), retaining
-    every source span. When shielding adds an error, keep the original
-    parse so a real structural error still reaches syntax validation.
-
-    Args:
-        data (bytes): encoded shell source.
-    """
-    tree = TS_PARSER.parse(data)
-    shielded_data = (
-        protected_source(data, tree.root_node) if b"<<" in data else None
-    ) or data
-    shielded_data = expansion_source(shielded_data, tree.root_node)
-    shielded_data = _operator_source(shielded_data, tree.root_node)
-    if shielded_data == data:
-        return tree.root_node
-    shielded = TS_PARSER.parse(shielded_data).root_node
-    if not _errors(shielded) <= _errors(tree.root_node):
-        return tree.root_node
-    return SourceNode(shielded, data)
-
-
-def _failed_arith_openers(root: TSNodeLike) -> list[int]:
-    """Byte offsets of ``((`` tokens the parser could not make sense of.
-
-    Only openers inside an ERROR subtree, or opening a construct that
-    holds one (``((exit 3) & a=$!; ...)`` lexes as arithmetic up to the
-    error), are reported. A genuine ``((i++))`` parses as an arithmetic
-    command with no error in it, so it cannot be picked up here.
-
-    Args:
-        root (TSNodeLike): root of a tree that has an error.
-    """
-    offsets: list[int] = []
-    stack: list[tuple[TSNodeLike, bool]] = [(root, False)]
-    while stack:
-        node, in_error = stack.pop()
-        errored = in_error or node.type == "ERROR"
-        for child in node.children:
-            if child.type == ARITH_OPEN_TOKEN and (errored or node.has_error):
-                offsets.append(child.start_byte)
-            stack.append((child, errored))
-    return offsets
-
-
-def _verbatim_spans(root: TSNodeLike) -> list[tuple[int, int]]:
-    """Byte spans whose backslashes escape nothing: comments and strings
-    in single quotes, ANSI-C ones included.
-
-    Args:
-        root (TSNodeLike): root of the parsed tree.
-    """
-    spans: list[tuple[int, int]] = []
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        if node.type in VERBATIM_TYPES:
-            spans.append((node.start_byte, node.end_byte))
-            continue
-        stack.extend(node.children)
-    return sorted(spans)
-
-
-def continuation_bytes(data: bytes) -> list[int]:
-    """Offsets of the bytes bash's reader deletes as line continuations.
-
-    The reader removes ``\\<newline>`` before a token is read, so the
-    halves it joins are one word (``a\\<newline>b`` is ``ab``,
-    ``$\\<newline>{x}`` an expansion); tree-sitter reads the pair as
-    whitespace instead. Single-quoted and ANSI-C text and a comment keep
-    theirs, and an escaped backslash continues nothing: only an
-    odd-length run of backslashes before the newline ends in a live one.
-    A live backslash ending the input continues onto nothing and goes
-    too: ``echo a\\`` runs ``echo a``. A heredoc body is lowered into a
-    quoted word before this runs, where every backslash it holds is
-    escaped, so no body loses a byte here.
-
-    Args:
-        data (bytes): shell source.
-    """
-    if b"\\\n" not in data and not data.endswith(b"\\"):
-        return []
-    spans = _verbatim_spans(TS_PARSER.parse(data).root_node)
-    dropped: list[int] = []
-    at = 0
-    index = data.find(b"\\")
-    while index >= 0:
-        end = index
-        while end < len(data) and data[end] == BACKSLASH:
-            end += 1
-        while at < len(spans) and spans[at][1] <= end - 1:
-            at += 1
-        verbatim = at < len(spans) and spans[at][0] <= end - 1
-        if (
-            (end - index) % 2
-            and not verbatim
-            and data[end : end + 1] in (b"", b"\n")
-        ):
-            dropped.extend(range(end - 1, min(end + 1, len(data))))
-        index = data.find(b"\\", end)
-    return dropped
-
-
-def source_offsets(command: str, root: TSNodeLike) -> tuple[int, ...]:
-    """Where each byte of the source ``parse`` read sits in ``command``.
-
-    ``parse`` deletes line continuations and inserts bytes to repair the
-    grammar, so a node's offsets index the source it read rather than the
-    line as typed. Indexed by one of them, this gives the byte of
-    ``command`` it came from; an inserted byte gives the byte after it.
-
-    Args:
-        command (str): the line ``root`` was parsed from.
-        root (TSNodeLike): what ``parse(command)`` returned.
-    """
-    if isinstance(root, HeredocNode | PrefixNode):
-        return root.offsets
-    data = encode_text(command)
-    source = drop_source_bytes(
-        HeredocSource(data, data, tuple(range(len(data) + 1)), ()),
-        continuation_bytes(data),
-    )
-    repaired = source.source[: root.start_byte] + (root.text or b"")
-    return rebase_source(source, repaired).offsets
-
-
-def join_continuations(command: str) -> str:
-    """The line as bash's reader hands it on, continuations removed.
-
-    Args:
-        command (str): the raw command line.
-    """
-    data = encode_text(command)
-    return decode_text(drop_bytes(data, continuation_bytes(data)))
-
-
-def _orphaned_dollar_offsets(root: TSNodeLike, data: bytes) -> list[int]:
-    """Byte offsets of literal ``$`` tokens cut off from their name.
-
-    tree-sitter-bash 0.25.1 stops lexing a later unbraced expansion in a
-    word when a name-terminating character follows it, so
-    ``> /api/$c/$id.json`` parses as ``/api/$c/$`` plus a sibling word
-    ``id.json``: the ``$`` lands in the tree as a literal token and the
-    expansion is gone. A literal ``$`` starting a recognized unbraced
-    parameter is a shape no correct bash lex produces (bash would have
-    read an expansion), so each one marks a mis-parse. The ``$`` opening
-    a simple_expansion is that expansion's own token and is skipped.
-
-    Args:
-        root (TSNodeLike): root of the parsed tree.
-        data (bytes): the source the tree was parsed from.
-    """
-    offsets: list[int] = []
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        for child in node.children:
-            if (
-                not child.is_named
-                and child.type == "$"
-                and node.type != "simple_expansion"
-                and data[child.end_byte : child.end_byte + 1] != b"{"
-                and scan_parameter(decode_text(data[child.start_byte :]), 0)
-                is not None
-            ):
-                offsets.append(child.start_byte)
-            stack.append(child)
-    return offsets
-
-
-def _rebrace_dollar(data: bytes, offset: int) -> bytes:
-    """Rewrite the expansion at ``offset`` into its braced spelling.
-
-    ``$id.json`` becomes ``${id}.json``, which says the same thing and
-    is the spelling the grammar reads correctly. Bash reads a single
-    digit after ``$`` as one positional parameter, so ``$12`` rebraces
-    as ``${1}2``.
-
-    Args:
-        data (bytes): shell source holding the orphaned ``$``.
-        offset (int): byte offset of the ``$``.
-    """
-    ref = scan_parameter(decode_text(data[offset:]), 0)
-    if ref is None:
-        return data
-    name, consumed = ref
-    # References contain only ASCII, so their character and byte lengths
-    # agree even when the source before or after them is multibyte.
-    return (
-        data[:offset]
-        + b"${"
-        + encode_text(name)
-        + b"}"
-        + data[offset + consumed :]
-    )
-
-
-def _repair_orphaned_dollars(root: TSNodeLike, data: bytes) -> TSNodeLike:
-    """Rebrace mis-lexed expansions and reparse until none remain.
-
-    Every rebrace consumes one bare ``$`` and never writes a new one,
-    so the loop is bounded by the count of ``$`` bytes. A retry that
-    parses worse than what it replaces is discarded.
-
-    Args:
-        root (TSNodeLike): tree parsed from ``data``.
-        data (bytes): the source ``root`` was parsed from.
-    """
-    for _ in range(data.count(b"$")):
-        offsets = _orphaned_dollar_offsets(root, data)
-        if not offsets:
-            break
-        for offset in sorted(offsets, reverse=True):
-            data = _rebrace_dollar(data, offset)
-        retried = _parse_bytes(data)
-        if retried.has_error:
-            break
-        root = retried
-    return root
-
-
-def _repair_redirect_dashes(
-    root: TSNodeLike, data: bytes
-) -> tuple[TSNodeLike, bytes]:
-    # tree-sitter-bash drops a bare dash immediately before an explicit fd.
-    # Quote only a dash in an uncovered gap, never text inside a word/body.
-    offsets: list[int] = []
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        end = node.start_byte
-        for child in node.children:
-            gap = data[end : child.start_byte]
-            if child.type == "file_redirect" and gap.strip() == b"-":
-                offsets.append(end + gap.index(b"-"))
-            end = child.end_byte
-            stack.append(child)
-    if not offsets:
-        return root, data
-    repaired = data
-    for offset in sorted(set(offsets), reverse=True):
-        repaired = repaired[:offset] + b"'-'" + repaired[offset + 1 :]
-    retried = _parse_bytes(repaired)
-    return (root, data) if retried.has_error else (retried, repaired)
-
-
-_NAME = re.compile(rb"\w+")
-_FOLLOWER = re.compile(rb"\s*(in|do)(?![^\s;&|()<>])")
-
-
-def _header_inserts(root: TSNodeLike, data: bytes) -> list[tuple[int, bytes]]:
-    heads: list[int] = []
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        stack.extend(node.children)
-        if node.type in ("for_statement", "ERROR"):
-            heads.extend(
-                kid.end_byte
-                for kid in node.children
-                if kid.type in ("for", "select")
-            )
-    inserts: list[tuple[int, bytes]] = []
-    for head in heads:
-        start = len(data) - len(data[head:].lstrip(b" \t"))
-        end = delimiter_end(data, start) or start
-        follower = _FOLLOWER.match(data, end)
-        word = follower.group(1) if follower else None
-        named = _NAME.fullmatch(data, start, end) is not None
-        if end == start or named and word == b"in":
-            continue
-        tail = b";" if word == b"do" else b""
-        inserts += (
-            [(end, b' in "$@"' + tail)]
-            if named
-            else [(start, b"0 in "), (end, tail)]
-        )
-    return inserts
-
-
-def _repair_for_headers(
-    root: TSNodeLike, data: bytes
-) -> tuple[TSNodeLike, bytes]:
-    # Encode invalid names for runtime validation and supply omitted "$@".
-    # Repeat to expose nested headers; accept only repairs adding no errors.
-    repaired, retried = data, root
-    while inserts := _header_inserts(retried, repaired):
-        for offset, text in sorted(inserts, reverse=True):
-            repaired = repaired[:offset] + text + repaired[offset:]
-        retried = _parse_bytes(repaired)
-    clean = retried is not root and len(_errors(retried)) <= len(_errors(root))
-    return (retried, repaired) if clean else (root, data)
-
-
-def _errors(root: TSNodeLike) -> set[tuple[int, int]]:
-    stack, spans = [root], set()
-    while stack:
-        node = stack.pop()
-        stack.extend(node.children)
-        if node.type == "ERROR" or node.is_missing:
-            spans.add((node.start_byte, node.end_byte))
-    return spans
-
-
-def _statement_boundaries(data: bytes) -> bytes:
-    """Make newlines swallowed between command words explicit separators.
-
-    tree-sitter-bash can absorb a statement newline into a nested pipeline
-    when the following statement has a file redirect. A newline between
-    children of a simple command cannot be whitespace in bash: quoted
-    newlines belong to a child, and continuations have already been joined.
-    Insert a semicolon without removing bytes so source maps remain valid.
-
-    Args:
-        data (bytes): source after heredoc lowering and continuation removal.
-    """
-    if b"\n" not in data:
-        return data
-    root = TS_PARSER.parse(data).root_node
-    offsets: set[int] = set()
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        stack.extend(node.children)
-        if node.type not in (
-            "command",
-            "file_redirect",
-            "redirected_statement",
-        ):
-            continue
-        for left, right in zip(node.children, node.children[1:]):
-            gap = data[left.end_byte : right.start_byte]
-            if b"\n" in gap and not gap.strip():
-                offsets.add(left.end_byte + gap.index(b"\n"))
-    for offset in sorted(offsets, reverse=True):
-        data = data[:offset] + b";" + data[offset:]
-    return data
 
 
 def parse(command: str) -> TSNodeLike:
@@ -696,7 +81,7 @@ def parse(command: str) -> TSNodeLike:
     if b"<<" in original:
         # The operators are read off a tree that lexes `0<<EOF` as one.
         hinted = TS_PARSER.parse(original).root_node
-        lexed = _operator_source(original, hinted)
+        lexed = operator_source(original, hinted)
         if lexed != original:
             hinted = TS_PARSER.parse(lexed).root_node
         documents = discover_heredocs(original, heredoc_operators(hinted))
@@ -720,8 +105,8 @@ def parse(command: str) -> TSNodeLike:
             )
         source, timing_marks = lower_timing(TS_PARSER, source)
         data = source.source
-    data = _statement_boundaries(data)
-    root = _parse_bytes(data)
+    data = statement_boundaries(data)
+    root = parse_protected(data)
     if root.has_error:
         # Sitting inside an ERROR is not evidence that an opener is
         # broken: tree-sitter's error region swallows neighbouring
@@ -733,8 +118,8 @@ def parse(command: str) -> TSNodeLike:
         # reports are byte offsets.
         offsets = [
             offset
-            for offset in set(_failed_arith_openers(root))
-            if not _is_arithmetic(data, offset)
+            for offset in set(failed_arith_openers(root))
+            if not is_arithmetic(data, offset)
         ]
         if offsets:
             retried_data = data
@@ -744,15 +129,18 @@ def parse(command: str) -> TSNodeLike:
                     + b" "
                     + retried_data[offset + 1 :]
                 )
-            retried = _parse_bytes(retried_data)
+            retried = parse_protected(retried_data)
             if not retried.has_error:
                 root = retried
                 data = retried_data
-    root, data = _repair_redirect_dashes(root, data)
+    root, data = repair_redirect_dashes(root, data)
     if b"for" in data or b"select" in data:
-        root, data = _repair_for_headers(root, data)
+        root, data = repair_for_headers(root, data)
     if b"$" in data:
-        root = _repair_orphaned_dollars(root, data)
+        root = repair_orphaned_dollars(root, data)
+    root = repair_assignments(
+        root, data[: root.start_byte] + (root.text or b"")
+    )
     if source is None:
         return root
     repaired = source.source[: root.start_byte] + (root.text or b"")
@@ -760,4 +148,17 @@ def parse(command: str) -> TSNodeLike:
     mapped = HeredocNode(root, source)
     return (
         wrap_timing(mapped, source, timing_marks) if timing_marks else mapped
+    )
+
+
+def parse_program(command: str) -> ParsedProgram:
+    """Parse a line into a program its holders release when done with it.
+
+    Args:
+        command (str): shell source to parse.
+    """
+    root = parse(command)
+    offsets = source_offsets(command, root)
+    return ParsedProgram(
+        command, root, offsets, partial(diagnose, root, offsets, parse)
     )

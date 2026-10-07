@@ -169,5 +169,5 @@ async def env_builtin(call: BuiltinCall) -> Result:
         call (BuiltinCall): the invocation.
     """
     return await handle_env(
-        call.execute_fn, list(call.argv.args), call.session, call.stdin
+        call.execute_fn, list(call.argv.args), call.context.session, call.stdin
     )

@@ -33,6 +33,8 @@ import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
 interface SessionBinding {
   session: SessionState
   owner: SessionManager | null
+  ancestors?: readonly SessionState[]
+  restoreExecution?: ContextCall
 }
 
 const sessionStorage = createAsyncContext<SessionBinding>()
@@ -48,10 +50,14 @@ export function runWithSession<T>(
   session: SessionState,
   fn: () => Promise<T>,
   owner?: SessionManager,
+  ancestors?: readonly SessionState[],
+  restoreExecution?: ContextCall,
 ): Promise<T> {
   const binding: SessionBinding = {
     session,
     owner: owner ?? sessionStorage.getStore()?.owner ?? null,
+    ...(ancestors === undefined ? {} : { ancestors }),
+    ...(restoreExecution === undefined ? {} : { restoreExecution }),
   }
   return Promise.resolve(sessionStorage.run(binding, fn))
 }
@@ -545,12 +551,16 @@ export function captureSessionContext(
   session?: SessionState,
   owner?: SessionManager,
 ): ContextCall[] {
+  const bound = sessionStorage.getStore()
+  const inherited = session === undefined || session === bound?.session ? bound : undefined
   const sessionScope: ContextCall =
     session === undefined
       ? sessionStorage.capture()
-      : (fn) => sessionStorage.run({ session, owner: owner ?? null }, fn)
+      : (fn) => sessionStorage.run({ ...inherited, session, owner: owner ?? null }, fn)
+  const restoreExecution = inherited?.restoreExecution
   return [
     sessionScope,
+    ...(restoreExecution === undefined ? [] : [restoreExecution]),
     admissionStorage.capture(),
     opPoliciesStorage.capture(),
     mountGateStorage.capture(),
@@ -564,9 +574,9 @@ export function captureSessionContext(
  * Run a line as a program run in a session: `find -exec` hands its words
  * to `execvp`, so the head it runs is the coreutils program, not the
  * shell's builtin of the same name (`printf -v` is a format string there,
- * not an assignment). Keyed by the session object, and cleared again by
- * a nested shell the line starts (`-exec sh -c ...`, which snapshots the
- * same session), so that shell's builtins are its own.
+ * not an assignment). Keyed by the session object, which the child shells
+ * it starts inherit, and cleared again by a nested shell the line starts
+ * (`-exec sh -c ...`), so that shell's builtins are its own.
  */
 export function runAsProgram<T>(session: SessionState, fn: () => Promise<T>): Promise<T> {
   return Promise.resolve(programStorage.run(session, fn))
@@ -581,7 +591,11 @@ export function runAsShell<T>(fn: () => Promise<T>): Promise<T> {
 
 /** Whether the line running in this session is a program run. */
 export function isProgramInvocation(session: SessionState): boolean {
-  return programStorage.getStore() === session
+  const marked = programStorage.getStore()
+  if (marked == null) return false
+  if (session === marked) return true
+  const binding = sessionStorage.getStore()
+  return binding?.session === session && binding.ancestors?.includes(marked) === true
 }
 
 /**

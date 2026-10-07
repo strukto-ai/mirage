@@ -22,6 +22,7 @@ from mirage.workspace.executor.statement import (
     restore_status,
     snapshot_status,
 )
+from mirage.workspace.frame import ExecutionFrame
 from mirage.workspace.session import SessionState
 
 
@@ -65,13 +66,13 @@ async def test_finish_statement_pulls_lazy_exit_code():
 
 
 def test_assignment_status_tracks_substitutions():
-    session = SessionState(session_id="t")
-    assert assignment_status(session, session._cmdsub_seq) == 0
-    seq = session._cmdsub_seq
-    session._cmdsub_seq += 1
-    session._cmdsub_status = 5
-    assert assignment_status(session, seq) == 5
-    assert assignment_status(session, session._cmdsub_seq) == 0
+    frame = ExecutionFrame()
+    assert assignment_status(frame, frame.cmdsub_seq) == 0
+    seq = frame.cmdsub_seq
+    frame.cmdsub_seq += 1
+    frame.cmdsub_status = 5
+    assert assignment_status(frame, seq) == 5
+    assert assignment_status(frame, frame.cmdsub_seq) == 0
 
 
 def test_restore_status_puts_back_the_captured_shell_status():

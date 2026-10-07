@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.shell.parse.engine import BASH_LANGUAGE, TS_PARSER
 from mirage.shell.parse.env import env_reads, implicit_reads, opaque_reads
 from mirage.shell.parse.names import (
     arith_reads,
@@ -21,13 +22,8 @@ from mirage.shell.parse.names import (
     identifier_names,
     referenced_names,
 )
-from mirage.shell.parse.parse import (
-    BASH_LANGUAGE,
-    TS_PARSER,
-    join_continuations,
-    parse,
-    source_offsets,
-)
+from mirage.shell.parse.parse import parse
+from mirage.shell.parse.source import join_continuations, source_offsets
 from mirage.shell.parse.syntax import (
     find_syntax_error,
     find_unterminated_backtick,

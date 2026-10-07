@@ -14,6 +14,8 @@
 
 import { Channel } from '@struktoai/mirage-core/shell/console/index'
 import { asyncContextIsolatesTasks } from '@struktoai/mirage-core/utils/async_context'
+import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
+import { IOResult } from '@struktoai/mirage-core/io/types'
 import { JobConsole, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-browser'
 import {
   bindMount,
@@ -23,12 +25,16 @@ import {
   type ExecWorkspace,
 } from '../runners/typescript/execution.ts'
 import substitutionScope from '../bash/cmdsub/scope.json'
+import assignmentRedirect from '../bash/assign/redirect.json'
+import unset from '../bash/builtin/unset.json'
 import substitutionStatus from '../bash/cmdsub/status.json'
 import commandFunction from '../bash/command/function.json'
 import commandRun from '../bash/command/run.json'
 import jobsBackground from '../bash/jobs/bg.json'
 import jobsOutput from '../bash/jobs/output.json'
 import nestedSyntax from '../bash/quoted/nested_subshell.json'
+import quotingSyntax from '../bash/syntax/quoting.json'
+import pipelineStatus from '../bash/param/pipestatus.json'
 import traps from '../bash/trap/exit.json'
 
 export interface Outcome {
@@ -79,12 +85,16 @@ function battery(): [string, Check][] {
   const files = [
     traps,
     substitutionScope,
+    assignmentRedirect,
+    unset,
     substitutionStatus,
     commandRun,
     commandFunction,
     jobsBackground,
     jobsOutput,
     nestedSyntax,
+    quotingSyntax,
+    pipelineStatus,
   ]
   return files.flatMap((file) =>
     (file.cases as unknown as Case[]).map((c): [string, Check] => [
@@ -103,6 +113,49 @@ const CHECKS: [string, Check][] = [
     'a page has no task-local async context',
     async () => {
       equal(asyncContextIsolatesTasks, false)
+    },
+  ],
+  [
+    'a suspended substitution keeps its writes off the parent',
+    async (ws) => {
+      let enter!: () => void, release!: () => void
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve
+      })
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      ws.registerCli(
+        'stall',
+        new CLISpec({
+          name: 'stall',
+          fn: async () => {
+            enter()
+            await gate
+            return [null, new IOResult()]
+          },
+        }),
+      )
+      const abort = new AbortController()
+      const timeout = setTimeout(() => abort.abort(), 5000)
+      const running = shell(ws, 'X=parent; value=$(X=child; stall; echo "$X"); echo "$X:$value"', {
+        signal: abort.signal,
+      })
+      try {
+        await Promise.race([
+          entered,
+          running.then(() => {
+            throw new Error('substitution finished before reaching its gate')
+          }),
+        ])
+        equal(ws.getSession(ws.defaultSessionId).env.X, 'parent')
+        release()
+        equal(await running, [0, 'parent:child\n', ''])
+      } finally {
+        release()
+        clearTimeout(timeout)
+        await Promise.allSettled([running])
+      }
     },
   ],
   [

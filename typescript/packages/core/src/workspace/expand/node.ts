@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EvaluationContext } from '../evaluation.ts'
 import type { SessionView } from '../../ops/types.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
@@ -36,6 +37,7 @@ import { expandBraces, isAtSplat, landArithWrites, parameterChunks } from './var
 import type { ArithResult, TSNodeLike } from '../../shell/types.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { ExecutionScope } from '../execution.ts'
+import { recordStatus } from '../executor/statement.ts'
 import { decodeText, encodeText } from '../../shell/bytes.ts'
 
 /**
@@ -55,6 +57,7 @@ export type ExecuteFn = (
   opts: {
     sessionId: string
     executionScope?: ExecutionScope
+    context?: EvaluationContext
     session?: SessionState
     stdin?: ByteSource | null
     signal?: AbortSignal
@@ -87,7 +90,7 @@ export function foldedWhitespace(node: TSNodeLike): string {
  */
 async function expandBacktickRegion(
   raw: string,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   node: TSNodeLike,
   offset: number,
@@ -101,14 +104,15 @@ async function expandBacktickRegion(
     }
     // Each pair is its own place on the line: the node holds every
     // touching pair, so the span within it says which one runs.
-    const io = await childLine(session, executeFn, segment.text, node, callStack, [
+    const io = await childLine(context, executeFn, segment.text, node, callStack, [
       offset + segment.start,
       offset + segment.end,
     ])
     out += decodeText(await io.materializeStdout()).replace(/\n+$/, '')
-    session.diagnostics.push(await io.materializeStderr())
-    session.cmdsubSeq += 1
-    session.cmdsubStatus = io.exitCode
+    context.frame.diagnostics.push(await io.materializeStderr())
+    context.frame.cmdsubSeq += 1
+    context.frame.cmdsubStatus = io.exitCode
+    recordStatus(context.session, io.exitCode, true)
   }
   return out
 }
@@ -129,16 +133,17 @@ async function expandBacktickRegion(
  * span within the node, for a backtick region holding several.
  */
 export async function childLine(
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   text: string,
   node: TSNodeLike,
   callStack: CallStack | null,
   span?: [number, number],
 ): Promise<IOResult> {
+  const session = context.session
   return executeFn(text, {
     sessionId: session.sessionId,
-    session,
+    context,
     node,
     substitution: true,
     callStack: (callStack ?? new CallStack()).fork(),
@@ -166,7 +171,7 @@ function collectDollarNodes(node: TSNodeLike, acc: TSNodeLike[]): void {
 // command substitution (heredoc bodies do this).
 async function substituteDollarRefs(
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view?: SessionView,
@@ -180,7 +185,7 @@ async function substituteDollarRefs(
   for (const c of acc) {
     if (c.startIndex === undefined || c.endIndex === undefined) continue
     out += text.slice(pos, c.startIndex - base)
-    out += await expandNode(c, session, executeFn, callStack, view)
+    out += await expandNode(c, context, executeFn, callStack, view)
     pos = c.endIndex - base
   }
   return out + text.slice(pos)
@@ -212,12 +217,12 @@ export function arithExit(expr: string, err: ArithError): DiscardSignal {
  */
 export async function expandArith(
   tsNode: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view?: SessionView,
 ): Promise<string> {
-  return named(arithInside(tsNode), arithText(tsNode, session, executeFn, callStack, view))
+  return named(arithInside(tsNode), arithText(tsNode, context, executeFn, callStack, view))
 }
 
 function arithInside(tsNode: TSNodeLike): string {
@@ -235,7 +240,7 @@ function arithInside(tsNode: TSNodeLike): string {
 
 async function arithText(
   tsNode: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view?: SessionView,
@@ -255,9 +260,9 @@ async function arithText(
       child.type === NT.TERNARY_EXPRESSION ||
       child.type === NT.POSTFIX_EXPRESSION
     ) {
-      parts.push(await arithText(child, session, executeFn, callStack, view))
+      parts.push(await arithText(child, context, executeFn, callStack, view))
     } else if (child.type === 'subscript') {
-      parts.push(await arithSubscript(child, session, executeFn, callStack, view))
+      parts.push(await arithSubscript(child, context, executeFn, callStack, view))
     } else if (ARITH_OPERATORS.has(child.type)) {
       parts.push(child.text)
     } else if (child.type === NT.NUMBER) {
@@ -267,11 +272,11 @@ async function arithText(
       child.type === NT.EXPANSION ||
       child.type === NT.COMMAND_SUBSTITUTION
     ) {
-      parts.push(await expandNode(child, session, executeFn, callStack, view))
+      parts.push(await expandNode(child, context, executeFn, callStack, view))
     } else if (child.type === NT.VARIABLE_NAME) {
       parts.push(child.text)
     } else {
-      parts.push(await expandNode(child, session, executeFn, callStack, view))
+      parts.push(await expandNode(child, context, executeFn, callStack, view))
     }
   }
   parts.push(tsNode.text.slice(end))
@@ -290,7 +295,7 @@ async function arithText(
  */
 async function arithSubscript(
   subNode: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view?: SessionView,
@@ -318,7 +323,7 @@ async function arithSubscript(
       sc.type === NT.TRANSLATED_STRING ||
       sc.type === NT.CONCATENATION
     ) {
-      parts.push(await expandNode(sc, session, executeFn, callStack, view))
+      parts.push(await expandNode(sc, context, executeFn, callStack, view))
     } else {
       parts.push(sc.text)
     }
@@ -329,12 +334,12 @@ async function arithSubscript(
 // Expand a tree-sitter node to the string it stands for.
 export async function expandNode(
   tsNode: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
   view?: SessionView,
 ): Promise<string> {
-  return unmarkGlobs(await expandNodeMarked(tsNode, session, executeFn, callStack, view))
+  return unmarkGlobs(await expandNodeMarked(tsNode, context, executeFn, callStack, view))
 }
 
 /**
@@ -347,12 +352,12 @@ export async function expandNode(
  */
 export async function expandNodeMarked(
   tsNode: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
   view?: SessionView,
 ): Promise<string> {
-  return joinChunks(await expandChunks(tsNode, session, executeFn, callStack, view))
+  return joinChunks(await expandChunks(tsNode, context, executeFn, callStack, view))
 }
 
 /**
@@ -367,14 +372,14 @@ export async function expandNodeMarked(
  */
 export async function expandChunks(
   tsNode: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
   view?: SessionView,
   quoted = false,
 ): Promise<Chunk[]> {
   try {
-    return await nodeChunks(tsNode, session, executeFn, callStack, view, quoted)
+    return await nodeChunks(tsNode, context, executeFn, callStack, view, quoted)
   } catch (err) {
     if (err instanceof BadSubstitution) throw err.within(tsNode.text.trimStart())
     throw err
@@ -383,12 +388,13 @@ export async function expandChunks(
 
 async function nodeChunks(
   tsNode: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view: SessionView | undefined,
   quoted: boolean,
 ): Promise<Chunk[]> {
+  const session = context.session
   const ntype = tsNode.type
 
   if (ntype === NT.WORD) {
@@ -399,7 +405,7 @@ async function nodeChunks(
     // expand. A bare word has one named child (or none) and falls
     // through to its own expansion rule.
     const child = tsNode.namedChildren[0]
-    if (child !== undefined) return expandChunks(child, session, executeFn, callStack, view)
+    if (child !== undefined) return expandChunks(child, context, executeFn, callStack, view)
     return [piece(tsNode.text)]
   }
 
@@ -421,13 +427,13 @@ async function nodeChunks(
   if (ntype === NT.EXPANSION) {
     const prefix = foldedWhitespace(tsNode)
     const expandChild = (c: TSNodeLike, inQuotes: boolean): Promise<Chunk[]> =>
-      expandChunks(c, session, executeFn, callStack, view, inQuotes)
+      expandChunks(c, context, executeFn, callStack, view, inQuotes)
     const chunks = await expandBraces(tsNode, session, callStack, expandChild, view, quoted)
     return prefix !== '' ? [piece(prefix), ...chunks] : chunks
   }
 
   if (ntype === NT.COMMAND_SUBSTITUTION || ntype === NT.ARITHMETIC_EXPANSION) {
-    const text = await substitution(tsNode, session, executeFn, callStack, view)
+    const text = await substitution(tsNode, context, executeFn, callStack, view)
     const prefix = foldedWhitespace(tsNode)
     return [...(prefix !== '' ? [piece(prefix)] : []), valuePiece(text, quoted)]
   }
@@ -445,12 +451,12 @@ async function nodeChunks(
       const child = children[position]
       if (child === undefined) continue
       if (child.type === '$' && children[position + 1]?.type === NT.STRING) continue
-      for (const c of await expandChunks(child, session, executeFn, callStack, view)) chunks.push(c)
+      for (const c of await expandChunks(child, context, executeFn, callStack, view)) chunks.push(c)
     }
     return chunks
   }
 
-  if (ntype === NT.STRING) return stringChunks(tsNode, session, executeFn, callStack, view)
+  if (ntype === NT.STRING) return stringChunks(tsNode, context, executeFn, callStack, view)
 
   if (ntype === NT.TRANSLATED_STRING) {
     // $"..." asks for a locale translation; no message catalog is ever
@@ -458,13 +464,13 @@ async function nodeChunks(
     // plain double-quote semantics.
     for (const child of tsNode.namedChildren) {
       if (child.type === NT.STRING) {
-        return stringChunks(child, session, executeFn, callStack, view)
+        return stringChunks(child, context, executeFn, callStack, view)
       }
     }
     return [piece('')]
   }
 
-  const text = await literalNode(tsNode, session, executeFn, callStack, view)
+  const text = await literalNode(tsNode, context, executeFn, callStack, view)
   return [piece(quoted ? markGlobs(text) : text)]
 }
 
@@ -482,7 +488,7 @@ async function nodeChunks(
  */
 async function stringChunks(
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view: SessionView | undefined,
@@ -498,7 +504,7 @@ async function stringChunks(
     }
     const pieces = await named(
       inside,
-      expandChunks(part, session, executeFn, callStack, view, true),
+      expandChunks(part, context, executeFn, callStack, view, true),
     )
     if (isAtSplat(part)) {
       splat = true
@@ -513,14 +519,15 @@ async function stringChunks(
 /** A command substitution's output or an arithmetic expansion's value. */
 async function substitution(
   tsNode: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view: SessionView | undefined,
 ): Promise<string> {
+  const session = context.session
   const prefix = foldedWhitespace(tsNode)
   if (tsNode.type === NT.ARITHMETIC_EXPANSION) {
-    const expr = await expandArith(tsNode, session, executeFn, callStack, view)
+    const expr = await expandArith(tsNode, context, executeFn, callStack, view)
     let result: ArithResult
     const reader = randomReader(session)
     try {
@@ -544,7 +551,7 @@ async function substitution(
   if (rawSub.startsWith('`') && rawSub.endsWith('`')) {
     // Backtick regions are re-lexed here rather than trusted from the
     // grammar, which merges adjacent pairs (see splitBacktickRegion).
-    return expandBacktickRegion(rawSub, session, executeFn, tsNode, prefix.length, callStack)
+    return expandBacktickRegion(rawSub, context, executeFn, tsNode, prefix.length, callStack)
   }
   if (rawSub.startsWith('$((') && rawSub.endsWith('))')) {
     // Inside heredoc bodies tree-sitter parses `$((expr))` as a
@@ -554,7 +561,7 @@ async function substitution(
     const sub = tsNode.namedChildren
     const only = sub[0]
     if (sub.length === 1 && only?.type === NT.SUBSHELL) {
-      const parenExpr = await substituteDollarRefs(only, session, executeFn, callStack, view)
+      const parenExpr = await substituteDollarRefs(only, context, executeFn, callStack, view)
       const expr = parenExpr.slice(1, -1)
       let arith: ArithResult
       const reader = randomReader(session)
@@ -590,21 +597,23 @@ async function substitution(
   if (inner.trim() === '') return ''
   // The substitution names its own node: the nested line's commands
   // stand under it, which is where the pass placed them.
-  const io = await childLine(session, executeFn, inner, tsNode, callStack)
+  const io = await childLine(context, executeFn, inner, tsNode, callStack)
   const text = decodeText(await io.materializeStdout()).replace(/\n+$/, '')
   // Record the substitution's status: an assignment-only statement
   // whose value ran substitutions reports the last one's status as
-  // its own (see assignmentStatus).
-  session.diagnostics.push(await io.materializeStderr())
-  session.cmdsubSeq += 1
-  session.cmdsubStatus = io.exitCode
+  // its own (see assignmentStatus), and `$?` reads it in the words that
+  // follow (`false; echo $(true) $?` prints 0).
+  context.frame.diagnostics.push(await io.materializeStderr())
+  context.frame.cmdsubSeq += 1
+  context.frame.cmdsubStatus = io.exitCode
+  recordStatus(context.session, io.exitCode, true)
   return text
 }
 
 /** The text of a node no expansion splits: quoted words and the rest. */
 async function literalNode(
   tsNode: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view: SessionView | undefined,
@@ -635,7 +644,7 @@ async function literalNode(
       const valPart = raw.slice(eq + 1)
       const valNodes = tsNode.namedChildren.filter((c) => c.type !== NT.VARIABLE_NAME)
       if (valNodes.length > 0 && valNodes[0] !== undefined) {
-        const expanded = await expandNode(valNodes[0], session, executeFn, callStack, view)
+        const expanded = await expandNode(valNodes[0], context, executeFn, callStack, view)
         return `${key}=${expanded}`
       }
       return `${key}=${valPart}`

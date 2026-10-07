@@ -52,8 +52,15 @@ from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.helpers import get_redirects, get_text, is_backgrounded
 from mirage.shell.job_table import Job, JobStatus, JobTable
 from mirage.shell.node_kind import NodeKind, node_kind
+from mirage.shell.parse.program import retain_programs
 from mirage.shell.types import TSNodeLike
 from mirage.utils.timezone import zone_from_env
+from mirage.workspace.evaluation import (
+    EvaluationContext,
+    child_context,
+    reset_current_evaluation,
+    set_current_evaluation,
+)
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.executor.statement import failed_read, statement_stdin
@@ -61,8 +68,6 @@ from mirage.workspace.executor.traps import inherit_exit_trap
 from mirage.workspace.node.occurrence import occurrence_of
 from mirage.workspace.session import (
     SessionState,
-    reset_current_session,
-    set_current_session,
 )
 from mirage.workspace.types import ExecutionNode
 
@@ -167,7 +172,7 @@ async def handle_background(
     execute_node,
     left: TSNodeLike,
     right: TSNodeLike | None,
-    session: SessionState,
+    context: EvaluationContext,
     job_table: JobTable,
     agent_id: str | None,
     stdin: ByteSource | None = None,
@@ -189,7 +194,15 @@ async def handle_background(
     job revokes it when it ends, which spends what no other hand-off
     still holds.
     """
-    bg_session = session.fork()
+    session = context.session
+    release_program = retain_programs([left])
+    child_evaluation = child_context(context)
+    bg_session = child_evaluation.session
+
+    def release_job(_: asyncio.Task[Any] | None = None) -> None:
+        release_program()
+        bg_session.functions.clear()
+
     inherit_exit_trap(bg_session)
     output = session.job_output or session.tty.jobs
     # A job is a shell of its own: what jobs it starts write into the
@@ -220,7 +233,7 @@ async def handle_background(
         # and the fork keeps its parent's id, so without this rebind a
         # nested eval inside the job resolves the ambient outer session
         # and escapes the fork.
-        token = set_current_session(bg_session)
+        token = set_current_evaluation(child_evaluation)
         try:
             try:
                 # Handing the console down as a sink is what makes
@@ -235,7 +248,7 @@ async def handle_background(
                 # controller: it runs without the line's event.
                 stdout, io, exec_node = await execute_node(
                     left,
-                    bg_session,
+                    child_evaluation,
                     None,
                     bg_call_stack,
                     sink=console,
@@ -281,7 +294,8 @@ async def handle_background(
                 await console.emit(Channel.STDERR, stderr)
             return io, exec_node
         finally:
-            reset_current_session(token)
+            release_job()
+            reset_current_evaluation(token)
             if job_handed is not None and decisions is not None:
                 await decisions.revoke(session.session_id, job_handed)
 
@@ -300,6 +314,7 @@ async def handle_background(
             limit=session.processes.max,
         )
     except Exception as exc:
+        release_job()
         # A submission that fails (a console the table cannot build, a
         # session at its process cap) starts no runner, so nothing would
         # ever revoke the job's hand-off: its grants would stay reserved
@@ -309,6 +324,10 @@ async def handle_background(
         if isinstance(exc, BlockingIOError):
             raise ExitSignal(FORK_FAILED_STATUS, stderr=FORK_FAILED) from exc
         raise
+    # A job killed before its runner starts never enters _run_bg, so its
+    # leases also go when its task ends.
+    if job.task is not None:
+        job.task.add_done_callback(release_job)
     bg_session.process_id = (
         job.process.info.pid if job.process is not None else None
     )
@@ -331,7 +350,7 @@ async def handle_background(
         )
 
     right_stdout, right_io, right_exec = await execute_node(
-        right, session, stdin, call_stack
+        right, context, stdin, call_stack
     )
     children = [
         ExecutionNode(command=cmd_str, exit_code=0),
@@ -347,7 +366,7 @@ async def handle_background(
 async def run_statement(
     execute_node: Callable[..., Any],
     node: TSNodeLike,
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None,
     bound: tuple[SharedInput | None, bool],
     call_stack: CallStack | None,
@@ -368,7 +387,7 @@ async def run_statement(
     Args:
         execute_node (Callable): the executor's statement runner.
         node (TSNodeLike): the statement.
-        session (SessionState): shell session.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (ByteSource | None): the body's input; a job gets none,
             like a background process reading /dev/null.
         bound (tuple[SharedInput | None, bool]): ``fd0_binding`` as the
@@ -381,9 +400,10 @@ async def run_statement(
         handed (HandOff | None): approval claims inherited by a job.
         decisions (Decisions | None): ledger that holds those claims.
     """
+    session = context.session
     if not is_backgrounded(node):
         return await execute_node(
-            node, session, statement_stdin(session, stdin, bound), call_stack
+            node, context, statement_stdin(session, stdin, bound), call_stack
         )
     if job_table is None:
         raise RuntimeError(
@@ -393,7 +413,7 @@ async def run_statement(
         execute_node,
         node,
         None,
-        session,
+        context,
         job_table,
         agent_id,
         stdin,

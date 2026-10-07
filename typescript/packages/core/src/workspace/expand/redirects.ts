@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EvaluationContext } from '../evaluation.ts'
 import { childLine } from './node.ts'
 import type { SessionView } from '../../ops/types.ts'
 import { materialize } from '../../io/types.ts'
@@ -20,7 +21,7 @@ import { ExitSignal } from '../../shell/errors.ts'
 import { getProcessSubBody, getProcessSubDirection } from '../../shell/helpers.ts'
 import { NodeType as NT, ProcessSubDirection, Redirect, RedirectKind } from '../../shell/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import type { SessionState } from '../session/session.ts'
+
 import { visibleEnv } from '../session/state.ts'
 import { classifyBarePath } from './classify/index.ts'
 import { expandNode } from './node.ts'
@@ -42,7 +43,7 @@ import { encodeText } from '../../shell/bytes.ts'
  */
 export async function expandRedirects(
   redirects: readonly Redirect[],
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   registry: MountRegistry,
   callStack: CallStack | null = null,
@@ -52,7 +53,7 @@ export async function expandRedirects(
   const expanded: Redirect[] = []
   for (const [index, r] of redirects.entries()) {
     try {
-      expanded.push(await expandRedirect(r, session, executeFn, registry, callStack, view))
+      expanded.push(await expandRedirect(r, context, executeFn, registry, callStack, view))
     } catch (err) {
       if (!(err instanceof ExitSignal) || !forked) throw err
       // The child performs no redirect after the first that fails; a
@@ -83,17 +84,18 @@ export async function expandRedirects(
 /** Expand one redirect's body or target. */
 async function expandRedirect(
   r: Redirect,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   registry: MountRegistry,
   callStack: CallStack | null,
   view: SessionView | undefined,
 ): Promise<Redirect> {
+  const session = context.session
   if (r.kind === RedirectKind.HEREDOC || r.kind === RedirectKind.HERESTRING) {
     let body: unknown = r.target
     const heredocNode = r.targetNode as TSNodeLike | null
     if (r.expandVars && heredocNode !== null) {
-      body = await expandNode(heredocNode, session, executeFn, callStack, view)
+      body = await expandNode(heredocNode, context, executeFn, callStack, view)
     } else if (typeof body === 'string' && r.expandVars) {
       let s: string = body
       for (const [k, v] of Object.entries(visibleEnv(session))) {
@@ -125,9 +127,9 @@ async function expandRedirect(
       const inner = getProcessSubBody(procSubNode)
       let innerData: Uint8Array = new Uint8Array()
       if (inner !== '') {
-        const ioPs = await childLine(session, executeFn, inner, procSubNode, callStack)
+        const ioPs = await childLine(context, executeFn, inner, procSubNode, callStack)
         innerData = await materialize(ioPs.stdout)
-        session.diagnostics.push(await ioPs.materializeStderr())
+        context.frame.diagnostics.push(await ioPs.materializeStderr())
       }
       return new Redirect({
         fd: r.fd,
@@ -149,7 +151,7 @@ async function expandRedirect(
   const targetNode = r.targetNode as TSNodeLike | null
   let targetScope: unknown = r.target
   if (targetNode !== null) {
-    const targetStr = await expandNode(targetNode, session, executeFn, callStack, view)
+    const targetStr = await expandNode(targetNode, context, executeFn, callStack, view)
     targetScope = classifyBarePath(targetStr, registry, session.cwd)
   }
   return new Redirect({

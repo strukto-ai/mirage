@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from itertools import chain
 
 from mirage.io import IOResult
@@ -20,10 +20,13 @@ from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.parse.constants import (
     BASH_KEYWORDS,
     CASE_TERMINATORS,
+    CLOSING_TOKENS,
+    CONSTRUCT_CLOSERS,
+    OPENER_CLOSERS,
     SEPARATOR_TOKENS,
     STRUCTURAL_TOKENS,
 )
-from mirage.shell.parse.parse import parse
+from mirage.shell.parse.types import SourceSpan, SyntaxIssue
 from mirage.shell.types import TSNodeLike
 
 
@@ -287,11 +290,34 @@ def find_syntax_error(
     aliases: frozenset[str] = frozenset(),
     own: Mapping[str, tuple[int, int]] | None = None,
     offsets: Sequence[int] | None = None,
+    parse_fn: Callable[[str], TSNodeLike] | None = None,
 ) -> str | None:
+    found = find_syntax_issue(node, aliases, own, offsets, parse_fn)
+    return None if found is None else found.offending
+
+
+def _issue(node: TSNodeLike, offending: str | None) -> SyntaxIssue | None:
+    return (
+        None
+        if offending is None
+        else SyntaxIssue(offending, SourceSpan(node.start_byte, node.end_byte))
+    )
+
+
+def find_syntax_issue(
+    node: TSNodeLike,
+    aliases: frozenset[str] = frozenset(),
+    own: Mapping[str, tuple[int, int]] | None = None,
+    offsets: Sequence[int] | None = None,
+    parse_fn: Callable[[str], TSNodeLike] | None = None,
+) -> SyntaxIssue | None:
     """Locate structural errors and missing tokens throughout a parsed AST.
 
     Of the tokens the grammar accepts and bash refuses, the first on the
-    line is the one reported, as bash stops there.
+    line is the one reported, as bash stops there. An error the walk finds
+    only by reparsing a ``$(...)`` body spans that substitution, since the
+    reparse reads the body in its own coordinates; one the walk sees
+    directly, such as a stray ``fi`` inside the body, keeps its own span.
 
     Args:
         node (TSNodeLike): root node from parse().
@@ -303,15 +329,19 @@ def find_syntax_error(
         offsets (Sequence[int] | None): where each byte the parser read
             sits in that line (``source_offsets``); None where the two are
             the same.
+        parse_fn (Callable[[str], TSNodeLike] | None): parses the body of
+            a ``$(...)`` substitution so its own syntax is judged too;
+            None leaves substitution bodies unchecked.
 
     Returns:
-        str | None: text of the offending region, or None if the AST is clean.
+        SyntaxIssue | None: the offending region's text and span, or None
+        if the AST is clean.
     """
     # Parameter syntax is judged during expansion (bad substitution), and
     # `[` is a builtin whose argument grammar is judged by that builtin.
     if node.type == "expansion":
         return (
-            ""
+            _issue(node, "")
             if any(c.is_missing and c.type == "}" for c in node.children)
             else None
         )
@@ -320,14 +350,21 @@ def find_syntax_error(
         and node.children
         and node.children[0].type == "["
     ):
-        return _missing_quote(node)
+        return _issue(node, _missing_quote(node))
     if node.type == "command_substitution":
         source = decode_text(node.text or b"")
         unclosed = find_unterminated_backtick(source)
         if unclosed is not None:
-            return unclosed
-        if source.startswith("$(") and source.endswith(")"):
-            return find_syntax_error(parse(source[2:-1]))
+            return _issue(node, unclosed)
+        if (
+            parse_fn is not None
+            and source.startswith("$(")
+            and source.endswith(")")
+        ):
+            nested = find_syntax_issue(
+                parse_fn(source[2:-1]), parse_fn=parse_fn
+            )
+            return None if nested is None else _issue(node, nested.offending)
     stray = min(
         chain(
             _stray_case_terminators(node),
@@ -337,9 +374,12 @@ def find_syntax_error(
         default=None,
     )
     if stray is not None:
-        return stray[1]
+        return SyntaxIssue(
+            stray[1],
+            SourceSpan(stray[0], stray[0] + len(encode_text(stray[1]))),
+        )
     if not node.has_error:
-        return find_unterminated_quote(node)
+        return _issue(node, find_unterminated_quote(node))
     previous = None
     for child in node.children:
         # Bash permits unquoted spaces in associative subscripts. The
@@ -356,7 +396,7 @@ def find_syntax_error(
             continue
         if child.is_missing:
             text = child.text
-            return decode_text(text) if text else ""
+            return _issue(child, decode_text(text) if text else "")
         if (
             child.type == "ERROR"
             and _is_structural_error(child)
@@ -369,9 +409,9 @@ def find_syntax_error(
                 previous = child
                 continue
             text = child.text
-            return decode_text(text) if text else ""
+            return _issue(child, decode_text(text) if text else "")
         if child.type != "ERROR":
-            nested = find_syntax_error(child, aliases, own, offsets)
+            nested = find_syntax_issue(child, aliases, own, offsets, parse_fn)
             if nested is not None:
                 return nested
         if child.is_named:
@@ -380,29 +420,44 @@ def find_syntax_error(
 
 
 def find_unterminated_quote(node: TSNodeLike) -> str | None:
-    """Find a missing quote in the parser's erroneous regions.
+    """Find what the input ended inside: a quote, or a substitution or
+    expansion still waiting for its closer.
 
     Complete strings, comments and heredoc bodies remain opaque. The
     grammar represents an open double quote as a missing token or an
     ERROR child, and an open single quote as a leaf ERROR span. An ANSI-C
     string ending in an escaped quote can parse cleanly, so check its
-    closing delimiter as well.
+    closing delimiter as well. An unclosed ``$(``, ``$((``, ``<(``,
+    ``>(``, ``${`` or ``$[`` is an opener token in an ERROR, or a
+    substitution or expansion whose closer the grammar marks missing.
 
     Args:
         node (TSNodeLike): the parsed command being refused.
+
+    Returns:
+        str | None: the character bash reports it was looking for.
     """
-    stack = [(node, False)]
+    stack = [(node, False, False)]
     while stack:
-        current, visited = stack.pop()
+        current, visited, quoted = stack.pop()
         if visited:
             # Diagnose an ERROR span only after its children, as before.
             if not current.children and (current.text or b"").startswith(b"'"):
                 return "'"
-            if sum(child.type == '"' for child in current.children) % 2:
-                return '"'
+            unclosed = _innermost_unclosed(current.children)
+            if unclosed is not None:
+                return unclosed
             continue
         if current.is_missing and current.type in ("'", '"'):
             return current.type
+        closer = CONSTRUCT_CLOSERS.get(current.type)
+        if closer is not None and any(
+            child.is_missing and child.type in CLOSING_TOKENS
+            for child in current.children
+        ):
+            # Inside a double-quoted string, bash reads the string's own
+            # closing quote into the construct, where it opens another.
+            return '"' if quoted else closer
         if current.type == "ansi_c_string":
             source = decode_text(current.text or b"")
             before = source[:-1]
@@ -410,9 +465,41 @@ def find_unterminated_quote(node: TSNodeLike) -> str | None:
                 return "'"
             continue
         if current.type == "ERROR":
-            stack.append((current, True))
-        stack.extend((child, False) for child in reversed(current.children))
+            stack.append((current, True, quoted))
+        inner = quoted or current.type == "string"
+        stack.extend(
+            (child, False, inner) for child in reversed(current.children)
+        )
     return None
+
+
+def _innermost_unclosed(children: Sequence[TSNodeLike]) -> str | None:
+    """What the innermost construct an ERROR's tokens open still waits for.
+
+    A double quote nests inside a substitution as bash reads it (``"$("``
+    waits for a quote), a lone ``)`` inside ``$((`` groups rather than
+    closes, and any other closer that does not match the innermost opener
+    is an unexpected token rather than the end of input.
+
+    Args:
+        children (Sequence[TSNodeLike]): the ERROR node's children, in order.
+    """
+    pending: list[tuple[str, str]] = []
+    for child in children:
+        if child.type == '"':
+            if pending and pending[-1][0] == '"':
+                pending.pop()
+            else:
+                pending.append(('"', '"'))
+        elif child.type in OPENER_CLOSERS:
+            pending.append(OPENER_CLOSERS[child.type])
+        elif child.type in CLOSING_TOKENS and pending:
+            if child.type == ")" and pending[-1][0] == "))":
+                continue
+            if child.type != pending[-1][0]:
+                return None
+            pending.pop()
+    return pending[-1][1] if pending else None
 
 
 def syntax_error_result(
@@ -424,14 +511,24 @@ def syntax_error_result(
         offending (str): the span the parser flagged.
         node (TSNodeLike | None): the parsed command, for quote diagnostics.
     """
+    return IOResult(
+        exit_code=2, stderr=encode_text(syntax_error_message(offending, node))
+    )
+
+
+def syntax_error_message(
+    offending: str, node: TSNodeLike | None = None
+) -> str:
+    """Format the diagnostic shared by parsed programs and execution results.
+
+    Args:
+        offending (str): the span the parser flagged.
+        node (TSNodeLike | None): the parsed command, for quote diagnostics.
+    """
     quote = find_unterminated_quote(node) if node is not None else None
     snippet = offending.strip()
     if quote is not None:
-        message = (
-            f"mirage: unexpected EOF while looking for matching `{quote}'\n"
-        )
-    elif snippet:
-        message = f"mirage: syntax error near '{snippet}'\n"
-    else:
-        message = "mirage: syntax error in command\n"
-    return IOResult(exit_code=2, stderr=encode_text(message))
+        return f"mirage: unexpected EOF while looking for matching `{quote}'\n"
+    if snippet:
+        return f"mirage: syntax error near '{snippet}'\n"
+    return "mirage: syntax error in command\n"

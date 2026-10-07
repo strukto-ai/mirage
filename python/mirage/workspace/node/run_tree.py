@@ -35,6 +35,7 @@ from mirage.shell.console import JobConsole, Terminal
 from mirage.shell.helpers import input_substitution_redirect
 from mirage.shell.job_table import JobTable
 from mirage.types import PathSpec, Producer
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.scope import _to_scope
 from mirage.workspace.executor.redirect import handle_redirect
@@ -44,7 +45,7 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import Refused, admit
 from mirage.workspace.node.execute_node import execute_node
 from mirage.workspace.node.occurrence import claimant_for
-from mirage.workspace.session import SessionState, session_view
+from mirage.workspace.session import session_view
 from mirage.workspace.types import ExecutionNode
 
 
@@ -56,7 +57,7 @@ async def run_command_tree(
     execute_fn: Callable[..., Any],
     agent_id: str,
     ast: Any,
-    session: SessionState,
+    context: EvaluationContext,
     stdin: Any,
     cancel: asyncio.Event | None,
     routing_decision: RouteDecision | None = None,
@@ -85,7 +86,7 @@ async def run_command_tree(
         execute_fn (Callable): recursive execute (for source/eval).
         agent_id (str): current agent ID for jobs.
         ast (Any): parsed tree-sitter root node.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         cancel (asyncio.Event | None): event used to abort mid-flight.
         routing_decision (RouteDecision | None): the typed line's routing
@@ -103,6 +104,7 @@ async def run_command_tree(
         ``io.stdout`` set to the barrier-resolved value) and the
         execution node.
     """
+    session = context.session
     run = partial(
         execute_node,
         dispatch,
@@ -121,14 +123,18 @@ async def run_command_tree(
         input_substitution_redirect(ast) if command_substitution else None
     )
     if redirect is None:
-        stdout, io, exec_node = await run(ast, session, stdin, call_stack)
+        stdout, io, exec_node = await run(ast, context, stdin, call_stack)
     else:
         redirects, _ = await expand_redirects(
             [redirect],
-            session,
+            context,
             execute_fn,
             registry,
-            view=session_view(session, registry.policies),
+            view=session_view(
+                session,
+                registry.policies,
+                diagnostics=context.frame.diagnostics,
+            ),
         )
         # Bash's implicit file read has cat's policy identity, without
         # invoking a function/alias or expanding the filename a second time.
@@ -174,7 +180,7 @@ async def run_command_tree(
                     dispatch,
                     None,
                     redirects,
-                    session,
+                    context,
                     stdin,
                     capture_input=True,
                 )

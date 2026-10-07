@@ -23,8 +23,8 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.utils.glob_walk import escape_glob
 from mirage.utils.path import expand_tilde
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.expand.node import expand_node
-from mirage.workspace.session import SessionState
 from mirage.workspace.session.shell_dirs import home_dir
 
 
@@ -48,7 +48,7 @@ def _unquoted_pattern(text: str) -> str:
 
 async def expand_pattern(
     ts_node: TSNodeLike,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
     view: SessionView | None = None,
@@ -65,10 +65,11 @@ async def expand_pattern(
 
     Args:
         ts_node (TSNodeLike): one pattern node.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): function-call scope, if any.
     """
+    session = context.session
     ntype = ts_node.type
     if ntype in (NT.WORD, NT.EXTGLOB_PATTERN):
         raw = get_text(ts_node)
@@ -82,7 +83,7 @@ async def expand_pattern(
     if ntype == NT.STRING:
         return escape_glob(
             await expand_node(
-                ts_node, session, execute_fn, call_stack, view=view
+                ts_node, context, execute_fn, call_stack, view=view
             )
         )
     if ntype == NT.TRANSLATED_STRING:
@@ -90,7 +91,7 @@ async def expand_pattern(
             if child.type == NT.STRING:
                 return escape_glob(
                     await expand_node(
-                        child, session, execute_fn, call_stack, view=view
+                        child, context, execute_fn, call_stack, view=view
                     )
                 )
         return ""
@@ -109,10 +110,10 @@ async def expand_pattern(
                 continue
             parts.append(
                 await expand_pattern(
-                    child, session, execute_fn, call_stack, view=view
+                    child, context, execute_fn, call_stack, view=view
                 )
             )
         return "".join(parts)
     return await expand_node(
-        ts_node, session, execute_fn, call_stack, view=view
+        ts_node, context, execute_fn, call_stack, view=view
     )

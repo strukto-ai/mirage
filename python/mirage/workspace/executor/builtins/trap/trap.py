@@ -150,4 +150,4 @@ async def trap_builtin(call: BuiltinCall) -> Result:
     Args:
         call (BuiltinCall): the invocation.
     """
-    return await handle_trap(list(call.argv.args), call.session)
+    return await handle_trap(list(call.argv.args), call.context.session)

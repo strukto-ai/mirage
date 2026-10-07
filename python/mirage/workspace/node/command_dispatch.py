@@ -47,10 +47,10 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.parse import (
     find_syntax_error,
-    parse,
     source_offsets,
     syntax_error_result,
 )
+from mirage.shell.parse.scope import ParseScope
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ProcessSubDirection
 from mirage.shell.variable import TempEnv, VarAttr
@@ -59,6 +59,7 @@ from mirage.types import LsLinkMode, PathSpec, Producer, word_text
 from mirage.utils.glob_walk import glob_pattern
 from mirage.utils.path import CycleError
 from mirage.vfs.dev.dev import DevVFS
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import (
     accepts_line,
     follow_directory_links,
@@ -136,7 +137,7 @@ async def execute_command(
     namespace,
     execute_fn,
     node,
-    session,
+    context: EvaluationContext,
     stdin,
     call_stack,
     job_table,
@@ -151,6 +152,7 @@ async def execute_command(
     ``sink`` is where a command that runs statements of its own (a
     function body, a nested shell) writes them as they finish.
     """
+    session = context.session
     name = get_command_name(node)
     assignment_nodes, parts = split_env_prefix(get_parts(node))
 
@@ -181,46 +183,58 @@ async def execute_command(
             rewritten, texts = rewrite
             at = head_node.start_byte - base
             line = decode_text(source[:at]) + rewritten
-            ast = parse(line)
-            own: dict[str, tuple[int, int]] = {}
-            for alias, text in texts:
-                own[alias] = (at, at + len(encode_text(text)))
-                at = own[alias][1]
-            offending = find_syntax_error(
-                ast, expanding_aliases(session), own, source_offsets(line, ast)
-            )
-            if offending is not None:
-                io = syntax_error_result(offending, ast)
-                bad = io.stderr if isinstance(io.stderr, bytes) else b""
-                return (
-                    None,
-                    io,
-                    ExecutionNode(
-                        command=head, exit_code=io.exit_code, stderr=bad
-                    ),
-                )
-            session._alias_stack.append(head)
-            # The rewritten line is read from this node, so it runs as
-            # a line of its own under the word that named it: each
-            # invocation of one alias is a place of its own on the line
-            # (`c && c` asks twice, as its spelled-out form does), and
-            # what its gates claim is the line's again at its end. Run
-            # on the line's own hand-off, both reads stood at the same
-            # offsets of the same text and the second ran on the
-            # first's nod.
-            expansion = (
-                evaluated_from(node, handed) if handed is not None else None
-            )
+            scope = ParseScope()
             try:
-                if expansion is None:
-                    return await recurse(ast, session, stdin, call_stack)
-                return await recurse(
-                    ast, session, stdin, call_stack, handed=expansion
+                ast = scope.parse(line)
+                own: dict[str, tuple[int, int]] = {}
+                for alias, text in texts:
+                    own[alias] = (at, at + len(encode_text(text)))
+                    at = own[alias][1]
+                offending = find_syntax_error(
+                    ast,
+                    expanding_aliases(session),
+                    own,
+                    source_offsets(line, ast),
+                    parse_fn=scope.parse,
                 )
+                if offending is not None:
+                    io = syntax_error_result(offending, ast)
+                    bad = io.stderr if isinstance(io.stderr, bytes) else b""
+                    return (
+                        None,
+                        io,
+                        ExecutionNode(
+                            command=head, exit_code=io.exit_code, stderr=bad
+                        ),
+                    )
+                session._alias_stack.append(head)
+                # The rewritten line is read from this node, so it runs as
+                # a line of its own under the word that named it: each
+                # invocation of one alias is a place of its own on the line
+                # (`c && c` asks twice, as its spelled-out form does), and
+                # what its gates claim is the line's again at its end. Run
+                # on the line's own hand-off, both reads stood at the same
+                # offsets of the same text and the second ran on the
+                # first's nod.
+                expansion = (
+                    evaluated_from(node, handed)
+                    if handed is not None
+                    else None
+                )
+                try:
+                    if expansion is None:
+                        return await recurse(ast, context, stdin, call_stack)
+                    return await recurse(
+                        ast, context, stdin, call_stack, handed=expansion
+                    )
+                finally:
+                    session._alias_stack.pop()
+                    if expansion is not None:
+                        registry.decisions.hand_up(
+                            session.session_id, expansion
+                        )
             finally:
-                session._alias_stack.pop()
-                if expansion is not None:
-                    registry.decisions.hand_up(session.session_id, expansion)
+                scope.release()
 
     prefix_assignments: list[tuple[str, str]] = []
     for p in assignment_nodes:
@@ -234,10 +248,14 @@ async def execute_command(
                 node,
                 expand_node(
                     val_nodes[0],
-                    session,
+                    context,
                     execute_fn,
                     call_stack,
-                    view=session_view(session, registry.policies),
+                    view=session_view(
+                        session,
+                        registry.policies,
+                        diagnostics=context.frame.diagnostics,
+                    ),
                 ),
             )
         else:
@@ -331,7 +349,7 @@ async def execute_command(
             node,
             parts,
             name,
-            session,
+            context,
             stdin,
             call_stack,
             job_table,
@@ -362,7 +380,7 @@ async def _dispatch_command_body(
     node,
     parts,
     name,
-    session,
+    context: EvaluationContext,
     stdin,
     call_stack,
     job_table,
@@ -378,6 +396,7 @@ async def _dispatch_command_body(
     # runs a line (eval, source, xargs) is bound to this node, and a
     # substitution names its own node when it calls, so every nested
     # line stands under the node its text came from.
+    session = context.session
     claimant = claimant_for(node, handed)
     execute_fn = partial(execute_fn, node=node)
 
@@ -408,7 +427,7 @@ async def _dispatch_command_body(
             inner = get_process_sub_body(p)
             if inner:
                 io_ps = await child_line(
-                    session, execute_fn, inner, p, call_stack
+                    context, execute_fn, inner, p, call_stack
                 )
                 data = await materialize(io_ps.stdout)
                 dev.set_input(path, allocation, data)
@@ -427,12 +446,16 @@ async def _dispatch_command_body(
             node,
             expand_argv(
                 parts,
-                session,
+                context,
                 execute_fn,
                 call_stack,
                 registry,
                 namespace,
-                view=session_view(session, registry.policies),
+                view=session_view(
+                    session,
+                    registry.policies,
+                    diagnostics=context.frame.diagnostics,
+                ),
                 routing=routing_decision,
             ),
         )
@@ -463,7 +486,7 @@ async def _dispatch_command_body(
             namespace,
             execute_fn,
             argv,
-            session,
+            context,
             stdin,
             call_stack,
             job_table,
@@ -532,7 +555,7 @@ async def _run_argv(
     namespace,
     execute_fn,
     argv: Argv,
-    session,
+    context: EvaluationContext,
     stdin,
     call_stack,
     job_table,
@@ -556,6 +579,7 @@ async def _run_argv(
     the shell's own fds outside the admitted command's gate window, and
     ``opener`` opens them once the line is admitted.
     """
+    session = context.session
     name = argv.name
 
     # ── boundary globs ──────────────────────────
@@ -652,7 +676,7 @@ async def _run_argv(
                 namespace,
                 execute_fn,
                 argv,
-                session,
+                context,
                 stdin,
                 call_stack,
                 job_table,
@@ -672,7 +696,7 @@ async def _run_argv(
                 namespace,
                 execute_fn,
                 argv,
-                session,
+                context,
                 stdin,
                 call_stack,
                 job_table,
@@ -719,7 +743,7 @@ async def _route_argv(
     namespace,
     execute_fn,
     argv: Argv,
-    session,
+    context: EvaluationContext,
     stdin,
     call_stack,
     job_table,
@@ -735,6 +759,7 @@ async def _route_argv(
     The half of ``_run_argv`` past the gate, split out so the gate's
     verdict can be bound around it.
     """
+    session = context.session
     name = argv.name
     args = list(argv.args)
     operands = list(argv.operands)
@@ -749,7 +774,7 @@ async def _route_argv(
             execute_fn,
             name,
             [word_text(a) for a in args],
-            session,
+            context,
             registry,
             namespace,
             stdin,
@@ -785,7 +810,7 @@ async def _route_argv(
         return await builtin(
             BuiltinCall(
                 argv=argv,
-                session=session,
+                context=context,
                 stdin=stdin,
                 call_stack=call_stack,
                 cancel=cancel,
@@ -912,7 +937,7 @@ async def _route_argv(
         dispatch,
         registry,
         argv.words,
-        session,
+        context,
         stdin,
         call_stack,
         job_table=job_table,

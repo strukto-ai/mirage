@@ -12,6 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EvaluationContext } from '../../evaluation.ts'
+import { retainPrograms } from '../../../shell/parse/program.ts'
+import type { TSNodeLike } from '../../../shell/types.ts'
+
 import type { ShellVar } from '../../../shell/variable.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult } from '../../../io/types.ts'
@@ -21,7 +25,7 @@ import type { JobConsole } from '../../../shell/console/index.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../../shell/constants.ts'
 import type { PathSpec } from '../../../types.ts'
 import { wordText } from '../../../types.ts'
-import type { SessionState } from '../../session/session.ts'
+
 import { restoreLocals } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import { share } from '../../../io/async_line_iterator.ts'
@@ -42,7 +46,7 @@ export async function executeShellFunction(
   cmdName: string,
   body: unknown[],
   restParts: readonly (string | PathSpec)[],
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null = null,
@@ -53,7 +57,9 @@ export async function executeShellFunction(
   // body's output.
   sink?: JobConsole,
 ): Promise<Result> {
+  const session = context.session
   // The body's statements read the caller's stdin in turn.
+  const releaseProgram = retainPrograms(body as TSNodeLike[])
   const bodyStdin = share(stdin)
   const cs = callStack ?? new CallStack()
   // Positional args carry the word as typed ($1 stays sub/a.txt).
@@ -87,7 +93,7 @@ export async function executeShellFunction(
               ? executeNode
               : (n, s, i, c, opts) => executeNode(n, s, i, c, { sink, ...opts }),
             cmdNode,
-            session,
+            context,
             bodyStdin,
             bound,
             cs,
@@ -126,6 +132,7 @@ export async function executeShellFunction(
       }
     })
   } finally {
+    releaseProgram()
     cs.pop()
     if (session.functionNames !== null) session.functionNames = outerNames
     restoreLocals(session, savedLocals)

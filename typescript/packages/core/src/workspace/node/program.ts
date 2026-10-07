@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EvaluationContext } from '../evaluation.ts'
 import { CommandTimeoutError } from '../../commands/errors.ts'
 import { isControlFlowError } from '../workspace/failure.ts'
 import { concat } from '../../io/cachable_iterator.ts'
@@ -39,7 +40,7 @@ import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
-import type { SessionState } from '../session/session.ts'
+
 import { ExecutionNode } from '../types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
@@ -48,7 +49,7 @@ type Result = [ByteSource | null, IOResult, ExecutionNode]
 export async function executeProgram(
   recurse: ExecuteNodeFn,
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable,
@@ -74,6 +75,7 @@ export async function executeProgram(
   inline = false,
   executeFn: ExecuteFn | null = null,
 ): Promise<Result> {
+  const session = context.session
   // Every program loop is one parse, which is the unit bash's alias rule
   // counts in: an alias defined on this parse and row is not expanded by
   // a use on the same parse and row. Restored on the way out so a nested
@@ -87,7 +89,7 @@ export async function executeProgram(
     return await runProgram(
       recurse,
       node,
-      session,
+      context,
       stdin,
       callStack,
       jobTable,
@@ -109,7 +111,7 @@ export async function executeProgram(
 async function runProgram(
   recurse: ExecuteNodeFn,
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable,
@@ -122,6 +124,7 @@ async function runProgram(
   inline = false,
   executeFn: ExecuteFn | null = null,
 ): Promise<Result> {
+  const session = context.session
   const children = node.children
   const allStdout: (ByteSource | null)[] = []
   let mergedIo = new IOResult()
@@ -201,7 +204,7 @@ async function runProgram(
           recurse,
           child,
           null,
-          session,
+          context,
           jobTable,
           agentId,
           stdin,
@@ -254,7 +257,7 @@ async function runProgram(
         jobs.recorder = recorder
         try {
           ;[s, ioResult, execNode] = await ENCLOSING.run(recorder, () =>
-            recurse(child, session, childStdin, callStack, { sink: recorder }),
+            recurse(child, context, childStdin, callStack, { sink: recorder }),
           )
         } finally {
           jobs.recorder = held
@@ -306,7 +309,7 @@ async function runProgram(
         mergedIo = await mergedIo.merge(
           new IOResult({ exitCode: code, stderr: looped ? err.io.stderr : err.stderr }),
         )
-        mergedIo = await exitShell(executeFn, session, code, stdin, callStack, allStdout, mergedIo)
+        mergedIo = await exitShell(executeFn, context, code, stdin, callStack, allStdout, mergedIo)
         recordStatus(session, mergedIo.exitCode)
         lastExec = new ExecutionNode({ command: 'exit', exitCode: mergedIo.exitCode })
         break
@@ -361,7 +364,7 @@ async function runProgram(
       if (!inline) {
         mergedIo = await exitShell(
           executeFn,
-          session,
+          context,
           io.exitCode,
           stdin,
           callStack,
@@ -409,13 +412,14 @@ function nextLine(node: TSNodeLike, children: readonly TSNodeLike[], i: number):
  */
 async function exitShell(
   executeFn: ExecuteFn | null,
-  session: SessionState,
+  context: EvaluationContext,
   code: number,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   allStdout: (ByteSource | null)[],
   mergedIo: IOResult,
 ): Promise<IOResult> {
+  const session = context.session
   const cleanup = await runExitTrap(executeFn, session, code, stdin, callStack)
   if (cleanup === null) {
     mergedIo.exitCode = code

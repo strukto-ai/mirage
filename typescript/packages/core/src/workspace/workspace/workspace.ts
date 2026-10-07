@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ParseScope } from '../../shell/parse/scope.ts'
+import { releaseFunctions } from '../session/functions.ts'
+
 import { indexConfigDump } from '../snapshot/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { KeyLock } from '../../cache/lock.ts'
@@ -627,7 +630,11 @@ export class Workspace {
         view.checkSpawn()
         const child = session.fork()
         child.processId = parentPid
-        return this.spawnForSession(request, child)
+        try {
+          return this.spawnForSession(request, child)
+        } finally {
+          releaseFunctions(child.functions)
+        }
       },
     })
   }
@@ -712,6 +719,7 @@ export class Workspace {
           })
           return result.exitCode
         } finally {
+          releaseFunctions(child.functions)
           input.stop()
           output.end()
         }
@@ -1161,42 +1169,46 @@ export class Workspace {
   /** `explain`'s judging, run with its policies deciding. */
   private async explained(line: string, sessionId: string): Promise<ShellExplanation> {
     const session = this.getSession(sessionId === '' ? this.defaultSessionId : sessionId)
-    const parser = await this.getShellParser()
-    const reparse = (text: string): TSNodeLike => parser.parse(text)
-    const root = parser.parse(line)
-    const judged = await explainLine(
-      root,
-      session,
-      this.registry,
-      this.namespace,
-      '',
-      reparse,
-      this.runtimeWorld.wholeLineFor(null) !== null,
-    )
-    if (holds(judged.map((one) => one.judgment))) {
-      return explainedLine(line, judged, () => '', reparse)
-    }
-    const [answers, placed] = await this.router.placement(root, line, session)
-    if (placed !== null && 'kind' in placed) {
-      const refused = placementRefused(placed, line)
-      return {
-        ...explainedLine(line, judged, () => '', reparse),
-        answers,
-        outcome: Outcome.DENY,
-        reason: placed.reason,
-        source: '',
-        refusal: refused.refusal,
-        exitCode: refused.exitCode,
-        stderr: refused.stderrText,
+    const parser = new ParseScope(await this.getShellParser())
+    try {
+      const reparse = (text: string): TSNodeLike => parser.parse(text)
+      const root = parser.parse(line)
+      const judged = await explainLine(
+        root,
+        session,
+        this.registry,
+        this.namespace,
+        '',
+        reparse,
+        this.runtimeWorld.wholeLineFor(null) !== null,
+      )
+      if (holds(judged.map((one) => one.judgment))) {
+        return explainedLine(line, judged, () => '', reparse)
       }
+      const [answers, placed] = await this.router.placement(root, line, session)
+      if (placed !== null && 'kind' in placed) {
+        const refused = placementRefused(placed, line)
+        return {
+          ...explainedLine(line, judged, () => '', reparse),
+          answers,
+          outcome: Outcome.DENY,
+          reason: placed.reason,
+          source: '',
+          refusal: refused.refusal,
+          exitCode: refused.exitCode,
+          stderr: refused.stderrText,
+        }
+      }
+      const said = explainedLine(
+        line,
+        judged,
+        (command) => this.router.runtimeFor(command, placed),
+        reparse,
+      )
+      return { ...said, answers }
+    } finally {
+      parser.release()
     }
-    const said = explainedLine(
-      line,
-      judged,
-      (command) => this.router.runtimeFor(command, placed),
-      reparse,
-    )
-    return { ...said, answers }
   }
 
   get workspaceId(): string {
@@ -2091,6 +2103,7 @@ export class Workspace {
     this.stateDropped = dropState
     try {
       await closeWorkspace({
+        sessions: this.sessionManager,
         watch: this.watchManager,
         cache: this.cache,
         ownsStateStore: this.ownsStateStore,

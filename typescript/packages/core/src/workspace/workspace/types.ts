@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EvaluationContext } from '../evaluation.ts'
 import type { ExecutionScope } from '../execution.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -216,6 +217,8 @@ export interface ExecuteOptions {
   executionScope?: ExecutionScope
   stdin?: ByteSource | null
   sessionId?: string
+  /** @internal The calling evaluator for a nested line. */
+  evaluation?: EvaluationContext
   /** @internal The exact session carried by an evaluator, including an unregistered fork. */
   session?: SessionState
   agentId?: string

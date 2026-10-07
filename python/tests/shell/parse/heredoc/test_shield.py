@@ -14,6 +14,7 @@
 
 import tree_sitter
 
+from mirage.shell.parse.engine import TS_PARSER
 from mirage.shell.parse.heredoc import (
     HeredocOperator,
     first_content_line,
@@ -21,7 +22,6 @@ from mirage.shell.parse.heredoc import (
     protected_source,
     terminator_lookalikes,
 )
-from mirage.shell.parse.parse import TS_PARSER
 
 
 def _root(command: str) -> tree_sitter.Node:
@@ -161,7 +161,7 @@ def test_protected_source_dash_masks_the_leading_tab():
 
 def test_protected_source_masks_an_unterminated_body_too():
     # Bash reads the body to the end of the input, so the shield does;
-    # the masked copy still lacks heredoc_end, and _parse_bytes keeps
+    # the masked copy still lacks heredoc_end, and parse_protected keeps
     # the plain tree for it.
     cmd = "cat <<EOF\n\\first\nsecond\n"
     out = protected_source(cmd.encode(), _root(cmd))

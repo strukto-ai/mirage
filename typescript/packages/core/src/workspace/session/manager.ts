@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { releaseFunctions } from './functions.ts'
+
 import { ownRecord, SessionState, varsFromEntries, varsFromEnv } from './session.ts'
 import { setCwd } from './shell_dirs.ts'
 import type { CompiledProfile } from '../../policy/profile.ts'
@@ -426,9 +428,11 @@ export class SessionManager {
       if (sessionId === this.defaultId) {
         throw new Error('Cannot close the default session')
       }
-      if (!this.sessions.has(sessionId)) {
+      const session = this.sessions.get(sessionId)
+      if (session === undefined) {
         throw new Error(`unknown session: ${sessionId}`)
       }
+      releaseFunctions(session.functions)
       this.sessions.delete(sessionId)
       this.persisted.delete(sessionId)
       await this.sessionStore.delete([sessionId])
@@ -441,7 +445,13 @@ export class SessionManager {
   }
 
   closeStore(): Promise<void> {
+    this.release()
     return this.sessionStore.close()
+  }
+
+  /** Release session-owned runtime resources without closing shared storage. */
+  release(): void {
+    for (const session of this.sessions.values()) releaseFunctions(session.functions)
   }
 
   private defaultSession(): SessionState {

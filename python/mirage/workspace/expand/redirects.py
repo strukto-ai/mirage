@@ -24,15 +24,16 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ProcessSubDirection, Redirect, RedirectKind
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.expand.classify import classify_bare_path
 from mirage.workspace.expand.node import child_line, expand_node
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.session import SessionState, visible_env
+from mirage.workspace.session import visible_env
 
 
 async def expand_redirects(
     redirects: list[Redirect],
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
     call_stack: CallStack | None = None,
@@ -49,7 +50,7 @@ async def expand_redirects(
 
     Args:
         redirects (list[Redirect]): parsed redirects from get_redirects.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry for classification.
         call_stack (CallStack | None): shell call stack for expansion.
@@ -68,7 +69,7 @@ async def expand_redirects(
         try:
             expanded.append(
                 await _expand_redirect(
-                    r, session, execute_fn, registry, call_stack, view
+                    r, context, execute_fn, registry, call_stack, view
                 )
             )
         except ExitSignal as exc:
@@ -103,7 +104,7 @@ async def expand_redirects(
 
 async def _expand_redirect(
     r: Redirect,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
     call_stack: CallStack | None,
@@ -113,17 +114,18 @@ async def _expand_redirect(
 
     Args:
         r (Redirect): the parsed redirect.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry for classification.
         call_stack (CallStack | None): shell call stack for expansion.
         view (SessionView | None): the session plane's gated door.
     """
+    session = context.session
     if r.kind in (RedirectKind.HEREDOC, RedirectKind.HERESTRING):
         body = r.target
         if r.target_node is not None and r.expand_vars:
             body = await expand_node(
-                r.target_node, session, execute_fn, call_stack, view=view
+                r.target_node, context, execute_fn, call_stack, view=view
             )
         elif isinstance(body, str) and r.expand_vars:
             for var, val in visible_env(session).items():
@@ -156,10 +158,12 @@ async def _expand_redirect(
             inner_data = b""
             if inner:
                 io_ps = await child_line(
-                    session, execute_fn, inner, r.target_node, call_stack
+                    context, execute_fn, inner, r.target_node, call_stack
                 )
                 inner_data = await materialize(io_ps.stdout)
-                session._diagnostics.append(await io_ps.materialize_stderr())
+                context.frame.diagnostics.append(
+                    await io_ps.materialize_stderr()
+                )
             return Redirect(
                 fd=r.fd,
                 target=inner_data,
@@ -177,7 +181,7 @@ async def _expand_redirect(
     target_scope = r.target
     if r.target_node is not None:
         target_str = await expand_node(
-            r.target_node, session, execute_fn, call_stack, view=view
+            r.target_node, context, execute_fn, call_stack, view=view
         )
         # A redirect target is a path by definition (the operator is
         # the context), so force classification like a PATH-kind word;

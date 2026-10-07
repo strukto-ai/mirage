@@ -472,5 +472,5 @@ async function appendTo(
  * process-replacement form this refuses.
  */
 export function execBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(handleExecCommand([...call.argv.args], call.session))
+  return Promise.resolve(handleExecCommand([...call.argv.args], call.context.session))
 }

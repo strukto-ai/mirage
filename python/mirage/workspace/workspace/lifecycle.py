@@ -189,6 +189,10 @@ async def close_async(
         await settle(ws._script_policy.close())
         await settle(ws._runtimes.close())
         await settle(ws.processes.drain())
+        try:
+            ws._session_mgr.release()
+        except Exception as exc:
+            failures.append(exc)
         await settle(ws.job_table.close_consoles())
         await settle(
             *(

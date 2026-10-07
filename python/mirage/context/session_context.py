@@ -58,6 +58,7 @@ class SessionBinding:
 
     session: "SessionState | None"
     owner: "SessionManager | None"
+    ancestors: "tuple[SessionState, ...]" = ()
 
 
 _current_session: ContextVar[SessionBinding | None] = ContextVar(
@@ -67,7 +68,10 @@ _current_session: ContextVar[SessionBinding | None] = ContextVar(
 
 
 def set_current_session(
-    session: "SessionState | None", owner: "SessionManager | None" = None
+    session: "SessionState | None",
+    owner: "SessionManager | None" = None,
+    *,
+    ancestors: "tuple[SessionState, ...]" = (),
 ) -> Token[Any]:
     """Bind ``session`` to the current async context.
 
@@ -77,11 +81,16 @@ def set_current_session(
             to. None keeps the owner already bound, so a nested bind
             inside a line (a background job's fork) stays attributed to
             the workspace running it.
+        ancestors (tuple[SessionState, ...]): the sessions of the
+            evaluations this one runs under, nearest first, so a mark
+            made on a parent (a program run) covers its child shells.
     """
     if owner is None:
         current = _current_session.get()
         owner = current.owner if current is not None else None
-    return _current_session.set(SessionBinding(session=session, owner=owner))
+    return _current_session.set(
+        SessionBinding(session=session, owner=owner, ancestors=ancestors)
+    )
 
 
 def reset_current_session(token: Token[Any]) -> None:
@@ -560,7 +569,7 @@ def redirect_opener_for(node_id: int) -> RedirectOpener | None:
     return bound[2]
 
 
-_program_invocation: ContextVar[int | None] = ContextVar(
+_program_invocation: ContextVar["SessionState | None"] = ContextVar(
     "mirage_program_invocation", default=None
 )
 
@@ -571,14 +580,14 @@ def set_program_invocation(session: "SessionState") -> Token[Any]:
     ``find -exec`` hands its words to ``execvp``, so the head it runs is
     the coreutils program, not the shell's builtin of the same name:
     ``printf -v`` is a format string there, not an assignment. Keyed
-    by the session object, and cleared again by a nested shell the
-    line starts (``-exec sh -c ...``, which snapshots the same
-    session), so that shell's builtins are its own.
+    by the session object, which the child shells it starts inherit,
+    and cleared again by a nested shell the line starts (``-exec sh -c
+    ...``), so that shell's builtins are its own.
 
     Args:
         session (SessionState): the session the program line runs in.
     """
-    return _program_invocation.set(id(session))
+    return _program_invocation.set(session)
 
 
 def clear_program_invocation() -> Token[Any]:
@@ -599,7 +608,17 @@ def program_invocation(session: "SessionState") -> bool:
     Args:
         session (SessionState): the session a builtin is answering in.
     """
-    return _program_invocation.get() == id(session)
+    marked = _program_invocation.get()
+    if marked is None:
+        return False
+    if session is marked:
+        return True
+    binding = _current_session.get()
+    return (
+        binding is not None
+        and binding.session is session
+        and any(ancestor is marked for ancestor in binding.ancestors)
+    )
 
 
 def redirect_target_judged(virtual: str) -> bool:

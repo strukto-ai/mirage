@@ -26,6 +26,12 @@ from mirage.shell.console import JobConsole, JobOutput
 from mirage.shell.constants import IFS_DEFAULT
 from mirage.shell.job_table import JobTable
 from mirage.shell.options import parse_option_word
+from mirage.workspace.evaluation import (
+    EvaluationContext,
+    child_context,
+    reset_current_evaluation,
+    set_current_evaluation,
+)
 from mirage.workspace.executor.builtins.script.constants import (
     BASH_LONG_OPTIONS,
     BASH_START_FLAGS,
@@ -37,7 +43,6 @@ from mirage.workspace.executor.builtins.script.script import (
 from mirage.workspace.executor.builtins.script.types import BashArgs
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.traps import clear_exit_trap, finish_shell
-from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import seed_var
 from mirage.workspace.types import ExecutionNode
 
@@ -102,7 +107,7 @@ async def handle_bash(
     dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     args: list[str],
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None = None,
     name: str = "bash",
     sink: JobConsole | None = None,
@@ -110,18 +115,18 @@ async def handle_bash(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a nested shell: inline text from ``-c``, or a script file.
 
-    A nested shell is a child shell, so it runs on a snapshot of the
-    session and the caller gets its state back afterwards:
-    ``bash -c 'cd /x'`` leaves the caller where it was, as it does in
-    bash, where the nested shell is a separate process. `source` is the
-    opposite case and deliberately does not snapshot, because a sourced
-    file is the caller.
+    A nested shell is a child shell, so it runs on a subshell of the
+    session and leaves the caller's state alone: ``bash -c 'cd /x'``
+    leaves the caller where it was, as it does in bash, where the nested
+    shell is a separate process. `source` is the opposite case and
+    deliberately runs on the caller's session, because a sourced file is
+    the caller.
 
     Args:
         dispatch (DispatchFn): op dispatcher, used to read a script file.
         execute_fn (Callable): runs the program text in this session.
         args (list[str]): words after the head word.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (ByteSource | None): input stream, also the program source
             when no operand names one.
         name (str): the head word (``bash`` or ``sh``). bash reports
@@ -132,6 +137,7 @@ async def handle_bash(
         job_table (JobTable | None): the caller's jobs, which the nested
             shell starts a table of its own beside.
     """
+    session = context.session
     parsed = parse_bash_args(args)
     if parsed.invalid is not None:
         # GNU words this "invalid option" and follows it with a usage
@@ -162,7 +168,9 @@ async def handle_bash(
             stdin = None
     if script is None:
         return None, IOResult(), ExecutionNode(command=name, exit_code=0)
-    saved = session.snapshot()
+    context = child_context(context)
+    session = context.session
+    child_token = set_current_evaluation(context)
     clear_exit_trap(session)
     session.job_output = JobOutput(session.job_output or session.tty.jobs)
     session.positional_args = positional
@@ -173,6 +181,9 @@ async def handle_bash(
     # A child shell is outside every function and `source` its caller is
     # inside: it runs on a call stack of its own, and `FUNCNAME` is empty.
     session.function_names = ()
+    session._local_vars = None
+    session._local_frames = []
+    session._local_random = []
     for option, enable in parsed.settings:
         session.shell_options[option] = enable
     # A nested shell is a program of its own: the builtins it runs are
@@ -193,7 +204,8 @@ async def handle_bash(
         io = await finish_shell(execute_fn, session, io, stdin)
     finally:
         reset_program_invocation(token)
-        session.restore(saved)
+        session.functions.clear()
+        reset_current_evaluation(child_token)
     label = f"{name} {parsed.path}" if parsed.path else f"{name} -c {script}"
     return io.stdout, io, ExecutionNode(command=label, exit_code=io.exit_code)
 
@@ -209,7 +221,7 @@ async def bash_builtin(call: BuiltinCall) -> Result:
         call.dispatch,
         call.execute_fn,
         list(call.argv.args),
-        call.session,
+        call.context,
         call.stdin,
         str(call.argv.name),
         call.sink,

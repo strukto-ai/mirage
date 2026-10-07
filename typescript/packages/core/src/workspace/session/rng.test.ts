@@ -58,8 +58,9 @@ describe('RANDOM generator', () => {
     // prints the error for 1.5 and then 24386, the second draw of seed 0.
     const s = new SessionState({ sessionId: 's' })
     expect(nextRandom(s, '0')).toBe(20814)
-    await sessionView(s, null).set(RANDOM, '1.5')
-    expect(s.diagnostics).toEqual(['1.5: syntax error: invalid character "."'])
+    const diagnostics: (string | Uint8Array)[] = []
+    await sessionView(s, null, diagnostics).set(RANDOM, '1.5')
+    expect(diagnostics).toEqual(['1.5: syntax error: invalid character "."'])
     expect(nextRandom(s, stored(s))).toBe(24386)
     expect(nextRandom(s, stored(s))).toBe(149)
   })
@@ -100,29 +101,29 @@ describe('RANDOM generator', () => {
     expect(nextRandom(again, '7')).toBe(first)
   })
 
-  it('reseeds in a child shell and hands the parent its state back', () => {
+  it('reseeds in a child shell without advancing the parent', () => {
     const s = new SessionState({ sessionId: 's' })
     const parent = [nextRandom(s, '42'), nextRandom(s, stored(s))]
-    const saved = s.snapshot()
-    const child = nextRandom(s, stored(s))
-    expect(s.randomState).not.toBeNull()
-    s.restore(saved)
+    const child = s.subshell()
+    expect(child.randomSeed).toBe(stored(s))
+    expect(child.randomState).toBeNull()
+    const drawn = nextRandom(child, stored(child))
+    expect(child.randomState).not.toBeNull()
     expect(nextRandom(s, stored(s))).toBe(1435)
     expect(parent).toEqual([17772, 26794])
-    expect(child).not.toBe(1435)
+    expect(drawn !== null && drawn >= 0 && drawn <= RANDOM_MAX).toBe(true)
   })
 
   it('does not replay a pending seed in the child, and keeps unset unset', () => {
     const s = new SessionState({ sessionId: 's' })
     s.vars[RANDOM] = makeVar('42')
-    s.snapshot()
-    expect(s.randomSeed).toBe('42')
-    expect(s.randomState).toBeNull()
+    const child = s.subshell()
+    expect(child.randomSeed).toBe('42')
+    expect(child.randomState).toBeNull()
     const unset = new SessionState({ sessionId: 'u' })
     nextRandom(unset, undefined)
     expect(nextRandom(unset, undefined)).toBeNull()
-    unset.snapshot()
-    expect(nextRandom(unset, undefined)).toBeNull()
+    expect(nextRandom(unset.subshell(), undefined)).toBeNull()
   })
 
   it('unset after a read strips the meaning', () => {

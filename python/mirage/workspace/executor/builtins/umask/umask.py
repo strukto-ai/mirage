@@ -140,4 +140,4 @@ async def umask_builtin(call: BuiltinCall) -> Result:
     Args:
         call (BuiltinCall): the invocation.
     """
-    return await handle_umask(list(call.argv.args), call.session)
+    return await handle_umask(list(call.argv.args), call.context.session)

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { EvaluationContext } from '../evaluation.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { DeviceInput, IOResult } from '../../io/types.ts'
 import { Redirect, RedirectKind } from '../../shell/types.ts'
@@ -57,7 +58,7 @@ describe('handleRedirect > / >>', () => {
       dispatch,
       STUB_NODE,
       redirects,
-      new SessionState({ sessionId: 'test' }),
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(0)
@@ -85,7 +86,7 @@ describe('handleRedirect > / >>', () => {
       dispatch,
       STUB_NODE,
       redirects,
-      new SessionState({ sessionId: 'test' }),
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
     expect(decode(writes[0]?.data ?? null)).toBe('new')
     expect(dispatch.mock.calls.map(([op]) => op)).toEqual(['append'])
@@ -110,7 +111,7 @@ describe('handleRedirect < (stdin)', () => {
       dispatch,
       STUB_NODE,
       redirects,
-      new SessionState({ sessionId: 'test' }),
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
     expect(receivedStdin).not.toBeNull()
     expect(decode(receivedStdin)).toBe('file-contents')
@@ -141,7 +142,7 @@ describe('handleRedirect < from a character device', () => {
       dispatch,
       STUB_NODE,
       redirects,
-      new SessionState({ sessionId: 't' }),
+      new EvaluationContext(new SessionState({ sessionId: 't' })),
     )
     return [received, ops]
   }
@@ -182,7 +183,7 @@ describe('handleRedirect <<< (herestring)', () => {
       dispatch,
       STUB_NODE,
       redirects,
-      new SessionState({ sessionId: 'test' }),
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
     expect(decode(receivedStdin)).toBe('hello world\n')
   })
@@ -211,7 +212,7 @@ describe('handleRedirect 2>&1', () => {
       dispatch,
       STUB_NODE,
       redirects,
-      new SessionState({ sessionId: 'test' }),
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
     expect(decode(writes[0]?.data ?? null)).toBe('out-err-')
   })
@@ -239,7 +240,7 @@ describe('handleRedirect 2>&1', () => {
       dispatch,
       STUB_NODE,
       redirects,
-      new SessionState({ sessionId: 'test' }),
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
     expect(decode(writes[0]?.data ?? null)).toBe('out-')
     expect(decode((stdout as Uint8Array | null) ?? null)).toBe('err-')
@@ -261,7 +262,7 @@ describe('handleRedirect &> (both to file)', () => {
       dispatch,
       STUB_NODE,
       redirects,
-      new SessionState({ sessionId: 'test' }),
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
     expect(writes[0]?.path).toBe('/ram/all.log')
     expect(decode(writes[0]?.data ?? null)).toBe('OUTERR')
@@ -284,7 +285,7 @@ describe('handleRedirect accepts PathSpec targets', () => {
       dispatch,
       STUB_NODE,
       redirects,
-      new SessionState({ sessionId: 'test' }),
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
     expect(decode(writes[0]?.data ?? null)).toBe('ok')
   })
@@ -575,7 +576,7 @@ describe('handleRedirect missing < source', () => {
         dispatch,
         STUB_NODE,
         redirects,
-        new SessionState({ sessionId: 'test' }),
+        new EvaluationContext(new SessionState({ sessionId: 'test' })),
         null,
         null,
       ),
@@ -683,7 +684,7 @@ describe('handleRedirect unwritable > target', () => {
         dispatch,
         STUB_NODE,
         redirects,
-        new SessionState({ sessionId: 'test' }),
+        new EvaluationContext(new SessionState({ sessionId: 'test' })),
       ),
     ).rejects.toThrow('backend exploded')
   })
@@ -702,7 +703,7 @@ describe('handleRedirect unwritable > target', () => {
         dispatch,
         STUB_NODE,
         redirects,
-        new SessionState({ sessionId: 'test' }),
+        new EvaluationContext(new SessionState({ sessionId: 'test' })),
       ),
     ).rejects.toThrow('backend exploded')
   })

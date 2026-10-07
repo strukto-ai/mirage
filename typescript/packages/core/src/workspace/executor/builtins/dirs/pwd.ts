@@ -45,5 +45,5 @@ export function handlePwd(operands: DirArgs, session: SessionState): Result {
 
 /** The `pwd` arm. */
 export function pwdBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(handlePwd([...call.argv.operands], call.session))
+  return Promise.resolve(handlePwd([...call.argv.operands], call.context.session))
 }

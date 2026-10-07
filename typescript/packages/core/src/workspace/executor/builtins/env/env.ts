@@ -176,5 +176,5 @@ export async function handleEnv(
 
 /** The `env` arm. */
 export async function envBuiltin(call: BuiltinCall): Promise<Result> {
-  return handleEnv(call.executeFn, [...call.argv.args], call.session, call.stdin)
+  return handleEnv(call.executeFn, [...call.argv.args], call.context.session, call.stdin)
 }

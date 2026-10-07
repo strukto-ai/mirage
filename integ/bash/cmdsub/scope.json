@@ -33,6 +33,176 @@
         "stdout": "child\nparent\nparent\n0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "child_unset_keeps_current_local_hidden",
+      "seq": 940086,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=global; f() { local x=local; (unset x; echo \"${x-unset}\"); v=$(unset x; echo \"${x-unset}\"); echo \"$v:$x\"; }; f; echo \"$x\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "unset\nunset:local\nglobal\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "child_inherits_saved_scope_without_call_environment",
+      "seq": 940087,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=global; f() { (export x; unset x; echo \"${x-unset}\"); echo \"$x\"; }; x=temp f; echo \"$x\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "global\ntemp\nglobal\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "child_pipeline_stage_keeps_function_locals",
+      "seq": 1346051,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( f() { echo x | { local y=1; echo \"y=$y\"; }; }; f )",
+      "expect": {
+        "exit": 0,
+        "stdout": "y=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "child_background_job_keeps_function_locals",
+      "seq": 1346052,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( f() { { local y=2; echo \"y=$y\"; } & wait; }; f )",
+      "expect": {
+        "exit": 0,
+        "stdout": "y=2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "child_nested_bash_runs_outside_functions",
+      "seq": 1346053,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( unset y; f() { bash -c 'local y=2; echo \"y=$y\"'; }; f )",
+      "expect": {
+        "exit": 0,
+        "stdout": "y=\n",
+        "stderr": "bash: local: can only be used in a function\n"
+      }
     }
   ]
 }

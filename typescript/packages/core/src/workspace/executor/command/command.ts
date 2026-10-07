@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EvaluationContext } from '../../evaluation.ts'
 import { registeredSpec } from '../../../commands/spec/builtins.ts'
 import { spreadOperands } from '../../../commands/spec/flag_view.ts'
 import { SPECS } from '../../../commands/spec/index.ts'
@@ -125,7 +126,7 @@ async function finishFind(
   io: IOResult,
   texts: readonly string[],
   registry: MountRegistry,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn | undefined,
   ns: NamespaceView | undefined,
   statPath: StatPath,
@@ -134,6 +135,7 @@ async function finishFind(
   starts: readonly PathSpec[],
   signal: AbortSignal | undefined,
 ): Promise<ByteSource | null> {
+  const session = context.session
   const [newStdout, actionErr, actionExit] = await applyFindActions(
     stdout,
     io.matchedRuns,
@@ -146,7 +148,10 @@ async function finishFind(
       ns: ns ?? null,
       statPath,
       dispatch,
-      identity: identityFrom(ns, sessionView(session, registry.policies)),
+      identity: identityFrom(
+        ns,
+        sessionView(session, registry.policies, context.frame.diagnostics),
+      ),
       stdin,
       starts,
       ...(signal !== undefined ? { signal } : {}),
@@ -171,7 +176,7 @@ export async function handleCommand(
   dispatch: DispatchFn,
   registry: MountRegistry,
   parts: readonly (string | PathSpec)[],
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,
@@ -185,6 +190,7 @@ export async function handleCommand(
   // Where a function body writes its statements as they finish.
   sink?: JobConsole,
 ): Promise<Result> {
+  const session = context.session
   if (parts.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
   }
@@ -214,8 +220,8 @@ export async function handleCommand(
         jobTable,
         textParts,
         session,
-        sessionView(session, registry.policies),
-        mergeSignals(signal, session.abortSignal),
+        sessionView(session, registry.policies, context.frame.diagnostics),
+        mergeSignals(signal, context.frame.abortSignal),
         // `fg` is the one job builtin that writes before it blocks.
         sink,
       )
@@ -229,7 +235,7 @@ export async function handleCommand(
       cmdName,
       funcBody as unknown[],
       parts.slice(1),
-      session,
+      context,
       stdin,
       callStack,
       jobTable,
@@ -249,7 +255,7 @@ export async function handleCommand(
   // leaf and a command handler see one plane alike.
   const cliInstall = registry.clis.get(cmdName)
   if (cliInstall !== null) {
-    const cliSignal = mergeSignals(signal, session.abortSignal)
+    const cliSignal = mergeSignals(signal, context.frame.abortSignal)
     // A leaf that waits on its service keeps running; the caller's abort
     // releases the invocation, as it does for `wait`.
     return abortable(
@@ -275,14 +281,14 @@ export async function handleCommand(
           dispatch,
           statPath: (path) => pathStat(dispatch, path, null),
           ns: namespaceViewOf(registry, namespace ?? null, dispatch, session),
-          sessionView: sessionView(session, registry.policies),
+          sessionView: sessionView(session, registry.policies, context.frame.diagnostics),
           ...(registry.processView === undefined
             ? {}
             : { processes: registry.processView(session) }),
         },
         dropsMountCaches(cliInstall.spec) ? () => dropMountCaches(registry) : null,
       ),
-      mergeSignals(signal, session.abortSignal),
+      mergeSignals(signal, context.frame.abortSignal),
     )
   }
 
@@ -509,7 +515,7 @@ export async function handleCommand(
     const runCtx: RunOnMountCtx = {
       ...(signal !== undefined ? { signal } : {}),
       registry,
-      session,
+      context,
       dispatch,
       ...(namespace !== undefined ? { namespace } : {}),
       ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
@@ -528,8 +534,8 @@ export async function handleCommand(
       registry,
       session.cwd,
       csNs,
-      sessionView(session, registry.policies),
-      mergeSignals(signal, session.abortSignal),
+      sessionView(session, registry.policies, context.frame.diagnostics),
+      mergeSignals(signal, context.frame.abortSignal),
       dispatch,
     )
     const [csStdout0, csIo] = await handleCrossMount(
@@ -542,7 +548,7 @@ export async function handleCommand(
       stdin,
       makeStorageKey(registry),
       csNs,
-      sessionView(session, registry.policies),
+      sessionView(session, registry.policies, context.frame.diagnostics),
       session.cwd,
       spelledWords(parts.slice(1)),
       aggregateFor(cmdName, csScopes, registry),
@@ -559,14 +565,14 @@ export async function handleCommand(
         csIo,
         csTexts,
         registry,
-        session,
+        context,
         executeFn,
         csNs,
         csStat,
         dispatch,
         stdin,
         csScopes,
-        mergeSignals(signal, session.abortSignal),
+        mergeSignals(signal, context.frame.abortSignal),
       )
       csExec.exitCode = csIo.exitCode
       csExec.stderr = await materialize(csIo.stderr)
@@ -697,14 +703,14 @@ export async function handleCommand(
       cmdStr,
       stdin,
       singleNs,
-      sessionView(session, registry.policies),
-      mergeSignals(signal, session.abortSignal),
+      sessionView(session, registry.policies, context.frame.diagnostics),
+      mergeSignals(signal, context.frame.abortSignal),
       dispatch,
       (name, ps, ts, fk, opts) =>
         runOnMount(
           {
             registry,
-            session,
+            context,
             dispatch,
             ...(namespace !== undefined ? { namespace } : {}),
             ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
@@ -726,14 +732,14 @@ export async function handleCommand(
         fanIo,
         texts,
         registry,
-        session,
+        context,
         executeFn,
         singleNs,
         singleStat,
         dispatch,
         stdin,
         paths,
-        mergeSignals(signal, session.abortSignal),
+        mergeSignals(signal, context.frame.abortSignal),
       )
       fanNode.exitCode = fanIo.exitCode
       fanNode.stderr = await materialize(fanIo.stderr)
@@ -749,7 +755,7 @@ export async function handleCommand(
   const runCtx: RunOnMountCtx = {
     ...(signal !== undefined ? { signal } : {}),
     registry,
-    session,
+    context,
     dispatch,
     ...(namespace !== undefined ? { namespace } : {}),
     ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
@@ -769,14 +775,14 @@ export async function handleCommand(
       io,
       texts,
       registry,
-      session,
+      context,
       executeFn,
       singleNs,
       singleStat,
       dispatch,
       stdin,
       paths,
-      mergeSignals(signal, session.abortSignal),
+      mergeSignals(signal, context.frame.abortSignal),
     )
   }
   if (warnBytes !== null) {

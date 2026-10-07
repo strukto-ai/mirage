@@ -101,6 +101,74 @@
         "stdout": "rc=1\nrestored\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "cmd_function_redefines_its_active_body",
+      "seq": 940096,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "f() { f() { echo new; }; echo old; }; f; f; unset -f f",
+      "expect": {
+        "exit": 0,
+        "stdout": "old\nnew\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cmd_functions_survive_eval_and_source_readers",
+      "seq": 940097,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "eval 'f() { echo eval; }'; f; printf 'f() { echo source; }\\n' > '{mount}/owned-function'; . '{mount}/owned-function'; rm '{mount}/owned-function'; f; unset -f f",
+      "expect": {
+        "exit": 0,
+        "stdout": "eval\nsource\n",
+        "stderr": ""
+      }
     }
   ]
 }

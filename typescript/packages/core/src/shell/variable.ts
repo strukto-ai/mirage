@@ -150,6 +150,13 @@ export function varKind(v: ShellVar): VarKind {
   return VarKind.Scalar
 }
 
+/** Copy a variable and its mutable array value for a child shell. */
+export function copyVar(v: ShellVar): ShellVar {
+  if (Array.isArray(v.value)) return withValue(v, [...v.value])
+  if (v.value !== null && typeof v.value === 'object') return withValue(v, { ...v.value })
+  return v
+}
+
 /** The variable with a new value and the same attributes. */
 export function withValue(v: ShellVar, value: ShellValue | null): ShellVar {
   return { ...v, value }

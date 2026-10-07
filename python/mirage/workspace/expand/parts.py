@@ -24,6 +24,7 @@ from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import mark_escaped_globs
 from mirage.utils.path import expand_tilde
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.expand.brace import (
     expand_template,
     make_inert,
@@ -39,13 +40,12 @@ from mirage.workspace.expand.node import expand_chunks
 from mirage.workspace.expand.types import Chunk
 from mirage.workspace.expand.variable import ifs_value
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.session import SessionState
 from mirage.workspace.session.shell_dirs import home_dir
 
 
 async def _expand_brace_word(
     node: TSNodeLike,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     view: SessionView | None = None,
@@ -68,10 +68,11 @@ async def _expand_brace_word(
 
     Args:
         node (TSNodeLike): concatenation or brace_expression.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
     """
+    session = context.session
     pieces: list[str] = []
     atoms: list[TSNodeLike] = []
     for child in node.children:
@@ -84,7 +85,7 @@ async def _expand_brace_word(
     if words is None:
         return None
     values = [
-        await expand_chunks(atom, session, execute_fn, call_stack, view=view)
+        await expand_chunks(atom, context, execute_fn, call_stack, view=view)
         for atom in atoms
     ]
     home = home_dir(session)
@@ -99,7 +100,7 @@ async def _expand_brace_word(
 
 async def expand_words(
     parts: list[Any],
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
     view: SessionView | None = None,
@@ -115,10 +116,11 @@ async def expand_words(
 
     Args:
         parts (list[Any]): the word nodes to expand.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
     """
+    session = context.session
     ifs = ifs_value(session, call_stack)
     result: list[str] = []
     for p in parts:
@@ -129,14 +131,14 @@ async def expand_words(
             "braceexpand", SET_OPTION_DEFAULTS["braceexpand"]
         ):
             brace_words = await _expand_brace_word(
-                p, session, execute_fn, call_stack, view=view
+                p, context, execute_fn, call_stack, view=view
             )
             if brace_words is not None:
                 for chunks in brace_words:
                     result.extend(split_fields(chunks, ifs))
                 continue
         chunks = await expand_chunks(
-            p, session, execute_fn, call_stack, view=view
+            p, context, execute_fn, call_stack, view=view
         )
         result.extend(split_fields(chunks, ifs))
     return result
@@ -144,7 +146,7 @@ async def expand_words(
 
 async def expand_and_classify(
     words: list[Any],
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
     cwd: str,
@@ -160,6 +162,6 @@ async def expand_and_classify(
     like bash, while `for f in '/data/*'?.txt` still globs on the `?`.
     """
     expanded = await expand_words(
-        words, session, execute_fn, call_stack, view=view
+        words, context, execute_fn, call_stack, view=view
     )
     return [classify_word(w, registry, cwd) for w in expanded]

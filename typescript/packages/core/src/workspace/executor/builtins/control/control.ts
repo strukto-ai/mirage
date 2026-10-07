@@ -174,20 +174,30 @@ export function falseBuiltin(_call: BuiltinCall): Promise<Result> {
 
 /** The `return` arm. */
 export function returnBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(handleReturn([...call.argv.args], call.session, call.callStack))
+  return Promise.resolve(handleReturn([...call.argv.args], call.context.session, call.callStack))
 }
 
 /** The `exit` arm. */
 export function exitBuiltin(call: BuiltinCall): Promise<Result> {
-  return handleExit([...call.argv.args], call.session, call.executeFn, call.stdin, call.callStack)
+  return handleExit(
+    [...call.argv.args],
+    call.context.session,
+    call.executeFn,
+    call.stdin,
+    call.callStack,
+  )
 }
 
 /** The `break` arm: unwinds the enclosing loops by throwing. */
 export function breakBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(leaveLoops('break', [...call.argv.args], call.session, call.callStack))
+  return Promise.resolve(
+    leaveLoops('break', [...call.argv.args], call.context.session, call.callStack),
+  )
 }
 
 /** The `continue` arm: unwinds to the next iteration by throwing. */
 export function continueBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(leaveLoops('continue', [...call.argv.args], call.session, call.callStack))
+  return Promise.resolve(
+    leaveLoops('continue', [...call.argv.args], call.context.session, call.callStack),
+  )
 }

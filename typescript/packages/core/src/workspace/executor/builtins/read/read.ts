@@ -384,9 +384,9 @@ async function readStore(
 export async function readBuiltin(call: BuiltinCall): Promise<Result> {
   return handleRead(
     [...call.argv.args],
-    call.session,
+    call.context.session,
     call.stdin,
-    sessionView(call.session, call.registry.policies),
+    sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
     call.signal,
   )
 }

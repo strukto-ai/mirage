@@ -318,6 +318,10 @@ async def printf_builtin(call: BuiltinCall) -> Result:
     """
     return await handle_printf(
         list(call.argv.args),
-        call.session,
-        session_view(call.session, call.namespace.registry.policies),
+        call.context.session,
+        session_view(
+            call.context.session,
+            call.namespace.registry.policies,
+            diagnostics=call.context.frame.diagnostics,
+        ),
     )

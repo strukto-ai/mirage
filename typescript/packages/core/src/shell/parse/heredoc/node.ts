@@ -12,14 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { WrappedNode } from '../engine.ts'
 import type { ShellNode } from '../../types.ts'
 import type { Heredoc, HeredocSource } from './types.ts'
 
-export class HeredocNode implements ShellNode {
+export class HeredocNode implements WrappedNode {
   constructor(
     private readonly node: ShellNode,
     private readonly source: HeredocSource,
   ) {}
+  get inner(): ShellNode {
+    return this.node
+  }
   get childCount(): number {
     return this.node.childCount
   }

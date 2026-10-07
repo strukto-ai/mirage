@@ -4,6 +4,7 @@ import pytest
 
 from mirage.io import IOResult
 from mirage.io.stream import materialize
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.xargs import handle_xargs
 from mirage.workspace.session import (
     get_current_session,
@@ -76,7 +77,7 @@ def warned(option: str, offending: str) -> bytes:
 async def test_batches_one_arg_per_run_with_n1():
     shell = FakeShell()
     _, io, _ = await handle_xargs(
-        shell, ["-n1", "echo"], make_session(), b"a b c"
+        shell, ["-n1", "echo"], EvaluationContext(make_session()), b"a b c"
     )
     assert shell.lines == ["echo a", "echo b", "echo c"]
     assert io.exit_code == 0
@@ -85,7 +86,9 @@ async def test_batches_one_arg_per_run_with_n1():
 @pytest.mark.asyncio
 async def test_single_run_without_n():
     shell = FakeShell()
-    _, io, _ = await handle_xargs(shell, ["echo"], make_session(), b"a b c")
+    _, io, _ = await handle_xargs(
+        shell, ["echo"], EvaluationContext(make_session()), b"a b c"
+    )
     assert shell.lines == ["echo a b c"]
     assert io.exit_code == 0
 
@@ -93,7 +96,9 @@ async def test_single_run_without_n():
 @pytest.mark.asyncio
 async def test_failing_invocation_exits_123_but_continues():
     shell = FakeShell(exit_codes=[1, 0])
-    _, io, _ = await handle_xargs(shell, ["-n1", "wc"], make_session(), b"a b")
+    _, io, _ = await handle_xargs(
+        shell, ["-n1", "wc"], EvaluationContext(make_session()), b"a b"
+    )
     assert shell.lines == ["wc a", "wc b"]
     assert io.exit_code == 123
 
@@ -101,7 +106,9 @@ async def test_failing_invocation_exits_123_but_continues():
 @pytest.mark.asyncio
 async def test_exit_255_stops_with_124():
     shell = FakeShell(exit_codes=[255, 0])
-    _, io, _ = await handle_xargs(shell, ["-n1", "sh"], make_session(), b"a b")
+    _, io, _ = await handle_xargs(
+        shell, ["-n1", "sh"], EvaluationContext(make_session()), b"a b"
+    )
     assert shell.lines == ["sh a"]
     assert io.exit_code == 124
     assert (
@@ -113,7 +120,9 @@ async def test_exit_255_stops_with_124():
 @pytest.mark.asyncio
 async def test_command_exit_127_is_an_ordinary_failure():
     shell = FakeShell(exit_codes=[127, 0])
-    _, io, _ = await handle_xargs(shell, ["-n1", "sh"], make_session(), b"a b")
+    _, io, _ = await handle_xargs(
+        shell, ["-n1", "sh"], EvaluationContext(make_session()), b"a b"
+    )
     assert shell.lines == ["sh a", "sh b"]
     assert io.exit_code == 123
 
@@ -122,7 +131,7 @@ async def test_command_exit_127_is_an_ordinary_failure():
 async def test_no_run_if_empty():
     shell = FakeShell()
     _, io, _ = await handle_xargs(
-        shell, ["-r", "echo", "hi"], make_session(), b""
+        shell, ["-r", "echo", "hi"], EvaluationContext(make_session()), b""
     )
     assert shell.lines == []
     assert io.exit_code == 0
@@ -131,7 +140,9 @@ async def test_no_run_if_empty():
 @pytest.mark.asyncio
 async def test_empty_input_without_r_runs_once():
     shell = FakeShell()
-    _, io, _ = await handle_xargs(shell, ["echo", "hi"], make_session(), b"")
+    _, io, _ = await handle_xargs(
+        shell, ["echo", "hi"], EvaluationContext(make_session()), b""
+    )
     assert shell.lines == ["echo hi"]
     assert io.exit_code == 0
 
@@ -139,28 +150,36 @@ async def test_empty_input_without_r_runs_once():
 @pytest.mark.asyncio
 async def test_null_delimited_input():
     shell = FakeShell()
-    await handle_xargs(shell, ["-0", "echo"], make_session(), b"a b\0c\0")
+    await handle_xargs(
+        shell, ["-0", "echo"], EvaluationContext(make_session()), b"a b\0c\0"
+    )
     assert shell.lines == ["echo 'a b' c"]
 
 
 @pytest.mark.asyncio
 async def test_a_raw_byte_reaches_the_command_as_itself():
     shell = FakeShell()
-    await handle_xargs(shell, ["printf", "%s"], make_session(), b"a\xffb\n")
+    await handle_xargs(
+        shell, ["printf", "%s"], EvaluationContext(make_session()), b"a\xffb\n"
+    )
     assert shell.lines == ["printf %s 'a'$'\\xff''b'"]
 
 
 @pytest.mark.asyncio
 async def test_custom_delimiter():
     shell = FakeShell()
-    await handle_xargs(shell, ["-d,", "echo"], make_session(), b"a,b,c")
+    await handle_xargs(
+        shell, ["-d,", "echo"], EvaluationContext(make_session()), b"a,b,c"
+    )
     assert shell.lines == ["echo a b c"]
 
 
 @pytest.mark.asyncio
 async def test_invalid_option_exits_1():
     shell = FakeShell()
-    _, io, _ = await handle_xargs(shell, ["-q", "echo"], make_session(), b"x")
+    _, io, _ = await handle_xargs(
+        shell, ["-q", "echo"], EvaluationContext(make_session()), b"x"
+    )
     assert io.exit_code == 1
     assert await materialize(io.stderr) == (
         b"xargs: invalid option -- 'q'\n" + TRY
@@ -180,7 +199,9 @@ async def test_invalid_option_exits_1():
 )
 async def test_option_refusals_carry_the_help_hint(args, message):
     shell = FakeShell()
-    _, io, _ = await handle_xargs(shell, args, make_session(), b"x")
+    _, io, _ = await handle_xargs(
+        shell, args, EvaluationContext(make_session()), b"x"
+    )
     assert io.exit_code == 1
     assert await materialize(io.stderr) == message + TRY
     assert shell.lines == []
@@ -210,7 +231,9 @@ async def test_option_refusals_carry_the_help_hint(args, message):
 )
 async def test_long_option_refusals_as_getopt_long_words_them(args, message):
     shell = FakeShell()
-    _, io, _ = await handle_xargs(shell, args, make_session(), b"x")
+    _, io, _ = await handle_xargs(
+        shell, args, EvaluationContext(make_session()), b"x"
+    )
     assert io.exit_code == 1
     assert await materialize(io.stderr) == message + TRY
     assert shell.lines == []
@@ -230,7 +253,9 @@ async def test_long_option_refusals_as_getopt_long_words_them(args, message):
 )
 async def test_abbreviated_long_options_resolve(args, lines):
     shell = FakeShell()
-    _, io, _ = await handle_xargs(shell, args, make_session(), b"a b\n")
+    _, io, _ = await handle_xargs(
+        shell, args, EvaluationContext(make_session()), b"a b\n"
+    )
     assert shell.lines == lines
     assert io.exit_code == 0
 
@@ -332,7 +357,9 @@ async def test_abbreviated_long_options_resolve(args, lines):
 )
 async def test_gnu_options(args, data, lines, stderr):
     shell = FakeShell()
-    _, io, _ = await handle_xargs(shell, args, make_session(), data)
+    _, io, _ = await handle_xargs(
+        shell, args, EvaluationContext(make_session()), data
+    )
     assert shell.lines == lines
     assert await materialize(io.stderr) == stderr
 
@@ -341,7 +368,7 @@ async def test_gnu_options(args, data, lines, stderr):
 async def test_open_tty_fails_without_a_terminal():
     shell = FakeShell()
     _, io, _ = await handle_xargs(
-        shell, ["-o", "echo"], make_session(), b"a\n"
+        shell, ["-o", "echo"], EvaluationContext(make_session()), b"a\n"
     )
     assert shell.lines == []
     assert io.exit_code == 125
@@ -360,7 +387,10 @@ async def test_show_limits_counts_the_environment():
     )
     shell = FakeShell()
     _, io, _ = await handle_xargs(
-        shell, ["--show-limits", "-s", "100", "echo"], session, b"a\n"
+        shell,
+        ["--show-limits", "-s", "100", "echo"],
+        EvaluationContext(session),
+        b"a\n",
     )
     upper = 2097152 - 2048 - size
     assert (await materialize(io.stderr)).decode() == (
@@ -388,7 +418,10 @@ async def test_process_slot_var_numbers_each_command():
 
     session = make_session()
     await handle_xargs(
-        execute, ["--process-slot-var=SLOT", "-n1", "sh"], session, b"a b\n"
+        execute,
+        ["--process-slot-var=SLOT", "-n1", "sh"],
+        EvaluationContext(session),
+        b"a b\n",
     )
     assert seen == ["sh a:0", "sh b:0"]
     assert "SLOT" not in session.env
@@ -407,7 +440,9 @@ async def test_process_slot_var_numbers_each_command():
 )
 async def test_help_prints_the_page_where_it_stands(args):
     shell = FakeShell()
-    out, io, _ = await handle_xargs(shell, args, make_session(), b"x")
+    out, io, _ = await handle_xargs(
+        shell, args, EvaluationContext(make_session()), b"x"
+    )
     page = (await materialize(out)).decode()
     assert page.startswith(
         "xargs: Build and run command lines from standard input.\n\n"
@@ -421,11 +456,13 @@ async def test_help_prints_the_page_where_it_stands(args):
 @pytest.mark.asyncio
 async def test_version_and_an_earlier_refusal():
     shell = FakeShell()
-    out, io, _ = await handle_xargs(shell, ["--version"], make_session(), b"x")
+    out, io, _ = await handle_xargs(
+        shell, ["--version"], EvaluationContext(make_session()), b"x"
+    )
     assert (await materialize(out)).startswith(b"xargs (Mirage) ")
     assert io.exit_code == 0
     _, io, _ = await handle_xargs(
-        shell, ["-n0", "--help"], make_session(), b"x"
+        shell, ["-n0", "--help"], EvaluationContext(make_session()), b"x"
     )
     assert io.exit_code == 1
     assert await materialize(io.stderr) == (
@@ -437,7 +474,9 @@ async def test_version_and_an_earlier_refusal():
 @pytest.mark.asyncio
 async def test_n_zero_rejected():
     shell = FakeShell()
-    _, io, _ = await handle_xargs(shell, ["-n0", "echo"], make_session(), b"x")
+    _, io, _ = await handle_xargs(
+        shell, ["-n0", "echo"], EvaluationContext(make_session()), b"x"
+    )
     assert io.exit_code == 1
     assert (await materialize(io.stderr)) == (
         b"xargs: value 0 for -n option should be >= 1\n" + TRY
@@ -447,7 +486,12 @@ async def test_n_zero_rejected():
 @pytest.mark.asyncio
 async def test_input_words_stay_single_tokens():
     shell = FakeShell()
-    await handle_xargs(shell, ["echo"], make_session(), b"don\\'t $(reboot)")
+    await handle_xargs(
+        shell,
+        ["echo"],
+        EvaluationContext(make_session()),
+        b"don\\'t $(reboot)",
+    )
     assert shell.lines == ["echo 'don'\"'\"'t' '$(reboot)'"]
 
 
@@ -455,7 +499,10 @@ async def test_input_words_stay_single_tokens():
 async def test_quotes_and_backslashes_are_removed():
     shell = FakeShell()
     await handle_xargs(
-        shell, ["-n1", "echo"], make_session(), b'"a b" \'c  d\' e\\ f ""\n'
+        shell,
+        ["-n1", "echo"],
+        EvaluationContext(make_session()),
+        b'"a b" \'c  d\' e\\ f ""\n',
     )
     assert shell.lines == [
         "echo 'a b'",
@@ -469,7 +516,7 @@ async def test_quotes_and_backslashes_are_removed():
 async def test_unmatched_quote_runs_the_words_read_then_exits_1():
     shell = FakeShell()
     _, io, _ = await handle_xargs(
-        shell, ["echo"], make_session(), b"a b\nc 'd\n"
+        shell, ["echo"], EvaluationContext(make_session()), b"a b\nc 'd\n"
     )
     assert shell.lines == ["echo a b c"]
     assert io.exit_code == 1
@@ -482,7 +529,9 @@ async def test_unmatched_quote_runs_the_words_read_then_exits_1():
 @pytest.mark.asyncio
 async def test_null_input_keeps_empty_items():
     shell = FakeShell()
-    await handle_xargs(shell, ["-0", "echo"], make_session(), b"a\0\0b\0")
+    await handle_xargs(
+        shell, ["-0", "echo"], EvaluationContext(make_session()), b"a\0\0b\0"
+    )
     assert shell.lines == ["echo a '' b"]
 
 
@@ -492,7 +541,9 @@ async def test_null_input_keeps_empty_items():
 )
 async def test_replace_runs_once_per_line(args):
     shell = FakeShell()
-    _, io, _ = await handle_xargs(shell, args, make_session(), b"a\nb\n")
+    _, io, _ = await handle_xargs(
+        shell, args, EvaluationContext(make_session()), b"a\nb\n"
+    )
     assert shell.lines == ["echo xay", "echo xby"]
     assert io.exit_code == 0
 
@@ -503,7 +554,7 @@ async def test_replace_takes_the_whole_line():
     await handle_xargs(
         shell,
         ["-I{}", "echo", "[{}]"],
-        make_session(),
+        EvaluationContext(make_session()),
         b'one two\n  three  \n\n   \n"a b" c\n',
     )
     assert shell.lines == [
@@ -517,7 +568,10 @@ async def test_replace_takes_the_whole_line():
 async def test_replace_substitutes_every_occurrence_but_not_the_name():
     shell = FakeShell()
     await handle_xargs(
-        shell, ["-I%", "%", "%", "%-%", "x%%y"], make_session(), b"a\n"
+        shell,
+        ["-I%", "%", "%", "%-%", "x%%y"],
+        EvaluationContext(make_session()),
+        b"a\n",
     )
     assert shell.lines == ["% a a-a xaay"]
 
@@ -526,7 +580,10 @@ async def test_replace_substitutes_every_occurrence_but_not_the_name():
 async def test_replace_inserts_the_line_verbatim():
     shell = FakeShell()
     await handle_xargs(
-        shell, ["-I{}", "echo", "<{}>"], make_session(), b"$&\\'x\n"
+        shell,
+        ["-I{}", "echo", "<{}>"],
+        EvaluationContext(make_session()),
+        b"$&\\'x\n",
     )
     assert shell.lines == ["echo '<$&'\"'\"'x>'"]
 
@@ -535,7 +592,7 @@ async def test_replace_inserts_the_line_verbatim():
 async def test_replace_on_empty_input_runs_nothing():
     shell = FakeShell()
     _, io, _ = await handle_xargs(
-        shell, ["-I{}", "echo", "{}"], make_session(), b""
+        shell, ["-I{}", "echo", "{}"], EvaluationContext(make_session()), b""
     )
     assert shell.lines == []
     assert io.exit_code == 0
@@ -545,10 +602,16 @@ async def test_replace_on_empty_input_runs_nothing():
 async def test_replace_with_null_and_delimiter_items():
     shell = FakeShell()
     await handle_xargs(
-        shell, ["-0", "-I{}", "echo", "[{}]"], make_session(), b"a b\0\0c\0"
+        shell,
+        ["-0", "-I{}", "echo", "[{}]"],
+        EvaluationContext(make_session()),
+        b"a b\0\0c\0",
     )
     await handle_xargs(
-        shell, ["-d,", "-I{}", "echo", "[{}]"], make_session(), b"a,b"
+        shell,
+        ["-d,", "-I{}", "echo", "[{}]"],
+        EvaluationContext(make_session()),
+        b"a,b",
     )
     assert shell.lines == [
         "echo '[a b]'",
@@ -563,13 +626,19 @@ async def test_replace_with_null_and_delimiter_items():
 async def test_replace_failure_exits_123_and_missing_command_stops():
     shell = FakeShell(exit_codes=[1, 0])
     _, io, _ = await handle_xargs(
-        shell, ["-I{}", "test", "{}"], make_session(), b"a\nb\n"
+        shell,
+        ["-I{}", "test", "{}"],
+        EvaluationContext(make_session()),
+        b"a\nb\n",
     )
     assert shell.lines == ["test a", "test b"]
     assert io.exit_code == 123
     shell = FakeShell(exit_codes=[255, 0])
     _, io, _ = await handle_xargs(
-        shell, ["-I{}", "sh", "{}"], make_session(), b"a\nb\n"
+        shell,
+        ["-I{}", "sh", "{}"],
+        EvaluationContext(make_session()),
+        b"a\nb\n",
     )
     assert shell.lines == ["sh a"]
     assert io.exit_code == 124
@@ -579,7 +648,10 @@ async def test_replace_failure_exits_123_and_missing_command_stops():
 async def test_replace_unmatched_quote_after_earlier_lines():
     shell = FakeShell()
     _, io, _ = await handle_xargs(
-        shell, ["-I{}", "echo", "{}"], make_session(), b"a\nb 'c\n"
+        shell,
+        ["-I{}", "echo", "{}"],
+        EvaluationContext(make_session()),
+        b"a\nb 'c\n",
     )
     assert shell.lines == ["echo a"]
     assert io.exit_code == 1
@@ -589,7 +661,10 @@ async def test_replace_unmatched_quote_after_earlier_lines():
 async def test_empty_replace_string_is_command_too_long():
     shell = FakeShell()
     _, io, _ = await handle_xargs(
-        shell, ["-I", "", "echo", "x"], make_session(), b"a\n"
+        shell,
+        ["-I", "", "echo", "x"],
+        EvaluationContext(make_session()),
+        b"a\n",
     )
     assert shell.lines == []
     assert io.exit_code == 1
@@ -612,7 +687,9 @@ async def test_empty_replace_string_is_command_too_long():
 )
 async def test_max_lines_batches_input_lines(args, data, lines):
     shell = FakeShell()
-    _, io, _ = await handle_xargs(shell, args, make_session(), data)
+    _, io, _ = await handle_xargs(
+        shell, args, EvaluationContext(make_session()), data
+    )
     assert shell.lines == lines
     assert io.exit_code == 0
 
@@ -621,7 +698,10 @@ async def test_max_lines_batches_input_lines(args, data, lines):
 async def test_max_lines_unmatched_quote_drops_the_partial_line():
     shell = FakeShell()
     _, io, _ = await handle_xargs(
-        shell, ["-L1", "echo"], make_session(), b"a b\nc 'd\n"
+        shell,
+        ["-L1", "echo"],
+        EvaluationContext(make_session()),
+        b"a b\nc 'd\n",
     )
     assert shell.lines == ["echo a b"]
     assert io.exit_code == 1
@@ -649,7 +729,7 @@ async def test_max_lines_unmatched_quote_drops_the_partial_line():
 async def test_counts_are_refused_with_the_help_hint(args, message):
     shell = FakeShell()
     _, io, _ = await handle_xargs(
-        shell, [*args, "echo"], make_session(), b"a\n"
+        shell, [*args, "echo"], EvaluationContext(make_session()), b"a\n"
     )
     assert io.exit_code == 1
     assert await materialize(io.stderr) == message + TRY
@@ -676,7 +756,9 @@ async def test_counts_are_refused_with_the_help_hint(args, message):
 )
 async def test_optional_value_replace_and_max_lines(args, lines):
     shell = FakeShell()
-    _, io, _ = await handle_xargs(shell, args, make_session(), b"a\nb\n")
+    _, io, _ = await handle_xargs(
+        shell, args, EvaluationContext(make_session()), b"a\nb\n"
+    )
     assert shell.lines == lines
     assert io.exit_code == 0
 
@@ -685,7 +767,10 @@ async def test_optional_value_replace_and_max_lines(args, lines):
 async def test_max_procs_runs_side_by_side_in_input_order():
     shell = SlowShell(delays={"echo a": 0.05})
     out, io, _ = await handle_xargs(
-        shell, ["-P2", "-n1", "echo"], make_session(), b"a b c d"
+        shell,
+        ["-P2", "-n1", "echo"],
+        EvaluationContext(make_session()),
+        b"a b c d",
     )
     assert shell.lines == ["echo a", "echo b", "echo c", "echo d"]
     assert shell.peak == 2
@@ -695,11 +780,16 @@ async def test_max_procs_runs_side_by_side_in_input_order():
     assert io.exit_code == 0
     shell = SlowShell()
     await handle_xargs(
-        shell, ["-P0", "-n1", "echo"], make_session(), b"a b c d"
+        shell,
+        ["-P0", "-n1", "echo"],
+        EvaluationContext(make_session()),
+        b"a b c d",
     )
     assert shell.peak == 4
     shell = SlowShell()
-    await handle_xargs(shell, ["-n1", "echo"], make_session(), b"a b c d")
+    await handle_xargs(
+        shell, ["-n1", "echo"], EvaluationContext(make_session()), b"a b c d"
+    )
     assert shell.peak == 1
 
 
@@ -707,13 +797,19 @@ async def test_max_procs_runs_side_by_side_in_input_order():
 async def test_max_procs_starts_nothing_after_a_command_aborts():
     shell = SlowShell(delays={"nope b": 0.05}, exit_codes={"nope a": 255})
     _, io, _ = await handle_xargs(
-        shell, ["-P2", "-n1", "nope"], make_session(), b"a b c d"
+        shell,
+        ["-P2", "-n1", "nope"],
+        EvaluationContext(make_session()),
+        b"a b c d",
     )
     assert shell.lines == ["nope a", "nope b"]
     assert io.exit_code == 124
     shell = SlowShell(exit_codes={"nope c": 1})
     _, io, _ = await handle_xargs(
-        shell, ["-P3", "-n1", "nope"], make_session(), b"a b c d"
+        shell,
+        ["-P3", "-n1", "nope"],
+        EvaluationContext(make_session()),
+        b"a b c d",
     )
     assert io.exit_code == 123
 
@@ -779,7 +875,9 @@ async def test_replace_max_lines_and_max_args_cancel_in_order(
     args, lines, warnings
 ):
     shell = FakeShell()
-    _, io, _ = await handle_xargs(shell, args, make_session(), b"a b\nc\n")
+    _, io, _ = await handle_xargs(
+        shell, args, EvaluationContext(make_session()), b"a b\nc\n"
+    )
     assert shell.lines == lines
     stderr = await materialize(io.stderr) or b""
     assert stderr == b"".join(warned(o, off) for o, off in warnings)
@@ -798,7 +896,7 @@ async def test_invalid_occurrence_rejected_before_reading_input(args):
         yield b"a\n"
 
     _, io, _ = await handle_xargs(
-        shell, [*args, "echo"], make_session(), source()
+        shell, [*args, "echo"], EvaluationContext(make_session()), source()
     )
     assert io.exit_code == 1
     assert reads == []
@@ -830,7 +928,10 @@ async def test_parallel_mode_forks_even_a_single_invocation(procs, data):
     token = set_current_session(parent)
     try:
         out, io, _ = await handle_xargs(
-            execute, [f"-P{procs}", "-n1", "echo"], parent, data
+            execute,
+            [f"-P{procs}", "-n1", "echo"],
+            EvaluationContext(parent),
+            data,
         )
         assert get_current_session() is parent
         words = data.decode().split()
@@ -862,7 +963,9 @@ async def test_parallel_mode_restores_parent_after_single_invocation_raises():
     token = set_current_session(parent)
     try:
         with pytest.raises(RuntimeError, match="command failed"):
-            await handle_xargs(execute, ["-P2", "echo"], parent, b"a")
+            await handle_xargs(
+                execute, ["-P2", "echo"], EvaluationContext(parent), b"a"
+            )
         assert get_current_session() is parent
         assert parent.env["X"] == "outer"
     finally:

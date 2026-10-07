@@ -26,6 +26,7 @@ from mirage.shell.errors import ReturnSignal
 from mirage.shell.job_table import JobTable
 from mirage.types import MountMode, PathSpec
 from mirage.workspace.cli.registry import CLIRegistry
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.execute_node import execute_node as _execute_node
 from mirage.workspace.session import SessionState
@@ -129,7 +130,13 @@ async def _aexec(cmd, session=None, dispatch=None, registry=None, env=None):
     node = parse(cmd)
 
     stdout, io, exec_node = await execute_node(
-        dispatch, reg, job_table, execute_fn, "agent-1", node, session
+        dispatch,
+        reg,
+        job_table,
+        execute_fn,
+        "agent-1",
+        node,
+        EvaluationContext(session),
     )
     stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
     return stdout, io, exec_node, session, mount, dispatch
@@ -488,7 +495,13 @@ def test_unsupported_node_raises():
 
     stdout, io, _ = _run(
         execute_node(
-            dispatch, reg, job_table, execute_fn, "agent-1", fake_node, session
+            dispatch,
+            reg,
+            job_table,
+            execute_fn,
+            "agent-1",
+            fake_node,
+            EvaluationContext(session),
         )
     )
     assert stdout is None
@@ -518,7 +531,7 @@ def test_read_from_bytes():
             execute_fn,
             "agent-1",
             node,
-            session,
+            EvaluationContext(session),
             stdin=b"hello world\n",
         )
     )
@@ -568,7 +581,7 @@ def test_return_raises_inside_function_frame():
                 execute_fn,
                 "agent-1",
                 node,
-                session,
+                EvaluationContext(session),
                 None,
                 cs,
             )
@@ -588,7 +601,13 @@ def test_return_top_level_fails_and_continues():
 
     _, io, _ = _run(
         execute_node(
-            dispatch, reg, job_table, execute_fn, "agent-1", node, session
+            dispatch,
+            reg,
+            job_table,
+            execute_fn,
+            "agent-1",
+            node,
+            EvaluationContext(session),
         )
     )
     assert io.exit_code == 2
@@ -610,7 +629,13 @@ def test_break_outside_loop_absorbed():
 
     _, io, _ = _run(
         execute_node(
-            dispatch, reg, job_table, execute_fn, "agent-1", node, session
+            dispatch,
+            reg,
+            job_table,
+            execute_fn,
+            "agent-1",
+            node,
+            EvaluationContext(session),
         )
     )
     assert io.exit_code == 0
@@ -626,7 +651,13 @@ def test_continue_outside_loop_absorbed():
 
     _, io, _ = _run(
         execute_node(
-            dispatch, reg, job_table, execute_fn, "agent-1", node, session
+            dispatch,
+            reg,
+            job_table,
+            execute_fn,
+            "agent-1",
+            node,
+            EvaluationContext(session),
         )
     )
     assert io.exit_code == 0
@@ -645,7 +676,13 @@ def test_eval():
 
     _, io, _ = _run(
         execute_node(
-            dispatch, reg, job_table, execute_fn, "agent-1", node, session
+            dispatch,
+            reg,
+            job_table,
+            execute_fn,
+            "agent-1",
+            node,
+            EvaluationContext(session),
         )
     )
     execute_fn.assert_called_once()
@@ -665,7 +702,13 @@ def test_source():
 
     _, io, _ = _run(
         execute_node(
-            dispatch, reg, job_table, execute_fn, "agent-1", node, session
+            dispatch,
+            reg,
+            job_table,
+            execute_fn,
+            "agent-1",
+            node,
+            EvaluationContext(session),
         )
     )
     execute_fn.assert_called_once()
@@ -1348,7 +1391,15 @@ def test_source_var_expansion():
     session = _session(env={"SCRIPT": "/data/init.sh"})
     node = parse("source $SCRIPT")
     _run(
-        execute_node(dispatch, reg, job_table, execute_fn, "a", node, session)
+        execute_node(
+            dispatch,
+            reg,
+            job_table,
+            execute_fn,
+            "a",
+            node,
+            EvaluationContext(session),
+        )
     )
     read_calls = [c for c in dispatch.call_args_list if c[0][0] == "read"]
     assert len(read_calls) > 0
@@ -1504,7 +1555,15 @@ def test_for_cmd_sub_expanded():
     node = parse("for f in $(listcmd); do export LAST=$f; done")
 
     _run(
-        execute_node(dispatch, reg, job_table, execute_fn, "a", node, session)
+        execute_node(
+            dispatch,
+            reg,
+            job_table,
+            execute_fn,
+            "a",
+            node,
+            EvaluationContext(session),
+        )
     )
     # $(listcmd) output split on \n → 3 iterations
     assert session.env["LAST"] == "gamma"
@@ -1606,7 +1665,15 @@ def test_cmd_cmd_sub_as_arg():
     node = parse("cat $(echo /data/file.txt)")
 
     _run(
-        execute_node(dispatch, reg, job_table, execute_fn, "a", node, session)
+        execute_node(
+            dispatch,
+            reg,
+            job_table,
+            execute_fn,
+            "a",
+            node,
+            EvaluationContext(session),
+        )
     )
     scopes = mount.execute_cmd.call_args[0][1]
     assert len(scopes) == 1
@@ -1643,7 +1710,15 @@ def test_assign_cmd_sub():
     node = parse("VAR=$(echo result_value)")
 
     _run(
-        execute_node(dispatch, reg, job_table, execute_fn, "a", node, session)
+        execute_node(
+            dispatch,
+            reg,
+            job_table,
+            execute_fn,
+            "a",
+            node,
+            EvaluationContext(session),
+        )
     )
     assert session.env["VAR"] == "result_value"
 
@@ -1688,7 +1763,15 @@ def test_redirect_cmd_sub_target():
     node = parse("echo x > $(echo /data/out.txt)")
 
     _run(
-        execute_node(dispatch, reg, job_table, execute_fn, "a", node, session)
+        execute_node(
+            dispatch,
+            reg,
+            job_table,
+            execute_fn,
+            "a",
+            node,
+            EvaluationContext(session),
+        )
     )
     write_calls = _data_writes(dispatch)
     assert len(write_calls) == 1
@@ -1899,7 +1982,7 @@ def test_read_from_bytes_stdin():
             execute_fn,
             "a",
             node,
-            session,
+            EvaluationContext(session),
             stdin=b"hello world\n",
         )
     )
@@ -1925,7 +2008,7 @@ def test_read_from_async_iterator_stdin():
             execute_fn,
             "a",
             node,
-            session,
+            EvaluationContext(session),
             stdin=stdin_stream,
         )
     )
@@ -1950,7 +2033,7 @@ def test_read_from_none_stdin():
             execute_fn,
             "a",
             node,
-            session,
+            EvaluationContext(session),
             stdin=None,
         )
     )
@@ -1975,7 +2058,7 @@ def test_read_multivar_from_bytes():
             execute_fn,
             "a",
             node,
-            session,
+            EvaluationContext(session),
             stdin=b"x y z",
         )
     )
@@ -2002,7 +2085,7 @@ def test_read_multivar_from_stream():
             execute_fn,
             "a",
             node,
-            session,
+            EvaluationContext(session),
             stdin=stdin_stream,
         )
     )
@@ -2027,7 +2110,7 @@ def test_read_multiline_takes_first():
             execute_fn,
             "a",
             node,
-            session,
+            EvaluationContext(session),
             stdin=b"line1\nline2\nline3",
         )
     )
@@ -2053,7 +2136,15 @@ def test_redirect_stdin_from_file():
     node = parse("sort < /data/input.txt")
 
     stdout, io, _ = _run(
-        execute_node(dispatch, reg, job_table, execute_fn, "a", node, session)
+        execute_node(
+            dispatch,
+            reg,
+            job_table,
+            execute_fn,
+            "a",
+            node,
+            EvaluationContext(session),
+        )
     )
     read_calls = [c for c in dispatch.call_args_list if c[0][0] == "read"]
     assert len(read_calls) == 1
@@ -2084,7 +2175,7 @@ def _exec_with_stdin(cmd, stdin, env=None):
             execute_fn,
             "a",
             node,
-            session,
+            EvaluationContext(session),
             stdin=stdin,
         )
         stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
@@ -2277,7 +2368,7 @@ def test_redirect_stdin_with_async_iterator():
             execute_fn,
             "a",
             node,
-            session,
+            EvaluationContext(session),
             stdin=_stream(),
         )
     )
@@ -2384,7 +2475,7 @@ def test_buffer_reset_after_loop():
             execute_fn,
             "a",
             node,
-            session,
+            EvaluationContext(session),
             stdin=b"inner\n",
         )
     )

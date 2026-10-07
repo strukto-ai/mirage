@@ -68,6 +68,12 @@ from mirage.shell.parse.names import literal_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import PipelineStages, Redirect, RedirectKind
 from mirage.types import PathSpec
+from mirage.workspace.evaluation import (
+    EvaluationContext,
+    child_context,
+    reset_current_evaluation,
+    set_current_evaluation,
+)
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins import handle_test, handle_unset
 from mirage.workspace.executor.builtins.exec import install_exec_redirects
@@ -117,11 +123,6 @@ from mirage.workspace.node.test_expr import (
     expand_test_expr,
 )
 from mirage.workspace.node.timing import timing_report
-from mirage.workspace.session import (
-    SessionState,
-    reset_current_session,
-    set_current_session,
-)
 from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.state import (
     ensure_var_visible,
@@ -136,7 +137,7 @@ from mirage.workspace.types import ExecutionNode
 async def _eval_cfor_expr(
     exprs: list[Any],
     default: int,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     view: SessionView | None = None,
@@ -148,8 +149,8 @@ async def _eval_cfor_expr(
             per comma-separated expression; empty for an empty slot.
         default (int): value an empty slot yields (1 for the condition
             so `for ((;;))` loops, 0 for init/update).
-        session (SessionState): shell session; arithmetic assignments land
-            in its env.
+        context (EvaluationContext): the evaluation; arithmetic assignments
+            land in its session's env.
         execute_fn (Callable): recursive execute for substitutions.
         call_stack (CallStack | None): function-call scope, if any.
         view (SessionView | None): the session plane's gated door the
@@ -163,6 +164,7 @@ async def _eval_cfor_expr(
             does.
         PolicyDenied: a pre_session rule refused one of the writes.
     """
+    session = context.session
     if not exprs:
         return default
     # One comma expression, evaluated once, so an assignment early in
@@ -170,7 +172,7 @@ async def _eval_cfor_expr(
     text = ", ".join(
         [
             await expand_arith(
-                expr, session, execute_fn, call_stack, view=view
+                expr, context, execute_fn, call_stack, view=view
             )
             for expr in exprs
         ]
@@ -236,7 +238,7 @@ async def _recurse_reassociated(
     processes: ProcessSupervisor | None,
     right: Any,
     node: Any,
-    session: SessionState,
+    context: EvaluationContext,
     stdin: Any = None,
     call_stack: CallStack | None = None,
     sink: JobConsole | None = None,
@@ -259,16 +261,19 @@ async def _recurse_reassociated(
             managed processes.
         right (Any): the list's right operand.
         node (Any): node being executed by handle_connection.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
     """
+    session = context.session
     if node is not right:
-        return await recurse(node, session, stdin, call_stack, sink=sink)
+        return await recurse(node, context, stdin, call_stack, sink=sink)
     # The session plane's door, bound once for the line: every
     # expansion-time write (`${X:=d}`, `$((X=5))`) lands through it,
     # so a pre_session rule governs those exactly as it governs `X=d`.
-    view = session_view(session, registry.policies)
+    view = session_view(
+        session, registry.policies, diagnostics=context.frame.diagnostics
+    )
     return await _run_redirected(
         recurse,
         dispatch,
@@ -278,7 +283,7 @@ async def _recurse_reassociated(
         right,
         redirects,
         processes,
-        session,
+        context,
         stdin,
         call_stack,
     )
@@ -293,7 +298,7 @@ async def _recurse_lifted(
     processes: ProcessSupervisor | None,
     right: Any,
     node: Any,
-    session: SessionState,
+    context: EvaluationContext,
     stdin: Any = None,
     call_stack: CallStack | None = None,
     sink: JobConsole | None = None,
@@ -312,19 +317,19 @@ async def _recurse_lifted(
             managed processes.
         right (Any): the list's right operand.
         node (Any): node being executed by handle_connection.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
     """
     if node is not right:
-        return await recurse(node, session, stdin, call_stack, sink=sink)
+        return await recurse(node, context, stdin, call_stack, sink=sink)
     return await _run_pipeline(
         recurse,
         dispatch,
         execute_fn,
         registry,
         stages,
-        session,
+        context,
         stdin,
         call_stack,
         processes,
@@ -340,7 +345,7 @@ async def _recurse_stage(
     targets: list[Any],
     processes: ProcessSupervisor | None,
     node: Any,
-    session: SessionState,
+    context: EvaluationContext,
     stdin: Any = None,
     call_stack: CallStack | None = None,
     *,
@@ -363,11 +368,12 @@ async def _recurse_stage(
         processes (ProcessSupervisor | None): where the stages run as
             managed processes.
         node (Any): the stage handle_pipe asks for.
-        session (SessionState): the stage's session.
+        context (EvaluationContext): the stage's session.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
         sink (JobConsole | None): the stage's pipe console.
     """
+    session = context.session
     for command, hoisted in zip(stages.commands, stages.redirects):
         if command is not node or not hoisted:
             continue
@@ -376,7 +382,9 @@ async def _recurse_stage(
             bound.append(
                 Redirect(fd=2, target=1, kind=RedirectKind.STDERR_TO_STDOUT)
             )
-        view = session_view(session, registry.policies)
+        view = session_view(
+            session, registry.policies, diagnostics=context.frame.diagnostics
+        )
         return await _run_redirected(
             recurse,
             dispatch,
@@ -386,7 +394,7 @@ async def _recurse_stage(
             node,
             bound,
             processes,
-            session,
+            context,
             stdin,
             call_stack,
         )
@@ -397,7 +405,7 @@ async def _recurse_stage(
         registry,
         targets,
         node,
-        session,
+        context,
         stdin,
         call_stack,
         sink=sink,
@@ -410,7 +418,7 @@ async def _run_pipeline(
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
     stages: PipelineStages,
-    session: SessionState,
+    context: EvaluationContext,
     stdin: Any,
     call_stack: CallStack | None,
     processes: ProcessSupervisor | None = None,
@@ -428,12 +436,13 @@ async def _run_pipeline(
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry.
         stages (PipelineStages): the pipeline's stages.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
         processes (ProcessSupervisor | None): where the stages run as
             managed processes.
     """
+    session = context.session
     if stages.lead is not None:
         left, op, right = stages.lead
         wrapped = partial(
@@ -447,7 +456,7 @@ async def _run_pipeline(
             right,
         )
         return await handle_connection(
-            wrapped, left, op, right, session, stdin, call_stack
+            wrapped, left, op, right, context, stdin, call_stack
         )
     commands = list(stages.commands)
     stderr_flags = list(stages.stderr_flags)
@@ -470,7 +479,7 @@ async def _run_pipeline(
         pipe_recurse,
         commands,
         stderr_flags,
-        session,
+        context,
         stdin,
         call_stack,
         processes,
@@ -497,7 +506,7 @@ async def _recurse_pipe_stderr(
     registry: MountRegistry,
     targets: list[Any],
     node: Any,
-    session: SessionState,
+    context: EvaluationContext,
     stdin: Any = None,
     call_stack: CallStack | None = None,
     *,
@@ -506,22 +515,25 @@ async def _recurse_pipe_stderr(
     # The session plane's door, bound once for the line: every
     # expansion-time write (`${X:=d}`, `$((X=5))`) lands through it,
     # so a pre_session rule governs those exactly as it governs `X=d`.
-    view = session_view(session, registry.policies)
+    session = context.session
+    view = session_view(
+        session, registry.policies, diagnostics=context.frame.diagnostics
+    )
     if node not in targets or node_kind(node) != NodeKind.REDIRECT:
-        return await recurse(node, session, stdin, call_stack, sink=sink)
+        return await recurse(node, context, stdin, call_stack, sink=sink)
     command, redirects = get_redirects(node)
     redirects.append(
         Redirect(fd=2, target=1, kind=RedirectKind.STDERR_TO_STDOUT)
     )
     expanded, pipe_node = await expand_redirects(
-        redirects, session, execute_fn, registry, call_stack, view=view
+        redirects, context, execute_fn, registry, call_stack, view=view
     )
     stdout, io, exec_node = await handle_redirect(
-        recurse, dispatch, command, expanded, session, stdin, call_stack
+        recurse, dispatch, command, expanded, context, stdin, call_stack
     )
     if pipe_node is not None and stdout is not None:
         stdout, io2, exec_node2 = await recurse(
-            pipe_node, session, stdout, call_stack
+            pipe_node, context, stdout, call_stack
         )
         io = await io.merge(io2)
         exec_node = exec_node2
@@ -532,7 +544,7 @@ async def _negated(
     stdout: Any,
     io: IOResult,
     exec_node: ExecutionNode,
-    session: SessionState,
+    context: EvaluationContext,
     inner: Any,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """What ``!`` makes of the statement it wraps once that has run.
@@ -541,9 +553,10 @@ async def _negated(
         stdout (Any): the wrapped statement's stdout.
         io (IOResult): its result, the status still its own.
         exec_node (ExecutionNode): its record.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         inner (Any): the wrapped statement's node.
     """
+    session = context.session
     # Lazy exit codes (exit_on_empty in grep) must be final before
     # inverting, or `! grep miss f` negates the provisional 0.
     stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
@@ -575,7 +588,7 @@ async def _run_redirected(
     command: Any,
     redirects: list[Redirect],
     processes: ProcessSupervisor | None,
-    session: SessionState,
+    context: EvaluationContext,
     stdin: Any,
     call_stack: CallStack | None,
     *,
@@ -601,16 +614,17 @@ async def _run_redirected(
         redirects (list[Redirect]): the statement's parsed redirects.
         processes (ProcessSupervisor | None): where the stages run as
             managed processes.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
         sink (JobConsole | None): where the redirect writes what it
             routes as it goes, None to return it.
     """
+    session = context.session
     if command is not None and command.type == NT.FUNCTION_DEFINITION:
         # The redirects belong to the function, applied at each call
         # (get_function_body), not to the definition.
-        return await recurse(command, session, stdin, call_stack)
+        return await recurse(command, context, stdin, call_stack)
     if command is not None and command.type == NT.LIST:
         # tree-sitter hoists a trailing redirect over the whole
         # &&/|| list; bash binds it to the last command:
@@ -632,7 +646,7 @@ async def _run_redirected(
             right,
         )
         return await handle_connection(
-            wrapped, left, op, right, session, stdin, call_stack
+            wrapped, left, op, right, context, stdin, call_stack
         )
     if command is not None and command.type == NT.PIPELINE:
         return await _run_pipeline(
@@ -641,7 +655,7 @@ async def _run_redirected(
             execute_fn,
             registry,
             get_pipeline_stages(command, redirects),
-            session,
+            context,
             stdin,
             call_stack,
             processes,
@@ -660,20 +674,20 @@ async def _run_redirected(
             inner,
             redirects,
             processes,
-            session,
+            context,
             stdin,
             call_stack,
             sink=sink,
         )
-        return await _negated(stdout, io, exec_node, session, inner)
+        return await _negated(stdout, io, exec_node, context, inner)
     expanded_redirects, pipe_node = await expand_redirects(
         redirects,
-        session,
+        context,
         execute_fn,
         registry,
         call_stack,
         view=view,
-        forked=_forks(command, session),
+        forked=_forks(command, context),
     )
     # `exec > file` with no command installs the redirects on the
     # shell for every later statement, rather than applying them to
@@ -687,34 +701,38 @@ async def _run_redirected(
     # returned rather than written. A simple command expands its words
     # before its redirects apply, so what that printed (a substitution's
     # stderr) goes around them; a compound body expands inside them.
-    simple = command is not None and command.type == NT.COMMAND
-    outer = session._diagnostics
+    simple = command is not None and command.type in (
+        NT.COMMAND,
+        NT.VARIABLE_ASSIGNMENT,
+        NT.VARIABLE_ASSIGNMENTS,
+    )
+    outer = context.frame.diagnostics
     if simple:
-        session._diagnostics = []
+        context.frame.diagnostics = []
     try:
         stdout, io, exec_node = await handle_redirect(
             partial(recurse, own_diagnostics=False) if simple else recurse,
             dispatch,
             command,
             expanded_redirects,
-            session,
+            context,
             stdin,
             call_stack,
             sink=sink if pipe_node is None else None,
         )
-        if simple and session._diagnostics:
-            err = _diagnostic_stderr(command, session)
+        if simple and context.frame.diagnostics:
+            err = _diagnostic_stderr(command, context)
             io.stderr = err + await io.materialize_stderr()
             exec_node.stderr = err + (exec_node.stderr or b"")
     except ExitSignal as exc:
         if simple:
-            exc.stderr = _diagnostic_stderr(command, session) + exc.stderr
+            exc.stderr = _diagnostic_stderr(command, context) + exc.stderr
         raise
     finally:
-        session._diagnostics = outer
+        context.frame.diagnostics = outer
     if pipe_node is not None and stdout is not None:
         stdout, io2, exec_node2 = await recurse(
-            pipe_node, session, stdout, call_stack
+            pipe_node, context, stdout, call_stack
         )
         io = await io.merge(io2)
         exec_node = exec_node2
@@ -726,7 +744,7 @@ async def _run_continuation(
     run_left: Callable[..., Any],
     left: Any,
     steps: tuple[tuple[str, Any], ...],
-    session: SessionState,
+    context: EvaluationContext,
     stdin: Any,
     call_stack: CallStack | None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
@@ -749,18 +767,18 @@ async def _run_continuation(
             left side in ``handle_connection``.
         steps (tuple[tuple[str, Any], ...]): the ``(operator, right)``
             steps, in order.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
     """
     if not steps:
-        return await run_left(session, stdin, call_stack)
+        return await run_left(context, stdin, call_stack)
     op, right = steps[-1]
     wrapped = partial(
         _recurse_continuation, recurse, run_left, left, steps[:-1]
     )
     return await handle_connection(
-        wrapped, left, op, right, session, stdin, call_stack
+        wrapped, left, op, right, context, stdin, call_stack
     )
 
 
@@ -770,7 +788,7 @@ async def _recurse_continuation(
     left: Any,
     steps: tuple[tuple[str, Any], ...],
     node: Any,
-    session: SessionState,
+    context: EvaluationContext,
     stdin: Any = None,
     call_stack: CallStack | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
@@ -784,15 +802,15 @@ async def _recurse_continuation(
         steps (tuple[tuple[str, Any], ...]): the steps before the
             current one.
         node (Any): the node ``handle_connection`` asks for.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
     """
     if node is left:
         return await _run_continuation(
-            recurse, run_left, left, steps, session, stdin, call_stack
+            recurse, run_left, left, steps, context, stdin, call_stack
         )
-    return await recurse(node, session, stdin, call_stack)
+    return await recurse(node, context, stdin, call_stack)
 
 
 def _is_bare_exec(command: Any) -> bool:
@@ -816,7 +834,7 @@ def _is_bare_exec(command: Any) -> bool:
     )
 
 
-def _forks(command: Any, session: SessionState) -> bool:
+def _forks(command: Any, context: EvaluationContext) -> bool:
     """Whether bash forks to run a redirected command, so its redirects
     expand in the child and an error there fails that command alone: a
     subshell or a program. A builtin, a function or another compound
@@ -827,8 +845,9 @@ def _forks(command: Any, session: SessionState) -> bool:
 
     Args:
         command (Any): the command under the redirect, None for none.
-        session (SessionState): whose functions a name may call.
+        context (EvaluationContext): whose functions a name may call.
     """
+    session = context.session
     if command is None or command.type != NT.COMMAND:
         return command is not None and command.type == NT.SUBSHELL
     words = [
@@ -865,7 +884,7 @@ async def execute_node(
     execute_fn: Callable[..., Any],
     agent_id: str,
     node: Any,
-    session: SessionState,
+    context: EvaluationContext,
     stdin: Any = None,
     call_stack: CallStack | None = None,
     cancel: asyncio.Event | None = None,
@@ -876,6 +895,7 @@ async def execute_node(
     ends_shell: bool = False,
     own_diagnostics: bool = True,
 ) -> tuple[Any, IOResult, ExecutionNode]:
+    session = context.session
     execution_scope = execution_scope or ExecutionScope()
     # The node is the whole of a child shell (a background job), which
     # runs its EXIT action when the node ends, its evaluator bound the
@@ -899,7 +919,7 @@ async def execute_node(
                 execute_fn,
                 agent_id,
                 node,
-                session,
+                context,
                 stdin,
                 call_stack,
                 cancel,
@@ -922,7 +942,7 @@ async def execute_node(
             execute_fn,
             agent_id,
             node,
-            session,
+            context,
             stdin,
             call_stack,
             cancel,
@@ -931,8 +951,8 @@ async def execute_node(
             handed,
             execution_scope,
         )
-    outer = session._diagnostics
-    session._diagnostics = []
+    outer = context.frame.diagnostics
+    context.frame.diagnostics = []
     try:
         stdout, io, exec_node = await _execute_node(
             dispatch,
@@ -942,7 +962,7 @@ async def execute_node(
             execute_fn,
             agent_id,
             node,
-            session,
+            context,
             stdin,
             call_stack,
             cancel,
@@ -951,20 +971,20 @@ async def execute_node(
             handed,
             execution_scope,
         )
-        if session._diagnostics:
-            err = _diagnostic_stderr(node, session)
+        if context.frame.diagnostics:
+            err = _diagnostic_stderr(node, context)
             io.stderr = err + await io.materialize_stderr()
             exec_node.stderr = err + (exec_node.stderr or b"")
         return stdout, io, exec_node
     except ExitSignal as exc:
-        exc.stderr = _diagnostic_stderr(node, session) + exc.stderr
+        exc.stderr = _diagnostic_stderr(node, context) + exc.stderr
         raise
     finally:
-        session._diagnostics = outer
+        context.frame.diagnostics = outer
 
 
-def _diagnostic_stderr(node: Any, session: SessionState) -> bytes:
-    if not session._diagnostics:
+def _diagnostic_stderr(node: Any, context: EvaluationContext) -> bytes:
+    if not context.frame.diagnostics:
         return b""
     head = get_text(node).split(None, 1)[0]
     builtin = (
@@ -978,7 +998,7 @@ def _diagnostic_stderr(node: Any, session: SessionState) -> bytes:
         message
         if isinstance(message, bytes)
         else encode_text(prefix + message + "\n")
-        for message in session._diagnostics
+        for message in context.frame.diagnostics
     )
 
 
@@ -990,7 +1010,7 @@ async def _execute_node(
     execute_fn: Callable[..., Any],
     agent_id: str,
     node: Any,
-    session: SessionState,
+    context: EvaluationContext,
     stdin: Any = None,
     call_stack: CallStack | None = None,
     cancel: asyncio.Event | None = None,
@@ -1009,7 +1029,7 @@ async def _execute_node(
         execute_fn (Callable): recursive execute (for source/eval).
         agent_id (str): current agent ID for jobs.
         node (Any): tree-sitter node to execute.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack): shell call stack.
         cancel (asyncio.Event | None): event used to abort mid-flight.
@@ -1024,10 +1044,13 @@ async def _execute_node(
             what capture sites (command substitution, pipe stages,
             redirects) rely on.
     """
+    session = context.session
     # The session plane's door, bound once for the line: every
     # expansion-time write (`${X:=d}`, `$((X=5))`) lands through it,
     # so a pre_session rule governs those exactly as it governs `X=d`.
-    view = session_view(session, registry.policies)
+    view = session_view(
+        session, registry.policies, diagnostics=context.frame.diagnostics
+    )
     # `set -n` reads without executing, and it stops *everything* after
     # it, at every depth: GNU answers `if true; then set -n; echo BAD;
     # fi` and `f(){ set -n; echo BAD; }; f` with nothing at all. Stated
@@ -1096,16 +1119,22 @@ async def _execute_node(
     if (
         sink is not None
         and kind not in STREAMING_KINDS
-        and kind not in (NodeKind.COMMAND, NodeKind.REDIRECT)
+        and kind
+        not in (
+            NodeKind.COMMAND,
+            NodeKind.REDIRECT,
+            NodeKind.VAR_ASSIGN,
+            NodeKind.VAR_ASSIGNS,
+        )
     ):
-        return await drained(sink, *await recurse(node, session, stdin, cs))
+        return await drained(sink, *await recurse(node, context, stdin, cs))
 
     stream = partial(recurse, sink=sink) if sink is not None else recurse
 
     if kind == NodeKind.TIMED:
         started = time.monotonic()
         inner = node.named_children[0]
-        stdout, io, exec_node = await stream(inner, session, stdin, cs)
+        stdout, io, exec_node = await stream(inner, context, stdin, cs)
         stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
         elapsed = time.monotonic() - started
         report = b"".join(
@@ -1125,7 +1154,7 @@ async def _execute_node(
         return await execute_program(
             recurse,
             node,
-            session,
+            context,
             stdin,
             cs,
             job_table,
@@ -1148,7 +1177,7 @@ async def _execute_node(
                 namespace,
                 execute_fn,
                 node,
-                session,
+                context,
                 stdin,
                 cs,
                 job_table,
@@ -1172,7 +1201,7 @@ async def _execute_node(
             execute_fn,
             registry,
             get_pipeline_stages(node),
-            session,
+            context,
             stdin,
             cs,
             job_table.processes if job_table is not None else None,
@@ -1182,7 +1211,7 @@ async def _execute_node(
     if kind == NodeKind.LIST:
         left, op, right = get_list_parts(node)
         return await handle_connection(
-            stream, left, op, right, session, stdin, cs
+            stream, left, op, right, context, stdin, cs
         )
 
     # ── redirected statement ────────────────────
@@ -1206,10 +1235,10 @@ async def _execute_node(
             sink=sink,
         )
         if not continuation:
-            result = await run_left(session, stdin, cs)
+            result = await run_left(context, stdin, cs)
         else:
             result = await _run_continuation(
-                recurse, run_left, node, continuation, session, stdin, cs
+                recurse, run_left, node, continuation, context, stdin, cs
             )
         return result if sink is None else await drained(sink, *result)
 
@@ -1232,20 +1261,20 @@ async def _execute_node(
             routing_decision=routing_decision,
             handed=handed,
         )
-        child_session = session.fork()
+        child = child_context(context)
         as_program = program_invocation(session)
         results: list[tuple[ByteSource | None, IOResult, ExecutionNode]] = []
 
         async def run_subshell() -> int:
-            token = set_current_session(child_session)
+            token = set_current_evaluation(child)
             program_token = (
-                set_program_invocation(child_session) if as_program else None
+                set_program_invocation(child.session) if as_program else None
             )
             try:
                 result = await handle_subshell(
                     sub_recurse,
                     list(node.children),
-                    child_session,
+                    child,
                     stdin,
                     cs,
                     sub_table,
@@ -1259,7 +1288,7 @@ async def _execute_node(
                 results.append(result)
                 return result[1].exit_code
             finally:
-                reset_current_session(token)
+                reset_current_evaluation(token)
                 if program_token is not None:
                     reset_program_invocation(program_token)
 
@@ -1273,10 +1302,14 @@ async def _execute_node(
                 limit=session.processes.max,
             )
         except BlockingIOError as exc:
+            child.session.functions.clear()
             raise ExitSignal(FORK_FAILED_STATUS, stderr=FORK_FAILED) from exc
-        child_session.process_id = process.info.pid
-        await process.task
-        return results[0]
+        child.session.process_id = process.info.pid
+        try:
+            await process.task
+            return results[0]
+        finally:
+            child.session.functions.clear()
 
     # ── arithmetic command ((( ... ))) ──────────
     if (
@@ -1285,7 +1318,7 @@ async def _execute_node(
         and node.children[0].type == NT.ARITH_OPEN
     ):
         text = get_text(node)
-        expr = await expand_arith(node, session, execute_fn, cs, view=view)
+        expr = await expand_arith(node, context, execute_fn, cs, view=view)
         reader = random_reader(session)
         error: ArithError | None = None
         value = 0
@@ -1363,7 +1396,7 @@ async def _execute_node(
                 stdout, io, last_exec = await run_statement(
                     stream,
                     child,
-                    session,
+                    context,
                     stdin,
                     bound,
                     cs,
@@ -1398,7 +1431,7 @@ async def _execute_node(
             stream,
             branches,
             else_body,
-            session,
+            context,
             stdin,
             cs,
             job_table=job_table,
@@ -1412,7 +1445,7 @@ async def _execute_node(
         exprs, body = get_cfor_parts(node)
         eval_expr = partial(
             _eval_cfor_expr,
-            session=session,
+            context=context,
             execute_fn=execute_fn,
             call_stack=cs,
             view=view,
@@ -1423,7 +1456,7 @@ async def _execute_node(
                 exprs,
                 body,
                 eval_expr,
-                session,
+                context,
                 stdin,
                 cs,
                 job_table=job_table,
@@ -1445,7 +1478,7 @@ async def _execute_node(
         async with command_scope():
             classified = await expand_and_classify(
                 values,
-                session,
+                context,
                 execute_fn,
                 registry,
                 session.cwd,
@@ -1468,7 +1501,7 @@ async def _execute_node(
                     var,
                     classified,
                     body,
-                    session,
+                    context,
                     stdin,
                     cs,
                     policies=namespace.registry.policies,
@@ -1484,7 +1517,7 @@ async def _execute_node(
                 var,
                 classified,
                 body,
-                session,
+                context,
                 stdin,
                 cs,
                 policies=namespace.registry.policies,
@@ -1503,7 +1536,7 @@ async def _execute_node(
                     stream,
                     condition,
                     body,
-                    session,
+                    context,
                     stdin,
                     cs,
                     job_table=job_table,
@@ -1516,7 +1549,7 @@ async def _execute_node(
                 stream,
                 condition,
                 body,
-                session,
+                context,
                 stdin,
                 cs,
                 job_table=job_table,
@@ -1528,11 +1561,11 @@ async def _execute_node(
     # ── case ────────────────────────────────────
     if kind == NodeKind.CASE:
         word_node = get_case_word(node)
-        word = await expand_node(word_node, session, execute_fn, cs, view=view)
+        word = await expand_node(word_node, context, execute_fn, cs, view=view)
         case_items = []
         for pattern_nodes, body, terminator in get_case_items(node):
             patterns = [
-                await expand_pattern(p, session, execute_fn, cs, view=view)
+                await expand_pattern(p, context, execute_fn, cs, view=view)
                 for p in pattern_nodes
             ]
             case_items.append((patterns, body, terminator))
@@ -1540,7 +1573,7 @@ async def _execute_node(
             stream,
             word,
             case_items,
-            session,
+            context,
             stdin,
             cs,
             job_table=job_table,
@@ -1576,14 +1609,20 @@ async def _execute_node(
     if kind == NodeKind.DECLARATION:
         async with command_scope():
             return await execute_declaration(
-                node, session, execute_fn, registry, namespace, cs, view
+                node, context, execute_fn, registry, namespace, cs, view
             )
 
     # ── unset ───────────────────────────────────
     if kind == NodeKind.UNSET:
         args = get_unset_args(node)
         return await handle_unset(
-            args, session, session_view(session, namespace.registry.policies)
+            args,
+            session,
+            session_view(
+                session,
+                namespace.registry.policies,
+                diagnostics=context.frame.diagnostics,
+            ),
         )
 
     # ── test ([ ] or [[ ]]) ─────────────────────
@@ -1591,13 +1630,13 @@ async def _execute_node(
         opener = node.children[0].type if node.children else "["
         if opener == "[[":
             tree = await expand_double_bracket(
-                node, session, execute_fn, cs, view=view
+                node, context, execute_fn, cs, view=view
             )
             return await handle_test(
                 dispatch, namespace, tree, session, name="[[", view=view
             )
         test_argv = await expand_test_expr(
-            node, session, execute_fn, cs, view=view
+            node, context, execute_fn, cs, view=view
         )
         return await handle_test(
             dispatch, namespace, test_argv, session, name="[", view=view
@@ -1606,27 +1645,29 @@ async def _execute_node(
     # ── negated command ─────────────────────────
     if kind == NodeKind.NEGATED:
         inner = get_negated_command(node)
-        stdout, io, exec_node = await stream(inner, session, stdin, cs)
-        return await _negated(stdout, io, exec_node, session, inner)
+        stdout, io, exec_node = await stream(inner, context, stdin, cs)
+        return await _negated(stdout, io, exec_node, context, inner)
 
     # ── variable assignment at top level ────────
     if kind == NodeKind.VAR_ASSIGN:
         return await execute_assignment(
-            node, session, execute_fn, registry, namespace, cs
+            node, context, execute_fn, registry, namespace, cs
         )
 
     # ── assignment-only statement (a=1 b=2) ─────
     if kind == NodeKind.VAR_ASSIGNS:
-        sub_seq = session._cmdsub_seq
+        sub_seq = context.frame.cmdsub_seq
         merged_io = IOResult()
         for child in node.named_children:
             if child.type != NT.VARIABLE_ASSIGNMENT:
                 continue
-            _, io, _ = await recurse(child, session, stdin, cs)
+            _, io, _ = await recurse(
+                child, context, stdin, cs, own_diagnostics=False
+            )
             merged_io = await merged_io.merge(io)
         # The statement's status follows the last command substitution
         # performed across ALL its assignments, not the last child's.
-        code = assignment_status(session, sub_seq)
+        code = assignment_status(context.frame, sub_seq)
         merged_io.exit_code = code
         return (
             None,

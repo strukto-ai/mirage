@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ExecutionFrame } from '../frame.ts'
 import { describe, expect, it } from 'vitest'
 
 import { IOResult } from '../../io/types.ts'
@@ -62,13 +63,13 @@ describe('finishStatement', () => {
 
 describe('assignmentStatus', () => {
   it('tracks command substitutions run during expansion', () => {
-    const session = new SessionState({ sessionId: 't' })
-    expect(assignmentStatus(session, session.cmdsubSeq)).toBe(0)
-    const seq = session.cmdsubSeq
-    session.cmdsubSeq += 1
-    session.cmdsubStatus = 5
-    expect(assignmentStatus(session, seq)).toBe(5)
-    expect(assignmentStatus(session, session.cmdsubSeq)).toBe(0)
+    const frame = new ExecutionFrame()
+    expect(assignmentStatus(frame, frame.cmdsubSeq)).toBe(0)
+    const seq = frame.cmdsubSeq
+    frame.cmdsubSeq += 1
+    frame.cmdsubStatus = 5
+    expect(assignmentStatus(frame, seq)).toBe(5)
+    expect(assignmentStatus(frame, frame.cmdsubSeq)).toBe(0)
   })
 })
 

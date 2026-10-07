@@ -58,8 +58,9 @@ async def test_an_unevaluable_word_leaves_the_generator_alone():
     # prints the error for 1.5 and then 24386, the second draw of seed 0.
     s = SessionState(session_id="s")
     assert next_random(s, "0") == 20814
-    await set_var(s, None, RANDOM, "1.5")
-    assert s._diagnostics == ['1.5: syntax error: invalid character "."']
+    diagnostics: list[str | bytes] = []
+    await set_var(s, None, RANDOM, "1.5", diagnostics=diagnostics)
+    assert diagnostics == ['1.5: syntax error: invalid character "."']
     assert next_random(s, s.vars[RANDOM].value) == 24386
     assert next_random(s, s.vars[RANDOM].value) == 149
 
@@ -122,27 +123,28 @@ def test_unset_after_a_read_strips_the_meaning():
     assert next_random(s, None) is None
 
 
-def test_a_child_shell_reseeds_and_the_parent_gets_its_state_back():
+def test_a_child_shell_reseeds_without_advancing_the_parent():
     s = SessionState(session_id="s")
     parent = [next_random(s, "42"), next_random(s, s.vars[RANDOM].value)]
-    saved = s.snapshot()
-    child = next_random(s, s.vars[RANDOM].value)
-    assert s._random_state is not None
-    s.restore(saved)
+    child = s.subshell()
+    assert child._random_seed == s.vars[RANDOM].value
+    assert child._random_state is None
+    drawn = next_random(child, child.vars[RANDOM].value)
+    assert child._random_state is not None
     assert next_random(s, s.vars[RANDOM].value) == 1435
-    assert parent == [17772, 26794] and child != 1435
+    assert parent == [17772, 26794]
+    assert drawn is not None and 0 <= drawn <= RANDOM_MAX
 
 
 def test_a_child_shell_does_not_replay_a_pending_seed():
     s = SessionState(session_id="s")
     seed_var(s, RANDOM, "42")
-    s.snapshot()
-    assert s._random_seed == "42" and s._random_state is None
+    child = s.subshell()
+    assert child._random_seed == "42" and child._random_state is None
     unset = SessionState(session_id="u")
     next_random(unset, None)
     assert next_random(unset, None) is None
-    unset.snapshot()
-    assert next_random(unset, None) is None
+    assert next_random(unset.subshell(), None) is None
 
 
 @pytest.mark.asyncio

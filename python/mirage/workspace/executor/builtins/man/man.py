@@ -310,4 +310,6 @@ async def man_builtin(call: BuiltinCall) -> Result:
     Args:
         call (BuiltinCall): the invocation.
     """
-    return await handle_man(list(call.argv.args), call.registry, call.session)
+    return await handle_man(
+        list(call.argv.args), call.registry, call.context.session
+    )

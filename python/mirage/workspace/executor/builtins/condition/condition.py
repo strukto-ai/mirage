@@ -106,7 +106,9 @@ async def test_builtin(call: BuiltinCall) -> Result:
         if test_args and word_text(test_args[-1]) == "]":
             test_args = test_args[:-1]
         else:
-            voice = "" if program_invocation(call.session) else "bash: "
+            voice = (
+                "" if program_invocation(call.context.session) else "bash: "
+            )
             err = encode_text(f"{voice}[: missing `]'\n")
             return (
                 None,
@@ -117,7 +119,11 @@ async def test_builtin(call: BuiltinCall) -> Result:
         call.dispatch,
         call.namespace,
         test_args,
-        call.session,
+        call.context.session,
         name=test_name,
-        view=session_view(call.session, call.namespace.registry.policies),
+        view=session_view(
+            call.context.session,
+            call.namespace.registry.policies,
+            diagnostics=call.context.frame.diagnostics,
+        ),
     )

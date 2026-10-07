@@ -803,7 +803,12 @@ def _after_cd(
         or (lost and not target.startswith("/"))
     ):
         return session, True
-    return session.fork(cwd=resolve_path(target, session.cwd)), False
+    predicted = session.fork(
+        cwd=resolve_path(target, session.cwd), functions={}
+    )
+    # A read-only prediction borrows functions from the executing line.
+    predicted.functions = session.functions
+    return predicted, False
 
 
 def _walked_line(

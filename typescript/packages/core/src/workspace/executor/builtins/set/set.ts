@@ -130,5 +130,5 @@ function optionListing(session: SessionState, plus: boolean): Uint8Array {
 
 /** The `set` arm. */
 export function setBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(handleSet([...call.argv.args], call.session, call.callStack))
+  return Promise.resolve(handleSet([...call.argv.args], call.context.session, call.callStack))
 }

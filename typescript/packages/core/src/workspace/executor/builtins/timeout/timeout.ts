@@ -414,7 +414,7 @@ export async function timeoutBuiltin(call: BuiltinCall): Promise<Result> {
   return handleTimeout(
     call.executeFn,
     [...call.argv.args],
-    call.session,
+    call.context.session,
     call.stdin,
     call.registry,
     call.signal,

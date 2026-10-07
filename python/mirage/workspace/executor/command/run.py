@@ -29,6 +29,7 @@ from mirage.runtime.table import WorkspaceRuntime
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.command.flags import parse_flags
 from mirage.workspace.mount import (
     MountCommandUnsupported,
@@ -38,7 +39,7 @@ from mirage.workspace.mount import (
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.probe import path_readdir, path_stat
 from mirage.workspace.mount.namespace.view import namespace_view_of
-from mirage.workspace.session import SessionState, env_snapshot, session_view
+from mirage.workspace.session import env_snapshot, session_view
 from mirage.workspace.types import ExecuteLine, ExecutionNode
 
 logger = logging.getLogger(__name__)
@@ -204,7 +205,7 @@ async def run_nested_line(
 
 async def run_on_mount(
     registry: MountRegistry,
-    session: SessionState,
+    context: EvaluationContext,
     dispatch: DispatchFn,
     namespace: Namespace | None,
     cmd_name: str,
@@ -229,7 +230,7 @@ async def run_on_mount(
 
     Args:
         registry (MountRegistry): Mount registry.
-        session (SessionState): Session providing cwd/env/session_id.
+        context (EvaluationContext): its session gives cwd, env and session_id.
         dispatch (Callable): Workspace operation dispatcher.
         namespace (Namespace | None): Addressing authority for ls symlinks.
         cmd_name (str): Command name.
@@ -249,6 +250,7 @@ async def run_on_mount(
         execute_fn (ExecuteLine | None): Runs a nested line, which the
             handler reaches as ``opts.shell``; None outside a workspace.
     """
+    session = context.session
     if mount is None:
         resolve_paths = [resolve_hint] if resolve_hint else paths
         try:
@@ -311,7 +313,11 @@ async def run_on_mount(
                 dispatch=dispatch,
                 session_id=session.session_id,
                 env=env_snapshot(session),
-                session_view=session_view(session, registry.policies),
+                session_view=session_view(
+                    session,
+                    registry.policies,
+                    diagnostics=context.frame.diagnostics,
+                ),
                 processes=registry.process_view(session)
                 if registry.process_view is not None
                 else None,

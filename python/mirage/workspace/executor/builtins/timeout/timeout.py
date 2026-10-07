@@ -510,7 +510,7 @@ async def timeout_builtin(call: BuiltinCall) -> Result:
     return await handle_timeout(
         call.execute_fn,
         list(call.argv.args),
-        call.session,
+        call.context.session,
         call.stdin,
         call.registry,
     )

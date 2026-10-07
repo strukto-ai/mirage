@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { type EvaluationContext, childContext } from '../../../evaluation.ts'
+import { releaseFunctions } from '../../../session/functions.ts'
+
 import { runAsShell } from '../../../../context/session_context.ts'
 import { resolvePath } from '../../../../utils/path.ts'
 import { BinViewVFS } from '../../../../vfs/bin/bin.ts'
@@ -22,7 +25,6 @@ import type { ByteSource } from '../../../../io/types.ts'
 import type { JobConsole } from '../../../../shell/console/index.ts'
 import type { JobTable } from '../../../../shell/job_table/index.ts'
 import { fsStrerror } from '../../../../errors/fs.ts'
-import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { handleBash } from './bash.ts'
@@ -105,13 +107,14 @@ export async function handleExecPath(
   executeFn: ExecuteStringFn,
   path: string,
   args: string[],
-  session: SessionState,
+  context: EvaluationContext,
   registry: MountRegistry,
   namespace: Namespace,
   stdin: ByteSource | null = null,
   sink?: JobConsole,
   jobTable?: JobTable,
 ): Promise<Result> {
+  let session = context.session
   let script: string
   try {
     script = await readScriptText(dispatch, path, session.cwd)
@@ -126,11 +129,12 @@ export async function handleExecPath(
   if (vfs instanceof BinViewVFS) {
     // The read enforces visibility and path policy; the target still passes
     // its command gate, without needing permission for the stub's helper.
-    const saved = session.snapshot()
+    context = childContext(context)
+    session = context.session
     try {
       return await runAsShell(() =>
         handleCommandBuiltin(
-          executeFn,
+          (command, opts) => executeFn(command, { ...opts, context }),
           ['--', stripSlash(spec.mountPath), ...args],
           session,
           registry,
@@ -138,7 +142,7 @@ export async function handleExecPath(
         ),
       )
     } finally {
-      session.restore(saved)
+      releaseFunctions(session.functions)
     }
   }
   const words = shebangWords(script)
@@ -148,7 +152,7 @@ export async function handleExecPath(
       dispatch,
       executeFn,
       [...words.slice(1), path, ...args],
-      session,
+      context,
       stdin,
       interp,
       sink,

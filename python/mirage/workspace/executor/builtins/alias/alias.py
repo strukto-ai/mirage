@@ -239,8 +239,8 @@ async def alias_builtin(call: BuiltinCall) -> Result:
     """
     return await handle_alias(
         list(call.argv.args),
-        call.session,
-        (call.session._parse_current, call.row),
+        call.context.session,
+        (call.context.session._parse_current, call.row),
     )
 
 
@@ -250,4 +250,4 @@ async def unalias_builtin(call: BuiltinCall) -> Result:
     Args:
         call (BuiltinCall): the invocation.
     """
-    return await handle_unalias(list(call.argv.args), call.session)
+    return await handle_unalias(list(call.argv.args), call.context.session)

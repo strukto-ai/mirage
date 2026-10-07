@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SyntaxIssue } from './types.ts'
+
 import { IOResult } from '../../io/types.ts'
 import { encodeText } from '../bytes.ts'
 import type { TSNodeLike } from '../types.ts'
@@ -19,50 +21,93 @@ import type { TSNodeLike } from '../types.ts'
 import {
   BASH_KEYWORDS,
   CASE_TERMINATORS,
+  CLOSING_TOKENS,
+  CONSTRUCT_CLOSERS,
+  OPENER_CLOSERS,
   SEPARATOR_TOKENS,
   STRUCTURAL_TOKENS,
 } from './constants.ts'
 
-/** Locate an open quote only in erroneous AST regions, leaving complete
- * strings, comments and heredoc bodies opaque. Mirrors Python. */
+/** Find what the input ended inside, only in erroneous AST regions: a quote,
+ * or a substitution or expansion still waiting for its closer (an opener
+ * token in an ERROR, or a closer the grammar marks missing). Complete
+ * strings, comments and heredoc bodies stay opaque. Returns the character
+ * bash reports it was looking for. Mirrors Python. */
 export function findUnterminatedQuote(node: TSNodeLike): string | null {
-  const stack: [TSNodeLike, boolean][] = [[node, false]]
+  const stack: [TSNodeLike, boolean, boolean][] = [[node, false, false]]
   for (let entry = stack.pop(); entry !== undefined; entry = stack.pop()) {
-    const [current, visited] = entry
+    const [current, visited, quoted] = entry
     if (visited) {
       // Diagnose an ERROR span only after its children, as before.
       if (current.children.length === 0 && current.text.startsWith("'")) return "'"
-      if (current.children.filter((child) => child.type === '"').length % 2 !== 0) return '"'
+      const unclosed = innermostUnclosed(current.children)
+      if (unclosed !== null) return unclosed
       continue
     }
     if (current.isMissing && (current.type === "'" || current.type === '"')) return current.type
+    const closer = CONSTRUCT_CLOSERS.get(current.type)
+    // Inside a double-quoted string, bash reads the string's own closing
+    // quote into the construct, where it opens another.
+    if (
+      closer !== undefined &&
+      current.children.some((child) => child.isMissing && CLOSING_TOKENS.has(child.type))
+    )
+      return quoted ? '"' : closer
     if (current.type === 'ansi_c_string') {
       const before = current.text.slice(0, -1)
       const slashes = /\\+$/.exec(before)?.[0].length ?? 0
       if (slashes % 2 !== 0) return "'"
       continue
     }
-    if (current.type === 'ERROR') stack.push([current, true])
+    if (current.type === 'ERROR') stack.push([current, true, quoted])
+    const inner = quoted || current.type === 'string'
     const children = current.children
     for (let i = children.length - 1; i >= 0; i -= 1) {
       const child = children[i]
-      if (child !== undefined) stack.push([child, false])
+      if (child !== undefined) stack.push([child, false, inner])
     }
   }
   return null
 }
 
+/** What the innermost construct an ERROR's tokens open still waits for. A
+ * double quote nests inside a substitution as bash reads it (`"$("` waits for
+ * a quote), a lone `)` inside `$((` groups rather than closes, and any other
+ * closer that does not match the innermost opener is an unexpected token
+ * rather than the end of input. */
+function innermostUnclosed(children: readonly TSNodeLike[]): string | null {
+  const pending: (readonly [string, string])[] = []
+  for (const child of children) {
+    if (child.type === '"') {
+      if (pending.at(-1)?.[0] === '"') pending.pop()
+      else pending.push(['"', '"'])
+      continue
+    }
+    const opened = OPENER_CLOSERS.get(child.type)
+    if (opened !== undefined) pending.push(opened)
+    else if (CLOSING_TOKENS.has(child.type) && pending.length > 0) {
+      if (child.type === ')' && pending.at(-1)?.[0] === '))') continue
+      if (child.type !== pending.at(-1)?.[0]) return null
+      pending.pop()
+    }
+  }
+  return pending.at(-1)?.[1] ?? null
+}
+
 /** Exit 2 with the bash-style diagnostic for an unparsable line. */
 export function syntaxErrorResult(offending: string, node: TSNodeLike): IOResult {
+  return new IOResult({ exitCode: 2, stderr: encodeText(syntaxErrorMessage(offending, node)) })
+}
+
+/** Format the diagnostic shared by parsed programs and execution results. */
+export function syntaxErrorMessage(offending: string, node: TSNodeLike): string {
   const quote = findUnterminatedQuote(node)
   const snippet = offending.trim()
-  const message =
-    quote !== null
-      ? 'mirage: unexpected EOF while looking for matching `' + quote + "'\n"
-      : snippet.length > 0
-        ? `mirage: syntax error near '${snippet}'\n`
-        : 'mirage: syntax error in command\n'
-  return new IOResult({ exitCode: 2, stderr: encodeText(message) })
+  return quote !== null
+    ? 'mirage: unexpected EOF while looking for matching `' + quote + "'\n"
+    : snippet.length > 0
+      ? `mirage: syntax error near '${snippet}'\n`
+      : 'mirage: syntax error in command\n'
 }
 
 // Locate a backtick substitution that is never closed. tree-sitter
@@ -294,14 +339,38 @@ export function findSyntaxError(
   own: ReadonlyMap<string, readonly [number, number]> = new Map(),
   offsets?: readonly number[],
 ): string | null {
+  return findSyntaxIssue(node, parse, aliases, own, offsets)?.offending ?? null
+}
+
+function issue(node: TSNodeLike, offending: string | null): SyntaxIssue | null {
+  return offending === null
+    ? null
+    : { offending, span: { start: node.startIndex ?? 0, end: node.endIndex ?? node.text.length } }
+}
+
+/** The first syntax error in the tree and the span it covers; `findSyntaxError`
+ * keeps only its text. An error the walk finds only by reparsing a `$(...)`
+ * body spans that substitution, since the reparse reads the body in its own
+ * coordinates; one the walk sees directly, such as a stray `fi` inside the
+ * body, keeps its own span. */
+export function findSyntaxIssue(
+  node: TSNodeLike,
+  parse?: (command: string) => TSNodeLike,
+  aliases: ReadonlySet<string> = new Set(),
+  own: ReadonlyMap<string, readonly [number, number]> = new Map(),
+  offsets?: readonly number[],
+): SyntaxIssue | null {
   // Expansion and the `[` builtin own their argument grammar.
   if (node.type === 'expansion') {
-    return node.children.some((child) => child.isMissing && child.type === '}') ? '' : null
+    return node.children.some((child) => child.isMissing && child.type === '}')
+      ? issue(node, '')
+      : null
   }
-  if (node.type === 'test_command' && node.children[0]?.type === '[') return missingQuote(node)
+  if (node.type === 'test_command' && node.children[0]?.type === '[')
+    return issue(node, missingQuote(node))
   if (node.type === 'command_substitution') {
     const unclosed = findUnterminatedBacktick(node.text)
-    if (unclosed !== null) return unclosed
+    if (unclosed !== null) return issue(node, unclosed)
   }
   if (
     node.type === 'command_substitution' &&
@@ -309,7 +378,8 @@ export function findSyntaxError(
     node.text.startsWith('$(') &&
     node.text.endsWith(')')
   ) {
-    return findSyntaxError(parse(node.text.slice(2, -1)), parse)
+    const nested = findSyntaxIssue(parse(node.text.slice(2, -1)), parse)
+    return nested === null ? null : issue(node, nested.offending)
   }
   let stray: [number, string] | null = null
   for (const hit of [
@@ -319,8 +389,9 @@ export function findSyntaxError(
   ]) {
     if (stray === null || hit[0] < stray[0]) stray = hit
   }
-  if (stray !== null) return stray[1]
-  if (!node.hasError) return findUnterminatedQuote(node)
+  if (stray !== null)
+    return { offending: stray[1], span: { start: stray[0], end: stray[0] + stray[1].length } }
+  if (!node.hasError) return issue(node, findUnterminatedQuote(node))
   let previous: TSNodeLike | null = null
   for (const child of node.children) {
     // Bash permits unquoted spaces in associative subscripts. The grammar
@@ -332,7 +403,7 @@ export function findSyntaxError(
       child.children.every((part) => part.type === 'word' && !part.hasError)
     )
       continue
-    if (child.isMissing) return child.text
+    if (child.isMissing) return issue(child, child.text)
     if (
       child.type === 'ERROR' &&
       isStructuralError(child) &&
@@ -342,10 +413,10 @@ export function findSyntaxError(
         previous = child
         continue
       }
-      return child.text
+      return issue(child, child.text)
     }
     if (child.type !== 'ERROR') {
-      const nested = findSyntaxError(child, parse, aliases, own, offsets)
+      const nested = findSyntaxIssue(child, parse, aliases, own, offsets)
       if (nested !== null) return nested
     }
     if (child.isNamed) previous = child

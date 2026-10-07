@@ -6,6 +6,7 @@ from mirage.commands.builtin.generic.wc import wc
 from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.errors import CommandTimeoutError
 from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.workspace.evaluation import EvaluationContext
 
 
 @pytest.mark.asyncio
@@ -235,7 +236,10 @@ async def test_pipeline_cache_lifecycle(failure):
         return b"first", IOResult(), ExecutionNode(command="head")
 
     run = handle_pipe(
-        execute, ["cat", "wc"], [], SessionState(session_id="test")
+        execute,
+        ["cat", "wc"],
+        [],
+        EvaluationContext(SessionState(session_id="test")),
     )
     if failure == "early":
         await run

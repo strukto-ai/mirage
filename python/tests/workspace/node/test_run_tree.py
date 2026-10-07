@@ -20,6 +20,7 @@ from mirage.shell.job_table import JobTable
 from mirage.shell.parse import parse
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.run_tree import (
@@ -66,7 +67,7 @@ async def test_run_command_tree_materializes_stdout(registry):
         _noop_execute,
         "agent",
         ast,
-        _session(),
+        EvaluationContext(_session()),
         None,
         None,
     )
@@ -85,7 +86,7 @@ async def test_run_command_tree_propagates_exit_code(registry):
         _noop_execute,
         "agent",
         ast,
-        _session(),
+        EvaluationContext(_session()),
         None,
         None,
     )
@@ -105,7 +106,7 @@ async def _cross_node(cmd: str):
         _noop_execute,
         "agent",
         parse(cmd),
-        SessionState(session_id="t", cwd="/"),
+        EvaluationContext(SessionState(session_id="t", cwd="/")),
         None,
         None,
     )

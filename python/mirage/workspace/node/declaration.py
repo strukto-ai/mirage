@@ -23,6 +23,7 @@ from mirage.shell.errors import DiscardSignal
 from mirage.shell.helpers import get_declaration_keyword, get_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import VarAttr
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import (
     handle_declare_functions,
     handle_declare_print,
@@ -35,7 +36,6 @@ from mirage.workspace.expand import expand_node
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.assignment import expand_array_items
-from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     conversion_scalar,
     ensure_var_visible,
@@ -104,7 +104,7 @@ def _declare_option_refusal(
     cmd: str,
     flag_chars: set[str],
     plus_chars: set[str],
-    session: SessionState,
+    context: EvaluationContext,
 ) -> tuple[Any, IOResult, ExecutionNode] | None:
     """The refusal a `declare` family option cluster earns, if any.
 
@@ -116,7 +116,7 @@ def _declare_option_refusal(
         cmd (str): the builtin's own name for the diagnostic.
         flag_chars (set[str]): the `-` letters, `--` excluded.
         plus_chars (set[str]): the `+` letters.
-        session (SessionState): shell session state (unused today, kept so
+        context (EvaluationContext): the evaluation (unused today, kept so
             a later check that reads it does not change the signature).
     """
     bad = next(
@@ -142,7 +142,7 @@ def _declare_option_refusal(
 
 async def _plus_refusals(
     cmd: str,
-    session: SessionState,
+    context: EvaluationContext,
     view: SessionView,
     plus_chars: set[str],
     assignments: list[str],
@@ -160,13 +160,14 @@ async def _plus_refusals(
 
     Args:
         cmd (str): the builtin's own name for the diagnostic.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         view (SessionView): the session plane's gated door.
         plus_chars (set[str]): the `+` letters.
         assignments (list[str]): `NAME` / `NAME=value` operands.
         staged (list[tuple[str, bool, list[str]]] | None): staged array
             literals from the same declaration.
     """
+    session = context.session
     if not (plus_chars & {"r", "a", "A"}):
         return None
     names = [a.partition("=")[0] for a in assignments]
@@ -195,7 +196,7 @@ async def _plus_refusals(
 
 
 async def _stamp_attrs(
-    session: SessionState,
+    context: EvaluationContext,
     view: SessionView,
     flag_chars: set[str],
     plus_chars: set[str],
@@ -216,7 +217,7 @@ async def _stamp_attrs(
     would be, in the builtin's voice.
 
     Args:
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         view (SessionView): the session plane's gated door.
         flag_chars (set[str]): the `-` letters.
         plus_chars (set[str]): the `+` letters.
@@ -226,7 +227,7 @@ async def _stamp_attrs(
         stored (list[str]): the names the handler actually stored.
     """
     refused = await _stamp_export(
-        session, view, flag_chars, assignments, staged, stored
+        context, view, flag_chars, assignments, staged, stored
     )
     if refused is not None:
         return refused
@@ -270,7 +271,7 @@ async def _stamp_attrs(
 
 
 async def _stamp_export(
-    session: SessionState,
+    context: EvaluationContext,
     view: SessionView,
     flag_chars: set[str],
     assignments: list[str],
@@ -305,7 +306,7 @@ async def _stamp_export(
     host-seeded credential the deployment had refused.
 
     Args:
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         view (SessionView): the session plane's gated door.
         flag_chars (set[str]): the declaration's collected flag letters.
         assignments (list[str]): `NAME` / `NAME=value` operands.
@@ -316,6 +317,7 @@ async def _stamp_export(
     Returns:
         A refusal result when the gate denied a mark, else None.
     """
+    session = context.session
     if "x" not in flag_chars:
         return None
     covered = {a.partition("=")[0] for a in assignments if "=" in a}
@@ -338,7 +340,7 @@ async def _stamp_export(
 
 async def execute_declaration(
     node: Any,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
     namespace: Namespace,
@@ -355,7 +357,7 @@ async def execute_declaration(
 
     Args:
         node (Any): the tree-sitter ``declaration_command`` node.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): recursive execute for substitutions.
         registry (MountRegistry): mount registry for glob resolution.
         namespace (Namespace): addressing authority holding the links.
@@ -364,6 +366,7 @@ async def execute_declaration(
             for the line so a pre_session rule governs an
             expansion-time write exactly as it governs `X=d`.
     """
+    session = context.session
     keyword = get_declaration_keyword(node)
     assignments = []
     # Array literals are staged, not stored: `readonly -a a=(y)` on an
@@ -384,14 +387,14 @@ async def execute_declaration(
             if val_nodes and val_nodes[0].type == NT.ARRAY:
                 key = get_text(child).partition("=")[0]
                 items = await expand_array_items(
-                    val_nodes[0], session, execute_fn, registry, namespace, cs
+                    val_nodes[0], context, execute_fn, registry, namespace, cs
                 )
                 staged.append(
                     (key.removesuffix("+"), key.endswith("+"), items)
                 )
                 continue
             expanded = await expand_node(
-                child, session, execute_fn, cs, view=view
+                child, context, execute_fn, cs, view=view
             )
             assignments.append(expanded)
         elif child.type in (
@@ -409,7 +412,7 @@ async def execute_declaration(
             # a variable_name, not a word, and a quoted assignment
             # (`export 'FOO=bar'`) as a plain string operand.
             expanded = await expand_node(
-                child, session, execute_fn, cs, view=view
+                child, context, execute_fn, cs, view=view
             )
             if not expanded and child.type in (
                 NT.SIMPLE_EXPANSION,
@@ -450,7 +453,7 @@ async def execute_declaration(
     cmd_word = "local" if keyword == NT.LOCAL else str(keyword)
     if keyword in (NT.LOCAL, "declare", "typeset"):
         refused = _declare_option_refusal(
-            cmd_word, flag_chars, plus_chars, session
+            cmd_word, flag_chars, plus_chars, context
         )
         if refused is not None:
             return refused
@@ -527,7 +530,11 @@ async def execute_declaration(
     # the session door and owns both refusal voices, so the executor
     # only expands and stages.
     if is_readonly:
-        decl_view = session_view(session, namespace.registry.policies)
+        decl_view = session_view(
+            session,
+            namespace.registry.policies,
+            diagnostics=context.frame.diagnostics,
+        )
         stored: list[str] = []
         # Only the `readonly` keyword owns -p / illegal-option
         # handling; `declare -r` keeps names only.
@@ -555,7 +562,7 @@ async def execute_declaration(
         # `declare -rx X="1"`. Readonly answers first, so the export
         # stamp has to land here too, or `-r` silently ate the `-x`.
         refused = await _stamp_attrs(
-            session,
+            context,
             decl_view,
             flag_chars,
             plus_chars,
@@ -577,7 +584,11 @@ async def execute_declaration(
             "typeset",
         ):
             return await handle_declare_print(assignments, session)
-        decl_view = session_view(session, namespace.registry.policies)
+        decl_view = session_view(
+            session,
+            namespace.registry.policies,
+            diagnostics=context.frame.diagnostics,
+        )
         stored = []
         result = await handle_local(
             assignments,
@@ -594,12 +605,12 @@ async def execute_declaration(
             global_scope="g" in flag_chars,
         )
         plus_refused = await _plus_refusals(
-            cmd_word, session, decl_view, plus_chars, assignments, staged
+            cmd_word, context, decl_view, plus_chars, assignments, staged
         )
         if plus_refused is not None:
             return plus_refused
         refused = await _stamp_attrs(
-            session,
+            context,
             decl_view,
             flag_chars,
             plus_chars,
@@ -614,7 +625,11 @@ async def execute_declaration(
     result = await handle_export(
         flag_words + assignments,
         session,
-        session_view(session, namespace.registry.policies),
+        session_view(
+            session,
+            namespace.registry.policies,
+            diagnostics=context.frame.diagnostics,
+        ),
         arrays=staged,
     )
     return _merge_conversion_errors(result, conversion_errors)

@@ -206,6 +206,13 @@ duration or throughput estimate is not the assertion. The normal `python/**`,
 suite. Run it locally with `cd integ && pnpm exec tsx hosting/run.ts` after
 building TypeScript; append `python` or `typescript` to select one host.
 
+The substitution release/cancel cases hold `$(cd /; curl ...)` at that same
+HTTP gate and query the public session API while it is suspended. The parent
+must remain at `/work` both during the await and after completion or
+cancellation; a released substitution must also return its captured output.
+These cases fail with the old mutate-and-restore implementation, which exposed
+the child's `/` while waiting even though its final shell output looked correct.
+
 CI also passes `--mounts` to run `hosting/monty.json` on both hosts. Every
 scenario creates two workspaces with explicit Monty runtimes and RAM, S3,
 Redis and Slack mounts. One Monty call waits on a gated Slack read or spins
@@ -238,6 +245,43 @@ The program cases cover program files read across mounts (`grep -f`, `sed -f`,
 `awk -f`, `jq --rawfile`). Both core shards discover this target from the
 manifest; the shared parity job also compares it and `ram-nested`. The existing `python/**`, `typescript/**`, and `integ/**`
 filters cover these modules and cases.
+
+The parser ownership and execution-frame modules are covered by the existing
+`python/**` and `typescript/**` filters; their shared Bash regressions and Chrome
+suite are covered by `integ/**`. No new filter is needed for those modules.
+`bash/assign/redirect.json` is pinned to Debian Bash 5.2.37, image
+`sha256:5bc3287b25407c965a30f38e32603dc253a3869e1b12a21ac09bfc27fd8b13ce`.
+In #1438's assignment example, substitution stderr precedes the assignment's
+redirect: stdout is `value\n` and stderr is `err\n`. The issue's originally
+proposed empty stderr does not match Bash.
+The ownership follow-ups in `bash/jobs/bg.json` (substitutions after `eval`
+returns) and `bash/cmdsub/scope.json` (child local and temporary environment
+scopes) are pinned to the same image and included in the Chrome battery.
+
+The #1438 behavior coverage uses the existing shared corpus on both hosts;
+Chrome imports these same files rather than maintaining another set of goldens:
+
+| Changed behavior or preserved contract                                                                      | Shared coverage                                                            |
+| ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Assignment-only redirects, substitution status/stderr and Unicode                                           | `bash/assign/redirect.json`                                                |
+| Child variables/functions stay isolated; local `unset` keeps the global hidden                              | `bash/cmdsub/scope.json`                                                   |
+| A running function survives self-unset, including `return 7`                                                | `bash/builtin/unset.json`                                                  |
+| Active redefinition finishes the old body; stored functions survive `eval` and `source` readers             | `bash/command/function.json`                                               |
+| A background job retains its function after foreground unset, and parses substitutions after `eval` returns | `bash/jobs/bg.json`                                                        |
+| Child RANDOM reads preserve the parent's sequence and unset state                                           | Existing cases in `bash/param/pipestatus.json`                             |
+| Shared diagnostic formatting preserves quote errors and nested syntax errors                                | Existing `bash/syntax/quoting.json` and `bash/quoted/nested_subshell.json` |
+
+The added unset/function cases and extended background case are pinned to the
+same Bash image. Suspended-parent isolation is checked through the real HTTP
+hosting suite on both languages and a gated registered CLI in real Chrome,
+which inspects the parent's variable before releasing the substitution. These
+replace the equivalent suspended-state unit checks. Release counts stay in
+the mirrored parser and evaluation unit suites, since shell-output goldens
+cannot prove memory cleanup. Only TypeScript answers a cancelled caller before
+the line's tree settles (Python joins the line first), so only its evaluation
+suite checks that a cancelled tree keeps its programs until a blocked leaf
+settles. The browser host checks also cover cancellation and workspace
+shutdown.
 
 ## Running locally
 

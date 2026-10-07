@@ -42,6 +42,10 @@ export const BASH_KEYWORDS: ReadonlySet<string> = new Set([
   'select',
 ])
 
+// Tokens that make an ERROR node a real syntax error: brackets, quotes,
+// and an expansion or substitution opener left unclosed, for which bash
+// reads to the end of input looking for the match and runs none of the
+// line.
 export const STRUCTURAL_TOKENS: ReadonlySet<string> = new Set([
   '(',
   ')',
@@ -52,6 +56,35 @@ export const STRUCTURAL_TOKENS: ReadonlySet<string> = new Set([
   '"',
   "'",
   '`',
+  '$(',
+  '$((',
+  '${',
+  '$[',
+  '<(',
+  '>(',
+])
+
+// Each expansion or substitution opener: the token that closes it and the
+// character bash's end-of-input diagnostic names for it.
+export const OPENER_CLOSERS: ReadonlyMap<string, readonly [string, string]> = new Map([
+  ['$(', [')', ')']],
+  ['$((', ['))', ')']],
+  ['<(', [')', ')']],
+  ['>(', [')', ')']],
+  ['${', ['}', '}']],
+  ['$[', [']', ']']],
+])
+
+export const CLOSING_TOKENS: ReadonlySet<string> = new Set([')', '))', '}', ']'])
+
+// A construct the grammar leaves with a missing closer, by the character
+// bash names when the input ends inside it. A subshell is absent: bash
+// reports an unexpected end of file there instead.
+export const CONSTRUCT_CLOSERS: ReadonlyMap<string, string> = new Map([
+  ['command_substitution', ')'],
+  ['process_substitution', ')'],
+  ['arithmetic_expansion', ')'],
+  ['expansion', '}'],
 ])
 
 // Statement separators. One that lands inside an ERROR node has nothing

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any
@@ -44,8 +44,8 @@ from mirage.shell.variable import (
     ShellVar,
     VarAttr,
     attrs_from_letters,
+    copy_var,
     stored_attrs,
-    with_value,
 )
 from mirage.types import (
     DEFAULT_VISIBILITY,
@@ -58,10 +58,8 @@ from mirage.types import (
     Visibility,
 )
 from mirage.workspace.abort import StatusWriter
-from mirage.workspace.session.constants import (
-    CHILD_SHELL_FIELDS,
-    INHERITED_FIELDS,
-)
+from mirage.workspace.session.constants import INHERITED_FIELDS
+from mirage.workspace.session.functions import FunctionTable
 from mirage.workspace.session.serialize import (
     commands_from_dict,
     commands_to_dict,
@@ -78,10 +76,13 @@ def copy_state(value: Any) -> Any:
     Args:
         value (Any): the field value.
     """
+    if isinstance(value, FunctionTable):
+        # The fork's own table leases the bodies when it is built.
+        return dict(value)
     if isinstance(value, ShellVar):
         # The record is frozen, but an indexed or associative value is
         # a live container, so the copy has to reach inside it.
-        return with_value(value, copy_state(value.value))
+        return copy_var(value)
     if isinstance(value, dict):
         return {k: copy_state(v) for k, v in value.items()}
     if isinstance(value, set):
@@ -89,6 +90,22 @@ def copy_state(value: Any) -> Any:
     if isinstance(value, list):
         return list(value)
     return value
+
+
+def copy_locals(
+    frame: dict[str, ShellVar | None],
+) -> dict[str, ShellVar | None]:
+    """Copy saved locals into child-owned frames.
+
+    Temporary call environments become ordinary saved scopes in the child.
+
+    Args:
+        frame (dict[str, ShellVar | None]): the parent's saved variables.
+    """
+    return {
+        name: None if var is None else copy_var(var)
+        for name, var in frame.items()
+    }
 
 
 def vars_from_env(env: Mapping[str, str]) -> dict[str, ShellVar]:
@@ -263,7 +280,7 @@ class SessionState:
     # value it describes.
     vars: dict[str, ShellVar] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
-    functions: dict[str, FunctionBody] = field(default_factory=dict)
+    functions: MutableMapping[str, FunctionBody] = field(default_factory=dict)
     # The functions `readonly -f` has frozen. A set beside `functions`
     # rather than a flag on the body because a body is a list of parsed
     # nodes shared with the parser, and the readonly fact is the
@@ -381,14 +398,6 @@ class SessionState:
     _trap_status: int | None = field(default=None, repr=False)
     _getopts_pos: int = field(default=1, repr=False)
     _getopts_optind: int | None = field(default=None, repr=False)
-    # Command-substitution tracking for assignment statements: how many
-    # substitutions have run in this session, and the status of the
-    # most recent one. An assignment statement snapshots the count
-    # before expanding its value and, when it grew, reports the last
-    # substitution's status as its own (bash: `x=$(false)` exits 1,
-    # `x=abc` exits 0).
-    _cmdsub_seq: int = field(default=0, repr=False)
-    _cmdsub_status: int = field(default=0, repr=False)
     # A pipeline's per-segment statuses, parked by `handle_pipe` for the
     # statement boundary that closes it to claim. None between them.
     _pipe_status_pending: tuple[int, ...] | None = field(
@@ -396,12 +405,10 @@ class SessionState:
     )
     # `$RANDOM`'s generator state and the seed word it last consumed
     # (`session/rng.py`). A child shell reseeds, as bash's does, and the
-    # parent gets its own state back (`snapshot` / `restore`).
+    # parent retains its own state while the child runs.
     _random_state: int | None = field(default=None, repr=False)
     _random_seed: str | None = field(default=None, repr=False)
     _random_last: int = field(default=0, repr=False)
-    # Scoped by the executing node so diagnostics follow its redirections.
-    _diagnostics: list[str | bytes] = field(default_factory=list, repr=False)
     # Alias bookkeeping. bash expands an alias when it *parses* the line
     # that uses it, so a definition takes effect from the next line read
     # (`alias x=..; x` on one line finds no `x`; the same two statements
@@ -732,6 +739,7 @@ class SessionState:
         )
 
     def __post_init__(self) -> None:
+        self.functions = FunctionTable(self.functions)
         # bash exports `$PWD` from startup, so a session that has never
         # run `cd` still has one. Seeding here rather than at lookup time
         # is what makes it an ordinary variable: assignable, unsettable,
@@ -787,36 +795,38 @@ class SessionState:
             forked._random_seed = RANDOM_UNSET
         return forked
 
-    def snapshot(self) -> dict[str, Any]:
-        """Copy the state a child shell runs on top of.
+    def subshell(self) -> "SessionState":
+        """A child shell of this session: a fork that reads on from here.
+
+        ``fork`` copies what a session keeps; a child shell (a command
+        substitution, a subshell, a nested ``bash``) also inherits the
+        reader's position, the alias bookkeeping and the local frames,
+        and reseeds ``$RANDOM`` on its first draw instead of replaying
+        this session's seed.
 
         Args:
             None
         """
-        saved = {
-            name: copy_state(getattr(self, name))
-            for name in CHILD_SHELL_FIELDS
-        }
-        # A child shell reseeds `$RANDOM`, as bash's does: the generator
-        # starts fresh, and the seed word follows the stored value so an
-        # assignment the parent made is not replayed as a reseed. `unset
-        # RANDOM` stays unset.
-        if self._random_seed != RANDOM_UNSET:
+        child = self.fork()
+        child._parse_seq = self._parse_seq
+        child._parse_current = self._parse_current
+        child._alias_marks = dict(self._alias_marks)
+        child._alias_stack = list(self._alias_stack)
+        child._local_vars = (
+            None if self._local_vars is None else copy_locals(self._local_vars)
+        )
+        child._local_frames = [
+            child._local_vars
+            if frame is self._local_vars and child._local_vars is not None
+            else copy_locals(frame)
+            for frame in self._local_frames
+        ]
+        child._local_random = list(self._local_random)
+        if child._random_seed != RANDOM_UNSET:
             var = self.vars.get(RANDOM)
-            self._random_seed = (
+            child._random_seed = (
                 var.value
                 if var is not None and isinstance(var.value, str)
                 else None
             )
-            self._random_state = None
-            self._random_last = 0
-        return saved
-
-    def restore(self, state: dict[str, Any]) -> None:
-        """Put back a snapshot, ending a child shell.
-
-        Args:
-            state (dict[str, Any]): what ``snapshot`` returned.
-        """
-        for name, value in state.items():
-            setattr(self, name, value)
+        return child

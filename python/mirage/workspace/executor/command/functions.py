@@ -27,13 +27,14 @@ from mirage.shell.console import JobConsole
 from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
 from mirage.shell.errors import ReturnSignal
 from mirage.shell.job_table import JobTable
+from mirage.shell.parse.program import retain_programs
 from mirage.shell.variable import ShellVar
 from mirage.types import PathSpec, word_text
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.command.types import ExecuteNodeFn
 from mirage.workspace.executor.control import UNWINDING, carried
 from mirage.workspace.executor.jobs import run_statement
 from mirage.workspace.executor.statement import fd0_binding, finish_statement
-from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import restore_locals
 from mirage.workspace.types import ExecutionNode
 
@@ -42,7 +43,7 @@ async def run_shell_function(
     execute_node: ExecuteNodeFn,
     cmd_name: str,
     parts: list[str | PathSpec],
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
     job_table: JobTable | None = None,
@@ -63,7 +64,7 @@ async def run_shell_function(
         cmd_name (str): the function's name (already resolved).
         parts (list[str | PathSpec]): classified command words; the
             tail becomes the function's positional arguments as typed.
-        session (SessionState): session whose env/arrays host the locals.
+        context (EvaluationContext): session whose env/arrays host the locals.
         stdin (ByteSource | None): stdin forwarded to each statement.
         call_stack (CallStack | None): the caller's stack, or a fresh
             one for a top-level call.
@@ -75,7 +76,9 @@ async def run_shell_function(
         sink (JobConsole | None): where each statement writes as it
             finishes, None to return the body's output.
     """
+    session = context.session
     func_body = session.functions[cmd_name]
+    release_program = retain_programs(func_body)
     if sink is not None:
         execute_node = partial(execute_node, sink=sink)
     # The body's statements read the caller's stdin in turn.
@@ -109,7 +112,7 @@ async def run_shell_function(
                 stdout, io, last_exec = await run_statement(
                     execute_node,
                     cmd,
-                    session,
+                    context,
                     stdin,
                     bound,
                     cs,
@@ -151,6 +154,7 @@ async def run_shell_function(
         last_exec.exit_code = merged_io.exit_code
         return combined, merged_io, last_exec
     finally:
+        release_program()
         reset_program_invocation(marked)
         cs.pop()
         if session.function_names is not None:

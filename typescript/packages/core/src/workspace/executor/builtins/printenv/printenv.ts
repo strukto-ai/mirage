@@ -46,5 +46,7 @@ export function handlePrintenv(name: string | null, session: SessionState): Resu
 /** The `printenv` arm. */
 export function printenvBuiltin(call: BuiltinCall): Promise<Result> {
   const args = call.argv.args
-  return Promise.resolve(handlePrintenv(args.length > 0 ? (args[0] ?? null) : null, call.session))
+  return Promise.resolve(
+    handlePrintenv(args.length > 0 ? (args[0] ?? null) : null, call.context.session),
+  )
 }

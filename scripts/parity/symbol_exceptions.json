@@ -1,5 +1,5 @@
 {
- "baseline": 4068,
+ "baseline": 4064,
  "modules": {
   "ops/registry": {
    "typescript_only": {
@@ -310,36 +310,46 @@
     "BoxFileInfo": "The shape of GET /files/{id} with the fields the fresh check asks for (path_collection, item_status) beside BoxItem's; Python reads the same answer as a plain dict, as it does every Box item."
    }
   },
-  "commands/cli/builtin/git/cat_file": {
+  "shell/parse/engine": {
    "typescript_only": {
-    "raw": "isomorphic-git hands back a parsed object, so TypeScript reads the stored bytes in a helper; dulwich's as_raw_string gives them in Python."
+    "NativeParser": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker.",
+    "ParseTrees": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker.",
+    "treeOf": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker.",
+    "WrappedNode": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker."
    }
   },
-  "commands/cli/builtin/git/hash_object": {
-   "python_only": {
-    "OBJECT_CLASSES": "dulwich stores an object built from its class; isomorphic-git's writeObject takes the type name, so TypeScript needs no table.",
-    "TREE_ENTRY": "Python matches a tree entry with a bytes regex; TypeScript walks the latin-1 text by index in wellFormed."
+  "shell/parse/program": {
+   "typescript_only": {
+    "Resource": "WASM tree deletion uses an independent finalizer payload as a reachability fallback for legacy parse callers. Python native node references already release their trees on collection; both ParsedProgram implementations expose the same explicit leases.",
+    "collected": "WASM tree deletion uses an independent finalizer payload as a reachability fallback for legacy parse callers. Python native node references already release their trees on collection; both ParsedProgram implementations expose the same explicit leases.",
+    "releaseResource": "WASM tree deletion uses an independent finalizer payload as a reachability fallback for legacy parse callers. Python native node references already release their trees on collection; both ParsedProgram implementations expose the same explicit leases."
    }
   },
-  "utils/dates": {
+  "shell/parse/parse": {
    "python_only": {
-    "_fixed": "Python turns a naive wall clock at a fixed offset into epoch seconds through datetime; TypeScript subtracts the offset from utcFromWall inline.",
-    "_offset_seconds": "Python reads a datetime's utcoffset as seconds; TypeScript's Zone.parts already carries offsetSec."
-   },
+    "parse_program": "Python exposes the native singleton entry point as a module function; TypeScript exposes parseProgram on the asynchronously created ShellParser instance."
+   }
+  },
+  "workspace/session/functions": {
    "typescript_only": {
-    "DIGITS": "The lexer's ASCII digit set behind isDigit; Python tests str.isascii and str.isdigit inline.",
-    "isDigit": "The lexer's ASCII digit test; Python tests str.isascii and str.isdigit inline.",
-    "isLetter": "The lexer's ASCII letter test; Python tests str.isascii and str.isalpha inline.",
-    "at": "A bounds-checked token read for noUncheckedIndexedAccess; Python indexes the list.",
-    "noRel": "The zero relative offset; Python's _Rel dataclass defaults every field to zero.",
-    "trimSpaces": "String.trim takes no character set; Python strips _SPACES with str.strip.",
-    "wallOf": "The wall clock a zone shows for an instant, read off Zone.parts; Python's datetime.astimezone gives it directly."
+    "collected": "The JavaScript function record is a Proxy whose leases live in a WeakMap and are closed through releaseFunctions, with a FinalizationRegistry fallback. Python uses FunctionTable.clear and an instance-owned weakref.finalize.",
+    "leases": "The JavaScript function record is a Proxy whose leases live in a WeakMap and are closed through releaseFunctions, with a FinalizationRegistry fallback. Python uses FunctionTable.clear and an instance-owned weakref.finalize.",
+    "releaseFunctions": "The JavaScript function record is a Proxy whose leases live in a WeakMap and are closed through releaseFunctions, with a FinalizationRegistry fallback. Python uses FunctionTable.clear and an instance-owned weakref.finalize."
    }
   },
   "workspace/node/explain": {
    "typescript_only": {
     "Scope": "explainedLine groups judgments by the scope they were evaluated from; Python keys a dict by (parent occurrence, text), which needs no named shape.",
     "sameAt": "Occurrences compare by reference in TypeScript, so finding a scope compares them field by field; Python's frozen dataclass equality does it."
+   }
+  },
+  "workspace/evaluation": {
+   "python_only": {
+    "set_current_evaluation": "Python binds evaluator and session ContextVars and returns their tokens; TypeScript runWithEvaluation scopes both around an async callback.",
+    "reset_current_evaluation": "Python restores the two ContextVar tokens explicitly; TypeScript runWithEvaluation restores both callback scopes on settlement."
+   },
+   "typescript_only": {
+    "runWithEvaluation": "TypeScript scopes evaluator storage and durable-session ancestry around a callback; Python set_current_evaluation/reset_current_evaluation use ContextVar tokens."
    }
   },
   "cli/vfs": {
@@ -386,6 +396,32 @@
   "server/mcp/http": {
    "python_only": {
     "DaemonMcpServer": "A Python Session call runs on the workspace runner's loop, so the daemon serves MCP with a subclass whose hop does it, as DaemonRpcServer does for RPC; TypeScript has one loop and hands its tool table to createMirageMcpServer."
+   }
+  },
+  "commands/cli/builtin/git/cat_file": {
+   "typescript_only": {
+    "raw": "isomorphic-git hands back a parsed object, so TypeScript reads the stored bytes in a helper; dulwich's as_raw_string gives them in Python."
+   }
+  },
+  "commands/cli/builtin/git/hash_object": {
+   "python_only": {
+    "OBJECT_CLASSES": "dulwich stores an object built from its class; isomorphic-git's writeObject takes the type name, so TypeScript needs no table.",
+    "TREE_ENTRY": "Python matches a tree entry with a bytes regex; TypeScript walks the latin-1 text by index in wellFormed."
+   }
+  },
+  "utils/dates": {
+   "python_only": {
+    "_fixed": "Python turns a naive wall clock at a fixed offset into epoch seconds through datetime; TypeScript subtracts the offset from utcFromWall inline.",
+    "_offset_seconds": "Python reads a datetime's utcoffset as seconds; TypeScript's Zone.parts already carries offsetSec."
+   },
+   "typescript_only": {
+    "DIGITS": "The lexer's ASCII digit set behind isDigit; Python tests str.isascii and str.isdigit inline.",
+    "isDigit": "The lexer's ASCII digit test; Python tests str.isascii and str.isdigit inline.",
+    "isLetter": "The lexer's ASCII letter test; Python tests str.isascii and str.isalpha inline.",
+    "at": "A bounds-checked token read for noUncheckedIndexedAccess; Python indexes the list.",
+    "noRel": "The zero relative offset; Python's _Rel dataclass defaults every field to zero.",
+    "trimSpaces": "String.trim takes no character set; Python strips _SPACES with str.strip.",
+    "wallOf": "The wall clock a zone shows for an instant, read off Zone.parts; Python's datetime.astimezone gives it directly."
    }
   }
  }

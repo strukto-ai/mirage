@@ -40,6 +40,10 @@ BASH_KEYWORDS = frozenset(
     }
 )
 
+# Tokens that make an ERROR node a real syntax error: brackets, quotes,
+# and an expansion or substitution opener left unclosed, for which bash
+# reads to the end of input looking for the match and runs none of the
+# line.
 STRUCTURAL_TOKENS = frozenset(
     {
         "(",
@@ -51,8 +55,37 @@ STRUCTURAL_TOKENS = frozenset(
         '"',
         "'",
         "`",
+        "$(",
+        "$((",
+        "${",
+        "$[",
+        "<(",
+        ">(",
     }
 )
+
+# Each expansion or substitution opener: the token that closes it and the
+# character bash's end-of-input diagnostic names for it.
+OPENER_CLOSERS: dict[str, tuple[str, str]] = {
+    "$(": (")", ")"),
+    "$((": ("))", ")"),
+    "<(": (")", ")"),
+    ">(": (")", ")"),
+    "${": ("}", "}"),
+    "$[": ("]", "]"),
+}
+
+CLOSING_TOKENS = frozenset({")", "))", "}", "]"})
+
+# A construct the grammar leaves with a missing closer, by the character
+# bash names when the input ends inside it. A subshell is absent: bash
+# reports an unexpected end of file there instead.
+CONSTRUCT_CLOSERS: dict[str, str] = {
+    "command_substitution": ")",
+    "process_substitution": ")",
+    "arithmetic_expansion": ")",
+    "expansion": "}",
+}
 
 # Statement separators. One that lands inside an ERROR node has nothing
 # to separate (a line starting with `;`, `| s`, `a ; ; b`, `a &; b`), and

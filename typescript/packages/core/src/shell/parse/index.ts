@@ -22,10 +22,7 @@ export {
   referencedNames,
   sameNode,
 } from './names.ts'
-export {
-  createShellParser,
-  type ShellParser,
-  type ShellParserConfig,
-  joinContinuations,
-} from './parse.ts'
+export type { ShellParserConfig } from './config.ts'
+export { createShellParser, type ShellParser } from './parse.ts'
+export { joinContinuations } from './source.ts'
 export { findSyntaxError, findUnterminatedBacktick, syntaxErrorResult } from './syntax.ts'

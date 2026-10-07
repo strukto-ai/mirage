@@ -149,8 +149,8 @@ export async function handleGetopts(
 export async function getoptsBuiltin(call: BuiltinCall): Promise<Result> {
   return handleGetopts(
     [...call.argv.args],
-    call.session,
+    call.context.session,
     call.callStack,
-    sessionView(call.session, call.registry.policies),
+    sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
   )
 }

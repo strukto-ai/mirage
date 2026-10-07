@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EvaluationContext } from '../evaluation.ts'
 import { sessionEntry, setSessionEntry } from '../session/session.ts'
 import { seedVar, setAttr } from '../session/state.ts'
 import { TempEnv, VarAttr } from '../../shell/variable.ts'
@@ -54,7 +55,8 @@ import {
   aliasCommandText,
   expandingAliases,
 } from '../executor/builtins/alias/index.ts'
-import { findSyntaxError, syntaxErrorResult, type ShellParser } from '../../shell/parse/index.ts'
+import { findSyntaxError, syntaxErrorResult } from '../../shell/parse/index.ts'
+import type { ParseScope } from '../../shell/parse/scope.ts'
 import { INTERPRETER_NAMES } from '../lookup/constants.ts'
 import { guardIO, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import {
@@ -101,7 +103,7 @@ import {
   lsLinkMode,
 } from '../lookup/index.ts'
 import { Admitted, admit } from './admission.ts'
-import type { SessionState } from '../session/session.ts'
+
 import { ensureVarVisible, sessionView } from '../session/state.ts'
 import { preSessionGate } from '../../policy/index.ts'
 import { ExecutionNode } from '../types.ts'
@@ -126,7 +128,7 @@ async function ownWords<T>(node: TSNodeLike, pending: Promise<T>): Promise<T> {
 export async function executeCommand(
   recurse: (
     n: TSNodeLike,
-    s: SessionState,
+    s: EvaluationContext,
     i: ByteSource | null,
     cs: CallStack | null,
     opts?: ExecuteNodeOpts,
@@ -136,16 +138,17 @@ export async function executeCommand(
   namespace: Namespace,
   executeFn: ExecuteFn,
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   stdinIn: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
   runtimeBindings?: Record<string, Runtime>,
   routingDecision?: RouteDecision,
   signal?: AbortSignal,
-  // The shell parser; only alias expansion needs it. Absent means an
+  // The line's parse scope; only alias expansion needs it, and each
+  // expansion parses in a fork released when it ends. Absent means an
   // alias is stored and printed but never expanded.
-  parser?: ShellParser,
+  parser?: ParseScope,
   // The agent the line is attributed to, which an approval request names.
   agentId = '',
   // The line's hand-off, which its gate claims on and runs on.
@@ -154,6 +157,7 @@ export async function executeCommand(
   // nested shell) writes them as they finish.
   sink?: JobConsole,
 ): Promise<Result> {
+  const session = context.session
   const name = getCommandName(node)
   const [assignmentNodes, nonPrefixParts] = splitEnvPrefix(getParts(node))
 
@@ -181,47 +185,56 @@ export async function executeCommand(
       const [rewritten, texts] = rewrite
       let at = (headNode.startIndex ?? 0) - base
       const line = source.slice(0, at) + rewritten
-      const ast = parser.parse(line)
-      const own = new Map<string, readonly [number, number]>()
-      for (const [alias, text] of texts) {
-        own.set(alias, [at, at + text.length])
-        at += text.length
-      }
-      const reparse = (text: string): TSNodeLike => parser.parse(text)
-      const offending = findSyntaxError(
-        ast,
-        reparse,
-        expandingAliases(session),
-        own,
-        parser.sourceOffsets(line, ast),
-      )
-      if (offending !== null) {
-        const io = syntaxErrorResult(offending, ast)
-        const bad = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
-        return [null, io, new ExecutionNode({ command: head, exitCode: io.exitCode, stderr: bad })]
-      }
-      session.aliasStack.push(head)
-      // The rewritten line is read from this node, so it runs as a line
-      // of its own under the word that named it: each invocation of one
-      // alias is a place of its own on the line (`c && c` asks twice, as
-      // its spelled-out form does), and what its gates claim is the
-      // line's again at its end. Run on the line's own hand-off, both
-      // reads stood at the same offsets of the same text and the second
-      // ran on the first's nod.
-      const expansion = handed === undefined ? null : evaluatedFrom(node, handed)
+      const scope = parser.fork()
       try {
-        // In the caller's frame, as Python's line root has one: the
-        // alias's text is the caller's own line.
-        return await recurse(
+        const ast = scope.parse(line)
+        const own = new Map<string, readonly [number, number]>()
+        for (const [alias, text] of texts) {
+          own.set(alias, [at, at + text.length])
+          at += text.length
+        }
+        const reparse = (text: string): TSNodeLike => scope.parse(text)
+        const offending = findSyntaxError(
           ast,
-          session,
-          stdinIn,
-          callStack ?? new CallStack(),
-          expansion === null ? undefined : { handed: expansion },
+          reparse,
+          expandingAliases(session),
+          own,
+          scope.sourceOffsets(line, ast),
         )
+        if (offending !== null) {
+          const io = syntaxErrorResult(offending, ast)
+          const bad = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
+          return [
+            null,
+            io,
+            new ExecutionNode({ command: head, exitCode: io.exitCode, stderr: bad }),
+          ]
+        }
+        session.aliasStack.push(head)
+        // The rewritten line is read from this node, so it runs as a line
+        // of its own under the word that named it: each invocation of one
+        // alias is a place of its own on the line (`c && c` asks twice, as
+        // its spelled-out form does), and what its gates claim is the
+        // line's again at its end. Run on the line's own hand-off, both
+        // reads stood at the same offsets of the same text and the second
+        // ran on the first's nod.
+        const expansion = handed === undefined ? null : evaluatedFrom(node, handed)
+        try {
+          // In the caller's frame, as Python's line root has one: the
+          // alias's text is the caller's own line.
+          return await recurse(
+            ast,
+            context,
+            stdinIn,
+            callStack ?? new CallStack(),
+            expansion === null ? undefined : { handed: expansion },
+          )
+        } finally {
+          session.aliasStack.pop()
+          if (expansion !== null) registry.decisions.handUp(session.sessionId, expansion)
+        }
       } finally {
-        session.aliasStack.pop()
-        if (expansion !== null) registry.decisions.handUp(session.sessionId, expansion)
+        scope.release()
       }
     }
   }
@@ -241,10 +254,10 @@ export async function executeCommand(
             node,
             expandNode(
               firstVal,
-              session,
+              context,
               executeFn,
               callStack,
-              sessionView(session, registry.policies),
+              sessionView(session, registry.policies, context.frame.diagnostics),
             ),
           )
         : rawVal
@@ -334,7 +347,7 @@ export async function executeCommand(
       node,
       nonPrefixParts,
       name,
-      session,
+      context,
       stdinIn,
       callStack,
       jobTable,
@@ -363,7 +376,7 @@ export async function executeCommand(
 async function runCommandBody(
   recurse: (
     n: TSNodeLike,
-    s: SessionState,
+    s: EvaluationContext,
     i: ByteSource | null,
     cs: CallStack | null,
   ) => Promise<Result>,
@@ -374,7 +387,7 @@ async function runCommandBody(
   node: TSNodeLike,
   parts: TSNodeLike[],
   name: string,
-  session: SessionState,
+  context: EvaluationContext,
   stdinIn: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
@@ -386,10 +399,11 @@ async function runCommandBody(
   seedPrefix?: (command: string) => void,
   sink?: JobConsole,
 ): Promise<Result> {
+  const session = context.session
   const stdin = stdinIn
   // A background job's kill channel rides the session; fold it in so
   // builtins (sleep) and the mount layer observe the kill.
-  const signal = mergeSignals(signalIn, session.abortSignal)
+  const signal = mergeSignals(signalIn, context.frame.abortSignal)
   // The command's place on the line, as the pass computed it, and the
   // door its nested evaluations re-enter through: a word that runs a
   // line (eval, source, xargs) is bound to this node, and a substitution
@@ -427,7 +441,7 @@ async function runCommandBody(
       procSubInputs.push([path, allocation])
       const inner = getProcessSubBody(p)
       if (inner !== '') {
-        const io = await childLine(session, executeFn, inner, p, callStack)
+        const io = await childLine(context, executeFn, inner, p, callStack)
         dev.setInput(path, allocation, await materialize(io.stdout))
         procSubStderr.push(await materialize(io.stderr))
       }
@@ -438,12 +452,12 @@ async function runCommandBody(
       node,
       expandArgv(
         cleanParts,
-        session,
+        context,
         executeFn,
         callStack,
         registry,
         namespace,
-        sessionView(session, registry.policies),
+        sessionView(session, registry.policies, context.frame.diagnostics),
         routingDecision,
       ),
     )
@@ -480,7 +494,7 @@ async function runCommandBody(
         namespace,
         executeFn,
         argv,
-        session,
+        context,
         stdin,
         callStack,
         jobTable,
@@ -543,7 +557,7 @@ async function runCommandBody(
 async function runArgv(
   recurse: (
     n: TSNodeLike,
-    s: SessionState,
+    s: EvaluationContext,
     i: ByteSource | null,
     cs: CallStack | null,
   ) => Promise<Result>,
@@ -552,7 +566,7 @@ async function runArgv(
   namespace: Namespace,
   executeFn: ExecuteFn,
   argv: Argv,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
@@ -575,6 +589,7 @@ async function runArgv(
   // Opens the redirect targets once the line is admitted.
   opener: RedirectOpener | null = null,
 ): Promise<Result> {
+  const session = context.session
   const name = argv.name
 
   // A glob whose directory holds a child mount cannot be pushed down to
@@ -617,7 +632,7 @@ async function runArgv(
       name,
       [...argv.args],
       [...argv.operands],
-      session,
+      context.session,
       registry,
       namespace,
       agentId,
@@ -665,7 +680,7 @@ async function runArgv(
       namespace,
       executeFn,
       argv,
-      session,
+      context,
       stdin,
       callStack,
       jobTable,
@@ -703,7 +718,7 @@ export function unsaid(lines: readonly string[], said: Uint8Array): string[] {
 async function routeArgv(
   recurse: (
     n: TSNodeLike,
-    s: SessionState,
+    s: EvaluationContext,
     i: ByteSource | null,
     cs: CallStack | null,
   ) => Promise<Result>,
@@ -712,7 +727,7 @@ async function routeArgv(
   namespace: Namespace,
   executeFn: ExecuteFn,
   argv: Argv,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
@@ -724,6 +739,7 @@ async function routeArgv(
   handed: HandOff | null,
   sink?: JobConsole,
 ): Promise<Result> {
+  const session = context.session
   // The half of `runArgv` past the gate, split out so the gate's verdict
   // can be bound around it.
   // Every handler below reaches the op door through this one function,
@@ -731,7 +747,7 @@ async function routeArgv(
   // between its operands (`rm l1 l2` with the first unlink held past
   // the grace). Python needs nothing here: its cancelled task never
   // reaches the next operand.
-  const dispatch = guardDispatch(dispatchIn, mergeSignals(signal, session.abortSignal))
+  const dispatch = guardDispatch(dispatchIn, mergeSignals(signal, context.frame.abortSignal))
   const name = argv.name
   const args = [...argv.args]
   let operands = [...argv.operands]
@@ -746,7 +762,7 @@ async function routeArgv(
       executeFn,
       name,
       args,
-      session,
+      context,
       registry,
       namespace,
       stdin,
@@ -780,7 +796,7 @@ async function routeArgv(
   if (builtin !== undefined) {
     return builtin({
       argv,
-      session,
+      context,
       stdin,
       callStack,
       signal,
@@ -922,7 +938,7 @@ async function routeArgv(
     dispatch,
     registry,
     dispatchArgv.words,
-    session,
+    context,
     stdin,
     callStack,
     jobTable,

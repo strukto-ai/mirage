@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { EvaluationContext } from '../../evaluation.ts'
 import { describe, expect, it } from 'vitest'
 import { command } from '../../../commands/config.ts'
 import { CommandSpec, type FlagValue, Operand, Option } from '../../../commands/spec/types.ts'
@@ -58,7 +59,7 @@ describe('handleCommand — command not found', () => {
       NEVER_DISPATCH,
       reg,
       ['nope'],
-      new SessionState({ sessionId: 'test' }),
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
     expect(io.exitCode).toBe(127)
     expect(exec.exitCode).toBe(127)
@@ -87,7 +88,7 @@ describe('handleCommand — dispatches to mount that has the command', () => {
       NEVER_DISPATCH,
       reg,
       ['cat', PathSpec.fromStrPath('/ram/x')],
-      new SessionState({ sessionId: 'test' }),
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
     expect(io.exitCode).toBe(0)
     expect(exec.exitCode).toBe(0)
@@ -120,7 +121,7 @@ describe('handleCommand — dispatches to mount that has the command', () => {
       NEVER_DISPATCH,
       reg,
       ['head', '-n', '5', PathSpec.fromStrPath('/ram/x')],
-      new SessionState({ sessionId: 'test' }),
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
     expect(seenFlags.n).toBe('5')
   })
@@ -146,7 +147,7 @@ describe('handleCommand — cross-mount', () => {
       NEVER_DISPATCH,
       reg,
       ['mycmd', PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')],
-      new SessionState({ sessionId: 'test' }),
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
     expect(io.exitCode).toBe(1)
     expect(exec.exitCode).toBe(1)
@@ -163,7 +164,7 @@ describe('handleCommand — job builtins', () => {
       NEVER_DISPATCH,
       reg,
       ['jobs'],
-      new SessionState({ sessionId: 'test' }),
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
       null,
       null,
       jt,
@@ -179,7 +180,7 @@ describe('handleCommand — job builtins', () => {
       NEVER_DISPATCH,
       reg,
       ['kill', '999'],
-      new SessionState({ sessionId: 'test' }),
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
       null,
       null,
       jt,

@@ -152,5 +152,5 @@ async def history_builtin(call: BuiltinCall) -> Result:
         call (BuiltinCall): the invocation.
     """
     return await handle_history(
-        call.registry, list(call.argv.args), call.session
+        call.registry, list(call.argv.args), call.context.session
     )

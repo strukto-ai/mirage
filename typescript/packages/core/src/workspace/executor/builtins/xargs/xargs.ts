@@ -12,9 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { runWithEvaluation, type EvaluationContext } from '../../../evaluation.ts'
+import { releaseFunctions } from '../../../session/functions.ts'
+
 import { versionLine } from '../../../../commands/spec/standard.ts'
 import { quoteText } from '../../../../commands/quote.ts'
-import { runAsProgram, runWithSession } from '../../../../context/session_context.ts'
+import { runAsProgram } from '../../../../context/session_context.ts'
 import { renderHelp } from '../../../../commands/spec/help.ts'
 import { SHELL_SPECS, parseShellOptions } from '../../../../commands/spec/shell.ts'
 import {
@@ -36,7 +39,7 @@ import { shellQuote } from '../../../../utils/quote.ts'
 import { execs } from '../../../lookup/lookup.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import { varsFromEnv } from '../../../session/session.ts'
-import type { SessionState } from '../../../session/session.ts'
+
 import { envSnapshot } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { readScriptBytes } from '../script/script.ts'
@@ -539,10 +542,11 @@ interface RunOptions {
 async function runLines(
   executeFn: ExecuteStringFn,
   events: readonly XargsEvent[],
-  session: SessionState,
+  context: EvaluationContext,
   procs: number,
   opts: RunOptions = {},
 ): Promise<[IOResult[], number | null]> {
+  const session = context.session
   const results: IOResult[][] = events.map(() => [])
   const slotVar = opts.slotVar ?? null
   const registry = opts.registry ?? null
@@ -559,7 +563,7 @@ async function runLines(
     const line = shellJoin(words)
     if (!forked) {
       const io = await runAsProgram(session, () =>
-        executeFn(line, { sessionId: session.sessionId, session, stdin }),
+        executeFn(line, { sessionId: session.sessionId, context, stdin }),
       )
       await io.materializeStdout()
       await io.materializeStderr()
@@ -568,20 +572,27 @@ async function runLines(
     let slot = 0
     while (taken.has(slot)) slot += 1
     taken.add(slot)
-    const child = session.fork()
+    const childEvaluation = context.fork()
+    const child = childEvaluation.session
     if (slotVar !== null) {
       child.vars = { ...child.vars, ...varsFromEnv({ [slotVar]: String(slot) }) }
     }
     try {
-      return await runWithSession(child, async () => {
+      return await runWithEvaluation(childEvaluation, async () => {
         const io = await runAsProgram(child, () =>
-          executeFn(line, { sessionId: child.sessionId, session: child, stdin }),
+          executeFn(line, {
+            sessionId: child.sessionId,
+            context: childEvaluation,
+            session: child,
+            stdin,
+          }),
         )
         await io.materializeStdout()
         await io.materializeStderr()
         return io
       })
     } finally {
+      releaseFunctions(child.functions)
       taken.delete(slot)
     }
   }
@@ -659,10 +670,11 @@ export interface XargsDoors {
 export async function handleXargs(
   executeFn: ExecuteStringFn,
   args: readonly string[],
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   doors: XargsDoors = {},
 ): Promise<Result> {
+  const session = context.session
   const parse = parseShellOptions(SHELL_SPECS.xargs, args)
   let envSize = 0
   for (const [name, value] of Object.entries(envSnapshot(session))) {
@@ -820,7 +832,7 @@ export async function handleXargs(
     fatal = err
   }
 
-  const [ios, stop] = await runLines(executeFn, builder.events, session, procs, {
+  const [ios, stop] = await runLines(executeFn, builder.events, context, procs, {
     trace: toggles.has('t'),
     slotVar,
     registry: doors.registry ?? null,
@@ -848,7 +860,7 @@ export async function handleXargs(
 
 /** The `xargs` arm. */
 export async function xargsBuiltin(call: BuiltinCall): Promise<Result> {
-  return handleXargs(call.executeFn, [...call.argv.args], call.session, call.stdin, {
+  return handleXargs(call.executeFn, [...call.argv.args], call.context, call.stdin, {
     dispatch: call.dispatch,
     registry: call.registry,
   })

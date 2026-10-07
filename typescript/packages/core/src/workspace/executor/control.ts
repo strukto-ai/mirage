@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EvaluationContext } from '../evaluation.ts'
 import { lineBuffer } from '../../io/async_line_iterator.ts'
 import { asyncChain } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -32,7 +33,7 @@ import { readReply } from './builtins/read/index.ts'
 import type { PathSpec } from '../../types.ts'
 import { wordText } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import type { SessionState } from '../session/session.ts'
+
 import { sessionView, visibleEnv } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { runStatement } from './jobs.ts'
@@ -81,7 +82,7 @@ export class ContinueSignal extends Error {
 async function executeBody(
   executeNode: ExecuteNodeFn,
   body: readonly TSNodeLike[],
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
@@ -89,6 +90,7 @@ async function executeBody(
   handed: HandOff | null,
   decisions: Decisions | null,
 ): Promise<Result> {
+  const session = context.session
   const allStdout: (ByteSource | null)[] = []
   let mergedIo = new IOResult()
   let lastExec = new ExecutionNode({ command: '', exitCode: 0 })
@@ -98,7 +100,7 @@ async function executeBody(
       const [rawStdout, io, execNode] = await runStatement(
         executeNode,
         cmd,
-        session,
+        context,
         stdin,
         bound,
         callStack,
@@ -240,7 +242,7 @@ export async function handleIf(
   executeNode: ExecuteNodeFn,
   branches: readonly [TSNodeLike, TSNodeLike[]][],
   elseBody: TSNodeLike[] | null,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,
@@ -248,12 +250,13 @@ export async function handleIf(
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
 ): Promise<Result> {
+  const session = context.session
   const bound = fd0Binding(session)
   for (const [condition, body] of branches) {
     const [condStdout, condIo] = await runStatement(
       executeNode,
       condition,
-      session,
+      context,
       stdin,
       bound,
       callStack,
@@ -268,7 +271,7 @@ export async function handleIf(
       return executeBody(
         executeNode,
         body,
-        session,
+        context,
         stdin,
         callStack,
         jobTable,
@@ -282,7 +285,7 @@ export async function handleIf(
     return executeBody(
       executeNode,
       elseBody,
-      session,
+      context,
       stdin,
       callStack,
       jobTable,
@@ -304,7 +307,7 @@ export async function handleFor(
   variable: string,
   values: readonly (string | PathSpec)[],
   body: readonly TSNodeLike[],
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   policies: Policies | null = null,
@@ -313,9 +316,10 @@ export async function handleFor(
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
 ): Promise<Result> {
+  const session = context.session
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
-  const view = sessionView(session, policies)
+  const view = sessionView(session, policies, context.frame.diagnostics)
   // The loop variable is the shell's own write: readonly is bash's
   // rule, checked up front so the loop never starts, exactly as bash
   // refuses `for x` on a readonly x before the first iteration.
@@ -343,7 +347,7 @@ export async function handleFor(
       const [stdout, io] = await executeBody(
         executeNode,
         body,
-        session,
+        context,
         stdin,
         callStack,
         jobTable,
@@ -370,7 +374,7 @@ async function conditionLoop(
   executeNode: ExecuteNodeFn,
   condition: TSNodeLike,
   body: readonly TSNodeLike[],
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
@@ -380,6 +384,7 @@ async function conditionLoop(
   label: string,
   breakOnZero: boolean,
 ): Promise<Result> {
+  const session = context.session
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
   let hitLimit = true
@@ -392,7 +397,7 @@ async function conditionLoop(
     const [condStdout, condIo] = await runStatement(
       executeNode,
       condition,
-      session,
+      context,
       stdin,
       bound,
       callStack,
@@ -415,7 +420,7 @@ async function conditionLoop(
       const [stdout, io] = await executeBody(
         executeNode,
         body,
-        session,
+        context,
         stdin,
         callStack,
         jobTable,
@@ -470,7 +475,7 @@ export async function handleCfor(
   exprs: readonly (readonly TSNodeLike[])[],
   body: readonly TSNodeLike[],
   evalExpr: CforEval,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,
@@ -478,6 +483,7 @@ export async function handleCfor(
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
 ): Promise<Result> {
+  const session = context.session
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
   let hitLimit = true
@@ -496,7 +502,7 @@ export async function handleCfor(
         const [stdout, io] = await executeBody(
           executeNode,
           body,
-          session,
+          context,
           stdin,
           callStack,
           jobTable,
@@ -555,7 +561,7 @@ export function handleWhile(
   executeNode: ExecuteNodeFn,
   condition: TSNodeLike,
   body: readonly TSNodeLike[],
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,
@@ -567,7 +573,7 @@ export function handleWhile(
     executeNode,
     condition,
     body,
-    session,
+    context,
     stdin,
     callStack,
     jobTable,
@@ -583,7 +589,7 @@ export function handleUntil(
   executeNode: ExecuteNodeFn,
   condition: TSNodeLike,
   body: readonly TSNodeLike[],
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,
@@ -595,7 +601,7 @@ export function handleUntil(
     executeNode,
     condition,
     body,
-    session,
+    context,
     stdin,
     callStack,
     jobTable,
@@ -611,7 +617,7 @@ export async function handleCase(
   executeNode: ExecuteNodeFn,
   word: string,
   items: readonly [readonly string[], readonly TSNodeLike[], string][],
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,
@@ -619,6 +625,7 @@ export async function handleCase(
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
 ): Promise<Result> {
+  const session = context.session
   const allStdout: ByteSource[] = []
   let mergedIo = new IOResult()
   let lastExec = new ExecutionNode({ command: 'case', exitCode: 0 })
@@ -634,7 +641,7 @@ export async function handleCase(
         result = await runStatement(
           executeNode,
           stmt,
-          session,
+          context,
           stdin,
           bound,
           callStack,
@@ -716,7 +723,7 @@ export async function handleSelect(
   variable: string,
   values: readonly (string | PathSpec)[],
   body: readonly TSNodeLike[],
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   policies: Policies | null = null,
@@ -727,9 +734,10 @@ export async function handleSelect(
   signal?: AbortSignal,
   sink?: JobConsole,
 ): Promise<Result> {
+  const session = context.session
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
-  const view = sessionView(session, policies)
+  const view = sessionView(session, policies, context.frame.diagnostics)
   const lines = stdin !== null ? lineBuffer(stdin) : null
   const words = values.map((v) => wordText(v))
   let showMenu = words.length > 0
@@ -774,7 +782,7 @@ export async function handleSelect(
       const [stdout, io] = await executeBody(
         executeNode,
         body,
-        session,
+        context,
         stdin,
         callStack,
         jobTable,

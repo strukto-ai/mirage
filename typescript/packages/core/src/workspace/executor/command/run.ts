@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EvaluationContext } from '../../evaluation.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
 import { wrapCachableStreams } from '../../../io/stream.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -42,7 +43,7 @@ import { encodeText } from '../../../shell/bytes.ts'
 
 export interface RunOnMountCtx {
   registry: MountRegistry
-  session: SessionState
+  context: EvaluationContext
   dispatch: DispatchFn
   namespace?: Namespace
   runtimeBindings?: Record<string, Runtime>
@@ -195,7 +196,8 @@ export async function runOnMount(
   flagKwargs: Flags,
   opts: RunOnMountOpts = {},
 ): Promise<[ByteSource | null, IOResult]> {
-  const { registry, session, dispatch, namespace, runtimeBindings, routingDecision } = ctx
+  const { registry, context, dispatch, namespace, runtimeBindings, routingDecision } = ctx
+  const session = context.session
   const hint = opts.resolveHint ?? null
   let mount = opts.mount ?? null
   if (mount === null) {
@@ -251,7 +253,7 @@ export async function runOnMount(
   )
   if (denial !== null) return [null, denial]
 
-  const signal = mergeSignals(mergeSignals(ctx.signal, session.abortSignal), opts.signal)
+  const signal = mergeSignals(mergeSignals(ctx.signal, ctx.context.frame.abortSignal), opts.signal)
   // A leaf that resumes here after the caller aborted must not reach a
   // mount handler: eager write handlers do not read the signal, and a
   // cancelled `rm` must not run.
@@ -263,7 +265,7 @@ export async function runOnMount(
       dispatch,
       sessionId: session.sessionId,
       env: envSnapshot(session),
-      sessionView: sessionView(session, registry.policies),
+      sessionView: sessionView(session, registry.policies, context.frame.diagnostics),
       ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
       execAllowed: registry.isExecAllowed(),
       execPathAllowed: registry.execAllowedAt,

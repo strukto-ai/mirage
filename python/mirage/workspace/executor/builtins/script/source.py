@@ -150,7 +150,7 @@ async def source_builtin(call: BuiltinCall) -> Result:
         call.dispatch,
         call.execute_fn,
         operands[0],
-        call.session,
+        call.context.session,
         [word_text(o) for o in operands[1:]],
         call.stdin,
         call.call_stack,

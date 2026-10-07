@@ -23,10 +23,10 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.job_table import JobTable
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.expand.argv import Argv
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 Result = tuple[ByteSource | None, IOResult, ExecutionNode]
@@ -44,7 +44,7 @@ class BuiltinCall:
     Args:
         argv (Argv): the expanded line: name, text args, classified
             operands, and the words as typed.
-        session (SessionState): the shell session the builtin acts on.
+        context (EvaluationContext): the shell and temporary state of this invocation.
         stdin (ByteSource | None): the line's standard input, if piped.
         call_stack (CallStack | None): the function-call stack, which
             holds the positional parameters.
@@ -66,7 +66,7 @@ class BuiltinCall:
     """
 
     argv: Argv
-    session: SessionState
+    context: EvaluationContext
     stdin: ByteSource | None
     call_stack: CallStack | None
     cancel: asyncio.Event | None

@@ -134,10 +134,10 @@ export function handleWhich(
 
 /** The `type` arm. */
 export function typeBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(handleType([...call.argv.args], call.session, call.registry))
+  return Promise.resolve(handleType([...call.argv.args], call.context.session, call.registry))
 }
 
 /** The `which` arm. */
 export function whichBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(handleWhich([...call.argv.args], call.session, call.registry))
+  return Promise.resolve(handleWhich([...call.argv.args], call.context.session, call.registry))
 }

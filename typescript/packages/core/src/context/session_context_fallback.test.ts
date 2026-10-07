@@ -12,17 +12,25 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import {
+  EvaluationContext,
+  getCurrentEvaluation,
+  runWithEvaluation,
+} from '../workspace/evaluation.ts'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  captureSessionContext,
   getAdmission,
   getCurrentSessionFor,
   getCurrentSession,
   getOpPolicies,
+  isProgramInvocation,
   mountGateFor,
   sessionVisibility,
   redirectPathsFor,
   redirectTargetJudged,
   requireMountWritable,
+  runAsProgram,
   runWithAdmission,
   runWithMountGate,
   runWithOpPolicies,
@@ -47,6 +55,7 @@ import { getTestParser } from '../workspace/fixtures/workspace_fixture.ts'
 import { Session } from '../workspace/workspace/handle.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
+import { ContextScope } from '../utils/context_scope.ts'
 import { pathVisible } from '../utils/hidden.ts'
 import { MountRegistry } from '../workspace/mount/registry.ts'
 import { namespaceViewOf } from '../workspace/mount/namespace/view.ts'
@@ -519,6 +528,42 @@ describe('dry runs on the fallback storage', () => {
   })
 })
 
+describe('deferred evaluation on the fallback storage', () => {
+  it.each([false, true])(
+    'restores a deferred evaluator with explicit session %s',
+    async (explicit) => {
+      const parent = new EvaluationContext(new SessionState({ sessionId: 'parent' }))
+      const child = parent.fork()
+      const deferred = await runAsProgram(parent.session, () =>
+        runWithEvaluation(child, () =>
+          Promise.resolve(
+            new ContextScope(captureSessionContext(explicit ? child.session : undefined)),
+          ),
+        ),
+      )
+      const other = new EvaluationContext(new SessionState({ sessionId: 'other' }))
+      await runWithEvaluation(other, async () => {
+        const recaptured = await deferred.run(async () => {
+          await Promise.resolve()
+          expect(getCurrentSession()).toBe(child.session)
+          expect(getCurrentEvaluation()).toBe(child)
+          expect(isProgramInvocation(child.session)).toBe(true)
+          return new ContextScope(captureSessionContext())
+        })
+        await recaptured.run(async () => {
+          await Promise.resolve()
+          expect(getCurrentEvaluation()).toBe(child)
+          expect(isProgramInvocation(child.session)).toBe(true)
+        })
+        expect(getCurrentEvaluation()).toBe(other)
+        expect(getCurrentSession()).toBe(other.session)
+      })
+      expect(getCurrentEvaluation()).toBeNull()
+      expect(getCurrentSession()).toBeNull()
+    },
+  )
+})
+
 describe('xargs session isolation on the fallback storage', () => {
   it.each<[number, string]>([
     [0, 'a'],
@@ -551,7 +596,7 @@ describe('xargs session isolation on the fallback storage', () => {
       const [out, io] = await handleXargs(
         execute,
         [`-P${String(procs)}`, '-n1', 'echo'],
-        parent,
+        new EvaluationContext(parent),
         new TextEncoder().encode(data),
       )
       expect(getCurrentSession()).toBe(parent)
@@ -586,7 +631,12 @@ describe('xargs session isolation on the fallback storage', () => {
     }
     await runWithSession(parent, async () => {
       await expect(
-        handleXargs(execute, ['-P2', 'echo'], parent, new TextEncoder().encode('a')),
+        handleXargs(
+          execute,
+          ['-P2', 'echo'],
+          new EvaluationContext(parent),
+          new TextEncoder().encode('a'),
+        ),
       ).rejects.toThrow('command failed')
       expect(getCurrentSession()).toBe(parent)
       expect(parent.env.X).toBe('outer')

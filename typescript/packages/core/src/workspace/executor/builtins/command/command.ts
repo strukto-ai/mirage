@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { retainPrograms } from '../../../../shell/parse/program.ts'
+import type { TSNodeLike } from '../../../../shell/types.ts'
+
 import { IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import type { CallStack } from '../../../../shell/call_stack.ts'
@@ -121,6 +124,7 @@ export async function handleCommandBuiltin(
   // Function bodies are never undefined, so a defined captured value means
   // a shadowing function was masked and must be restored after the run.
   const savedFn = session.functions[innerName]
+  const releaseProgram = retainPrograms(Array.isArray(savedFn) ? (savedFn as TSNodeLike[]) : [])
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
   delete session.functions[innerName]
   // An alias is masked the same way: bash expands an alias only as a
@@ -138,6 +142,7 @@ export async function handleCommandBuiltin(
     return [io.stdout, io, new ExecutionNode({ command: 'command', exitCode: io.exitCode })]
   } finally {
     if (savedFn !== undefined) session.functions[innerName] = savedFn
+    releaseProgram()
     if (savedAlias !== undefined) session.aliases[innerName] = savedAlias
   }
 }
@@ -147,7 +152,7 @@ export async function commandBuiltin(call: BuiltinCall): Promise<Result> {
   return handleCommandBuiltin(
     call.executeFn,
     [...call.argv.args],
-    call.session,
+    call.context.session,
     call.registry,
     call.stdin,
     call.callStack,

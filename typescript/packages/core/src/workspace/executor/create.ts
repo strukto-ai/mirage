@@ -1,6 +1,3 @@
-import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
-import { materialize, type ByteSource } from '../../io/types.ts'
-import type { FileDescription } from '../../shell/descriptors.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,13 +12,17 @@ import type { FileDescription } from '../../shell/descriptors.ts'
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DEFAULT_UMASK, getCurrentSession } from '../../context/session_context.ts'
+import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
+import { materialize, type ByteSource } from '../../io/types.ts'
+import type { FileDescription } from '../../shell/descriptors.ts'
+import { DEFAULT_UMASK } from '../../context/session_context.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { PathSpec } from '../../types.ts'
 import { isFsError } from '../../errors/fs.ts'
 import { spliceWindow } from '../../utils/ranges.ts'
 import type { SessionState } from '../session/session.ts'
 import { hasAborted, makeAbortError } from '../abort.ts'
+import { getCurrentEvaluation } from '../evaluation.ts'
 
 /**
  * Write or append, giving a newly created file the umask's mode.
@@ -75,7 +76,7 @@ export async function createFile(
  * file: a background job writing alongside the shell neither reopens the
  * file nor lands on an offset another write has not advanced yet. A writer
  * killed while it waits for its turn writes nothing: a promise cannot be
- * cancelled, so the turn checks the writer's session (a job's own), as
+ * cancelled, so the turn checks the writer's execution frame, as
  * Python's cancelled task leaves the queue.
  */
 export async function writeDescription(
@@ -93,7 +94,7 @@ export async function writeDescription(
   file.writing = new Promise((resolve) => (done = resolve))
   try {
     await turn
-    const writer = getCurrentSession()?.abortSignal ?? undefined
+    const writer = getCurrentEvaluation()?.frame.abortSignal ?? undefined
     if (hasAborted(writer)) throw makeAbortError(writer)
     await writeThrough(dispatch, session, file, data)
   } finally {

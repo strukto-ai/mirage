@@ -36,9 +36,9 @@ from mirage.shell.literal import literal_tree
 from mirage.shell.parse import (
     find_syntax_error,
     find_unterminated_backtick,
-    parse,
     syntax_error_result,
 )
+from mirage.shell.parse.scope import ParseScope
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, Refusal
@@ -46,6 +46,13 @@ from mirage.workspace.abort import (
     MirageAbortError,
     StatusWriter,
     set_line_writer,
+)
+from mirage.workspace.evaluation import (
+    EvaluationContext,
+    child_context,
+    get_current_evaluation,
+    reset_current_evaluation,
+    set_current_evaluation,
 )
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.alias import expanding_aliases
@@ -191,105 +198,123 @@ async def recurse(
         session = ws._session_mgr.get(
             opts.get("session_id") or ws._session_mgr.default_id
         )
-    tree = None
-    if substitution and node.type == NT.COMMAND_SUBSTITUTION:
-        tree = parse(cmd)
-    if tree is not None and input_substitution_redirect(tree) is not None:
-        evaluate = partial(
-            recurse,
-            ws,
-            cancel=cancel,
-            routing_decision=routing_decision,
-            agent_id=agent_id,
-            nested=nested,
-            execution_scope=execution_scope,
-            handed=inner,
-        )
-        io, _ = await run_command_tree(
-            ws.dispatch,
-            ws._registry,
-            ws._namespace,
-            ws.job_table,
-            evaluate,
-            agent_id or "",
-            tree,
-            session,
-            None,
-            cancel,
-            routing_decision=routing_decision,
-            handed=inner,
-            command_substitution=True,
-            execution_scope=execution_scope,
-        )
-        record_status(session, io.exit_code, transparent=True)
-    else:
-        saved = session.snapshot() if substitution else None
-        terminal_output = session.terminal_output
-        capture = Terminal()
-        waits = JobWaits(capture.jobs)
-        rest = session.job_output or session.tty.jobs
-        if saved is not None:
-            session.terminal_output = False
-            inherit_exit_trap(session)
-            # A substitution reads its pipe until every writer has closed
-            # it, so what a job it started writes is part of its value,
-            # and it ends when its jobs do. They are its own jobs.
-            session.job_output = capture.jobs
-            session.job_waits = waits
-            caller = opts.get("job_table") or ws.job_table
-            opts["job_table"] = caller.child(caller)
-            opts["sink"] = capture
+    context = get_current_evaluation()
+    if context is None:
+        context = EvaluationContext(session)
+    elif context.session is not session:
+        context = EvaluationContext(session, context.frame.fork(), context)
+    if (
+        substitution
+        and node is not None
+        and node.type == NT.COMMAND_SUBSTITUTION
+    ):
+        parser = ParseScope()
         try:
-            try:
-                io = await ws.shell(
-                    cmd,
+            tree = parser.parse(cmd)
+            if input_substitution_redirect(tree) is not None:
+                evaluate = partial(
+                    recurse,
+                    ws,
                     cancel=cancel,
-                    record=False,
-                    execution_scope=execution_scope,
                     routing_decision=routing_decision,
                     agent_id=agent_id,
+                    nested=nested,
+                    execution_scope=execution_scope,
                     handed=inner,
-                    **opts,
                 )
-            except UNWINDING as sig:
-                # A substitution runs on a copy of the caller's frames,
-                # and it is a child shell: whatever unwinds out of it
-                # ends it.
-                if saved is None:
-                    raise
-                io = ended(sig)
-            if saved is not None:
-                io = await finish_shell(
-                    partial(
-                        recurse,
-                        ws,
-                        node=node,
-                        handed=handed,
-                        cancel=cancel,
-                        routing_decision=routing_decision,
-                        agent_id=agent_id,
-                        nested=nested,
-                        execution_scope=execution_scope,
-                        job_table=opts["job_table"],
-                    ),
-                    session,
-                    io,
-                    opts.get("stdin"),
-                    opts.get("call_stack"),
+                io, _ = await run_command_tree(
+                    ws.dispatch,
+                    ws._registry,
+                    ws._namespace,
+                    ws.job_table,
+                    evaluate,
+                    agent_id or "",
+                    tree,
+                    context,
+                    None,
+                    cancel,
+                    routing_decision=routing_decision,
+                    handed=inner,
+                    command_substitution=True,
+                    execution_scope=execution_scope,
                 )
-                for channel, data in (
-                    (Channel.STDOUT, await io.materialize_stdout()),
-                    (Channel.STDERR, await io.materialize_stderr()),
-                ):
-                    await capture.emit(channel, data)
-                await waits.join(rest)
-                out, err = capture.take()
-                io.stdout = out or None
-                io.stderr = err or None
+                record_status(session, io.exit_code, transparent=True)
+                if io.refusal is not None:
+                    nested.latest = io.refusal
+                return io
         finally:
-            if saved is not None:
-                session.terminal_output = terminal_output
-                session.restore(saved)
+            parser.release()
+    child_token = None
+    if substitution:
+        context = child_context(context)
+        session = context.session
+        child_token = set_current_evaluation(context, owner=ws._session_mgr)
+    capture = Terminal()
+    waits = JobWaits(capture.jobs)
+    rest = session.job_output or session.tty.jobs
+    if substitution:
+        session.terminal_output = False
+        inherit_exit_trap(session)
+        # A substitution reads its pipe until every writer has closed
+        # it, so what a job it started writes is part of its value,
+        # and it ends when its jobs do. They are its own jobs.
+        session.job_output = capture.jobs
+        session.job_waits = waits
+        caller = opts.get("job_table") or ws.job_table
+        opts["job_table"] = caller.child(caller)
+        opts["sink"] = capture
+    try:
+        try:
+            io = await ws.shell(
+                cmd,
+                cancel=cancel,
+                record=False,
+                execution_scope=execution_scope,
+                routing_decision=routing_decision,
+                agent_id=agent_id,
+                handed=inner,
+                **opts,
+            )
+        except UNWINDING as sig:
+            # A substitution runs on a copy of the caller's frames,
+            # and it is a child shell: whatever unwinds out of it
+            # ends it.
+            if not substitution:
+                raise
+            io = ended(sig)
+        if substitution:
+            io = await finish_shell(
+                partial(
+                    recurse,
+                    ws,
+                    node=node,
+                    handed=handed,
+                    cancel=cancel,
+                    routing_decision=routing_decision,
+                    agent_id=agent_id,
+                    nested=nested,
+                    execution_scope=execution_scope,
+                    job_table=opts["job_table"],
+                ),
+                session,
+                io,
+                opts.get("stdin"),
+                opts.get("call_stack"),
+            )
+            for channel, data in (
+                (Channel.STDOUT, await io.materialize_stdout()),
+                (Channel.STDERR, await io.materialize_stderr()),
+            ):
+                await capture.emit(channel, data)
+            await waits.join(rest)
+            out, err = capture.take()
+            io.stdout = out or None
+            io.stderr = err or None
+    finally:
+        if substitution:
+            session.functions.clear()
+            if child_token is not None:
+                reset_current_evaluation(child_token)
     if io.refusal is not None:
         nested.latest = io.refusal
     return io
@@ -545,6 +570,14 @@ async def run_prepared_line(
     session_id = session.session_id
     cache_facts = ws._dispatcher.capture_cache_facts()
     effective_session = fork_for_call(session, cwd, env)
+    parent = get_current_evaluation()
+    if parent is not None and parent.session is not session:
+        parent = None
+    context = (
+        parent
+        if parent is not None and parent.session is effective_session
+        else EvaluationContext(effective_session, parent=parent)
+    )
     # The agent of this line, carried with the execution rather than
     # held on the workspace: a nested line inherits it through
     # `recurse`, a concurrent line keeps its own.
@@ -555,10 +588,9 @@ async def run_prepared_line(
     # evaluations get an inert scope.
     is_line = record
     scope = RecordingScope(active=is_line)
+    parse_scope = ParseScope()
 
-    session_token = set_current_session(
-        effective_session, owner=ws._session_mgr
-    )
+    session_token = set_current_evaluation(context, owner=ws._session_mgr)
     # Taken before any statement stamps, so a cancelled line can put
     # `$?` back to what it found. Restored at the seam in
     # ``Workspace.shell``, after the last await of the line, so an
@@ -570,12 +602,16 @@ async def run_prepared_line(
         # and every nested evaluation under it inherits the identity.
         set_line_writer(frame.writer)
     try:
-        ast = parse(command) if argv is None else literal_tree(argv)
+        ast = (
+            parse_scope.parse(command) if argv is None else literal_tree(argv)
+        )
         # Syntax gates before policy, mirroring the TS order and
         # bash: an unparsable line exits 2 and the policy is never
         # consulted about it.
         offending = find_syntax_error(
-            ast, expanding_aliases(effective_session)
+            ast,
+            expanding_aliases(effective_session),
+            parse_fn=parse_scope.parse,
         )
         if offending is None and argv is None:
             # tree-sitter accepts an unclosed backtick as a complete
@@ -839,7 +875,7 @@ async def run_prepared_line(
                 exec_recursion,
                 agent or "",
                 ast,
-                effective_session,
+                context,
                 stdin,
                 cancel,
                 routing_decision=decision,
@@ -917,8 +953,11 @@ async def run_prepared_line(
         # fingerprints/drift) and as observer op events. The command
         # event's exit_code says whether the line that emitted them
         # succeeded.
+        parse_scope.release()
+        if effective_session is not session:
+            effective_session.functions.clear()
         scope.close()
-        reset_current_session(session_token)
+        reset_current_evaluation(session_token)
         await ws._session_mgr.flush(session.session_id)
         ws._ops.records.extend(scope.records)
         # bash adds a line to history only when it is non-empty

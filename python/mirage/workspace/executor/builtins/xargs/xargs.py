@@ -38,15 +38,15 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.join import shell_join
 from mirage.utils.quote import shell_quote
+from mirage.workspace.evaluation import (
+    EvaluationContext,
+    reset_current_evaluation,
+    set_current_evaluation,
+)
 from mirage.workspace.executor.builtins.script.script import read_script_bytes
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.lookup.lookup import execs
 from mirage.workspace.mount.registry import MountRegistry
-from mirage.workspace.session import (
-    SessionState,
-    reset_current_session,
-    set_current_session,
-)
 from mirage.workspace.session.session import vars_from_env
 from mirage.workspace.session.state import env_snapshot
 from mirage.workspace.types import ExecutionNode
@@ -535,7 +535,7 @@ def xargs_missing(name: str) -> str:
 async def _run_lines(
     execute_fn: Callable[..., Any],
     events: list[str | list[bytes]],
-    session: SessionState,
+    context: EvaluationContext,
     procs: int,
     *,
     trace: bool = False,
@@ -557,7 +557,7 @@ async def _run_lines(
     Args:
         execute_fn (Callable): shell evaluator for each line.
         events (list[str | list[bytes]]): messages and command lines.
-        session (SessionState): the session the lines run in.
+        context (EvaluationContext): the session the lines run in.
         procs (int): the -P count; 0 runs every line at once.
         trace (bool): -t, print each command line before it runs.
         slot_var (str | None): --process-slot-var, the variable that
@@ -566,6 +566,7 @@ async def _run_lines(
             up; None runs every name.
         stdin (ByteSource | None): input shared by all commands (-a).
     """
+    session = context.session
     results: list[list[IOResult]] = [[] for _ in events]
     upcoming = iter(range(len(events)))
     stop: int | None = None
@@ -592,10 +593,11 @@ async def _run_lines(
             return io
         slot = next(n for n in range(len(taken) + 1) if n not in taken)
         taken.add(slot)
-        child = session.fork()
+        child_evaluation = context.fork()
+        child = child_evaluation.session
         if slot_var is not None:
             child.vars = {**child.vars, **vars_from_env({slot_var: str(slot)})}
-        token = set_current_session(child)
+        token = set_current_evaluation(child_evaluation)
         marked = set_program_invocation(child)
         try:
             io = await execute_fn(line, session_id=session.session_id, **extra)
@@ -604,7 +606,8 @@ async def _run_lines(
             return io
         finally:
             reset_program_invocation(marked)
-            reset_current_session(token)
+            reset_current_evaluation(token)
+            child.functions.clear()
             taken.discard(slot)
 
     async def worker() -> None:
@@ -655,7 +658,7 @@ async def _run_lines(
 async def handle_xargs(
     execute_fn: Callable[..., Any],
     args: list[str],
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None,
     *,
     dispatch: DispatchFn | None = None,
@@ -684,12 +687,13 @@ async def handle_xargs(
         execute_fn (Callable): shell evaluator for the inner line.
         args (list[str]): options, then command name and initial
             arguments; the command defaults to ["echo"] like GNU.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the evaluation's session and frame.
         stdin (ByteSource | None): input whose words become arguments.
         dispatch (DispatchFn | None): op dispatcher, which reads -a.
         registry (MountRegistry | None): where command names are looked
             up; None runs every name.
     """
+    session = context.session
     parse = parse_shell_options(SHELL_SPECS["xargs"], args or [])
     env_size = sum(
         len(encode_text(f"{name}={value}")) + 1
@@ -855,7 +859,7 @@ async def handle_xargs(
     ios, stop = await _run_lines(
         execute_fn,
         builder.events,
-        session,
+        context,
         procs,
         trace="t" in toggles,
         slot_var=slot_var,
@@ -891,7 +895,7 @@ async def xargs_builtin(call: BuiltinCall) -> Result:
     return await handle_xargs(
         call.execute_fn,
         list(call.argv.args),
-        call.session,
+        call.context,
         call.stdin,
         dispatch=call.dispatch,
         registry=call.registry,

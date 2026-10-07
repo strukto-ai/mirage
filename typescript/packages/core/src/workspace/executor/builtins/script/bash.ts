@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { type EvaluationContext, childContext } from '../../../evaluation.ts'
+import { releaseFunctions } from '../../../session/functions.ts'
+
 import { runAsShell } from '../../../../context/session_context.ts'
 import { materialize, IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
@@ -19,7 +22,7 @@ import { type JobConsole, JobOutput } from '../../../../shell/console/index.ts'
 import { IFS_DEFAULT } from '../../../../shell/constants.ts'
 import type { JobTable } from '../../../../shell/job_table/index.ts'
 import { parseOptionWord } from '../../../../shell/options.ts'
-import type { SessionState } from '../../../session/session.ts'
+
 import { seedVar } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
@@ -109,22 +112,23 @@ export function parseBashArgs(args: string[]): BashArgs {
  * `name` is the head word (`bash` or `sh`). bash reports itself by
  * `argv[0]`, so the diagnostics follow the spelling the caller used.
  *
- * A nested shell is a child shell, so it runs on a snapshot of the session
- * and the caller gets its state back afterwards: `bash -c 'cd /x'` leaves the
- * caller where it was, as it does in bash, where the nested shell is a
- * separate process. `handleSource` is the opposite case and deliberately does
- * not snapshot, because a sourced file is the caller.
+ * A nested shell is a child shell, so it runs on a subshell of the session
+ * and leaves the caller's state alone: `bash -c 'cd /x'` leaves the caller
+ * where it was, as it does in bash, where the nested shell is a separate
+ * process. `handleSource` is the opposite case and deliberately runs on the
+ * caller's session, because a sourced file is the caller.
  */
 export async function handleBash(
   dispatch: DispatchFn,
   executeFn: ExecuteStringFn,
   args: string[],
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null = null,
   name = 'bash',
   sink?: JobConsole,
   jobTable?: JobTable,
 ): Promise<Result> {
+  let session = context.session
   const parsed = parseBashArgs(args)
   if (parsed.invalid !== null) {
     // GNU words this "invalid option" and follows it with a usage block.
@@ -156,7 +160,8 @@ export async function handleBash(
   if (script === null) {
     return [null, new IOResult(), new ExecutionNode({ command: name, exitCode: 0 })]
   }
-  const saved = session.snapshot()
+  context = childContext(context)
+  session = context.session
   clearExitTrap(session)
   session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
   session.positionalArgs = positional
@@ -167,6 +172,9 @@ export async function handleBash(
   // A child shell is outside every function and `source` its caller is
   // inside: it runs on a call stack of its own, and `FUNCNAME` is empty.
   session.functionNames = []
+  session.localVars = null
+  session.localFrames = []
+  session.localRandom = []
   for (const [option, enable] of parsed.settings) session.shellOptions[option] = enable
   // A nested shell is its own process, with its own jobs: its `jobs` and
   // `wait` see only them, its EXIT action's included, and they are not its
@@ -178,9 +186,10 @@ export async function handleBash(
   try {
     io = await runAsShell(async () =>
       finishShell(
-        (action, opts) => executeFn(action, { ...opts, ...jobs }),
+        (action, opts) => executeFn(action, { ...opts, ...jobs, context }),
         session,
         await executeFn(script, {
+          context,
           sessionId: session.sessionId,
           stdin,
           ...(sink === undefined ? {} : { sink }),
@@ -190,7 +199,7 @@ export async function handleBash(
       ),
     )
   } finally {
-    session.restore(saved)
+    releaseFunctions(session.functions)
   }
   const label = parsed.path !== null ? `${name} ${parsed.path}` : `${name} -c ${script}`
   return [io.stdout, io, new ExecutionNode({ command: label, exitCode: io.exitCode })]
@@ -202,7 +211,7 @@ export async function bashBuiltin(call: BuiltinCall): Promise<Result> {
     call.dispatch,
     call.executeFn,
     [...call.argv.args],
-    call.session,
+    call.context,
     call.stdin,
     call.argv.name,
     call.sink,

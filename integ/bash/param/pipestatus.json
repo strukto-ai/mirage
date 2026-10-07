@@ -1054,6 +1054,40 @@
         "stderr": ""
       },
       "note": "`! { false; }` is left out: tree-sitter-bash parses the brace after `!` as a command word, a grammar limit older than this case."
+    },
+    {
+      "id": "random_pipeline_stage_reseeds",
+      "seq": 981543,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( RANDOM=42; a=$RANDOM$RANDOM; RANDOM=42; echo $RANDOM$RANDOM | { read b; [ \"$a\" = \"$b\" ] && echo replay || echo reseed; } )",
+      "expect": {
+        "exit": 0,
+        "stdout": "reseed\n",
+        "stderr": ""
+      }
     }
   ]
 }

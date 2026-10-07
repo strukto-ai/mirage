@@ -664,9 +664,10 @@ async function landCoercion(
   session: SessionState,
   policies: Policies | null,
   coercion: IntegerCoercion,
+  diagnostics?: (string | Uint8Array)[],
 ): Promise<void> {
   for (const write of coercion.writes) {
-    await setVar(session, policies, write.name, writtenValue(session, write))
+    await setVar(session, policies, write.name, writtenValue(session, write), true, diagnostics)
   }
   coercion.reader.settle()
 }
@@ -683,6 +684,7 @@ async function setVar(
   name: string,
   value: ShellValue,
   followRef = true,
+  diagnostics?: (string | Uint8Array)[],
 ): Promise<void> {
   if (followRef) name = deref(session, name) || name
   ensureVarVisible(session, name)
@@ -711,7 +713,7 @@ async function setVar(
       // bash bound what the expression assigned before it failed
       // (`declare -i n; x='y=5,1/0'; n=x` leaves y at 5, and a RANDOM
       // seed in it seeds); they land, gated, before the refusal reports.
-      if (err instanceof ArithError) await landCoercion(session, policies, coercion)
+      if (err instanceof ArithError) await landCoercion(session, policies, coercion, diagnostics)
       throw err
     }
   }
@@ -729,8 +731,9 @@ async function setVar(
       session.randomState = Number(((value % modulus) + modulus) % modulus)
     } catch (err) {
       if (!(err instanceof ArithError)) throw err
-      session.diagnostics.push(err.message)
-      await landCoercion(session, policies, coercion)
+      if (diagnostics === undefined) throw err
+      diagnostics.push(err.message)
+      await landCoercion(session, policies, coercion, diagnostics)
       return
     }
     session.randomSeed = shaped
@@ -739,7 +742,7 @@ async function setVar(
   noteRandomKind(session, name, shaped)
   // The assignments the coercion or the seed made land now, gated each,
   // before the name they were made for.
-  await landCoercion(session, policies, coercion)
+  await landCoercion(session, policies, coercion, diagnostics)
   let stored = existing === undefined ? makeVar(shaped) : withValue(existing, shaped)
   // An agent write to a managed name shadows session-locally: the
   // pointer drops and the record becomes a plain variable for this
@@ -1004,11 +1007,16 @@ async function markVar(
   setAttr(session, name, attr, on)
 }
 
-export function sessionView(session: SessionState, policies: Policies | null = null): SessionView {
+export function sessionView(
+  session: SessionState,
+  policies: Policies | null = null,
+  diagnostics?: (string | Uint8Array)[],
+): SessionView {
   return {
     get: (name) => envGet(session, name),
     snapshot: () => envSnapshot(session),
-    set: (name, value, followRef = true) => setVar(session, policies, name, value, followRef),
+    set: (name, value, followRef = true) =>
+      setVar(session, policies, name, value, followRef, diagnostics),
     unset: (name, followRef = true) => unsetVar(session, policies, name, followRef),
     mark: (name, attr, on) => markVar(session, policies, name, attr, on),
     isReadonly: (name) => envIsReadonly(session, name),

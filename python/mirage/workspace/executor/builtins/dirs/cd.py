@@ -261,7 +261,7 @@ async def cd_builtin(call: BuiltinCall) -> Result:
     Args:
         call (BuiltinCall): the invocation.
     """
-    session = call.session
+    session = call.context.session
     dispatch = call.dispatch
     registry = call.registry
     namespace = call.namespace

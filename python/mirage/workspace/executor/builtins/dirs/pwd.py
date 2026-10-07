@@ -65,4 +65,4 @@ async def pwd_builtin(call: BuiltinCall) -> Result:
     Args:
         call (BuiltinCall): the invocation.
     """
-    return await handle_pwd(list(call.argv.operands), call.session)
+    return await handle_pwd(list(call.argv.operands), call.context.session)

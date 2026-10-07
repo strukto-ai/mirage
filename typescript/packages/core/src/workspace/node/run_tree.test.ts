@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { EvaluationContext } from '../evaluation.ts'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
@@ -71,7 +72,7 @@ describe('runCommandTree', () => {
     const [stdout, io] = await runCommandTree(
       buildDeps(registry()),
       parse('echo hello'),
-      new SessionState({ sessionId: 'test', cwd: '/' }),
+      new EvaluationContext(new SessionState({ sessionId: 'test', cwd: '/' })),
     )
     expect(io.exitCode).toBe(0)
     expect(new TextDecoder().decode(await materialize(stdout))).toContain('hello')
@@ -81,7 +82,7 @@ describe('runCommandTree', () => {
     const [, io] = await runCommandTree(
       buildDeps(registry()),
       parse('false'),
-      new SessionState({ sessionId: 'test', cwd: '/' }),
+      new EvaluationContext(new SessionState({ sessionId: 'test', cwd: '/' })),
     )
     expect(io.exitCode).not.toBe(0)
   })

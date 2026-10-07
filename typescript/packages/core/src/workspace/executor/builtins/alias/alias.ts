@@ -181,11 +181,14 @@ export function aliasCommandText(
 /** The `alias` arm; the row marks where the definition was made. */
 export function aliasBuiltin(call: BuiltinCall): Promise<Result> {
   return Promise.resolve(
-    handleAlias([...call.argv.args], call.session, [call.session.parseCurrent, call.row]),
+    handleAlias([...call.argv.args], call.context.session, [
+      call.context.session.parseCurrent,
+      call.row,
+    ]),
   )
 }
 
 /** The `unalias` arm. */
 export function unaliasBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(handleUnalias([...call.argv.args], call.session))
+  return Promise.resolve(handleUnalias([...call.argv.args], call.context.session))
 }
