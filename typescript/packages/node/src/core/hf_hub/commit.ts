@@ -108,7 +108,6 @@ export async function uploadModes(
 export function payload(
   additions: Addition[],
   deletions: string[],
-  folders: string[],
   message: string,
   description = '',
   parent = '',
@@ -123,14 +122,12 @@ export function payload(
     })
   }
   for (const path of deletions) lines.push({ key: 'deletedFile', value: { path } })
-  for (const path of folders) lines.push({ key: 'deletedFolder', value: { path } })
   return new TextEncoder().encode(lines.map((line) => `${JSON.stringify(line)}\n`).join(''))
 }
 
 export interface CommitOptions {
   additions?: Addition[]
   deletions?: string[]
-  folders?: string[]
   message?: string
   description?: string
   createPr?: boolean
@@ -163,7 +160,6 @@ export async function commit(
   const body = payload(
     adds,
     options.deletions ?? [],
-    options.folders ?? [],
     options.message ?? DEFAULT_COMMIT_MESSAGE,
     options.description ?? '',
   )

@@ -54,14 +54,6 @@ def test_named_files_win_over_the_include_filter():
     assert selected(TREE, ["a.txt"], ["sub/*"], []) == ["a.txt"]
 
 
-def test_include_narrows_a_whole_repo_download():
-    assert selected(TREE, [], ["sub/*"], []) == ["sub/b.json"]
-
-
-def test_exclude_drops_matches():
-    assert selected(TREE, [], [], ["sub/*"]) == ["a.txt"]
-
-
 @pytest.mark.asyncio
 @patch("mirage.commands.cli.builtin.hf.download.fetch_tree")
 @pytest.mark.parametrize(

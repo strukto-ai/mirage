@@ -17,16 +17,25 @@ import pytest
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.core.hf_hub.config import HfConfig
 from mirage.io.stream import yield_bytes
+from mirage.types import PathSpec
 
 CONFIG = HfConfig(token="hf_test")
 ANON = HfConfig()
 
 
-def inv(texts=(), flags=None, config=CONFIG, doors=None, stdin=None):
+def inv(
+    texts=(),
+    flags=None,
+    config=CONFIG,
+    doors=None,
+    stdin=None,
+    paths=(),
+):
     """One `hf` invocation, as the executor would build it."""
     return CLIInvocation(
         config,
         argv=tuple(texts),
+        paths=tuple(PathSpec.from_str_path(p) for p in paths),
         texts=tuple(texts),
         flags=flags or {},
         stdin=None if stdin is None else yield_bytes(stdin),

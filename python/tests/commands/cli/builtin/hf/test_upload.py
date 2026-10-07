@@ -19,7 +19,6 @@ import pytest
 from mirage.commands.cli.builtin.hf.upload import (
     collect,
     in_repo_base,
-    keep,
     upload_cmd,
 )
 from mirage.commands.errors import UsageError
@@ -46,29 +45,24 @@ async def test_collect_walks_a_directory_relative_to_it(doors):
 
 
 @pytest.mark.asyncio
-async def test_collect_refuses_a_missing_path(doors):
-    record, _, _, _ = doors
-    with pytest.raises(UsageError, match="No such file"):
-        await collect(record, PathSpec.from_str_path("/work/nope"))
-
-
-def test_keep_applies_include_then_exclude():
-    rows = [("a.txt", b""), ("sub/b.txt", b"")]
-    assert keep(rows, ["sub/*"], []) == [("sub/b.txt", b"")]
-    assert keep(rows, [], ["sub/*"]) == [("a.txt", b"")]
-
-
-@pytest.mark.asyncio
 @patch("mirage.commands.cli.builtin.hf.upload.create_repo")
 @patch("mirage.commands.cli.builtin.hf.upload.commit")
 async def test_upload_commits_every_walked_file_at_once(
     mock_commit, mock_create, doors
 ):
     record, _, _, _ = doors
-    await upload_cmd(inv(texts=("acme/widget", "/work"), doors=record))
+    await upload_cmd(
+        inv(
+            texts=("acme/widget",),
+            paths=("/work",),
+            flags={"create_pr": True},
+            doors=record,
+        )
+    )
     additions = mock_commit.await_args.kwargs["additions"]
     assert sorted(a.path for a in additions) == ["a.txt", "sub/b.txt"]
     assert mock_commit.await_count == 1
+    assert mock_commit.await_args.kwargs["create_pr"] is True
 
 
 @pytest.mark.asyncio
@@ -83,7 +77,9 @@ async def test_upload_of_a_file_lands_at_path_in_repo(
     `hf upload r ./a.txt docs` as a file named `docs`."""
     record, _, _, _ = doors
     await upload_cmd(
-        inv(texts=("acme/widget", "/work/a.txt", "docs"), doors=record)
+        inv(
+            texts=("acme/widget", "docs"), paths=("/work/a.txt",), doors=record
+        )
     )
     assert mock_commit.await_args.kwargs["additions"][0].path == "docs"
 
@@ -97,7 +93,9 @@ async def test_upload_of_a_directory_spreads_under_path_in_repo(
     """A directory source is the other half of the same rule: there
     `path_in_repo` names the destination FOLDER."""
     record, _, _, _ = doors
-    await upload_cmd(inv(texts=("acme/widget", "/work", "docs"), doors=record))
+    await upload_cmd(
+        inv(texts=("acme/widget", "docs"), paths=("/work",), doors=record)
+    )
     paths = [a.path for a in mock_commit.await_args.kwargs["additions"]]
     assert paths == ["docs/a.txt", "docs/sub/b.txt"]
 
@@ -109,26 +107,10 @@ async def test_upload_of_a_file_without_path_in_repo_uses_its_basename(
     mock_commit, mock_create, doors
 ):
     record, _, _, _ = doors
-    await upload_cmd(inv(texts=("acme/widget", "/work/a.txt"), doors=record))
-    assert mock_commit.await_args.kwargs["additions"][0].path == "a.txt"
-
-
-@pytest.mark.asyncio
-@patch("mirage.commands.cli.builtin.hf.upload.create_repo")
-@patch("mirage.commands.cli.builtin.hf.upload.commit")
-async def test_upload_passes_the_delete_globs_through(
-    mock_commit, mock_create, doors
-):
-    record, _, _, _ = doors
     await upload_cmd(
-        inv(
-            texts=("acme/widget", "/work/a.txt"),
-            flags={"delete": ["old.txt"], "create_pr": True},
-            doors=record,
-        )
+        inv(texts=("acme/widget",), paths=("/work/a.txt",), doors=record)
     )
-    assert mock_commit.await_args.kwargs["deletions"] == ["old.txt"]
-    assert mock_commit.await_args.kwargs["create_pr"] is True
+    assert mock_commit.await_args.kwargs["additions"][0].path == "a.txt"
 
 
 @pytest.mark.asyncio
@@ -136,14 +118,19 @@ async def test_upload_refuses_without_a_token(doors):
     record, _, _, _ = doors
     with pytest.raises(UsageError, match="token"):
         await upload_cmd(
-            inv(texts=("acme/widget", "/work"), config=ANON, doors=record)
+            inv(
+                texts=("acme/widget",),
+                paths=("/work",),
+                config=ANON,
+                doors=record,
+            )
         )
 
 
 @pytest.mark.asyncio
 async def test_upload_needs_a_workspace():
     with pytest.raises(UsageError, match="workspace"):
-        await upload_cmd(inv(texts=("acme/widget", "/work")))
+        await upload_cmd(inv(texts=("acme/widget",), paths=("/work",)))
 
 
 @pytest.mark.parametrize(

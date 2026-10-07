@@ -19,6 +19,7 @@ from typing import Any, Callable, Generic, Literal, TypeVar
 from pydantic import BaseModel
 
 from mirage.commands.cli.compile import validate_cli
+from mirage.commands.constants import ROOT_CWD
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import CommandSpec, FlagValue, UsageStyle
 from mirage.io.types import ByteSource, IOResult
@@ -94,7 +95,7 @@ class CLIInvocation(Generic[ConfigT]):
     a script handler maps ``argv``/``stdin``/``env`` onto RunArgs, a
     native handler maps the same three onto a process. The record
     carries both views of the line: the process view (``argv``,
-    ``stdin``, ``env``) and the parsed view (``config``, ``paths``,
+    ``stdin``, ``env``, ``cwd``) and the parsed view (``config``, ``paths``,
     ``texts``, ``flags``), so a handler takes whichever its substrate
     can express and nothing is threaded through keyword injection.
 
@@ -116,6 +117,11 @@ class CLIInvocation(Generic[ConfigT]):
         env (Mapping[str, str]): the session's environment variables,
             as one frozen process-view snapshot. A leaf that wants the
             live, gated handle reads ``doors.session_view``.
+        cwd (PathSpec): the session's working directory. What a
+            relative spelling the grammar cannot type resolves against:
+            an operand that is a path only some of the time, a path an
+            environment variable names, an operand whose absence names
+            a default path.
         doors (CLIDoors | None): one door per state plane, None outside
             a workspace and for every CLI that reaches a service
             instead of a filesystem.
@@ -139,6 +145,7 @@ class CLIInvocation(Generic[ConfigT]):
     flags: Mapping[str, FlagValue] = field(default_factory=dict)
     stdin: ByteSource | None = None
     env: Mapping[str, str] = field(default_factory=dict)
+    cwd: PathSpec = ROOT_CWD
     doors: CLIDoors | None = None
     spec: "CLISpec | None" = None
     shell: Callable[[str], Awaitable[IOResult]] | None = None

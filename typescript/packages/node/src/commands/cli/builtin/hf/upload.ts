@@ -17,16 +17,25 @@ import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
 import { UsageError } from '@struktoai/mirage-core/commands/errors'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import type { DispatchFn } from '@struktoai/mirage-core/runtime/types'
-
 import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { fsStrerror, isEnotdir, isMissingPath } from '@struktoai/mirage-core/errors/fs'
-import { fnmatch } from '@struktoai/mirage-core/utils/fnmatch'
+import { shellQuote } from '@struktoai/mirage-core/utils/quote'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { createRepo } from '../../../../core/hf_hub/admin.ts'
 import { repoUrl } from '../../../../core/hf_hub/client.ts'
 import { commit, type Addition } from '../../../../core/hf_hub/commit.ts'
 import type { HfConfig } from '../../../../core/hf_hub/config.ts'
-import { DEFAULT_COMMIT_MESSAGE } from '../../../../core/hf_hub/constants.ts'
+import {
+  DEFAULT_COMMIT_MESSAGE,
+  DEFAULT_IGNORE_PATTERNS,
+  EMPTY_COMMIT_WARNING,
+} from '../../../../core/hf_hub/constants.ts'
+import {
+  deletionsFor,
+  fetchTree,
+  filterRepoPaths,
+  repoFiles,
+} from '../../../../core/hf_hub/tree.ts'
 import { hubFor, repoTypeOf, requireOperands, requireToken, textOut } from './accessor.ts'
 import { refuseVariadic } from './download.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
@@ -52,48 +61,38 @@ async function isDir(dispatch: DispatchFn, path: PathSpec): Promise<boolean> {
  * Reports whether `local` was a directory, because the caller needs it:
  * upstream reads `path_in_repo` as the destination FILE for a file source and
  * as the destination FOLDER for a directory one, so a file uploaded to
- * `u.txt` must land at `u.txt` and not at `u.txt/u.txt`.
+ * `u.txt` must land at `u.txt` and not at `u.txt/u.txt`. A file is named by
+ * where it sits under `local`, one walked level at a time, never by its own
+ * absolute path: through a symlink the listing answers with the target's
+ * paths, which are not under `local` at all.
  */
 async function collect(
   dispatch: DispatchFn,
   local: PathSpec,
 ): Promise<{ rows: Row[]; fromDir: boolean }> {
-  const base = local
-  let directory: boolean
-  try {
-    directory = await isDir(dispatch, base)
-  } catch (err) {
-    if (isMissingPath(err) || isEnotdir(err)) {
-      throw new UsageError(`${local.rawPath}: ${fsStrerror(err) ?? posixPhrase('ENOENT')}`)
-    }
-    throw err
-  }
-  if (!directory) {
-    const [data] = await dispatch('read', base)
+  if (!(await isDir(dispatch, local))) {
+    const [data] = await dispatch('read', local)
+    const name = rstripSlash(local.virtual)
     return {
-      rows: [
-        { name: base.virtual.slice(base.virtual.lastIndexOf('/') + 1), data: data as Uint8Array },
-      ],
+      rows: [{ name: name.slice(name.lastIndexOf('/') + 1), data: data as Uint8Array }],
       fromDir: false,
     }
   }
   const rows: Row[] = []
-  const pending = [base]
-  while (pending.length > 0) {
-    const current = pending.pop()
-    if (current === undefined) break
+  const pending: [PathSpec, string][] = [[local, '']]
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const [current, prefix] = next
     const [entries] = await dispatch('readdir', current)
     for (const entry of entries as string[]) {
       const child = current.join(entry)
+      const leaf = rstripSlash(child.virtual)
+      const name = `${prefix}${leaf.slice(leaf.lastIndexOf('/') + 1)}`
       if (await isDir(dispatch, child)) {
-        pending.push(child)
+        pending.push([child, `${name}/`])
         continue
       }
       const [data] = await dispatch('read', child)
-      rows.push({
-        name: child.virtual.slice(base.virtual.replace(/\/$/, '').length + 1),
-        data: data as Uint8Array,
-      })
+      rows.push({ name, data: data as Uint8Array })
     }
   }
   return {
@@ -104,14 +103,14 @@ async function collect(
 
 /** Apply the line's --include and --exclude globs. */
 export function keep(rows: Row[], include: readonly string[], exclude: readonly string[]): Row[] {
-  let out = rows
-  if (include.length > 0) {
-    out = out.filter((row) => include.some((pattern) => fnmatch(row.name, pattern)))
-  }
-  if (exclude.length > 0) {
-    out = out.filter((row) => !exclude.some((pattern) => fnmatch(row.name, pattern)))
-  }
-  return out
+  const kept = new Set(
+    filterRepoPaths(
+      rows.map((row) => row.name),
+      include,
+      exclude,
+    ),
+  )
+  return rows.filter((row) => kept.has(row.name))
 }
 
 /**
@@ -149,7 +148,14 @@ export async function uploadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
     throw new UsageError('hf upload needs a workspace to read from')
   }
   const repoId = inv.texts[0] ?? ''
-  const operands = inv.texts.slice(1)
+  // LOCAL_PATH is path-typed, so the parser resolved it against the cwd;
+  // without one, upstream's `_resolve_upload_paths` reads the file or folder
+  // named after the repository (`hf upload acme/model` reads `./model`) and
+  // refuses when there is none.
+  const source =
+    inv.paths[0] ??
+    PathSpec.fromStrPath(repoId.slice(repoId.lastIndexOf('/') + 1), undefined, inv.cwd ?? '/')
+  const operands = [...inv.paths.map((path) => path.rawPath), ...inv.texts.slice(1)]
   const include = fl.asList('include')
   const exclude = fl.asList('exclude')
   const deletions = fl.asList('delete')
@@ -160,27 +166,44 @@ export async function uploadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   ] as [readonly string[], string][]) {
     if (patterns.length > 0) refuseVariadic(operands, flag, patterns)
   }
-  const local = operands[0] ?? '.'
-  const inRepo = operands[1] ?? ''
-  const collected = await collect(
-    dispatch,
-    PathSpec.fromStrPath(local, undefined, inv.env.PWD ?? '/'),
-  )
-  const rows = keep(collected.rows, include, exclude)
-  if (rows.length === 0) throw new UsageError(`no files matched under ${local}`)
+  const inRepo = inv.texts[1] ?? ''
+  let collected: { rows: Row[]; fromDir: boolean }
+  try {
+    collected = await collect(dispatch, source)
+  } catch (err) {
+    if (!isMissingPath(err) && !isEnotdir(err)) throw err
+    throw new UsageError(
+      inv.paths.length > 0
+        ? `${shellQuote(source.rawPath)}: ${fsStrerror(err) ?? posixPhrase('ENOENT')}`
+        : `'${source.rawPath}' is not a local file or folder. Please set local_path explicitly.`,
+    )
+  }
   const base = inRepoBase(inRepo)
-  // A directory source spreads under `path_in_repo`; a file source lands AT
-  // it. Appending the basename either way stored `hf upload r f.txt f.txt` at
-  // `f.txt/f.txt`, which the tree then reported as a directory and
-  // `hf download` could not find at all.
-  const additions: Addition[] = collected.fromDir
-    ? rows.map((row) => ({ path: base === '' ? row.name : `${base}/${row.name}`, data: row.data }))
-    : [
-        {
-          path: base === '' ? (rows[0]?.name ?? '') : base,
-          data: rows[0]?.data ?? new Uint8Array(),
-        },
-      ]
+  let warnings = ''
+  // A directory source spreads under `path_in_repo`, filtered the way
+  // upload_folder filters (git and hub cache folders always left out); a file
+  // source lands AT it, and upstream ignores the filters for one, with a
+  // warning each. Appending the basename either way stored
+  // `hf upload r f.txt f.txt` at `f.txt/f.txt`, which the tree then reported
+  // as a directory and `hf download` could not find at all.
+  let additions: Addition[]
+  if (collected.fromDir) {
+    additions = keep(collected.rows, include, [...exclude, ...DEFAULT_IGNORE_PATTERNS]).map(
+      (row) => ({ path: base === '' ? row.name : `${base}/${row.name}`, data: row.data }),
+    )
+  } else {
+    for (const [flag, patterns] of [
+      ['--include', include],
+      ['--exclude', exclude],
+      ['--delete', deletions],
+    ] as [string, readonly string[]][]) {
+      if (patterns.length > 0) warnings += `Ignoring ${flag} since a single file is uploaded.\n`
+    }
+    const [row] = collected.rows
+    additions = [
+      { path: base === '' ? (row?.name ?? '') : base, data: row?.data ?? new Uint8Array() },
+    ]
+  }
   const repoType = repoTypeOf(fl)
   // Upstream creates the repository if it is missing and ignores --private
   // when it already exists, so the flag picks the visibility of one this line
@@ -191,14 +214,30 @@ export async function uploadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
     existOk: true,
   })
   const accessor = hubFor(inv, repoId, repoType, fl.asStr('revision'))
-  await commit(accessor, {
-    additions,
-    deletions: [...deletions],
-    message: fl.asStr('commit_message') ?? DEFAULT_COMMIT_MESSAGE,
-    description: fl.asStr('commit_description') ?? '',
-    createPr: fl.asBool('create_pr'),
-  })
+  // For a folder the --delete patterns match the repo's files under
+  // `path_in_repo`, and a file this commit re-adds is not deleted first. A
+  // commit that would change nothing is skipped, with upstream's create_commit
+  // warning.
+  const added = new Set(additions.map((add) => add.path))
+  const doomed =
+    collected.fromDir && deletions.length > 0
+      ? deletionsFor(repoFiles(await fetchTree(accessor)), deletions, base).filter(
+          (path) => !added.has(path),
+        )
+      : []
+  const message = fl.asStr('commit_message')
+  if (additions.length > 0 || doomed.length > 0) {
+    await commit(accessor, {
+      additions,
+      deletions: doomed,
+      message: message === undefined || message === '' ? DEFAULT_COMMIT_MESSAGE : message,
+      description: fl.asStr('commit_description') ?? '',
+      createPr: fl.asBool('create_pr'),
+    })
+  } else {
+    warnings += EMPTY_COMMIT_WARNING
+  }
   const home = repoUrl((inv.config as HfConfig).endpoint, accessor.repoType, repoId)
   const url = rstripSlash(`${home}/tree/${accessor.revision}/${base}`)
-  return textOut(`${url}\n`)
+  return textOut(`${url}\n`, warnings)
 }

@@ -46,35 +46,31 @@ describe('commitUrl', () => {
 
 describe('payload', () => {
   it('puts the header first', () => {
-    expect(lines(payload([], [], [], 'msg', 'body'))[0]).toEqual({
+    expect(lines(payload([], [], 'msg', 'body'))[0]).toEqual({
       key: 'header',
       value: { summary: 'msg', description: 'body' },
     })
   })
 
   it('base64-encodes a file', () => {
-    const row = lines(payload([{ path: 'a.txt', data: bytes('hi') }], [], [], 'm'))[1]
+    const row = lines(payload([{ path: 'a.txt', data: bytes('hi') }], [], 'm'))[1]
     const value = row?.value as Record<string, unknown>
     expect(row?.key).toBe('file')
     expect(value.encoding).toBe('base64')
     expect(Buffer.from(String(value.content), 'base64').toString()).toBe('hi')
   })
 
-  it('spells files and folders with different keys', () => {
-    // The Hub distinguishes them, and sending a folder as deletedFile reports
-    // that no file by that name exists.
-    const rows = lines(payload([], ['a.txt'], ['d'], 'm'))
-    expect(rows[1]).toEqual({ key: 'deletedFile', value: { path: 'a.txt' } })
-    expect(rows[2]).toEqual({ key: 'deletedFolder', value: { path: 'd' } })
+  it('spells a deletion as a deleted file', () => {
+    expect(lines(payload([], ['a.txt'], 'm'))[1]).toEqual({
+      key: 'deletedFile',
+      value: { path: 'a.txt' },
+    })
   })
 
   it('carries a parent commit only when given', () => {
-    const withParent = lines(payload([], [], [], 'm', '', 'abc'))[0]?.value as Record<
-      string,
-      unknown
-    >
+    const withParent = lines(payload([], [], 'm', '', 'abc'))[0]?.value as Record<string, unknown>
     expect(withParent.parentCommit).toBe('abc')
-    const without = lines(payload([], [], [], 'm'))[0]?.value as Record<string, unknown>
+    const without = lines(payload([], [], 'm'))[0]?.value as Record<string, unknown>
     expect(without.parentCommit).toBeUndefined()
   })
 })

@@ -138,7 +138,6 @@ async def upload_modes(
 def payload(
     additions: list[Addition],
     deletions: list[str],
-    folders: list[str],
     message: str,
     description: str = "",
     parent: str = "",
@@ -152,8 +151,6 @@ def payload(
     Args:
         additions (list[Addition]): files to add or replace.
         deletions (list[str]): file paths to remove.
-        folders (list[str]): folder paths to remove, which the Hub
-            spells with its own key rather than as a path with a slash.
         message (str): the commit summary.
         description (str): the commit body.
         parent (str): the commit this one must apply onto, for
@@ -179,8 +176,6 @@ def payload(
         )
     for path in deletions:
         lines.append({"key": "deletedFile", "value": {"path": path}})
-    for path in folders:
-        lines.append({"key": "deletedFolder", "value": {"path": path}})
     return b"".join(json.dumps(line).encode() + b"\n" for line in lines)
 
 
@@ -188,7 +183,6 @@ async def commit(
     accessor: HfHubAccessor,
     additions: list[Addition] | None = None,
     deletions: list[str] | None = None,
-    folders: list[str] | None = None,
     message: str = DEFAULT_COMMIT_MESSAGE,
     description: str = "",
     create_pr: bool = False,
@@ -204,7 +198,6 @@ async def commit(
         accessor (HfHubAccessor): the mount's accessor.
         additions (list[Addition] | None): files to add or replace.
         deletions (list[str] | None): file paths to remove.
-        folders (list[str] | None): folder paths to remove.
         message (str): the commit summary.
         description (str): the commit body.
         create_pr (bool): open a pull request instead of pushing.
@@ -226,7 +219,7 @@ async def commit(
             f"{accessor.repo_id}: the Hub requires an LFS upload for "
             f"{', '.join(heavy)}; write it with `hf upload` instead"
         )
-    body = payload(adds, deletions or [], folders or [], message, description)
+    body = payload(adds, deletions or [], message, description)
     params = {"create_pr": "1"} if create_pr else None
     data = await hub_post_ndjson(
         accessor.token,

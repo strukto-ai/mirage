@@ -20,8 +20,6 @@ import type { DispatchFn } from '@struktoai/mirage-core/runtime/types'
 import { boundedMap } from '@struktoai/mirage-core/concurrency/limiter'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
-import { fnmatch } from '@struktoai/mirage-core/utils/fnmatch'
-
 import type { HfHubAccessor } from '../../../../accessor/hf_hub.ts'
 import {
   blobPath,
@@ -40,10 +38,9 @@ import {
   GLOB_CHARS,
   MAX_DOWNLOAD_WORKERS,
 } from '../../../../core/hf_hub/constants.ts'
-import { fetchTree } from '../../../../core/hf_hub/tree.ts'
-import { isDirEntry, type TreeEntry } from '../../../../core/hf_hub/tree_entry.ts'
+import { fetchTree, filterRepoPaths, repoFiles } from '../../../../core/hf_hub/tree.ts'
+import type { TreeEntry } from '../../../../core/hf_hub/tree_entry.ts'
 import { hubFor, repoTypeOf, requireOperands, textOut } from './accessor.ts'
-import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 
 /**
  * Which repo paths a download line asks for.
@@ -57,21 +54,12 @@ export function selected(
   include: readonly string[],
   exclude: readonly string[],
 ): string[] {
-  let files = [...tree.entries()]
-    .filter(([, entry]) => !isDirEntry(entry))
-    .map(([path]) => path)
-    .sort(compareCodePoints)
+  const files = repoFiles(tree)
   if (names.length > 0) {
     const wanted = new Set(names)
     return files.filter((path) => wanted.has(path))
   }
-  if (include.length > 0) {
-    files = files.filter((path) => include.some((pattern) => fnmatch(path, pattern)))
-  }
-  if (exclude.length > 0) {
-    files = files.filter((path) => !exclude.some((pattern) => fnmatch(path, pattern)))
-  }
-  return files
+  return filterRepoPaths(files, include, exclude)
 }
 
 /**
@@ -343,7 +331,7 @@ export async function downloadCmd(inv: CLIInvocation): Promise<CommandFnResult> 
   const cacheWord = cacheRoot(inv.env)
   const cacheDir =
     fl.asPath('cache_dir') ??
-    (cacheWord ? PathSpec.fromStrPath(cacheWord, undefined, inv.env.PWD ?? '/') : undefined)
+    (cacheWord ? PathSpec.fromStrPath(cacheWord, undefined, inv.cwd ?? '/') : undefined)
   if (localDir === undefined && cacheDir === undefined) {
     throw new UsageError(
       'nothing to download into: pass --local-dir, or --cache-dir (or set ' +

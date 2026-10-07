@@ -105,16 +105,16 @@
       }
     },
     {
-      "id": "hf_repo_files_delete_takes_a_glob",
+      "id": "hf_repo_files_delete_matches_a_glob_against_the_repo",
       "seq": 960109,
       "targets": [
         "cli-hf"
       ],
-      "command": "hf repo-files delete integ/repo-cli 'sub/*' --commit-message 'drop sub'",
+      "command": "hf repo-files delete integ/repo-cli 'sub/*' --commit-message 'drop sub' | sed 's,/commit/[0-9a-f]*,/commit/SHA,' && hf download integ/repo-cli --include 'sub/*' --local-dir /scratch/gone",
       "expect": {
-        "exit": 0,
-        "stdout": "Deleted sub/* from integ/repo-cli\n",
-        "stderr": ""
+        "exit": 1,
+        "stdout": "Files correctly deleted from repo. Commit: http://127.0.0.1:5086/integ/repo-cli/commit/SHA.\n",
+        "stderr": "hf download: No files in integ/repo-cli matched the line\n"
       }
     },
     {
@@ -310,6 +310,45 @@
         "exit": 0,
         "stdout": "http://127.0.0.1:5086/integ/repo-cli/tree/main/pathspec.txt\n/scratch/hf-pathspec-back\npathspec",
         "stderr": ""
+      }
+    },
+    {
+      "id": "hf_repo_files_delete_matching_nothing_makes_no_commit",
+      "seq": 960148,
+      "targets": [
+        "cli-hf"
+      ],
+      "command": "hf repo-files delete integ/repo-cli 'nothing*' | sed 's,/commit/[0-9a-f]*,/commit/SHA,'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Files correctly deleted from repo. Commit: http://127.0.0.1:5086/integ/repo-cli/commit/SHA.\n",
+        "stderr": "No files have been modified since last commit. Skipping to prevent empty commit.\n"
+      }
+    },
+    {
+      "id": "hf_upload_without_local_path_reads_the_repo_named_folder",
+      "seq": 960149,
+      "targets": [
+        "cli-hf"
+      ],
+      "command": "mkdir -p /scratch/up/repo-cli/.git /scratch/up/repo-cli/up && echo -n g > /scratch/up/repo-cli/.git/HEAD && echo -n u > /scratch/up/repo-cli/up/u.txt && (cd /scratch/up && hf upload integ/repo-cli --commit-message m && hf upload integ/repo-cli repo-cli/up/u.txt up/one.txt --include '*.txt' --delete 'x*' --commit-message m && hf download integ/repo-cli --include 'up/*' --local-dir out); hf download integ/repo-cli --include '.git/*' --local-dir /scratch/up/git; ln -s /scratch/up/repo-cli/up /scratch/up/link && hf upload integ/repo-cli /scratch/up/link vialink --commit-message m > /dev/null && hf download integ/repo-cli --include 'vialink/*' --local-dir /scratch/up/lk; (cd /scratch && hf upload integ/repo-cli; hf upload integ/repo-cli ./nosuch)",
+      "expect": {
+        "exit": 2,
+        "stdout": "http://127.0.0.1:5086/integ/repo-cli/tree/main\nhttp://127.0.0.1:5086/integ/repo-cli/tree/main/up/one.txt\n/scratch/up/out/up/one.txt\n/scratch/up/out/up/u.txt\n/scratch/up/out\n/scratch/up/lk/vialink/u.txt\n/scratch/up/lk\n",
+        "stderr": "Ignoring --include since a single file is uploaded.\nIgnoring --delete since a single file is uploaded.\nhf download: No files in integ/repo-cli matched the line\n'repo-cli' is not a local file or folder. Please set local_path explicitly.\n./nosuch: No such file or directory\n"
+      }
+    },
+    {
+      "id": "hf_upload_delete_matches_the_repo_and_spares_what_it_adds",
+      "seq": 960150,
+      "targets": [
+        "cli-hf"
+      ],
+      "command": "mkdir -p /scratch/dl/v1 /scratch/dl/v2 && echo -n a > /scratch/dl/v1/a.txt && echo -n o > /scratch/dl/v1/old.txt && echo -n x > /scratch/dl/v1/x.bin && echo -n A > /scratch/dl/v2/a.txt && hf upload integ/repo-cli /scratch/dl/v1 dl --commit-message v1 > /dev/null && hf upload integ/repo-cli /scratch/dl/v2 dl --delete '*.txt' --commit-message v2 > /dev/null && hf download integ/repo-cli --include 'dl/*' --local-dir /scratch/dl/out && cat /scratch/dl/out/dl/a.txt && echo && hf repo-files delete integ/repo-cli 'dl/[^a]*' --commit-message v3 > /dev/null && hf upload integ/repo-cli /scratch/dl/v2 dl --include 'none*' --delete 'x*' --commit-message v4 > /dev/null && hf upload integ/repo-cli /scratch/dl/v2 dl --include 'none*' --commit-message v5 && hf download integ/repo-cli --include 'dl/*' --local-dir /scratch/dl/gone",
+      "expect": {
+        "exit": 1,
+        "stdout": "/scratch/dl/out/dl/a.txt\n/scratch/dl/out/dl/x.bin\n/scratch/dl/out\nA\nhttp://127.0.0.1:5086/integ/repo-cli/tree/main/dl\n",
+        "stderr": "No files have been modified since last commit. Skipping to prevent empty commit.\nhf download: No files in integ/repo-cli matched the line\n"
       }
     }
   ]

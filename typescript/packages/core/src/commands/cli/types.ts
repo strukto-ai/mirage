@@ -77,7 +77,7 @@ export interface CLIDoors {
 /**
  * Everything one CLI line hands its handler, built once per line by the
  * executor. The record carries both views of the invocation: the process
- * view (`argv`, `stdin`, `env`) and the parsed view (`config`, `paths`,
+ * view (`argv`, `stdin`, `env`, `cwd`) and the parsed view (`config`, `paths`,
  * `texts`, `flags`), so every handler tier renders whichever its
  * substrate can express. Narrower than CommandOpts on purpose: a CLI
  * consults no mount, so there is no VFS, no mount prefix, and no
@@ -103,6 +103,14 @@ export interface CLIInvocation<ConfigT = unknown> {
    * `doors.sessionView`.
    */
   env: Readonly<Record<string, string>>
+  /**
+   * The session's working directory, absolute. What a relative spelling the
+   * grammar cannot type resolves against: an operand that is a path only some
+   * of the time, a path an environment variable names, an operand whose absence
+   * names a default path. Absent where no executor built the record, which
+   * reads as `/`.
+   */
+  cwd?: string
   /**
    * The workspace doors a mount-reading verb needs (`git`), absent
    * outside a workspace and for every CLI that reaches a service instead

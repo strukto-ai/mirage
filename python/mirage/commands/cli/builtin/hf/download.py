@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from fnmatch import fnmatch
 
 from mirage.accessor.hf_hub import HfHubAccessor
 from mirage.commands.cli.builtin.hf.accessor import (
@@ -49,7 +48,11 @@ from mirage.core.hf_hub.repo import (
     head_commit,
     revision_url,
 )
-from mirage.core.hf_hub.tree import fetch_tree
+from mirage.core.hf_hub.tree import (
+    fetch_tree,
+    filter_repo_paths,
+    repo_files,
+)
 from mirage.core.hf_hub.tree_entry import TreeEntry
 from mirage.errors.constants import MISS_ERRORS
 from mirage.io.types import ByteSource, IOResult
@@ -80,22 +83,10 @@ def selected(
     Returns:
         list[str]: repo-relative file paths, sorted.
     """
-    files = sorted(path for path, entry in tree.items() if not entry.is_dir)
+    files = repo_files(tree)
     if names:
         return [path for path in files if path in set(names)]
-    if include:
-        files = [
-            path
-            for path in files
-            if any(fnmatch(path, pattern) for pattern in include)
-        ]
-    if exclude:
-        files = [
-            path
-            for path in files
-            if not any(fnmatch(path, pattern) for pattern in exclude)
-        ]
-    return files
+    return filter_repo_paths(files, include, exclude)
 
 
 async def ensure_dir(dispatch: DispatchFn, path: PathSpec) -> None:
@@ -413,7 +404,7 @@ async def download_cmd(
     local_dir = fl.as_path("local_dir")
     cache_word = cache_root(dict(inv.env))
     cache_dir = fl.as_path("cache_dir") or (
-        PathSpec.from_str_path(cache_word, cwd=inv.env.get("PWD", "/"))
+        PathSpec.from_str_path(cache_word, cwd=inv.cwd.virtual)
         if cache_word
         else None
     )

@@ -131,7 +131,6 @@ async function scriptOutput(
   script: ScriptSource,
   runtime: LanguageRuntime,
   prog: string,
-  cwd: PathSpec,
   timeout: number | null,
   signal: AbortSignal,
 ): Promise<[Uint8Array | null, IOResult]> {
@@ -149,7 +148,7 @@ async function scriptOutput(
     args: [...inv.argv],
     prog,
     scriptCli: true,
-    cwd,
+    cwd: PathSpec.fromStrPath(inv.cwd ?? '/'),
     env,
     stdin,
     signal,
@@ -362,6 +361,7 @@ export async function handleCli(
     flags,
     stdin,
     env: envSnapshot(session),
+    cwd: session.cwd,
     ...(Object.keys(doors).length > 0 ? { doors } : {}),
     spec: leaf,
   }
@@ -392,15 +392,7 @@ export async function handleCli(
         new ExecutionNode({ command: cmdStr, exitCode: 127, stderr }),
       ]
     }
-    body = scriptOutput(
-      inv,
-      leaf.script,
-      runtime,
-      prog,
-      PathSpec.fromStrPath(session.cwd),
-      timeout,
-      abort.signal,
-    )
+    body = scriptOutput(inv, leaf.script, runtime, prog, timeout, abort.signal)
   } else {
     const fn = leaf.fn
     if (fn === null) {

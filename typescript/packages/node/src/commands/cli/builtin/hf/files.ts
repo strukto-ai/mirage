@@ -15,33 +15,49 @@
 import type { CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
 import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
+import { repoUrl } from '../../../../core/hf_hub/client.ts'
 import { commit } from '../../../../core/hf_hub/commit.ts'
-import { DEFAULT_COMMIT_MESSAGE } from '../../../../core/hf_hub/constants.ts'
+import { EMPTY_COMMIT_WARNING } from '../../../../core/hf_hub/constants.ts'
+import { headCommit } from '../../../../core/hf_hub/repo.ts'
+import { deletionsFor, fetchTree, repoFiles } from '../../../../core/hf_hub/tree.ts'
+import type { HfConfig } from '../../../../core/hf_hub/config.ts'
 import { hubFor, repoTypeOf, requireOperands, requireToken, textOut } from './accessor.ts'
-import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 
 /**
- * Delete files or folders from a repository, in one commit.
+ * Delete the files a set of glob patterns matches, in one commit.
  *
- * A pattern ending in `/` is a folder, which the Hub deletes under its own
- * key: sending one as a file deletion reports that no file by that name
- * exists.
+ * huggingface_hub's `delete_files`: the patterns match the repository's
+ * listing (`*` crosses `/`, a trailing `/` names a folder), so `**` deletes
+ * every file and a pattern matching nothing deletes nothing. A line that
+ * matches nothing makes no commit, warns the way upstream's `create_commit`
+ * does, and names the commit the revision already points at.
  */
 export async function deleteCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   requireOperands(inv, ['repo_id', 'patterns'])
   requireToken(inv, 'repo-files delete')
   const fl = new FlagView(inv.flags)
   const [repoId, ...patterns] = inv.texts
-  const files = patterns.filter((p) => !p.endsWith('/'))
-  const folders = patterns.filter((p) => p.endsWith('/')).map((p) => rstripSlash(p))
   const target = repoId ?? ''
   const accessor = hubFor(inv, target, repoTypeOf(fl), fl.asStr('revision'))
-  await commit(accessor, {
-    deletions: files,
-    folders,
-    message: fl.asStr('commit_message') ?? DEFAULT_COMMIT_MESSAGE,
-    description: fl.asStr('commit_description') ?? '',
-    createPr: fl.asBool('create_pr'),
-  })
-  return textOut(patterns.map((p) => `Deleted ${p} from ${target}\n`).join(''))
+  const deletions = deletionsFor(repoFiles(await fetchTree(accessor)), patterns)
+  const message = fl.asStr('commit_message')
+  let url: string
+  let stderr = ''
+  if (deletions.length === 0) {
+    const home = repoUrl((inv.config as HfConfig).endpoint, accessor.repoType, target)
+    url = `${home}/commit/${await headCommit(accessor)}`
+    stderr = EMPTY_COMMIT_WARNING
+  } else {
+    const reply = await commit(accessor, {
+      deletions,
+      message:
+        message === undefined || message === ''
+          ? `Delete files ${patterns.join(' ')} with mirage`
+          : message,
+      description: fl.asStr('commit_description') ?? '',
+      createPr: fl.asBool('create_pr'),
+    })
+    url = typeof reply.commitUrl === 'string' ? reply.commitUrl : ''
+  }
+  return textOut(`Files correctly deleted from repo. Commit: ${url}.\n`, stderr)
 }

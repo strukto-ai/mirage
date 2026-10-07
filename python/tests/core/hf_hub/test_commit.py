@@ -46,7 +46,7 @@ def test_commit_url_encodes_a_revision_holding_a_slash(accessor):
 
 
 def test_payload_puts_the_header_first():
-    lines = _lines(payload([], [], [], "msg", "body"))
+    lines = _lines(payload([], [], "msg", "body"))
     assert lines[0] == {
         "key": "header",
         "value": {"summary": "msg", "description": "body"},
@@ -54,32 +54,29 @@ def test_payload_puts_the_header_first():
 
 
 def test_payload_base64_encodes_a_file():
-    lines = _lines(payload([Addition("a.txt", b"hi")], [], [], "m"))
+    lines = _lines(payload([Addition("a.txt", b"hi")], [], "m"))
     assert lines[1]["key"] == "file"
     assert lines[1]["value"]["encoding"] == "base64"
     assert base64.b64decode(lines[1]["value"]["content"]) == b"hi"
     assert lines[1]["value"]["path"] == "a.txt"
 
 
-def test_payload_spells_files_and_folders_with_different_keys():
-    """The Hub distinguishes them, and sending a folder as deletedFile
-    reports that no file by that name exists."""
-    lines = _lines(payload([], ["a.txt"], ["d"], "m"))
+def test_payload_spells_a_deletion_as_a_deleted_file():
+    lines = _lines(payload([], ["a.txt"], "m"))
     assert lines[1] == {"key": "deletedFile", "value": {"path": "a.txt"}}
-    assert lines[2] == {"key": "deletedFolder", "value": {"path": "d"}}
 
 
 def test_payload_carries_a_parent_commit_when_given():
-    lines = _lines(payload([], [], [], "m", parent="abc"))
+    lines = _lines(payload([], [], "m", parent="abc"))
     assert lines[0]["value"]["parentCommit"] == "abc"
 
 
 def test_payload_omits_the_parent_when_absent():
-    assert "parentCommit" not in _lines(payload([], [], [], "m"))[0]["value"]
+    assert "parentCommit" not in _lines(payload([], [], "m"))[0]["value"]
 
 
 def test_payload_is_newline_delimited():
-    raw = payload([Addition("a", b"x")], ["b"], [], "m")
+    raw = payload([Addition("a", b"x")], ["b"], "m")
     assert raw.endswith(b"\n")
     assert len(raw.splitlines()) == 3
 
