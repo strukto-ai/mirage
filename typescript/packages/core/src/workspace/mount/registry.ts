@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountCommands } from '../../commands/builtin/backends.ts'
-import type { ProcessView } from '../../process/types.ts'
+import type { ProcessView } from '../../process/view.ts'
 import type { SessionState } from '../session/session.ts'
 import { isNoMount, noMount } from '../../errors/fs.ts'
 import { mountKey } from '../../utils/key_prefix.ts'

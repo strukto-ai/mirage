@@ -27,7 +27,7 @@ from mirage.vfs.mongodb.config import MongoDBConfig
 from tests.fixtures.vfs_io import io_for
 
 GENERICS = "mirage.commands.builtin.generic_bind.search._GENERICS"
-RESOLVE = "mirage.commands.builtin.generic_bind.adapter.make_resolve_glob"
+RESOLVE = "mirage.commands.config.make_resolve_glob"
 SEARCH_COLLECTION = "mirage.core.mongodb.search.search_entity"
 
 

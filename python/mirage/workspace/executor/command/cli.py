@@ -47,7 +47,7 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, CommandOutput
 from mirage.ops.types import NamespaceView, SessionView, StatPath
 from mirage.policy import resolve_limit
-from mirage.process.types import ProcessView
+from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.routing import runtime_for_language

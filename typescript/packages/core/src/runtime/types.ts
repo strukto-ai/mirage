@@ -12,16 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ProcessView } from '../process/types.ts'
-
 import type { ByteSource, IOResult, OpReport } from '../io/types.ts'
 import type { PathSpec, SetAttrFields } from '../types.ts'
 import type { RuntimeConfig } from './config.ts'
 import type { RouteScript } from './routing/types.ts'
-import type { NamespaceView, SessionView } from '../ops/types.ts'
-import type { WorkspaceBinding } from './binding.ts'
-import type { MountResolver } from './resolver.ts'
-import type { ContextScope } from '../utils/context_scope.ts'
 
 /**
  * The languages a runtime can interpret, one name for both doors (run
@@ -238,19 +232,6 @@ export interface RuntimeCapabilities {
   readonly evaluate: boolean
   readonly reach: RuntimeReach
   readonly filesystem: readonly FilesystemOperation[]
-}
-
-/** Local workspace doors captured for one execution, never guest globals. */
-export interface RuntimeContext {
-  readonly binding: WorkspaceBinding
-  readonly dispatch: BridgeDispatchFn
-  readonly resolver: MountResolver
-  readonly ns: NamespaceView
-  readonly sessionView: SessionView | null
-  readonly cwd: PathSpec
-  readonly env: Readonly<Record<string, string>>
-  readonly scope: ContextScope
-  readonly processes: ProcessView | null
 }
 
 /**

@@ -67,7 +67,7 @@ if TYPE_CHECKING:
     )
     from mirage.policy.types import VfsContext
     from mirage.runtime.base import Runtime
-    from mirage.runtime.binding import WorkspaceBinding
+    from mirage.runtime.binding import RuntimeContext, WorkspaceBinding
     from mirage.runtime.config import RuntimeConfig
     from mirage.runtime.constants import EXTERNAL_COMMANDS
     from mirage.runtime.errors import UnsupportedExecutionError
@@ -92,7 +92,6 @@ if TYPE_CHECKING:
         RunArgs,
         RunResult,
         RuntimeCapabilities,
-        RuntimeContext,
         ShellExecution,
     )
     from mirage.secrets.registry import known_sources, register_secrets
@@ -220,7 +219,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.runtime.base": ("Runtime",),
     "mirage.runtime.config": ("RuntimeConfig",),
     "mirage.runtime.constants": ("EXTERNAL_COMMANDS",),
-    "mirage.runtime.binding": ("WorkspaceBinding",),
+    "mirage.runtime.binding": ("RuntimeContext", "WorkspaceBinding"),
     "mirage.runtime.errors": ("UnsupportedExecutionError",),
     "mirage.runtime.language": ("LanguageRuntime",),
     "mirage.runtime.mixin": (
@@ -242,7 +241,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "ShellExecution",
         "ProcessExecution",
         "ExecutionRequest",
-        "RuntimeContext",
         "RuntimeCapabilities",
         "FilesystemOperation",
     ),

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ProcessView } from '../../process/types.ts'
+import type { ProcessView } from '../../process/view.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
 import type { Limit, PathSpec } from '../../types.ts'
 import type { NamespaceView, SessionView, StatPath } from '../../ops/types.ts'

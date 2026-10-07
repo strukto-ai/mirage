@@ -82,12 +82,16 @@ from mirage.policy.types import DryRun
 from mirage.process.child import ChildProcess
 from mirage.process.stdio import ProcessInput, ProcessOutput
 from mirage.process.supervisor import ProcessSupervisor
-from mirage.process.types import ProcessView, SpawnRequest
+from mirage.process.types import SpawnRequest
+from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
-from mirage.runtime.binding import WorkspaceBinding, capture_binding
+from mirage.runtime.binding import (
+    RuntimeContext,
+    WorkspaceBinding,
+    capture_binding,
+)
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.routing import RouteDecision, RoutePolicy
-from mirage.runtime.types import RuntimeContext
 from mirage.secrets.config import EnvVar, SecretSource
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import source_for

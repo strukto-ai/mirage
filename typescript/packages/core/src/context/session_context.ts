@@ -19,8 +19,8 @@ import { rstripSlash, stripSlash } from '../utils/slash.ts'
 import { anchorDepth, isGlob, pathVisible, showHead, shownMode } from '../utils/hidden.ts'
 import { eacces, enoent, erofs } from '../errors/fs.ts'
 import { parent } from '../utils/path.ts'
-import type { DryRun, VfsExplanation } from '../policy/types.ts'
-import type { EntryGate, PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
+import type { DryRun, VfsExplanation, EntryGate } from '../policy/types.ts'
+import type { PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
 import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
 
 /** Whoever binds sessions: one per workspace, compared by identity. */

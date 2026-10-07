@@ -18,12 +18,10 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum, StrEnum
 from typing import (
-    TYPE_CHECKING,
     Annotated,
     Any,
     ClassVar,
     Literal,
-    Protocol,
     TypeAlias,
 )
 
@@ -37,11 +35,6 @@ from pydantic import (
 )
 
 from mirage.utils.path import dotted_spelling, resolve_path
-
-if TYPE_CHECKING:
-    import aiohttp
-
-    from mirage.policy.types import CommandRule
 
 
 class Aggr:
@@ -222,10 +215,6 @@ JsonValue: TypeAlias = (
     "None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]"
 )
 
-# How a >= 400 API response and its body text become the backend's own
-# exception; core/api/client.py's engine calls it, each backend supplies
-# one. Quoted so importing mirage.types never loads aiohttp at runtime.
-ErrorOf: TypeAlias = "Callable[[aiohttp.ClientResponse, str], Exception]"
 # One page request of a cursor-paginated endpoint: receives the cursor to
 # resume from (None for the first page) and returns the decoded reply.
 PageFetch: TypeAlias = Callable[[str | None], Awaitable[dict[str, Any]]]
@@ -600,64 +589,6 @@ class Visibility:
 
 
 DEFAULT_VISIBILITY = Visibility()
-
-
-class EntryGate(Protocol):
-    """What a command's own I/O asks before touching an entry it
-    reached below its operands.
-
-    The admission gate judges the paths a line names; a walk (``grep
-    -r``, ``find``, ``du``, ``cp -r``, ``tar``) then reaches entries no
-    rule has seen. The dispatcher binds the admitted command's gate to
-    the session context for the command's run, and the commands tier
-    reads it there, so the tier that enforces the rules never imports
-    the tier that states them.
-
-    Args:
-        scoped (bool): whether a path rule in force reads this command's
-            paths at all, or a coded or scripted pre_vfs policy speaks
-            for its session; a native walk (a backend's own find or du)
-            yields to the guarded readdir walk while it is set, so each
-            entry passes the gate.
-        granted (tuple[CommandRule, ...]): the ask rules this line runs
-            under a grant for. Read by the op doors, which see the same
-            entries from below and would otherwise re-derive a verdict
-            that knows nothing of the nod the gate already took.
-    """
-
-    @property
-    def scoped(self) -> bool: ...
-
-    @property
-    def granted(self) -> "tuple[CommandRule, ...]": ...
-
-    def scopes(self, virtual: str) -> bool:
-        """Whether anything at or under this path could be refused for
-        the running command, so a native walk there gives way to the
-        guarded one; per operand, unlike ``scoped``.
-
-        Args:
-            virtual (str): absolute virtual path of a walk's start point.
-        """
-        ...
-
-    def check(self, virtual: str) -> None:
-        """Raise when a rule in force refuses this entry for the running
-        command; return when the command may touch it.
-
-        Args:
-            virtual (str): absolute virtual path of the entry.
-        """
-        ...
-
-    def refuses(self, virtual: str) -> bool:
-        """True exactly where ``check`` would raise, for a door that
-        declines instead (the read cache).
-
-        Args:
-            virtual (str): absolute virtual path of the entry.
-        """
-        ...
 
 
 MOUNT_MODE_ALIASES: dict[str, MountMode] = {

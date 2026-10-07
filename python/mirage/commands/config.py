@@ -35,7 +35,7 @@ from mirage.ops.types import (
     SessionView,
     StatPath,
 )
-from mirage.process.types import ProcessView
+from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.types import DispatchFn, ExecPathFn, ShellFn
 from mirage.types import Limit, PathSpec

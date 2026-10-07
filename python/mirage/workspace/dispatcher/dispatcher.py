@@ -59,13 +59,13 @@ from mirage.ops.namespace_view import (
     namespace_stat,
 )
 from mirage.policy.errors import PolicyDenied, PolicyError
+from mirage.policy.types import EntryGate
 from mirage.shell.bytes import encode_text
 from mirage.types import (
     DEFAULT_READ_TTL,
     CacheFacts,
     CapacityResult,
     CapacityState,
-    EntryGate,
     FileStat,
     FileType,
     MountMode,

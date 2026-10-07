@@ -47,7 +47,7 @@ import {
 import { NodeType, RedirectKind } from '../../shell/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { PathSpec, type Refusal } from '../../types.ts'
-import type { EntryGate } from '../../types.ts'
+import type { EntryGate } from '../../policy/types.ts'
 import { isGlob } from '../../utils/hidden.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { makeAbortError } from '../abort.ts'

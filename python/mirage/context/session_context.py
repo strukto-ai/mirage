@@ -18,10 +18,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from mirage.errors.fs import eacces, enoent, erofs
-from mirage.policy.types import DryRun, VfsExplanation
+from mirage.policy.types import DryRun, EntryGate, VfsExplanation
 from mirage.types import (
     MOUNT_MODE_RANK,
-    EntryGate,
     MountMode,
     PathSpec,
     Refusal,

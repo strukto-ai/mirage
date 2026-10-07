@@ -23,7 +23,7 @@ from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import CommandSpec, FlagValue, UsageStyle
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import NamespaceView, SessionView, StatPath
-from mirage.process.types import ProcessView
+from mirage.process.view import ProcessView
 from mirage.runtime.types import DispatchFn, ScriptSource
 from mirage.types import Limit, PathSpec
 

@@ -25,11 +25,11 @@ import type {
   EvalResult,
   EvalValue,
   RunArgs,
-  RuntimeContext,
   RunResult,
   RuntimeOptions,
   RuntimeReach,
 } from '../../types.ts'
+import type { RuntimeContext } from '../../binding.ts'
 import {
   createPyodideInterrupter,
   type ArmedInterrupt,
