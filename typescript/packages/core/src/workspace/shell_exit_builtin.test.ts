@@ -140,7 +140,11 @@ describe('special pid variables', () => {
 describe('unsupported constructs', () => {
   it('reports a graceful error for unparseable input', async () => {
     await withWS(async (ws) => {
-      expect(await runResult(ws, 'case x')).toEqual([2, '', "mirage: syntax error near 'case x'\n"])
+      expect(await runResult(ws, 'case x')).toEqual([
+        2,
+        '',
+        'mirage: syntax error: unexpected end of file\n',
+      ])
     })
   })
 })

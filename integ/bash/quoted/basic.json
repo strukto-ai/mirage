@@ -69,7 +69,7 @@
       }
     },
     {
-      "id": "syntax_error_quotes_the_span_as_typed",
+      "id": "syntax_error_if_without_separator_reaches_end_of_file",
       "seq": 930211,
       "targets": [
         "ram",
@@ -99,7 +99,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'if 'a b' then'\n"
+        "stderr": "mirage: syntax error: unexpected end of file\n"
       }
     }
   ]

@@ -21,8 +21,10 @@ from mirage.shell.parse.constants import (
     BASH_KEYWORDS,
     CASE_TERMINATORS,
     CLOSING_TOKENS,
+    COMPOUND_CLOSERS,
     CONSTRUCT_CLOSERS,
     OPENER_CLOSERS,
+    QUOTE_TOKENS,
     SEPARATOR_TOKENS,
     STRUCTURAL_TOKENS,
 )
@@ -448,7 +450,7 @@ def find_unterminated_quote(node: TSNodeLike) -> str | None:
             if unclosed is not None:
                 return unclosed
             continue
-        if current.is_missing and current.type in ("'", '"'):
+        if current.is_missing and current.type in QUOTE_TOKENS:
             return current.type
         closer = CONSTRUCT_CLOSERS.get(current.type)
         if closer is not None and any(
@@ -476,21 +478,21 @@ def find_unterminated_quote(node: TSNodeLike) -> str | None:
 def _innermost_unclosed(children: Sequence[TSNodeLike]) -> str | None:
     """What the innermost construct an ERROR's tokens open still waits for.
 
-    A double quote nests inside a substitution as bash reads it (``"$("``
-    waits for a quote), a lone ``)`` inside ``$((`` groups rather than
-    closes, and any other closer that does not match the innermost opener
-    is an unexpected token rather than the end of input.
+    A double quote or a backtick nests inside a substitution as bash reads
+    it (``"$("`` waits for a quote), a lone ``)`` inside ``$((`` groups
+    rather than closes, and any other closer that does not match the
+    innermost opener is an unexpected token rather than the end of input.
 
     Args:
         children (Sequence[TSNodeLike]): the ERROR node's children, in order.
     """
     pending: list[tuple[str, str]] = []
     for child in children:
-        if child.type == '"':
-            if pending and pending[-1][0] == '"':
+        if child.type in ('"', "`"):
+            if pending and pending[-1][0] == child.type:
                 pending.pop()
             else:
-                pending.append(('"', '"'))
+                pending.append((child.type, child.type))
         elif child.type in OPENER_CLOSERS:
             pending.append(OPENER_CLOSERS[child.type])
         elif child.type in CLOSING_TOKENS and pending:
@@ -500,6 +502,49 @@ def _innermost_unclosed(children: Sequence[TSNodeLike]) -> str | None:
                 return None
             pending.pop()
     return pending[-1][1] if pending else None
+
+
+def ends_inside_construct(node: TSNodeLike) -> bool:
+    """Whether the input ends inside a compound command or after an operator.
+
+    bash reads such a line as unfinished: the grammar marks the token it
+    still needed missing at the end (``(echo a``, ``echo a |``), or an
+    ERROR reaching the end leaves a compound open (``{ echo a``, ``if
+    true; then``, ``case a in``).
+
+    Args:
+        node (TSNodeLike): the parsed line.
+    """
+    end = node.start_byte + len((node.text or b"").rstrip())
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if current.is_missing and current.start_byte >= end:
+            return True
+        if (
+            current.type == "ERROR"
+            and current.end_byte >= end
+            and _leaves_open(current.children)
+        ):
+            return True
+        stack.extend(current.children)
+    return False
+
+
+def _leaves_open(children: Sequence[TSNodeLike]) -> bool:
+    """Whether an ERROR's tokens open a compound they never close.
+
+    Args:
+        children (Sequence[TSNodeLike]): the ERROR node's children.
+    """
+    pending: list[str] = []
+    for child in children:
+        closer = COMPOUND_CLOSERS.get(child.type)
+        if closer is not None:
+            pending.append(closer)
+        elif pending and child.type == pending[-1]:
+            pending.pop()
+    return bool(pending)
 
 
 def syntax_error_result(
@@ -526,9 +571,13 @@ def syntax_error_message(
         node (TSNodeLike | None): the parsed command, for quote diagnostics.
     """
     quote = find_unterminated_quote(node) if node is not None else None
+    if quote is None and find_unterminated_backtick(offending) is not None:
+        quote = "`"
     snippet = offending.strip()
     if quote is not None:
         return f"mirage: unexpected EOF while looking for matching `{quote}'\n"
+    if node is not None and ends_inside_construct(node):
+        return "mirage: syntax error: unexpected end of file\n"
     if snippet:
         return f"mirage: syntax error near '{snippet}'\n"
     return "mirage: syntax error in command\n"

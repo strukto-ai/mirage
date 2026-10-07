@@ -22,8 +22,10 @@ import {
   BASH_KEYWORDS,
   CASE_TERMINATORS,
   CLOSING_TOKENS,
+  COMPOUND_CLOSERS,
   CONSTRUCT_CLOSERS,
   OPENER_CLOSERS,
+  QUOTE_TOKENS,
   SEPARATOR_TOKENS,
   STRUCTURAL_TOKENS,
 } from './constants.ts'
@@ -44,7 +46,7 @@ export function findUnterminatedQuote(node: TSNodeLike): string | null {
       if (unclosed !== null) return unclosed
       continue
     }
-    if (current.isMissing && (current.type === "'" || current.type === '"')) return current.type
+    if (current.isMissing && QUOTE_TOKENS.has(current.type)) return current.type
     const closer = CONSTRUCT_CLOSERS.get(current.type)
     // Inside a double-quoted string, bash reads the string's own closing
     // quote into the construct, where it opens another.
@@ -71,16 +73,16 @@ export function findUnterminatedQuote(node: TSNodeLike): string | null {
 }
 
 /** What the innermost construct an ERROR's tokens open still waits for. A
- * double quote nests inside a substitution as bash reads it (`"$("` waits for
- * a quote), a lone `)` inside `$((` groups rather than closes, and any other
- * closer that does not match the innermost opener is an unexpected token
- * rather than the end of input. */
+ * double quote or a backtick nests inside a substitution as bash reads it
+ * (`"$("` waits for a quote), a lone `)` inside `$((` groups rather than
+ * closes, and any other closer that does not match the innermost opener is
+ * an unexpected token rather than the end of input. */
 function innermostUnclosed(children: readonly TSNodeLike[]): string | null {
   const pending: (readonly [string, string])[] = []
   for (const child of children) {
-    if (child.type === '"') {
-      if (pending.at(-1)?.[0] === '"') pending.pop()
-      else pending.push(['"', '"'])
+    if (child.type === '"' || child.type === '`') {
+      if (pending.at(-1)?.[0] === child.type) pending.pop()
+      else pending.push([child.type, child.type])
       continue
     }
     const opened = OPENER_CLOSERS.get(child.type)
@@ -94,6 +96,33 @@ function innermostUnclosed(children: readonly TSNodeLike[]): string | null {
   return pending.at(-1)?.[1] ?? null
 }
 
+/** Whether the input ends inside a compound command or after an operator:
+ * the grammar marks the token it still needed missing at the end (`(echo a`,
+ * `echo a |`), or an ERROR reaching the end leaves a compound open
+ * (`{ echo a`, `if true; then`, `case a in`). Mirrors Python. */
+export function endsInsideConstruct(node: TSNodeLike): boolean {
+  const end = (node.startIndex ?? 0) + node.text.trimEnd().length
+  const stack: TSNodeLike[] = [node]
+  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
+    if (current.isMissing && (current.startIndex ?? 0) >= end) return true
+    if (current.type === 'ERROR' && (current.endIndex ?? 0) >= end && leavesOpen(current.children))
+      return true
+    stack.push(...current.children)
+  }
+  return false
+}
+
+/** Whether an ERROR's tokens open a compound they never close. */
+function leavesOpen(children: readonly TSNodeLike[]): boolean {
+  const pending: string[] = []
+  for (const child of children) {
+    const closer = COMPOUND_CLOSERS.get(child.type)
+    if (closer !== undefined) pending.push(closer)
+    else if (pending.length > 0 && child.type === pending.at(-1)) pending.pop()
+  }
+  return pending.length > 0
+}
+
 /** Exit 2 with the bash-style diagnostic for an unparsable line. */
 export function syntaxErrorResult(offending: string, node: TSNodeLike): IOResult {
   return new IOResult({ exitCode: 2, stderr: encodeText(syntaxErrorMessage(offending, node)) })
@@ -101,13 +130,16 @@ export function syntaxErrorResult(offending: string, node: TSNodeLike): IOResult
 
 /** Format the diagnostic shared by parsed programs and execution results. */
 export function syntaxErrorMessage(offending: string, node: TSNodeLike): string {
-  const quote = findUnterminatedQuote(node)
+  const quote =
+    findUnterminatedQuote(node) ?? (findUnterminatedBacktick(offending) === null ? null : '`')
   const snippet = offending.trim()
   return quote !== null
     ? 'mirage: unexpected EOF while looking for matching `' + quote + "'\n"
-    : snippet.length > 0
-      ? `mirage: syntax error near '${snippet}'\n`
-      : 'mirage: syntax error in command\n'
+    : endsInsideConstruct(node)
+      ? 'mirage: syntax error: unexpected end of file\n'
+      : snippet.length > 0
+        ? `mirage: syntax error near '${snippet}'\n`
+        : 'mirage: syntax error in command\n'
 }
 
 // Locate a backtick substitution that is never closed. tree-sitter

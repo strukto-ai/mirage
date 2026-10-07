@@ -1,0 +1,292 @@
+{
+  "cases": [
+    {
+      "id": "syntax_unfinished_subshell",
+      "seq": 1338217,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; (echo a",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error: unexpected end of file\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_unfinished_group",
+      "seq": 1338218,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; { echo a",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error: unexpected end of file\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_unfinished_if",
+      "seq": 1338219,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; if true; then echo a",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error: unexpected end of file\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_unfinished_while",
+      "seq": 1338220,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; while true; do echo a",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error: unexpected end of file\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_unfinished_case",
+      "seq": 1338221,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; case a in",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error: unexpected end of file\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_unfinished_function",
+      "seq": 1338222,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; f() {",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error: unexpected end of file\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_unfinished_for",
+      "seq": 1338223,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; for i in 1; do",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error: unexpected end of file\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_unfinished_pipeline",
+      "seq": 1338224,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; echo a |",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error: unexpected end of file\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_unfinished_and_list",
+      "seq": 1338225,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; echo a &&",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error: unexpected end of file\n"
+      },
+      "flags": []
+    }
+  ]
+}

@@ -36,10 +36,10 @@ def test_partial_quoted_heredoc_end_is_not_syntax_error():
 
 
 def test_a_syntax_error_span_keeps_an_invalid_byte_as_typed():
-    line = decode_text(b"if '\xff' then")
+    line = decode_text(b"[[ '\xff'")
     io = syntax_error_result(line, parse(line))
     assert io.exit_code == 2
-    assert io.stderr == b"mirage: syntax error near 'if '\xff' then'\n"
+    assert io.stderr == b"mirage: syntax error near '[[ '\xff''\n"
 
 
 def test_syntax_error_after_deep_command_substitution():
@@ -181,7 +181,9 @@ def test_unterminated_backtick_is_a_syntax_error(bad_cmd):
     assert io.exit_code == 2, (
         f"expected exit 2 for {bad_cmd!r}, got {io.exit_code}"
     )
-    assert b"syntax error" in (io.stderr or b"")
+    assert (
+        io.stderr == b"mirage: unexpected EOF while looking for matching ``'\n"
+    )
 
 
 @pytest.mark.parametrize(

@@ -77,6 +77,23 @@ export const OPENER_CLOSERS: ReadonlyMap<string, readonly [string, string]> = ne
 
 export const CLOSING_TOKENS: ReadonlySet<string> = new Set([')', '))', '}', ']'])
 
+// The quotes an input can end inside; bash reads on looking for the match.
+export const QUOTE_TOKENS: ReadonlySet<string> = new Set(["'", '"', '`'])
+
+// The compound commands an ERROR can leave open, by the token closing
+// each. Input ending inside one is bash's `syntax error: unexpected end
+// of file`, not an unexpected token. An unclosed subshell parses with its
+// `)` missing instead, and a `(` an ERROR holds is unexpected (`echo x (`).
+export const COMPOUND_CLOSERS: ReadonlyMap<string, string> = new Map([
+  ['{', '}'],
+  ['if', 'fi'],
+  ['case', 'esac'],
+  ['while', 'done'],
+  ['until', 'done'],
+  ['for', 'done'],
+  ['select', 'done'],
+])
+
 // A construct the grammar leaves with a missing closer, by the character
 // bash names when the input ends inside it. A subshell is absent: bash
 // reports an unexpected end of file there instead.
@@ -85,6 +102,7 @@ export const CONSTRUCT_CLOSERS: ReadonlyMap<string, string> = new Map([
   ['process_substitution', ')'],
   ['arithmetic_expansion', ')'],
   ['expansion', '}'],
+  ['array', ')'],
 ])
 
 // Statement separators. One that lands inside an ERROR node has nothing

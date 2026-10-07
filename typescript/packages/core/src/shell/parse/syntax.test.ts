@@ -37,15 +37,13 @@ beforeAll(async () => {
 
 describe('syntaxErrorResult', () => {
   it('keeps an invalid byte in the span as typed', async () => {
-    const line = decodeText(
-      new Uint8Array([0x69, 0x66, 0x20, 0x27, 0xff, 0x27, 0x20, 0x74, 0x68, 0x65, 0x6e]),
-    )
+    const line = decodeText(new Uint8Array([0x5b, 0x5b, 0x20, 0x27, 0xff, 0x27]))
     const io = syntaxErrorResult(line, parser.parse(line))
     expect(io.exitCode).toBe(2)
     expect(Array.from(await io.materializeStderr())).toEqual([
-      ...new TextEncoder().encode("mirage: syntax error near 'if '"),
+      ...new TextEncoder().encode("mirage: syntax error near '[[ '"),
       0xff,
-      ...new TextEncoder().encode("' then'\n"),
+      ...new TextEncoder().encode("''\n"),
     ])
   })
 })

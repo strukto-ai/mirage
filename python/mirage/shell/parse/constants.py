@@ -77,6 +77,23 @@ OPENER_CLOSERS: dict[str, tuple[str, str]] = {
 
 CLOSING_TOKENS = frozenset({")", "))", "}", "]"})
 
+# The quotes an input can end inside; bash reads on looking for the match.
+QUOTE_TOKENS = frozenset({"'", '"', "`"})
+
+# The compound commands an ERROR can leave open, by the token closing
+# each. Input ending inside one is bash's `syntax error: unexpected end
+# of file`, not an unexpected token. An unclosed subshell parses with its
+# `)` missing instead, and a `(` an ERROR holds is unexpected (`echo x (`).
+COMPOUND_CLOSERS: dict[str, str] = {
+    "{": "}",
+    "if": "fi",
+    "case": "esac",
+    "while": "done",
+    "until": "done",
+    "for": "done",
+    "select": "done",
+}
+
 # A construct the grammar leaves with a missing closer, by the character
 # bash names when the input ends inside it. A subshell is absent: bash
 # reports an unexpected end of file there instead.
@@ -85,6 +102,7 @@ CONSTRUCT_CLOSERS: dict[str, str] = {
     "process_substitution": ")",
     "arithmetic_expansion": ")",
     "expansion": "}",
+    "array": ")",
 }
 
 # Statement separators. One that lands inside an ERROR node has nothing
