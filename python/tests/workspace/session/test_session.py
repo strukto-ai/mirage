@@ -617,6 +617,8 @@ def test_new_shell_starts_from_the_environment():
             "UNSET": ShellVar(None, exported),
             "IFS": ShellVar(",", exported),
             "TOKEN": ShellVar(None, exported, token),
+            "OPTIND": ShellVar("5", exported),
+            "RANDOM": ShellVar("42", exported),
         },
         functions={"f": "f() { :; }", "g": "g() { :; }"},
         exported_functions={"f"},
@@ -626,10 +628,13 @@ def test_new_shell_starts_from_the_environment():
         last_exit_code=1,
         umask=0o077,
     )
+    parent._getopts_pos, parent._getopts_optind = 2, 1
     child = parent.new_shell()
     assert child.vars == {
         "OUT": ShellVar("o", exported),
         "TOKEN": ShellVar(None, exported, token),
+        "OPTIND": ShellVar("1", exported),
+        "RANDOM": ShellVar("42", exported),
         "PWD": ShellVar("/w", exported),
         "PATH": ShellVar("/usr/bin"),
         "IFS": ShellVar(" \t\n"),
@@ -639,5 +644,7 @@ def test_new_shell_starts_from_the_environment():
     assert child.readonly_functions == set()
     assert (child.aliases, child.shell_options) == ({}, {})
     assert (child.last_exit_code, child.cwd, child.umask) == (0, "/w", 0o077)
+    assert (child._getopts_pos, child._getopts_optind) == (0, None)
+    assert child._random_seed == "42"
     assert set(parent.functions) == {"f", "g"}
     assert parent.vars["PLAIN"] == ShellVar("p")

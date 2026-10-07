@@ -256,6 +256,8 @@ describe('SessionState.newShell', () => {
         UNSET: makeVar(null, exported),
         IFS: makeVar(',', exported),
         TOKEN: { value: null, attrs: exported, managed: token },
+        OPTIND: makeVar('5', exported),
+        RANDOM: makeVar('42', exported),
       },
       functions: { f: 'f() { :; }', g: 'g() { :; }' },
       exportedFunctions: new Set(['f']),
@@ -265,10 +267,14 @@ describe('SessionState.newShell', () => {
     })
     parent.aliases = { a: 'echo' }
     parent.umask = 0o077
+    parent.getoptsPos = 2
+    parent.getoptsOptind = 1
     const child = parent.newShell()
     expect(child.vars).toEqual({
       OUT: makeVar('o', exported),
       TOKEN: { value: null, attrs: exported, managed: token },
+      OPTIND: makeVar('1', exported),
+      RANDOM: makeVar('42', exported),
       PWD: makeVar('/w', exported),
       PATH: makeVar('/usr/bin'),
       IFS: makeVar(' \t\n'),
@@ -278,6 +284,8 @@ describe('SessionState.newShell', () => {
     expect(child.readonlyFunctions).toEqual(new Set())
     expect([child.aliases, child.shellOptions]).toEqual([{}, {}])
     expect([child.lastExitCode, child.cwd, child.umask]).toEqual([0, '/w', 0o077])
+    expect([child.getoptsPos, child.getoptsOptind]).toEqual([0, null])
+    expect(child.randomSeed).toBe('42')
     expect(Object.keys(parent.functions)).toEqual(['f', 'g'])
     expect(parent.vars.PLAIN).toEqual(makeVar('p'))
   })

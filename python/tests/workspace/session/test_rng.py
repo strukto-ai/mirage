@@ -19,6 +19,7 @@ from mirage.shell.constants import RANDOM, RANDOM_MAX, RANDOM_UNSET
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import ShellVar
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.rng import initial_seed
 from mirage.workspace.session.state import (
     conversion_scalar,
     next_random,
@@ -30,6 +31,11 @@ from mirage.workspace.session.state import (
     set_var,
     shadow_local,
 )
+
+
+def test_generators_started_in_one_tick_seed_apart(monkeypatch):
+    monkeypatch.setattr("time.time_ns", lambda: 1_000_000)
+    assert initial_seed("s") != initial_seed("s")
 
 
 def test_seed_from_evaluates_the_word_as_arithmetic():

@@ -792,6 +792,28 @@ FUNC_JOB_CASES = [
         0,
     ),
     (
+        "xf_declare_p_only_prints",
+        "f(){ :; }; declare -pfx f; declare -pFr f; declare -F; "
+        "f(){ echo 2; }; f",
+        "f () \n{ \n    :\n}\ndeclare -f f\ndeclare -f f\n2\n",
+        "",
+        0,
+    ),
+    (
+        "xf_declare_plus_lists_every_function",
+        "f(){ :; }; g(){ :; }; export -f f; declare +x -F; declare +r -F",
+        "declare -fx f\ndeclare -f g\ndeclare -fx f\ndeclare -f g\n",
+        "",
+        0,
+    ),
+    (
+        "xf_declare_p_missing_is_not_found",
+        "f(){ :; }; declare -Fp nosuch f; echo rc=$?",
+        "declare -f f\nrc=1\n",
+        "bash: declare: nosuch: not found\n",
+        0,
+    ),
+    (
         "xf_redefinition_keeps_mark",
         "f(){ :; }; export -f f; f(){ echo 2; }; export -f",
         "f () \n{ \n    echo 2\n}\ndeclare -fx f\n",

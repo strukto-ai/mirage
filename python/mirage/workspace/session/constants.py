@@ -78,6 +78,10 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "_function_sites",
 )
 
+# What a new shell sets these to whatever its environment holds, as
+# bash's startup does; an exported one keeps its export mark.
+STARTUP_VALUES: dict[str, str] = {"OPTIND": "1", "OPTERR": "1"}
+
 # State that belongs to the line being executed, not to the shell, so a
 # fork starts it fresh: the errexit marker and the running function's
 # locals.

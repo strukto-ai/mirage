@@ -12,14 +12,36 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import itertools
+import time
+
 from mirage.shell.constants import (
     RANDOM_A,
     RANDOM_M,
     RANDOM_MAX,
+    RANDOM_MODULUS,
     RANDOM_Q,
     RANDOM_R,
     RANDOM_ZERO_SEED,
 )
+
+_started = itertools.count(1)
+
+
+def initial_seed(session_id: str) -> int:
+    """A first seed for a generator never assigned one: the clock,
+    stirred with the session id and a count of the generators started,
+    so two started in one tick differ, as bash's mixes in each shell's
+    own pid.
+
+    Args:
+        session_id (str): the session the generator draws for.
+    """
+    digest = 0
+    for ch in session_id:
+        digest = (digest * 31 + ord(ch)) % RANDOM_MODULUS
+    stir = (next(_started) * 0x9E3779B1) % RANDOM_MODULUS
+    return (time.time_ns() % RANDOM_MODULUS) ^ digest ^ stir
 
 
 def step_state(state: int) -> int:

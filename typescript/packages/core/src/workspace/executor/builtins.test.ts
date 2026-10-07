@@ -45,6 +45,7 @@ import type { DispatchFn } from '../../runtime/types.ts'
 import {
   handleCd,
   handleEcho,
+  handleEnv,
   handleEval,
   handleExport,
   handleLocal,
@@ -143,6 +144,24 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     ;[, io] = await handleExport(['-nf', 'f'], s)
     expect(io.exitCode).toBe(0)
     expect(s.exportedFunctions).toEqual(new Set())
+  })
+
+  it('env gives its command a copy of the function marks', async () => {
+    const s = new SessionState({
+      sessionId: 'test',
+      functions: { f: 'f() { :; }' },
+      exportedFunctions: new Set(['f']),
+    })
+    const seen: string[][] = []
+    const run: ExecuteStringFn = () => {
+      seen.push([...s.exportedFunctions])
+      s.exportedFunctions.delete('f')
+      return Promise.resolve(new IOResult())
+    }
+    await handleEnv(run, ['sh'], s)
+    await handleEnv(run, ['-i', 'sh'], s)
+    expect(seen).toEqual([['f'], []])
+    expect(s.exportedFunctions).toEqual(new Set(['f']))
   })
 
   it('bare export prints like -p', async () => {

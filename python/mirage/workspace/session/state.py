@@ -14,7 +14,6 @@
 
 import errno
 import functools
-import time
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import replace
 
@@ -53,7 +52,7 @@ from mirage.shell.variable import (
 )
 from mirage.utils.hidden import var_hidden
 from mirage.workspace.session.errors import ReadonlyVariableError
-from mirage.workspace.session.rng import draw
+from mirage.workspace.session.rng import draw, initial_seed
 from mirage.workspace.session.session import SessionState
 
 
@@ -620,7 +619,7 @@ def next_random(session: SessionState, stored: str | None) -> int | None:
         state = seed
         last = 0
     elif session._random_state is None:
-        state = time.time_ns() % RANDOM_MODULUS
+        state = initial_seed(session.session_id)
         last = 0
     else:
         state = session._random_state

@@ -57,7 +57,10 @@ from mirage.types import (
     Visibility,
 )
 from mirage.workspace.abort import StatusWriter
-from mirage.workspace.session.constants import INHERITED_FIELDS
+from mirage.workspace.session.constants import (
+    INHERITED_FIELDS,
+    STARTUP_VALUES,
+)
 from mirage.workspace.session.functions import (
     FunctionSite,
     function_sources,
@@ -287,9 +290,7 @@ class SessionState:
     # two different frozen things in bash, and each refuses in its own
     # voice.
     readonly_functions: set[str] = field(default_factory=set)
-    # The functions `export -f` marked, which a nested shell inherits
-    # (`new_shell`). A redefinition keeps the mark and an unset drops it,
-    # as bash's does.
+    # The functions `export -f` marked, which a nested shell inherits.
     exported_functions: set[str] = field(default_factory=set)
     last_exit_code: int = 0
     # `${PIPESTATUS[@]}`: the exit status of every segment of the last
@@ -845,13 +846,22 @@ class SessionState:
         ]
         child._local_random = list(self._local_random)
         if child._random_seed != RANDOM_UNSET:
-            var = self.vars.get(RANDOM)
-            child._random_seed = (
-                var.value
-                if var is not None and isinstance(var.value, str)
-                else None
-            )
+            child._draw_afresh()
         return child
+
+    def _draw_afresh(self) -> None:
+        """Start ``$RANDOM`` on a new sequence at its next draw, rather
+        than seed it from the value the variable holds now.
+
+        Args:
+            None
+        """
+        var = self.vars.get(RANDOM)
+        self._random_seed = (
+            var.value
+            if var is not None and isinstance(var.value, str)
+            else None
+        )
 
     def new_shell(self) -> "SessionState":
         """A new shell started from this session, as a nested ``bash`` is.
@@ -862,9 +872,10 @@ class SessionState:
         (no array, no other attribute), and the functions ``export -f``
         marked. The rest starts as a fresh shell's does: the other
         variables and functions, the aliases, the ``set`` and ``shopt``
-        options, ``$?``, ``$!``, ``$RANDOM``, the call stack and the
-        startup variables, IFS included, which bash never reads from its
-        environment. A managed variable not yet fetched crosses as its
+        options, ``$?``, ``$!``, ``$RANDOM``'s sequence, ``getopts``'s
+        place, the call stack and the startup variables, which bash never
+        reads from its environment: IFS is dropped and ``STARTUP_VALUES``
+        restart. A managed variable not yet fetched crosses as its
         pointer, which the nested shell fetches through.
 
         Args:
@@ -878,7 +889,9 @@ class SessionState:
         child = self.fork(
             vars={
                 name: ShellVar(
-                    var.value, frozenset({VarAttr.EXPORT}), var.managed
+                    STARTUP_VALUES.get(name, var.value),
+                    frozenset({VarAttr.EXPORT}),
+                    var.managed,
                 )
                 for name, var in self.vars.items()
                 if VarAttr.EXPORT in var.attrs
@@ -901,9 +914,10 @@ class SessionState:
             pipe_status=(),
             last_bg_job_id=None,
             function_names=(),
-            _random_state=None,
+            _getopts_pos=0,
+            _getopts_optind=None,
         )
-        child._random_seed = None
+        child._draw_afresh()
         return child
 
     def remove_function(self, name: str) -> None:

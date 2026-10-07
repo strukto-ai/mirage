@@ -476,14 +476,16 @@ def handle_declare_functions(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run the function half of ``declare``: ``-f`` / ``-F``.
 
-    ``-r`` freezes the named functions as ``readonly -f`` does, ``-x``
-    marks them for export and ``+x`` takes the mark off, printing
-    nothing. Otherwise ``-F NAME`` prints the name and ``-f NAME`` the
-    body, ``-p`` adding the attribute line (``function_lines``). A
-    missing name is exit 1 with no message. With no names every function
-    lists with its attribute line, as ``declare -f NAME`` under ``-F``
-    and as its body otherwise; ``-r`` or ``-x`` narrows the list to the
-    functions holding either attribute.
+    ``-p`` only prints, whatever attributes come with it: ``-F NAME``
+    the attribute line, ``-f NAME`` the body and, for a function with an
+    attribute, that line (``function_lines``); a missing name is
+    ``not found``, exit 1. Without ``-p``, ``-r`` freezes the named
+    functions as ``readonly -f`` does, ``-x`` marks them for export and
+    ``+x`` takes the mark off, printing nothing; with no attribute
+    ``-F NAME`` prints the name and ``-f NAME`` the body, and a missing
+    name is exit 1 with no message. With no names every function lists
+    as ``-p`` prints it; ``-r`` or ``-x`` narrows the list to the
+    functions holding either attribute, and a ``+`` attribute does not.
 
     Args:
         cmd (str): the builtin's own name for a diagnostic.
@@ -492,10 +494,12 @@ def handle_declare_functions(
         names (list[str]): the function names, empty to list all.
         plus (frozenset[str]): the attribute letters given with ``+``.
     """
-    wanted = (flags | plus) & {"r", "x"}
+    printing = "p" in flags
+    wanted = flags & {"r", "x"}
     present = [name for name in names if name in session.functions]
-    code = 1 if len(present) < len(names) else 0
-    if names and wanted:
+    missing = [name for name in names if name not in session.functions]
+    code = 1 if missing else 0
+    if names and not printing and (wanted or plus & {"r", "x"}):
         for name in present:
             if "r" in flags:
                 session.readonly_functions.add(name)
@@ -515,13 +519,20 @@ def handle_declare_functions(
             if not wanted or wanted & set(function_flags(session, name))
         ]
     lines = function_lines(
-        session, present, "F" not in flags, "p" in flags or not names
+        session, present, "F" not in flags, printing or not names
     )
     out = encode_text(("\n".join(lines) + "\n") if lines else "")
+    err = (
+        encode_text(
+            "".join(f"bash: {cmd}: {name}: not found\n" for name in missing)
+        )
+        if printing
+        else b""
+    )
     return (
         out,
-        IOResult(exit_code=code),
-        ExecutionNode(command=cmd, exit_code=code),
+        IOResult(exit_code=code, stderr=err or None),
+        ExecutionNode(command=cmd, exit_code=code, stderr=err),
     )
 
 

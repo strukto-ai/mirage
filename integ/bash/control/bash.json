@@ -645,6 +645,108 @@
         "stdout": "rc=127\nf\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ctl_bash_c_restarts_getopts",
+      "seq": 502179,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( getopts ab opt -ab; bash -c 'getopts xy opt -xy; echo \"$opt $OPTIND\"' )",
+      "expect": {
+        "exit": 0,
+        "stdout": "x 1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_bash_c_restarts_optind_and_opterr",
+      "seq": 502180,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( export OPTIND=5 OPTERR=0; bash -c 'echo \"$OPTIND $OPTERR\"' )",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_bash_c_draws_its_own_random",
+      "seq": 502181,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( export RANDOM=42; a=$(bash -c 'echo $RANDOM $RANDOM $RANDOM'); b=$(bash -c 'echo $RANDOM $RANDOM $RANDOM'); [ \"$a\" = \"$b\" ] && echo same || echo differ )",
+      "expect": {
+        "exit": 0,
+        "stdout": "differ\n",
+        "stderr": ""
+      }
     }
   ]
 }

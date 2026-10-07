@@ -2747,10 +2747,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "( name_12=ok; _x9=yes; printf \"<%s>\\n\" \"$name_12.x\" \"${name_12}.x\" \"$_x9-y\" \"$name_12é\" )",
+      "command": "( name_12=ok; _x9=yes; printf \"<%s>\\n\" \"$name_12.x\" \"${name_12}.x\" \"$_x9-y\" \"$name_12\u00e9\" )",
       "expect": {
         "exit": 0,
-        "stdout": "<ok.x>\n<ok.x>\n<yes-y>\n<oké>\n",
+        "stdout": "<ok.x>\n<ok.x>\n<yes-y>\n<ok\u00e9>\n",
         "stderr": ""
       }
     },
@@ -2849,7 +2849,7 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "( prefix=a; value=aétail; echo \"${value#$prefixé}|${value#\"$prefixé\"}|${value#${prefix}é}\" )",
+      "command": "( prefix=a; value=a\u00e9tail; echo \"${value#$prefix\u00e9}|${value#\"$prefix\u00e9\"}|${value#${prefix}\u00e9}\" )",
       "expect": {
         "exit": 0,
         "stdout": "tail|tail|tail\n",
@@ -3058,6 +3058,40 @@
         "exit": 0,
         "stdout": "2 p2 p2 hello 5 el\nrc=0\n",
         "stderr": "bash: ${}: bad substitution\nbash: ${.}: bad substitution\nbash: ${pb3.b}: bad substitution\nbash: ${1a}: bad substitution\nbash: ${pb3:}: bad substitution\nbash: ${#pb3 b}: bad substitution\nbash: ${#pb3-x}: bad substitution\nbash: ${!pb3 b}: bad substitution\nbash: ${pb3;b}: bad substitution\nbash: ${pb3[1]x}: bad substitution\nbash: ${pb3*}: bad substitution\nbash: ${ pb3}: bad substitution\nbash: ${pb3 b}: bad substitution\nbash: ${pb3 }: bad substitution\nbash: ${%pb3}: bad substitution\nbash: ${-pb3}: bad substitution\nbash: ${$pb3}: bad substitution\nbash: ${#%}: bad substitution\nbash: ${#!x}: bad substitution\nbash: ${!$}: bad substitution\nbash: ${pb3[]}: bad substitution\nbash: ${@pb3}: bad substitution\nbash: ${pb3\\ b}: bad substitution\nbash: ${pb3\"b\"}: bad substitution\n"
+      }
+    },
+    {
+      "id": "param_random_subshells_draw_their_own",
+      "seq": 500690,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "( n=0; for i in 1 2 3 4 5 6 7 8; do a=$( (echo $RANDOM $RANDOM $RANDOM) ); b=$( (echo $RANDOM $RANDOM $RANDOM) ); [ \"$a\" = \"$b\" ] && n=$((n+1)); done; echo \"same=$n\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "same=0\n",
+        "stderr": ""
       }
     }
   ]

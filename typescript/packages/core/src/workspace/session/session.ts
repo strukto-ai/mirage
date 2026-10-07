@@ -14,6 +14,7 @@
 
 import { compareCodePoints } from '../../utils/sort.ts'
 import { type FunctionSite, functionSources } from './functions.ts'
+import { STARTUP_VALUES } from './constants.ts'
 import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
 
 import {
@@ -367,9 +368,7 @@ export class SessionState {
   // *variable* set: `readonly -f f` and `readonly f` are two different
   // frozen things in bash, and each refuses in its own voice.
   readonlyFunctions: Set<string>
-  // The functions `export -f` marked, which a nested shell inherits
-  // (`newShell`). A redefinition keeps the mark and an unset drops it, as
-  // bash's does.
+  // The functions `export -f` marked, which a nested shell inherits.
   exportedFunctions: Set<string>
   lastExitCode: number
   // `${PIPESTATUS[@]}`: the exit status of every segment of the last
@@ -647,11 +646,17 @@ export class SessionState {
       frame === this.localVars && child.localVars !== null ? child.localVars : copyLocals(frame),
     )
     child.localRandom = [...this.localRandom]
-    if (child.randomSeed !== RANDOM_UNSET) {
-      const word = this.vars[RANDOM]?.value
-      child.randomSeed = typeof word === 'string' ? word : null
-    }
+    if (child.randomSeed !== RANDOM_UNSET) child.drawAfresh()
     return child
+  }
+
+  /**
+   * Start `$RANDOM` on a new sequence at its next draw, rather than seed it
+   * from the value the variable holds now.
+   */
+  private drawAfresh(): void {
+    const word = this.vars[RANDOM]?.value
+    this.randomSeed = typeof word === 'string' ? word : null
   }
 
   /**
@@ -661,10 +666,11 @@ export class SessionState {
    * variables, as plain exported strings (no array, no other attribute), and
    * the functions `export -f` marked. The rest starts as a fresh shell's
    * does: the other variables and functions, the aliases, the `set` and
-   * `shopt` options, `$?`, `$!`, `$RANDOM`, the call stack and the startup
-   * variables, IFS included, which bash never reads from its environment. A
-   * managed variable not yet fetched crosses as its pointer, which the
-   * nested shell fetches through. Mirrors Python.
+   * `shopt` options, `$?`, `$!`, `$RANDOM`'s sequence, `getopts`'s place,
+   * the call stack and the startup variables, which bash never reads from
+   * its environment: IFS is dropped and `STARTUP_VALUES` restart. A managed
+   * variable not yet fetched crosses as its pointer, which the nested shell
+   * fetches through. Mirrors Python.
    */
   newShell(): SessionState {
     const vars = ownRecord<ShellVar>()
@@ -672,7 +678,7 @@ export class SessionState {
       if (!v.attrs.has(VarAttr.Export) || name === 'IFS') continue
       if (typeof v.value !== 'string' && v.managed === undefined) continue
       vars[name] = {
-        value: v.value,
+        value: STARTUP_VALUES[name] ?? v.value,
         attrs: new Set([VarAttr.Export]),
         ...(v.managed === undefined ? {} : { managed: v.managed }),
       }
@@ -697,7 +703,9 @@ export class SessionState {
     child.pipeStatus = []
     child.lastBgJobId = null
     child.functionNames = []
-    child.randomSeed = null
+    child.getoptsPos = 0
+    child.getoptsOptind = null
+    child.drawAfresh()
     return child
   }
 

@@ -396,13 +396,15 @@ export function functionLines(
 /**
  * Run the function half of `declare`: `-f` / `-F`.
  *
- * `-r` freezes the named functions as `readonly -f` does, `-x` marks them
- * for export and `+x` takes the mark off, printing nothing. Otherwise `-F
- * NAME` prints the name and `-f NAME` the body, `-p` adding the attribute
- * line (`functionLines`). A missing name is exit 1 with no message. With
- * no names every function lists with its attribute line, as `declare -f
- * NAME` under `-F` and as its body otherwise; `-r` or `-x` narrows the list
- * to the functions holding either attribute.
+ * `-p` only prints, whatever attributes come with it: `-F NAME` the
+ * attribute line, `-f NAME` the body and, for a function with an attribute,
+ * that line (`functionLines`); a missing name is `not found`, exit 1.
+ * Without `-p`, `-r` freezes the named functions as `readonly -f` does, `-x`
+ * marks them for export and `+x` takes the mark off, printing nothing; with
+ * no attribute `-F NAME` prints the name and `-f NAME` the body, and a
+ * missing name is exit 1 with no message. With no names every function
+ * lists as `-p` prints it; `-r` or `-x` narrows the list to the functions
+ * holding either attribute, and a `+` attribute does not.
  */
 export function handleDeclareFunctions(
   cmd: string,
@@ -412,10 +414,12 @@ export function handleDeclareFunctions(
   plus: ReadonlySet<string> = new Set(),
   parser?: ParseScope,
 ): Result {
-  const wanted = ['r', 'x'].filter((c) => flags.has(c) || plus.has(c))
+  const printing = flags.has('p')
+  const wanted = ['r', 'x'].filter((c) => flags.has(c))
   let present = names.filter((name) => name in session.functions)
-  const code = present.length < names.length ? 1 : 0
-  if (names.length > 0 && wanted.length > 0) {
+  const missing = names.filter((name) => !(name in session.functions))
+  const code = missing.length > 0 ? 1 : 0
+  if (names.length > 0 && !printing && (wanted.length > 0 || plus.has('r') || plus.has('x'))) {
     for (const name of present) {
       if (flags.has('r')) session.readonlyFunctions.add(name)
       if (flags.has('x')) session.exportedFunctions.add(name)
@@ -439,14 +443,17 @@ export function handleDeclareFunctions(
     session,
     present,
     !flags.has('F'),
-    flags.has('p') || names.length === 0,
+    printing || names.length === 0,
     parser,
   )
   const out = encodeText(lines.length > 0 ? `${lines.join('\n')}\n` : '')
+  const err = printing
+    ? encodeText(missing.map((name) => `bash: ${cmd}: ${name}: not found\n`).join(''))
+    : new Uint8Array()
   return [
     out,
-    new IOResult({ exitCode: code }),
-    new ExecutionNode({ command: cmd, exitCode: code }),
+    new IOResult({ exitCode: code, stderr: err.byteLength > 0 ? err : null }),
+    new ExecutionNode({ command: cmd, exitCode: code, stderr: err }),
   ]
 }
 

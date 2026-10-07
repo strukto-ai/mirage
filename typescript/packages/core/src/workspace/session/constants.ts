@@ -17,3 +17,9 @@
  * workspace defines one of this name.
  */
 export const DEFAULT_PROFILE = 'default'
+
+/**
+ * What a new shell sets these to whatever its environment holds, as bash's
+ * startup does; an exported one keeps its export mark.
+ */
+export const STARTUP_VALUES: Readonly<Record<string, string>> = { OPTIND: '1', OPTERR: '1' }
