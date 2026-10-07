@@ -234,7 +234,7 @@ A command that moves or deletes several files is refused one file at a time, so 
 **Which version a write sends.** A `>>` append, a resize to a nonzero length, and a write at an offset read the file themselves first, so they send the version of the bytes they just read. Any other write sends, in order:
 
 1. what the same line last read or wrote at that path (`cat f; echo x > f`, or two redirects in a row);
-2. the version the mount kept from an earlier line: the cached copy's, or, where the bytes were not kept (a `grep` or `head` of the file, an own append, a file bigger than the cache), the version alone.
+2. the version the mount kept from an earlier line: the cached copy's, or, where the bytes were not kept (a `grep` or `head` of the file, the agent's own redirect or append, a file bigger than the cache), the version alone.
 
 With neither, the write is a create: it goes through when the file does not exist and is refused when it does. So on a conditional mount, overwrite a file only after reading it.
 

@@ -688,15 +688,14 @@ describe('conditional writes on an S3 mount', () => {
     expect(ops[WritePolicy.CONDITIONAL]).toEqual(ops[WritePolicy.UNCONDITIONAL])
   })
 
-  it('keeps the bytes a redirect wrote, on any mount', async () => {
-    // A `>` write keeps its bytes, as tee does, so the next read is served
-    // from the cache instead of fetching what was just written.
+  it('keeps no bytes a redirect wrote on an unconditional mount', async () => {
+    // As on main: a `>` write keeps no bytes, so the next read fetches them.
     const ws = workspace(WritePolicy.UNCONDITIONAL)
     try {
       await run(ws, 'echo updated > /s3/n')
       mock.ledger.length = 0
       expect((await run(ws, 'cat /s3/n'))[1]).toBe('updated\n')
-      expect(mock.ledger.filter(([op]) => op === 'GetObject').length).toBe(0)
+      expect(mock.ledger.filter(([op]) => op === 'GetObject').length).toBe(1)
     } finally {
       await ws.close()
     }

@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { commandRecords } from '../../observe/context.ts'
-import type { OpRecord } from '../../observe/record.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { runWithRedirectPaths } from '../../context/session_context.ts'
 import { fsStrerror, isFsError, isMissingPath } from '../../errors/fs.ts'
@@ -52,7 +50,6 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
-import { markClaimedWrites } from '../../cache/file/io.ts'
 import { createFile, writeDescription } from './create.ts'
 import {
   CLOSED as EXEC_CLOSED,
@@ -175,29 +172,6 @@ export class JobRoute extends JobOutput {
     else if (dest instanceof FileDescription)
       await writeDescription(this.dispatch, this.session, dest, data)
   }
-}
-
-/**
- * Keep the bytes a redirect wrote, as tee keeps its own. The redirect claims
- * the path with the very bytes it wrote and marks its own write records with
- * them, so `writtenVerdict` keeps the bytes with the PUT's token, and a later
- * write in the line still voids an earlier command's claim on the path. Only
- * a `>` write claims: an append's bytes are the file's tail, never the file.
- * A descriptor write records `pwrite`, which the verdict never reads, so its
- * bytes stay uncached too. Mirrors Python's `_claim`.
- */
-function claim(
-  io: IOResult,
-  records: readonly OpRecord[],
-  file: FileDescription,
-  data: Uint8Array,
-): void {
-  const path = file.scope.virtual
-  io.writes[path] = data
-  io.cache = io.cache.filter((p) => p !== path)
-  if (file.append) return
-  io.cache.push(path)
-  markClaimedWrites(records, io)
 }
 
 /** Ordered descriptor bindings for one command, restored after execution.
@@ -529,15 +503,15 @@ export async function handleRedirect(
             const data = unique
               ? concat(chunks.filter(([key]) => dest(key) === file).map(([, data]) => data))
               : new Uint8Array()
-            const mine = await commandRecords(async (records) => {
-              if (data.byteLength > 0 || !opened.has(file))
-                await writeDescription(dispatch, session, file, data)
-              else file.opened = true
-              return records
-            })
+            if (data.byteLength > 0 || !opened.has(file))
+              await writeDescription(dispatch, session, file, data)
+            else file.opened = true
             if (unique) {
               consumed.add(file)
-              if (data.byteLength > 0) claim(io, mine, file, data)
+              if (data.byteLength > 0) {
+                io.writes[file.scope.virtual] = data
+                io.cache = io.cache.filter((p) => p !== file.scope.virtual)
+              }
             }
           }
         for (const [key, data] of chunks) {
@@ -547,11 +521,9 @@ export async function handleRedirect(
           else if (target instanceof Inherited) routed.push([target, data])
           else if (target instanceof FileDescription && !consumed.has(target)) {
             failedScope = target.scope
-            const mine = await commandRecords(async (records) => {
-              await writeDescription(dispatch, session, target, data)
-              return records
-            })
-            claim(io, mine, target, data)
+            await writeDescription(dispatch, session, target, data)
+            io.writes[target.scope.virtual] = data
+            io.cache = io.cache.filter((p) => p !== target.scope.virtual)
           }
         }
       } catch (error) {
