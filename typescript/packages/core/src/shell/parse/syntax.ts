@@ -522,7 +522,7 @@ export function endsInsideConstruct(
   if (stray.some(([, text]) => text !== '')) return false
   const end = (node.startIndex ?? 0) + node.text.trimEnd().length
   let unfinished = false
-  const stack: [TSNodeLike, TSNodeLike | null, TSNodeLike | null][] = [[node, null, null]]
+  const stack: [TSNodeLike, TSNodeLike | null, TSNodeLike][] = [[node, null, node]]
   for (let entry = stack.pop(); entry !== undefined; entry = stack.pop()) {
     const [current, before, parent] = entry
     const start = current.startIndex ?? 0
@@ -560,16 +560,16 @@ export function endsInsideConstruct(
 function openCompound(
   error: TSNodeLike,
   before: TSNodeLike | null,
-  parent: TSNodeLike | null,
+  parent: TSNodeLike,
   aliases: ReadonlySet<string> = new Set(),
   own: ReadonlyMap<string, readonly [number, number]> = new Map(),
   offsets?: readonly number[],
 ): boolean | null {
   const origin = error.startIndex ?? 0
   const children = [...errorTokens(error)]
-  const top = parent?.type === 'program'
+  const top = parent.type === 'program'
   let after = before?.type ?? null
-  if (before !== null && parent !== null) {
+  if (before !== null) {
     const from = parent.startIndex ?? 0
     const gap = parent.text.slice((before.endIndex ?? from) - from, origin - from)
     if (gap.replaceAll('\\\n', '').includes('\n')) after = ';'
@@ -579,7 +579,7 @@ function openCompound(
       ? 'words'
       : (after !== null && COMMAND_FOLLOWS.has(after)) ||
           (top && (after === null || SEPARATOR_TOKENS.has(after))) ||
-          (after === ')' && parent?.type === 'function_definition')
+          (after === ')' && parent.type === 'function_definition')
         ? 'command'
         : after !== null && SEPARATOR_TOKENS.has(after)
           ? 'list'

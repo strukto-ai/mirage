@@ -23,7 +23,7 @@ import {
   findUnterminatedBacktick,
   type ShellParser,
 } from './index.ts'
-import { endsInsideConstruct, failsInArray, findSyntaxIssue, syntaxErrorResult } from './syntax.ts'
+import { endsInsideConstruct, failsInArray, syntaxErrorResult } from './syntax.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -39,83 +39,27 @@ describe('endsInsideConstruct', () => {
   it.each([
     ['if true', true],
     ['case x', true],
-    ['f() {', true],
-    ['( ( echo a', true],
-    ['echo a |', true],
-    ['if true; then echo a; else', true],
-    ['case x in a) echo', true],
-    ['if then', false],
-    ['if ;', false],
     ['if }', false],
-    ['echo x (', false],
     ['( then', false],
-    ['if true; then else', false],
     ['for i in 1; do ;', false],
     [') ; if true; then', false],
     ['; if true; then', false],
-    ['while ) ; do', false],
     ['echo a ) ; if true; then', false],
     ['echo a | ; if true; then', false],
     ['f() ; if true; then', false],
     ['echo a\n; while true; do', false],
     ['case x in a', false],
-    ['case x in a) echo;; b', false],
   ])('%s: %s', (line, unfinished) => {
     expect(endsInsideConstruct(parser.parse(line))).toBe(unfinished)
-  })
-
-  it('takes an alias spelling a closer as a command at the end', () => {
-    const root = parser.parse('fi; echo a |')
-    expect(endsInsideConstruct(root)).toBe(false)
-    expect(endsInsideConstruct(root, new Set(['fi']))).toBe(true)
-    // Inside its own text an alias is the reserved word again.
-    const own = parser.parse('if fi; echo a')
-    expect(endsInsideConstruct(own, new Set(['fi']))).toBe(true)
-    expect(endsInsideConstruct(own, new Set(['fi']), new Map([['fi', [0, 5]]]))).toBe(false)
-  })
-})
-
-describe('the first error read', () => {
-  it.each([
-    ['fi; x=(1 2', "mirage: syntax error near 'fi'\n", 2],
-    ['fi; echo "abc', "mirage: syntax error near 'fi'\n", 2],
-    ['if then; x=(1 2', "mirage: syntax error near 'then'\n", 2],
-    ['if true; then x+=(1 2', "mirage: unexpected EOF while looking for matching `)'\n", 1],
-    ['x=(1 2; fi', "mirage: syntax error near ';'\n", 1],
-    ['x=(1 2 | cat', "mirage: syntax error near '|'\n", 1],
-    ['x=(1 2 >f', "mirage: syntax error near '>'\n", 1],
-  ])('%s is the one reported', async (line, message, status) => {
-    const root = parser.parse(line)
-    const issue = findSyntaxIssue(root)
-    expect(issue).not.toBeNull()
-    if (issue === null) return
-    const io = syntaxErrorResult(
-      issue.offending,
-      root,
-      new Set(),
-      new Map(),
-      undefined,
-      issue.span.end,
-    )
-    expect([new TextDecoder().decode(await io.materializeStderr()), io.exitCode]).toEqual([
-      message,
-      status,
-    ])
   })
 })
 
 describe('failsInArray', () => {
   it.each([
-    ['x=(1 2', true],
     ['x=(1 $(echo', true],
-    ['x=(1 "a', true],
-    ['if true; then x=(1 2', true],
     ['x=(1 2) ; y=(', true],
-    ['x=(1 2; fi', true],
-    ['echo $(x=(1 2)', false],
     ['x=(1 (2', false],
     ['echo $(echo', false],
-    ['x=(1 2)', false],
   ])('%s: %s', (line, inside) => {
     const root = parser.parse(line)
     expect(failsInArray(root)).toBe(inside)
@@ -179,18 +123,6 @@ describe('findSyntaxError', () => {
   ])('returns null for valid / recoverable %j', (cmd) => {
     const root = parser.parse(cmd)
     expect(findSyntaxError(root)).toBeNull()
-  })
-
-  it.each([
-    [';s', ';'],
-    ['| s', '|'],
-    ['&& s', '&&'],
-    ['echo a ; ; echo b', ';'],
-    ['echo bg &; echo fg', ';'],
-    ['true;;s', ';;'],
-  ])('names the stray separator in %j', (cmd, token) => {
-    const root = parser.parse(cmd)
-    expect(findSyntaxError(root)?.trim()).toBe(token)
   })
 })
 

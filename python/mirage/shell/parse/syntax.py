@@ -257,12 +257,10 @@ def _reserved_here(
     Args:
         word (str): the word.
         start (int): its start byte in the parse.
-        aliases (frozenset[str]): alias names expanded where a command
-            starts.
-        own (Mapping[str, tuple[int, int]] | None): each alias whose own
-            text the line opens with, to the span of the line it covers.
-        offsets (Sequence[int] | None): where each parsed byte sits in the
-            line; None where the two are the same.
+        aliases (frozenset[str]): as in ``find_syntax_issue``.
+        own (Mapping[str, tuple[int, int]] | None): as in
+            ``find_syntax_issue``.
+        offsets (Sequence[int] | None): as in ``find_syntax_issue``.
     """
     if word not in aliases:
         return True
@@ -666,12 +664,10 @@ def ends_inside_construct(
 
     Args:
         node (TSNodeLike): the parsed line.
-        aliases (frozenset[str]): alias names the shell would expand where
-            a command starts (``find_syntax_issue``).
-        own (Mapping[str, tuple[int, int]] | None): each alias whose own
-            text the line opens with, to the span of the line it covers.
-        offsets (Sequence[int] | None): where each byte the parser read
-            sits in the line; None where the two are the same.
+        aliases (frozenset[str]): as in ``find_syntax_issue``.
+        own (Mapping[str, tuple[int, int]] | None): as in
+            ``find_syntax_issue``.
+        offsets (Sequence[int] | None): as in ``find_syntax_issue``.
         issue_end (int | None): where the flagged span ends in the parse;
             None when it is not known.
     """
@@ -684,8 +680,8 @@ def ends_inside_construct(
         return False
     end = node.start_byte + len((node.text or b"").rstrip())
     unfinished = False
-    stack: list[tuple[TSNodeLike, TSNodeLike | None, TSNodeLike | None]] = [
-        (node, None, None)
+    stack: list[tuple[TSNodeLike, TSNodeLike | None, TSNodeLike]] = [
+        (node, None, node)
     ]
     while stack:
         current, before, parent = stack.pop()
@@ -710,7 +706,7 @@ def ends_inside_construct(
 def _open_compound(
     error: TSNodeLike,
     before: TSNodeLike | None,
-    parent: TSNodeLike | None,
+    parent: TSNodeLike,
     aliases: frozenset[str] = frozenset(),
     own: Mapping[str, tuple[int, int]] | None = None,
     offsets: Sequence[int] | None = None,
@@ -736,20 +732,17 @@ def _open_compound(
         error (TSNodeLike): the ERROR node.
         before (TSNodeLike | None): its previous sibling; after a
             command, the node starts among that command's words.
-        parent (TSNodeLike | None): the node holding it.
-        aliases (frozenset[str]): alias names expanded where a command
-            starts, which are commands there whatever they spell, except
-            inside their own text (``_reserved_here``).
-        own (Mapping[str, tuple[int, int]] | None): each alias whose own
-            text the line opens with, to the span it covers.
-        offsets (Sequence[int] | None): where each parsed byte sits in the
-            line.
+        parent (TSNodeLike): the node holding it.
+        aliases (frozenset[str]): as in ``find_syntax_issue``.
+        own (Mapping[str, tuple[int, int]] | None): as in
+            ``find_syntax_issue``.
+        offsets (Sequence[int] | None): as in ``find_syntax_issue``.
     """
     text = error.text or b""
     children = list(_error_tokens(error))
-    top = parent is not None and parent.type == "program"
+    top = parent.type == "program"
     after = None if before is None else before.type
-    if before is not None and parent is not None:
+    if before is not None:
         gap = (parent.text or b"")[
             before.end_byte - parent.start_byte : error.start_byte
             - parent.start_byte
@@ -761,11 +754,7 @@ def _open_compound(
     elif (
         after in COMMAND_FOLLOWS
         or (top and (after is None or after in SEPARATOR_TOKENS))
-        or (
-            after == ")"
-            and parent is not None
-            and parent.type == "function_definition"
-        )
+        or (after == ")" and parent.type == "function_definition")
     ):
         expect = "command"
     elif after in SEPARATOR_TOKENS:
@@ -863,12 +852,10 @@ def syntax_error_result(
     Args:
         offending (str): the span the parser flagged.
         node (TSNodeLike | None): the parsed command, for quote diagnostics.
-        aliases (frozenset[str]): alias names expanded where a command
-            starts.
-        own (Mapping[str, tuple[int, int]] | None): each alias whose own
-            text the line opens with, to the span it covers.
-        offsets (Sequence[int] | None): where each parsed byte sits in the
-            line.
+        aliases (frozenset[str]): as in ``find_syntax_issue``.
+        own (Mapping[str, tuple[int, int]] | None): as in
+            ``find_syntax_issue``.
+        offsets (Sequence[int] | None): as in ``find_syntax_issue``.
         issue_end (int | None): where the flagged span ends in the parse.
     """
     message = syntax_error_message(
@@ -897,12 +884,10 @@ def syntax_error_message(
     Args:
         offending (str): the span the parser flagged.
         node (TSNodeLike | None): the parsed command, for quote diagnostics.
-        aliases (frozenset[str]): alias names expanded where a command
-            starts.
-        own (Mapping[str, tuple[int, int]] | None): each alias whose own
-            text the line opens with, to the span it covers.
-        offsets (Sequence[int] | None): where each parsed byte sits in the
-            line.
+        aliases (frozenset[str]): as in ``find_syntax_issue``.
+        own (Mapping[str, tuple[int, int]] | None): as in
+            ``find_syntax_issue``.
+        offsets (Sequence[int] | None): as in ``find_syntax_issue``.
         issue_end (int | None): where the flagged span ends in the parse;
             None when it is not known.
     """

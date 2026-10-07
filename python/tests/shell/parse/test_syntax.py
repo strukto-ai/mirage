@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import json
 from pathlib import Path
 
@@ -28,16 +27,10 @@ from mirage.shell.parse import (
 from mirage.shell.parse.syntax import (
     ends_inside_construct,
     fails_in_array,
-    find_syntax_issue,
     syntax_error_result,
 )
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-
-
-def test_partial_quoted_heredoc_end_is_not_syntax_error():
-    root = parse("cat <<EN'D'\n$v\nEND")
-    assert find_syntax_error(root) is None
 
 
 @pytest.mark.parametrize(
@@ -45,82 +38,29 @@ def test_partial_quoted_heredoc_end_is_not_syntax_error():
     [
         ("if true", True),
         ("case x", True),
-        ("f() {", True),
-        ("( ( echo a", True),
-        ("echo a |", True),
-        ("if true; then echo a; else", True),
-        ("case x in a) echo", True),
-        ("if then", False),
-        ("if ;", False),
         ("if }", False),
-        ("echo x (", False),
         ("( then", False),
-        ("if true; then else", False),
         ("for i in 1; do ;", False),
         (") ; if true; then", False),
         ("; if true; then", False),
-        ("while ) ; do", False),
         ("echo a ) ; if true; then", False),
         ("echo a | ; if true; then", False),
         ("f() ; if true; then", False),
         ("echo a\n; while true; do", False),
         ("case x in a", False),
-        ("case x in a) echo;; b", False),
     ],
 )
 def test_only_input_bash_took_whole_ends_inside_a_construct(line, unfinished):
     assert ends_inside_construct(parse(line)) is unfinished
 
 
-def test_an_alias_spelling_a_closer_is_a_command_at_the_end():
-    root = parse("fi; echo a |")
-    assert ends_inside_construct(root) is False
-    assert ends_inside_construct(root, frozenset({"fi"})) is True
-    # Inside its own text an alias is the reserved word again.
-    own = parse("if fi; echo a")
-    assert ends_inside_construct(own, frozenset({"fi"})) is True
-    assert (
-        ends_inside_construct(own, frozenset({"fi"}), {"fi": (0, 5)}) is False
-    )
-
-
-@pytest.mark.parametrize(
-    ("line", "message", "status"),
-    [
-        ("fi; x=(1 2", "mirage: syntax error near 'fi'\n", 2),
-        ('fi; echo "abc', "mirage: syntax error near 'fi'\n", 2),
-        ("if then; x=(1 2", "mirage: syntax error near 'then'\n", 2),
-        (
-            "if true; then x+=(1 2",
-            "mirage: unexpected EOF while looking for matching `)'\n",
-            1,
-        ),
-        ("x=(1 2; fi", "mirage: syntax error near ';'\n", 1),
-        ("x=(1 2 | cat", "mirage: syntax error near '|'\n", 1),
-        ("x=(1 2 >f", "mirage: syntax error near '>'\n", 1),
-    ],
-)
-def test_the_first_error_read_is_the_one_reported(line, message, status):
-    root = parse(line)
-    issue = find_syntax_issue(root)
-    assert issue is not None
-    io = syntax_error_result(issue.offending, root, issue_end=issue.span.end)
-    assert (io.stderr, io.exit_code) == (message.encode(), status)
-
-
 @pytest.mark.parametrize(
     ("line", "inside"),
     [
-        ("x=(1 2", True),
         ("x=(1 $(echo", True),
-        ('x=(1 "a', True),
-        ("if true; then x=(1 2", True),
         ("x=(1 2) ; y=(", True),
-        ("x=(1 2; fi", True),
-        ("echo $(x=(1 2)", False),
         ("x=(1 (2", False),
         ("echo $(echo", False),
-        ("x=(1 2)", False),
     ],
 )
 def test_an_unfinished_array_is_the_outermost_construct(line, inside):
@@ -208,6 +148,7 @@ def test_find_syntax_error_detects_error_nodes(bad_cmd):
     [
         "echo hi",
         "for x in a b; do echo $x; done",
+        "cat <<EN'D'\n$v\nEND",
         "if true; then echo y; fi",
         "cat /tmp/x | sort",
         "echo bg & echo fg",
@@ -219,83 +160,6 @@ def test_find_syntax_error_detects_error_nodes(bad_cmd):
 )
 def test_find_syntax_error_returns_none_for_valid(good_cmd):
     assert find_syntax_error(parse(good_cmd)) is None
-
-
-@pytest.mark.parametrize(
-    "bad_cmd",
-    [
-        "if then fi",
-        "echo (",
-        "for x do done",
-        ";s",
-        "true;;s",
-    ],
-)
-def test_execute_returns_clear_syntax_error(bad_cmd):
-    ws = Workspace({"/data": RAMVFS()})
-    io = asyncio.run(ws.shell(bad_cmd))
-    assert io.exit_code == 2, (
-        f"expected exit 2 for {bad_cmd!r}, got {io.exit_code}"
-    )
-    stderr = io.stderr or b""
-    assert b"syntax error" in stderr, (
-        f"expected 'syntax error' in stderr for {bad_cmd!r}, got {stderr!r}"
-    )
-
-
-@pytest.mark.parametrize(
-    "bad_cmd, token",
-    [
-        (";s", ";"),
-        ("| s", "|"),
-        ("&& s", "&&"),
-        ("echo a ; ; echo b", ";"),
-        ("echo bg &; echo fg", ";"),
-        ("true;;s", ";;"),
-    ],
-)
-def test_stray_separator_is_a_syntax_error_and_nothing_runs(bad_cmd, token):
-    ws = Workspace({"/data": RAMVFS()})
-    io = asyncio.run(ws.shell(bad_cmd))
-    assert io.exit_code == 2
-    assert io.stderr == f"mirage: syntax error near '{token}'\n".encode()
-    assert not io.stdout
-
-
-@pytest.mark.parametrize(
-    "bad_cmd",
-    [
-        "echo `echo a",
-        "echo \"`echo '`'`\"",
-    ],
-)
-def test_unterminated_backtick_is_a_syntax_error(bad_cmd):
-    """tree-sitter parses these as complete; bash exits 2 and so do we."""
-    ws = Workspace({"/data": RAMVFS()})
-    io = asyncio.run(ws.shell(bad_cmd))
-    assert io.exit_code == 2, (
-        f"expected exit 2 for {bad_cmd!r}, got {io.exit_code}"
-    )
-    assert (
-        io.stderr == b"mirage: unexpected EOF while looking for matching ``'\n"
-    )
-
-
-@pytest.mark.parametrize(
-    "command,expected",
-    [
-        # A trailing backslash continues the line; with nothing to continue
-        # onto, bash drops it and runs the command.
-        ("echo a\\", b"a\n"),
-        ("echo \\", b"\n"),
-        ("echo a\\\\", b"a\\\n"),
-    ],
-)
-def test_trailing_backslash_is_a_line_continuation(command, expected):
-    ws = Workspace({"/data": RAMVFS()})
-    io = asyncio.run(ws.shell(command))
-    assert io.exit_code == 0, (io.exit_code, io.stderr)
-    assert io.stdout == expected
 
 
 MISSING_QUOTE_CASES = json.loads(

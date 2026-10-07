@@ -94,8 +94,11 @@ export class ParsedProgram {
   }
 }
 
-/** A node of a parsed program; every read checks the program is still held. */
+/** A node of a parsed program; every read checks the program is still held.
+ * The wrappers of a node's children are built once and kept, as in Python. */
 export class ProgramNode implements ShellNode {
+  private kids: ProgramNode[] | undefined
+  private named: ProgramNode[] | undefined
   constructor(
     private readonly borrowed: ShellNode,
     readonly program: ParsedProgram,
@@ -153,10 +156,14 @@ export class ProgramNode implements ShellNode {
     return this.wrap(this.node.child(index))
   }
   get children(): ProgramNode[] {
-    return this.node.children.map((node) => new ProgramNode(node, this.program))
+    const node = this.node
+    this.kids ??= node.children.map((child) => new ProgramNode(child, this.program))
+    return [...this.kids]
   }
   get namedChildren(): ProgramNode[] {
-    return this.node.namedChildren.map((node) => new ProgramNode(node, this.program))
+    const node = this.node
+    this.named ??= node.namedChildren.map((child) => new ProgramNode(child, this.program))
+    return [...this.named]
   }
   private wrap(node: ShellNode | null): ProgramNode | null {
     return node === null ? null : new ProgramNode(node, this.program)
