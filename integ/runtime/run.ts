@@ -1218,13 +1218,17 @@ async function main(): Promise<number> {
   let failed = 0
   let skipped = 0
   const failures: string[] = []
-  const files = readdirSync(SUITE_DIR, { recursive: true, encoding: 'utf8' })
-    .filter((f) => f.endsWith('.json'))
-    .map((f) => f.split(sep).join('/'))
+  const files = ['runtime', 'policy']
+    .flatMap((directory) =>
+      readdirSync(join(SUITE_DIR, '..', directory), { recursive: true, encoding: 'utf8' }).map(
+        (file) => `${directory}/${file.split(sep).join('/')}`,
+      ),
+    )
+    .filter((file) => file.endsWith('.json') && file !== 'policy/cases.json')
     .sort()
   for (const file of files) {
-    const suite = JSON.parse(readFileSync(join(SUITE_DIR, file), 'utf8')) as Suite
-    const name = file.slice(0, -'.json'.length)
+    const suite = JSON.parse(readFileSync(join(SUITE_DIR, '..', file), 'utf8')) as Suite
+    const name = file.replace(/^runtime\//, '').slice(0, -'.json'.length)
     if (only.size > 0 && ![...only].some((o) => name === o || name.startsWith(`${o}/`))) continue
     const requires = suite.requires ?? {}
     const hostRequires = Array.isArray(requires) ? requires : (requires[HOST] ?? [])

@@ -448,8 +448,9 @@ run_host() {
 
   local file suite suite_json requires unmet only claim
   while IFS= read -r file <&3; do
-    suite_json=$(cat "$SUITE_DIR/$file")
-    suite="${file%.json}"
+    suite_json=$(cat "$SUITE_DIR/../$file")
+    suite="${file#runtime/}"
+    suite="${suite%.json}"
     if [ "${#ONLY_SUITES[@]}" -gt 0 ]; then
       local picked=0
       for only in "${ONLY_SUITES[@]}"; do
@@ -528,7 +529,7 @@ run_host() {
       done < <(runtime_variants "$listed" "$host")
     done < <(jq -c '.cases[]' <<<"$suite_json")
     echo "suite $host/$suite $((SECONDS - suite_t0))s"
-  done 3< <(cd "$SUITE_DIR" && find . -name '*.json' | sed 's|^\./||' | sort)
+  done 3< <(cd "$SUITE_DIR/.." && find runtime policy -name '*.json' ! -path 'policy/cases.json' | sort)
 
   $cli daemon stop >/dev/null 2>&1 </dev/null || true
   sleep 1

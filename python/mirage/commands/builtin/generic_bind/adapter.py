@@ -443,7 +443,6 @@ async def _drain_refusing_dirs(
     index: IndexCacheStore,
     path: PathSpec,
     source: AsyncIterator[bytes],
-    context: IOContext | None = None,
 ) -> AsyncIterator[bytes]:
     empty = True
     try:
@@ -1420,10 +1419,8 @@ def with_dispatch_rule_guard(
     return guarded
 
 
-# (policies, mount prefix, session id); the unbound spelling for a
-# registration-time wrap, which reads the live context per call.
+# Policies, mount prefix, session id and the captured invocation context.
 _PolicyScope = tuple[Policies | None, str, str, IOContext | None]
-_UNBOUND_SCOPE: _PolicyScope = (None, "", "", None)
 
 
 def _op_policy_scope(context: IOContext | None = None) -> _PolicyScope:
@@ -1527,8 +1524,7 @@ async def _policy_call(
 
     Async, unlike the sync guards it wraps: the hooks are user
     coroutines. Every slot this wraps returns an awaitable, so the
-    shape is preserved; read_stream and readdir have their own
-    wrappers.
+    shape is preserved; read_stream has its own wrapper.
 
     Args:
         scope (_PolicyScope): the wrap-time capture.
@@ -1553,39 +1549,6 @@ async def _policy_call(
             context,
         )
     return await fn(*args, **kwargs)
-
-
-async def _policy_readdir(
-    scope: _PolicyScope,
-    fn: OperationFn,
-    *args: Any,
-    context: IOContext | None = None,
-    **kwargs: Any,
-) -> list[str]:
-    """Readdir admitted through pre_vfs for the directory it lists.
-
-    Args:
-        scope (_PolicyScope): the wrap-time capture.
-        fn (OperationFn): the guarded backend readdir.
-        *args: the call's positionals; the first PathSpec is the
-            directory being listed.
-        **kwargs: forwarded untouched.
-    """
-    policies, prefix, session_id, context = _live_policy_scope(scope)
-    if policies is not None:
-        parent_spec = next(a for a in args if isinstance(a, PathSpec))
-        await pre_vfs_gate(
-            policies,
-            "readdir",
-            parent_spec,
-            False,
-            prefix,
-            session_id,
-            check_hidden=False,
-            io=context,
-        )
-    entries: list[str] = await fn(*args, **kwargs)
-    return entries
 
 
 def _policy_stream(
@@ -1676,12 +1639,11 @@ def with_policy_guard(ops: CommandIO) -> CommandIO:
     """
     scope = _op_policy_scope(ops.io_context)
     changes: dict[str, Any] = {
-        "readdir": functools.partial(_policy_readdir, scope, ops.readdir),
         "read_stream": functools.partial(
             _policy_stream, scope, ops.read_stream
         ),
     }
-    for slot in ("read_bytes", "read_range", *_MUTATIONS):
+    for slot in ("read_bytes", "read_range", "readdir", *_MUTATIONS):
         access = _MUTATIONS.get(slot)
         fn = getattr(ops, slot)
         if fn is not None:

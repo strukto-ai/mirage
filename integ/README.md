@@ -30,13 +30,16 @@ implementations cannot drift apart.
   checks auth per deployment, the CLI's daemon lifecycle and config, and
   gates that every HTTP route and CLI command was exercised. `inapp.ts` is
   the in-app access on TypeScript.
-- `policy/`: the policy corpus. Each case binds sessions to profiles and
+- `policy/`: the shared policy corpus. `cases.json` binds sessions to profiles and
   registers coded policies, then drives lines, VFS calls, tools, asks and
   explain, pinning what each refuses, asks or lets through: the allow list,
   command and path rules, anchor depth, asks and their answers, the VFS
   door, hide and show, mount modes and sections, coded and script
   policies, and placement. `lifecycle/run.py` and `lifecycle/run.ts` run
-  it, given its path.
+  it, given its path. The other JSON suites cover policy hooks, routing and
+  output limits through `runtime/run.py`, `runtime/run.ts` and `runtime/cli.sh`;
+  those runners discover them here with the `policy` selector. See
+  [`policy/README.md`](policy/README.md) for coverage and commands.
 - `prisma/`: one schema per kit fake.
 - `fixtures/`: the seed data cases assume.
 
@@ -151,7 +154,7 @@ flowchart LR
     DB["mongodb · postgres · chroma · qdrant<br/>python layers, integ/vfs/&lt;name&gt;,<br/>integ/runners, targets.json"] --> database
     OB["langfuse · jaeger layers<br/>integ/vfs/observability, seeds,<br/>integ/runners, targets.json"] --> observability
     FS["fuse modules, workspace fuse wiring<br/>integ/fuse, check_json.py"] --> fuse
-    RT["python/** and typescript/**<br/>minus the runtime drop list<br/>integ/runtime, integ/fixtures/runtime"] --> runtime
+    RT["python/** and typescript/**<br/>minus the runtime drop list<br/>integ/runtime, integ/policy, integ/fixtures/runtime"] --> runtime
     core --> J1["integ"]
     ts --> J2["integ-ts"]
     core & ts --> J3["integ-shared-py · integ-shared-ts<br/>integ-shared-parity · integ-selftests<br/>integ-facets · integ-wandb"]
@@ -171,7 +174,7 @@ set more:
 | Changed                                                                                                      | Also sets               |
 | ------------------------------------------------------------------------------------------------------------ | ----------------------- |
 | python or typescript source, except the runtime drop list below                                              | runtime                 |
-| `integ/runtime/`, `integ/fixtures/runtime/`, `integ/tsconfig.json`                                           | runtime                 |
+| `integ/runtime/`, `integ/policy/`, `integ/fixtures/runtime/`, `integ/tsconfig.json`                          | runtime                 |
 | `integ/package.json`                                                                                         | runtime, fuse           |
 | the python mongodb, postgres, chroma and qdrant layers; their `integ/vfs/` cases                             | database                |
 | the langfuse and jaeger layers in either language; `integ/vfs/observability/`; the langfuse and jaeger seeds | observability           |

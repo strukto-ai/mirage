@@ -28,7 +28,7 @@ differs.
 | [`program/`](program/)                 | topic   | what one program gets: argv, output streams, eval                                                 |
 | [`sandbox/`](sandbox/)                 | topic   | the whole-line door every sandbox shares                                                          |
 | [`routing/`](routing/)                 | topic   | how a line reaches a runtime                                                                      |
-| [`policy/`](policy/)                   | topic   | route policy, hooks and output limits                                                             |
+| [`../policy/`](../policy/)             | topic   | shared policy corpus: route policy, hooks and output limits                                       |
 | [`config/`](config/)                   | topic   | runtime names and config fields that are refused                                                  |
 | [`cli/`](cli/)                         | topic   | script CLIs in Python and JavaScript                                                              |
 | [`backend/`](backend/)                 | topic   | guest reads and writes on real redis, S3 and MongoDB                                              |
@@ -42,6 +42,11 @@ differs.
 | [`sandlock/`](sandlock/)               | runtime | Landlock limits on a host process                                                                 |
 | [`apple_container/`](apple_container/) | runtime | Apple's container: stderr, sessions, an unserved cwd                                              |
 | [`e2b/`](e2b/)                         | scripts | manual checks against a live E2B sandbox, not run by the runners                                  |
+
+Policy cases live together in [`../policy/`](../policy/). These runners
+discover its JSON suites except `cases.json`, which uses the lifecycle
+runners. The suite selectors remain `policy`, `policy/hooks`,
+`policy/limits`, `policy/routing` and `policy/sync`.
 
 ## Runtimes
 

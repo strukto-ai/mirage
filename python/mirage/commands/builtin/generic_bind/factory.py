@@ -238,10 +238,6 @@ def _stat_wraps(ops: CommandIO) -> CommandIO:
     return with_slash_guard(with_stat_cache(ops))
 
 
-def _write_wraps(ops: CommandIO) -> CommandIO:
-    return with_slash_guard(ops)
-
-
 async def _run_with_namespace_globs(
     ops: CommandIO,
     finish: Callable[[CommandIO], CommandIO],
@@ -251,25 +247,7 @@ async def _run_with_namespace_globs(
     texts: list[str],
     opts: CommandOpts,
 ) -> Any:
-    """Run a builder with an adapter that carries the invocation's
-    namespace facts below every guard.
-
-    A nested mount's keys live in another VFS and no VFS stores
-    a symlink, so a glob resolved by one backend's readdir misses both,
-    while the same names are already merged into a listing. The adapter
-    is built once per backend and the names are session-scoped, so the
-    fact is stamped on here, per invocation, from ``opts.ns`` -- and the
-    whole guard chain is applied on top of the stamped copy, so every
-    guard that consumes a namespace fact simply reads it off the
-    adapter it wraps: glob resolution derives from ``glob_children``,
-    the dir guard closes over it, and the hidden guard's rmdir captures
-    it for its emptiness judgment. Binding the guards at registration
-    instead would strand them behind partials built before any
-    invocation exists, which is exactly the wiring that made the rmdir
-    guard blind to a mounted child. The stamp happens whether or not
-    the namespace owes this directory anything, so there is one code
-    path rather than two; the guards read the current session at call
-    time, so per-invocation binding changes cost, not behavior.
+    """Run a generic builder with the caller's guarded adapter.
 
     ``ops`` stays the first bound argument, because that partial slot is
     how the adapter is reached for a registered command; it arrives raw
@@ -285,24 +263,7 @@ async def _run_with_namespace_globs(
         texts (list[str]): the command's text arguments.
         opts (CommandOpts): the per-invocation option bag.
     """
-    children = opts.ns.child_mounts if opts.ns is not None else None
-    links = opts.ns.links if opts.ns is not None else None
-    stamped = replace(
-        ops,
-        io_context=opts.io_context,
-        glob_children=children,
-        glob_target_stat=(links.target_stat if links is not None else None),
-    )
-    # Command path restrictions speak first, then the coded pre_vfs
-    # hooks, both outside the cache wraps (`finish`) so a refusal fires
-    # before a warm serve, the dispatcher's own order at the op door. A
-    # probe answer is served below them (`with_probe_answers` on the
-    # raw adapter), so they still judge every path before it. Under a
-    # hide or a path rule the native subtree ops are set aside
-    # (`scoped_io`), so every entry passes through the guarded walk.
-    bound = with_dir_guard(
-        with_command_guards(with_policy_guard(finish(with_recording(stamped))))
-    )
+    bound = with_dir_guard(invocation_io(ops, opts, finish))
     bound = scoped_io(bound, opts.ns, paths or [opts.cwd], opts.mount_prefix)
     return await fn(bound, accessor, paths, texts, opts)
 
@@ -349,7 +310,7 @@ def make_generic_commands(
         elif not b.write:
             finish = _stat_wraps
         else:
-            finish = _write_wraps
+            finish = with_slash_guard
         # A per-command adapter with its own stat (dify's light ls) would
         # otherwise print the probe's full stat under fresh only.
         answered = (
@@ -374,8 +335,22 @@ def make_generic_commands(
     return commands
 
 
-def invocation_io(ops: CommandIO, opts: CommandOpts) -> CommandIO:
-    """Apply caller-owned guards to a bespoke backend command's adapter."""
+def invocation_io(
+    ops: CommandIO,
+    opts: CommandOpts,
+    finish: Callable[[CommandIO], CommandIO] = with_slash_guard,
+) -> CommandIO:
+    """Bind a generic or bespoke adapter to the calling command.
+
+    Capture namespace facts and recording before wrapping any slots, so
+    deferred reads keep their caller. Path guards precede coded policies,
+    and both run before the cache can serve an answer.
+
+    Args:
+        ops (CommandIO): the backend's raw adapter.
+        opts (CommandOpts): the caller's context and namespace view.
+        finish (Callable[[CommandIO], CommandIO]): cache and slash wraps.
+    """
     links = opts.ns.links if opts.ns is not None else None
     stamped = replace(
         ops,
@@ -384,5 +359,5 @@ def invocation_io(ops: CommandIO, opts: CommandOpts) -> CommandIO:
         glob_target_stat=links.target_stat if links is not None else None,
     )
     return with_command_guards(
-        with_policy_guard(with_recording(with_slash_guard(stamped)))
+        with_policy_guard(finish(with_recording(stamped)))
     )

@@ -1207,9 +1207,20 @@ async def main() -> int:
     strict = os.environ.get("INTEG_RUNTIME_STRICT") == "1"
     passed = failed = skipped = 0
     failures: list[str] = []
-    for path in sorted(SUITE_DIR.rglob("*.json")):
+    paths = [
+        path
+        for directory in (SUITE_DIR, SUITE_DIR.parent / "policy")
+        for path in directory.rglob("*.json")
+        if path != SUITE_DIR.parent / "policy" / "cases.json"
+    ]
+    for path in sorted(paths):
         suite = json.loads(path.read_text())
-        name = path.relative_to(SUITE_DIR).with_suffix("").as_posix()
+        name = (
+            path.relative_to(SUITE_DIR.parent)
+            .with_suffix("")
+            .as_posix()
+            .removeprefix("runtime/")
+        )
         if only and not any(
             name == o or name.startswith(f"{o}/") for o in only
         ):

@@ -170,6 +170,7 @@ jobs:
             # mounting a dropped backend takes that name off the list.
             runtime:
               - 'integ/runtime/**'
+              - 'integ/policy/**'
               - 'integ/fixtures/runtime/**'
               - 'integ/package.json'
               - 'integ/tsconfig.json'
@@ -1592,7 +1593,7 @@ jobs:
       # cli.sh runs both hosts at once, each over two lanes that take the
       # next suite nobody has claimed, so a leg costs about half of
       # max(python, typescript) rather than their sum. Legs split by
-      # top-level folder of integ/runtime, picked off measured per-suite
+      # suite topic, picked off measured per-suite
       # wall clock to halve both hosts. Re-read the `suite <host>/<name>
       # <n>s` lines cli.sh prints before moving a folder across; that step
       # is most of the job's test time, and it is the only one timed per
@@ -1608,8 +1609,9 @@ jobs:
           set -euo pipefail
           # Collation for sort/comm, and for the name pattern below.
           export LC_ALL=C
-          # A suite is named by its path under integ/runtime, without
-          # `.json`; a leg takes whole top-level folders. A name outside the
+          # Runtime suites use their path under integ/runtime; policy suites
+          # use policy/<name>. cases.json uses the lifecycle runners instead.
+          # A leg takes whole topics. A name outside the
           # pattern is refused rather than dropped: a dropped name reaches
           # neither leg, so all three drivers would skip its cases and CI
           # would pass without running them.
@@ -1619,7 +1621,8 @@ jobs:
           box_suites=()
           ssh_suites=()
           while IFS= read -r f; do
-            n="${f#integ/runtime/}"
+            n="${f#integ/}"
+            n="${n#runtime/}"
             n="${n%.json}"
             case "$n" in
               */*/*|*[!a-z0-9_/+]*|/*|*/)
@@ -1649,7 +1652,7 @@ jobs:
             if jq -e 'any(.cases[]?; any((.backends // [])[]; . == "ssh"))' "$f" >/dev/null; then
               ssh_suites+=("$n")
             fi
-          done < <(find integ/runtime -name '*.json' | sort)
+          done < <(find integ/runtime integ/policy -name '*.json' ! -path 'integ/policy/cases.json' | sort)
           all=$(printf '%s\n' "${names[@]}" | sort -u)
           folders=$(printf '%s\n' "${names[@]}" | cut -d/ -f1 | sort -u)
           wanted=$(printf '%s' "$LEG_A_FOLDERS" | tr ' ' '\n' | grep -v '^$' | sort -u)

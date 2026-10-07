@@ -22,7 +22,7 @@ import { cacheAwareReadBytes, cacheAwareReadStream } from '../../../cache/read_t
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
-import type { ChildMounts, LinkView, NamespaceView } from '../../../ops/types.ts'
+import type { NamespaceView } from '../../../ops/types.ts'
 import { type CommandOpts, type CommandFn, type RegisteredCommand, command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import {
@@ -160,35 +160,11 @@ function statWraps<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
   return withSlashGuard(withStatCache(ops))
 }
 
-function writeWraps<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
-  return withSlashGuard(ops)
-}
-
 export interface MakeGenericCommandsOptions<A extends Accessor = Accessor> {
   overrides?: ReadonlySet<string>
   // Per-command adapters that replace the shared adapter when one command
   // needs a cheaper backend operation (mirrors the Python ops_overrides).
   opsOverrides?: Record<string, CommandIO<A>>
-}
-
-// The namespace facts a glob resolver reads, stamped on the adapter per
-// invocation: the child names the namespace owes a directory, and the
-// stat of what such a name points at, so a trailing slash follows a link
-// the way bash does. Conditional spreads, not `undefined` values, because
-// exactOptionalPropertyTypes refuses an explicit undefined on an optional
-// field; Python's fields are `| None` and take the uniform path.
-function stampNamespace<A extends Accessor>(
-  raw: CommandIO<A>,
-  children?: ChildMounts,
-  links?: LinkView,
-): CommandIO<A> {
-  return {
-    ...raw,
-    ...(children === undefined ? {} : { globChildren: children }),
-    ...(links === undefined
-      ? {}
-      : { globTargetStat: (virtual: string) => links.targetStat(virtual) }),
-  }
 }
 
 export function makeGenericCommands<A extends Accessor = Accessor>(
@@ -217,65 +193,17 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
     // Path guards are applied per invocation, over the stamped adapter,
     // inside the command closure below. The raw adapter stays untouched
     // for the ops tables, whose door does its own enforcement.
-    const finish = b.read === true ? readWraps : b.write === true ? writeWraps : statWraps
+    const finish = b.read === true ? readWraps : b.write === true ? withSlashGuard : statWraps
     // A per-command adapter with its own stat (dify's light ls) would
     // otherwise print the probe's full stat under fresh only.
     const answered =
       raw.stat === (ops as CommandIO).stat && b.write !== true ? withProbeAnswers(raw) : raw
-    // A nested mount's keys live in another VFS and no VFS
-    // stores a symlink, so a glob resolved by one backend's readdir
-    // misses both. The names are session-scoped, so the fact is stamped
-    // per invocation, and the whole guard chain is applied on top of
-    // the stamped copy: every guard that consumes a namespace fact
-    // simply reads it off the adapter it wraps (glob resolution derives
-    // from globChildren, the dir guard closes over it, the hidden
-    // guard's rmdir captures it for its emptiness judgment). Binding
-    // the guards at registration instead would strand them behind
-    // closures built before any invocation exists, which is exactly the
-    // wiring that made the rmdir guard blind to a mounted child. The
-    // guards capture the invocation context, so deferred reads keep
-    // their caller even when another session is running.
-    // The conditional spread is not a leftover: exactOptionalPropertyTypes
-    // refuses an explicit `undefined` for an optional field, so an absent
-    // namespace has to mean an absent key rather than an undefined value.
-    // Python's `glob_children` is `| None` and takes the uniform path.
-    // Command path restrictions speak first, then the coded preVfs
-    // hooks, both outside the cache wraps (`finish`) so a refusal fires
-    // before a warm serve, the dispatcher's own order at the op door. A
-    // probe answer is served below them (withProbeAnswers on the raw
-    // adapter), so they still judge every path before it. The
-    // invocation's mount prefix rides into its wrap-time scope for
-    // readers drained after the gate scopes return. Under a hide or a
-    // path rule the native subtree ops are set aside (scopedIo), so
-    // every entry passes through the guarded walk. The abort guard sits
-    // outermost: once the invocation's signal has fired no slot starts,
-    // so a handler the caller was released from begins no further read
-    // or write between its operands.
     const fn: CommandFn = (accessor, paths, texts, opts) => {
+      const bound = withDirGuard(invocationIo(answered, opts, finish))
+      // Cancellation is checked before every slot; scoped commands walk
+      // through the guards instead of using a backend's native subtree op.
       const guarded = scopedIo(
-        withAbortGuard(
-          withDirGuard(
-            withCommandGuards(
-              withPolicyGuard(
-                finish(
-                  withRecording(
-                    stampNamespace(
-                      {
-                        ...answered,
-                        ...(opts.ioContext === undefined ? {} : { ioContext: opts.ioContext }),
-                      },
-                      opts.ns?.childMounts,
-                      opts.ns?.links,
-                    ),
-                  ),
-                ),
-                opts.mountPrefix,
-              ),
-              opts.mountPrefix,
-            ),
-          ),
-          opts.signal,
-        ),
+        withAbortGuard(bound, opts.signal),
         opts.ns,
         paths.length > 0 ? paths : [PathSpec.fromStrPath(opts.cwd)],
         opts.mountPrefix ?? '',
@@ -310,18 +238,29 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
   return commands
 }
 
-/** Apply caller-owned guards to a bespoke backend command's adapter. */
+/**
+ * Bind a generic or bespoke adapter to the calling command.
+ * Capture namespace facts and recording before wrapping any slots, so deferred
+ * reads keep their caller. Path guards precede coded policies, and both run
+ * before the cache can serve an answer. `finish` chooses cache and slash wraps.
+ */
 export function invocationIo<A extends Accessor>(
   ops: CommandIO<A>,
   opts: CommandOpts,
+  finish: (ops: CommandIO<A>) => CommandIO<A> = withSlashGuard,
 ): CommandIO<A> {
-  const stamped = stampNamespace(
-    { ...ops, ...(opts.ioContext === undefined ? {} : { ioContext: opts.ioContext }) },
-    opts.ns?.childMounts,
-    opts.ns?.links,
-  )
+  const children = opts.ns?.childMounts
+  const links = opts.ns?.links
+  const stamped = {
+    ...ops,
+    ...(opts.ioContext === undefined ? {} : { ioContext: opts.ioContext }),
+    ...(children === undefined ? {} : { globChildren: children }),
+    ...(links === undefined
+      ? {}
+      : { globTargetStat: (virtual: string) => links.targetStat(virtual) }),
+  }
   return withCommandGuards(
-    withPolicyGuard(withRecording(withSlashGuard(stamped)), opts.mountPrefix),
+    withPolicyGuard(finish(withRecording(stamped)), opts.mountPrefix),
     opts.mountPrefix,
   )
 }
