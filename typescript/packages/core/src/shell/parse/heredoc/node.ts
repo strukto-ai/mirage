@@ -102,10 +102,11 @@ export class HeredocNode implements WrappedNode {
     return this.source.original.slice(first, last + 1)
   }
   /** The node's own text with each heredoc body the line reads after a
-   * substitution in it moved inside that substitution, just before its `)`:
-   * the same command to bash, and what a substitution's line runs as, carrying
-   * no heredoc out of itself. `undefined` when no substitution in the node
-   * carries one out. */
+   * substitution in it moved inside that substitution, just before its `)`,
+   * and out of the node's text where it sat there: the same command to bash,
+   * and what a substitution's line runs as, carrying no heredoc out of itself.
+   * A body the input ended inside gets its terminator on a line of its own.
+   * `undefined` when no substitution in the node carries one out. */
   get inlined(): string | undefined {
     if (this.node.parent === null || this.endIndex <= this.startIndex) return undefined
     const first = this.source.offsets[this.startIndex] ?? 0
@@ -113,18 +114,27 @@ export class HeredocNode implements WrappedNode {
     const closes = this.source.closes.filter(([close]) => first <= close && close <= last)
     if (closes.length === 0) return undefined
     const docs = new Map(this.source.documents.map(([, doc]) => [doc.operatorStart, doc]))
-    let out = this.sourceText
-    for (const [close, opened] of [...closes].sort((a, b) => b[0] - a[0])) {
+    const edits: [number, number, string][] = []
+    for (const [close, opened] of closes) {
       let bodies = '\n'
       for (const at of opened) {
         const doc = docs.get(at)
         if (doc === undefined) continue
         bodies += this.source.original.slice(doc.bodyStart, doc.end)
         if (!bodies.endsWith('\n')) bodies += '\n'
-        if (!doc.terminated) bodies += `${doc.delimiter}\n`
+        if (!doc.terminated) {
+          const line = bodies.slice(0, -1)
+          if ((line.length - line.replace(/\\+$/, '').length) % 2 === 1) bodies += '\n'
+          bodies += `${doc.delimiter}\n`
+        }
+        if (first <= doc.bodyStart && doc.end <= last + 1)
+          edits.push([doc.bodyStart - first, doc.end - first, ''])
       }
-      out = out.slice(0, close - first) + bodies + out.slice(close - first)
+      edits.push([close - first, close - first, bodies])
     }
+    let out = this.sourceText
+    for (const [start, end, replacement] of edits.sort((a, b) => b[0] - a[0] || b[1] - a[1]))
+      out = out.slice(0, start) + replacement + out.slice(end)
     return out
   }
   /** What bash warns of while it reads the line's heredocs, in the order it

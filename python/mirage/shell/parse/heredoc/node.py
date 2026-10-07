@@ -144,9 +144,11 @@ class HeredocNode:
     def inlined(self) -> bytes:
         """The node's own text with each heredoc body the line reads after
         a substitution in it moved inside that substitution, just before
-        its ``)``: the same command to bash, and what a substitution's line
-        runs as, carrying no heredoc out of itself. Empty when no
-        substitution in the node carries one out."""
+        its ``)``, and out of the node's text where it sat there: the same
+        command to bash, and what a substitution's line runs as, carrying no
+        heredoc out of itself. A body the input ended inside gets its
+        terminator on a line of its own. Empty when no substitution in the
+        node carries one out."""
         if self._node.parent is None or self.end_byte <= self.start_byte:
             return b""
         offsets, original = self._source.offsets, self._source.original
@@ -155,8 +157,8 @@ class HeredocNode:
         if not closes:
             return b""
         docs = {doc.operator_start: doc for _, doc in self._source.documents}
-        out = bytearray(self.source_text)
-        for close, opened in sorted(closes, reverse=True):
+        edits: list[tuple[int, int, bytes]] = []
+        for close, opened in closes:
             bodies = bytearray(b"\n")
             for at in opened:
                 doc = docs.get(at)
@@ -166,6 +168,16 @@ class HeredocNode:
                 if not bodies.endswith(b"\n"):
                     bodies += b"\n"
                 if not doc.terminated:
+                    line = bodies[:-1]
+                    if (len(line) - len(line.rstrip(b"\\"))) % 2:
+                        bodies += b"\n"
                     bodies += encode_text(doc.delimiter) + b"\n"
-            out[close - first : close - first] = bodies
+                if first <= doc.body_start and doc.end <= last + 1:
+                    edits.append(
+                        (doc.body_start - first, doc.end - first, b"")
+                    )
+            edits.append((close - first, close - first, bytes(bodies)))
+        out = bytearray(self.source_text)
+        for start, end, replacement in sorted(edits, reverse=True):
+            out[start:end] = replacement
         return bytes(out)
