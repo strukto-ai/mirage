@@ -51,19 +51,17 @@ async def test_grep_emits_token_hint_on_forbidden():
     accessor.time_range = TimeRange()
     accessor.config = AsyncMock()
     paths = [_path("/discord/myguild__G1/channels/general__C1")]
-    with (
-        patch(
-            "mirage.commands.builtin.discord.grep.search_guild",
-            new=AsyncMock(side_effect=RuntimeError("403 Forbidden")),
-        ),
-        patch(
-            "mirage.commands.builtin.discord.grep.IO",
-            _io(resolve_glob=AsyncMock(return_value=paths)),
-        ),
-        patch(
-            "mirage.commands.builtin.discord.grep.grep_generic",
-            new=AsyncMock(return_value=(b"", IOResult(exit_code=1))),
-        ),
+    with patch.dict(
+        grep.__wrapped__.__globals__,
+        {
+            "search_guild": AsyncMock(
+                side_effect=RuntimeError("403 Forbidden")
+            ),
+            "IO": _io(resolve_glob=AsyncMock(return_value=paths)),
+            "grep_generic": AsyncMock(
+                return_value=(b"", IOResult(exit_code=1))
+            ),
+        },
     ):
         _out, io = await grep(
             accessor, paths, ["hi"], CommandOpts(flags={"w": True, "r": True})
@@ -79,19 +77,15 @@ async def test_rg_emits_warning_on_rate_limit():
     accessor.time_range = TimeRange()
     accessor.config = AsyncMock()
     paths = [_path("/discord/myguild__G1/channels/general__C1")]
-    with (
-        patch(
-            "mirage.commands.builtin.discord.rg.search_guild",
-            new=AsyncMock(side_effect=RuntimeError("rate limited 429")),
-        ),
-        patch(
-            "mirage.commands.builtin.discord.rg.IO",
-            _io(resolve_glob=AsyncMock(return_value=paths)),
-        ),
-        patch(
-            "mirage.commands.builtin.discord.rg.rg_generic",
-            new=AsyncMock(return_value=(b"", IOResult(exit_code=1))),
-        ),
+    with patch.dict(
+        rg.__wrapped__.__globals__,
+        {
+            "search_guild": AsyncMock(
+                side_effect=RuntimeError("rate limited 429")
+            ),
+            "IO": _io(resolve_glob=AsyncMock(return_value=paths)),
+            "rg_generic": AsyncMock(return_value=(b"", IOResult(exit_code=1))),
+        },
     ):
         _out, io = await rg(
             accessor, paths, ["hi"], CommandOpts(flags={"word_regexp": True})

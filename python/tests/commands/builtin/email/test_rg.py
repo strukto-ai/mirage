@@ -70,19 +70,15 @@ async def test_rg_multi_pattern_skips_imap_search():
         seen["generic"] = [p.virtual for p in paths]
         return b"", IOResult()
 
-    with (
-        patch(
-            "mirage.commands.builtin.email.rg.search_messages",
-            new=AsyncMock(side_effect=AssertionError("imap search ran")),
-        ),
-        patch(
-            "mirage.commands.builtin.email.rg.IO",
-            _io(resolve_glob=fake_resolve),
-        ),
-        patch(
-            "mirage.commands.builtin.email.rg.rg_generic",
-            new=fake_generic,
-        ),
+    with patch.dict(
+        rg.__wrapped__.__globals__,
+        {
+            "search_messages": AsyncMock(
+                side_effect=AssertionError("imap search ran")
+            ),
+            "IO": _io(resolve_glob=fake_resolve),
+            "rg_generic": fake_generic,
+        },
     ):
         _, io = await rg(
             accessor,
@@ -102,17 +98,14 @@ async def test_rg_multi_pattern_skips_imap_search():
 async def test_rg_single_pattern_uses_imap_search():
     accessor = SimpleNamespace(config=SimpleNamespace(max_messages=10))
     search = AsyncMock(return_value=[])
-    with (
-        patch(
-            "mirage.commands.builtin.email.rg.search_messages",
-            new=search,
-        ),
-        patch(
-            "mirage.commands.builtin.email.rg.IO",
-            _io(
+    with patch.dict(
+        rg.__wrapped__.__globals__,
+        {
+            "search_messages": search,
+            "IO": _io(
                 resolve_glob=AsyncMock(side_effect=AssertionError("glob ran")),
             ),
-        ),
+        },
     ):
         _, io = await rg(
             accessor,
@@ -131,19 +124,15 @@ async def test_rg_message_file_operand_defers_to_generic():
     # rather than reporting exit 1 without searching.
     accessor = SimpleNamespace(config=SimpleNamespace(max_messages=10))
     msg = _path("/email/INBOX/2026-01-05/Q2__1.email.json")
-    with (
-        patch(
-            "mirage.commands.builtin.email.rg.search_messages",
-            new=AsyncMock(return_value=[]),
-        ) as search,
-        patch(
-            "mirage.commands.builtin.email.rg.IO",
-            _io(resolve_glob=AsyncMock(return_value=[])),
-        ),
-        patch(
-            "mirage.commands.builtin.email.rg.rg_generic",
-            new=AsyncMock(return_value=(b"", IOResult())),
-        ) as generic,
+    search = AsyncMock(return_value=[])
+    generic = AsyncMock(return_value=(b"", IOResult()))
+    with patch.dict(
+        rg.__wrapped__.__globals__,
+        {
+            "search_messages": search,
+            "IO": _io(resolve_glob=AsyncMock(return_value=[])),
+            "rg_generic": generic,
+        },
     ):
         _out, io = await rg(
             accessor,
@@ -161,14 +150,14 @@ async def test_rg_regex_hands_the_server_its_required_literal():
     # `worker.3` matches `worker-3`; the server is asked for `worker`.
     accessor = SimpleNamespace(config=SimpleNamespace(max_messages=10))
     search = AsyncMock(return_value=[])
-    with (
-        patch("mirage.commands.builtin.email.rg.search_messages", new=search),
-        patch(
-            "mirage.commands.builtin.email.rg.IO",
-            _io(
+    with patch.dict(
+        rg.__wrapped__.__globals__,
+        {
+            "search_messages": search,
+            "IO": _io(
                 resolve_glob=AsyncMock(side_effect=AssertionError("glob ran")),
             ),
-        ),
+        },
     ):
         _, io = await rg(
             accessor,
