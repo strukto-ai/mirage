@@ -120,11 +120,13 @@ export class HeredocNode implements WrappedNode {
       for (const at of opened) {
         const doc = docs.get(at)
         if (doc === undefined) continue
-        bodies += this.source.original.slice(doc.bodyStart, doc.end)
+        const body = this.source.original.slice(doc.bodyStart, doc.end)
+        bodies += body
         if (!bodies.endsWith('\n')) bodies += '\n'
         if (!doc.terminated) {
-          const line = bodies.slice(0, -1)
-          if ((line.length - line.replace(/\\+$/, '').length) % 2 === 1) bodies += '\n'
+          const line = body.endsWith('\n') ? body.slice(0, -1) : body
+          const trailing = line.length - line.replace(/\\+$/, '').length
+          if (!doc.quoted && trailing % 2 === 1) bodies += '\n'
           bodies += `${doc.delimiter}\n`
         }
         if (first <= doc.bodyStart && doc.end <= last + 1)

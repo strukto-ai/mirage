@@ -164,12 +164,14 @@ class HeredocNode:
                 doc = docs.get(at)
                 if doc is None:
                     continue
-                bodies += original[doc.body_start : doc.end]
+                body = original[doc.body_start : doc.end]
+                bodies += body
                 if not bodies.endswith(b"\n"):
                     bodies += b"\n"
                 if not doc.terminated:
-                    line = bodies[:-1]
-                    if (len(line) - len(line.rstrip(b"\\"))) % 2:
+                    line = body.removesuffix(b"\n")
+                    trailing = len(line) - len(line.rstrip(b"\\"))
+                    if not doc.quoted and trailing % 2:
                         bodies += b"\n"
                     bodies += encode_text(doc.delimiter) + b"\n"
                 if first <= doc.body_start and doc.end <= last + 1:

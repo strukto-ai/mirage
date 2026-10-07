@@ -2510,6 +2510,37 @@
         "gdrive",
         "gdrive-folder"
       ]
+    },
+    {
+      "id": "heredoc_reader_carried_quoted_body_keeps_its_continuation",
+      "command": "echo \"$(wc -l <<'EOF')\"\nabc\\\n",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": "mirage: line 1: warning: command substitution: 1 unterminated here-document\nmirage: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+      },
+      "seq": 509981,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ]
     }
   ]
 }
