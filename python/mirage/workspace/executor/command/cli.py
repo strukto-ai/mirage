@@ -528,7 +528,7 @@ async def handle_cli(
     else:
         fn = leaf.fn
         if fn is None:
-            # validate_cli guarantees fn XOR subcommands XOR script and
+            # _validate_cli guarantees fn XOR subcommands XOR script and
             # walk only returns handler-bearing nodes as leaf; reaching
             # this is a bug.
             raise RuntimeError(
