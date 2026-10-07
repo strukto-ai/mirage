@@ -14,6 +14,7 @@
 
 from collections.abc import Sequence
 from functools import cmp_to_key
+from os.path import commonprefix
 
 from mirage.commands.cli.builtin.git.errors import (
     FormatUsageError,
@@ -34,6 +35,7 @@ from mirage.commands.cli.builtin.git.types import (
     RefSortKey,
 )
 from mirage.shell.bytes import byte_char
+from mirage.utils.strverscmp import strverscmp
 from mirage.utils.width import char_width
 
 HEX = "0123456789abcdefABCDEF"
@@ -43,51 +45,6 @@ VERSION_PREFIXES = ("version:", "v:")
 # hold a NUL, which only perl's quoting carries.
 TEXT_QUOTES = (QuoteStyle.PYTHON, QuoteStyle.SHELL, QuoteStyle.TCL)
 TCL_ESCAPES = {"\f": "\\f", "\r": "\\r", "\n": "\\n", "\t": "\\t", "\v": "\\v"}
-
-# glibc strverscmp's automaton, which git's versioncmp keeps: a state
-# per kind of run (none, integral, fractional, leading zeros), and what
-# the first differing pair of characters decides in each.
-S_N, S_I, S_F, S_Z = 0, 3, 6, 9
-CMP, LEN = 2, 3
-NEXT_STATE = (S_N, S_I, S_Z, S_N, S_I, S_I, S_N, S_F, S_F, S_N, S_F, S_Z)
-RESULT_TYPE = (
-    CMP,
-    CMP,
-    CMP,
-    CMP,
-    LEN,
-    CMP,
-    CMP,
-    CMP,
-    CMP,
-    CMP,
-    -1,
-    -1,
-    1,
-    LEN,
-    LEN,
-    1,
-    LEN,
-    LEN,
-    CMP,
-    CMP,
-    CMP,
-    CMP,
-    CMP,
-    CMP,
-    CMP,
-    CMP,
-    CMP,
-    CMP,
-    1,
-    1,
-    -1,
-    CMP,
-    CMP,
-    -1,
-    CMP,
-    CMP,
-)
 
 
 def _next_field(template: str, start: int) -> int:
@@ -335,57 +292,21 @@ def _swap_prereleases(
     return -1 if first >= 0 else 1
 
 
-def _char_at(text: str, i: int) -> str:
-    """A C string's character at ``i``, NUL past its end.
-
-    Args:
-        text (str): the string, NUL-terminated.
-        i (int): the index.
-    """
-    return text[i] if i < len(text) else "\0"
-
-
-def _digit_class(char: str) -> int:
-    return (char == "0") + ("0" <= char <= "9")
-
-
 def versioncmp(a: str, b: str, suffixes: Sequence[str] = ()) -> int:
-    """git's ``versioncmp``: compare as versions, ``v1.9`` before
-    ``v1.10``.
+    """git's ``versioncmp``: glibc's ``strverscmp``, unless a
+    ``versionsort.suffix`` around the first difference decides.
 
     Args:
         a (str): the first value.
         b (str): the second value.
         suffixes (Sequence[str]): ``versionsort.suffix``.
     """
-    x, y = a + "\0", b + "\0"
-    at = _char_at
-    i = 0
-    c1, c2 = at(x, 0), at(y, 0)
-    state = S_N + _digit_class(c1)
-    while ord(c1) == ord(c2):
-        if c1 == "\0":
-            return 0
-        state = NEXT_STATE[state]
-        i += 1
-        c1, c2 = at(x, i), at(y, i)
-        state += _digit_class(c1)
-    diff = ord(c1) - ord(c2)
-    if suffixes:
-        swapped = _swap_prereleases(a, b, i, suffixes)
+    if suffixes and a != b:
+        off = len(commonprefix([a, b]))
+        swapped = _swap_prereleases(a, b, off, suffixes)
         if swapped is not None:
             return swapped
-    result = RESULT_TYPE[state * 3 + _digit_class(c2)]
-    if result == CMP:
-        return diff
-    if result == LEN:
-        k = i + 1
-        while "0" <= at(x, k) <= "9":
-            if not "0" <= at(y, k) <= "9":
-                return 1
-            k += 1
-        return -1 if "0" <= at(y, k) <= "9" else diff
-    return result
+    return strverscmp(a, b)
 
 
 def _compare_text(a: str, b: str, icase: bool) -> int:
