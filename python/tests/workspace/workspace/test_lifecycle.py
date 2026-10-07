@@ -33,7 +33,6 @@ from mirage.commands.cli.types import CLISpec
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.spec import CommandSpec, Operand
 from mirage.io import IOResult
-from mirage.ops.registry import RegisteredOp, op
 from mirage.runtime.base import Runtime
 from mirage.shell.console import (
     Channel,
@@ -44,7 +43,9 @@ from mirage.shell.console import (
 from mirage.shell.job_table import JobStatus
 from mirage.types import CapacityResult, CapacityState, MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
+from mirage.vfs.call import vfs_call
 from mirage.vfs.ram import RAMVFS
+from mirage.vfs.types import Effect
 from mirage.workspace import Workspace
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.executor.builtins.shared import expand_operands
@@ -53,6 +54,7 @@ from mirage.workspace.mount.namespace import RAMNamespaceStore
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.snapshot import to_state_dict
 from mirage.workspace.types import ExecutionNode
+from tests.fixtures.vfs_io import override, override_glob
 
 _RELEASE: list[asyncio.Event] = []
 
@@ -85,42 +87,10 @@ async def test_close_keeps_loop_responsive_while_kernel_unmount_blocks(
     ["glob", "midpath", "metadata", "touch", "chmod", "chown", "chgrp"],
 )
 async def test_first_mount_access_prepares_expansion(action):
-    class IndexedRAM(RAMVFS):
-        def __init__(self, shared):
-            super().__init__()
-            self.shared = shared
-
-        def ops(self):
-            base = super().ops()
-            walk = next(ro.fn for ro in base if ro.name == "glob")
-
-            async def glob(accessor, path, *, index=None, **kwargs):
-                # The listing the ancestor's mount recorded for this
-                # directory, which must not be served stale here.
-                listing = await self.shared.list_dir(
-                    path.directory.rstrip("/") or "/"
-                )
-                if listing.entries is not None:
-                    prefix = mount_prefix_of(path.virtual, path.vfs_path)
-                    return [
-                        PathSpec.from_str_path(key, mount_key(key, prefix))
-                        for key in listing.entries
-                        if fnmatchcase(
-                            key.rsplit("/", 1)[-1], path.pattern or "*"
-                        )
-                    ]
-                return await walk(accessor, path, index=index, **kwargs)
-
-            return [ro for ro in base if ro.name != "glob"] + [
-                RegisteredOp(
-                    name="glob", vfs=self.name, filetype=None, fn=glob
-                )
-            ]
-
     ancestor = RAMVFS()
     ws = Workspace({"/": ancestor}, index=IndexConfig(ttl=600))
     shared = ws.mount("/").index_store
-    replacement = IndexedRAM(shared)
+    replacement = RAMVFS()
     replacement.load_state(
         {
             "dirs": ["/", "/dir"],
@@ -142,6 +112,23 @@ async def test_first_mount_access_prepares_expansion(action):
         ],
     )
     ws.add_mount("/data", replacement, MountMode.WRITE)
+    mount = ws.mount("/data")
+    walk = mount._glob
+
+    async def glob(accessor, path, *, index=None, **kwargs):
+        # The listing the ancestor's mount recorded for this directory,
+        # which must not be served stale here.
+        listing = await shared.list_dir(path.directory.rstrip("/") or "/")
+        if listing.entries is not None:
+            prefix = mount_prefix_of(path.virtual, path.vfs_path)
+            return [
+                PathSpec.from_str_path(key, mount_key(key, prefix))
+                for key in listing.entries
+                if fnmatchcase(key.rsplit("/", 1)[-1], path.pattern or "*")
+            ]
+        return await walk(path, index=index)
+
+    override_glob(mount, glob)
     try:
         if action == "metadata":
             expanded = await expand_operands(
@@ -650,39 +637,28 @@ async def test_close_refuses_lifecycle_changes_but_allows_runtime_drain(
 @pytest.mark.asyncio
 async def test_unmount_preserves_operations_of_each_surviving_vfs():
     class LabeledRAM(RAMVFS):
-        def __init__(self, label, specialized=False):
+        def __init__(self, label):
             super().__init__()
+            self.label = label
             self.closes = 0
 
-            async def identity(accessor, path, **kwargs):
-                if self.closes:
-                    raise RuntimeError("VFS closed")
-                return label.encode()
-
-            async def unique(accessor, path, **kwargs):
-                return label.encode()
-
-            self.extra = [
-                RegisteredOp(
-                    name="identity", vfs=self.name, filetype=None, fn=identity
-                )
-            ]
-            if specialized:
-                self.extra.append(
-                    RegisteredOp(
-                        name="unique", vfs=self.name, filetype=None, fn=unique
-                    )
-                )
-
-        def ops(self):
-            return [*super().ops(), *self.extra]
+        @vfs_call(effect=Effect.READ)
+        async def identity(self, path):
+            if self.closes:
+                raise RuntimeError("VFS closed")
+            return self.label.encode()
 
         async def close(self):
             self.closes += 1
             await super().close()
 
+    class SpecializedRAM(LabeledRAM):
+        @vfs_call(effect=Effect.READ)
+        async def unique(self, path):
+            return self.label.encode()
+
     first = LabeledRAM("first")
-    second = LabeledRAM("second", specialized=True)
+    second = SpecializedRAM("second")
     third = LabeledRAM("third")
     ws = Workspace({})
 
@@ -815,7 +791,6 @@ async def test_unmount_waits_for_admitted_vfs_use(
         assert not index_closed
         return b"value"
 
-    @op("read", vfs="ram")
     async def read(accessor, scope, **kwargs):
         return await read_body()
 
@@ -841,7 +816,7 @@ async def test_unmount_waits_for_admitted_vfs_use(
     )
     if alias == "dynamic":
         ws.add_mount("/alias", vfs)
-    ws.mount("/data").register_fns([read])
+    override(vfs, "read", read)
     ws.mount("/data").register(
         RegisteredCommand(
             name="readvalue",
@@ -996,9 +971,7 @@ async def test_unmount_drains_metadata_glob_and_its_index_writes(monkeypatch):
         )
         return []
 
-    ws.mount("/data").register_fns(
-        [RegisteredOp(name="glob", vfs="ram", filetype=None, fn=glob)]
-    )
+    override_glob(ws.mount("/data"), glob)
     monkeypatch.setattr(vfs, "close", close)
     expanding = asyncio.create_task(
         expand_operands(
@@ -1061,9 +1034,7 @@ async def test_a_glob_writes_its_listing_through_a_lock_held_view(monkeypatch):
         )
         return []
 
-    ws.mount("/data").register_fns(
-        [RegisteredOp(name="glob", vfs="ram", filetype=None, fn=glob)]
-    )
+    override_glob(ws.mount("/data"), glob)
     try:
         result = await asyncio.wait_for(ws.shell("echo /data/*"), 5)
         assert (result.exit_code, result.stdout) == (0, b"/data/*\n")

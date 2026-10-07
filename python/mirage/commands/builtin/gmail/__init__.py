@@ -14,7 +14,6 @@
 
 from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.gmail.grep import grep
-from mirage.commands.builtin.gmail.io import IO as _IO
 from mirage.commands.builtin.gmail.rg import rg
 
 # Gmail verbs and API passthroughs live in the gws CLI
@@ -23,7 +22,6 @@ from mirage.commands.builtin.gmail.rg import rg
 COMMANDS = [
     *make_generic_commands(
         "gmail",
-        _IO,
         overrides={"grep", "rg"},
     ),
     grep,

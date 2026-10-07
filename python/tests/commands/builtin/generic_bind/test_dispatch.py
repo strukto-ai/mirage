@@ -22,10 +22,10 @@ from mirage.commands.config import command
 from mirage.commands.spec import SPECS
 from mirage.errors.fs import eacces
 from mirage.io import IOResult
-from mirage.ops.registry import op as register_op
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from tests.fixtures.vfs_io import install, replaces
 
 
 @pytest.mark.asyncio
@@ -101,7 +101,7 @@ async def test_du_walk_charges_each_mount_its_own_cap():
     outer.load_state({"files": {f"/f{i}": b"x" for i in range(4)}})
     inner.load_state({"files": {f"/g{i}": b"y" for i in range(3)}})
     ws = Workspace({"/a": outer, "/a/b": inner}, mode=MountMode.WRITE)
-    ws.mount("/a/b").register_fns([_unmeasured_du])
+    install(ws.mount("/a/b"), [_unmeasured_du])
     try:
         result = await ws.shell("du -a /a")
         rows = (await result.materialize_stdout()).decode().splitlines()
@@ -117,7 +117,7 @@ async def test_du_walk_charges_each_mount_its_own_cap():
 
 @pytest.mark.asyncio
 async def test_du_x_never_lists_a_mount_below_the_operand():
-    @register_op("readdir", vfs="ram")
+    @replaces("readdir")
     async def refusing(accessor, path, **kwargs):
         raise eacces(path)
 
@@ -127,7 +127,7 @@ async def test_du_x_never_lists_a_mount_below_the_operand():
     )
     try:
         await ws.shell("echo aa > /a/f; echo ccc > /a/b/g; echo d > /c/h")
-        ws.mount("/a/b").register_fns([refusing])
+        install(ws.mount("/a/b"), [refusing])
         result = await ws.shell("du -x /a /c")
         assert await result.materialize_stdout() == b"3\t/a\n2\t/c\n"
         assert not result.stderr

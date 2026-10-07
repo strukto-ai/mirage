@@ -12,9 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.databricks_volume.io import IO as _IO
 from mirage.commands.builtin.generic_bind import make_generic_commands
 
 COMMANDS = [
-    *make_generic_commands("databricks_volume", _IO),
+    *make_generic_commands("databricks_volume"),
 ]

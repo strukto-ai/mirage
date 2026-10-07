@@ -12,50 +12,50 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable, Mapping
+from types import MappingProxyType
 from typing import Any
 
 from pydantic import BaseModel
 
 from mirage.accessor.base import Accessor
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.du import DEFAULT_MAX_DU_ENTRIES
-from mirage.commands.builtin.generic_bind import (
-    CommandIO,
-    make_generic_commands,
+from mirage.errors.fs import enotsup
+from mirage.types import (
+    CapacityResult,
+    CapacityState,
+    FileStat,
+    JsonValue,
+    ListingVersion,
+    PathSpec,
 )
-from mirage.commands.config import RegisteredCommand, registered_commands
-from mirage.ops.generic import make_generic_ops
-from mirage.ops.registry import RegisteredOp
-from mirage.types import CapacityResult, CapacityState, ListingVersion
-from mirage.vfs.adapter import VFSAdapter
+from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
+from mirage.vfs.call import vfs_call
 from mirage.vfs.secrets import redacted_config_dump
+from mirage.vfs.types import DuEntries, Effect, SearchQuery
 from mirage.watch.base import DeltaHook
 
 
 class BaseVFS:
-    """What a driver supplies, and nothing a mount runs it with.
+    """A backend: an accessor, the facts about it, and its functions.
 
-    A driver is an accessor and the tables it serves through: ``ops``
-    for the VFS/FUSE verbs and ``commands`` for the shell. Everything
-    a tree needs to run one (the placement, the index store, the
-    registered tables, the reference it was built from) lives on the
-    mount, so an author never sees it.
+    A VFS answers ``readdir``, ``read`` and ``stat``; every other function
+    (``write``, ``unlink``, ``read_stream``, a native ``find`` or
+    ``search``, ...) is optional, and a VFS answers exactly the ones it
+    defines. Every generic shell command (``ls``, ``cat``, ``grep``,
+    ``find``, ``head``, ``wc``, ...) runs on the three required ones, and
+    a line that needs a function the VFS does not define answers
+    ``Operation not supported`` at that call, so ``gzip -c`` and
+    ``tar -t`` still run as readers on a read-only backend. A function
+    marked ``@vfs_call`` is also reachable by name through the
+    dispatcher (``ws.dispatch("search_abc", path)``), with every check the
+    door runs; the built-in ones are marked here, and an override keeps
+    the mark.
 
-    There are two ways to be one. A builtin declares its facts as
-    class attributes and returns from ``ops`` and ``commands`` the
-    tables its ``ops/<name>`` and ``commands/builtin/<name>`` modules
-    build, so it calls ``super().__init__()`` bare. A custom backend
-    hands the constructor an accessor and a ``VFSAdapter`` (or a
-    prebuilt ``CommandIO`` table), and the whole generic command set
-    (``ls``, ``cat``, ``grep``, ``find``, ``head``, ``wc``, ...) plus
-    glob resolution and the VFS/FUSE ops are derived from it: the
-    one-file path, which ``examples/python/other/custom_vfs.py`` walks
-    end to end. Optional capabilities unlock more surface (``writes``
-    enables the byte-mutation family, ``find`` and ``du`` become
-    native fast paths). A table without an op still gets every
-    command: ``gzip -c`` and ``tar -t`` run as readers, and a line
-    that needs the missing op answers ``Operation not supported`` at
-    that op.
+    Everything a tree needs to run one (the placement, the index store,
+    the registered commands, the reference it was built from) lives on
+    the mount, so an author never sees it.
 
     Snapshots and versions see one of two things, and a subclass picks
     which by what it owns. Content the VFS holds itself (an in-memory
@@ -154,70 +154,77 @@ class BaseVFS:
     # the dispatcher, which charges each entry to the mount serving it.
     max_du_entries: int | None = DEFAULT_MAX_DU_ENTRIES
 
-    _closed: bool = False
+    # Whether ``read`` fetches a byte window from the store itself. When
+    # False the caller reads the whole file and slices it, so ``read`` is
+    # only ever handed a window by a VFS that sets this.
+    reads_ranges: bool = False
 
-    # Whether this driver was built from a table, and the two tables
-    # derived from it when it was.
-    _from_table: bool = False
-    _commands_table: list[RegisteredCommand] | None = None
-    _ops_table: list[RegisteredOp] | None = None
+    # Whether the data lives on the host filesystem, which lets a command
+    # aggregate on the host instead of streaming through mirage.
+    local: bool = False
+
+    # How many paths one glob may expand to before it stops; None for no
+    # cap.
+    max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES
+
+    # What ``search`` supports, read by the consumers that opt in by
+    # namespace (``{"grep": {"mode": "literal"}}`` lets grep and rg use
+    # it). Empty means no consumer may assume anything.
+    search_meta: Mapping[str, JsonValue] = MappingProxyType({})
+
+    # Extensions whose ``read`` is a rendering rather than the stored
+    # bytes, each to the name of the method that renders it, which takes
+    # ``read``'s arguments, window included. A rendered read is never
+    # served from or kept in the file cache, and a ``raw`` read asks for
+    # ``read`` itself.
+    renderers: Mapping[str, str] = MappingProxyType({})
+
+    # The generic shell commands this VFS replaces with its own.
+    overrides: frozenset[str] = frozenset()
+
+    _closed: bool = False
 
     def __init__(
         self,
         *,
         name: str | None = None,
         accessor: Accessor | None = None,
-        io: CommandIO | VFSAdapter | None = None,
         prompt: str | None = None,
         write_prompt: str | None = None,
-        overrides: set[str] | None = None,
+        overrides: set[str] | frozenset[str] | None = None,
         commands: list[Callable[..., Any]] | None = None,
-        ops: list[Callable[..., Any]] | None = None,
-        auto_ops: bool = True,
         caches_reads: bool | None = None,
         sizes_always_known: bool | None = None,
         supports_snapshot: bool | None = None,
         read_revalidatable: bool | None = None,
     ) -> None:
-        """Build a driver from a table, or nothing at all.
+        """Set the facts a subclass does not declare as attributes.
 
         Every argument is optional, so a class that declares its facts
-        as attributes and returns its tables from ``ops`` and
-        ``commands`` calls ``super().__init__()`` bare. Given ``io``,
-        the whole generic command set and the derived op set are wired
-        from the table.
+        as attributes calls ``super().__init__()`` bare.
 
         Args:
             name (str | None): VFS name commands register under; also
                 the registry key when the class is exposed through
                 ``register_vfs`` or a ``mirage.vfs`` entry point. None
-                keeps the class attribute; a driver built from a table
-                must end up with a name of its own, as TypeScript's
-                ``VFSOptions`` requires.
-            accessor (Accessor | None): backend handle passed to every
-                core function.
-            io (CommandIO | VFSAdapter | None): the backend's resource
-                capabilities, or a prebuilt IO table.
+                keeps the class attribute.
+            accessor (Accessor | None): backend handle the functions use.
             prompt (str | None): LLM-facing description of the layout.
             write_prompt (str | None): appended when mounted writable.
-            overrides (set[str] | None): generic command names the
-                backend replaces (pass the replacements via ``commands``).
+            overrides (set[str] | frozenset[str] | None): generic command
+                names this VFS replaces (pass the replacements via
+                ``commands``).
             commands (list[Callable] | None): extra ``@command``
                 functions (bespoke verbs or override replacements).
-            ops (list[Callable] | None): ``@op`` functions or
-                ``RegisteredOp`` values layered over the derived set; one
-                carrying no filetype shadows the derived op of its name.
-            auto_ops (bool): derive the op set from the table; disable to
-                serve only the explicit ``ops``.
             caches_reads (bool | None): serve repeat reads from the file
                 cache; enable only for stable, read-mostly content.
-            sizes_always_known (bool | None): whether ``io.stat`` sizes
-                every regular file without fetching it, which is also
-                what makes the mount legal on FSKit.
-            supports_snapshot (bool | None): whether ``io.stat`` fills
+            sizes_always_known (bool | None): whether ``stat`` sizes every
+                regular file without fetching it, which is also what
+                makes the mount legal on FSKit.
+            supports_snapshot (bool | None): whether ``stat`` fills
                 ``FileStat.fingerprint`` with a stable per-path marker.
                 Setting it without that is not drift detection.
-            read_revalidatable (bool | None): whether ``io.stat`` and the
+            read_revalidatable (bool | None): whether ``stat`` and the
                 read record stamp the same kind of content token, so a
                 ``read: fresh`` mount can compare them. Setting it without
                 that makes every read verdict stale; a mount declaring
@@ -236,6 +243,8 @@ class BaseVFS:
             self.prompt = prompt
         if write_prompt is not None:
             self.write_prompt = write_prompt
+        if overrides is not None:
+            self.overrides = frozenset(overrides)
         if caches_reads is not None:
             self.caches_reads = caches_reads
         if sizes_always_known is not None:
@@ -244,56 +253,361 @@ class BaseVFS:
             self.supports_snapshot = supports_snapshot
         if read_revalidatable is not None:
             self.read_revalidatable = read_revalidatable
-        if io is None:
-            if any(x is not None for x in (overrides, commands, ops)):
-                raise ValueError(
-                    "overrides, commands and ops derive from an io table; "
-                    "pass io"
-                )
-            return
-        # The base's placeholder would register every generic command
-        # under a VFS no registry or prompt knows.
-        if self.name == BaseVFS.name:
-            raise ValueError("a VFS built from a table needs a name")
-        self._from_table = True
-        table = io.to_command_io() if isinstance(io, VFSAdapter) else io
-        self.max_du_entries = table.max_du_entries
-        self._commands_table = registered_commands(
-            [
-                *make_generic_commands(self.name, table, overrides=overrides),
-                *(commands or []),
-            ]
-        )
-        user_ops: list[RegisteredOp] = []
-        for fn in ops or []:
-            if isinstance(fn, RegisteredOp):
-                user_ops.append(fn)
-            else:
-                user_ops.extend(getattr(fn, "_registered_ops"))
-        # A user op carrying no filetype replaces the derived op of the
-        # same name: the derived set is built with those names skipped,
-        # so two handlers never compete for one key.
-        shadowed = {ro.name for ro in user_ops if ro.filetype is None}
-        derived = (
-            make_generic_ops(self.name, table, overrides=shadowed)
-            if auto_ops
-            else []
-        )
-        self._ops_table = [*derived, *user_ops]
+        self._commands = list(commands or [])
 
-    def ops(self) -> list[RegisteredOp]:
-        """The VFS/FUSE verbs this driver serves, as registered ops.
+    def supports(self, name: str) -> bool:
+        """Whether this VFS defines the function ``name``.
 
-        A verb that is not in this list is not served: the mount answers
-        ``Operation not supported`` for it. A driver built from a table
-        serves the set derived from it; a builtin returns the list its
-        ``ops/<name>`` module derives from the backend's table.
+        A function the base declares is supported once a subclass
+        overrides it; one only a subclass declares (a custom
+        ``@vfs_call``) is supported because it exists.
+
+        Args:
+            name (str): the function name.
         """
-        return self._ops_table if self._ops_table is not None else []
+        own = getattr(type(self), name, None)
+        return callable(own) and own is not getattr(BaseVFS, name, None)
 
-    def commands(self) -> list[RegisteredCommand]:
-        """The shell commands this driver serves, as registered commands."""
-        return self._commands_table if self._commands_table is not None else []
+    def commands(self) -> list[Callable[..., Any]]:
+        """The bespoke ``@command`` functions this VFS was handed."""
+        return list(self._commands)
+
+    @vfs_call(effect=Effect.READ)
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        """List the children of a directory.
+
+        Args:
+            path (PathSpec): the directory.
+            index (IndexCacheStore): the mount's index, for backends that
+                address items by id.
+        """
+        raise enotsup(self.name, "readdir", path)
+
+    @vfs_call(effect=Effect.READ)
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        """Read a file's bytes, or a window of them.
+
+        A window reaches this only when ``reads_ranges`` is set: the
+        caller otherwise reads the whole file and slices it.
+
+        Args:
+            path (PathSpec): the file.
+            index (IndexCacheStore): the mount's index.
+            offset (int): the first byte of the window.
+            size (int | None): the window's length, None through the end.
+        """
+        raise enotsup(self.name, "read", path)
+
+    @vfs_call(effect=Effect.READ)
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        """Describe a path; raises FileNotFoundError when nothing is there.
+
+        Args:
+            path (PathSpec): the path.
+            index (IndexCacheStore): the mount's index.
+        """
+        raise enotsup(self.name, "stat", path)
+
+    def read_stream(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> AsyncIterator[bytes]:
+        """Stream a file's bytes as the caller pulls them.
+
+        A VFS that does not define it is read whole instead.
+
+        Args:
+            path (PathSpec): the file.
+            index (IndexCacheStore): the mount's index.
+        """
+        raise enotsup(self.name, "read_stream", path)
+
+    async def exists(self, path: PathSpec) -> bool:
+        """Whether anything is at ``path``; derived from ``stat`` when
+        not defined.
+
+        Args:
+            path (PathSpec): the path.
+        """
+        raise enotsup(self.name, "exists", path)
+
+    async def find(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        **predicates: Any,
+    ) -> list[str]:
+        """Answer ``find`` natively instead of walking ``readdir``.
+
+        Args:
+            path (PathSpec): where the search starts.
+            index (IndexCacheStore): the mount's index.
+            **predicates (Any): the parsed ``find`` expression.
+        """
+        raise enotsup(self.name, "find", path)
+
+    async def du_size(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> int:
+        """The recursive byte total under ``path``, natively.
+
+        Native ``du`` is both ``du_size`` and ``du_entries``: the generic
+        derives its per-directory rows from the entries, so one without
+        the other is not served.
+
+        Args:
+            path (PathSpec): the path.
+            index (IndexCacheStore): the mount's index.
+        """
+        raise enotsup(self.name, "du", path)
+
+    async def du_entries(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> DuEntries:
+        """Every stored file under ``path`` with its size, natively.
+
+        Args:
+            path (PathSpec): the path.
+            index (IndexCacheStore): the mount's index.
+        """
+        raise enotsup(self.name, "du", path)
+
+    @vfs_call(effect=Effect.WRITE)
+    async def write(self, path: PathSpec, data: bytes) -> None:
+        """Replace a file's bytes, creating it when missing.
+
+        Args:
+            path (PathSpec): the file.
+            data (bytes): its new content.
+        """
+        raise enotsup(self.name, "write", path)
+
+    @vfs_call(effect=Effect.WRITE)
+    async def append(
+        self,
+        path: PathSpec,
+        data: bytes,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> None:
+        """Add bytes to the end of a file, creating it when missing.
+
+        A VFS that defines ``write`` and not this is appended to by
+        reading the file and writing it back.
+
+        Args:
+            path (PathSpec): the file.
+            data (bytes): the bytes to add.
+            index (IndexCacheStore): the mount's index.
+        """
+        raise enotsup(self.name, "append", path)
+
+    @vfs_call(effect=Effect.WRITE)
+    async def pwrite(
+        self,
+        path: PathSpec,
+        data: bytes,
+        offset: int,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> None:
+        """Write bytes at an offset, keeping every byte outside them.
+
+        As pwrite(2): a gap past the end reads back as zeros and a missing
+        file is created. A VFS that defines ``write`` and not this is
+        written by reading the file and writing it back.
+
+        Args:
+            path (PathSpec): the file.
+            data (bytes): the bytes to write.
+            offset (int): where they start.
+            index (IndexCacheStore): the mount's index.
+        """
+        raise enotsup(self.name, "pwrite", path)
+
+    @vfs_call(effect=Effect.WRITE)
+    async def create(self, path: PathSpec) -> None:
+        """Create an empty file, leaving an existing one as it is.
+
+        Args:
+            path (PathSpec): the file.
+        """
+        raise enotsup(self.name, "create", path)
+
+    @vfs_call(effect=Effect.WRITE)
+    async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
+        """Make a directory.
+
+        Args:
+            path (PathSpec): the directory.
+            parents (bool): make missing parents too, as ``mkdir -p``.
+        """
+        raise enotsup(self.name, "mkdir", path)
+
+    @vfs_call(effect=Effect.WRITE)
+    async def unlink(self, path: PathSpec) -> None:
+        """Remove a file.
+
+        Args:
+            path (PathSpec): the file.
+        """
+        raise enotsup(self.name, "unlink", path)
+
+    @vfs_call(effect=Effect.WRITE)
+    async def rmdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> None:
+        """Remove an empty directory.
+
+        Args:
+            path (PathSpec): the directory.
+            index (IndexCacheStore): the mount's index, which a refused
+                rmdir's hidden-remnant walk lists through.
+        """
+        raise enotsup(self.name, "rmdir", path)
+
+    async def rm_r(self, path: PathSpec) -> Any:
+        """Remove a subtree in one call instead of entry by entry.
+
+        Args:
+            path (PathSpec): the subtree's root.
+        """
+        raise enotsup(self.name, "rm_r", path)
+
+    @vfs_call(effect=Effect.WRITE)
+    async def rename(self, src: PathSpec, dst: PathSpec) -> None:
+        """Move a name within this VFS.
+
+        Args:
+            src (PathSpec): the current name.
+            dst (PathSpec): the new name.
+        """
+        raise enotsup(self.name, "rename", src)
+
+    async def copy(self, src: PathSpec, dst: PathSpec) -> None:
+        """Copy a file within this VFS without moving its bytes through
+        mirage.
+
+        Args:
+            src (PathSpec): the file.
+            dst (PathSpec): the copy.
+        """
+        raise enotsup(self.name, "copy", dst)
+
+    async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
+        """Copy a directory tree within this VFS in one call.
+
+        Args:
+            src (PathSpec): the directory.
+            dst (PathSpec): the copy.
+        """
+        raise enotsup(self.name, "dir_copy", dst)
+
+    @vfs_call(effect=Effect.WRITE)
+    async def truncate(
+        self, path: PathSpec, length: int, no_create: bool = False
+    ) -> None:
+        """Resize a file, padding with zeros or cutting the end.
+
+        Args:
+            path (PathSpec): the file.
+            length (int): its new size.
+            no_create (bool): refuse a missing file instead of creating
+                it; a VFS that cannot hold that atomically raises ENOTSUP
+                before writing.
+        """
+        raise enotsup(self.name, "truncate", path)
+
+    @vfs_call(effect=Effect.WRITE)
+    async def setattr(
+        self,
+        path: PathSpec,
+        *,
+        mode: int | None = None,
+        uid: int | str | None = None,
+        gid: int | str | None = None,
+        atime: str | None = None,
+        mtime: str | None = None,
+    ) -> dict[str, int | str]:
+        """Store metadata fields the backend keeps itself.
+
+        Returns the fields it stored; the rest land in the namespace's
+        attribute overlay.
+
+        Args:
+            path (PathSpec): the path.
+            mode (int | None): permission bits.
+            uid (int | str | None): owner.
+            gid (int | str | None): group.
+            atime (str | None): access time.
+            mtime (str | None): modification time.
+        """
+        raise enotsup(self.name, "setattr", path)
+
+    async def search(
+        self,
+        path: PathSpec,
+        query: SearchQuery,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> list[str] | None:
+        """Search the resource under ``path``; None declines, [] is none.
+
+        Results are text records in the format ``search_meta`` declares.
+        Errors and incomplete results are raised, never answered as a
+        miss.
+
+        Args:
+            path (PathSpec): the scope.
+            query (SearchQuery): the query and its options.
+            index (IndexCacheStore): the mount's index.
+        """
+        raise enotsup(self.name, "search", path)
+
+    async def search_many(
+        self,
+        paths: list[PathSpec],
+        query: SearchQuery,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> list[str] | None:
+        """Search several scopes as one ranked query.
+
+        Args:
+            paths (list[PathSpec]): the scopes.
+            query (SearchQuery): the query and its options.
+            index (IndexCacheStore): the mount's index.
+        """
+        raise enotsup(self.name, "search", paths[0] if paths else "")
+
+    async def narrow_paths(
+        self, query: str, paths: list[PathSpec]
+    ) -> list[PathSpec] | None:
+        """The files under ``paths`` a content index says may hold
+        ``query``, so a recursive grep scans only those.
+
+        A superset is harmless, since the scan still runs over the
+        answer; None means the index cannot answer and the scan walks
+        everything. Consulted only while ``content_search_enabled``.
+
+        Args:
+            query (str): the whole-word literal.
+            paths (list[PathSpec]): the scopes.
+        """
+        return None
+
+    def content_search_enabled(self) -> bool:
+        """Whether this mount opted in to ``narrow_paths``."""
+        return False
+
+    def is_mounted(self) -> bool:
+        """Whether the backend is there to answer at all."""
+        return True
 
     def storage_location(self) -> str | None:
         """Where this driver's bytes live, as one string a person can read.
@@ -333,18 +647,16 @@ class BaseVFS:
     def get_state(self) -> dict[str, Any]:
         """What a snapshot records for this driver.
 
-        The default carries only the type, which is enough to rebuild a
-        builtin that owns nothing. A driver built from a table adds
-        ``needs_override``: the base cannot know a subclass's
-        constructor, so both loaders then require the mount to be handed
-        back live (``mounts=``; ``Workspace.copy`` does this itself). A
-        driver that owns its content (an in-memory store) overrides this
-        and ``load_state`` to carry it and drops the flag; a driver over
-        a remote service keeps the default and pins what it read through
-        ``supports_snapshot`` fingerprints instead.
+        The default carries the type and ``needs_override``: the base
+        cannot know a subclass's constructor, so both loaders then
+        require the mount to be handed back live (``mounts=``;
+        ``Workspace.copy`` does this itself). A builtin that owns nothing
+        records only its type, which is enough to rebuild it; a driver
+        that owns its content (an in-memory store) overrides this and
+        ``load_state`` to carry it; a driver over a remote service keeps
+        the default and pins what it read through ``supports_snapshot``
+        fingerprints instead.
         """
-        if not self._from_table:
-            return {"type": self.name}
         return {"type": self.name, "needs_override": True}
 
     def config_state(self, config: BaseModel, **extra: Any) -> dict[str, Any]:

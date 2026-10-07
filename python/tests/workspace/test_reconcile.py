@@ -39,7 +39,10 @@ from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace.mount.namespace.namespace import NodeMeta
 from mirage.workspace.reconcile import Reconciler
 from tests.e2e.s3_mock import patch_s3_multi
-from tests.fixtures.versioned_vfs import VersionedVFS
+from tests.fixtures.versioned_vfs import (
+    StatlessVersionedVFS,
+    VersionedVFS,
+)
 
 
 async def _ws_with_overlay():
@@ -858,7 +861,7 @@ async def _versioned(
     *,
     has_stat: bool = True,
 ):
-    vfs = VersionedVFS(kind, remote, has_stat=has_stat)
+    vfs = (VersionedVFS if has_stat else StatlessVersionedVFS)(kind, remote)
     ws = Workspace({"/m/": vfs}, read=ReadSpec(policy=ReadPolicy.FRESH))
     mount = ws.namespace.mount_for("/m/a")
     try:

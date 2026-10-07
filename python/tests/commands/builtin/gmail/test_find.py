@@ -21,6 +21,8 @@ from mirage.commands.builtin.gmail import COMMANDS
 from mirage.commands.config import CommandOpts
 from mirage.io.types import materialize
 from mirage.types import PathSpec
+from mirage.vfs.gmail import GmailVFS
+from tests.fixtures.vfs_io import io_for
 
 LABELS = [{"id": "INBOX", "type": "system"}]
 
@@ -78,7 +80,11 @@ async def _run(paths, *texts: str, **flags) -> list[str]:
             AsyncMock(),
             paths,
             list(texts),
-            CommandOpts(index=RAMIndexCacheStore(), flags={**flags}),
+            CommandOpts(
+                io=io_for(GmailVFS, AsyncMock()),
+                index=RAMIndexCacheStore(),
+                flags={**flags},
+            ),
         )
         data = await materialize(stdout)
     return data.decode().splitlines()

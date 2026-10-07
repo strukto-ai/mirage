@@ -32,24 +32,22 @@ async def test_rm_refused_operand_keeps_spelling_and_continues(
 ):
     stat = AsyncMock(return_value=FileStat(name="ok", type=FileType.FILE))
     unlink = AsyncMock()
-    io = with_command_guards(
-        CommandIO(
-            readdir=AsyncMock(return_value=[]),
-            read_bytes=AsyncMock(),
-            read_stream=AsyncMock(),
-            stat=stat,
-            is_mounted=lambda _: True,
-            unlink=unlink,
-            rmdir=AsyncMock(),
-            rm_r=AsyncMock(),
-        )
+    io = CommandIO(
+        readdir=AsyncMock(return_value=[]),
+        read_bytes=AsyncMock(),
+        read_stream=AsyncMock(),
+        stat=stat,
+        is_mounted=lambda _: True,
+        unlink=unlink,
+        rmdir=AsyncMock(),
+        rm_r=AsyncMock(),
     )
     refused = replace(
         PathSpec.from_str_path("/data"), raw_path=raw, walk_error=refusal
     )
     valid = PathSpec.from_str_path("/data/ok")
-    _, result = await make_rm("s3", io)(
-        None, [refused, valid], [], CommandOpts(flags={"f": force})
+    _, result = await make_rm("s3", with_command_guards)(
+        None, [refused, valid], [], CommandOpts(flags={"f": force}, io=io)
     )
     assert (result.exit_code, result.stderr) == (code, stderr)
     assert stat.await_count == 1

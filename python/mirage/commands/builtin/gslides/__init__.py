@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.commands.builtin.gslides.io import IO as _IO
 from mirage.commands.builtin.gslides.rm import rm
 
 # Slides API passthroughs live in the gws CLI
@@ -22,7 +21,6 @@ from mirage.commands.builtin.gslides.rm import rm
 COMMANDS = [
     *make_generic_commands(
         "gslides",
-        _IO,
         overrides={"rm"},
     ),
     rm,

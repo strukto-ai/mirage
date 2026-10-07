@@ -13,6 +13,5 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.commands.builtin.jaeger.io import IO as _IO
 
-COMMANDS = [*make_generic_commands("jaeger", _IO)]
+COMMANDS = [*make_generic_commands("jaeger")]

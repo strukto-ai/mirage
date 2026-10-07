@@ -1,6 +1,8 @@
 import pytest
 from pydantic import SecretStr
 
+from mirage.commands.builtin.backends import mount_commands
+from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.config import CommandOpts
 from mirage.types import PathSpec
 from mirage.vfs.mem0 import Mem0Config
@@ -37,7 +39,7 @@ def _res():
 def _command(vfs: Mem0VFS, name: str):
     return next(
         command.fn
-        for command in vfs.commands()
+        for command in mount_commands(vfs)
         if command.name == name and command.filetype is None
     )
 
@@ -53,7 +55,10 @@ async def test_rg_recursive_by_default_matches_content():
     res = _res()
     p = PathSpec(virtual="/mem", directory="/mem", vfs_path="")
     source, _io = await _command(res, "rg")(
-        res.accessor, [p], ["bananas"], CommandOpts(index=ops(res).index)
+        res.accessor,
+        [p],
+        ["bananas"],
+        CommandOpts(io=command_io(res), index=ops(res).index),
     )
     out = await _bytes(source)
     assert b"bananas" in out

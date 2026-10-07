@@ -13,11 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import replace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.generic.rm_cmd import make_rm
+from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.context import (
@@ -34,17 +36,24 @@ class FakeAccessor:
     pass
 
 
-def _make_rm(files: set[str], calls: list[tuple]):
-    async def resolve_glob(accessor, paths, index):
-        return paths
+# The mount's table, for its glob: no operand here is a pattern.
+_IO = CommandIO(
+    readdir=AsyncMock(return_value=[]),
+    read_bytes=AsyncMock(),
+    read_stream=AsyncMock(),
+    stat=AsyncMock(),
+    is_mounted=lambda _: True,
+)
 
+
+def _make_rm(files: set[str], calls: list[tuple]):
     async def unlink(accessor, path, index=NULL_INDEX):
         calls.append((accessor, path, index))
         if path.virtual not in files:
             raise FileNotFoundError(path.virtual)
         files.remove(path.virtual)
 
-    return make_rm(vfs="gdocs", glob_fn=resolve_glob, unlink=unlink)
+    return make_rm(vfs="gdocs", unlink=unlink)
 
 
 @pytest.mark.asyncio
@@ -53,7 +62,9 @@ async def test_rm_threads_accessor_and_index_into_unlink():
     accessor = FakeAccessor()
     rm = _make_rm({"/owned/a.gdoc.json"}, calls)
     path = PathSpec.from_str_path("/owned/a.gdoc.json")
-    _, result = await rm(accessor, [path], [], CommandOpts(index=NULL_INDEX))
+    _, result = await rm(
+        accessor, [path], [], CommandOpts(io=_IO, index=NULL_INDEX)
+    )
     assert result.exit_code == 0
     assert calls == [(accessor, path, NULL_INDEX)]
 
@@ -62,7 +73,7 @@ async def test_rm_threads_accessor_and_index_into_unlink():
 async def test_rm_missing_operand():
     rm = _make_rm(set(), [])
     with pytest.raises(UsageError) as info:
-        await rm(FakeAccessor(), [], [], CommandOpts())
+        await rm(FakeAccessor(), [], [], CommandOpts(io=_IO))
     assert str(info.value) == (
         "rm: missing operand\nTry 'rm --help' for more information."
     )
@@ -74,7 +85,7 @@ async def test_rm_force_without_operands_does_nothing():
     calls: list[tuple] = []
     rm = _make_rm(set(), calls)
     out, result = await rm(
-        FakeAccessor(), [], [], CommandOpts(flags={"f": True})
+        FakeAccessor(), [], [], CommandOpts(io=_IO, flags={"f": True})
     )
     assert (out, result.exit_code, result.stderr) == (None, 0, None)
     assert calls == []
@@ -89,7 +100,7 @@ async def test_rm_enoent_reports_and_continues_without_force():
         PathSpec.from_str_path("/owned/x.json"),
         PathSpec.from_str_path("/owned/b.json"),
     ]
-    _, result = await rm(FakeAccessor(), paths, [], CommandOpts())
+    _, result = await rm(FakeAccessor(), paths, [], CommandOpts(io=_IO))
     assert result.exit_code == 1
     assert result.stderr == (
         b"rm: cannot remove '/owned/x.json': No such file or directory\n"
@@ -124,7 +135,7 @@ async def test_rm_holds_each_path_to_its_regions_mode():
                 PathSpec.from_str_path("/gdocs/build/a.json"),
             ],
             [],
-            CommandOpts(),
+            CommandOpts(io=_IO),
         )
     finally:
         reset_mount_gate(gate_token)
@@ -146,7 +157,7 @@ async def test_rm_force_swallows_enoent():
         FakeAccessor(),
         [PathSpec.from_str_path("/owned/x.json")],
         [],
-        CommandOpts(flags={"f": True}),
+        CommandOpts(io=_IO, flags={"f": True}),
     )
     assert result.exit_code == 0
     assert len(calls) == 1
@@ -161,7 +172,7 @@ async def test_rm_verbose_reports_each_removal():
         PathSpec.from_str_path("/owned/b.gdoc.json"),
     ]
     output, result = await rm(
-        FakeAccessor(), paths, [], CommandOpts(flags={"v": True})
+        FakeAccessor(), paths, [], CommandOpts(io=_IO, flags={"v": True})
     )
     assert isinstance(output, bytes)
     text = output.decode()
@@ -178,7 +189,7 @@ async def test_rm_empty_operand_keeps_its_spelling():
     path = replace(
         PathSpec.from_str_path("/owned"), raw_path="", walk_error="ENOENT"
     )
-    _, result = await rm(FakeAccessor(), [path], [], CommandOpts())
+    _, result = await rm(FakeAccessor(), [path], [], CommandOpts(io=_IO))
     assert result.stderr == (
         b"rm: cannot remove '': No such file or directory\n"
     )

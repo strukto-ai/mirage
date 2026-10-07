@@ -13,9 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.mongodb import MongoDBAccessor
+from mirage.commands.builtin.generic_bind.adapter import mount_io
 from mirage.commands.builtin.generic_bind.factory import scan_io
 from mirage.commands.builtin.generic_bind.search import run_search
-from mirage.commands.builtin.mongodb.io import IO
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
@@ -33,5 +33,5 @@ async def grep(
     texts: list[str],
     opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
-    scan, _ = scan_io(IO, opts.ns, opts.mount_prefix)
+    scan, _ = scan_io(mount_io(opts), opts.ns, opts.mount_prefix)
     return await run_search(scan, "grep", accessor, paths, texts, opts)

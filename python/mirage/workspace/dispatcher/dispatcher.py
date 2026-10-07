@@ -304,6 +304,8 @@ class _Call:
         rule_gate (EntryGate | None): the running command's gate.
         report (OpReport | None): the caller's report.
         no_follow (bool): whether the op acts on the final name itself.
+        write (bool): whether policy judges the op a write: its POSIX
+            name, or the effect the mount's VFS declares for it.
     """
 
     op: str
@@ -315,11 +317,7 @@ class _Call:
     rule_gate: EntryGate | None
     report: OpReport | None
     no_follow: bool
-
-    @property
-    def write(self) -> bool:
-        """Whether policy judges the op a write."""
-        return self.op in POLICY_WRITE_OPS
+    write: bool
 
     @property
     def raw(self) -> bool:
@@ -344,7 +342,7 @@ class _Call:
             if "filetype" in self.kwargs
             else get_extension(self.path.virtual)
         )
-        return filetype is not None and mount.has_filetype_op("read", filetype)
+        return mount.renders(filetype)
 
 
 class Dispatcher:
@@ -506,7 +504,10 @@ class Dispatcher:
         result = self._filter(
             call, await self._call(call, mount, self._filler(call, mount))
         )
-        if op in DISPATCH_WRITE_OPS and op not in SERIAL_WRITE_OPS:
+        if (
+            op in DISPATCH_WRITE_OPS
+            or (call.write and op not in POLICY_WRITE_OPS)
+        ) and op not in SERIAL_WRITE_OPS:
             await self._settle_write(mount, op, call.path, kwargs)
         result = await boundary.complete(op, call.path, call.write, result)
         return result, IOResult()
@@ -611,6 +612,7 @@ class Dispatcher:
             rule_gate=rule_gate,
             report=report,
             no_follow=no_follow,
+            write=op in POLICY_WRITE_OPS,
         )
 
     async def _refuse_rename(self, call: _Call) -> None:
@@ -741,6 +743,10 @@ class Dispatcher:
         Returns:
             OpBoundary: the boundary the op completes through.
         """
+        # A function the VFS declares a write is judged as one, whatever
+        # its name: the POSIX names are known here, a custom one only to
+        # the VFS that defines it.
+        call.write = call.write or mount.writes(call.op)
         boundary = self._boundary(mount)
         await boundary.admit(
             call.op,

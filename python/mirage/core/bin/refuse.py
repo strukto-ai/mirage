@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+from typing import Any, NoReturn
 
 from mirage.accessor.bin import BinAccessor
 from mirage.errors.fs import erofs
@@ -21,7 +21,7 @@ from mirage.types import PathSpec
 
 async def refuse(
     accessor: BinAccessor, path: PathSpec, *args: Any, **kwargs: Any
-) -> None:
+) -> NoReturn:
     """Refuse a write into the view, as a read-only file system does.
 
     What the view holds is the lookup's to say, so every write op lands

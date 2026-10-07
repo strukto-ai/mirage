@@ -14,9 +14,11 @@
 
 import pytest
 
+from mirage.commands.builtin.backends import mount_commands
 from mirage.core.email.config import EmailConfig
 from mirage.types import VFSName
 from mirage.vfs.email.email import EmailVFS
+from tests.fixtures.vfs_io import served
 
 
 @pytest.fixture
@@ -43,11 +45,10 @@ def test_vfs_accessor(config):
 
 def test_vfs_commands_registered(config):
     vfs = EmailVFS(config=config)
-    cmds = vfs.commands()
+    cmds = mount_commands(vfs)
     assert len(cmds) >= 6
 
 
 def test_vfs_ops_registered(config):
     vfs = EmailVFS(config=config)
-    ops = vfs.ops()
-    assert len(ops) == 4
+    assert served(vfs) == {"glob", "read", "readdir", "stat"}

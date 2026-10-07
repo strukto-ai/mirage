@@ -16,7 +16,11 @@ from collections.abc import Callable
 from typing import Any
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic_bind.adapter import CommandIO, Operation
+from mirage.commands.builtin.generic_bind.adapter import (
+    CommandIO,
+    Operation,
+    over_mount_io,
+)
 from mirage.commands.builtin.generic_bind.builders.mkdir import (
     created_lines,
     created_names,
@@ -31,12 +35,11 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def make_mkdir(vfs: str, io: CommandIO) -> Callable[..., Any]:
-    """Build the implicit-parents mkdir override for one keyed store.
+def _build(io: CommandIO) -> Callable[..., Any]:
+    """The mkdir handler over one mount's table.
 
     Args:
-        vfs (str): VFS name the command registers under.
-        io (CommandIO): the backend's op table; must wire mkdir.
+        io (CommandIO): the guarded table of the running mount.
     """
     mkdir_impl = io.require(Operation.MKDIR)
     resolve_glob = io.resolve_glob
@@ -84,7 +87,19 @@ def make_mkdir(vfs: str, io: CommandIO) -> Callable[..., Any]:
             writes=writes, stderr=stderr, exit_code=1 if errors else 0
         )
 
+    return mkdir
+
+
+def make_mkdir(
+    vfs: str, wrap: Callable[[CommandIO], CommandIO]
+) -> Callable[..., Any]:
+    """Build the implicit-parents mkdir override for one keyed store.
+
+    Args:
+        vfs (str): VFS name the command registers under.
+        wrap (Callable): the guards over the mount's table.
+    """
     wrapped: Callable[..., Any] = command(
         "mkdir", vfs=vfs, spec=SPECS["mkdir"], write=True, path_guarded=True
-    )(mkdir)
+    )(over_mount_io(_build, wrap))
     return wrapped

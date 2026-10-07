@@ -13,8 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.commands.builtin.hf_buckets.io import IO as _IO
 
 COMMANDS = [
-    *make_generic_commands("hf_buckets", _IO),
+    *make_generic_commands("hf_buckets"),
 ]

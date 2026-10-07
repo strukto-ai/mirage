@@ -15,11 +15,13 @@
 import pytest
 
 from mirage import Workspace
+from mirage.commands.builtin.backends import mount_commands
 from mirage.core.airtable.config import AirtableConfig
 from mirage.types import VFSName
 from mirage.vfs.airtable import AirtableVFS
 from mirage.vfs.registry import build_vfs
 from tests.fixtures.airtable_api import TOKEN
+from tests.fixtures.vfs_io import served
 
 TABLE = (
     "/at/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001"
@@ -50,9 +52,9 @@ def test_reads_are_never_served_from_the_file_cache():
 
 
 def test_the_file_surface_is_read_only():
-    names = {c.name for c in _vfs().commands()}
+    names = {c.name for c in mount_commands(_vfs())}
     assert {"cat", "ls", "find", "grep", "head", "jq", "wc"} <= names
-    assert not [op.name for op in _vfs().ops() if op.write]
+    assert served(_vfs()) == {"glob", "read", "readdir", "stat"}
 
 
 def test_state_redacts_the_token():

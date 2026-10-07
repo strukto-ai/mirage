@@ -16,9 +16,10 @@ import pytest
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.postgres.io import resolve_glob
 from mirage.types import PathSpec
+from mirage.vfs.postgres import PostgresVFS
 from mirage.vfs.postgres.config import PostgresConfig
+from tests.fixtures.vfs_io import io_for
 
 
 @pytest.fixture
@@ -40,5 +41,7 @@ async def test_resolve_glob_unresolved_no_pattern(accessor, index):
         resolved=False,
         pattern=None,
     )
-    result = await resolve_glob(accessor, [p], index)
+    result = await io_for(PostgresVFS, accessor).resolve_glob(
+        accessor, [p], index
+    )
     assert result == [p]

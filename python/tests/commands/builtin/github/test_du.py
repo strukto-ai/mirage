@@ -49,25 +49,25 @@ async def _tree_stat(_accessor, path, _index):
     )
 
 
-def _patch(monkeypatch, readdir, stat):
-    ops = CommandIO(
+def _patch(monkeypatch, readdir, stat) -> CommandIO:
+    monkeypatch.setitem(du.__wrapped__.__globals__, "stat", stat)
+    monkeypatch.setitem(du.__wrapped__.__globals__, "ensure_tree", AsyncMock())
+    monkeypatch.setitem(du.__wrapped__.__globals__, "resolve_glob", _resolve)
+    return CommandIO(
         readdir=readdir,
         stat=stat,
         read_bytes=AsyncMock(),
         read_stream=AsyncMock(),
         is_mounted=lambda _: True,
     )
-    monkeypatch.setitem(du.__wrapped__.__globals__, "IO", ops)
-    monkeypatch.setitem(du.__wrapped__.__globals__, "ensure_tree", AsyncMock())
-    monkeypatch.setitem(du.__wrapped__.__globals__, "resolve_glob", _resolve)
 
 
-async def _run(accessor, operand, flags):
+async def _run(accessor, operand, flags, table: CommandIO):
     stream, io = await du.__wrapped__(
         accessor,
         [PathSpec.from_str_path(operand)],
         [],
-        CommandOpts(flags=flags),
+        CommandOpts(flags=flags, io=table),
     )
     return (
         (await materialize(stream)).decode(),
@@ -92,6 +92,6 @@ async def _run(accessor, operand, flags):
     ],
 )
 async def test_du_sums_the_live_tree(monkeypatch, operand, flags, expected):
-    _patch(monkeypatch, AsyncMock(), _tree_stat)
+    table = _patch(monkeypatch, AsyncMock(), _tree_stat)
     accessor = SimpleNamespace(truncated=False, tree=TREE)
-    assert await _run(accessor, operand, flags) == (expected, 0, "")
+    assert await _run(accessor, operand, flags, table) == (expected, 0, "")

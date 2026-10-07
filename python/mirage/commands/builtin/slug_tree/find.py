@@ -24,7 +24,7 @@ from mirage.commands.builtin.generic.find import (
     find_walk_generic,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
-    CommandIO,
+    mount_io,
     with_command_guards,
     with_policy_guard,
 )
@@ -121,7 +121,6 @@ async def _normalize_find_output(
 
 def make_find(
     vfs: str,
-    io: CommandIO,
     tree: SlugTree[A],
     stat: StatOp,
     stat_light: StatOp,
@@ -131,7 +130,6 @@ def make_find(
 
     Args:
         vfs (str): the backend the command registers for.
-        io (CommandIO): the backend's command IO.
         tree (SlugTree[A]): the backend's tree.
         stat (StatOp): the full stat.
         stat_light (StatOp): the index-only stat, used unless the
@@ -143,10 +141,6 @@ def make_find(
     """
     find_full = make_search_backed_find(tree.resolve, stat, tree.walk)
     find_light = make_search_backed_find(tree.resolve, stat_light, tree.walk)
-    walk_full = with_command_guards(with_policy_guard(io))
-    walk_light = with_command_guards(
-        with_policy_guard(replace(io, stat=stat_light))
-    )
 
     @command("find", vfs=vfs, spec=SPECS["find"])
     async def find(
@@ -155,6 +149,7 @@ def make_find(
         texts: list[str],
         opts: CommandOpts,
     ) -> tuple[ByteSource | None, IOResult]:
+        io = mount_io(opts)
         paths = default_paths(paths, opts.cwd)
         paths = await io.resolve_glob(accessor, paths, opts.index)
         search_path = paths[0]
@@ -177,7 +172,9 @@ def make_find(
         # session cannot see; the walk classifies through the guarded
         # readdir/stat, the same fork the factory builder takes (rung 0).
         if paths_scoped(opts.ns, paths):
-            walk_io = walk_full if full else walk_light
+            walk_io = with_command_guards(
+                with_policy_guard(io if full else replace(io, stat=stat_light))
+            )
             stdout, result = await find_walk_generic(
                 paths,
                 words,

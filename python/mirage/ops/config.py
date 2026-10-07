@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
@@ -99,7 +99,6 @@ class OpsMount:
     accessor: Accessor
     index: IndexCacheStore
     mode: MountMode
-    ops: list[Any] = field(default_factory=list[Any])
     # Mirrors BaseVFS.sizes_always_known. Read by the fskit mount
     # guard, which cannot serve a VFS that sizes files only on read.
     sizes_always_known: bool = False

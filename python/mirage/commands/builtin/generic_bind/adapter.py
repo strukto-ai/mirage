@@ -16,7 +16,7 @@ import errno
 import functools
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any, NoReturn, Protocol, overload
 
@@ -24,7 +24,9 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.du import DEFAULT_MAX_DU_ENTRIES
 from mirage.commands.builtin.utils.paths import dot_refusal
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import AggregateFn, CommandFnResult, CommandOpts
+from mirage.commands.resolve import get_extension
 from mirage.context import (
     effective_path_mode,
     get_admission,
@@ -36,6 +38,7 @@ from mirage.context import (
     session_visibility,
 )
 from mirage.context.session_context import require_paths_writable
+from mirage.core.generic.rewrite import refuse_taken
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import (
     eacces,
@@ -49,7 +52,6 @@ from mirage.errors.fs import (
 )
 from mirage.errors.types import DotWalkError
 from mirage.io import IOResult
-from mirage.ops.generic.factory import refuse_taken
 from mirage.ops.namespace_view import paths_scoped
 from mirage.ops.types import (
     ChildMounts,
@@ -65,18 +67,28 @@ from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
 from mirage.utils.hidden import hidden_under, move_reveals, path_visible
 from mirage.utils.path import norm, parent
 from mirage.utils.remnants import remove_remnants, visible_below
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.types import (
     ContentSearchOps,
     DuOps,
+    ExistsOp,
     IsMountedOp,
-    NativeReadOps,
+    MkdirOp,
     OperationFn,
-    ReadOps,
+    PairOp,
+    PathOp,
+    PwriteOp,
+    ReadBytesOp,
+    ReaddirOp,
+    ReadRangeOp,
     ReadStreamOp,
     ResolveGlobOp,
+    RmdirOp,
+    RmTreeOp,
     SearchOps,
     StatOp,
-    WriteOps,
+    TruncateOp,
+    WriteOp,
 )
 
 logger = logging.getLogger(__name__)
@@ -174,12 +186,15 @@ class Builder:
     read: bool = False
 
 
-@dataclass(frozen=True)
-class CommandIO(ReadOps, NativeReadOps, WriteOps):
+@dataclass(frozen=True, kw_only=True)
+class CommandIO:
     """Backend capabilities consumed by command algorithms.
 
-    Command admission guards these calls; POSIX policy hooks belong to
-    the filesystem dispatcher and are not part of this interface.
+    Built from a mount's VFS by ``command_io``: each slot is one of its
+    functions with the accessor commands still pass in front dropped,
+    and a function the VFS does not define is an absent slot. Command
+    admission guards these calls; POSIX policy hooks belong to the
+    filesystem dispatcher and are not part of this interface.
 
     ``glob_children`` is the child names the namespace owes a directory
     (nested mount roots and symlinks), and ``glob_target_stat`` what an
@@ -191,8 +206,28 @@ class CommandIO(ReadOps, NativeReadOps, WriteOps):
     through.
     """
 
-    read_stream: ReadStreamOp = field()
-    is_mounted: IsMountedOp = field()
+    readdir: ReaddirOp
+    read_bytes: ReadBytesOp
+    stat: StatOp
+    read_stream: ReadStreamOp
+    is_mounted: IsMountedOp
+    read_range: ReadRangeOp | None = None
+    exists: ExistsOp | None = None
+    find: OperationFn | None = None
+    du: DuOps | None = None
+    write: WriteOp | None = None
+    append: WriteOp | None = None
+    pwrite: PwriteOp | None = None
+    create: PathOp | None = None
+    mkdir: MkdirOp | None = None
+    unlink: PathOp | None = None
+    rmdir: RmdirOp | None = None
+    rm_r: RmTreeOp | None = None
+    rename: PairOp | None = None
+    copy: PairOp | None = None
+    dir_copy: PairOp | None = None
+    truncate: TruncateOp | None = None
+    set_attrs: OperationFn | None = None
     streams_bytes: bool = False
     local: bool = True
     max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES
@@ -238,6 +273,184 @@ class CommandIO(ReadOps, NativeReadOps, WriteOps):
                 functools.partial(_refuse_missing, op), op.value
             )
         return fn
+
+
+def mount_io(opts: CommandOpts) -> CommandIO:
+    """The table of the mount a command runs on.
+
+    Args:
+        opts (CommandOpts): the command's options.
+
+    Raises:
+        TypeError: the command ran outside a mount.
+    """
+    if opts.io is None:
+        raise TypeError(f"{opts.command}: ran without its mount's table")
+    return opts.io
+
+
+def over_mount_io(
+    build: Callable[[CommandIO], Callable[..., Any]],
+    wrap: Callable[[CommandIO], CommandIO] | None = None,
+) -> Callable[..., Any]:
+    """A handler that builds ``build``'s handler over the running mount's
+    table, wrapped by ``wrap``, on every call.
+
+    For a builder that reads its slots once, up front: the table is the
+    mount's, so it is only known once a command runs.
+
+    Args:
+        build (Callable): makes the handler for one table.
+        wrap (Callable | None): the guards to put over the table first.
+    """
+
+    async def run(
+        accessor: Accessor,
+        paths: list[PathSpec],
+        texts: list[str],
+        opts: CommandOpts,
+    ) -> Any:
+        io = mount_io(opts)
+        handler = build(wrap(io) if wrap is not None else io)
+        return await handler(accessor, paths, texts, opts)
+
+    return run
+
+
+def _without_accessor(method: Callable[..., Any]) -> OperationFn:
+    """``method`` callable the way a command calls a slot.
+
+    Commands still pass an accessor in front of every call; the VFS
+    holds its own, so it is dropped here.
+
+    Args:
+        method (Callable[..., Any]): a bound VFS function.
+    """
+
+    def call(accessor: Accessor, *args: Any, **kwargs: Any) -> Any:
+        return method(*args, **kwargs)
+
+    return call
+
+
+async def _exists_by_stat(
+    vfs: BaseVFS, accessor: Accessor, path: PathSpec
+) -> bool:
+    """Whether ``stat`` finds anything at ``path``.
+
+    Args:
+        vfs (BaseVFS): the VFS to ask.
+        accessor (Accessor): the command's accessor, unused.
+        path (PathSpec): the path.
+    """
+    try:
+        await vfs.stat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    return True
+
+
+def _reader(vfs: BaseVFS) -> Callable[..., Awaitable[bytes]]:
+    """``vfs.read``, or the renderer of the path's filetype where the VFS
+    renders one, which is what a command reads. Both are looked up per
+    call, as the op door looks them up.
+
+    Args:
+        vfs (BaseVFS): the mounted VFS.
+    """
+
+    async def read(
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        renderer = vfs.renderers.get(get_extension(path.virtual) or "")
+        if renderer is None:
+            return await vfs.read(path, index, offset, size)
+        rendered: bytes = await getattr(vfs, renderer)(
+            path, index, offset, size
+        )
+        return rendered
+
+    return read
+
+
+def command_io(vfs: BaseVFS) -> CommandIO:
+    """The command tier's table for ``vfs``, built from its functions.
+
+    A function the VFS does not define is an absent slot, except the two
+    every reader needs: a stream, which reads the file whole when the VFS
+    does not stream, and an existence check, which asks ``stat``. A
+    ranged read is the VFS's own ``read`` only when it reads ranges.
+
+    Args:
+        vfs (BaseVFS): the mounted VFS.
+    """
+
+    def slot(name: str) -> OperationFn | None:
+        if not vfs.supports(name):
+            return None
+        return _without_accessor(getattr(vfs, name))
+
+    read_bytes = _without_accessor(_reader(vfs))
+    streams = vfs.supports("read_stream")
+    return CommandIO(
+        readdir=_without_accessor(vfs.readdir),
+        read_bytes=read_bytes,
+        stat=_without_accessor(vfs.stat),
+        read_stream=(
+            _without_accessor(vfs.read_stream)
+            if streams
+            else functools.partial(stream_from_bytes, read_bytes)
+        ),
+        streams_bytes=not streams,
+        read_range=read_bytes if vfs.reads_ranges else None,
+        exists=slot("exists") or functools.partial(_exists_by_stat, vfs),
+        find=slot("find"),
+        du=(
+            DuOps(
+                size=_without_accessor(vfs.du_size),
+                entries=_without_accessor(vfs.du_entries),
+            )
+            if vfs.supports("du_size") and vfs.supports("du_entries")
+            else None
+        ),
+        write=slot("write"),
+        append=slot("append"),
+        pwrite=slot("pwrite"),
+        create=slot("create"),
+        mkdir=slot("mkdir"),
+        unlink=slot("unlink"),
+        rmdir=slot("rmdir"),
+        rm_r=slot("rm_r"),
+        rename=slot("rename"),
+        copy=slot("copy"),
+        dir_copy=slot("dir_copy"),
+        truncate=slot("truncate"),
+        set_attrs=slot("setattr"),
+        is_mounted=_without_accessor(vfs.is_mounted),
+        local=vfs.local,
+        max_glob_matches=vfs.max_glob_matches,
+        max_du_entries=vfs.max_du_entries,
+        search=(
+            SearchOps(
+                search=_without_accessor(vfs.search),
+                search_many=slot("search_many"),
+                meta=vfs.search_meta,
+            )
+            if vfs.supports("search")
+            else None
+        ),
+        content_search=(
+            ContentSearchOps(
+                narrow_paths=_without_accessor(vfs.narrow_paths),
+                enabled=_without_accessor(vfs.content_search_enabled),
+            )
+            if vfs.supports("narrow_paths")
+            else None
+        ),
+    )
 
 
 async def _refuse_missing(
@@ -1181,7 +1394,7 @@ async def _mkdir_on_writable(
         **options: forwarded untouched.
     """
     if isinstance(path, PathSpec):
-        await refuse_taken(stat, accessor, path, parents)
+        await refuse_taken(functools.partial(stat, accessor), path, parents)
     return await fn(accessor, path, parents=parents, **options)
 
 

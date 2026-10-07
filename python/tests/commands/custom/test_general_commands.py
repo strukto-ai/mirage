@@ -12,17 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.backends import mount_commands
 from mirage.vfs.ram import RAMVFS
 
 
 def test_memory_backend_commands_exist():
-    cmds = RAMVFS().commands()
+    cmds = mount_commands(RAMVFS())
     names = {c.name for c in cmds}
     assert "cat" in names
     assert "ls" in names
 
 
 def test_memory_backend_commands_have_memory_backend():
-    cmds = RAMVFS().commands()
+    cmds = mount_commands(RAMVFS())
     for cmd in cmds:
         assert cmd.vfs == "ram"

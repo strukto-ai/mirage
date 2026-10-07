@@ -1,23 +1,33 @@
-from dataclasses import replace
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
 from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage import (
-    BaseVFS,
-    DriverOps,
-    ReadFixture,
-    check_driver_contract,
-    check_read_contract,
-)
 from mirage.accessor.ram import RAMAccessor
-from mirage.commands.builtin.ram.io import IO
-from mirage.ops.registry import op
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.ram.read import read as ram_read
+from mirage.core.ram.readdir import readdir as ram_readdir
+from mirage.core.ram.stat import stat as ram_stat
+from mirage.core.ram.write import write as ram_write
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.vfs.adapter import VFSAdapter
+from mirage.utils.ranges import slice_window
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram.ram import RAMVFS
 from mirage.vfs.ram.store import RAMStore
-from mirage.vfs.types import ReadOps
+from mirage.vfs.testing import ReadFixture, check_read_contract
 
 FILE = PathSpec(virtual="/data/a.txt", directory="/data", vfs_path="a.txt")
 DIRECTORY = PathSpec(virtual="/data", directory="/", vfs_path="")
@@ -28,133 +38,95 @@ CONTENT = "é: hello\n".encode()
 FIXTURE = ReadFixture(FILE, DIRECTORY, MISSING, CONTENT)
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("native", [False, True])
-async def test_builtin_and_minimal_adapter_share_the_contract(native):
-    accessor = RAMAccessor(RAMStore())
-    await IO.write(accessor, FILE, CONTENT)
-    adapter = (
-        IO
-        if native
-        else VFSAdapter(
-            read=ReadOps(
-                readdir=IO.readdir, read_bytes=IO.read_bytes, stat=IO.stat
-            )
-        )
-    )
-    await check_read_contract(adapter, accessor, FIXTURE)
+class Minimal(BaseVFS):
+    """The three required reads over a RAM store, whole reads sliced."""
+
+    name = "custom"
+
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await ram_readdir(self.accessor, path, index)
+
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        data = await ram_read(self.accessor, path, index)
+        return slice_window(data, offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await ram_stat(self.accessor, path, index)
+
+
+class EndForSize(Minimal):
+    reads_ranges = True
+
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        data = await ram_read(self.accessor, path, index)
+        return data[offset:size]
+
+
+class LenientStat(Minimal):
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        if path.vfs_path == MISSING.vfs_path:
+            return FileStat(name="missing", type=FileType.FILE, size=0)
+        return await super().stat(path, index)
+
+
+async def _seeded(cls: type[BaseVFS], content: bytes) -> BaseVFS:
+    store = RAMStore()
+    accessor = RAMAccessor(store)
+    await ram_write(accessor, FILE, content)
+    return cls(accessor=accessor)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("content", [b"", b"a", b"ab", CONTENT])
-async def test_contract_only_probes_valid_native_ranges(content):
-    accessor = RAMAccessor(RAMStore())
-    await IO.write(accessor, FILE, content)
-    calls = []
-
-    async def strict_range(a, p, i, offset, size):
-        if size == 0 or offset >= len(content):
-            raise ValueError("unsatisfiable native range")
-        calls.append((offset, size))
-        return content[offset : None if size is None else offset + size]
-
+async def test_a_minimal_vfs_meets_the_contract(content):
+    vfs = await _seeded(Minimal, content)
     await check_read_contract(
-        replace(IO, read_range=strict_range),
-        accessor,
-        replace(FIXTURE, content=content),
-    )
-    assert len(calls) == (2 if content else 0)
-    if content:
-        assert calls[0][1] is not None
-        assert calls[1][1] is None
-
-
-@pytest.mark.asyncio
-async def test_contract_catches_ranges_using_end_instead_of_size():
-    accessor = RAMAccessor(RAMStore())
-    await IO.write(accessor, FILE, CONTENT)
-
-    async def broken_range(a, p, i, offset, size):
-        return CONTENT[offset:size]
-
-    with pytest.raises(AssertionError, match="offset and byte count"):
-        await check_read_contract(
-            replace(IO, read_range=broken_range), accessor, FIXTURE
-        )
-
-
-@pytest.mark.asyncio
-async def test_contract_propagates_permission_failure():
-    accessor = RAMAccessor(RAMStore())
-    read = AsyncMock(side_effect=PermissionError("denied"))
-    with pytest.raises(PermissionError, match="denied"):
-        await check_read_contract(
-            replace(IO, read_bytes=read), accessor, FIXTURE
-        )
-
-
-def _custom(store: RAMStore, ops: list | None = None) -> BaseVFS:
-    return BaseVFS(
-        name="custom",
-        accessor=RAMAccessor(store),
-        io=VFSAdapter(
-            read=ReadOps(
-                readdir=IO.readdir, read_bytes=IO.read_bytes, stat=IO.stat
-            )
-        ),
-        ops=ops,
+        vfs, FIXTURE.__class__(FILE, DIRECTORY, MISSING, content)
     )
 
 
 @pytest.mark.asyncio
-async def test_a_builtin_driver_meets_the_driver_contract():
+async def test_a_builtin_meets_the_contract():
     ram = RAMVFS()
-    await DriverOps(ram).write(FILE, CONTENT)
-    await check_driver_contract(ram, FIXTURE)
+    await ram_write(ram.accessor, FILE, CONTENT)
+    await check_read_contract(ram, FIXTURE)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("content", [b"", b"a", CONTENT])
-async def test_a_table_built_driver_meets_the_driver_contract(content):
-    store = RAMStore()
-    await IO.write(RAMAccessor(store), FILE, content)
-    await check_driver_contract(
-        _custom(store), replace(FIXTURE, content=content)
-    )
-
-
-@pytest.mark.asyncio
-async def test_driver_contract_catches_a_read_that_ignores_the_window():
-    @op("read", vfs="custom")
-    async def whole_read(accessor, path, **kwargs):
-        return CONTENT
-
-    store = RAMStore()
-    await IO.write(RAMAccessor(store), FILE, CONTENT)
+async def test_the_contract_catches_ranges_using_end_instead_of_size():
+    vfs = await _seeded(EndForSize, CONTENT)
     with pytest.raises(AssertionError, match="offset and byte count"):
-        await check_driver_contract(_custom(store, [whole_read]), FIXTURE)
+        await check_read_contract(vfs, FIXTURE)
 
 
 @pytest.mark.asyncio
-async def test_driver_contract_catches_a_stat_that_answers_for_a_missing_path():
-    @op("stat", vfs="custom")
-    async def lenient_stat(accessor, path, *, index=None, **kwargs):
-        if path.vfs_path == MISSING.vfs_path:
-            return FileStat(name="missing", type=FileType.FILE, size=0)
-        return await IO.stat(accessor, path, index)
-
-    store = RAMStore()
-    await IO.write(RAMAccessor(store), FILE, CONTENT)
+async def test_the_contract_catches_a_stat_that_answers_for_a_missing_path():
+    vfs = await _seeded(LenientStat, CONTENT)
     with pytest.raises(AssertionError, match="must raise FileNotFoundError"):
-        await check_driver_contract(_custom(store, [lenient_stat]), FIXTURE)
+        await check_read_contract(vfs, FIXTURE)
 
 
 @pytest.mark.asyncio
-async def test_driver_ops_calls_a_driver_without_a_workspace():
-    table = DriverOps(RAMVFS())
-    await table.write(FILE, b"payload")
-    assert await table.read(FILE) == b"payload"
-    assert await table.read(FILE, offset=1, size=3) == b"ayl"
-    assert table.has("glob")
-    with pytest.raises(KeyError, match="no op registered"):
-        table.op("search")
+async def test_the_contract_propagates_a_permission_failure():
+    vfs = await _seeded(Minimal, CONTENT)
+    vfs.read = AsyncMock(side_effect=PermissionError("denied"))  # type: ignore[method-assign]
+    with pytest.raises(PermissionError, match="denied"):
+        await check_read_contract(vfs, FIXTURE)

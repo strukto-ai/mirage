@@ -22,7 +22,9 @@ from mirage.commands.builtin.mongodb.rg import rg
 from mirage.commands.config import CommandOpts
 from mirage.io.types import IOResult
 from mirage.types import PathSpec
+from mirage.vfs.mongodb import MongoDBVFS
 from mirage.vfs.mongodb.config import MongoDBConfig
+from tests.fixtures.vfs_io import io_for
 
 GENERICS = "mirage.commands.builtin.generic_bind.search._GENERICS"
 RESOLVE = "mirage.commands.builtin.generic_bind.adapter.make_resolve_glob"
@@ -78,7 +80,10 @@ async def test_rg_unresolved_glob_skips_pushdown(accessor):
         patch.dict(GENERICS, {"rg": fake_generic}),
     ):
         await rg(
-            accessor, [_glob_path()], ["target"], CommandOpts(index=NULL_INDEX)
+            accessor,
+            [_glob_path()],
+            ["target"],
+            CommandOpts(io=io_for(MongoDBVFS, accessor), index=NULL_INDEX),
         )
 
     assert seen["generic"] == ["/db1/collections/coll1"]

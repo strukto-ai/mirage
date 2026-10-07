@@ -12,8 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.backends import mount_commands
 from mirage.types import VFSName
 from mirage.vfs.hf_models import HfModelsConfig, HfModelsVFS
+from tests.fixtures.vfs_io import served
 
 
 def test_vfs_name():
@@ -24,7 +26,7 @@ def test_vfs_name():
 
 def test_vfs_registers_ops_and_commands():
     r = HfModelsVFS(HfModelsConfig(repo_id="org/model"))
-    op_names = {o.name for o in r.ops()}
-    cmd_names = {c.name for c in r.commands()}
+    op_names = served(r)
+    cmd_names = {c.name for c in mount_commands(r)}
     assert {"read", "readdir", "stat"} <= op_names
     assert {"cat", "ls", "stat"} <= cmd_names

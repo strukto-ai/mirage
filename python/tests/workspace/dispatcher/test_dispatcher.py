@@ -14,15 +14,14 @@
 
 import asyncio
 import errno
-from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import FsCondition, posix_errno
 from mirage.errors.types import ReadOnlyError
-from mirage.ops.registry import op as register_op
 from mirage.policy import (
     Action,
     CommandRule,
@@ -51,6 +50,7 @@ from mirage.workspace.dispatcher.constants import POLICY_WRITE_OPS
 from mirage.workspace.dispatcher.dispatcher import _MountChannel
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.session import SessionState
+from tests.fixtures.vfs_io import override, render
 
 
 class DenyLocked(Policy):
@@ -99,7 +99,8 @@ def _dispatcher(policies: Policies) -> tuple[Dispatcher, MagicMock]:
     mount.retiring = False
     mount.ensure_ready = AsyncMock()
     mount.vfs.caches_reads = True
-    mount.has_filetype_op = MagicMock(return_value=False)
+    mount.renders = MagicMock(return_value=False)
+    mount.writes = MagicMock(return_value=False)
     mount.execute_op = AsyncMock(return_value=b"cold")
     namespace.try_mount_for = MagicMock(return_value=mount)
     namespace.registry.policies = policies
@@ -1165,7 +1166,6 @@ def _counted_workspace(
     fetched: list[str] = []
     ws = Workspace({"/data/": _CachingRAM()}, mode=MountMode.WRITE)
 
-    @register_op("read", vfs="ram", filetype=filetype)
     async def counted(accessor, path: PathSpec, **kwargs) -> bytes:
         fetched.append(path.virtual)
         if race and len(fetched) == 1:
@@ -1174,7 +1174,12 @@ def _counted_workspace(
             b"BODY", kwargs.get("offset", 0), kwargs.get("size")
         )
 
-    ws.mount("/data/").register_fns([counted])
+    vfs = ws.mount("/data/").vfs
+    if filetype is None:
+        vfs.reads_ranges = False
+        override(vfs, "read", counted)
+    else:
+        render(vfs, filetype, counted)
     return ws, fetched
 
 
@@ -1240,18 +1245,16 @@ async def test_a_ranged_render_reaches_the_renderer_as_its_range():
     ws, _ = _counted_workspace()
     windows: list[tuple[int | None, int | None]] = []
 
-    @register_op("read", vfs="ram", filetype=".count")
     async def windowed(accessor, path: PathSpec, **kwargs) -> bytes:
         windows.append((kwargs.get("offset"), kwargs.get("size")))
         return b"RE"
 
-    ws.mount("/data/").register_fns([windowed])
+    render(ws.mount("/data/").vfs, ".count", windowed)
     await ws.vfs.write("/data/f.count", b"STORED")
     assert await ws.vfs.read("/data/f.count", 0, 2) == b"RE"
     assert windows == [(0, 2)]
 
 
-@register_op("read", vfs="ram", filetype=".count")
 async def _render_count(accessor, path: PathSpec, **kwargs) -> bytes:
     return b"RENDER"
 
@@ -1281,8 +1284,8 @@ async def test_a_renderer_registered_after_the_probe_is_not_kept(
         return await probe(path, *args, **kwargs)
 
     async def register_after_probe():
-        if probed and not mount.has_filetype_op("read", ".count"):
-            mount.register_fns([_render_count])
+        if probed and not mount.renders(".count"):
+            render(mount.vfs, ".count", _render_count)
         await ready()
 
     ws.cache.get = probe_once
@@ -1461,19 +1464,16 @@ class _SplicingRAMVFS(RAMVFS):
     """A RAM mount that answers pwrite the way S3 and redis do: read the
     file, give the loop a turn, and write the whole file back."""
 
-    def ops(self):
-        found = {ro.name: ro.fn for ro in super().ops()}
-        read, write = found["read"], found["write"]
-
-        async def pwrite(accessor, path, data, offset, **kwargs):
-            whole = await read(accessor, path)
-            await asyncio.sleep(0)
-            await write(accessor, path, splice_window(whole, offset, data))
-
-        return [
-            replace(ro, fn=pwrite) if ro.name == "pwrite" else ro
-            for ro in super().ops()
-        ]
+    async def pwrite(
+        self,
+        path: PathSpec,
+        data: bytes,
+        offset: int,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> None:
+        whole = await self.read(path)
+        await asyncio.sleep(0)
+        await self.write(path, splice_window(whole, offset, data))
 
 
 @pytest.mark.asyncio

@@ -18,6 +18,7 @@ from mirage import MountMode, Workspace
 from mirage.commands.errors import LimitExceededError
 from mirage.types import Limit, OnExceed, PathSpec
 from mirage.vfs.ram import RAMVFS
+from tests.fixtures.vfs_io import override
 
 
 async def _read_long(accessor, scope, *args, **kwargs):
@@ -52,7 +53,7 @@ async def _dispatch_read(ws):
 async def test_vfs_read_truncates_to_max_bytes(monkeypatch):
     ws, mount = await _ws_mount()
     mount.command_limits["read"] = Limit(max_bytes=5)
-    monkeypatch.setattr(mount._ops[("read", None)], "fn", _read_long)
+    override(mount.vfs, "read", _read_long)
     assert await _dispatch_read(ws) == b"hello"
 
 
@@ -60,7 +61,7 @@ async def test_vfs_read_truncates_to_max_bytes(monkeypatch):
 async def test_vfs_read_truncates_to_max_lines(monkeypatch):
     ws, mount = await _ws_mount()
     mount.command_limits["read"] = Limit(max_lines=2)
-    monkeypatch.setattr(mount._ops[("read", None)], "fn", _read_lines)
+    override(mount.vfs, "read", _read_lines)
     assert await _dispatch_read(ws) == b"a\nb\n"
 
 
@@ -68,7 +69,7 @@ async def test_vfs_read_truncates_to_max_lines(monkeypatch):
 async def test_vfs_read_on_exceed_error_raises(monkeypatch):
     ws, mount = await _ws_mount()
     mount.command_limits["read"] = Limit(max_bytes=5, on_exceed=OnExceed.ERROR)
-    monkeypatch.setattr(mount._ops[("read", None)], "fn", _read_long)
+    override(mount.vfs, "read", _read_long)
     with pytest.raises(LimitExceededError):
         await _dispatch_read(ws)
 
@@ -77,14 +78,14 @@ async def test_vfs_read_on_exceed_error_raises(monkeypatch):
 async def test_vfs_read_within_limit_untouched(monkeypatch):
     ws, mount = await _ws_mount()
     mount.command_limits["read"] = Limit(max_bytes=100)
-    monkeypatch.setattr(mount._ops[("read", None)], "fn", _read_short)
+    override(mount.vfs, "read", _read_short)
     assert await _dispatch_read(ws) == b"hi"
 
 
 @pytest.mark.asyncio
 async def test_vfs_unconfigured_read_untouched(monkeypatch):
     ws, mount = await _ws_mount()
-    monkeypatch.setattr(mount._ops[("read", None)], "fn", _read_long)
+    override(mount.vfs, "read", _read_long)
     assert await _dispatch_read(ws) == b"hello world"
 
 

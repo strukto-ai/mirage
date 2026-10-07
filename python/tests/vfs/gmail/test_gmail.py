@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.commands.builtin.backends import mount_commands
 from mirage.types import VFSName
 from mirage.vfs.gmail.config import GmailConfig
 from mirage.vfs.gmail.gmail import GmailVFS
@@ -43,5 +44,5 @@ def test_vfs_accessor(config):
 
 def test_vfs_commands_registered(config):
     vfs = GmailVFS(config=config)
-    cmds = vfs.commands()
+    cmds = mount_commands(vfs)
     assert len(cmds) > 15

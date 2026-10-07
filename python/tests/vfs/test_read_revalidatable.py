@@ -16,7 +16,6 @@ import asyncio
 import datetime
 import functools
 import hashlib
-import importlib
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -51,20 +50,10 @@ import mirage.core.msgraph.drive as drive_ops
 import mirage.core.s3.read as s3_read
 import mirage.core.s3.stream as s3_stream
 from mirage.cache.index import IndexCacheStore, RAMIndexCacheStore
-from mirage.commands.builtin.box.io import IO as BOX_IO
-from mirage.commands.builtin.dropbox.io import IO as DROPBOX_IO
-from mirage.commands.builtin.gdocs.io import IO as GDOCS_IO
-from mirage.commands.builtin.gdrive.io import IO as GDRIVE_IO
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
-from mirage.commands.builtin.github.io import IO as GITHUB_IO
-from mirage.commands.builtin.gridfs.io import IO as GRIDFS_IO
-from mirage.commands.builtin.gsheets.io import IO as GSHEETS_IO
-from mirage.commands.builtin.gslides.io import IO as GSLIDES_IO
-from mirage.commands.builtin.hf_buckets.io import IO as HF_BUCKETS_IO
-from mirage.commands.builtin.hf_hub.io import IO as HF_IO
-from mirage.commands.builtin.onedrive.io import IO as ONEDRIVE_IO
-from mirage.commands.builtin.s3.io import IO as S3_IO
-from mirage.commands.builtin.sharepoint.io import IO as SHAREPOINT_IO
+from mirage.commands.builtin.generic_bind.adapter import (
+    CommandIO,
+    command_io,
+)
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.core.hf_hub.client import etag_value
 from mirage.io.cachable_iterator import CachableAsyncIterator
@@ -74,6 +63,7 @@ from mirage.observe.record import OpRecord
 from mirage.types import FileStat, MountMode, PathSpec, ReadPolicy, ReadSpec
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gdocs.doc_entry import make_filename as doc_filename
+from mirage.vfs.github import GitHubVFS
 from mirage.vfs.gsheets.sheet_entry import make_filename as sheet_filename
 from mirage.vfs.gslides.slide_entry import make_filename as slide_filename
 from mirage.vfs.loader import load_attr
@@ -99,6 +89,7 @@ from tests.fixtures.msgraph_api import (
     FakeGraph,
 )
 from tests.fixtures.msgraph_api import serve as serve_graph
+from tests.fixtures.vfs_io import vfs_over
 
 S3_FAMILY = (
     "s3",
@@ -144,32 +135,30 @@ HARNESSES = {
 # user's own, SharePoint one library of one site, mounted scoped so the keys
 # stay drive-relative (unscoped, `a.txt` would name a site).
 GRAPH = {
-    "onedrive": (ME, ONEDRIVE_IO),
-    "sharepoint": (DRIVE_ID, SHAREPOINT_IO),
+    "onedrive": ME,
+    "sharepoint": DRIVE_ID,
 }
 
 ALL_SHAPES = ("root", "nested", "prefixed")
 ALL_ROWS = ("bytes", "stream", "drain")
 
 # The mounts that render a Drive file through its editor API: the mime type
-# they list, the module whose `record` a read stamps through, and the door.
+# they list, the module whose `record` a read stamps through, and the file
+# name a listing gives the file.
 GAPPS = {
     "gdocs": (
         "application/vnd.google-apps.document",
         gdocs_read,
-        GDOCS_IO,
         doc_filename,
     ),
     "gsheets": (
         "application/vnd.google-apps.spreadsheet",
         gsheets_read,
-        GSHEETS_IO,
         sheet_filename,
     ),
     "gslides": (
         "application/vnd.google-apps.presentation",
         gslides_read,
-        GSLIDES_IO,
         slide_filename,
     ),
 }
@@ -237,7 +226,6 @@ class Fake:
     fetches: Callable[[], int]
     rewrite: Callable[[bytes], None]
     reach: list[str]
-    io: CommandIO
     read_mod: ModuleType
     # None when the stream is synthesized from the whole read, which then
     # records through read_mod's record; the slot it lands in is "bytes".
@@ -252,6 +240,10 @@ class Fake:
     # no index, so the unrecorded row compares two independent reads of the
     # object rather than one index entry with itself.
     stat_indexed: bool = True
+
+    @property
+    def io(self) -> CommandIO:
+        return command_io(self.vfs)
 
     def slot(self, row: str) -> str:
         return SLOTS[row] if self.stream_mod is not None else "bytes"
@@ -360,7 +352,6 @@ def _s3_fake(name: str, shape: str, data: bytes) -> Iterator[Fake]:
             fetches=lambda: session._client.calls["get_object"],
             rewrite=rewrite,
             reach=[],
-            io=S3_IO,
             read_mod=s3_read,
             stream_mod=s3_stream,
         )
@@ -410,7 +401,6 @@ def _gridfs_fake(
         fetches=lambda: len(bucket.opened),
         rewrite=rewrite,
         reach=reach,
-        io=GRIDFS_IO,
         read_mod=gridfs_read,
         stream_mod=gridfs_stream,
     )
@@ -460,7 +450,6 @@ def _hf_fake(
             fetches=lambda: hub.count("resolve"),
             rewrite=rewrite,
             reach=reach,
-            io=HF_IO,
             read_mod=hf_read,
             stream_mod=hf_stream,
         )
@@ -471,7 +460,7 @@ def _graph_fake(name: str, shape: str, data: bytes) -> Iterator[Fake]:
     key = KEYS[shape]
     prefix = PREFIX if shape == "prefixed" else None
     stored = (prefix or "") + key
-    drive, io = GRAPH[name]
+    drive = GRAPH[name]
     files = {stored: data}
     config: dict[str, str] = {"access_token": "t"}
     if name == "sharepoint":
@@ -499,7 +488,6 @@ def _graph_fake(name: str, shape: str, data: bytes) -> Iterator[Fake]:
             fetches=graph.fetches,
             rewrite=rewrite,
             reach=graph.reach,
-            io=io,
             read_mod=drive_ops,
             stream_mod=drive_ops,
         )
@@ -520,7 +508,6 @@ def _gdrive_fake(shape: str, data: bytes) -> Iterator[Fake]:
             fetches=lambda: drive.calls["download_file"],
             rewrite=lambda new: drive.add_file(key, new),
             reach=[],
-            io=GDRIVE_IO,
             read_mod=gdrive_read,
             stream_mod=None,
             index=RAMIndexCacheStore(),
@@ -530,7 +517,7 @@ def _gdrive_fake(shape: str, data: bytes) -> Iterator[Fake]:
 
 @contextmanager
 def _gapps_fake(name: str, data: bytes) -> Iterator[Fake]:
-    mime, read_mod, io, filename = GAPPS[name]
+    mime, read_mod, filename = GAPPS[name]
     drive = FakeGDrive()
     file_id = drive.add_file("a", data, mime)
     listed = drive.find_entry(file_id)
@@ -546,7 +533,6 @@ def _gapps_fake(name: str, data: bytes) -> Iterator[Fake]:
             fetches=lambda: drive.calls["render"],
             rewrite=lambda new: drive.add_file("a", new, mime),
             reach=[],
-            io=io,
             read_mod=read_mod,
             stream_mod=None,
             index=RAMIndexCacheStore(),
@@ -586,7 +572,6 @@ def _hf_buckets_fake(shape: str, data: bytes) -> Iterator[Fake]:
             fetches=lambda: hub.count("bucket_resolve"),
             rewrite=rewrite,
             reach=reach,
-            io=HF_BUCKETS_IO,
             read_mod=hf_buckets_read,
             stream_mod=hf_buckets_stream,
         )
@@ -633,7 +618,6 @@ def _github_fake(
             fetches=lambda: hub.count("blob"),
             rewrite=rewrite,
             reach=reach,
-            io=GITHUB_IO,
             read_mod=github_read,
             stream_mod=None,
             mount_index=True,
@@ -662,7 +646,6 @@ def _dropbox_fake(shape: str, data: bytes) -> Iterator[Fake]:
             fetches=lambda: dropbox.count("download"),
             rewrite=lambda new: dropbox.write(stored, new),
             reach=[],
-            io=DROPBOX_IO,
             read_mod=dropbox_read,
             stream_mod=dropbox_read,
             index=RAMIndexCacheStore(),
@@ -689,7 +672,6 @@ def _box_fake(shape: str, data: bytes) -> Iterator[Fake]:
             fetches=lambda: box.count("content"),
             rewrite=lambda new: box.write(stored, new),
             reach=[],
-            io=BOX_IO,
             read_mod=box_read,
             stream_mod=box_read,
             index=RAMIndexCacheStore(),
@@ -1243,27 +1225,16 @@ def test_a_changed_object_is_refetched(name, shape, monkeypatch):
     assert fake.reach == []
 
 
-# The command packages the aliases share: every s3 alias is wired through
-# s3's, every hf repo type through hf_hub's. Any other name keys itself, so
-# a new declarer with no package of its own fails the lookup loudly.
-IO_KEYS = {
-    **{name: "s3" for name in S3_FAMILY},
-    **{name: "hf_hub" for name in HF_FAMILY},
-}
-
-
-def _wires_write(key: str) -> bool:
-    io = importlib.import_module(f"mirage.commands.builtin.{key}.io").IO
-    return getattr(io, "write", None) is not None
+def _wires_write(name: str) -> bool:
+    vfs = load_attr(REGISTRY[name].vfs_path)
+    return vfs.write is not BaseVFS.write
 
 
 def _writable_names() -> set[str]:
     # Derived from the registry and each backend's wired write slot (the
     # CommandIO the spec generator reads), not listed: a declarer that gains
     # a write op joins the write rows.
-    return {
-        name for name in _declared() if _wires_write(IO_KEYS.get(name, name))
-    }
+    return {name for name in _declared() if _wires_write(name)}
 
 
 def _write_families() -> set[str]:
@@ -1630,10 +1601,11 @@ def test_a_synthesized_stream_is_the_read_it_records_through():
     # github's stream slot is filled from its whole read, which is why its
     # expected slot is "bytes". A native stream that forgot to record would
     # otherwise hide behind stream_mod=None.
-    stream = GITHUB_IO.read_stream
+    vfs = vfs_over(GitHubVFS, None)
+    assert not vfs.supports("read_stream")
+    stream = command_io(vfs).read_stream
     assert isinstance(stream, functools.partial)
     assert stream.func is stream_from_bytes
-    assert stream.args == (github_read.read,)
 
 
 def test_the_contract_goes_red_on_github_stamping_another_kind(monkeypatch):

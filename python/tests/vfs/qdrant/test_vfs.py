@@ -1,7 +1,9 @@
 import pytest
 
+from mirage.commands.builtin.backends import mount_commands
 from mirage.vfs.qdrant import QdrantConfig, QdrantVFS
 from mirage.vfs.registry import REGISTRY, build_vfs
+from tests.fixtures.vfs_io import served
 
 
 def _vfs(**kw) -> QdrantVFS:
@@ -18,7 +20,7 @@ def test_vfs_name_and_snapshot():
 
 def test_vfs_registers_ops():
     res = _vfs()
-    assert {"read", "readdir", "stat"} <= {o.name for o in res.ops()}
+    assert {"read", "readdir", "stat"} <= served(res)
 
 
 def test_vfs_registers_commands():
@@ -36,7 +38,7 @@ def test_vfs_registers_commands():
         "tree",
         "wc",
     }
-    assert expected <= {c.name for c in res.commands()}
+    assert expected <= {c.name for c in mount_commands(res)}
 
 
 @pytest.mark.asyncio

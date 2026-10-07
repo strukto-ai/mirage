@@ -14,11 +14,19 @@
 
 from dataclasses import replace
 
-from mirage.commands.builtin.disk.io import IO as _IO
-from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.generic_bind import (
+    CommandIO,
+    make_generic_commands,
+)
 
-# Shell traversals need partial results and per-directory errors; the shared
-# readdir/stat walker owns those. Direct VFS aggregate methods remain strict.
+
+def _walked(io: CommandIO) -> CommandIO:
+    return replace(io, find=None, du=None)
+
+
+# Shell traversals need partial results and per-directory errors; the
+# shared readdir/stat walker owns those. The VFS's own find and du remain
+# strict.
 COMMANDS = [
-    *make_generic_commands("disk", replace(_IO, find=None, du=None)),
+    *make_generic_commands("disk", table=_walked, local=True),
 ]

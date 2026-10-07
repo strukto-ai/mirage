@@ -23,6 +23,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexConfig
 from mirage.cache.index.config import Evicted
 from mirage.cache.index.factory import build_index
 from mirage.cache.manager import CacheManager
+from mirage.commands.builtin.backends import mount_commands
 from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
 from mirage.context import (
     effective_path_mode,
@@ -357,10 +358,9 @@ class MountRegistry:
         )
         if alias is not None:
             m.activity = alias.activity
-        m.register_fns(vfs.commands())
+        m.register_fns(mount_commands(vfs))
         for cmd in GENERAL_COMMANDS:
             m.register_general(cmd)
-        m.register_fns(vfs.ops())
         if self._file_cache is not None:
             self._attach_manager(m)
         self._mounts.append(m)
@@ -654,7 +654,6 @@ class MountRegistry:
                 accessor=m.vfs.accessor,
                 index=m.index_store,
                 mode=m.mode,
-                ops=m.vfs.ops(),
                 sizes_always_known=m.vfs.sizes_always_known,
             )
             for m in self._mounts

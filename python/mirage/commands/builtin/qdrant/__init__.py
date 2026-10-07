@@ -14,9 +14,8 @@
 
 from mirage.commands.builtin.generic.search import make_search
 from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.commands.builtin.qdrant.io import IO as _IO
 
 COMMANDS = [
-    *make_generic_commands("qdrant", _IO),
-    make_search("qdrant", _IO.search),
+    *make_generic_commands("qdrant"),
+    make_search("qdrant"),
 ]

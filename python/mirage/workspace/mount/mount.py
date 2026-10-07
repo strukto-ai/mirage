@@ -22,10 +22,12 @@ from contextlib import asynccontextmanager, contextmanager
 from typing import Any, Callable
 
 from mirage.cache.context import push_cache_manager
+from mirage.cache.index import NULL_INDEX
 from mirage.cache.index.config import IndexConfig
 from mirage.cache.index.factory import build_index
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.manager import CacheManager
+from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.builtin.utils.paths import dispatch_stat, link_follow
 from mirage.commands.config import CommandOpts, ExecContext, RegisteredCommand
@@ -49,6 +51,12 @@ from mirage.context import (
     set_walk_probe,
     strongest_mode_under,
 )
+from mirage.core.generic.rewrite import (
+    append_by_rewrite,
+    expect_offset,
+    pwrite_by_rewrite,
+    refuse_taken,
+)
 from mirage.errors.fs import ebusy, enotsup
 from mirage.errors.render import format_fs_error
 from mirage.io.cachable_iterator import CachableAsyncIterator
@@ -61,7 +69,6 @@ from mirage.observe.context import (
     with_mount_context,
     with_revisions,
 )
-from mirage.ops.registry import RegisteredOp
 from mirage.ops.types import StatPath
 from mirage.policy import resolve_limit
 from mirage.runtime.python.host.host_io import host_io, with_host_io
@@ -78,7 +85,10 @@ from mirage.types import (
 from mirage.utils.context_scope import ContextScope
 from mirage.utils.ids import uuid7
 from mirage.utils.key_prefix import mount_key
+from mirage.utils.ranges import is_unsatisfiable_range, slice_window
 from mirage.vfs.base import BaseVFS
+from mirage.vfs.call import call_effect
+from mirage.vfs.types import Effect
 from mirage.workspace.mount.activity import VFSActivity
 from mirage.workspace.mount.read_policy import coerce_read_policy
 
@@ -198,6 +208,89 @@ def _wrap_op_stream(result: Any, mount_id: str, activity: VFSActivity) -> Any:
     return result
 
 
+@functools.cache
+def _parameters(fn: Callable[..., Any]) -> frozenset[str] | None:
+    """The keyword names ``fn`` takes, None when it takes any.
+
+    Args:
+        fn (Callable[..., Any]): an unbound function.
+    """
+    params = inspect.signature(fn).parameters.values()
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params):
+        return None
+    return frozenset(
+        p.name
+        for p in params
+        if p.kind
+        in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+    )
+
+
+def _taken(fn: Callable[..., Any], kwargs: dict[str, Any]) -> dict[str, Any]:
+    """The keywords of ``kwargs`` that ``fn`` takes.
+
+    The op door hands every op the mount's ``index`` and whatever its
+    caller passed; a function that does not name one of them never sees
+    it, as the table's wrappers dropped what their core did not take.
+
+    Args:
+        fn (Callable[..., Any]): the function about to run.
+        kwargs (dict[str, Any]): the op's keywords.
+    """
+    target = fn.func if isinstance(fn, functools.partial) else fn
+    names = _parameters(getattr(target, "__func__", target))
+    if names is None:
+        return kwargs
+    return {k: v for k, v in kwargs.items() if k in names}
+
+
+async def _read_window(
+    read: Callable[..., Awaitable[bytes]],
+    ranges: bool,
+    path: PathSpec,
+    index: IndexCacheStore = NULL_INDEX,
+    offset: int = 0,
+    size: int | None = None,
+) -> bytes:
+    """A read, honoring a byte window when one is asked for.
+
+    A VFS that reads ranges natively fetches only the window, which is
+    the whole point on an object store: one ranged GET instead of the
+    whole file. Every other read is whole and sliced, which is the only
+    meaningful behavior for content that is rendered rather than stored.
+    A zero-length read is answered here rather than sent anywhere, and a
+    window starting at or past EOF answers empty, the POSIX answer, where
+    an HTTP store refuses with 416: normalizing here keeps the op's
+    contract one thing whichever path answers it.
+
+    Args:
+        read (Callable[..., Awaitable[bytes]]): the VFS's read, or the
+            renderer for the path's filetype.
+        ranges (bool): whether ``read`` takes a window natively.
+        path (PathSpec): the file.
+        index (IndexCacheStore): the mount's index.
+        offset (int): the window's first byte.
+        size (int | None): the window's length, None through the end.
+    """
+    if size == 0:
+        return b""
+    whole = not offset and size is None
+    if ranges and not whole:
+        try:
+            return await read(path, index=index, offset=offset, size=size)
+        except Exception as exc:
+            if not is_unsatisfiable_range(exc):
+                raise
+            return b""
+    data = await read(path, index=index)
+    if whole:
+        return data
+    return slice_window(data, offset, size)
+
+
 class MountEntry:
     """A mounted VFS with command and op dispatch.
 
@@ -231,6 +324,8 @@ class MountEntry:
         self.mount_id = uuid7()
         self.prefix = prefix
         self.vfs = vfs
+        # The command tier's table, built once from the VFS's functions.
+        self.io = command_io(vfs)
         self.mode = mode
         # How this mount's cached bytes are revalidated. Read by the
         # gate (Reconciler.may_serve_cached) and by the cache write path
@@ -287,7 +382,6 @@ class MountEntry:
         # register.
         self._prefix_index: dict[str, list[int]] | None = None
         self.command_limits: dict[str, Limit] = {}
-        self._ops: dict[tuple[Any, ...], RegisteredOp] = {}
         # key: (cmd_name, target_resource_type)
 
     @asynccontextmanager
@@ -302,43 +396,39 @@ class MountEntry:
             release()
 
     def has_op(self, name: str) -> bool:
-        """Whether the op table serves ``name`` on any level of the cascade.
+        """Whether this mount answers the op ``name``.
 
         Args:
             name (str): the op name.
         """
-        return bool(self._resolve_cascade(name, None, self._ops))
+        return bool(self._calls(name, None))
 
     async def expand_glob(
         self, paths: list[PathSpec], prefix: str
     ) -> list[PathSpec]:
-        """Expand glob words through the ``glob`` op, one spec at a time.
+        """Expand glob words through the VFS's ``readdir``, one at a time.
 
-        A driver whose table carries no ``glob`` leaves every word as
-        typed. The mount stamps each word's mount-relative key before the
-        op sees it, since the key is the placement's to know, and keeps
-        the VFS retained while the walk reads metadata.
+        A VFS with no ``readdir`` leaves every word as typed. The mount
+        stamps each word's mount-relative key before the walk sees it,
+        since the key is the placement's to know, and keeps the VFS
+        retained while the walk reads metadata.
 
         Args:
             paths (list[PathSpec]): the words, pattern specs among them.
             prefix (str): the mount prefix without its trailing slash.
         """
-        levels = self._resolve_cascade("glob", None, self._ops)
-        if not levels:
+        if not self.vfs.supports("readdir"):
             return list(paths)
         async with self.use():
             if self.cache_manager is None:
-                return await self._run_glob(
-                    levels, paths, prefix, self.index_store
-                )
+                return await self._run_glob(paths, prefix, self.index_store)
             async with self.cache_manager.mutation():
                 await self.ensure_ready()
                 index = self.cache_manager.scope_index_locked(self.index_store)
-                return await self._run_glob(levels, paths, prefix, index)
+                return await self._run_glob(paths, prefix, index)
 
     async def _run_glob(
         self,
-        levels: list[RegisteredOp],
         paths: list[PathSpec],
         prefix: str,
         index: IndexCacheStore,
@@ -350,12 +440,19 @@ class MountEntry:
                 if prefix
                 else p
             )
-            for op in levels:
-                matches = await op.fn(self.vfs.accessor, spec, index=index)
-                if matches is not None:
-                    out.extend(matches)
-                    break
+            out.extend(await self._glob(spec, index))
         return out
+
+    async def _glob(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[PathSpec]:
+        """Expand one pattern through the VFS's ``readdir`` and ``stat``.
+
+        Args:
+            path (PathSpec): the pattern, keyed below the mount.
+            index (IndexCacheStore): the mount's index.
+        """
+        return await self.io.resolve_glob(self.vfs.accessor, [path], index)
 
     @property
     def index(self) -> IndexCacheStore:
@@ -515,25 +612,22 @@ class MountEntry:
         return fns
 
     def register_fns(self, fns: Iterable[Any]) -> None:
-        """Register decorated functions or command/op definitions.
+        """Register decorated functions or command definitions.
 
         Args:
-            fns (iterable): Decorated functions, RegisteredCommand values,
-                and/or RegisteredOp values.
+            fns (iterable): Decorated functions or RegisteredCommand
+                values.
 
         Raises:
-            ValueError: If a command/op's VFS doesn't match
-                this mount's VFS.
+            ValueError: If a command's VFS doesn't match this mount's VFS.
         """
         pname = self.vfs.name
         # Grouped by name, because a family table fans out over sibling
-        # VFS names: hf_buckets/hf_datasets/hf_models/hf_spaces share one
-        # `make_generic_ops(HF_VFS_NAMES, IO)` table, so most entries a
-        # mount is handed belong to a sibling and are simply skipped. A
-        # name whose entries name only other VFS is the real mistake (a
-        # table built for the wrong backend), and that still raises.
+        # VFS names, so most entries a mount is handed may belong to a
+        # sibling and are simply skipped. A name whose entries name only
+        # other VFS is the real mistake (a table built for the wrong
+        # backend), and that still raises.
         cmd_groups: dict[str, tuple[list[RegisteredCommand], set[str]]] = {}
-        op_groups: dict[str, tuple[list[RegisteredOp], set[str]]] = {}
         for fn in fns:
             rcs: list[RegisteredCommand] = (
                 [fn]
@@ -546,43 +640,21 @@ class MountEntry:
                     keep.append(rc)
                 else:
                     attempted.add(rc.vfs)
-            ros: list[RegisteredOp] = (
-                [fn]
-                if isinstance(fn, RegisteredOp)
-                else getattr(fn, "_registered_ops", [])
-            )
-            for ro in ros:
-                keep_op, attempted_op = op_groups.setdefault(
-                    ro.name, ([], set())
-                )
-                if ro.vfs is None or ro.vfs == pname:
-                    keep_op.append(ro)
-                else:
-                    attempted_op.add(ro.vfs)
         for name, (keep, attempted) in cmd_groups.items():
             if not keep:
                 raise ValueError(
                     f"command {name!r} is for VFS(s) "
                     f"{sorted(attempted)!r}, not {pname!r}"
                 )
-        for name, (keep_op, attempted_op) in op_groups.items():
-            if not keep_op:
-                raise ValueError(
-                    f"op {name!r} is for VFS(s) "
-                    f"{sorted(attempted_op)!r}, not {pname!r}"
-                )
         for keep, _attempted in cmd_groups.values():
             for rc in keep:
                 self.register(rc)
-        for keep_op, _attempted_op in op_groups.values():
-            for ro in keep_op:
-                self.register_op(ro)
 
     def unregister(self, names: list[str]) -> None:
-        """Remove all commands and ops with the given names.
+        """Remove all commands with the given names.
 
         Args:
-            names (list[str]): Command/op names to remove.
+            names (list[str]): Command names to remove.
         """
         for name in names:
             keys = [k for k in self._cmds if k[0] == name]
@@ -590,9 +662,6 @@ class MountEntry:
                 del self._cmds[k]
             self._general_cmds.pop(name, None)
             self._cmd_specs.pop(name, None)
-            op_keys = [k for k in self._ops if k[0] == name]
-            for k in op_keys:
-                del self._ops[k]
 
     def commands(self) -> dict[str, list[str | None]]:
         """List registered commands grouped by filetype variants.
@@ -611,36 +680,23 @@ class MountEntry:
             )
         return dict(sorted(result.items()))
 
-    def registered_ops(self) -> dict[str, list[str | None]]:
-        """List registered ops grouped by filetype variants.
-
-        Returns:
-            dict[str, list[str | None]]: Op name to filetype list.
-        """
-        result: dict[str, list[str | None]] = {}
-        for name, filetype in self._ops:
-            result.setdefault(name, []).append(filetype)
-        for name in result:
-            result[name] = sorted(
-                result[name], key=lambda x: (x is not None, x or "")
-            )
-        return dict(sorted(result.items()))
-
-    # ── op registration ───────────────────────────────
-
-    def register_op(self, op: RegisteredOp) -> None:
-        """Register a VFS-specific VFS op."""
-        key = (op.name, op.filetype)
-        self._ops[key] = op
-
-    def has_filetype_op(self, name: str, filetype: str) -> bool:
-        """Whether an op named ``name`` is registered for ``filetype``.
+    def writes(self, op_name: str) -> bool:
+        """Whether the VFS declares the function ``op_name`` a write.
 
         Args:
-            name (str): the op name.
-            filetype (str): the extension the op is scoped to.
+            op_name (str): the op name.
         """
-        return (name, filetype) in self._ops
+        return call_effect(type(self.vfs), op_name) is Effect.WRITE
+
+    def renders(self, filetype: str | None) -> bool:
+        """Whether the VFS renders a read of ``filetype``.
+
+        A rendered read is never served from or kept in the file cache.
+
+        Args:
+            filetype (str | None): the extension.
+        """
+        return filetype is not None and filetype in self.vfs.renderers
 
     def _resolve_cascade(
         self,
@@ -670,15 +726,13 @@ class MountEntry:
     def reads_ranges(self, path: str) -> bool:
         """Whether a ranged read of `path` fetches only that range.
 
-        False where the read op that answers it reads the whole file and
-        slices: a backend with no native range, or a filetype-scoped
-        render.
+        False where the read that answers it reads the whole file and
+        slices: a VFS with no native range, or a rendered filetype.
 
         Args:
             path (str): virtual path.
         """
-        levels = self._resolve_cascade("read", get_extension(path), self._ops)
-        return bool(levels) and levels[0].ranges
+        return self.vfs.reads_ranges and not self.renders(get_extension(path))
 
     # ── execution ─────────────────────────────────────
 
@@ -880,6 +934,7 @@ class MountEntry:
                 else None
             ),
             index=self.index,
+            io=self.io,
             dispatch=context.dispatch,
             session_id=context.session_id,
             env=context.env,
@@ -1057,8 +1112,104 @@ class MountEntry:
             op_name (str): operation name (e.g. "setattr").
             path (str): virtual path (drives filetype-specific lookup).
         """
-        filetype = get_extension(path)
-        return bool(self._resolve_cascade(op_name, filetype, self._ops))
+        return bool(self._calls(op_name, get_extension(path)))
+
+    def _calls(
+        self, op_name: str, filetype: str | None
+    ) -> list[Callable[..., Any]]:
+        """What answers ``op_name`` on this mount, in the order to try.
+
+        A rendered filetype's renderer answers a read before ``read``
+        does, window and all, and the first answer that is not None wins.
+        The rest is the op door's own shape around the VFS's functions: a
+        read takes a window, ``append`` and ``pwrite`` are a rewrite where
+        the VFS only writes whole files, ``mkdir`` refuses a taken name
+        first, and ``glob`` walks ``readdir``. Only a function marked
+        ``@vfs_call`` is reachable by name.
+
+        Args:
+            op_name (str): the op name.
+            filetype (str | None): the extension the read resolves by.
+        """
+        vfs = self.vfs
+        if op_name == "read":
+            levels: list[Callable[..., Any]] = []
+            renderer = (
+                vfs.renderers.get(filetype) if filetype is not None else None
+            )
+            if renderer is not None:
+                levels.append(
+                    functools.partial(
+                        _read_window, getattr(vfs, renderer), True
+                    )
+                )
+            if vfs.supports("read"):
+                levels.append(
+                    functools.partial(_read_window, vfs.read, vfs.reads_ranges)
+                )
+            return levels
+        if op_name == "glob":
+            return [self._glob] if vfs.supports("readdir") else []
+        if op_name in ("append", "pwrite") and not vfs.supports(op_name):
+            return (
+                [getattr(self, f"_{op_name}_by_rewrite")]
+                if vfs.supports("write")
+                else []
+            )
+        if op_name == "pwrite":
+            return [self._pwrite]
+        if op_name == "mkdir" and vfs.supports("mkdir"):
+            return [self._mkdir]
+        if call_effect(type(vfs), op_name) is None or not vfs.supports(
+            op_name
+        ):
+            return []
+        return [getattr(vfs, op_name)]
+
+    async def _append_by_rewrite(
+        self,
+        path: PathSpec,
+        data: bytes,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> None:
+        await append_by_rewrite(
+            functools.partial(self.vfs.read, index=index),
+            self.vfs.write,
+            functools.partial(self.vfs.stat, index=index),
+            path,
+            data,
+        )
+
+    async def _pwrite_by_rewrite(
+        self,
+        path: PathSpec,
+        data: bytes,
+        offset: int,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> None:
+        await pwrite_by_rewrite(
+            functools.partial(self.vfs.read, index=index),
+            self.vfs.write,
+            functools.partial(self.vfs.stat, index=index),
+            path,
+            data,
+            expect_offset(offset, path),
+        )
+
+    async def _pwrite(
+        self,
+        path: PathSpec,
+        data: bytes,
+        offset: int,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> None:
+        await self.vfs.pwrite(
+            path, data, expect_offset(offset, path), index=index
+        )
+
+    async def _mkdir(self, path: PathSpec, parents: bool = False) -> None:
+        await refuse_taken(self.vfs.stat, path, parents)
+        await self.vfs.mkdir(path, parents=parents)
 
     async def execute_op(
         self,
@@ -1067,17 +1218,18 @@ class MountEntry:
         *args,
         **kwargs,
     ) -> Any:
-        """Execute a VFS op on this mount's VFS.
+        """Run an op on this mount's VFS.
 
-        Tries filetype-specific first, then VFS-specific.
-        First non-None result wins.
+        Tries a rendered filetype's renderer first for a read, then the
+        VFS's own function; the first answer that is not None wins. Each
+        function is handed the keywords it takes, ``index`` among them.
 
         A caller may override the filetype by passing one, and passing
-        None asks for the by-VFS op even where a filetype-scoped
-        one is registered. That is what a read-modify-write needs: it
-        hands whatever it read straight back to ``write``, which always
-        stores, so reading a rendered form would store the rendering
-        over the file. TypeScript spells the same override
+        None asks for the stored bytes even where the VFS renders the
+        filetype. That is what a read-modify-write needs: it hands
+        whatever it read straight back to ``write``, which always stores,
+        so reading a rendered form would store the rendering over the
+        file. TypeScript spells the same override
         ``readFile(path, {raw: true})``.
 
         Args:
@@ -1090,11 +1242,11 @@ class MountEntry:
                 if "filetype" in kwargs
                 else get_extension(path)
             )
-            levels = self._resolve_cascade(op_name, filetype, self._ops)
+            levels = self._calls(op_name, filetype)
             if not levels:
                 raise enotsup(str(self.vfs.name), op_name, path)
 
-            if any(o.write for o in levels):
+            if call_effect(type(self.vfs), op_name) is Effect.WRITE:
                 dst = kwargs.get("dst")
                 endpoints = [PathSpec.from_str_path(path)]
                 if isinstance(dst, PathSpec):
@@ -1124,16 +1276,14 @@ class MountEntry:
             recording_token = push_mount_context(self.mount_id)
             revs_token = push_revisions(self.revisions or None)
             try:
-                for op in levels:
+                for fn in levels:
                     # The backend's own paths are host paths, so the process
                     # patch (runtime/python/host/fs.py and open.py) must not answer
                     # them: a disk mount rooted at its own virtual prefix
                     # spells the two the same, and routing the physical one
                     # hands the op back to the backend serving it.
                     with host_io():
-                        result = op.fn(
-                            self.vfs.accessor, scope, *args, **kwargs
-                        )
+                        result = fn(scope, *args, **_taken(fn, kwargs))
                         if inspect.isawaitable(result):
                             result = await run_with_timeout(
                                 result, op_timeout, op_name

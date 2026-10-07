@@ -19,6 +19,8 @@ from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.du import du_generic
 from mirage.commands.builtin.generic_bind.adapter import (
+    CommandIO,
+    mount_io,
     with_command_guards,
     with_policy_guard,
 )
@@ -27,9 +29,10 @@ from mirage.commands.builtin.generic_bind.builders.du import (
     walk_entries,
     walk_size,
 )
-from mirage.commands.builtin.github.io import IO, resolve_glob
+from mirage.commands.builtin.github.pushdown import resolve_glob
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
+from mirage.core.github.stat import stat
 from mirage.core.github.tree import ensure_tree
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.namespace_view import paths_scoped
@@ -86,7 +89,7 @@ async def _stat(
     path: PathSpec,
 ):
     await live()
-    return await IO.stat(accessor, path, index)
+    return await stat(accessor, path, index)
 
 
 def _walked(
@@ -104,6 +107,7 @@ def _walked(
 
 
 async def _live_size(
+    io: CommandIO,
     live: Callable[[], Awaitable[None]],
     accessor: GitHubAccessor,
     index: IndexCacheStore,
@@ -118,7 +122,7 @@ async def _live_size(
     # what the session cannot see and never report a refused directory.
     if _walked(accessor, ns, path):
         return await walk_size(
-            with_command_guards(with_policy_guard(IO)),
+            with_command_guards(with_policy_guard(io)),
             accessor,
             index,
             budget,
@@ -129,6 +133,7 @@ async def _live_size(
 
 
 async def _live_entries(
+    io: CommandIO,
     live: Callable[[], Awaitable[None]],
     accessor: GitHubAccessor,
     index: IndexCacheStore,
@@ -139,7 +144,7 @@ async def _live_entries(
     await live()
     if _walked(accessor, ns, path):
         return await walk_entries(
-            with_command_guards(with_policy_guard(IO)),
+            with_command_guards(with_policy_guard(io)),
             accessor,
             index,
             budget,
@@ -159,7 +164,8 @@ async def du(
     opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
     checked = False
-    budget = WalkBudget(IO.max_du_entries)
+    io = mount_io(opts)
+    budget = WalkBudget(io.max_du_entries)
 
     # `_subtree` reads accessor.tree rather than the index, so the first
     # callback brings the tree live, after du has validated its flags: an
@@ -177,8 +183,10 @@ async def du(
         opts,
         partial(_resolve, live, accessor, opts.index),
         partial(_stat, live, accessor, opts.index),
-        partial(_live_size, live, accessor, opts.index, budget, opts.ns),
-        partial(_live_entries, live, accessor, opts.index, budget, opts.ns),
+        partial(_live_size, io, live, accessor, opts.index, budget, opts.ns),
+        partial(
+            _live_entries, io, live, accessor, opts.index, budget, opts.ns
+        ),
         truncated=lambda: budget.hit,
         unreadable=lambda: budget.unreadable,
         directories=lambda: budget.directories,

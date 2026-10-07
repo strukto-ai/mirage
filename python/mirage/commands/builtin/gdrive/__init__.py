@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.gdrive.io import IO as _IO
 from mirage.commands.builtin.generic_bind import make_generic_commands
 
 _GDRIVE_OVERRIDES: set[str] = set()
@@ -23,7 +22,6 @@ _GDRIVE_OVERRIDES: set[str] = set()
 COMMANDS = [
     *make_generic_commands(
         "gdrive",
-        _IO,
         overrides=_GDRIVE_OVERRIDES,
     ),
 ]

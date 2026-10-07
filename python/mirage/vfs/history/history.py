@@ -12,11 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.accessor.history import HistoryAccessor
-from mirage.commands.builtin.history import COMMANDS
-from mirage.commands.config import RegisteredCommand, registered_commands
-from mirage.ops.history import OPS
-from mirage.ops.registry import RegisteredOp
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.history.find import find
+from mirage.core.history.read import read as _read
+from mirage.core.history.readdir import readdir as _readdir
+from mirage.core.history.stat import stat as _stat
+from mirage.types import FileStat, PathSpec
+from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 
 HISTORY_PREFIX = "/.bash_history"
@@ -44,8 +49,33 @@ class HistoryViewVFS(BaseVFS):
         self.observer = observer
         self.accessor = HistoryAccessor(observer)
 
-    def ops(self) -> list[RegisteredOp]:
-        return OPS
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await _readdir(self.accessor, path, index)
 
-    def commands(self) -> list[RegisteredCommand]:
-        return registered_commands(COMMANDS)
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        data = await _read(self.accessor, path, index)
+        return slice_window(data, offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await _stat(self.accessor, path, index)
+
+    async def find(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        **predicates: Any,
+    ) -> list[str]:
+        return await find(self.accessor, path, **predicates)
+
+    def get_state(self) -> dict[str, Any]:
+        return {"type": self.name}

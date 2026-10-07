@@ -20,7 +20,11 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cp import walk
 from mirage.commands.builtin.generic.rm_cmd import rm_without_operands
-from mirage.commands.builtin.generic_bind.adapter import CommandIO, Operation
+from mirage.commands.builtin.generic_bind.adapter import (
+    CommandIO,
+    Operation,
+    over_mount_io,
+)
 from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.builtin.utils.slash_links import (
     is_slashed_link,
@@ -36,12 +40,11 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 
 
-def make_rm(vfs: str, io: CommandIO) -> Callable[..., Any]:
-    """Build the no-real-directories rm override for one keyed store.
+def _build(io: CommandIO) -> Callable[..., Any]:
+    """The rm handler over one mount's table.
 
     Args:
-        vfs (str): VFS name the command registers under.
-        io (CommandIO): the backend's op table; must wire rm_r.
+        io (CommandIO): the guarded table of the running mount.
     """
     stat = io.stat
     readdir = io.readdir
@@ -183,7 +186,19 @@ def make_rm(vfs: str, io: CommandIO) -> Callable[..., Any]:
             writes=removed, stderr=stderr, exit_code=1 if errors else 0
         )
 
+    return rm
+
+
+def make_rm(
+    vfs: str, wrap: Callable[[CommandIO], CommandIO]
+) -> Callable[..., Any]:
+    """Build the no-real-directories rm override for one keyed store.
+
+    Args:
+        vfs (str): VFS name the command registers under.
+        wrap (Callable): the guards over the mount's table.
+    """
     wrapped: Callable[..., Any] = command(
         "rm", vfs=vfs, spec=SPECS["rm"], write=True, path_guarded=True
-    )(rm)
+    )(over_mount_io(_build, wrap))
     return wrapped

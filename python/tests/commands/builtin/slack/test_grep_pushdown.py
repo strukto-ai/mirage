@@ -25,6 +25,8 @@ from mirage.core.slack.config import SlackConfig
 from mirage.core.time_range import TimeRange
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.slack import SlackVFS
+from tests.fixtures.vfs_io import io_for
 
 
 @pytest.mark.asyncio
@@ -65,7 +67,9 @@ async def test_grep_on_a_time_scoped_mount_skips_native_search():
             accessor,
             channel,
             ["hello"],
-            CommandOpts(index=index, flags={"w": True}),
+            CommandOpts(
+                io=io_for(SlackVFS, accessor), index=index, flags={"w": True}
+            ),
         )
     fake_search.assert_not_awaited()
     assert io.exit_code == 2

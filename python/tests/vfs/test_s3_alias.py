@@ -15,6 +15,7 @@
 import pytest
 from pydantic import SecretStr
 
+from mirage.commands.builtin.backends import mount_commands
 from mirage.vfs.aliyun.config import AliyunConfig
 from mirage.vfs.backblaze.config import BackblazeConfig
 from mirage.vfs.ceph.config import CephConfig
@@ -31,6 +32,7 @@ from mirage.vfs.seaweedfs.config import SeaweedFSConfig
 from mirage.vfs.supabase.config import SupabaseConfig
 from mirage.vfs.tencent.config import TencentConfig
 from mirage.vfs.wasabi.config import WasabiConfig
+from tests.fixtures.vfs_io import served
 
 # Mirrors typescript/packages/node/src/vfs/s3_aliases.test.ts. Every
 # provider is a thin wrapper over S3Config, so what needs pinning is the
@@ -283,9 +285,8 @@ def test_an_alias_carries_its_own_name(name):
     vfs = build_vfs(name, ALIASES[name])
     assert vfs.name == name
     assert isinstance(vfs.config, S3Config)
-    assert vfs.ops()
-    assert {ro.vfs for ro in vfs.ops()} == {name}
-    assert {rc.vfs for rc in vfs.commands()} == {name}
+    assert {"read", "readdir", "stat", "write"} <= served(vfs)
+    assert {rc.vfs for rc in mount_commands(vfs)} == {name}
     assert vfs.storage_location() == f"s3:{vfs.config.endpoint_url}:b"
     state = vfs.get_state()
     assert state["type"] == name

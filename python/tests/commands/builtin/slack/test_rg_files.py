@@ -22,21 +22,25 @@ import pytest
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.commands.builtin.slack.grep import grep
-from mirage.commands.builtin.slack.io import IO as SLACK_IO
 from mirage.commands.builtin.slack.rg import rg
 from mirage.commands.config import CommandOpts
 from mirage.core.slack.config import SlackConfig
+from mirage.core.slack.read import read as core_read
+from mirage.core.slack.readdir import readdir as core_readdir
+from mirage.core.slack.stat import stat as core_stat
 from mirage.io.stream import materialize
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.slack import SlackVFS
+from tests.fixtures.vfs_io import io_for
 
 
 def _io(**slots: Callable[..., Any]) -> SimpleNamespace:
     """The command's IO with the given slots faked; the rest stay real."""
     real = {
-        "readdir": SLACK_IO.readdir,
-        "stat": SLACK_IO.stat,
-        "read_bytes": SLACK_IO.read_bytes,
+        "readdir": core_readdir,
+        "stat": core_stat,
+        "read_bytes": core_read,
     }
     return SimpleNamespace(**{**real, **slots})
 
@@ -64,7 +68,6 @@ async def test_rg_chat_jsonl_scans_the_named_day(accessor, index):
         {
             "search_messages": mock_msgs,
             "search_files": mock_files,
-            "IO": _io(resolve_glob=AsyncMock(return_value=[])),
             "rg_generic": mock_generic,
         },
     ):
@@ -80,7 +83,11 @@ async def test_rg_chat_jsonl_scans_the_named_day(accessor, index):
                 )
             ],
             ["foo"],
-            CommandOpts(index=index, flags={"word_regexp": True}),
+            CommandOpts(
+                io=_io(resolve_glob=AsyncMock(return_value=[])),
+                index=index,
+                flags={"word_regexp": True},
+            ),
         )
     assert mock_msgs.await_count == 0
     assert mock_files.await_count == 0
@@ -112,7 +119,11 @@ async def test_rg_files_dir_redirects_to_generic_scan(accessor, index):
                 )
             ],
             ["foo"],
-            CommandOpts(index=index, flags={"word_regexp": True}),
+            CommandOpts(
+                io=io_for(SlackVFS, accessor),
+                index=index,
+                flags={"word_regexp": True},
+            ),
         )
     assert mock_msgs.await_count == 0
     assert mock_files.await_count == 0
@@ -129,7 +140,6 @@ async def test_grep_chat_jsonl_scans_the_named_day(accessor, index):
         {
             "search_messages": mock_msgs,
             "search_files": mock_files,
-            "IO": _io(resolve_glob=AsyncMock(return_value=[])),
             "grep_generic": mock_generic,
         },
     ):
@@ -145,7 +155,11 @@ async def test_grep_chat_jsonl_scans_the_named_day(accessor, index):
                 )
             ],
             ["foo"],
-            CommandOpts(index=index, flags={"w": True}),
+            CommandOpts(
+                io=_io(resolve_glob=AsyncMock(return_value=[])),
+                index=index,
+                flags={"w": True},
+            ),
         )
     assert mock_msgs.await_count == 0
     assert mock_files.await_count == 0
@@ -170,17 +184,6 @@ async def test_grep_files_dir_redirects_to_per_file_scan(accessor, index):
         {
             "search_messages": mock_msgs,
             "search_files": mock_files,
-            "IO": _io(
-                resolve_glob=AsyncMock(return_value=[blob]),
-                read_bytes=mock_read,
-                stat=AsyncMock(
-                    return_value=FileStat(
-                        name="report.txt",
-                        type=FileType.FILE,
-                        content=ContentType.TEXT,
-                    )
-                ),
-            ),
         },
     ):
         out, io = await grep(
@@ -195,7 +198,21 @@ async def test_grep_files_dir_redirects_to_per_file_scan(accessor, index):
                 )
             ],
             ["foo"],
-            CommandOpts(index=index, flags={"w": True}),
+            CommandOpts(
+                io=_io(
+                    resolve_glob=AsyncMock(return_value=[blob]),
+                    read_bytes=mock_read,
+                    stat=AsyncMock(
+                        return_value=FileStat(
+                            name="report.txt",
+                            type=FileType.FILE,
+                            content=ContentType.TEXT,
+                        )
+                    ),
+                ),
+                index=index,
+                flags={"w": True},
+            ),
         )
     assert mock_msgs.await_count == 0
     assert mock_files.await_count == 0

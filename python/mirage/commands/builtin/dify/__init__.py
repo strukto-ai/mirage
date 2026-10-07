@@ -14,20 +14,26 @@
 
 from dataclasses import replace
 
-from mirage.commands.builtin.dify.io import IO as _IO
 from mirage.commands.builtin.dify.search import search
-from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.generic_bind import (
+    CommandIO,
+    make_generic_commands,
+)
 from mirage.commands.builtin.slug_tree.find import make_find, reads_times
 from mirage.core.dify.stat import stat, stat_light
 from mirage.core.dify.tree import DIFY_TREE
 
+
+def _light_ls(io: CommandIO) -> CommandIO:
+    return replace(io, stat=stat_light)
+
+
 COMMANDS = [
     *make_generic_commands(
         "dify",
-        _IO,
         overrides={"find"},
-        ops_overrides={"ls": replace(_IO, stat=stat_light)},
+        adapt={"ls": _light_ls},
     ),
-    make_find("dify", _IO, DIFY_TREE, stat, stat_light, reads_times),
+    make_find("dify", DIFY_TREE, stat, stat_light, reads_times),
     search,
 ]

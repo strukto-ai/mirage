@@ -14,9 +14,8 @@
 
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.builtin.aggregators import prefix_aggregate
-from mirage.commands.builtin.email.io import IO
 from mirage.commands.builtin.generic.grep import grep_generic
-from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.builtin.generic_bind.adapter import bound_op, mount_io
 from mirage.commands.builtin.generic_bind.factory import scan_io
 from mirage.commands.builtin.grep_pattern import (
     compile_pattern,
@@ -79,7 +78,7 @@ async def grep(
     # push-down waits for it too; every other reason to defer is the shared
     # gate's. A scope that names no folder falls through to the generic scan
     # rather than answering, which is what the mount root does.
-    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
+    scan, scoped = scan_io(mount_io(opts), opts.ns, opts.mount_prefix)
     operand = (
         None
         if scoped

@@ -15,7 +15,10 @@ from mirage.commands.config import CommandOpts
 from mirage.core.time_range import TimeRange
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.discord import DiscordVFS
+from mirage.vfs.slack import SlackVFS
 from mirage.vfs.types import SearchOps, SearchQuery
+from tests.fixtures.vfs_io import io_for
 
 
 def test_classify_pattern_newline_list_is_regex():
@@ -503,7 +506,13 @@ async def test_an_empty_search_answer_is_final(
             accessor,
             [spec],
             ["missing"],
-            CommandOpts(index=RAMIndexCacheStore(), flags=flags),
+            CommandOpts(
+                index=RAMIndexCacheStore(),
+                flags=flags,
+                io=io_for(
+                    SlackVFS if read == "slack_read" else DiscordVFS, accessor
+                ),
+            ),
         )
     assert next(iter(mocks.values())).await_count == 1
     assert mocks[read].await_count == 0

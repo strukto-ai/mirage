@@ -16,14 +16,16 @@ from collections.abc import Awaitable, Callable
 from functools import partial
 
 from mirage.accessor.email import EmailAccessor
-from mirage.commands.builtin.email.io import IO
 from mirage.commands.builtin.generic.find import (
     find_walk_generic,
     is_link,
     parse_find_args,
     resolve_start,
 )
-from mirage.commands.builtin.generic_bind.adapter import overlaid_stat
+from mirage.commands.builtin.generic_bind.adapter import (
+    mount_io,
+    overlaid_stat,
+)
 from mirage.commands.builtin.generic_bind.factory import scan_io
 from mirage.commands.builtin.grep_pushdown import lone_operand
 from mirage.commands.builtin.utils.output import format_records
@@ -83,7 +85,7 @@ async def find(
     path = fl.as_str("path")
     mindepth = fl.as_str("mindepth")
     empty = fl.as_bool("empty")
-    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
+    scan, scoped = scan_io(mount_io(opts), opts.ns, opts.mount_prefix)
     paths = await scan.resolve_glob(accessor, paths, opts.index)
     # A pure -name search at folder level pushes the subject query down to
     # IMAP search instead of walking every message; any other predicate

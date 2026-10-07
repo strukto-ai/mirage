@@ -24,7 +24,9 @@ from mirage.commands.builtin.github import COMMANDS
 from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
+from mirage.vfs.github import GitHubVFS
 from tests.fixtures.github_mock import MOCK_BLOBS
+from tests.fixtures.vfs_io import io_for
 
 
 @pytest.fixture(autouse=True)
@@ -62,7 +64,9 @@ async def _run(accessor, index, path, expr, **kwargs):
         accessor,
         [_scope(path)],
         [expr],
-        CommandOpts(index=index, flags={**kwargs}),
+        CommandOpts(
+            io=io_for(GitHubVFS, accessor), index=index, flags={**kwargs}
+        ),
     )
     data = await materialize(stdout) if stdout is not None else b""
     return data.decode(errors="replace"), io

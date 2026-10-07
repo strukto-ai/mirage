@@ -13,8 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from dataclasses import replace
-from functools import partial
 
 import pytest
 
@@ -22,15 +20,12 @@ from mirage import MountMode, Workspace
 from mirage.accessor.base import Accessor
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic_bind import CommandIO
-from mirage.commands.builtin.ram.io import IO as RAM_IO
-from mirage.commands.builtin.utils.wrap import stream_from_bytes
+from mirage.commands.builtin.backends import mount_commands
 from mirage.commands.cli import CLISpec
 from mirage.commands.config import command
 from mirage.commands.spec import CommandSpec, Operand
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import IOResult
-from mirage.ops.registry import RegisteredOp
 from mirage.runtime.vfs import RuntimeVFS
 from mirage.types import (
     CapacityState,
@@ -44,8 +39,10 @@ from mirage.types import (
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram.ram import RAMVFS
 from mirage.vfs.ram.store import RAMStore
+from mirage.workspace.mount import MountEntry
 from mirage.workspace.mount.read_policy import check_read_capability
 from tests.fixtures.driver_ops import ops
+from tests.fixtures.vfs_io import served
 
 PAGES = {
     "guides": {
@@ -125,29 +122,57 @@ async def wiki_hello(accessor, *texts: str, **flags: FlagValue):
     return b"hello custom verb\n", IOResult()
 
 
-async def my_read(accessor, path, *, index=None, **kwargs):
-    return b"custom"
+class WikiVFS(BaseVFS):
+    """A plug-in VFS over a dict of pages: the three required reads."""
 
+    name = "wiki"
 
-def make_io() -> CommandIO:
-    return CommandIO(
-        readdir=readdir,
-        read_bytes=read_bytes,
-        read_stream=partial(stream_from_bytes, read_bytes),
-        stat=stat,
-        is_mounted=lambda a: True,
-        local=False,
-    )
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await readdir(self.accessor, path, index)
+
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        data = await read_bytes(self.accessor, path, index)
+        return data[offset : None if size is None else offset + size]
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await stat(self.accessor, path, index)
 
 
 def make_vfs(**kwargs) -> BaseVFS:
-    return BaseVFS(
-        name="wiki", accessor=WikiAccessor(PAGES), io=make_io(), **kwargs
+    return WikiVFS(accessor=WikiAccessor(PAGES), **kwargs)
+
+
+def ram_without(store: RAMStore, *names: str, name: str = "custom") -> RAMVFS:
+    """A RAM VFS over ``store`` that does not define ``names``.
+
+    Args:
+        store (RAMStore): the store to serve.
+        *names (str): the functions to leave undefined.
+        name (str): the VFS name.
+    """
+    cls = type(
+        "Custom",
+        (RAMVFS,),
+        {"name": name, **{n: getattr(BaseVFS, n) for n in names}},
     )
+    vfs = cls()
+    vfs._store = store
+    vfs.accessor = RAMAccessor(store)
+    return vfs
 
 
 def command_names(vfs: BaseVFS) -> set[str]:
-    return {rc.name for rc in vfs.commands()}
+    return {rc.name for rc in mount_commands(vfs)}
 
 
 class Marker:
@@ -169,9 +194,9 @@ def test_missing_accessor_attribute_raises():
         Accessor().missing_operation
 
 
-def test_base_serves_no_tables():
+def test_base_serves_nothing():
     vfs = BaseVFS()
-    assert vfs.ops() == []
+    assert served(vfs) == set()
     assert vfs.commands() == []
 
 
@@ -181,10 +206,9 @@ def test_a_driver_that_brings_no_accessor_runs_over_the_default():
     assert isinstance(BaseVFS().accessor, Accessor)
 
 
-def test_a_table_built_driver_keeps_the_accessor_it_was_handed():
+def test_a_driver_keeps_the_accessor_it_was_handed():
     accessor = WikiAccessor(PAGES)
-    vfs = BaseVFS(name="wiki", accessor=accessor, io=make_io())
-    assert vfs.accessor is accessor
+    assert WikiVFS(accessor=accessor).accessor is accessor
 
 
 def test_base_has_no_storage_location():
@@ -201,9 +225,9 @@ def test_base_has_no_delta_hook():
     assert BaseVFS().delta_hook() is None
 
 
-def test_base_state_is_the_type():
+def test_base_state_asks_to_be_handed_back():
     vfs = BaseVFS()
-    assert vfs.get_state() == {"type": "base"}
+    assert vfs.get_state() == {"type": "base", "needs_override": True}
     vfs.load_state({"type": "base"})
 
 
@@ -246,27 +270,10 @@ def test_extra_commands_registered():
 
 def test_requires_name():
     with pytest.raises(ValueError):
-        BaseVFS(name="", accessor=WikiAccessor(PAGES), io=make_io())
+        WikiVFS(name="", accessor=WikiAccessor(PAGES))
 
 
-def test_a_table_built_driver_needs_a_name():
-    with pytest.raises(ValueError, match="needs a name"):
-        BaseVFS(accessor=WikiAccessor(PAGES), io=make_io())
-
-
-def test_a_subclass_name_names_a_table_built_driver():
-    class Wiki(BaseVFS):
-        name = "wiki"
-
-    assert Wiki(accessor=WikiAccessor(PAGES), io=make_io()).name == "wiki"
-
-
-def test_tables_need_io():
-    with pytest.raises(ValueError, match="pass io"):
-        BaseVFS(name="wiki", commands=[wiki_hello])
-
-
-def test_table_built_state_asks_to_be_handed_back():
+def test_plugin_state_asks_to_be_handed_back():
     assert make_vfs().get_state() == {
         "type": "wiki",
         "needs_override": True,
@@ -298,8 +305,8 @@ def test_prompts_set():
 
 
 @pytest.mark.asyncio
-async def test_glob_op_derived_from_io_readdir():
-    vfs = make_vfs()
+async def test_glob_walks_readdir():
+    mount = MountEntry("/", make_vfs())
     spec = PathSpec(
         vfs_path="guides/quick*",
         virtual="/guides/quick*",
@@ -307,8 +314,7 @@ async def test_glob_op_derived_from_io_readdir():
         pattern="quick*",
         resolved=False,
     )
-    glob = next(ro for ro in vfs.ops() if ro.name == "glob")
-    matches = await glob.fn(vfs.accessor, spec, index=NULL_INDEX)
+    matches = await mount.expand_glob([spec], "")
     assert [m.virtual for m in matches] == ["/guides/quickstart.md"]
 
 
@@ -342,28 +348,8 @@ async def test_workspace_execution_end_to_end():
     assert (await ws.stat("/wiki/notes.md")).size == 18
 
 
-def test_auto_ops_derived_from_table():
-    vfs = make_vfs()
-    names = {(ro.name, ro.write) for ro in vfs.ops()}
-    assert names == {
-        ("glob", False),
-        ("read", False),
-        ("readdir", False),
-        ("stat", False),
-    }
-
-
-def test_auto_ops_disabled():
-    vfs = make_vfs(auto_ops=False)
-    assert vfs.ops() == []
-
-
-def test_user_ops_shadow_derived():
-    custom = RegisteredOp(name="read", vfs="wiki", filetype=None, fn=my_read)
-    vfs = make_vfs(ops=[custom])
-    reads = [ro for ro in vfs.ops() if ro.name == "read"]
-    assert len(reads) == 1
-    assert reads[0].fn is my_read
+def test_a_plugin_serves_its_reads_at_the_door():
+    assert served(make_vfs()) == {"glob", "read", "readdir", "stat"}
 
 
 def test_a_script_registered_vfs_is_named_in_the_read_refusal():
@@ -389,11 +375,7 @@ async def test_missing_directory_removal_continues_to_later_operands(
     store = RAMStore()
     store.dirs.add("/empty")
     store.files["/file"] = b"keep"
-    vfs = BaseVFS(
-        name="custom",
-        accessor=RAMAccessor(store),
-        io=replace(RAM_IO, rm_r=None, rmdir=None),
-    )
+    vfs = ram_without(store, "rm_r", "rmdir")
     ws = Workspace({"/custom": (vfs, mode)})
     try:
         result = await ws.shell(f"rm {flag} /custom/empty /custom/file")
@@ -426,11 +408,7 @@ async def test_custom_vfs_copies_without_native_copy(flags):
     store = RAMStore()
     store.dirs.update({"/src", "/src/empty", "/src/sub"})
     store.files["/src/sub/file"] = b"payload"
-    vfs = BaseVFS(
-        name="custom",
-        accessor=RAMAccessor(store),
-        io=replace(RAM_IO, copy=None, find=None),
-    )
+    vfs = ram_without(store, "copy", "find")
     ws = Workspace({"/custom": vfs}, mode=MountMode.WRITE)
     try:
         result = await ws.shell(f"cp {flags} /custom/src /custom/dst")
@@ -454,11 +432,7 @@ async def test_unavailable_copy_does_not_create_directories(flags, mode):
     store.dirs.update({"/src", "/src/empty"})
     store.files["/src/file"] = b"payload"
     before = set(store.dirs)
-    vfs = BaseVFS(
-        name="custom",
-        accessor=RAMAccessor(store),
-        io=replace(RAM_IO, copy=None, write=None),
-    )
+    vfs = ram_without(store, "copy", "write")
     ws = Workspace({"/custom": (vfs, mode)})
     try:
         result = await ws.shell(f"cp {flags} /custom/src /custom/dst")
@@ -484,11 +458,7 @@ async def test_builtin_and_custom_writes_obey_mount_mode(custom):
     builtin = RAMVFS()
     path = PathSpec(virtual="/data/a", directory="/data", vfs_path="a")
     await ops(builtin).write(path, b"before")
-    vfs = (
-        BaseVFS(name="probe", accessor=builtin.accessor, io=RAM_IO)
-        if custom
-        else builtin
-    )
+    vfs = ram_without(builtin._store, name="probe") if custom else builtin
     ws = Workspace({"/data": vfs}, mode=MountMode.READ)
     try:
         result = await ws.shell("echo after > /data/a")

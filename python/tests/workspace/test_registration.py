@@ -18,7 +18,6 @@ from mirage import MountMode, Workspace
 from mirage.commands.config import RegisteredCommand, command
 from mirage.commands.spec import SPECS
 from mirage.io.types import IOResult
-from mirage.ops.registry import op
 from mirage.vfs.ram import RAMVFS
 
 
@@ -57,12 +56,10 @@ def test_commands_introspection(ws):
     assert None in cmds["cat"]
 
 
-def test_registered_ops_introspection(ws):
+def test_the_mount_answers_its_vfs_functions(ws):
     m = ws.mount("/data/")
-    ops = m.registered_ops()
-    assert isinstance(ops, dict)
-    assert "read" in ops
-    assert "stat" in ops
+    assert m.has_op("read")
+    assert m.has_op("stat")
 
 
 def test_register_fns_adds_command(ws):
@@ -84,17 +81,6 @@ def test_register_fns_adds_registered_command(ws):
     m = ws.mount("/data/")
     m.register_fns(custom._registered_commands)
     assert "test_custom" in m.commands()
-
-
-def test_register_fns_adds_op(ws):
-    @op("test_custom_op", vfs="ram")
-    async def custom_op(accessor, scope, **kwargs):
-        return b"hello"
-
-    m = ws.mount("/data/")
-    assert "test_custom_op" not in m.registered_ops()
-    m.register_fns([custom_op])
-    assert "test_custom_op" in m.registered_ops()
 
 
 def test_unregister_removes_command(ws):
@@ -166,16 +152,6 @@ def test_register_fns_wrong_vfs_raises(ws):
     m = ws.mount("/data/")
     with pytest.raises(ValueError, match=r"'s3'"):
         m.register_fns([s3_cmd])
-
-
-def test_register_fns_wrong_vfs_op_raises(ws):
-    @op("s3_read", vfs="s3")
-    async def s3_op(accessor, scope, **kwargs):
-        return b"s3"
-
-    m = ws.mount("/data/")
-    with pytest.raises(ValueError, match=r"'s3'"):
-        m.register_fns([s3_op])
 
 
 def test_register_fns_multi_vfs_filters_to_matching(ws):

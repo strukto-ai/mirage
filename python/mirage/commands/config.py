@@ -15,7 +15,7 @@
 import functools
 from collections.abc import Awaitable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Protocol, TypeAlias, overload
+from typing import TYPE_CHECKING, Any, Callable, Protocol, TypeAlias, overload
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
@@ -32,6 +32,9 @@ from mirage.process.types import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.types import DispatchFn, ExecPathFn, ShellFn
 from mirage.types import Limit, PathSpec
+
+if TYPE_CHECKING:
+    from mirage.commands.builtin.generic_bind.adapter import CommandIO
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +92,8 @@ class CommandOpts:
             an operand to one; None inside such a handler.
         command (str | None): The command name the mount runs.
         index (IndexCacheStore): The mount's index cache.
+        io (CommandIO | None): The mount's backend table, built from its
+            VFS; None outside a mount.
         dispatch (DispatchFn | None): The workspace op dispatcher.
         session_id (str | None): The calling session.
         env (dict[str, str] | None): A snapshot of the session
@@ -126,6 +131,7 @@ class CommandOpts:
     filetype_fns: Mapping[str, "CommandFn"] | None = None
     command: str | None = None
     index: IndexCacheStore = NULL_INDEX
+    io: "CommandIO | None" = None
     dispatch: DispatchFn | None = None
     session_id: str | None = None
     env: dict[str, str] | None = None
