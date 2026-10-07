@@ -300,7 +300,7 @@ describe('session predicates on the fallback storage', () => {
       async () => {
         await hold
       },
-      ownerA,
+      { owner: ownerA },
     )
     const runB = runWithSession(
       sessB,
@@ -312,7 +312,7 @@ describe('session predicates on the fallback storage', () => {
         release()
         return Promise.resolve()
       },
-      ownerB,
+      { owner: ownerB },
     )
     await Promise.all([runA, runB])
     expect(forA).toBe(sessA)
@@ -482,7 +482,7 @@ describe('a named facade session on the fallback storage', () => {
       await wide.mkdir('/data/vault')
       await wide.write('/data/vault/secret', 'top\n')
       const [held, release] = gate()
-      const holding = runWithSession(host, () => held, ws.sessionManager)
+      const holding = runWithSession(host, () => held, { owner: ws.sessionManager })
       const named = new Session(ws, ws.defaultSessionId).vfs
       await expect(named.read('/data/vault/secret')).rejects.toMatchObject({ code: 'ENOENT' })
       expect(await ws.vfs.cat('/data/vault/secret')).toBe('top\n')

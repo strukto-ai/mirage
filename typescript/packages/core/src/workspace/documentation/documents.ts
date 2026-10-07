@@ -105,7 +105,7 @@ export class Documents {
         }
         return this.render(kind)
       },
-      this.manager,
+      { owner: this.manager },
     )
   }
 
@@ -128,7 +128,7 @@ export class Documents {
           }
           throw eexist(path)
         },
-        this.manager,
+        { owner: this.manager },
       )
       view = new DocumentVFS(path.slice(path.lastIndexOf('/') + 1), () => this.render(kind), kind)
       this.opsRegistry.registerVfs(view)

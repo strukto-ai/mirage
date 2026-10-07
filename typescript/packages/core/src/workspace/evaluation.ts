@@ -1,5 +1,4 @@
-import { runWithSession } from '../context/session_context.ts'
-import { createAsyncContext } from '../utils/async_context.ts'
+import { boundEvaluation, runWithSession } from '../context/session_context.ts'
 import type { SessionManager } from './session/manager.ts'
 import { ExecutionFrame } from './frame.ts'
 import type { SessionState } from './session/session.ts'
@@ -18,26 +17,20 @@ export class EvaluationContext {
   }
 }
 
-const current = createAsyncContext<EvaluationContext>()
-
-/** Bind the evaluator and its session without exposing execution state to storage. */
+/** Bind an evaluation with its session, as one binding. */
 export function runWithEvaluation<T>(
   context: EvaluationContext,
   fn: () => Promise<T>,
   owner?: SessionManager,
 ): Promise<T> {
-  const ancestors: SessionState[] = []
-  for (let parent = context.parent; parent !== null; parent = parent.parent)
-    ancestors.push(parent.session)
-  return Promise.resolve(
-    current.run(context, () =>
-      runWithSession(context.session, fn, owner, ancestors, current.capture()),
-    ),
-  )
+  return runWithSession(context.session, fn, {
+    ...(owner === undefined ? {} : { owner }),
+    evaluation: context,
+  })
 }
 
 export function getCurrentEvaluation(): EvaluationContext | null {
-  return current.getStore() ?? null
+  return boundEvaluation()
 }
 
 /** A child shell's evaluation: the session's subshell and a new frame. */

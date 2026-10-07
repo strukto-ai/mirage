@@ -343,7 +343,7 @@ async function runLine(
                 frame,
                 argv,
               ),
-            env.sessions,
+            { owner: env.sessions },
           )
           return result.exitCode
         },

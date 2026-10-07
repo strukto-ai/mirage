@@ -14,6 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  boundEvaluation,
+  captureSessionContext,
   effectiveMountMode,
   effectivePathMode,
   getAdmission,
@@ -36,6 +38,7 @@ import { Policies } from '../policy/policies.ts'
 import { MountMode, weakerMode } from '../types.ts'
 import { SessionManager } from '../workspace/session/manager.ts'
 import { SessionState } from '../workspace/session/session.ts'
+import { EvaluationContext, runWithEvaluation } from '../workspace/evaluation.ts'
 import { hiddenUnder, pathVisible } from '../utils/hidden.ts'
 
 const visible = (virtual: string): boolean => pathVisible(sessionVisibility(), virtual)
@@ -123,7 +126,7 @@ describe('a binding belongs to the workspace that published it', () => {
         expect(getCurrentSession()).toBe(session)
         return Promise.resolve()
       },
-      mine,
+      { owner: mine },
     )
   })
 
@@ -139,7 +142,7 @@ describe('a binding belongs to the workspace that published it', () => {
           expect(getCurrentSessionFor(mine)).toBe(inner)
           return Promise.resolve()
         }),
-      mine,
+      { owner: mine },
     )
   })
 
@@ -170,7 +173,7 @@ describe('a binding belongs to the workspace that published it', () => {
         expect(getCurrentSessionUnlessForeign(theirs)).toBeNull()
         return Promise.resolve()
       },
-      mine,
+      { owner: mine },
     )
   })
 
@@ -456,5 +459,30 @@ describe('the op-policies binding', () => {
       return Promise.resolve()
     })
     expect(getOpPolicies()).toBeNull()
+  })
+})
+
+describe('the evaluation binding', () => {
+  it('stays with its own session, in a binding and in a capture', async () => {
+    const session = new SessionState({ sessionId: 's' })
+    const other = new SessionState({ sessionId: 'o' })
+    const evaluation = new EvaluationContext(session)
+    await runWithEvaluation(evaluation, async () => {
+      expect(boundEvaluation()).toBe(evaluation)
+      for (const [rebound, expected] of [
+        [session, evaluation],
+        [other, null],
+      ] as const) {
+        await runWithSession(rebound, () => {
+          expect(boundEvaluation()).toBe(expected)
+          return Promise.resolve()
+        })
+        const [scope] = captureSessionContext(rebound)
+        await scope?.(() => {
+          expect(boundEvaluation()).toBe(expected)
+        })
+      }
+    })
+    expect(boundEvaluation()).toBeNull()
   })
 })

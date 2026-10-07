@@ -14,6 +14,7 @@
 
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { ContextCall } from '../utils/async_context.ts'
+import type { EvaluationContext } from '../workspace/evaluation.ts'
 import type { SessionManager } from '../workspace/session/manager.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import { rstripSlash, stripSlash } from '../utils/slash.ts'
@@ -27,14 +28,16 @@ import type { EntryGate, PathSpec, Refusal, Visibility, WalkProbe } from '../typ
 import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
 
 /**
- * The session bound to one async context, and whose it is: `owner` is
- * the session manager it belongs to, which is one per workspace.
+ * The session bound to one async context, whose it is, and the evaluation
+ * running on it: `owner` is the session manager it belongs to, which is
+ * one per workspace. The evaluation is part of the binding, so a scope
+ * bound to another session never carries this one's evaluation, with its
+ * frame and cancellation.
  */
 interface SessionBinding {
   session: SessionState
   owner: SessionManager | null
-  ancestors?: readonly SessionState[]
-  restoreExecution?: ContextCall
+  evaluation: EvaluationContext | null
 }
 
 const sessionStorage = createAsyncContext<SessionBinding>()
@@ -42,28 +45,33 @@ const sessionStorage = createAsyncContext<SessionBinding>()
 /**
  * Bind `session` for the duration of `fn`.
  *
- * `owner` names the manager the session belongs to; omitting it keeps
- * the owner already bound, so a nested bind inside a line (a
- * background job's fork) stays attributed to the workspace running it.
+ * `owner` names the manager the session belongs to; omitting it keeps the
+ * owner already bound, so a nested bind inside a line (a background job's
+ * fork) stays attributed to the workspace running it. `evaluation` is the
+ * evaluation running on the session; omitting it keeps the one already
+ * bound when it runs on this same session, and drops another session's.
  */
 export function runWithSession<T>(
   session: SessionState,
   fn: () => Promise<T>,
-  owner?: SessionManager,
-  ancestors?: readonly SessionState[],
-  restoreExecution?: ContextCall,
+  options: { owner?: SessionManager; evaluation?: EvaluationContext } = {},
 ): Promise<T> {
+  const bound = sessionStorage.getStore()
   const binding: SessionBinding = {
     session,
-    owner: owner ?? sessionStorage.getStore()?.owner ?? null,
-    ...(ancestors === undefined ? {} : { ancestors }),
-    ...(restoreExecution === undefined ? {} : { restoreExecution }),
+    owner: options.owner ?? bound?.owner ?? null,
+    evaluation: options.evaluation ?? (bound?.session === session ? bound.evaluation : null),
   }
   return Promise.resolve(sessionStorage.run(binding, fn))
 }
 
 export function getCurrentSession(): SessionState | null {
   return sessionStorage.getStore()?.session ?? null
+}
+
+/** The evaluation bound with the current session, null outside one. */
+export function boundEvaluation(): EvaluationContext | null {
+  return sessionStorage.getStore()?.evaluation ?? null
 }
 
 /**
@@ -546,21 +554,25 @@ export function runWithRedirectPaths<T>(
 
 const programStorage = createAsyncContext<SessionState | null>()
 
-/** Capture all command admission state for a deferred workspace callback. */
+/** Capture all command admission state for a deferred workspace callback,
+ * bound to `session` when one is named: its evaluation comes along only
+ * when it is the session bound now. */
 export function captureSessionContext(
   session?: SessionState,
   owner?: SessionManager,
 ): ContextCall[] {
-  const bound = sessionStorage.getStore()
-  const inherited = session === undefined || session === bound?.session ? bound : undefined
-  const sessionScope: ContextCall =
-    session === undefined
-      ? sessionStorage.capture()
-      : (fn) => sessionStorage.run({ ...inherited, session, owner: owner ?? null }, fn)
-  const restoreExecution = inherited?.restoreExecution
+  let sessionScope: ContextCall = sessionStorage.capture()
+  if (session !== undefined) {
+    const bound = sessionStorage.getStore()
+    const binding: SessionBinding = {
+      session,
+      owner: owner ?? null,
+      evaluation: bound?.session === session ? bound.evaluation : null,
+    }
+    sessionScope = (fn) => sessionStorage.run(binding, fn)
+  }
   return [
     sessionScope,
-    ...(restoreExecution === undefined ? [] : [restoreExecution]),
     admissionStorage.capture(),
     opPoliciesStorage.capture(),
     mountGateStorage.capture(),
@@ -595,7 +607,10 @@ export function isProgramInvocation(session: SessionState): boolean {
   if (marked == null) return false
   if (session === marked) return true
   const binding = sessionStorage.getStore()
-  return binding?.session === session && binding.ancestors?.includes(marked) === true
+  if (binding?.session !== session) return false
+  for (let parent = binding.evaluation?.parent ?? null; parent !== null; parent = parent.parent)
+    if (parent.session === marked) return true
+  return false
 }
 
 /**

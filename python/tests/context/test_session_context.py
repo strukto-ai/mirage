@@ -35,6 +35,7 @@ from mirage.context import (
     set_program_invocation,
     strongest_mode_under,
 )
+from mirage.context.session_context import bound_evaluation
 from mirage.errors.types import ReadOnlyError
 from mirage.types import (
     HiddenPaths,
@@ -45,6 +46,11 @@ from mirage.types import (
     weaker_mode,
 )
 from mirage.utils.hidden import hidden_under, path_visible
+from mirage.workspace.evaluation import (
+    EvaluationContext,
+    reset_current_evaluation,
+    set_current_evaluation,
+)
 from mirage.workspace.session import SessionManager, SessionState
 
 
@@ -481,9 +487,10 @@ def test_a_program_run_covers_the_child_evaluations_under_it():
     parent = SessionState(session_id="parent")
     child = parent.fork()
     other = SessionState(session_id="other")
+    evaluation = EvaluationContext(child, parent=EvaluationContext(parent))
     mark = set_program_invocation(parent)
     try:
-        token = set_current_session(child, ancestors=(parent,))
+        token = set_current_session(child, evaluation=evaluation)
         try:
             assert program_invocation(parent)
             assert program_invocation(child)
@@ -494,3 +501,21 @@ def test_a_program_run_covers_the_child_evaluations_under_it():
     finally:
         reset_program_invocation(mark)
     assert not program_invocation(parent)
+
+
+def test_an_evaluation_binds_with_its_own_session_only():
+    session = SessionState(session_id="s")
+    other = SessionState(session_id="o")
+    evaluation = EvaluationContext(session)
+    token = set_current_evaluation(evaluation)
+    try:
+        assert bound_evaluation() is evaluation
+        for rebound, expected in ((session, evaluation), (other, None)):
+            inner = set_current_session(rebound)
+            try:
+                assert bound_evaluation() is expected
+            finally:
+                reset_current_session(inner)
+    finally:
+        reset_current_evaluation(token)
+    assert bound_evaluation() is None

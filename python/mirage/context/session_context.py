@@ -41,24 +41,30 @@ if TYPE_CHECKING:
     from mirage.policy.decisions import Decisions
     from mirage.policy.policies import Policies
     from mirage.policy.types import DryRun, HandOff, VfsExplanation
+    from mirage.workspace.evaluation import EvaluationContext
     from mirage.workspace.session.manager import SessionManager
     from mirage.workspace.session.session import SessionState
 
 
 @dataclass(frozen=True, slots=True)
 class SessionBinding:
-    """The session bound to one async context, and whose it is.
+    """The session bound to one async context, whose it is, and the
+    evaluation running on it.
 
     Args:
         session (SessionState | None): the live session.
         owner (SessionManager | None): the session manager the session
             belongs to, which is one per workspace. None when the
             binder did not name one.
+        evaluation (EvaluationContext | None): the evaluation running
+            on the session, None outside one. It is part of the
+            binding, so a scope bound to another session never carries
+            this one's evaluation, with its frame and cancellation.
     """
 
     session: "SessionState | None"
     owner: "SessionManager | None"
-    ancestors: "tuple[SessionState, ...]" = ()
+    evaluation: "EvaluationContext | None" = None
 
 
 _current_session: ContextVar[SessionBinding | None] = ContextVar(
@@ -71,7 +77,7 @@ def set_current_session(
     session: "SessionState | None",
     owner: "SessionManager | None" = None,
     *,
-    ancestors: "tuple[SessionState, ...]" = (),
+    evaluation: "EvaluationContext | None" = None,
 ) -> Token[Any]:
     """Bind ``session`` to the current async context.
 
@@ -81,15 +87,21 @@ def set_current_session(
             to. None keeps the owner already bound, so a nested bind
             inside a line (a background job's fork) stays attributed to
             the workspace running it.
-        ancestors (tuple[SessionState, ...]): the sessions of the
-            evaluations this one runs under, nearest first, so a mark
-            made on a parent (a program run) covers its child shells.
+        evaluation (EvaluationContext | None): the evaluation running
+            on the session. None keeps the one already bound when it
+            runs on this same session; another session's is dropped.
     """
+    current = _current_session.get()
     if owner is None:
-        current = _current_session.get()
         owner = current.owner if current is not None else None
+    if (
+        evaluation is None
+        and current is not None
+        and current.session is session
+    ):
+        evaluation = current.evaluation
     return _current_session.set(
-        SessionBinding(session=session, owner=owner, ancestors=ancestors)
+        SessionBinding(session=session, owner=owner, evaluation=evaluation)
     )
 
 
@@ -102,6 +114,12 @@ def get_current_session() -> "SessionState | None":
     """Return the session bound to the current async context, if any."""
     binding = _current_session.get()
     return binding.session if binding is not None else None
+
+
+def bound_evaluation() -> "EvaluationContext | None":
+    """Return the evaluation bound with the current session, if any."""
+    binding = _current_session.get()
+    return binding.evaluation if binding is not None else None
 
 
 def get_current_session_for(owner: "SessionManager") -> "SessionState | None":
@@ -614,11 +632,15 @@ def program_invocation(session: "SessionState") -> bool:
     if session is marked:
         return True
     binding = _current_session.get()
-    return (
-        binding is not None
-        and binding.session is session
-        and any(ancestor is marked for ancestor in binding.ancestors)
-    )
+    if binding is None or binding.session is not session:
+        return False
+    evaluation = binding.evaluation
+    parent = evaluation.parent if evaluation is not None else None
+    while parent is not None:
+        if parent.session is marked:
+            return True
+        parent = parent.parent
+    return False
 
 
 def redirect_target_judged(virtual: str) -> bool:
