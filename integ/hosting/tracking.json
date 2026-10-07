@@ -1,0 +1,30 @@
+[
+  {
+    "id": "success",
+    "command": "echo tracked",
+    "expect": {"stdout": "tracked\n", "stderr": "", "exit_code": 0, "refusal": null}
+  },
+  {
+    "id": "nonzero",
+    "command": "echo failed >&2; false",
+    "expect": {"stdout": "", "stderr": "failed\n", "exit_code": 1, "refusal": null}
+  },
+  {
+    "id": "denied",
+    "command": "rm /work/keep",
+    "profile": "denied",
+    "expect": {"stdout": "", "stderr": "rm: Permission denied\n", "exit_code": 126, "refusal": {"kind": "deny", "reason": "no deletes"}}
+  },
+  {
+    "id": "approval",
+    "command": "rm /work/keep",
+    "profile": "approval",
+    "expect": {"stdout": "", "stderr": "rm: Permission denied\n", "exit_code": 126, "refusal": {"kind": "pending", "reason": "needs approval"}}
+  },
+  {
+    "id": "unrecorded",
+    "command": "echo private",
+    "record": false,
+    "expect": {"stdout": "private\n", "stderr": "", "exit_code": 0, "refusal": null}
+  }
+]
