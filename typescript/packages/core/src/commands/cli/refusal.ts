@@ -24,6 +24,8 @@ import { operandSlot, optionMetavar } from '../spec/help.ts'
 import { type CommandSpec, UsageStyle } from '../spec/types.ts'
 import type { ParsedCommand } from '../../workspace/executor/command/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
+import { posixPhrase } from '../../errors/posix.ts'
+import type { FsCondition } from '../../errors/types.ts'
 
 export const ARGPARSE_EXIT = 2
 const LONG_PREFIX = '--'
@@ -257,4 +259,21 @@ export function leafRefusal(
     return [encodeText(refused), USAGE_EXIT, shown !== '' ? encodeText(shown) : null]
   }
   return [argparseMessage, USAGE_EXIT, null]
+}
+
+/** Render failure to enter a CLI's declared operand base. */
+export function directoryRefusal(
+  prog: string,
+  path: string,
+  reason: FsCondition,
+  style: UsageStyle,
+): [Uint8Array, number] {
+  return style === UsageStyle.GIT
+    ? [new TextEncoder().encode(`fatal: cannot change to '${path}': ${posixPhrase(reason)}\n`), 128]
+    : [
+        new TextEncoder().encode(
+          `${prog}: cannot change directory to '${path}': ${posixPhrase(reason)}\n`,
+        ),
+        1,
+      ]
 }

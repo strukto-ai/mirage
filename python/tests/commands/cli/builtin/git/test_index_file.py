@@ -19,7 +19,7 @@ from dulwich.index import ConflictedIndexEntry, Index, IndexEntry
 
 from mirage.commands.cli.builtin.git.index_file import read_index
 
-GITDIR = "/repo/.git"
+from .conftest import GITDIR
 
 
 @pytest.mark.asyncio

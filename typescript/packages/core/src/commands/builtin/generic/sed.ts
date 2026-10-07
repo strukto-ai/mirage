@@ -19,7 +19,7 @@ import type { FlagValue } from '../../spec/types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { eisdir, fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
-import { dispatchStat, typedSpec } from '../utils/paths.ts'
+import { dispatchStat } from '../utils/paths.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { readFailExitCode } from '../../spec/usage.ts'
@@ -59,7 +59,7 @@ function sedDoors(opts: CommandOpts, stream: Stream, write: Write): SedDoors {
   const prefix = opts.mountPrefix !== undefined ? rstripSlash(opts.mountPrefix) : ''
   const spec = (name: string): PathSpec => {
     const resolved = resolvePath(name, opts.cwd)
-    if (opts.dispatch !== undefined) return typedSpec(name, opts.cwd)
+    if (opts.dispatch !== undefined) return PathSpec.fromStrPath(name, undefined, opts.cwd)
     const slash = resolved.lastIndexOf('/')
     return new PathSpec({
       virtual: resolved,

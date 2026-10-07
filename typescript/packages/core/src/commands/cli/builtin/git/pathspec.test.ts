@@ -12,16 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../../../types.ts'
 import { expect, it } from 'vitest'
 import { EmptyPathspecError, OutsideRepositoryError, UnsupportedPathspecError } from './errors.ts'
 import { pathspecPatterns, pathspecSelects } from './pathspec.ts'
 import type { RepoLocation } from './types.ts'
 
 const LOCATION: RepoLocation = {
-  gitdir: '/repo/.git',
-  commondir: '/repo/.git',
-  worktree: '/repo',
-  mountRoot: '/repo/',
+  gitdir: PathSpec.fromStrPath('/repo/.git'),
+  commondir: PathSpec.fromStrPath('/repo/.git'),
+  worktree: PathSpec.fromStrPath('/repo'),
+  mountRoot: PathSpec.fromStrPath('/repo/'),
 }
 
 it.each([

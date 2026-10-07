@@ -45,6 +45,7 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec.constants import flag_kwarg_name
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import parse_command, parse_to_kwargs
+from mirage.commands.spec.types import FlagValue
 from mirage.core.github.config import GhConfig
 from mirage.core.github.repo import (
     RepoRef,
@@ -65,7 +66,7 @@ from mirage.core.github.repo import (
     view_repo,
 )
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import JsonValue
+from mirage.types import JsonValue, PathSpec
 
 _OWNER = struct(("id", "string"), ("login", "string"))
 _USER = struct(
@@ -638,8 +639,8 @@ async def clone_cmd(
     parsed = parse_command(
         leaf, words, cwd, "git clone", inv.env, unknown_is_operand=True
     )
-    flags = dict(parse_to_kwargs(parsed))
-    flags["C"] = cwd
+    flags: dict[str, FlagValue] = dict(parse_to_kwargs(parsed))
+    flags["C"] = PathSpec.from_str_path(cwd, cwd="/")
     git = CLIInvocation[None](
         None,
         argv=("clone", *words),

@@ -31,7 +31,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest'
 import { IOResult } from '../../../../io/types.ts'
 import { OpsRegistry } from '../../../../ops/registry.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
-import { MountMode } from '../../../../types.ts'
+import { MountMode, PathSpec } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { ignoreFunny, prettify, summaryLines, type Wanted } from './fetch.ts'
@@ -88,10 +88,10 @@ async function load(name: string): Promise<void> {
     await ws.dispatch(op, path.virtual, args, kwargs),
     new IOResult(),
   ]
-  await ensureDir(dispatch, `/w/${name}`)
+  await ensureDir(dispatch, PathSpec.fromStrPath(`/w/${name}`))
   for (const rel of walk(join(seed, name))) {
     const target = `/w/${name}/${rel}`
-    if (rel.endsWith('/')) await ensureDir(dispatch, target.slice(0, -1))
+    if (rel.endsWith('/')) await ensureDir(dispatch, PathSpec.fromStrPath(target.slice(0, -1)))
     else await ws.dispatch('write', target, [new Uint8Array(readFileSync(join(seed, name, rel)))])
   }
 }

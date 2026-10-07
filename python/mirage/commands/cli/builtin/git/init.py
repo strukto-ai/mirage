@@ -1,5 +1,4 @@
 import errno
-import posixpath
 
 from mirage.commands.cli.builtin.git.discover import discover
 from mirage.commands.cli.builtin.git.errors import (
@@ -23,17 +22,17 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileType
+from mirage.types import FileType, PathSpec
 
 
 async def lay_out(
-    dispatch: DispatchFn, gitdir: str, branch: str, config: str
+    dispatch: DispatchFn, gitdir: PathSpec, branch: str, config: str
 ) -> None:
     """Write a new git directory's skeleton, keeping what is there.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        gitdir (str): absolute virtual path of the git directory.
+        gitdir (PathSpec): absolute virtual path of the git directory.
         branch (str): the branch HEAD starts on.
         config (str): the config file's contents.
     """
@@ -44,20 +43,20 @@ async def lay_out(
         "refs/tags",
         "info",
     ):
-        await ensure_dir(dispatch, f"{gitdir}/{directory}")
+        await ensure_dir(dispatch, gitdir.join(directory))
     await write_once(
-        dispatch, f"{gitdir}/HEAD", f"ref: refs/heads/{branch}\n".encode()
+        dispatch, gitdir.join("HEAD"), f"ref: refs/heads/{branch}\n".encode()
     )
-    await write_once(dispatch, f"{gitdir}/config", config.encode())
+    await write_once(dispatch, gitdir.join("config"), config.encode())
     await write_once(
         dispatch,
-        f"{gitdir}/description",
+        gitdir.join("description"),
         b"Unnamed repository; edit this file 'description' "
         b"to name the repository.\n",
     )
 
 
-def named_gitdir(fl: FlagView, texts: tuple[str, ...]) -> str:
+def named_gitdir(fl: FlagView, texts: tuple[str, ...]) -> PathSpec:
     """The git directory an ``init`` line names: ``--git-dir``, the
     directory itself under ``--bare``, and its ``.git`` otherwise.
 
@@ -66,13 +65,11 @@ def named_gitdir(fl: FlagView, texts: tuple[str, ...]) -> str:
         texts (tuple[str, ...]): the line's operands.
     """
     start = start_point(fl)
-    explicit = fl.as_str("git_dir")
+    explicit = fl.as_path("git_dir")
     if explicit:
-        return posixpath.normpath(posixpath.join(start, explicit))
-    target = posixpath.normpath(
-        posixpath.join(start, texts[0] if texts else ".")
-    )
-    return target if fl.as_bool("bare") else posixpath.join(target, ".git")
+        return explicit
+    target = PathSpec.from_str_path(texts[0] if texts else ".", cwd=start)
+    return target if fl.as_bool("bare") else target.join(".git")
 
 
 async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
@@ -105,12 +102,16 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         here = await doors.stat_path(start)
         if here is None or here.type is not FileType.DIRECTORY:
             raise NoWorkingDirectoryError(
-                start,
+                start.raw_path,
                 FsCondition.ENOENT if here is None else FsCondition.ENOTDIR,
             )
-        target = posixpath.normpath(
-            posixpath.join(start, inv.texts[0] if inv.texts else ".")
+        target = PathSpec.from_str_path(
+            inv.texts[0] if inv.texts else ".", cwd=start
         )
+        if target.walk_error == "ENOENT":
+            raise CannotMkdirError(
+                target.raw_path, "No such file or directory"
+            )
         bare = fl.as_bool("bare")
         gitdir = named_gitdir(fl, inv.texts)
         branch = fl.as_str("initial_branch") or "master"
@@ -121,7 +122,7 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         info = await doors.stat_path(gitdir)
         if info is not None and (
             info.type is not FileType.DIRECTORY
-            or await read_optional(dispatch, f"{gitdir}/HEAD") is not None
+            or await read_optional(dispatch, gitdir.join("HEAD")) is not None
         ):
             location = await discover(
                 dispatch,
@@ -129,33 +130,39 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 doors.ns.mounts.root_of,
                 target,
                 gitdir,
-                fl.as_str("work_tree"),
+                worktree if (worktree := fl.as_path("work_tree")) else None,
             )
             gitdir = location.commondir
-        existing = await read_optional(dispatch, f"{gitdir}/HEAD") is not None
+        existing = (
+            await read_optional(dispatch, gitdir.join("HEAD")) is not None
+        )
         made = bool(inv.texts) and await doors.stat_path(target) is None
         config = (
             "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n"
             f"\tbare = {'true' if bare else 'false'}\n"
         )
-        settings = f"{gitdir}/config"
+        settings = gitdir.join("config")
         try:
             await lay_out(dispatch, gitdir, branch, config)
             if existing:
                 await take_lock(dispatch, settings)
         except OSError as exc:
-            locked = exc.filename == f"{settings}.lock"
+            locked = exc.filename == f"{settings.virtual}.lock"
             if locked and exc.errno == errno.EEXIST:
-                raise ConfigLockError(settings, FsCondition.EEXIST) from exc
+                raise ConfigLockError(
+                    settings.virtual, FsCondition.EEXIST
+                ) from exc
             if exc.errno != errno.EROFS:
                 raise
             if made:
                 raise CannotMkdirError(inv.texts[0]) from exc
             if locked:
-                raise ConfigLockError(settings, FsCondition.EROFS) from exc
-            raise InitReadOnlyError(exc.filename or gitdir) from exc
+                raise ConfigLockError(
+                    settings.virtual, FsCondition.EROFS
+                ) from exc
+            raise InitReadOnlyError(exc.filename or gitdir.virtual) from exc
         action = "Reinitialized existing" if existing else "Initialized empty"
-        text = f"{action} Git repository in {gitdir}/\n"
+        text = f"{action} Git repository in {gitdir.virtual}/\n"
         warning = ""
         if existing and fl.as_str("initial_branch"):
             warning = f"warning: re-init: ignored --initial-branch={branch}\n"

@@ -35,10 +35,13 @@ from mirage.commands.spec.usage import (
     unknown_option_error,
 )
 from mirage.types import PathSpec
+from mirage.utils.path import dotted_spelling, resolve_path
 from mirage.workspace.executor.command.types import ParsedCommand
 
 
-def synthesize_path_spec(value: str, raw_path: str | None = None) -> PathSpec:
+def synthesize_path_spec(
+    value: str, raw_path: str | None = None, cwd: str = "/"
+) -> PathSpec:
     """A PathSpec for a path the classifier never saw.
 
     Covers a relative value cwd-resolved by ``parse_command`` (e.g.
@@ -55,6 +58,7 @@ def synthesize_path_spec(value: str, raw_path: str | None = None) -> PathSpec:
     Args:
         value (str): the resolved absolute virtual path.
         raw_path (str | None): the value before parser path resolution.
+        cwd (str): working directory for the retained dotted spelling.
     """
     return PathSpec(
         virtual=value,
@@ -62,6 +66,9 @@ def synthesize_path_spec(value: str, raw_path: str | None = None) -> PathSpec:
         directory=value[: value.rfind("/") + 1] or "/",
         vfs_path="",
         resolved=True,
+        dotted=dotted_spelling(raw_path, cwd)
+        if raw_path is not None and resolve_path(raw_path, cwd) == value
+        else None,
         walk_error="ENOENT" if raw_path == "" else None,
     )
 
@@ -71,6 +78,7 @@ def take_spelling(
     scope_map: Mapping[str, PathSpec],
     value: str,
     raw_path: str | None = None,
+    cwd: str = "/",
 ) -> PathSpec:
     """The next classified word spelling ``value``, in argv order.
 
@@ -92,11 +100,12 @@ def take_spelling(
             last spelling wins.
         value (str): the resolved path the parser reported.
         raw_path (str | None): spelling retained by the parser.
+        cwd (str): working directory for synthesized path spellings.
     """
     queue = spellings.get(value.rstrip("/") or "/")
     if queue:
         return queue.popleft()
-    return scope_map.get(value) or synthesize_path_spec(value, raw_path)
+    return scope_map.get(value) or synthesize_path_spec(value, raw_path, cwd)
 
 
 def parse_flags(
@@ -228,11 +237,14 @@ def parse_flags(
                         scope_map,
                         texts_in[index],
                         raw_parts[index],
+                        cwd,
                     )
                 flag_kwargs[key] = pairs
             elif key in repeat_path_keys and isinstance(value, list):
                 flag_kwargs[key] = [
-                    take_spelling(spellings, scope_map, part, raw_parts[index])
+                    take_spelling(
+                        spellings, scope_map, part, raw_parts[index], cwd
+                    )
                     for index, part in enumerate(texts_in)
                 ]
             elif key in single_path_keys and isinstance(value, str):
@@ -241,6 +253,7 @@ def parse_flags(
                     scope_map,
                     value,
                     raw if isinstance(raw, str) else None,
+                    cwd,
                 )
             elif isinstance(value, str) and value in scope_map:
                 flag_kwargs[key] = scope_map[value].virtual
@@ -254,7 +267,9 @@ def parse_flags(
         texts: list[str] = []
         for (value, kind), (raw, _) in zip(parsed.args, parsed.raw_operands):
             if kind == "path":
-                paths.append(take_spelling(spellings, scope_map, value, raw))
+                paths.append(
+                    take_spelling(spellings, scope_map, value, raw, cwd)
+                )
             else:
                 texts.append(value)
         return ParsedCommand(

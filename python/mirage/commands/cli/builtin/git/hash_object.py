@@ -14,7 +14,6 @@
 
 import asyncio
 import hashlib
-import posixpath
 import re
 
 from dulwich.objects import Blob, Commit, ShaFile, Tag, Tree
@@ -39,6 +38,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
+from mirage.types import PathSpec
 
 OBJECT_CLASSES: dict[str, type[ShaFile]] = {
     "blob": Blob,
@@ -122,16 +122,18 @@ def object_id(kind: str, data: bytes) -> bytes:
     )
 
 
-async def _content(dispatch: DispatchFn, base: str, name: str) -> bytes:
+async def _content(dispatch: DispatchFn, base: PathSpec, name: str) -> bytes:
     """A file's bytes, in git's words when it cannot be read.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        base (str): the directory a relative name starts from.
+        base (PathSpec): the directory a relative name starts from.
         name (str): the path as typed.
     """
     try:
-        return await read_file(dispatch, posixpath.join(base, name))
+        return await read_file(
+            dispatch, PathSpec.from_str_path(name, cwd=base)
+        )
     except IsADirectoryError as exc:
         raise GitError(f"Unable to hash {name}") from exc
     except (FileNotFoundError, NotADirectoryError) as exc:

@@ -13,11 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
-import { sedGeneric } from '../../generic/sed.ts'
+import { sedGeneric, positionalAsPaths } from '../../generic/sed.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
-import { positionalAsPaths } from '../../generic/sed.ts'
 
 const ENC = new TextEncoder()
 
@@ -40,7 +39,7 @@ export const BUILDER: Builder = {
     }
     // With -e/-f the positional operand is a file, not the script.
     const usingE = fl.asList('e').length > 0
-    const usingF = fl.asList('f').length > 0
+    const usingF = fl.asPaths('f').length > 0
     const operands = usingE || usingF ? [...positionalAsPaths(texts, opts), ...paths] : paths
     const resolved =
       operands.length > 0 ? await resolveGlobOf(ops)(accessor, operands, idx) : operands

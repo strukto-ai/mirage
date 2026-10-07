@@ -35,6 +35,7 @@ from mirage.commands.cli.builtin.git.errors import (
 from mirage.commands.cli.builtin.git.index_file import read_index, write_index
 from mirage.commands.cli.builtin.git.io import take_lock
 from mirage.commands.cli.builtin.git.objects import abbrev_for
+from mirage.commands.cli.builtin.git.pathspec import visible_entries
 from mirage.commands.cli.builtin.git.reflog import record
 from mirage.commands.cli.builtin.git.refs import (
     HEAD_REF,
@@ -198,7 +199,7 @@ async def commit(
         # git takes the index's lock before it looks for anything to
         # commit, so a read-only repository refuses an empty commit too.
         try:
-            await take_lock(dispatch, f"{location.gitdir}/index")
+            await take_lock(dispatch, location.gitdir.join("index"))
         except FileExistsError as exc:
             raise LockExistsError(exc.filename) from exc
         state = await read_index(dispatch, location.gitdir)
@@ -226,7 +227,7 @@ async def commit(
                     repo,
                     location,
                     head,
-                    start_point(fl),
+                    start_point(fl).virtual,
                     links_of(doors),
                 )
             )
@@ -258,7 +259,11 @@ async def commit(
             dispatch, location, b"core", b"quotepath", True
         )
         changes = await asyncio.to_thread(
-            commit_summary, repo, before or {}, tree, fully
+            commit_summary,
+            repo,
+            visible_entries(location, before or {}),
+            visible_entries(location, tree),
+            fully,
         )
     except GitError as exc:
         return fatal(exc)

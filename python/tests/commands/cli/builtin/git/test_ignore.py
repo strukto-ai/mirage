@@ -18,6 +18,9 @@ import pytest
 
 from mirage.commands.cli.builtin.git.ignore import IgnoreStack, load_ignores
 from mirage.commands.cli.builtin.git.types import RepoLocation
+from mirage.types import PathSpec
+
+from .conftest import GITDIR, REPO
 
 EMPTY = IgnoreStack([])
 
@@ -73,7 +76,7 @@ async def test_both_repository_files_are_read(workspace, repo_path: Path):
     info = repo_path / ".git" / "info"
     info.mkdir(exist_ok=True)
     (info / "exclude").write_text("*.tmp\n", encoding="utf-8")
-    stack = await load_ignores(workspace.dispatch, "/repo/.git", "/repo")
+    stack = await load_ignores(workspace.dispatch, GITDIR, REPO)
     assert stack.is_ignored("a.log")
     assert stack.is_ignored("a.tmp")
 
@@ -86,13 +89,13 @@ async def test_a_tracked_gitignore_overrides_the_private_list(
     info.mkdir(exist_ok=True)
     (info / "exclude").write_text("*.log\n", encoding="utf-8")
     (repo_path / ".gitignore").write_text("!keep.log\n", encoding="utf-8")
-    stack = await load_ignores(workspace.dispatch, "/repo/.git", "/repo")
+    stack = await load_ignores(workspace.dispatch, GITDIR, REPO)
     assert not stack.is_ignored("keep.log")
 
 
 @pytest.mark.asyncio
 async def test_a_repository_with_neither_file_ignores_nothing(workspace):
-    stack = await load_ignores(workspace.dispatch, "/repo/.git", "/repo")
+    stack = await load_ignores(workspace.dispatch, GITDIR, REPO)
     assert not stack.is_ignored("whatever.log")
 
 
@@ -101,9 +104,9 @@ def test_a_location_carries_the_two_directories_apart():
     # the tracked one from the working tree, which are not the same
     # place for a linked worktree.
     location = RepoLocation(
-        gitdir="/repo/.git/worktrees/w",
-        commondir="/repo/.git",
-        worktree="/work",
-        mount_root="/",
+        gitdir=PathSpec.from_str_path("/repo/.git/worktrees/w"),
+        commondir=GITDIR,
+        worktree=PathSpec.from_str_path("/work"),
+        mount_root=PathSpec.from_str_path("/"),
     )
     assert location.gitdir != location.worktree

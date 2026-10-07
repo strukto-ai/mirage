@@ -14,7 +14,6 @@
 
 import asyncio
 import base64
-import posixpath
 import re
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
@@ -38,6 +37,7 @@ from mirage.commands.cli.builtin.git.errors import (
 from mirage.commands.cli.builtin.git.refs import read_head
 from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.cli.types import CLIDoors
+from mirage.types import PathSpec
 
 FLUSH = b"0000"
 SERVICE = "git-upload-pack"
@@ -458,7 +458,7 @@ def extra_headers(values: list[bytes]) -> dict[str, str]:
 
 async def open_transport(
     url: str,
-    start: str,
+    start: PathSpec,
     doors: CLIDoors,
     headers: dict[str, str],
     credentials: Mapping[str, str] | None = None,
@@ -472,7 +472,7 @@ async def open_transport(
 
     Args:
         url (str): the remote as typed or configured.
-        start (str): the directory a relative path resolves against.
+        start (PathSpec): the directory a relative path resolves against.
         doors (CLIDoors): the invocation's doors.
         headers (dict[str, str]): extra HTTP headers from config.
         credentials (Mapping[str, str] | None): an Authorization for the
@@ -492,9 +492,11 @@ async def open_transport(
     if dispatch is None or stat_path is None or mounts is None:
         raise NoWorkspaceError()
     path = urlsplit(url).path if scheme is not None else url
-    path = posixpath.normpath(posixpath.join(start, unquote(path)))
+    scope = PathSpec.from_str_path(unquote(path), cwd=start)
     for suffix in REPO_SUFFIXES:
-        candidate = path.rstrip("/") + suffix
+        candidate = PathSpec.from_str_path(
+            (scope.dotted or scope.virtual).rstrip("/") + suffix, cwd="/"
+        )
         info = await stat_path(candidate)
         if info is None:
             continue
@@ -503,7 +505,7 @@ async def open_transport(
                 dispatch,
                 stat_path,
                 mounts.root_of,
-                posixpath.dirname(candidate),
+                candidate.parent,
                 candidate,
             )
         except GitError:

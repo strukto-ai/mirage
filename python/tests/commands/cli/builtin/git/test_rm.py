@@ -27,15 +27,10 @@ from mirage.commands.cli.builtin.git.rm import (
     select,
     shadowed,
 )
-from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.spec.flag_view import FlagView
 
-LOCATION = RepoLocation(
-    gitdir="/repo/.git",
-    commondir="/repo/.git",
-    worktree="/repo",
-    mount_root="/repo",
-)
+from .conftest import LOCATION, REPO
+
 TRACKED = {"a.txt", "docs/one.md", "docs/two.md"}
 
 
@@ -320,7 +315,7 @@ class Hiding:
 @pytest.mark.asyncio
 async def test_a_link_above_a_deleted_path_makes_it_a_local_change():
     hidden = await shadowed(
-        Hiding(), "/repo", ["slot/child"], {"slot/child": DELETED}
+        Hiding(), REPO, ["slot/child"], {"slot/child": DELETED}
     )
     assert hidden == {"slot/child"}
 
@@ -330,7 +325,7 @@ async def test_a_link_pointing_at_nothing_leaves_the_path_deleted():
     # git lstats through the leading link and gets ENOENT, so there is
     # no local change to lose and the removal goes through.
     hidden = await shadowed(
-        Hiding(present=False), "/repo", ["slot/child"], {"slot/child": DELETED}
+        Hiding(present=False), REPO, ["slot/child"], {"slot/child": DELETED}
     )
     assert hidden == set()
 
@@ -338,7 +333,7 @@ async def test_a_link_pointing_at_nothing_leaves_the_path_deleted():
 @pytest.mark.asyncio
 async def test_a_path_the_walk_found_is_never_shadowed():
     hidden = await shadowed(
-        Hiding(), "/repo", ["slot/child"], {"slot/child": MODIFIED}
+        Hiding(), REPO, ["slot/child"], {"slot/child": MODIFIED}
     )
     assert hidden == set()
 
@@ -346,7 +341,7 @@ async def test_a_path_the_walk_found_is_never_shadowed():
 @pytest.mark.asyncio
 async def test_without_a_namespace_nothing_is_shadowed():
     assert (
-        await shadowed(None, "/repo", ["slot/child"], {"slot/child": DELETED})
+        await shadowed(None, REPO, ["slot/child"], {"slot/child": DELETED})
         == set()
     )
 

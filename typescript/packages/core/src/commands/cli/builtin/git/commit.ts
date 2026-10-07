@@ -33,8 +33,10 @@ import {
 } from './errors.ts'
 import { stageTracked } from './add.ts'
 import { commitSummary } from './diff_output.ts'
+import { visibleEntries } from './pathspec.ts'
 import { readIndex, updateIndex } from './index_file.ts'
-import { takeLock, under } from './io.ts'
+import { takeLock } from './io.ts'
+
 import { record } from './reflog.ts'
 import { detachHead, readHead, writeRef } from './refs.ts'
 import { configBool, repoArgs, type Repo } from './repo.ts'
@@ -221,11 +223,11 @@ export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
     const repo = await opened(fl, doors, true)
     // git takes the index's lock before it looks for anything to commit, so a
     // read-only repository refuses an empty commit too.
-    const index = under(repo.location.gitdir, 'index')
+    const index = repo.location.gitdir.join('index')
     try {
       await takeLock(dispatch, index)
     } catch (err) {
-      if (isEexist(err)) throw new LockExistsError(`${index}.lock`)
+      if (isEexist(err)) throw new LockExistsError(`${index.virtual}.lock`)
       throw err
     }
     const state = await readIndex(repo, dispatch)
@@ -245,7 +247,14 @@ export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
       })
     if (same && !fl.asBool('allow_empty')) {
       throw new NothingToCommitError(
-        await renderReport(repo, dispatch, statPath, head, startPoint(fl), doors.ns?.links ?? null),
+        await renderReport(
+          repo,
+          dispatch,
+          statPath,
+          head,
+          startPoint(fl).virtual,
+          doors.ns?.links ?? null,
+        ),
       )
     }
     const parents =
@@ -273,8 +282,8 @@ export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
       head.branch,
       await commitSummary(
         repo,
-        before ?? new Map(),
-        after,
+        visibleEntries(repo.location, before ?? new Map()),
+        visibleEntries(repo.location, after),
         await configBool(repo, 'core.quotepath', true),
       ),
       repo.abbrev,

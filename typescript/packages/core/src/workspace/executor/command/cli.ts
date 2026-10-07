@@ -12,30 +12,32 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import {
+  directoryRefusal,
+  clapMissingOperands,
+  leafRefusal,
+} from '../../../commands/cli/refusal.ts'
+import { missCondition } from '../../mount/namespace/probe.ts'
+import { FileType, wordText, PathSpec, type Limit } from '../../../types.ts'
 import { flagOccurrences } from '../../../commands/spec/flag_view.ts'
 import type { ProcessView } from '../../../process/types.ts'
 import { CLAP_EXIT, CLI_CONFIG_ENV, GIT_LONG_OPTIONS } from '../../../commands/cli/constants.ts'
-import { clapMissingOperands, leafRefusal } from '../../../commands/cli/refusal.ts'
 import { CLISpec, type CLIInvocation, type CLIDoors } from '../../../commands/cli/types.ts'
 import { listedNode, nodeHelp, ownsArgv, walk } from '../../../commands/cli/walk.ts'
 import { verbVisible } from '../../lookup/lookup.ts'
-import type { DispatchFn } from '../../../runtime/types.ts'
+import { type DispatchFn, type ScriptSource } from '../../../runtime/types.ts'
 import type { NamespaceView, SessionView, StatPath } from '../../../ops/types.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
-import { UsageStyle } from '../../../commands/spec/types.ts'
-import { Operand, type FlagValue } from '../../../commands/spec/types.ts'
-import { PartialOutputError, UsageError } from '../../../commands/errors.ts'
+import { UsageStyle, Operand, type FlagValue } from '../../../commands/spec/types.ts'
+import { PartialOutputError, UsageError, CommandTimeoutError } from '../../../commands/errors.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { wordText, PathSpec, type Limit } from '../../../types.ts'
 import { maybeWithTimeout, runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
-import { CommandTimeoutError } from '../../../commands/errors.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import type { SessionState } from '../../session/session.ts'
 import { envSnapshot } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import { resolveLimit } from '../../../policy/index.ts'
 import { runtimeForLanguage } from '../../../runtime/routing/decide.ts'
-import type { ScriptSource } from '../../../runtime/types.ts'
 import { runOutput } from '../../../commands/builtin/general/interpreter.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
@@ -240,6 +242,25 @@ export async function handleCli(
     const stdout = result.stream === 'stdout' ? result.output : null
     const io = new IOResult({ exitCode: result.exitCode, stderr })
     return [stdout, io, new ExecutionNode({ command: cmdStr, exitCode: result.exitCode, stderr })]
+  }
+
+  if (context.statPath !== undefined && context.dispatch !== undefined) {
+    for (const base of result.operandBases) {
+      const info = await context.statPath(base)
+      if (info !== null && info.type === FileType.DIRECTORY) continue
+      const reason = info === null ? await missCondition(context.dispatch, base) : 'ENOTDIR'
+      const [stderr, code] = directoryRefusal(
+        install.name,
+        base.rawPath,
+        reason,
+        install.spec.usageStyle,
+      )
+      return [
+        null,
+        new IOResult({ exitCode: code, stderr }),
+        new ExecutionNode({ command: cmdStr, exitCode: code, stderr }),
+      ]
+    }
   }
 
   const prog = [install.name, ...result.path].join(' ')

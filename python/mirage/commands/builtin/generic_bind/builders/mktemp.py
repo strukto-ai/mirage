@@ -61,7 +61,7 @@ async def mktemp(
 
     async def exists(path: PathSpec) -> bool:
         if opts.stat_path is not None:
-            return await opts.stat_path(path.virtual) is not None
+            return await opts.stat_path(path) is not None
         return await path_exists(partial(ops.stat, accessor), local(path))
 
     return await mktemp_generic(paths, list(texts), opts, mkdir, write, exists)

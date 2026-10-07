@@ -34,6 +34,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, MountView
+from mirage.types import PathSpec
 
 ROOT = "/"
 STDOUT = "stdout"
@@ -89,7 +90,7 @@ def mounts_of(doors: CLIDoors) -> MountView | None:
     return doors.ns.mounts if doors.ns is not None else None
 
 
-def start_point(fl: FlagView) -> str:
+def start_point(fl: FlagView) -> PathSpec:
     """Where repository discovery begins for this invocation.
 
     ``-C`` changes directory before anything else happens, git's own
@@ -98,14 +99,13 @@ def start_point(fl: FlagView) -> str:
     as if typed, so an absent ``-C`` resolves to the session cwd and a
     relative ``-C build`` is already absolute by the time it arrives.
 
-    Read as a string, not a PathSpec: group-level values are resolved by
-    the walk and reach a leaf as absolute virtual paths, while a leaf's
-    own PATH flags are recovered as PathSpec by ``parse_flags``.
+    Keep the PathSpec until the directory walk is checked. Repository-relative
+    pathspec matching uses its virtual spelling after that check.
 
     Args:
         fl (FlagView): spec-validated view over the leaf's flag bag.
     """
-    return fl.as_str("C") or ROOT
+    return fl.as_path("C") or PathSpec.from_str_path(ROOT)
 
 
 def revision_arg(texts: tuple[str, ...], default: str = HEAD) -> str:

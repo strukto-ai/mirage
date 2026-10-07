@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import posixpath
 from dataclasses import dataclass
 
 from dulwich.index import IndexEntry
@@ -39,7 +38,11 @@ from mirage.commands.cli.builtin.git.io import (
     remove_empty_parents,
     remove_file,
 )
-from mirage.commands.cli.builtin.git.pathspec import matched, repo_relative
+from mirage.commands.cli.builtin.git.pathspec import (
+    matched,
+    repo_relative,
+    visible_entries,
+)
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
 from mirage.commands.cli.builtin.git.util import (
@@ -56,7 +59,7 @@ from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileType
+from mirage.types import FileType, PathSpec
 
 Tree = dict[bytes, tuple[int, bytes]]
 
@@ -138,7 +141,7 @@ def select(
 
 async def shadowed(
     links: LinkView | None,
-    worktree: str,
+    worktree: PathSpec,
     paths: list[str],
     missing: dict[str, str],
 ) -> set[str]:
@@ -158,7 +161,7 @@ async def shadowed(
     Args:
         links (LinkView | None): the name plane's link facts, None when
             no namespace is wired.
-        worktree (str): absolute virtual path of the working tree root.
+        worktree (PathSpec): absolute virtual path of the working tree root.
         paths (list[str]): the selected paths that hold an index entry.
         missing (dict[str, str]): what the walk said about each path.
     """
@@ -168,10 +171,10 @@ async def shadowed(
     for path in paths:
         if missing.get(path) != DELETED:
             continue
-        absolute = posixpath.join(worktree, path)
-        if links.resolve(absolute) == absolute:
+        absolute = worktree.join(path)
+        if links.resolve(absolute.virtual) == absolute.virtual:
             continue
-        if await links.exists(absolute):
+        if await links.exists(absolute.virtual):
             found.add(path)
     return found
 
@@ -275,8 +278,8 @@ async def clear_worktree(
     """
     removed = False
     for path in selected:
-        absolute = posixpath.join(location.worktree, path)
-        if links is None or links.stat_at(absolute) is None:
+        absolute = location.worktree.join(path)
+        if links is None or links.stat_at(absolute.virtual) is None:
             info = await stat_path(absolute)
             if info is not None and info.type is FileType.DIRECTORY:
                 if not removed:
@@ -319,9 +322,14 @@ async def rm(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         state = await read_index(dispatch, location.gitdir)
         tracked = {
             path.decode("utf-8", errors="replace")
-            for path in (set(state.entries) | set(state.conflicts))
+            for path in (
+                set(visible_entries(location, state.entries))
+                | set(visible_entries(location, state.conflicts))
+            )
         }
-        selected = select(location, start_point(fl), texts, tracked, flags)
+        selected = select(
+            location, start_point(fl).virtual, texts, tracked, flags
+        )
         if not flags.force:
             checkable = [
                 path for path in selected if path.encode() in state.entries

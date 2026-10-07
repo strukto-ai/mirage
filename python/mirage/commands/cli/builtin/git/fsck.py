@@ -25,17 +25,19 @@ from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import StatPath
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileType
+from mirage.types import FileType, PathSpec
 
 PACK_BLOCK = 1 << 18
 
 
-async def check_pack(dispatch: DispatchFn, path: str, expected: bytes) -> None:
+async def check_pack(
+    dispatch: DispatchFn, path: PathSpec, expected: bytes
+) -> None:
     """Hash bounded ranges, retaining only the trailing SHA-1 between reads.
 
     Args:
         dispatch (DispatchFn): repository dispatcher.
-        path (str): virtual pack path.
+        path (PathSpec): virtual pack path.
         expected (bytes): pack checksum recorded by the index.
     """
     digest = hashlib.sha1()
@@ -50,7 +52,7 @@ async def check_pack(dispatch: DispatchFn, path: str, expected: bytes) -> None:
             chunk = await read_range(dispatch, path, offset, count)
             if not chunk:
                 if size is not None and offset < size:
-                    raise GitError(f"truncated pack: {path}")
+                    raise GitError(f"truncated pack: {path.virtual}")
                 break
             offset += len(chunk)
             buffered = tail + chunk
@@ -61,53 +63,57 @@ async def check_pack(dispatch: DispatchFn, path: str, expected: bytes) -> None:
                 break
     except WALK_ERRORS as exc:
         raise GitError(
-            f"cannot read pack {path}: {fs_strerror(exc) or str(exc)}"
+            f"cannot read pack {path.virtual}: {fs_strerror(exc) or str(exc)}"
         ) from exc
     if offset < 32:
-        raise GitError(f"truncated pack: {path}")
+        raise GitError(f"truncated pack: {path.virtual}")
     if digest.digest() != tail or tail != expected:
-        raise GitError(f"pack checksum mismatch: {path}")
+        raise GitError(f"pack checksum mismatch: {path.virtual}")
 
 
-async def check_packs(dispatch: DispatchFn, commondir: str) -> None:
+async def check_packs(dispatch: DispatchFn, commondir: PathSpec) -> None:
     """Validate indexes and stream packs before opening the object database.
 
     Args:
         dispatch (DispatchFn): repository dispatcher.
-        commondir (str): shared Git directory.
+        commondir (PathSpec): shared Git directory.
     """
-    root = f"{commondir}/objects/pack"
+    root = commondir.join("objects/pack")
     for entry in await read_names(dispatch, root):
         name = basename(entry)
         if not name.endswith(".idx"):
             continue
-        path = f"{root}/{name}"
+        path = root.join(name)
         try:
             data = await read_file(dispatch, path)
         except WALK_ERRORS as exc:
             detail = fs_strerror(exc) or str(exc)
-            raise GitError(f"cannot read pack index {path}: {detail}") from exc
+            raise GitError(
+                f"cannot read pack index {path.virtual}: {detail}"
+            ) from exc
         if len(data) < 1064:
-            raise GitError(f"truncated pack index: {path}")
+            raise GitError(f"truncated pack index: {path.virtual}")
         if hashlib.sha1(data[:-20]).digest() != data[-20:]:
-            raise GitError(f"pack index checksum mismatch: {path}")
-        await check_pack(dispatch, f"{root}/{name[:-4]}.pack", data[-40:-20])
+            raise GitError(f"pack index checksum mismatch: {path.virtual}")
+        await check_pack(
+            dispatch, root.join(f"{name[:-4]}.pack"), data[-40:-20]
+        )
 
 
 async def log_roots(
-    dispatch: DispatchFn, stat_path: StatPath, path: str
+    dispatch: DispatchFn, stat_path: StatPath, path: PathSpec
 ) -> set[bytes]:
     """Collect reflog roots without assuming names or storage layout.
 
     Args:
         dispatch (DispatchFn): repository dispatcher.
         stat_path (StatPath): namespace-aware entry classification.
-        path (str): logs directory or a log file.
+        path (PathSpec): logs directory or a log file.
     """
     found: set[bytes] = set()
     for entry in await read_names(dispatch, path):
         name = basename(entry)
-        target = f"{path}/{name}"
+        target = path.join(name)
         info = await stat_path(target)
         if info is not None and info.type is FileType.DIRECTORY:
             found.update(await log_roots(dispatch, stat_path, target))
@@ -206,7 +212,7 @@ async def fsck(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         for directory in {location.gitdir, location.commondir}:
             roots.update(
                 await log_roots(
-                    doors.dispatch, doors.stat_path, f"{directory}/logs"
+                    doors.dispatch, doors.stat_path, directory.join("logs")
                 )
             )
         out, io = await asyncio.to_thread(
@@ -214,7 +220,7 @@ async def fsck(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         )
         if not roots:
             head = await read_optional(
-                doors.dispatch, f"{location.gitdir}/HEAD"
+                doors.dispatch, location.gitdir.join("HEAD")
             )
             branch = (
                 (head or b"").decode().strip().removeprefix("ref: refs/heads/")

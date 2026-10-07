@@ -15,12 +15,11 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { mountKey } from '../../../utils/key_prefix.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
-import { PathSpec } from '../../../types.ts'
+import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync, stdinStream } from '../utils/stream.ts'
 
@@ -285,7 +284,7 @@ interface IconvFlags {
   readonly fromEnc: string
   readonly toEnc: string
   readonly ignoreErrors: boolean
-  readonly outputPath: string | null
+  readonly outputPath: PathSpec | null
 }
 
 function parseFlags(bag: Record<string, FlagValue>): IconvFlags {
@@ -294,7 +293,7 @@ function parseFlags(bag: Record<string, FlagValue>): IconvFlags {
     fromEnc: fl.asStr('f') ?? 'utf-8',
     toEnc: fl.asStr('t') ?? 'utf-8',
     ignoreErrors: fl.asBool('c'),
-    outputPath: fl.asStr('o') ?? null,
+    outputPath: fl.asPath('o') ?? null,
   }
 }
 
@@ -352,7 +351,7 @@ export async function iconvGeneric(
   const encoded = concat(chunks)
   const outPath = parsed.outputPath
   if (outPath !== null) {
-    const spec = PathSpec.fromStrPath(outPath, mountKey(outPath, opts.mountPrefix ?? ''))
+    const spec = outPath
     await write(spec, encoded)
     return [
       null,

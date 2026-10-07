@@ -5,7 +5,8 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
 import { diff } from './diff.ts'
 import { GitError } from './errors.ts'
-import { readOptional, under } from './io.ts'
+import { readOptional } from './io.ts'
+
 import { repoArgs } from './repo.ts'
 import { opened } from './session.ts'
 import { resolveCommit } from './revparse.ts'
@@ -15,10 +16,7 @@ import { fatal } from './util.ts'
 export async function stashList(inv: CLIInvocation): Promise<CommandFnResult> {
   try {
     const repo = await opened(new FlagView(inv.flags), inv.doors ?? {})
-    const data = await readOptional(
-      repo.dispatch,
-      under(repo.location.commondir, 'logs/refs/stash'),
-    )
+    const data = await readOptional(repo.dispatch, repo.location.commondir.join('logs/refs/stash'))
     const rows = new TextDecoder()
       .decode(data ?? new Uint8Array())
       .split('\n')
@@ -43,7 +41,7 @@ export async function stashShow(inv: CLIInvocation): Promise<CommandFnResult> {
     if (match !== null) {
       const data = await readOptional(
         repo.dispatch,
-        under(repo.location.commondir, 'logs/refs/stash'),
+        repo.location.commondir.join('logs/refs/stash'),
       )
       const rows = new TextDecoder()
         .decode(data ?? new Uint8Array())

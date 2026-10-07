@@ -15,12 +15,11 @@
 import { GitConfigManager } from 'isomorphic-git/managers'
 import { FileSystem } from 'isomorphic-git/models'
 
-import { FileType, PathSpec } from '../../../../types.ts'
-import type { FileStat } from '../../../../types.ts'
+import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
 import { enoent } from '../../../../errors/fs.ts'
-import { basename, ensureDir, exists, readNames, removeFile, under } from './io.ts'
-import type { Dispatch, RepoLocation } from './types.ts'
+import { basename, ensureDir, exists, readNames, removeFile, writeFile as writePath } from './io.ts'
 import { posixNormpath } from '../../../../utils/path.ts'
+import type { Dispatch, RepoLocation } from './types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -143,23 +142,31 @@ export function gitFs(
   // isomorphic-git accepts one gitdir and does not follow commondir itself.
   // Route shared storage here so every library operation keeps the selected
   // checkout's HEAD/index while using the common objects, refs and config.
+  const roots =
+    location === undefined
+      ? []
+      : [location.gitdir, location.commondir, location.worktree].sort(
+          (a, b) => b.virtual.length - a.virtual.length,
+        )
   const dispatch: Dispatch = (op, path, args, kwargs) => {
-    let virtual = posixNormpath(path.virtual)
-    if (location !== undefined && location.gitdir !== location.commondir) {
-      const prefix = `${location.gitdir}/`
-      if (virtual.startsWith(prefix)) {
-        const relative = virtual.slice(prefix.length)
-        const shared = ['objects', 'refs', 'packed-refs', 'config', 'shallow'].some(
-          (name) => relative === name || relative.startsWith(`${name}/`),
-        )
-        const local = ['refs/bisect', 'refs/worktree', 'refs/rewritten'].some(
-          (name) => relative === name || relative.startsWith(`${name}/`),
-        )
-        if (shared && !local) virtual = under(location.commondir, relative)
-      }
+    if (location === undefined) return source(op, path, args, kwargs)
+    const virtual = posixNormpath(path.virtual)
+    for (const root of roots) {
+      const prefix = `${root.virtual.replace(/\/$/, '')}/`
+      if (virtual !== root.virtual && !virtual.startsWith(prefix)) continue
+      const relative = virtual === root.virtual ? '' : virtual.slice(prefix.length)
+      const shared = ['objects', 'refs', 'packed-refs', 'config', 'shallow'].some(
+        (name) => relative === name || relative.startsWith(`${name}/`),
+      )
+      const local = ['refs/bisect', 'refs/worktree', 'refs/rewritten'].some(
+        (name) => relative === name || relative.startsWith(`${name}/`),
+      )
+      const base = root === location.gitdir && shared && !local ? location.commondir : root
+      return source(op, relative ? base.join(relative) : base, args, kwargs)
     }
-    return source(op, PathSpec.fromStrPath(virtual), args, kwargs)
+    return source(op, path, args, kwargs)
   }
+
   const readFile = async (path: string, options?: string | { encoding?: string }) => {
     const encoding = typeof options === 'string' ? options : options?.encoding
     const [data] = await dispatch('read', PathSpec.fromStrPath(path))
@@ -168,9 +175,11 @@ export function gitFs(
   }
 
   const writeFile = async (path: string, data: Uint8Array | string) => {
-    const bytes = typeof data === 'string' ? ENC.encode(data) : data
-    await ensureDir(dispatch, path.slice(0, path.lastIndexOf('/')) || '/')
-    await dispatch('write', PathSpec.fromStrPath(path), [bytes])
+    await writePath(
+      dispatch,
+      PathSpec.fromStrPath(path),
+      typeof data === 'string' ? ENC.encode(data) : data,
+    )
   }
 
   const stat = async (path: string) => {
@@ -184,13 +193,14 @@ export function gitFs(
       readFile,
       writeFile,
       unlink: async (path: string) => {
-        await removeFile(dispatch, path)
+        await removeFile(dispatch, PathSpec.fromStrPath(path))
       },
       // isomorphic-git wants bare names; backends may report either those or
       // whole paths, with or without a trailing slash.
-      readdir: async (path: string) => (await readNames(dispatch, path)).map(basename),
+      readdir: async (path: string) =>
+        (await readNames(dispatch, PathSpec.fromStrPath(path))).map(basename),
       mkdir: async (path: string) => {
-        await ensureDir(dispatch, path)
+        await ensureDir(dispatch, PathSpec.fromStrPath(path))
       },
       rmdir: async (path: string) => {
         await dispatch('rmdir', PathSpec.fromStrPath(path))
@@ -203,7 +213,7 @@ export function gitFs(
       // git chmods a loose object to 0444; the mount decides its own modes and
       // writeOnce never rewrites one, so there is nothing to enforce.
       chmod: () => Promise.resolve(),
-      exists: (path: string) => exists(dispatch, path),
+      exists: (path: string) => exists(dispatch, PathSpec.fromStrPath(path)),
     } as unknown as Record<string, (...args: never[]) => Promise<unknown>>,
   }
 }
@@ -226,8 +236,8 @@ export async function configValues(
   path: string,
 ): Promise<string[]> {
   const config = await GitConfigManager.get({
-    fs: new FileSystem(gitFs(dispatch)) as never,
-    gitdir: location.commondir,
+    fs: new FileSystem(gitFs(dispatch, location)) as never,
+    gitdir: location.commondir.virtual,
   })
   // Section and name fold case; a subsection between them does not.
   const first = path.indexOf('.')

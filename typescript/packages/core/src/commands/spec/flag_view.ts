@@ -199,24 +199,26 @@ export class FlagView {
     return Number.parseFloat(text.replaceAll('_', ''))
   }
 
-  // A PATH-typed value reads as its resolved virtual path here, which is
-  // what every reader of the string wants; `asPaths` hands over the PathSpec
-  // itself, for the typed spelling an error line names.
   asStr(name: string): string | undefined {
     const value = this.flags[this.key(name)]
-    if (value instanceof PathSpec) return value.virtual
     return typeof value === 'string' ? value : undefined
   }
 
   asList(name: string): string[] {
     const value = this.flags[this.key(name)]
-    if (Array.isArray(value)) return value.map((v) => (v instanceof PathSpec ? v.virtual : v))
-    if (value instanceof PathSpec) return [value.virtual]
+    if (Array.isArray(value)) {
+      const items: readonly (string | PathSpec)[] = value
+      return items.filter((item): item is string => typeof item === 'string')
+    }
     if (typeof value === 'string') return [value]
     return []
   }
 
-  // PATH-typed flag values arrive as PathSpec. Mirrors Python's `as_paths`.
+  asPath(name: string): PathSpec | undefined {
+    const value = this.flags[this.key(name)]
+    return value instanceof PathSpec ? value : undefined
+  }
+
   asPaths(name: string): PathSpec[] {
     const value = this.flags[this.key(name)]
     if (Array.isArray(value)) {

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-import posixpath
 import re
 import sys
 from collections.abc import Callable, Iterable
@@ -205,13 +204,7 @@ async def read_cli_file(
         if inv.stdin is None:
             raise ValueError(f"{option} needs standard input")
         return await materialize(inv.stdin)
-    spec = (
-        raw
-        if isinstance(raw, PathSpec)
-        else PathSpec.from_str_path(
-            posixpath.normpath(posixpath.join(inv.env.get("PWD", "/"), raw))
-        )
-    )
+    spec = PathSpec.from_str_path(raw, cwd=inv.env.get("PWD", "/"))
     if inv.doors is None or inv.doors.dispatch is None:
         raise ValueError(f"{option} needs a workspace to read files from")
     try:

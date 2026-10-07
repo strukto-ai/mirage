@@ -14,7 +14,6 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import eexist, fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-from mirage.utils.path import resolve_path
 
 _ALPHABET = string.ascii_letters + string.digits
 DEFAULT_TEMPLATE = "tmp.XXXXXXXXXX"
@@ -185,7 +184,7 @@ async def mktemp(
     name = draw()
     try:
         for _ in range(ATTEMPTS):
-            path = PathSpec.from_str_path(resolve_path(name, cwd))
+            path = PathSpec.from_str_path(name, cwd=cwd)
             if exists_fn is None or not await exists_fn(path):
                 break
             name = draw()

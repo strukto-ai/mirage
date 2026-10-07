@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import posixpath
 import time
 from dataclasses import dataclass, replace
 from io import BytesIO
@@ -649,7 +648,7 @@ async def fetch(
         if dispatch is None:
             raise NoWorkspaceError()
         config = _config(
-            await read_optional(dispatch, f"{location.commondir}/config")
+            await read_optional(dispatch, location.commondir.join("config"))
         )
         head = await read_head(dispatch, location.gitdir)
         texts = list(inv.texts)
@@ -709,7 +708,7 @@ async def fetch(
             if want.local is not None and want.local == checked:
                 raise GitError(
                     f"refusing to fetch into branch '{checked}' "
-                    f"checked out at '{location.worktree}'"
+                    f"checked out at '{location.worktree.virtual}'"
                 )
         tag_opt = multivar(config, (b"remote", name.encode()), b"tagopt")
         follow = not fl.as_bool("no_tags") and tag_opt[-1:] != [b"--no-tags"]
@@ -724,9 +723,7 @@ async def fetch(
             dispatch, repo, location, taken, reason, not bare
         )
         await write_file(
-            dispatch,
-            posixpath.join(location.gitdir, FETCH_HEAD),
-            fetch_head(url, taken),
+            dispatch, location.gitdir.join(FETCH_HEAD), fetch_head(url, taken)
         )
         shown = pruned + [
             row for row in rows if row.code != "=" or fl.as_bool("verbose")
@@ -753,8 +750,6 @@ def fetch_read_only(
         inv (CLIInvocation[None]): the line's invocation record.
         location (RepoLocation | None): the repository it opened.
     """
-    if location is None or location.gitdir == posixpath.join(
-        location.worktree, ".git"
-    ):
+    if location is None or location.gitdir == location.worktree.join(".git"):
         return FetchHeadReadOnlyError(f".git/{FETCH_HEAD}")
-    return FetchHeadReadOnlyError(posixpath.join(location.gitdir, FETCH_HEAD))
+    return FetchHeadReadOnlyError(location.gitdir.join(FETCH_HEAD).virtual)

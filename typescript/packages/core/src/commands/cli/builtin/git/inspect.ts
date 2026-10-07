@@ -1,3 +1,4 @@
+import { PathSpec } from '../../../../types.ts'
 import { loadRefs, resolveSymbolic } from './refs.ts'
 import { shortenRef } from './ref_fields.ts'
 import git from 'isomorphic-git'
@@ -22,7 +23,7 @@ import {
 } from './errors.ts'
 import { parseFlags, refCommits, select } from './history.ts'
 import { uniqueAbbreviations } from './ref_list.ts'
-import { configBool, repoArgs } from './repo.ts'
+import { configBool, repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { configLines } from './fs.ts'
 import { readFile, readOptional } from './io.ts'
@@ -40,9 +41,7 @@ import {
 } from './util.ts'
 import { HELP_SWITCH } from '../../refusal.ts'
 import { isBare } from './discover.ts'
-import { under } from './io.ts'
 import type { Dispatch, RepoLocation } from './types.ts'
-import type { Repo } from './repo.ts'
 
 const ENC = new TextEncoder()
 const SHOW_TOPLEVEL = '--show-toplevel'
@@ -107,7 +106,7 @@ export async function globalSources(
   const xdg = configured === '' ? `${home}/.config` : configured
   const sources: { source: string; data: Uint8Array }[] = []
   for (const source of override === undefined ? [`${xdg}/git/config`, target] : [target]) {
-    const data = await readOptional(dispatch, source)
+    const data = await readOptional(dispatch, PathSpec.fromStrPath(source, undefined, '/'))
     if (data !== null) sources.push({ source, data })
   }
   if (!sources.length && listing)
@@ -122,12 +121,15 @@ export async function config(inv: CLIInvocation): Promise<CommandFnResult> {
     if (fl.asBool('global')) sources = await globalSources(inv, fl.asBool('list'))
     else {
       const repo = await opened(fl, inv.doors ?? {})
-      const path = `${repo.location.commondir}/config`
+      const path = repo.location.commondir.join(`config`)
       const ordinary =
-        repo.location.commondir === repo.location.worktree + '/.git' &&
-        startPoint(fl) === repo.location.worktree
+        repo.location.commondir.virtual === repo.location.worktree.virtual + '/.git' &&
+        startPoint(fl).virtual === repo.location.worktree.virtual
       sources = [
-        { source: ordinary ? '.git/config' : path, data: await readFile(repo.dispatch, path) },
+        {
+          source: ordinary ? '.git/config' : path.rawPath,
+          data: await readFile(repo.dispatch, path),
+        },
       ]
     }
     const listing = fl.asBool('list'),
@@ -246,21 +248,24 @@ function configKey(key: string): string {
  */
 async function placeAnswers(repo: Repo, start: string): Promise<Map<string, string>> {
   const location: RepoLocation = repo.location
-  const inGitDir = start === location.gitdir || start.startsWith(`${location.gitdir}/`)
-  const top = location.worktree === '/' ? '/' : `${location.worktree}/`
+  const inGitDir =
+    start === location.gitdir.virtual || start.startsWith(`${location.gitdir.virtual}/`)
+  const top = location.worktree.virtual === '/' ? '/' : `${location.worktree.virtual}/`
   const inWorkTree =
     !inGitDir &&
     !(await isBare(repo.dispatch, location)) &&
-    (start === location.worktree || start.startsWith(top))
-  const prefix = inWorkTree && start !== location.worktree ? `${start.slice(top.length)}/` : ''
+    (start === location.worktree.virtual || start.startsWith(top))
+  const prefix =
+    inWorkTree && start !== location.worktree.virtual ? `${start.slice(top.length)}/` : ''
   const gitDir =
-    start === location.gitdir
+    start === location.gitdir.virtual
       ? '.'
-      : start === location.worktree && location.gitdir === under(location.worktree, '.git')
+      : start === location.worktree.virtual &&
+          location.gitdir.virtual === location.worktree.join('.git').virtual
         ? '.git'
-        : location.gitdir
+        : location.gitdir.virtual
   return new Map([
-    [SHOW_TOPLEVEL, `${location.worktree}\n`],
+    [SHOW_TOPLEVEL, `${location.worktree.virtual}\n`],
     [GIT_DIR_OPTION, `${gitDir}\n`],
     ['--show-prefix', `${prefix}\n`],
     ['--is-inside-work-tree', `${String(inWorkTree)}\n`],
@@ -299,7 +304,7 @@ function shortWidth(value: unknown, fallback: number): number {
  */
 async function abbreviated(
   dispatch: Dispatch,
-  gitdir: string,
+  gitdir: PathSpec,
   table: ReadonlyMap<string, string>,
   revision: string,
   strict: boolean,
@@ -353,10 +358,11 @@ export async function revParse(inv: CLIInvocation): Promise<CommandFnResult> {
     const mode = fl.raw('abbrev_ref')
     if (typeof mode === 'string') abbrevStrict(mode, true)
     repo = await opened(fl, inv.doors ?? {}, toplevel)
-    const start = startPoint(fl)
+    const start = startPoint(fl).virtual
     if (
       toplevel &&
-      (start === repo.location.gitdir || start.startsWith(`${repo.location.gitdir}/`))
+      (start === repo.location.gitdir.virtual ||
+        start.startsWith(`${repo.location.gitdir.virtual}/`))
     )
       throw new NotAWorkTreeError()
     const answers = await placeAnswers(repo, start)

@@ -262,10 +262,10 @@ export class InitReadOnlyError extends GitError {
   }
 }
 
-/** `init` refused the directory its operand names by a read-only mount. */
+/** `init` could not create the directory its operand names. */
 export class CannotMkdirError extends GitError {
-  constructor(path: string) {
-    super(`cannot mkdir ${path}: Read-only file system`)
+  constructor(path: string, reason = 'Read-only file system') {
+    super(`cannot mkdir ${path}: ${reason}`)
   }
 }
 

@@ -207,9 +207,12 @@ async def du_operands(
     Args:
         paths (list[PathSpec]): the operands as parsed, possibly empty.
         cwd (PathSpec | str): the working directory, used when empty.
-        resolve_glob (Callable): expands globs against the backend.
-        stat (Callable): raises when an operand cannot be read.
-        has_content (Callable | None): asked only when stat failed, to
+        resolve_glob (Callable[[list[PathSpec]], Awaitable[list[PathSpec]]]):
+            expands globs against the backend.
+        stat (Callable[[PathSpec], Awaitable[FileStat]]):
+            raises when an operand cannot be read.
+        has_content (Callable[[PathSpec], Awaitable[bool]] | None):
+            asked only when stat failed, to
             tell an implicit directory from an absent path.
         links (LinkView | None): the namespace's symlink facts. A link
             has no backend inode, so it fails stat while still being a
@@ -298,13 +301,14 @@ async def du_operand_exists(
     Args:
         path (PathSpec): the operand.
         stattable (bool): whether the bound backend's stat succeeded.
-        has_content (HasContent | None): the content probe, which tells
+        has_content (Callable[[PathSpec], Awaitable[bool]] | None):
+            the content probe, which tells
             an implicit directory from an absent path.
         stat_path (StatPath | None): dispatcher-backed stat.
     """
     if stat_path is None and stattable:
         return True
-    if stat_path is not None and await stat_path(path.virtual) is not None:
+    if stat_path is not None and await stat_path(path) is not None:
         return True
     return has_content is not None and await has_content(path)
 
@@ -798,8 +802,10 @@ async def du_generic(
         paths (list[PathSpec]): The operands as parsed, possibly empty.
         texts (list[str]): Non-path words, unused by du.
         opts (CommandOpts): Flags and cwd from the dispatcher.
-        resolve_glob (Callable): Expands globs against the backend.
-        stat (Callable): Raises when an operand cannot be read.
+        resolve_glob (Callable[[list[PathSpec]], Awaitable[list[PathSpec]]]):
+            Expands globs against the backend.
+        stat (Callable[[PathSpec], Awaitable[FileStat]]):
+            Raises when an operand cannot be read.
         compute_size (ComputeSize): Recursive byte size of one operand.
         compute_entries (ComputeEntries): Per-file breakdown.
         truncated (Callable[[], bool] | None): Whether the walk was cut.

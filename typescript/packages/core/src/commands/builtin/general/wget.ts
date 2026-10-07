@@ -14,7 +14,7 @@
 
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import { PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { HttpConnectError, HttpTimeoutError } from '../errors.ts'
@@ -48,7 +48,7 @@ async function wget(
   const fl = new FlagView(opts.flags, specOf('wget'))
   // -O is short-only, so it lands on the disambiguated `args_O` dest
   // (`AMBIGUOUS_NAMES`); a plain `O` key is one the parser never emits.
-  const argsO = fl.asStr('args_O') ?? null
+  const argsO = fl.asPath('args_O') ?? fl.asStr('args_O') ?? null
   const q = fl.asBool('q')
   const spider = fl.asBool('spider')
   const timeout = fl.asFloat('timeout')
@@ -92,7 +92,11 @@ async function wget(
       new IOResult({ stderr: q ? new Uint8Array() : ENC.encode('Remote file exists.\n') }),
     ]
   }
-  if (argsO === '-' || (isHttpError(resp) && argsO === null)) {
+  if (
+    argsO === '-' ||
+    (argsO instanceof PathSpec && argsO.rawPath === '-') ||
+    (isHttpError(resp) && argsO === null)
+  ) {
     return [
       isHttpError(resp) ? null : resp.body,
       new IOResult({
@@ -104,12 +108,13 @@ async function wget(
       }),
     ]
   }
-  const dest = argsO ?? paths[0]?.virtual ?? (url.slice(url.lastIndexOf('/') + 1) || 'index.html')
+  const target = argsO ?? paths[0] ?? (url.slice(url.lastIndexOf('/') + 1) || 'index.html')
+  const dest = target instanceof PathSpec ? target.virtual : target
   // An error status still creates the destination, empty, the way GNU wget
   // truncates the -O target before it learns the response code.
   const data = isHttpError(resp) ? new Uint8Array() : resp.body
   if (opts.dispatch !== undefined) {
-    const scope = resolveTarget(dest, opts.cwd)
+    const scope = resolveTarget(target, opts.cwd)
     try {
       await opts.dispatch('write', scope, [data])
     } catch (err) {

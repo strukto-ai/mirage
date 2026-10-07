@@ -16,7 +16,7 @@ import git from 'isomorphic-git'
 import { IOResult } from '../../../../io/types.ts'
 import { fsStrerror, isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import { sha1Hex } from '../../../../utils/hash.ts'
-import { posixNormpath } from '../../../../utils/path.ts'
+import { PathSpec } from '../../../../types.ts'
 import { readStdinAsync } from '../../../builtin/utils/stream.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -103,9 +103,9 @@ async function objectId(kind: string, data: Uint8Array): Promise<string> {
 }
 
 /** A file's bytes, in git's words when it cannot be read. */
-async function content(dispatch: Dispatch, base: string, name: string): Promise<Uint8Array> {
+async function content(dispatch: Dispatch, base: PathSpec, name: string): Promise<Uint8Array> {
   try {
-    return await readFile(dispatch, posixNormpath(name.startsWith('/') ? name : `${base}/${name}`))
+    return await readFile(dispatch, PathSpec.fromStrPath(name, undefined, base))
   } catch (err) {
     if (isEisdir(err)) throw new GitError(`Unable to hash ${name}`)
     if (isMissingPath(err) || isEnotdir(err)) {

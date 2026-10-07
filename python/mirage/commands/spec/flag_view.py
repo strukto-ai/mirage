@@ -214,6 +214,10 @@ class FlagView:
             return [value]
         return []
 
+    def as_path(self, name: str) -> PathSpec | None:
+        value = self._flags.get(self._key(name))
+        return value if isinstance(value, PathSpec) else None
+
     def as_paths(self, name: str) -> list[PathSpec]:
         # PATH-typed flag values arrive as PathSpec. Mirrors TS asPaths.
         value = self._flags.get(self._key(name))

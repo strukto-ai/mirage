@@ -113,7 +113,7 @@ async def config_values(
         section (bytes): the section, e.g. ``b"core"``.
         name (bytes): the variable, e.g. ``b"worktree"``.
     """
-    data = await read_optional(dispatch, f"{location.commondir}/config")
+    data = await read_optional(dispatch, location.commondir.join("config"))
     if data is None:
         return []
     config = ConfigFile.from_file(BytesIO(data))

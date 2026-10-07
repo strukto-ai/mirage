@@ -12,12 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { HELP_OPTION } from '../spec/constants.ts'
+import { flagOccurrences } from '../spec/flag_view.ts'
+import { HELP_OPTION, FLOAT_VALUE, INT_VALUE } from '../spec/constants.ts'
 import { compileSpec, type CompiledSpec, expandLong } from '../spec/compile.ts'
-import { FLOAT_VALUE, INT_VALUE } from '../spec/constants.ts'
 import { argparseHelp, clapGroupRefusal, clapUnexpectedArgument, renderHelp } from '../spec/help.ts'
 import { CommandSpec, UsageStyle, Option } from '../spec/types.ts'
-import { resolvePath } from '../../utils/path.ts'
+import { PathSpec } from '../../types.ts'
+
 import { WalkResult, type CLISpec, type WalkFlagBag } from './types.ts'
 
 import { CLAP_EXIT, GIT_SYNOPSES, USAGE_EXIT } from './constants.ts'
@@ -365,21 +366,16 @@ function recordBool(flags: WalkFlagBag, cs: CompiledSpec, spelling: string): voi
 }
 
 /**
- * Record a value occurrence under its canonical dashed spelling. The node's
- * `operandBase` option moves the way a chdir does, as the flat parser's does
- * for tar: each occurrence lands relative to the one before it, so
- * `git -C /repo -C docs` is `/repo/docs`. The composed path may stay relative
- * until `resolveGroupPaths` puts it against the working directory.
+ * Record a value occurrence. Directory changes are resolved in occurrence
+ * order by resolveGroupPaths after the node has been scanned.
  */
 function recordValue(flags: WalkFlagBag, cs: CompiledSpec, spelling: string, value: string): void {
   const dest = cs.destOf(spelling)
-  const previous = flags[dest]
-  if (dest === cs.baseDest && typeof previous === 'string') {
-    flags[dest] = previous === '' ? value : resolvePath(value, previous)
-  } else if (cs.multipleDests.has(dest)) {
+  flagOccurrences(flags).push([dest, value])
+  if (cs.multipleDests.has(dest)) {
     const prev = flags[dest]
     if (Array.isArray(prev)) {
-      prev.push(value)
+      flags[dest] = [...prev, value]
     } else {
       flags[dest] = [value]
     }
@@ -461,19 +457,38 @@ function expandGroupLong(node: CLISpec, cs: CompiledSpec, spelling: string): rea
  * the same here rather than handing a leaf a raw relative string it has no cwd
  * to interpret.
  *
- * Resolved to absolute strings, not PathSpec: a group flag never picks a mount
- * (CLI dispatch consults none), so the routing half of the leaf's PATH recovery
- * has nothing to do here.
+ * Keep the typed spelling and its walk verdict, just as leaf PATH values do.
+ * The operand base resolves first; other path options are relative to it.
  */
-function resolveGroupPaths(cs: CompiledSpec, flags: WalkFlagBag, cwd: string): void {
-  for (const [dest, kind] of cs.kindByDest) {
-    if (kind !== 'path' || !(dest in flags)) continue
-    const value = flags[dest]
-    if (Array.isArray(value)) {
-      flags[dest] = value.map((part) => resolvePath(part, cwd))
-    } else if (typeof value === 'string') {
-      flags[dest] = resolvePath(value, cwd)
+function resolveGroupPaths(
+  cs: CompiledSpec,
+  flags: WalkFlagBag,
+  cwd: string,
+  bases: PathSpec[],
+): void {
+  let base: string | PathSpec = cwd
+  if (cs.baseDest !== null) {
+    const value = flags[cs.baseDest]
+    if (typeof value === 'string') {
+      const values = flagOccurrences(flags)
+        .filter(([name]) => name === cs.baseDest)
+        .map(([, value]) => value)
+        .filter((value): value is string => typeof value === 'string')
+      let scope = PathSpec.fromStrPath('.', undefined, cwd)
+      for (const word of values.length > 0 ? values : [value]) {
+        scope = PathSpec.fromStrPath(word || '.', undefined, scope)
+        bases.push(scope)
+      }
+      flags[cs.baseDest] = scope
+      base = scope
     }
+  }
+  for (const [dest, kind] of cs.kindByDest) {
+    if (kind !== 'path' || !(dest in flags) || dest === cs.baseDest) continue
+    const value = flags[dest]
+    if (Array.isArray(value))
+      flags[dest] = value.map((part) => PathSpec.fromStrPath(part, undefined, base))
+    else if (typeof value === 'string') flags[dest] = PathSpec.fromStrPath(value, undefined, base)
   }
 }
 
@@ -493,6 +508,7 @@ function finishNode(
   flags: WalkFlagBag,
   cwd: string,
   style: UsageStyle,
+  bases: PathSpec[],
   env: Readonly<Record<string, string>> | null,
 ): WalkResult | null {
   for (const [dest, variable] of cs.envByDest) {
@@ -506,7 +522,7 @@ function finishNode(
       flags[dest] = cs.multipleDests.has(dest) ? [value] : value
     }
   }
-  resolveGroupPaths(cs, flags, cwd)
+  resolveGroupPaths(cs, flags, cwd, bases)
   // Numeric-typed values before choices, argparse's order; wording is
   // git's parse-options refusal (`--depth` on a non-integer), one phrase
   // for int and float alike.
@@ -518,7 +534,7 @@ function finishNode(
       const value = flags[dest]
       const candidates = Array.isArray(value) ? value : typeof value === 'string' ? [value] : []
       for (const part of candidates) {
-        if (!pattern.test(part)) {
+        if (typeof part === 'string' && !pattern.test(part)) {
           return usageError(name, node, `error: option '${dest}' expects a numerical value`, style)
         }
       }
@@ -526,10 +542,15 @@ function finishNode(
   }
   for (const [dest, allowed] of cs.choicesByDest) {
     const value = flags[dest]
-    const candidates = Array.isArray(value) ? value : typeof value === 'string' ? [value] : []
+    const candidates = Array.isArray(value)
+      ? value
+      : typeof value === 'string' || value instanceof PathSpec
+        ? [value]
+        : []
     for (const part of candidates) {
-      if (!allowed.includes(part)) {
-        return usageError(name, node, `error: invalid argument '${part}' for '${dest}'`, style)
+      const choice = part instanceof PathSpec ? part.virtual : part
+      if (!allowed.includes(choice)) {
+        return usageError(name, node, `error: invalid argument '${choice}' for '${dest}'`, style)
       }
     }
   }
@@ -572,6 +593,7 @@ export function walk(
   const style = spec.usageStyle
   let path: string[] = []
   const flags: WalkFlagBag = {}
+  const bases: PathSpec[] = []
   let i = 0
   const shown = (child: string): boolean => visible?.([...path, child]) ?? true
   for (;;) {
@@ -579,7 +601,13 @@ export function walk(
     // remaining argv rides the ordinary spec machinery for validation,
     // then passes to the program verbatim.
     if (node.fn !== null || node.script !== null) {
-      return new WalkResult({ leaf: node, path, groupFlags: flags, argv: argv.slice(i) })
+      return new WalkResult({
+        leaf: node,
+        path,
+        groupFlags: flags,
+        operandBases: bases,
+        argv: argv.slice(i),
+      })
     }
     const name = [head, ...path].join(' ')
     const cs = compileSpec(node)
@@ -593,7 +621,7 @@ export function walk(
           ? findChild(node, token)
           : null
       if (alias?.aliases.includes(token)) {
-        const refused = finishNode(name, node, cs, flags, cwd, style, env)
+        const refused = finishNode(name, node, cs, flags, cwd, style, bases, env)
         if (refused !== null) return refused
         node = alias
         path = [...path, alias.name]
@@ -720,7 +748,7 @@ export function walk(
         i += 1
         continue
       }
-      const refused = finishNode(name, node, cs, flags, cwd, style, env)
+      const refused = finishNode(name, node, cs, flags, cwd, style, bases, env)
       if (refused !== null) return refused
       // An alias resolves to its canonical node; the path records the
       // canonical name (argparse prog attribution: errors under `gws co`
@@ -736,7 +764,7 @@ export function walk(
       break
     }
     if (descended) continue
-    const refused = finishNode(name, node, cs, flags, cwd, style, env)
+    const refused = finishNode(name, node, cs, flags, cwd, style, bases, env)
     if (refused !== null) return refused
     return new WalkResult({
       output: encodeText(nodeHelp(name, node, style, shown)),

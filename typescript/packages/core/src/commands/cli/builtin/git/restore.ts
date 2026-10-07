@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { visibleEntries, matched, repoRelative, under as inside } from './pathspec.ts'
 import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
@@ -41,9 +42,8 @@ import {
   removeFile,
   removeTree,
   restoreEntry,
-  under,
 } from './io.ts'
-import { matched, repoRelative, under as inside } from './pathspec.ts'
+
 import { repoArgs, type Repo } from './repo.ts'
 import { BRANCH_PREFIX, loadRefs, SYMREF_PREFIX } from './refs.ts'
 import { opened } from './session.ts'
@@ -171,7 +171,7 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
       repo,
       doors,
       texts,
-      startPoint(fl),
+      startPoint(fl).virtual,
       source,
       flags.staged,
       flags.worktree,
@@ -228,8 +228,12 @@ export async function restorePaths(
   // all, and what lets the refusal below name it when none does.
   const names =
     overlay && source !== null
-      ? new Set(tree.keys())
-      : new Set([...held.keys(), ...tree.keys(), ...state.conflicts.keys()])
+      ? new Set(visibleEntries(repo.location, tree).keys())
+      : new Set([
+          ...visibleEntries(repo.location, held).keys(),
+          ...visibleEntries(repo.location, tree).keys(),
+          ...visibleEntries(repo.location, state.conflicts).keys(),
+        ])
   const selected = new Set<string>()
   for (const operand of operands) {
     const hits = matched(names, repoRelative(repo.location, start, operand))
@@ -282,7 +286,7 @@ export async function restorePaths(
     // where the directory still sits. Nothing is read back from the
     // working tree, so emptying it first is free.
     for (const name of dropped) {
-      const path = under(repo.location.worktree, name)
+      const path = repo.location.worktree.join(name)
       // A component above the entry that is not a directory is not a way
       // through to it: the unlink would resolve past it and delete a file
       // inside whatever it points at, which no branch named. git checks the
@@ -305,7 +309,7 @@ export async function restorePaths(
     for (const name of present) {
       const entry = tree.get(name)
       if (entry === undefined) continue
-      const where = under(repo.location.worktree, name)
+      const where = repo.location.worktree.join(name)
       if (entry.mode === GITLINK_MODE) {
         await keepGitlink(dispatch, statPath, where, links)
         continue
@@ -326,7 +330,7 @@ export async function restorePaths(
       // restoreEntry, which retargets it; following one to a directory here
       // would delete a tree no branch named.
       let current: Uint8Array | null = null
-      if ((links?.statAt(where) ?? null) === null) {
+      if ((links?.statAt(where.virtual) ?? null) === null) {
         const info = await statPath(where)
         if (info !== null && info.type === FileType.DIRECTORY) {
           await removeTree(dispatch, where, links, mounts)

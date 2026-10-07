@@ -62,6 +62,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
+from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
 
 SYMREF_PREFIX = "ref: "
@@ -449,7 +450,7 @@ async def read_config(
         dispatch (DispatchFn): workspace op dispatcher.
         location (RepoLocation): the discovered repository.
     """
-    data = await read_optional(dispatch, f"{location.commondir}/config")
+    data = await read_optional(dispatch, location.commondir.join("config"))
     return ConfigFile.from_file(BytesIO(data or b""))
 
 
@@ -484,26 +485,26 @@ async def worktree_heads(
     """
     heads: dict[str, str] = {}
 
-    async def note(gitdir: str, path: str) -> None:
-        data = await read_optional(dispatch, f"{gitdir}/{HEAD_FILE}")
+    async def note(gitdir: PathSpec, path: str) -> None:
+        data = await read_optional(dispatch, gitdir.join(f"{HEAD_FILE}"))
         text = (data or b"").decode("utf-8", "replace").strip()
         if text.startswith(SYMREF_PREFIX) and path:
             heads.setdefault(text[len(SYMREF_PREFIX) :].strip(), path)
 
     common = location.commondir
-    if location.gitdir == common:
-        main = location.worktree
+    if location.gitdir.virtual == common.virtual:
+        main = location.worktree.virtual
     else:
         main = (
-            posixpath.dirname(common)
-            if posixpath.basename(common) == ".git"
+            posixpath.dirname(common.virtual)
+            if posixpath.basename(common.virtual) == ".git"
             else ""
         )
     await note(common, main)
-    root = f"{common}/{WORKTREES}"
+    root = common.join(WORKTREES)
     for entry in await read_names(dispatch, root):
-        linked = f"{root}/{posixpath.basename(entry)}"
-        data = await read_optional(dispatch, f"{linked}/{GITDIR_FILE}")
+        linked = root.join(posixpath.basename(entry))
+        data = await read_optional(dispatch, linked.join(GITDIR_FILE))
         if data is None:
             continue
         path = data.decode("utf-8", "replace").strip()
@@ -564,9 +565,7 @@ async def detached_line(
         location (RepoLocation): the discovered repository.
         head (HeadRef): what HEAD points at.
     """
-    log = await read_optional(
-        dispatch, posixpath.join(location.gitdir, "logs/HEAD")
-    )
+    log = await read_optional(dispatch, location.gitdir.join("logs/HEAD"))
     for row in reversed((log or b"").splitlines()):
         record, _, message = row.partition(b"\t")
         text = message.decode("utf-8", "replace")
@@ -713,7 +712,9 @@ async def ref_listing(
         for name in names:
             if name == HEAD_FILE or not is_root_ref(name):
                 continue
-            data = await read_optional(dispatch, f"{location.gitdir}/{name}")
+            data = await read_optional(
+                dispatch, location.gitdir.join(f"{name}")
+            )
             if data:
                 table[name] = data.decode("utf-8", "replace").split("\n", 1)[0]
     known = known_names(table, names)

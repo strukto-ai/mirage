@@ -4,13 +4,15 @@ import { afterEach, beforeAll, expect, it, vi } from 'vitest'
 import * as github from '../../../../core/github/repo.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
-import { MountMode } from '../../../../types.ts'
+import { MountMode, PathSpec } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import type { ExecuteResult } from '../../../../workspace/workspace/types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import type { CLIInvocation } from '../../types.ts'
 import * as git from '../git/clone.ts'
 import { GH } from './index.ts'
+
+const WORK = PathSpec.fromStrPath('/w')
 
 const require = createRequire(import.meta.url)
 let parser: ShellParser
@@ -46,24 +48,24 @@ async function run(line: string, base?: string): Promise<ExecuteResult> {
 }
 
 it.each([
-  ['cd /w && gh repo clone o/r', undefined, ['https://github.com/o/r.git', 'r'], { C: '/w' }],
+  ['cd /w && gh repo clone o/r', undefined, ['https://github.com/o/r.git', 'r'], { C: WORK }],
   [
     'cd /w && gh repo clone https://github.com/o/r.git dest',
     undefined,
     ['https://github.com/o/r.git', 'dest'],
-    { C: '/w' },
+    { C: WORK },
   ],
   [
     'cd /w && gh repo clone mine -- -q --branch dev',
     undefined,
     ['https://github.com/alice/mine.git', 'mine'],
-    { quiet: true, branch: 'dev', C: '/w' },
+    { quiet: true, branch: 'dev', C: WORK },
   ],
   [
     'cd /w && gh repo clone ghe.test/o/r',
     'https://ghe.test/api/v3',
     ['https://ghe.test/o/r.git', 'r'],
-    { C: '/w' },
+    { C: WORK },
   ],
 ])('hands git clone the url and flags of %s', async (line, base, texts, flags) => {
   const calls = clones()

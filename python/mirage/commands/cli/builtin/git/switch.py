@@ -316,5 +316,5 @@ def switch_read_only(
     if name is None:
         return index_locked(inv, location)
     ref = f"{BRANCH_PREFIX}{name}"
-    root = location.commondir if location is not None else ".git"
+    root = location.commondir.virtual if location is not None else ".git"
     return RefReadOnlyError(ref, posixpath.join(root, ref))

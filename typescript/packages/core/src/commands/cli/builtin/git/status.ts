@@ -136,7 +136,7 @@ export async function status(inv: CLIInvocation): Promise<CommandFnResult> {
       parsed.ignored,
     )
     const fully = await configBool(repo, 'core.quotepath', true)
-    const shown = parsed.porcelain ? rows : await displayed(repo, startPoint(fl), rows)
+    const shown = parsed.porcelain ? rows : await displayed(repo, startPoint(fl).virtual, rows)
     const upstream = await branchUpstream(repo, head, noCommits)
     const detached = head.branch !== null ? '' : await detachedLine(repo, head)
     const body =

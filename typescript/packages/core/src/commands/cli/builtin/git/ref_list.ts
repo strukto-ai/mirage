@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { PathSpec } from '../../../../types.ts'
 import git from 'isomorphic-git'
 import { IOResult } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -24,7 +25,8 @@ import type { GitError } from './errors.ts'
 import { short } from './format.ts'
 import { configValues } from './fs.ts'
 import { parseFlags, select } from './history.ts'
-import { basename, readNames, readOptional, under } from './io.ts'
+import { basename, readNames, readOptional } from './io.ts'
+
 import { loadMailmap } from './mailmap.ts'
 import { abbreviationRequests, needsObject } from './ref_fields.ts'
 import { keptRefs, type RefFilter } from './ref_filter.ts'
@@ -323,22 +325,22 @@ async function rootNames(repo: Repo): Promise<string[]> {
 async function worktreeHeads(repo: Repo): Promise<Map<string, string>> {
   const heads = new Map<string, string>()
   const { gitdir, commondir, worktree } = repo.location
-  const note = async (dir: string, path: string): Promise<void> => {
-    const data = await readOptional(repo.dispatch, under(dir, HEAD_FILE))
+  const note = async (dir: PathSpec, path: string): Promise<void> => {
+    const data = await readOptional(repo.dispatch, dir.join(HEAD_FILE))
     const text = DEC.decode(data ?? new Uint8Array()).trim()
     if (text.startsWith(SYMREF_PREFIX) && path) {
       const ref = text.slice(SYMREF_PREFIX.length).trim()
       if (!heads.has(ref)) heads.set(ref, path)
     }
   }
-  let main = worktree
-  if (gitdir !== commondir)
-    main = basename(commondir) === '.git' ? commondir.slice(0, -'/.git'.length) : ''
+  let main = worktree.virtual
+  if (gitdir.virtual !== commondir.virtual)
+    main = basename(commondir.virtual) === '.git' ? commondir.virtual.slice(0, -'/.git'.length) : ''
   await note(commondir, main)
-  const root = under(commondir, WORKTREES)
+  const root = commondir.join(WORKTREES)
   for (const entry of await readNames(repo.dispatch, root)) {
-    const linked = under(root, basename(entry))
-    const data = await readOptional(repo.dispatch, under(linked, GITDIR_FILE))
+    const linked = root.join(basename(entry))
+    const data = await readOptional(repo.dispatch, linked.join(GITDIR_FILE))
     if (data === null) continue
     const path = DEC.decode(data).trim()
     await note(linked, path.endsWith('/.git') ? path.slice(0, -'/.git'.length) : path)
@@ -375,7 +377,7 @@ async function detachedLabel(repo: Repo, target: string, moved: string): Promise
  * detached HEAD reads (pinned against git 2.47.3 and 2.50.1).
  */
 export async function detachedLine(repo: Repo, head: HeadRef): Promise<string> {
-  const log = await readOptional(repo.dispatch, under(repo.location.gitdir, 'logs/HEAD'))
+  const log = await readOptional(repo.dispatch, repo.location.gitdir.join('logs/HEAD'))
   const rows = DEC.decode(log ?? new Uint8Array())
     .split('\n')
     .filter(Boolean)
@@ -499,7 +501,7 @@ export async function refListing(
   if (roots) {
     for (const name of names) {
       if (name === HEAD_FILE || !isRootRef(name)) continue
-      const data = await readOptional(repo.dispatch, under(repo.location.gitdir, name))
+      const data = await readOptional(repo.dispatch, repo.location.gitdir.join(name))
       if (data?.length) table.set(name, DEC.decode(data).split('\n', 1)[0] ?? '')
     }
   }

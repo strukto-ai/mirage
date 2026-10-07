@@ -142,11 +142,7 @@ async def _header_time(walk: _Walk, path: PathSpec, absent: bool) -> str:
     if is_stdin(path):
         now = datetime.now(timezone.utc).isoformat()
         return full_iso_time(now, walk.zone)
-    info = (
-        await walk.stat_path(path.virtual)
-        if walk.stat_path is not None
-        else None
-    )
+    info = await walk.stat_path(path) if walk.stat_path is not None else None
     if info is None:
         info = await walk.stat_fn(path)
     return full_iso_time(info.modified, walk.zone)

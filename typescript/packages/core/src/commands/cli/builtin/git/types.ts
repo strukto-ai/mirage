@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { FileStat } from '../../../../types.ts'
+import type { NamespaceView } from '../../../../ops/types.ts'
+import { type PathSpec, type FileStat } from '../../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Zone } from '../../../../utils/timezone.ts'
 import type { CLIInvocation } from '../../types.ts'
@@ -41,16 +42,17 @@ export type Dispatch = DispatchFn
  */
 export interface RepoLocation {
   /** This checkout's git directory, which holds HEAD and the index. */
-  readonly gitdir: string
+  readonly gitdir: PathSpec
   /**
    * The shared git directory, which holds objects and branches. Equal to
    * `gitdir` unless this is a linked worktree.
    */
-  readonly commondir: string
+  readonly commondir: PathSpec
   /** The working tree root. */
-  readonly worktree: string
+  readonly worktree: PathSpec
   /** The mount prefix both live under, which bounded the discovery walk. */
-  readonly mountRoot: string
+  readonly mountRoot: PathSpec
+  readonly ns?: NamespaceView | null
 }
 
 /** What HEAD points at: a branch, some other ref, or a raw commit. */

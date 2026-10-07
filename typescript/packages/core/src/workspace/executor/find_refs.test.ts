@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { type PathSpec, FileStat, FileType, MountMode } from '../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { FileStat, FileType, MountMode } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { resolveNewerRefs } from './find_refs.ts'
@@ -35,8 +35,8 @@ async function out(ws: Workspace, line: string): Promise<[string, string, number
   return [r.stdoutText, r.stderrText, r.exitCode]
 }
 
-function stat(virtual: string): Promise<FileStat | null> {
-  if (virtual === '/w/ref') {
+function stat(virtual: string | PathSpec): Promise<FileStat | null> {
+  if ((typeof virtual === 'string' ? virtual : virtual.virtual) === '/w/ref') {
     return Promise.resolve(
       new FileStat({ name: 'ref', type: FileType.FILE, modified: '2020-01-01T00:00:00Z' }),
     )

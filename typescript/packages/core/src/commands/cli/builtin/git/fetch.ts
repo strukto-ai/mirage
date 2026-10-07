@@ -29,7 +29,8 @@ import {
 import { configLines, configValues } from './fs.ts'
 import { resolvedRefs } from './history.ts'
 import { globalSources } from './inspect.ts'
-import { under, writeFile } from './io.ts'
+import { writeFile } from './io.ts'
+
 import { append, entry, IDENTITY, ZERO } from './reflog.ts'
 import {
   deleteRef,
@@ -520,7 +521,7 @@ export async function fetch(inv: CLIInvocation): Promise<CommandFnResult> {
     for (const want of wants)
       if (want.local !== null && want.local === checked)
         throw new GitError(
-          `refusing to fetch into branch '${checked}' checked out at '${location.worktree}'`,
+          `refusing to fetch into branch '${checked}' checked out at '${location.worktree.virtual}'`,
         )
     const tagOpt = await values(`remote.${name}.tagopt`)
     const follow = !fl.asBool('no_tags') && tagOpt.at(-1) !== '--no-tags'
@@ -530,7 +531,7 @@ export async function fetch(inv: CLIInvocation): Promise<CommandFnResult> {
     const [rows, rejected] = await updateRefs(fetched, taken, reason, !bare)
     await writeFile(
       repo.dispatch,
-      under(location.gitdir, FETCH_HEAD),
+      location.gitdir.join(FETCH_HEAD),
       ENC.encode(fetchHead(url, taken)),
     )
     const shown = [...pruned, ...rows.filter((line) => line.code !== '=' || fl.asBool('verbose'))]
@@ -548,7 +549,7 @@ export async function fetch(inv: CLIInvocation): Promise<CommandFnResult> {
  */
 export const fetchReadOnly: ReadOnlyRefusal = (_inv, location) =>
   new FetchHeadReadOnlyError(
-    location === null || location.gitdir === under(location.worktree, '.git')
+    location === null || location.gitdir.virtual === location.worktree.join('.git').virtual
       ? `.git/${FETCH_HEAD}`
-      : under(location.gitdir, FETCH_HEAD),
+      : location.gitdir.join(FETCH_HEAD).virtual,
   )

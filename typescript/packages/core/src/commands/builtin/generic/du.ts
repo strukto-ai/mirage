@@ -14,7 +14,7 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { PathSpec } from '../../../types.ts'
+import { PathSpec, type Visibility } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { IOResult, type SizedRun } from '../../../io/types.ts'
@@ -30,7 +30,6 @@ import { scaledSize } from '../utils/formatting.ts'
 import { quoteText } from '../../quote.ts'
 import { INTMAX } from '../constants.ts'
 import type { LinkView, MountView, NamespaceView, StatPath } from '../../../ops/types.ts'
-import type { Visibility } from '../../../types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
 import type { DuEntries } from '../../../vfs/types.ts'
@@ -213,7 +212,7 @@ async function duOperandExists(
   statPath: StatPath | null,
 ): Promise<boolean> {
   if (statPath === null && stattable) return true
-  if (statPath !== null && (await statPath(path.virtual)) !== null) return true
+  if (statPath !== null && (await statPath(path)) !== null) return true
   return hasContent !== undefined && (await hasContent(path))
 }
 
