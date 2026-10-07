@@ -72,6 +72,7 @@ from mirage.workspace.executor.traps import (
     run_err_trap,
     run_exit_trap,
 )
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 
@@ -273,8 +274,24 @@ async def handle_connection(
     context: EvaluationContext,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
+    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Handle &&, ||"""
+    """Handle ``&&`` and ``||``.
+
+    The left command runs where ``set -e`` is ignored. The right one is
+    the list's own: the ERR action is armed as it starts and answers its
+    failure, which the statement holding the list then does not.
+
+    Args:
+        execute_node (Callable): the node recursion.
+        left (TSNodeLike): the command tested.
+        op (str): ``&&`` or ``||``.
+        right (TSNodeLike): the command that runs as the test says.
+        context (EvaluationContext): the shell.
+        stdin (ByteSource | None): its standard input.
+        call_stack (CallStack | None): its frames.
+        execute_fn (Callable[..., Any] | None): runs the ERR action.
+    """
     session = context.session
     bound = fd0_binding(session)
     with ignoring_errexit(session):
@@ -298,6 +315,7 @@ async def handle_connection(
             ),
         )
 
+    armed = err_trap_armed(session)
     try:
         right_stdout, right_io, right_exec = await execute_node(
             right, context, statement_stdin(session, stdin, bound), call_stack
@@ -310,13 +328,70 @@ async def handle_connection(
     # the combined stream is returned to the caller.
     right_bytes = await materialize(right_stdout)
     merged = await left_io.merge(right_io)
-    combined = async_chain([left_bytes, right_bytes])
+    outputs: list[ByteSource | None] = [left_bytes, right_bytes]
+    try:
+        trapped = await run_err_trap(
+            execute_fn,
+            right,
+            right_io.exit_code,
+            session,
+            armed,
+            stdin,
+            call_stack,
+            right_exec.unopened,
+        )
+    except UNWINDING as sig:
+        raise await carried(sig, async_chain(outputs), merged)
+    if trapped:
+        merged = await land(trapped, None, outputs, merged)
+        merged.exit_code = right_io.exit_code
+    combined = async_chain(outputs)
     return (
         combined,
         merged,
         ExecutionNode(
             op=str(op), exit_code=merged.exit_code, children=children
         ),
+    )
+
+
+async def _subshell_ended(
+    sig: ExitSignal | ReturnSignal,
+    recorder: Recorder,
+    session: SessionState,
+    sink: JobConsole | None,
+    all_stdout: list[Any],
+    merged_io: IOResult,
+) -> tuple[IOResult, ExecutionNode]:
+    """End a subshell on an ``exit`` (or ``${var:?}``), or the ``return``
+    of a function it runs in, that left a statement or the ERR action
+    answering one: a subshell is its own shell, and the signal's status
+    is the subshell's.
+
+    Args:
+        sig (ExitSignal | ReturnSignal): the signal.
+        recorder (Recorder): what the statement wrote before it left.
+        session (SessionState): the subshell.
+        sink (JobConsole | None): where its output goes as it is written.
+        all_stdout (list[Any]): what the subshell wrote so far.
+        merged_io (IOResult): its result so far.
+    """
+    merged_io = await land(
+        await statement_output(
+            recorder, sig.stdout or None, IOResult(), session.terminal, sink
+        ),
+        sink,
+        all_stdout,
+        merged_io,
+    )
+    status = ended(sig).exit_code
+    merged_io = await merged_io.merge(
+        IOResult(exit_code=status, stderr=sig.stderr or None)
+    )
+    merged_io.exit_code = status
+    record_status(session, status)
+    return merged_io, ExecutionNode(
+        command="()", exit_code=status, stderr=sig.stderr
     )
 
 
@@ -439,28 +514,8 @@ async def handle_subshell(
             finally:
                 jobs.recorder = held
         except (ExitSignal, ReturnSignal) as sig:
-            # A subshell is its own shell: exit (or ${var:?}) ends
-            # the subshell only, becoming its exit status, and so
-            # does the `return` of a function it runs in.
-            merged_io = await land(
-                await statement_output(
-                    recorder,
-                    sig.stdout or None,
-                    IOResult(),
-                    session.terminal,
-                    sink,
-                ),
-                sink,
-                all_stdout,
-                merged_io,
-            )
-            status = ended(sig).exit_code
-            sig_io = IOResult(exit_code=status, stderr=sig.stderr or None)
-            merged_io = await merged_io.merge(sig_io)
-            merged_io.exit_code = status
-            record_status(session, status)
-            last_exec = ExecutionNode(
-                command="()", exit_code=status, stderr=sig.stderr
+            merged_io, last_exec = await _subshell_ended(
+                sig, recorder, session, sink, all_stdout, merged_io
             )
             break
         finally:
@@ -478,15 +533,22 @@ async def handle_subshell(
         )
         merged_io = await land(written, sink, all_stdout, merged_io)
         merged_io = await merged_io.merge(io)
-        trapped = await run_err_trap(
-            execute_fn,
-            child,
-            io.exit_code,
-            session,
-            armed,
-            stdin,
-            call_stack,
-        )
+        try:
+            trapped = await run_err_trap(
+                execute_fn,
+                child,
+                io.exit_code,
+                session,
+                armed,
+                stdin,
+                call_stack,
+                last_exec.unopened,
+            )
+        except (ExitSignal, ReturnSignal) as sig:
+            merged_io, last_exec = await _subshell_ended(
+                sig, Recorder(), session, sink, all_stdout, merged_io
+            )
+            break
         if trapped:
             merged_io = await land(trapped, sink, all_stdout, merged_io)
             merged_io.exit_code = io.exit_code

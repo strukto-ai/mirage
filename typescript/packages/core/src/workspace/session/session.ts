@@ -405,13 +405,17 @@ export class SessionState {
   exitTrap: string | null = null
   exitTrapInherited = false
   // The `trap ... ERR` and `trap ... RETURN` actions, '' for an ignored
-  // one, and whether the running scope hides each: a function sees neither
-  // unless `set -E` / `set -T`, a child shell no ERR unless `set -E`, and a
-  // scope that sets one sees it. Live shell state, like the EXIT action.
+  // one, and whether the running scope hides each: a child shell lists but
+  // runs neither unless `set -E` / `set -T`, and a scope that sets one sees
+  // it. Live shell state, like the EXIT action.
   errTrap: string | null = null
   returnTrap: string | null = null
   errTrapHidden = false
   returnTrapHidden = false
+  // Whether each action is running: bash runs neither again until it
+  // finishes, whatever the action registers meanwhile.
+  errTrapRunning = false
+  returnTrapRunning = false
   trapStatus: number | null = null
   tty = new Terminal()
   jobOutput: JobOutput | null = null
@@ -426,6 +430,9 @@ export class SessionState {
   // Everything run there, a function or a subshell included, ignores it
   // (`ignoringErrexit`); a child shell keeps the context.
   errexitIgnored = false
+  // Whether `set -e` is ending the shell: its statements unwind without
+  // running ERR or RETURN again, as bash's exit leaves at once.
+  errexitExiting = false
   // Variables shadowed by `local` / `declare` in the running function; a
   // null value means the caller had no variable of that name. One stack,
   // not one per container: a local shadows the whole record, so its
@@ -616,6 +623,8 @@ export class SessionState {
     forked.returnTrap = this.returnTrap
     forked.errTrapHidden = this.errTrapHidden
     forked.returnTrapHidden = this.returnTrapHidden
+    forked.errTrapRunning = this.errTrapRunning
+    forked.returnTrapRunning = this.returnTrapRunning
     forked.tty = this.tty
     forked.jobOutput = this.jobOutput
     forked.jobWaits = this.jobWaits

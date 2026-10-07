@@ -484,7 +484,7 @@ export async function handleRedirect(
       command !== null &&
       chunks.some(([channel]) => channel === Channel.STDOUT)
     ) {
-      chunks.push([Channel.STDERR, closedWriteLine(command)])
+      chunks.push([Channel.STDERR, closedWriteLine(command, unwound)])
       io.exitCode = 1
     }
     const dest = (key: Channel | Inherited): FdDest | undefined => {
@@ -556,7 +556,14 @@ export async function handleRedirect(
   } finally {
     await route.release()
   }
-  if (unwound !== null) throw await carried(unwound, stdout, new IOResult({ stderr: io.stderr }))
+  if (unwound !== null) {
+    if (unwound instanceof ExitSignal && unwound.replaced !== null && io.exitCode !== 0) {
+      // The replacing program's own write failed: its status is the shell's.
+      unwound.exitCode = io.exitCode
+      unwound.containedCode = io.exitCode
+    }
+    throw await carried(unwound, stdout, new IOResult({ stderr: io.stderr }))
+  }
   return [stdout, io, new ExecutionNode({ command: 'redirect', exitCode: io.exitCode, refused })]
 }
 
@@ -655,18 +662,26 @@ function redirectErrorLine(scope: PathSpec, err: unknown): Uint8Array {
   return encodeText(strerror !== null ? `${label}: ${strerror}\n` : `${label}\n`)
 }
 
-/** GNU's line for a write onto a closed stdout, in the command's name. */
-function closedWriteLine(command: TSNodeLike): Uint8Array {
+/**
+ * GNU's line for a write onto a closed stdout, in the name of what wrote:
+ * the command, or the program an `exec` in it replaced the shell with.
+ */
+function closedWriteLine(command: TSNodeLike, unwound: Unwinding | null = null): Uint8Array {
   const words = getText(command)
     .split(/\s+/)
     .filter((w) => w !== '')
-  const name = words[0] ?? 'redirect'
+  const name =
+    unwound instanceof ExitSignal && unwound.replaced !== null
+      ? unwound.replaced
+      : (words[0] ?? 'redirect')
   return encodeText(`${name}: write error: Bad file descriptor\n`)
 }
 
 /** Shell-attributed IOResult for a redirect target that cannot be opened. */
 function redirectFailure(scope: PathSpec, err: unknown): Result {
-  return shellFailure(redirectErrorLine(scope, err))
+  const [stdout, io, node] = shellFailure(redirectErrorLine(scope, err))
+  node.unopened = true
+  return [stdout, io, node]
 }
 
 /**

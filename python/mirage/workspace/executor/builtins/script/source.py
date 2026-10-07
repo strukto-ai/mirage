@@ -32,6 +32,7 @@ from mirage.workspace.executor.builtins.script.script import (
     script_error,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
+from mirage.workspace.executor.control import UNWINDING, carried
 from mirage.workspace.executor.traps import run_return_trap
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
@@ -122,7 +123,10 @@ async def handle_source(
                 exit_code=sig.exit_code,
             )
         # The RETURN action runs as the file returns, in its frame.
-        returned = await run_return_trap(execute_fn, session, stdin, cs)
+        try:
+            returned = await run_return_trap(execute_fn, session, stdin, cs)
+        except UNWINDING as sig:
+            raise await carried(sig, io.stdout, io)
         if returned:
             out = b"".join(d for c, d, _ in returned if c == Channel.STDOUT)
             err = b"".join(d for c, d, _ in returned if c == Channel.STDERR)

@@ -610,7 +610,9 @@ async def handle_redirect(
             and command is not None
             and any(c == Channel.STDOUT for c, _ in chunks)
         ):
-            chunks.append((Channel.STDERR, _closed_write_line(command)))
+            chunks.append(
+                (Channel.STDERR, _closed_write_line(command, unwound))
+            )
             io.exit_code = 1
 
         def dest(
@@ -709,6 +711,14 @@ async def handle_redirect(
     finally:
         await route.release()
     if unwound is not None:
+        if (
+            isinstance(unwound, ExitSignal)
+            and unwound.replaced
+            and io.exit_code
+        ):
+            # The replacing program's own write failed: its status is the
+            # shell's.
+            unwound.exit_code = unwound.contained_code = io.exit_code
         raise await carried(unwound, stdout, IOResult(stderr=io.stderr))
     return (
         stdout,
@@ -836,14 +846,22 @@ def _redirect_error_line(scope: PathSpec, exc: OSError) -> bytes:
     return encode_text(f"{label}: {strerror}\n" if strerror else f"{label}\n")
 
 
-def _closed_write_line(command: TSNodeLike) -> bytes:
-    """GNU's line for a write onto a closed stdout, in the command's name.
+def _closed_write_line(
+    command: TSNodeLike, unwound: Exception | None = None
+) -> bytes:
+    """GNU's line for a write onto a closed stdout, in the name of what
+    wrote: the command, or the program an ``exec`` in it replaced the
+    shell with.
 
     Args:
         command (TSNodeLike): the command whose stdout was closed.
+        unwound (Exception | None): the signal it left by, if any.
     """
-    words = get_text(command).split()
-    name = words[0] if words else "redirect"
+    if isinstance(unwound, ExitSignal) and unwound.replaced is not None:
+        name = unwound.replaced
+    else:
+        words = get_text(command).split()
+        name = words[0] if words else "redirect"
     return encode_text(f"{name}: write error: Bad file descriptor\n")
 
 
@@ -867,7 +885,9 @@ def _redirect_failure(
         scope (PathSpec): The redirect target that could not be opened.
         exc (OSError): The filesystem error raised by the open.
     """
-    return _shell_failure(_redirect_error_line(scope, exc))
+    _, io, node = _shell_failure(_redirect_error_line(scope, exc))
+    node.unopened = True
+    return None, io, node
 
 
 def _shell_failure(

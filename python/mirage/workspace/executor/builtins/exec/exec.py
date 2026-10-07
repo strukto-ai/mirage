@@ -135,6 +135,7 @@ async def handle_exec_command(
             127, stderr=builtin_error("exec", f"{head}: not found")
         )
     line = ("command " if shadowed else "") + shell_join(words)
+    clear_traps(session)
     token = set_program_invocation(session)
     try:
         io = await execute_fn(
@@ -146,9 +147,8 @@ async def handle_exec_command(
         reset_program_invocation(token)
     stdout = await materialize(io.stdout) or b""
     stderr = await materialize(io.stderr) or b""
-    clear_traps(session)
     replaced = ExitSignal(io.exit_code, stderr=stderr, stdout=stdout)
-    replaced.under_redirects = True
+    replaced.replaced = head
     raise replaced
 
 

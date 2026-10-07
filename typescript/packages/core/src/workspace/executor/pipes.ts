@@ -44,6 +44,7 @@ import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
 
 import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
+import type { SessionState } from '../session/session.ts'
 import { handleBackground, pump } from './jobs.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { endShell, errTrapArmed, inheritTraps, runErrTrap, runExitTrap } from './traps.ts'
@@ -290,6 +291,12 @@ export async function handlePipe(
   return [lastStdout, lastIo, execNode]
 }
 
+/**
+ * Handle `&&` and `||`. The left command runs where `set -e` is ignored.
+ * The right one is the list's own: the ERR action is armed as it starts
+ * and answers its failure, which the statement holding the list then does
+ * not. Mirrors Python's handle_connection.
+ */
 export async function handleConnection(
   executeNode: ExecuteNodeFn,
   left: TSNodeLike,
@@ -298,6 +305,7 @@ export async function handleConnection(
   context: EvaluationContext,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
+  executeFn: ExecuteStringFn | null = null,
 ): Promise<Result> {
   const session = context.session
   const bound = fd0Binding(session)
@@ -315,6 +323,7 @@ export async function handleConnection(
   let rightStdout: ByteSource | null
   let rightIo: IOResult
   let rightExec: ExecutionNode
+  const armed = errTrapArmed(session)
   try {
     ;[rightStdout, rightIo, rightExec] = await executeNode(
       right,
@@ -328,13 +337,61 @@ export async function handleConnection(
   }
   children.push(rightExec)
   const rightBytes = await materialize(rightStdout)
-  const merged = await leftIo.merge(rightIo)
-  const combined = asyncChain([leftBytes, rightBytes])
+  let merged = await leftIo.merge(rightIo)
+  const outputs: (ByteSource | null)[] = [leftBytes, rightBytes]
+  let trapped: Written[]
+  try {
+    trapped = await runErrTrap(
+      executeFn,
+      right,
+      rightIo.exitCode,
+      session,
+      armed,
+      stdin,
+      callStack,
+      rightExec.unopened,
+    )
+  } catch (err) {
+    if (isUnwinding(err)) throw await carried(err, asyncChain(outputs), merged)
+    throw err
+  }
+  if (trapped.length > 0) {
+    merged = await land(trapped, null, outputs, merged)
+    merged.exitCode = rightIo.exitCode
+  }
+  const combined = asyncChain(outputs)
   return [
     combined,
     merged,
     new ExecutionNode({ op: op ?? ';', exitCode: merged.exitCode, children }),
   ]
+}
+
+/**
+ * End a subshell on an `exit` (or `${var:?}`), or the `return` of a
+ * function it runs in, that left a statement or the ERR action answering
+ * one: a subshell is its own shell, and the signal's status is the
+ * subshell's. Mirrors Python's _subshell_ended.
+ */
+async function subshellEnded(
+  err: ExitSignal | ReturnSignal,
+  recorder: Recorder,
+  session: SessionState,
+  sink: JobConsole | null,
+  allStdout: (ByteSource | null)[],
+  mergedIo: IOResult,
+): Promise<[IOResult, ExecutionNode]> {
+  mergedIo = await land(
+    await statementOutput(recorder, err.stdout, new IOResult(), session.terminal, sink),
+    sink,
+    allStdout,
+    mergedIo,
+  )
+  const status = ended(err).exitCode
+  mergedIo = await mergedIo.merge(new IOResult({ exitCode: status, stderr: err.stderr }))
+  mergedIo.exitCode = status
+  recordStatus(session, status)
+  return [mergedIo, new ExecutionNode({ command: '()', exitCode: status, stderr: err.stderr })]
 }
 
 /**
@@ -459,20 +516,7 @@ export async function handleSubshell(
       }
     } catch (err) {
       if (!(err instanceof ExitSignal || err instanceof ReturnSignal)) throw err
-      // A subshell is its own shell: exit (or ${var:?}) ends the
-      // subshell only, becoming its exit status, and so does the
-      // `return` of a function it runs in.
-      mergedIo = await land(
-        await statementOutput(recorder, err.stdout, new IOResult(), session.terminal, sink),
-        sink,
-        allStdout,
-        mergedIo,
-      )
-      const status = ended(err).exitCode
-      mergedIo = await mergedIo.merge(new IOResult({ exitCode: status, stderr: err.stderr }))
-      mergedIo.exitCode = status
-      recordStatus(session, status)
-      lastExec = new ExecutionNode({ command: '()', exitCode: status, stderr: err.stderr })
+      ;[mergedIo, lastExec] = await subshellEnded(err, recorder, session, sink, allStdout, mergedIo)
       break
     }
     stdout = await finishStatement(stdout, io, session, child, childExec)
@@ -487,15 +531,30 @@ export async function handleSubshell(
     mergedIo = await land(written, sink, allStdout, mergedIo)
     mergedIo = await mergedIo.merge(io)
     lastExec = childExec
-    const trapped = await runErrTrap(
-      runAction,
-      child,
-      io.exitCode,
-      session,
-      armed,
-      stdin,
-      callStack,
-    )
+    let trapped: Written[]
+    try {
+      trapped = await runErrTrap(
+        runAction,
+        child,
+        io.exitCode,
+        session,
+        armed,
+        stdin,
+        callStack,
+        childExec.unopened,
+      )
+    } catch (err) {
+      if (!(err instanceof ExitSignal || err instanceof ReturnSignal)) throw err
+      ;[mergedIo, lastExec] = await subshellEnded(
+        err,
+        new Recorder(),
+        session,
+        sink,
+        allStdout,
+        mergedIo,
+      )
+      break
+    }
     if (trapped.length > 0) {
       mergedIo = await land(trapped, sink, allStdout, mergedIo)
       mergedIo.exitCode = io.exitCode

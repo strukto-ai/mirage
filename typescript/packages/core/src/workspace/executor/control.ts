@@ -131,6 +131,7 @@ async function executeBody(
         armed,
         stdin,
         callStack,
+        execNode.unopened,
       )
       if (trapped.length > 0) {
         mergedIo = await land(trapped, null, allStdout, mergedIo)
@@ -219,7 +220,7 @@ export function ended(sig: Unwinding): IOResult {
  * take_stdout.
  */
 export function takeStdout(sig: Unwinding): Uint8Array {
-  if (!(sig instanceof ExitSignal) || !sig.underRedirects) return new Uint8Array()
+  if (!(sig instanceof ExitSignal) || sig.replaced === null) return new Uint8Array()
   const output = sig.stdout ?? new Uint8Array()
   sig.stdout = null
   return output
@@ -687,9 +688,9 @@ export async function handleCase(
     ran = true
     for (const stmt of body) {
       const armed = errTrapArmed(session)
-      let result: Result
+      let io: IOResult
       try {
-        result = await runStatement(
+        const [rawStdout, statementIo, execNode] = await runStatement(
           executeNode,
           stmt,
           context,
@@ -701,27 +702,28 @@ export async function handleCase(
           handed,
           decisions,
         )
+        io = statementIo
+        lastExec = execNode
+        const stdout = await finishStatement(rawStdout, io, session, stmt)
+        if (stdout !== null) allStdout.push(stdout)
+        mergedIo = await mergedIo.merge(io)
+        const trapped = await runErrTrap(
+          executeFn,
+          stmt,
+          io.exitCode,
+          session,
+          armed,
+          stdin,
+          callStack,
+          execNode.unopened,
+        )
+        if (trapped.length > 0) {
+          mergedIo = await land(trapped, null, allStdout, mergedIo)
+          mergedIo.exitCode = io.exitCode
+        }
       } catch (sig) {
         if (!isUnwinding(sig)) throw sig
         throw await carried(sig, chainNonNull(allStdout), mergedIo)
-      }
-      const [rawStdout, io, execNode] = result
-      lastExec = execNode
-      const stdout = await finishStatement(rawStdout, io, session, stmt)
-      if (stdout !== null) allStdout.push(stdout)
-      mergedIo = await mergedIo.merge(io)
-      const trapped = await runErrTrap(
-        executeFn,
-        stmt,
-        io.exitCode,
-        session,
-        armed,
-        stdin,
-        callStack,
-      )
-      if (trapped.length > 0) {
-        mergedIo = await land(trapped, null, allStdout, mergedIo)
-        mergedIo.exitCode = io.exitCode
       }
       if (errexitActs(stmt, io.exitCode, session)) {
         mergedIo.exitCode = io.exitCode

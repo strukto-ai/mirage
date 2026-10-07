@@ -50,15 +50,17 @@ export async function ignoringErrexit<T>(session: SessionState, fn: () => Promis
   }
 }
 
-/** Whether `set -e` ends the shell after this statement. */
+/** Whether `set -e` ends the shell after this statement, marking the shell
+ * as ending when it does. */
 export function errexitActs(node: TSNodeLike, status: number, session: SessionState): boolean {
-  return (
+  const acts =
     status !== 0 &&
     session.shellOptions.errexit === true &&
     !ERREXIT_EXEMPT_TYPES.has(node.type) &&
     !session.errexitImmune &&
     !session.errexitIgnored
-  )
+  if (acts) session.errexitExiting = true
+  return acts
 }
 
 /**

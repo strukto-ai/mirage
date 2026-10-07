@@ -172,6 +172,9 @@ async def handle_bash(
     session = context.session
     child_token = set_current_evaluation(context)
     clear_traps(session)
+    # A new interpreter is outside every test its caller is in:
+    # `if bash -ec 'false; ...'` still ends at `false`.
+    session.errexit_ignored = False
     session.job_output = JobOutput(session.job_output or session.tty.jobs)
     session.positional_args = positional
     session.script_name = script_name

@@ -104,14 +104,14 @@ export async function handleExecCommand(
   const [missing, shadowed] = await programHead(head, session, registry, session.cwd, null)
   if (missing) throw new ExitSignal(127, builtinError('exec', `${head}: not found`))
   const line = (clear ? 'env -i ' : '') + (shadowed ? 'command ' : '') + shellJoin(words)
+  clearTraps(session)
   const io = await runAsProgram(session, () =>
     executeFn(line, { sessionId: session.sessionId, stdin }),
   )
   const stdout = await materialize(io.stdout)
   const stderr = await io.materializeStderr()
-  clearTraps(session)
   const replaced = new ExitSignal(io.exitCode, stderr, stdout)
-  replaced.underRedirects = true
+  replaced.replaced = head
   throw replaced
 }
 

@@ -98,6 +98,22 @@ async def _execute_body(
                 handed,
                 decisions,
             )
+            stdout = await finish_statement(stdout, io, session, cmd)
+            all_stdout.append(stdout)
+            merged_io = await merged_io.merge(io)
+            trapped = await run_err_trap(
+                execute_fn,
+                cmd,
+                io.exit_code,
+                session,
+                armed,
+                stdin,
+                call_stack,
+                last_exec.unopened,
+            )
+            if trapped:
+                merged_io = await land(trapped, None, all_stdout, merged_io)
+                merged_io.exit_code = io.exit_code
         except UNWINDING as sig:
             # The control builtin is a statement the loop leaves through
             # rather than closes, so its own status is recorded here:
@@ -105,15 +121,6 @@ async def _execute_body(
             if isinstance(sig, (BreakSignal, ContinueSignal)):
                 record_status(session, sig.io.exit_code)
             raise await carried(sig, _chain_streams(all_stdout), merged_io)
-        stdout = await finish_statement(stdout, io, session, cmd)
-        all_stdout.append(stdout)
-        merged_io = await merged_io.merge(io)
-        trapped = await run_err_trap(
-            execute_fn, cmd, io.exit_code, session, armed, stdin, call_stack
-        )
-        if trapped:
-            merged_io = await land(trapped, None, all_stdout, merged_io)
-            merged_io.exit_code = io.exit_code
         if errexit_acts(cmd, io.exit_code, session):
             merged_io.exit_code = io.exit_code
             break
@@ -201,7 +208,7 @@ def take_stdout(sig: Exception) -> bytes:
     Args:
         sig (Exception): one of ``UNWINDING``.
     """
-    if not isinstance(sig, ExitSignal) or not sig.under_redirects:
+    if not isinstance(sig, ExitSignal) or sig.replaced is None:
         return b""
     output, sig.stdout = sig.stdout or b"", None
     return output
@@ -678,26 +685,29 @@ async def handle_case(
                     handed,
                     decisions,
                 )
+                stdout = await finish_statement(stdout, io, session, stmt)
+                if stdout is not None:
+                    all_stdout.append(stdout)
+                merged_io = await merged_io.merge(io)
+                trapped = await run_err_trap(
+                    execute_fn,
+                    stmt,
+                    io.exit_code,
+                    session,
+                    armed,
+                    stdin,
+                    call_stack,
+                    last_exec.unopened,
+                )
+                if trapped:
+                    merged_io = await land(
+                        trapped, None, all_stdout, merged_io
+                    )
+                    merged_io.exit_code = io.exit_code
             except UNWINDING as sig:
                 raise await carried(
                     sig, _chain_streams(list(all_stdout)), merged_io
                 )
-            stdout = await finish_statement(stdout, io, session, stmt)
-            if stdout is not None:
-                all_stdout.append(stdout)
-            merged_io = await merged_io.merge(io)
-            trapped = await run_err_trap(
-                execute_fn,
-                stmt,
-                io.exit_code,
-                session,
-                armed,
-                stdin,
-                call_stack,
-            )
-            if trapped:
-                merged_io = await land(trapped, None, all_stdout, merged_io)
-                merged_io.exit_code = io.exit_code
             if errexit_acts(stmt, io.exit_code, session):
                 merged_io.exit_code = io.exit_code
                 stopped = True

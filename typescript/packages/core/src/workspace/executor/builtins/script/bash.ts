@@ -162,6 +162,9 @@ export async function handleBash(
   context = childContext(context)
   session = context.session
   clearTraps(session)
+  // A new interpreter is outside every test its caller is in:
+  // `if bash -ec 'false; ...'` still ends at `false`.
+  session.errexitIgnored = false
   session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
   session.positionalArgs = positional
   session.scriptName = scriptName

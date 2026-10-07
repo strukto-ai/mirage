@@ -27,7 +27,13 @@ import { NodeType as NT } from '../../shell/types.ts'
 import { errexitActs, fd0Binding, recordStatus, statementStdin } from '../executor/statement.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { isFsError } from '../../errors/fs.ts'
-import { BreakSignal, ContinueSignal, carried, isUnwinding } from '../executor/control.ts'
+import {
+  BreakSignal,
+  ContinueSignal,
+  carried,
+  isUnwinding,
+  type Unwinding,
+} from '../executor/control.ts'
 import { divertStatement } from '../executor/builtins/exec/index.ts'
 import { handleBackground } from '../executor/jobs.ts'
 import type { ExecuteNodeFn } from '../executor/command/types.ts'
@@ -104,7 +110,10 @@ export async function executeProgram(
     )
   } finally {
     ;[session.parseCurrent, session.parseRow] = outerParse
-    if (root) session.lineOpen = false
+    if (root) {
+      session.lineOpen = false
+      session.errexitExiting = false
+    }
   }
 }
 
@@ -271,48 +280,23 @@ async function runProgram(
           allStdout,
           mergedIo,
         )
-        if (
-          err instanceof DiscardSignal &&
-          callStack?.subshell !== true &&
-          session.shellOptions.errexit !== true
-        ) {
-          // bash's DISCARD: the rest of this line goes, and the loop
-          // resumes at the next line with `$?` at 1.
-          const discarded: Written[] = [
-            [Channel.STDOUT, err.stdout ?? new Uint8Array(), false],
-            [Channel.STDERR, err.stderr, false],
-          ]
-          mergedIo = await land(
-            discarded.filter(([, data]) => data.byteLength > 0),
-            sink,
-            allStdout,
-            mergedIo,
-          )
-          mergedIo.exitCode = err.exitCode
-          recordStatus(session, err.exitCode)
-          lastExec = new ExecutionNode({
-            command: getText(child),
-            exitCode: err.exitCode,
-            stderr: err.stderr,
-          })
+        let resumes: boolean
+        ;[resumes, mergedIo, lastExec] = await unwound(
+          err,
+          child,
+          context,
+          stdin,
+          callStack,
+          sink,
+          inline,
+          executeFn,
+          allStdout,
+          mergedIo,
+        )
+        if (resumes) {
           i = nextLine(node, children, i)
           continue
         }
-        if (inline) {
-          const parts = allStdout.filter((part): part is ByteSource => part !== null)
-          throw await carried(err, parts.length > 0 ? asyncChain(parts) : null, mergedIo)
-        }
-        // Anything else ends this shell: `exit`, or an error bash treats as
-        // one, keeping what earlier statements wrote.
-        if (err.stdout !== null) allStdout.push(err.stdout)
-        const looped = err instanceof BreakSignal || err instanceof ContinueSignal
-        const code = looped ? err.io.exitCode : err.exitCode
-        mergedIo = await mergedIo.merge(
-          new IOResult({ exitCode: code, stderr: looped ? err.io.stderr : err.stderr }),
-        )
-        mergedIo = await exitShell(executeFn, context, code, stdin, callStack, allStdout, mergedIo)
-        recordStatus(session, mergedIo.exitCode)
-        lastExec = new ExecutionNode({ command: 'exit', exitCode: mergedIo.exitCode })
         break
       }
       try {
@@ -355,15 +339,39 @@ async function runProgram(
     mergedIo = await mergedIo.merge(io)
 
     if (!isBg) {
-      const trapped = await runErrTrap(
-        executeFn ?? null,
-        child,
-        io.exitCode,
-        session,
-        armed,
-        stdin,
-        callStack,
-      )
+      let trapped: Written[]
+      try {
+        trapped = await runErrTrap(
+          executeFn ?? null,
+          child,
+          io.exitCode,
+          session,
+          armed,
+          stdin,
+          callStack,
+          lastExec.unopened,
+        )
+      } catch (err) {
+        if (!isUnwinding(err)) throw err
+        let resumes: boolean
+        ;[resumes, mergedIo, lastExec] = await unwound(
+          err,
+          child,
+          context,
+          stdin,
+          callStack,
+          sink,
+          inline,
+          executeFn,
+          allStdout,
+          mergedIo,
+        )
+        if (resumes) {
+          i = nextLine(node, children, i - 1)
+          continue
+        }
+        break
+      }
       if (trapped.length > 0) {
         mergedIo = await land(trapped, sink ?? null, allStdout, mergedIo)
         mergedIo.exitCode = io.exitCode
@@ -413,6 +421,64 @@ function nextLine(node: TSNodeLike, children: readonly TSNodeLike[], i: number):
     end = next.endIndex ?? start
   }
   return j
+}
+
+/**
+ * Settle a signal that unwound out of a statement, or out of the ERR action
+ * that answered it. bash's DISCARD resumes the loop at the next line with
+ * `$?` at 1. An inline program carries anything else on into
+ * its caller, after what it wrote; any other program ends its shell there:
+ * `exit`, or an error bash treats as one. Mirrors Python's _unwound.
+ */
+async function unwound(
+  err: Unwinding,
+  child: TSNodeLike,
+  context: EvaluationContext,
+  stdin: ByteSource | null,
+  callStack: CallStack | null,
+  sink: JobConsole | null,
+  inline: boolean,
+  executeFn: ExecuteFn | null,
+  allStdout: (ByteSource | null)[],
+  mergedIo: IOResult,
+): Promise<[boolean, IOResult, ExecutionNode]> {
+  const session = context.session
+  if (
+    err instanceof DiscardSignal &&
+    callStack?.subshell !== true &&
+    session.shellOptions.errexit !== true
+  ) {
+    const discarded: Written[] = [
+      [Channel.STDOUT, err.stdout ?? new Uint8Array(), false],
+      [Channel.STDERR, err.stderr, false],
+    ]
+    mergedIo = await land(
+      discarded.filter(([, data]) => data.byteLength > 0),
+      sink,
+      allStdout,
+      mergedIo,
+    )
+    mergedIo.exitCode = err.exitCode
+    recordStatus(session, err.exitCode)
+    return [
+      true,
+      mergedIo,
+      new ExecutionNode({ command: getText(child), exitCode: err.exitCode, stderr: err.stderr }),
+    ]
+  }
+  if (inline) {
+    const parts = allStdout.filter((part): part is ByteSource => part !== null)
+    throw await carried(err, parts.length > 0 ? asyncChain(parts) : null, mergedIo)
+  }
+  if (err.stdout !== null) allStdout.push(err.stdout)
+  const looped = err instanceof BreakSignal || err instanceof ContinueSignal
+  const code = looped ? err.io.exitCode : err.exitCode
+  mergedIo = await mergedIo.merge(
+    new IOResult({ exitCode: code, stderr: looped ? err.io.stderr : err.stderr }),
+  )
+  mergedIo = await exitShell(executeFn, context, code, stdin, callStack, allStdout, mergedIo)
+  recordStatus(session, mergedIo.exitCode)
+  return [false, mergedIo, new ExecutionNode({ command: 'exit', exitCode: mergedIo.exitCode })]
 }
 
 /**

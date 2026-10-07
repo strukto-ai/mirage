@@ -409,7 +409,7 @@ async function runPipeline(
       signal,
       processes,
     )
-    return handleConnection(wrapped, left, op, right, context, stdin, callStack)
+    return handleConnection(wrapped, left, op, right, context, stdin, callStack, executeFn)
   }
   const targets = stages.commands.filter((_, i) => stages.stderrFlags[i] === true)
   const pipeRecurse = recurseStage.bind(
@@ -538,7 +538,7 @@ async function runRedirected(
       signal,
       processes,
     )
-    return handleConnection(wrapped, left, op, right, context, stdin, callStack)
+    return handleConnection(wrapped, left, op, right, context, stdin, callStack, executeFn)
   }
   if (command !== null && command.type === NT.PIPELINE) {
     return runPipeline(
@@ -662,12 +662,20 @@ async function runContinuation(
   context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
+  executeFn: ExecuteFn | null = null,
 ): Promise<Result> {
   const last = steps[steps.length - 1]
   if (last === undefined) return runLeft(context, stdin, callStack)
   const [op, right] = last
-  const wrapped = recurseContinuation.bind(null, recurse, runLeft, left, steps.slice(0, -1))
-  return handleConnection(wrapped, left, op, right, context, stdin, callStack)
+  const wrapped = recurseContinuation.bind(
+    null,
+    recurse,
+    runLeft,
+    left,
+    steps.slice(0, -1),
+    executeFn,
+  )
+  return handleConnection(wrapped, left, op, right, context, stdin, callStack, executeFn)
 }
 
 async function recurseContinuation(
@@ -675,13 +683,14 @@ async function recurseContinuation(
   runLeft: RunLeft,
   left: TSNodeLike,
   steps: readonly (readonly [string, TSNodeLike])[],
+  executeFn: ExecuteFn | null,
   node: TSNodeLike,
   context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
 ): Promise<Result> {
   if (node === left)
-    return runContinuation(recurse, runLeft, left, steps, context, stdin, callStack)
+    return runContinuation(recurse, runLeft, left, steps, context, stdin, callStack, executeFn)
   return recurse(node, context, stdin, callStack)
 }
 
@@ -1129,7 +1138,7 @@ async function executeNodeBody(
 
   if (kind === NodeKind.LIST) {
     const [left, op, right] = getListParts(node)
-    return handleConnection(stream, left, op, right, context, stdin, callStack)
+    return handleConnection(stream, left, op, right, context, stdin, callStack, executeFn)
   }
 
   if (kind === NodeKind.REDIRECT) {
@@ -1154,7 +1163,16 @@ async function executeNodeBody(
     const result =
       continuation.length === 0
         ? await runLeft(context, stdin, callStack)
-        : await runContinuation(recurse, runLeft, node, continuation, context, stdin, callStack)
+        : await runContinuation(
+            recurse,
+            runLeft,
+            node,
+            continuation,
+            context,
+            stdin,
+            callStack,
+            executeFn,
+          )
     return sink === undefined ? result : drained(sink, ...result)
   }
 
@@ -1340,9 +1358,9 @@ async function executeNodeBody(
     for (const child of node.namedChildren) {
       if (child.type === NT.COMMENT) continue
       const armed = errTrapArmed(session)
-      let result: Result
+      let io: IOResult
       try {
-        result = await runStatement(
+        const [rawStdout, statementIo, execNode] = await runStatement(
           stream,
           child,
           context,
@@ -1354,27 +1372,28 @@ async function executeNodeBody(
           deps.handed ?? null,
           registry.decisions,
         )
+        io = statementIo
+        lastExec = execNode
+        const stdout = await finishStatement(rawStdout, io, session, child)
+        if (stdout !== null) allStdout.push(stdout)
+        mergedIo = await mergedIo.merge(io)
+        const trapped = await runErrTrap(
+          executeFn,
+          child,
+          io.exitCode,
+          session,
+          armed,
+          stdin,
+          callStack,
+          execNode.unopened,
+        )
+        if (trapped.length > 0) {
+          mergedIo = await land(trapped, null, allStdout, mergedIo)
+          mergedIo.exitCode = io.exitCode
+        }
       } catch (sig) {
         if (!isUnwinding(sig)) throw sig
         throw await carried(sig, allStdout.length > 0 ? asyncChain(allStdout) : null, mergedIo)
-      }
-      const [rawStdout, io, execNode] = result
-      lastExec = execNode
-      const stdout = await finishStatement(rawStdout, io, session, child)
-      if (stdout !== null) allStdout.push(stdout)
-      mergedIo = await mergedIo.merge(io)
-      const trapped = await runErrTrap(
-        executeFn,
-        child,
-        io.exitCode,
-        session,
-        armed,
-        stdin,
-        callStack,
-      )
-      if (trapped.length > 0) {
-        mergedIo = await land(trapped, null, allStdout, mergedIo)
-        mergedIo.exitCode = io.exitCode
       }
       if (errexitActs(child, io.exitCode, session)) {
         mergedIo.exitCode = io.exitCode

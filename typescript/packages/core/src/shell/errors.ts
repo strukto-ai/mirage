@@ -49,22 +49,23 @@ export class ReadonlyError extends Error {
 // the top-level program loop stops the remaining statements. Mirrors
 // Python's mirage.shell.errors.ExitSignal.
 export class ExitSignal extends Error {
-  readonly exitCode: number
+  exitCode: number
   stderr: Uint8Array
   stdout: Uint8Array | null
   // Status a containing boundary reports instead of exitCode. GNU bash
   // exits 127 on a fatal expansion error but a subshell wrapping one
   // returns 1; `exit N` uses N in both positions (the default).
-  readonly containedCode: number
+  containedCode: number
   // The id of the command whose own words were being expanded when it was
   // raised. bash expands a simple command's words before it applies the
   // command's redirects, so that diagnostic goes around them; any other
   // goes through the redirects it was written under.
   expanding: number | null = null
-  // stdout is an `exec`'d command's, written under the redirects the signal
-  // unwinds through; an EXIT action's goes around them, as bash runs it once
-  // the shell has unwound.
-  underRedirects = false
+  // The program an `exec` replaced the shell with: stdout is then that
+  // program's, written under the redirects the signal unwinds through, and
+  // the shell's actions went with it. An EXIT action's output goes around
+  // those redirects, as bash runs it once the shell has unwound.
+  replaced: string | null = null
 
   constructor(
     exitCode = 0,

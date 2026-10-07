@@ -25,7 +25,7 @@ from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
-from mirage.shell.errors import ReturnSignal
+from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.helpers import parse_function
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse.scope import ParseScope
@@ -171,6 +171,27 @@ async def run_shell_function(
                     body_handed,
                     decisions,
                 )
+                # $? tracks each statement inside the body, so a bare
+                # `return` (and mid-function $?) sees the last command.
+                stdout = await finish_statement(stdout, io, session, cmd)
+                if stdout is not None:
+                    all_stdout.append(stdout)
+                merged_io = await merged_io.merge(io)
+                trapped = await run_err_trap(
+                    execute_fn,
+                    cmd,
+                    io.exit_code,
+                    session,
+                    armed,
+                    stdin,
+                    cs,
+                    last_exec.unopened,
+                )
+                if trapped:
+                    merged_io = await land(
+                        trapped, sink, all_stdout, merged_io
+                    )
+                    merged_io.exit_code = io.exit_code
             except ReturnSignal as sig:
                 if sig.stdout is not None:
                     all_stdout.append(sig.stdout)
@@ -186,29 +207,30 @@ async def run_shell_function(
                     async_chain(all_stdout) if all_stdout else None,
                     merged_io,
                 )
-            # $? tracks each statement inside the body, so a bare
-            # `return` (and mid-function $?) sees the last command.
-            stdout = await finish_statement(stdout, io, session, cmd)
-            if stdout is not None:
-                all_stdout.append(stdout)
-            merged_io = await merged_io.merge(io)
-            trapped = await run_err_trap(
-                execute_fn, cmd, io.exit_code, session, armed, stdin, cs
-            )
-            if trapped:
-                merged_io = await land(trapped, sink, all_stdout, merged_io)
-                merged_io.exit_code = io.exit_code
             if errexit_acts(cmd, io.exit_code, session):
                 merged_io.exit_code = io.exit_code
                 break
         status = merged_io.exit_code
-        returned = await run_return_trap(execute_fn, session, stdin, cs)
+        try:
+            returned = await run_return_trap(execute_fn, session, stdin, cs)
+        except UNWINDING as sig:
+            raise await carried(
+                sig,
+                async_chain(all_stdout) if all_stdout else None,
+                merged_io,
+            )
         if returned:
             merged_io = await land(returned, sink, all_stdout, merged_io)
             merged_io.exit_code = status
         combined = async_chain(all_stdout) if all_stdout else None
         last_exec.exit_code = merged_io.exit_code
         return combined, merged_io, last_exec
+    except ExitSignal as sig:
+        # An `exec` replaced the shell: the actions went with it, so the
+        # ones the body took from its caller do not come back.
+        if sig.replaced is not None:
+            lifted = (None, None)
+        raise
     finally:
         session._parse_current, session._parse_row = outer_parse
         if nested is not None and decisions is not None:

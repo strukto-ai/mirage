@@ -61,6 +61,8 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "return_trap",
     "err_trap_hidden",
     "return_trap_hidden",
+    "err_trap_running",
+    "return_trap_running",
     "tty",
     "job_output",
     "job_waits",
@@ -87,6 +89,7 @@ INHERITED_FIELDS: tuple[str, ...] = (
 # locals.
 TRANSIENT_FIELDS: tuple[str, ...] = (
     "errexit_immune",
+    "errexit_exiting",
     "_local_vars",
     "_local_frames",
     "_local_random",

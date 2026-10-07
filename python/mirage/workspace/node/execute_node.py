@@ -465,7 +465,14 @@ async def _run_pipeline(
             right,
         )
         return await handle_connection(
-            wrapped, left, op, right, context, stdin, call_stack
+            wrapped,
+            left,
+            op,
+            right,
+            context,
+            stdin,
+            call_stack,
+            execute_fn,
         )
     commands = list(stages.commands)
     stderr_flags = list(stages.stderr_flags)
@@ -656,7 +663,14 @@ async def _run_redirected(
             right,
         )
         return await handle_connection(
-            wrapped, left, op, right, context, stdin, call_stack
+            wrapped,
+            left,
+            op,
+            right,
+            context,
+            stdin,
+            call_stack,
+            execute_fn,
         )
     if command is not None and command.type == NT.PIPELINE:
         return await _run_pipeline(
@@ -758,6 +772,7 @@ async def _run_continuation(
     context: EvaluationContext,
     stdin: Any,
     call_stack: CallStack | None,
+    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Fold the ``&&``/``||`` steps a heredoc's operator line carried
     around the statement, left to right.
@@ -781,15 +796,28 @@ async def _run_continuation(
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
+        execute_fn (Callable[..., Any] | None): runs the ERR action.
     """
     if not steps:
         return await run_left(context, stdin, call_stack)
     op, right = steps[-1]
     wrapped = partial(
-        _recurse_continuation, recurse, run_left, left, steps[:-1]
+        _recurse_continuation,
+        recurse,
+        run_left,
+        left,
+        steps[:-1],
+        execute_fn,
     )
     return await handle_connection(
-        wrapped, left, op, right, context, stdin, call_stack
+        wrapped,
+        left,
+        op,
+        right,
+        context,
+        stdin,
+        call_stack,
+        execute_fn,
     )
 
 
@@ -798,6 +826,7 @@ async def _recurse_continuation(
     run_left: Callable[..., Any],
     left: Any,
     steps: tuple[tuple[str, Any], ...],
+    execute_fn: Callable[..., Any] | None,
     node: Any,
     context: EvaluationContext,
     stdin: Any = None,
@@ -812,6 +841,7 @@ async def _recurse_continuation(
         left (Any): the redirected_statement node.
         steps (tuple[tuple[str, Any], ...]): the steps before the
             current one.
+        execute_fn (Callable[..., Any] | None): runs the ERR action.
         node (Any): the node ``handle_connection`` asks for.
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
@@ -819,7 +849,14 @@ async def _recurse_continuation(
     """
     if node is left:
         return await _run_continuation(
-            recurse, run_left, left, steps, context, stdin, call_stack
+            recurse,
+            run_left,
+            left,
+            steps,
+            context,
+            stdin,
+            call_stack,
+            execute_fn,
         )
     return await recurse(node, context, stdin, call_stack)
 
@@ -1222,7 +1259,7 @@ async def _execute_node(
     if kind == NodeKind.LIST:
         left, op, right = get_list_parts(node)
         return await handle_connection(
-            stream, left, op, right, context, stdin, cs
+            stream, left, op, right, context, stdin, cs, execute_fn
         )
 
     # ── redirected statement ────────────────────
@@ -1249,7 +1286,14 @@ async def _execute_node(
             result = await run_left(context, stdin, cs)
         else:
             result = await _run_continuation(
-                recurse, run_left, node, continuation, context, stdin, cs
+                recurse,
+                run_left,
+                node,
+                continuation,
+                context,
+                stdin,
+                cs,
+                execute_fn,
             )
         return result if sink is None else await drained(sink, *result)
 
@@ -1413,18 +1457,27 @@ async def _execute_node(
                     handed,
                     registry.decisions,
                 )
+                stdout = await finish_statement(stdout, io, session, child)
+                if stdout is not None:
+                    all_stdout.append(stdout)
+                merged_io = await merged_io.merge(io)
+                trapped = await run_err_trap(
+                    execute_fn,
+                    child,
+                    io.exit_code,
+                    session,
+                    armed,
+                    stdin,
+                    cs,
+                    last_exec.unopened,
+                )
+                if trapped:
+                    merged_io = await land(
+                        trapped, None, all_stdout, merged_io
+                    )
+                    merged_io.exit_code = io.exit_code
             except UNWINDING as sig:
                 raise await carried(sig, async_chain(all_stdout), merged_io)
-            stdout = await finish_statement(stdout, io, session, child)
-            if stdout is not None:
-                all_stdout.append(stdout)
-            merged_io = await merged_io.merge(io)
-            trapped = await run_err_trap(
-                execute_fn, child, io.exit_code, session, armed, stdin, cs
-            )
-            if trapped:
-                merged_io = await land(trapped, None, all_stdout, merged_io)
-                merged_io.exit_code = io.exit_code
             if errexit_acts(child, io.exit_code, session):
                 merged_io.exit_code = io.exit_code
                 break

@@ -52,6 +52,8 @@ export function clearTraps(session: SessionState): void {
   session.returnTrap = null
   session.errTrapHidden = false
   session.returnTrapHidden = false
+  session.errTrapRunning = false
+  session.returnTrapRunning = false
 }
 
 /**
@@ -109,13 +111,16 @@ export function errTrapArmed(session: SessionState): boolean {
  * Run the ERR action after a statement finished with `status`.
  *
  * It runs where `set -e` would act: not in a test, the left of `&&`/`||`
- * or after `!`, and not again for a group, `if`, a loop or `case`, whose
- * own failing command ran it already. `$?` is `status` while it runs and
- * again after it, whatever the action returns, and a failure inside it
- * does not run it again. An `exit` in it ends the shell. Hidden in a
- * function or a child shell unless `set -E`, as bash's is. `armed` is
- * `errTrapArmed` as the statement started. Returns what the action wrote,
- * for the caller to land; empty when none runs. Mirrors Python.
+ * or after `!`, and not again for a group, `if`, a loop, `case` or
+ * `&&`/`||` list, whose own failing command ran it already, unless the
+ * statement failed to open a redirect and never ran (`unopened`). `$?` is
+ * `status` while it runs and again after it, whatever the action returns,
+ * and the action does not run while it is running, nor once `set -e` is
+ * ending the shell. An `exit` or `return` in it leaves as the statement's
+ * would. Hidden in a function or a child shell unless `set -E`, as bash's
+ * is. `armed` is `errTrapArmed` as the statement started. Returns what the
+ * action wrote, for the caller to land; empty when none runs. Mirrors
+ * Python.
  */
 export async function runErrTrap(
   executeFn: ExecuteStringFn | null,
@@ -125,6 +130,7 @@ export async function runErrTrap(
   armed: boolean,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
+  unopened = false,
 ): Promise<Written[]> {
   const action = session.errTrap
   const statement =
@@ -138,17 +144,19 @@ export async function runErrTrap(
     action === null ||
     action === '' ||
     session.errTrapHidden ||
+    session.errTrapRunning ||
+    session.errexitExiting ||
     session.errexitImmune ||
     session.errexitIgnored ||
-    (ERR_TRAP_EXEMPT_TYPES.has(statement.type) && !arithmetic(statement))
+    (ERR_TRAP_EXEMPT_TYPES.has(statement.type) && !unopened && !arithmetic(statement))
   )
     return []
-  session.errTrapHidden = true
+  session.errTrapRunning = true
   let written: Written[]
   try {
     written = await runAction(executeFn, action, session, stdin, callStack)
   } finally {
-    if (session.errTrap === action) session.errTrapHidden = false
+    session.errTrapRunning = false
   }
   recordStatus(session, status)
   return written
@@ -164,8 +172,9 @@ function arithmetic(node: TSNodeLike): boolean {
  * Run the RETURN action as a function or a sourced file returns. It runs in
  * the frames of what is returning, with `$?` as the last command left it;
  * what returns keeps its own status. Hidden in a function or a child shell
- * unless `set -T` or it set its own. Returns what the action wrote, for the
- * caller to land; empty when none runs. Mirrors Python.
+ * unless `set -T` or it set its own, and it does not run while it is
+ * running, nor once `set -e` is ending the shell. Returns what the action
+ * wrote, for the caller to land; empty when none runs. Mirrors Python.
  */
 export async function runReturnTrap(
   executeFn: ExecuteStringFn | null,
@@ -174,14 +183,32 @@ export async function runReturnTrap(
   callStack: CallStack | null = null,
 ): Promise<Written[]> {
   const action = session.returnTrap
-  if (executeFn === null || action === null || action === '' || session.returnTrapHidden) return []
+  if (
+    executeFn === null ||
+    action === null ||
+    action === '' ||
+    session.returnTrapHidden ||
+    session.returnTrapRunning ||
+    session.errexitExiting
+  )
+    return []
   const status = session.lastExitCode
-  const written = await runAction(executeFn, action, session, stdin, callStack)
+  session.returnTrapRunning = true
+  let written: Written[]
+  try {
+    written = await runAction(executeFn, action, session, stdin, callStack)
+  } finally {
+    session.returnTrapRunning = false
+  }
   recordStatus(session, status)
   return written
 }
 
-/** Run a trap action as a line of the shell and collect its output. */
+/**
+ * Run a trap action as a line of the shell and collect its output. What the
+ * action runs in a test or after `!` leaves the `set -e` answer for the
+ * statement it answers as it was.
+ */
 async function runAction(
   executeFn: ExecuteStringFn,
   action: string,
@@ -189,12 +216,18 @@ async function runAction(
   stdin: ByteSource | null,
   callStack: CallStack | null,
 ): Promise<Written[]> {
-  const io = await executeFn(action, {
-    sessionId: session.sessionId,
-    session,
-    stdin,
-    callStack: callStack ?? new CallStack(),
-  })
+  const immune = session.errexitImmune
+  let io: IOResult
+  try {
+    io = await executeFn(action, {
+      sessionId: session.sessionId,
+      session,
+      stdin,
+      callStack: callStack ?? new CallStack(),
+    })
+  } finally {
+    session.errexitImmune = immune
+  }
   const stdout = await materialize(io.stdout)
   const stderr = await io.materializeStderr()
   const written: Written[] = []

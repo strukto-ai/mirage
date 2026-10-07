@@ -63,6 +63,7 @@ def clear_traps(session: SessionState) -> None:
     session._trap_status = None
     session.err_trap = session.return_trap = None
     session.err_trap_hidden = session.return_trap_hidden = False
+    session.err_trap_running = session.return_trap_running = False
 
 
 def lift_function_traps(
@@ -130,16 +131,19 @@ async def run_err_trap(
     armed: bool,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
+    unopened: bool = False,
 ) -> list[Written]:
     """Run the ERR action after a statement finished with ``status``.
 
     It runs where ``set -e`` would act: not in a test, the left of
     ``&&``/``||`` or after ``!``, and not again for a group, ``if``, a
-    loop or ``case``, whose own failing command ran it already. ``$?``
-    is ``status`` while it runs and again after it, whatever the action
-    returns, and a failure inside it does not run it again. An ``exit``
-    in it ends the shell. Hidden in a function or a child shell unless
-    ``set -E``, as bash's is.
+    loop, ``case`` or ``&&``/``||`` list, whose own failing command ran
+    it already, unless the statement failed to open a redirect and never
+    ran. ``$?`` is ``status`` while it runs and again after it, whatever
+    the action returns, and the action does not run while it is running,
+    nor once ``set -e`` is ending the shell. An ``exit`` or ``return`` in
+    it leaves as the statement's would. Hidden in a function or a child
+    shell unless ``set -E``, as bash's is.
 
     Args:
         execute_fn (Callable[..., Any] | None): runs a line in the
@@ -150,6 +154,7 @@ async def run_err_trap(
         armed (bool): ``err_trap_armed`` as the statement started.
         stdin (ByteSource | None): the shell's standard input.
         call_stack (CallStack | None): the frames the action runs in.
+        unopened (bool): a redirect of the statement failed to open.
 
     Returns:
         list[Written]: what the action wrote, for the caller to land;
@@ -164,19 +169,24 @@ async def run_err_trap(
         or execute_fn is None
         or not action
         or session.err_trap_hidden
+        or session.err_trap_running
+        or session.errexit_exiting
         or session.errexit_immune
         or session.errexit_ignored
-        or (node.type in ERR_TRAP_EXEMPT_TYPES and not _arithmetic(node))
+        or (
+            node.type in ERR_TRAP_EXEMPT_TYPES
+            and not unopened
+            and not _arithmetic(node)
+        )
     ):
         return []
-    session.err_trap_hidden = True
+    session.err_trap_running = True
     try:
         written = await _run_action(
             execute_fn, action, session, stdin, call_stack
         )
     finally:
-        if session.err_trap == action:
-            session.err_trap_hidden = False
+        session.err_trap_running = False
     record_status(session, status)
     return written
 
@@ -205,7 +215,9 @@ async def run_return_trap(
 
     It runs in the frames of what is returning, with ``$?`` as the last
     command left it; what returns keeps its own status. Hidden in a
-    function or a child shell unless ``set -T`` or it set its own.
+    function or a child shell unless ``set -T`` or it set its own, and
+    it does not run while it is running, nor once ``set -e`` is ending
+    the shell.
 
     Args:
         execute_fn (Callable[..., Any] | None): runs a line in the
@@ -219,10 +231,22 @@ async def run_return_trap(
         empty when none runs.
     """
     action = session.return_trap
-    if execute_fn is None or not action or session.return_trap_hidden:
+    if (
+        execute_fn is None
+        or not action
+        or session.return_trap_hidden
+        or session.return_trap_running
+        or session.errexit_exiting
+    ):
         return []
     status = session.last_exit_code
-    written = await _run_action(execute_fn, action, session, stdin, call_stack)
+    session.return_trap_running = True
+    try:
+        written = await _run_action(
+            execute_fn, action, session, stdin, call_stack
+        )
+    finally:
+        session.return_trap_running = False
     record_status(session, status)
     return written
 
@@ -235,6 +259,8 @@ async def _run_action(
     call_stack: CallStack | None,
 ) -> list[Written]:
     """Run a trap action as a line of the shell and collect its output.
+    What the action runs in a test or after ``!`` leaves the ``set -e``
+    answer for the statement it answers as it was.
 
     Args:
         execute_fn (Callable[..., Any]): runs a line in the caller's
@@ -244,12 +270,16 @@ async def _run_action(
         stdin (ByteSource | None): the shell's standard input.
         call_stack (CallStack | None): the frames it runs in.
     """
-    io = await execute_fn(
-        action,
-        session_id=session.session_id,
-        stdin=stdin,
-        call_stack=call_stack if call_stack is not None else CallStack(),
-    )
+    immune = session.errexit_immune
+    try:
+        io = await execute_fn(
+            action,
+            session_id=session.session_id,
+            stdin=stdin,
+            call_stack=call_stack if call_stack is not None else CallStack(),
+        )
+    finally:
+        session.errexit_immune = immune
     stdout = await materialize(io.stdout) or b""
     stderr = await materialize(io.stderr) or b""
     return [

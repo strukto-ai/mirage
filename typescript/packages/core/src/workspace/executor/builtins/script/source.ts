@@ -17,6 +17,8 @@ import { Channel, type JobConsole } from '../../../../shell/console/index.ts'
 import { concat } from '../../../../io/cachable_iterator.ts'
 import { asyncChain } from '../../../../io/stream.ts'
 import { runReturnTrap } from '../../traps.ts'
+import { carried, isUnwinding } from '../../control.ts'
+import type { Written } from '../../statement.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { fsStrerror } from '../../../../errors/fs.ts'
 import { CallStack } from '../../../../shell/call_stack.ts'
@@ -88,7 +90,13 @@ export async function handleSource(
       })
     }
     // The RETURN action runs as the file returns, in its frame.
-    const returned = await runReturnTrap(executeFn, session, stdin, cs)
+    let returned: Written[]
+    try {
+      returned = await runReturnTrap(executeFn, session, stdin, cs)
+    } catch (err) {
+      if (isUnwinding(err)) throw await carried(err, io.stdout, io)
+      throw err
+    }
     if (returned.length > 0) {
       const out = concat(returned.filter(([c]) => c === Channel.STDOUT).map(([, d]) => d))
       const err = concat(returned.filter(([c]) => c === Channel.STDERR).map(([, d]) => d))

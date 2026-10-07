@@ -19,7 +19,7 @@ import type { ParseScope } from '../../../shell/parse/scope.ts'
 import type { ShellVar } from '../../../shell/variable.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult } from '../../../io/types.ts'
-import { errexitActs, fd0Binding, finishStatement, land } from '../statement.ts'
+import { errexitActs, fd0Binding, finishStatement, land, type Written } from '../statement.ts'
 import { CallStack } from '../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../shell/console/index.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -35,7 +35,7 @@ import type { JobTable } from '../../../shell/job_table/index.ts'
 
 import type { HandOff } from '../../../policy/types.ts'
 import type { Decisions } from '../../../policy/decisions.ts'
-import { ReturnSignal } from '../../../shell/errors.ts'
+import { ExitSignal, ReturnSignal } from '../../../shell/errors.ts'
 import { carried, isUnwinding } from '../control.ts'
 import {
   errTrapArmed,
@@ -82,7 +82,7 @@ export async function executeShellFunction(
   // Positional args carry the word as typed ($1 stays sub/a.txt).
   const textArgs = restParts.map(wordText)
   cs.push(textArgs, cmdName)
-  const lifted = liftFunctionTraps(session)
+  let lifted = liftFunctionTraps(session)
   const outerNames = session.functionNames
   if (outerNames !== null) session.functionNames = cs.functionNames()
   // One stack: a local shadows the whole record, so the caller's value
@@ -159,6 +159,7 @@ export async function executeShellFunction(
             armed,
             bodyStdin,
             cs,
+            execNode.unopened,
           )
           if (trapped.length > 0) {
             mergedIo = await land(trapped, sink ?? null, allStdout, mergedIo)
@@ -182,12 +183,23 @@ export async function executeShellFunction(
         }
       }
       const status = mergedIo.exitCode
-      const returned = await runReturnTrap(executeFn, session, bodyStdin, cs)
+      let returned: Written[]
+      try {
+        returned = await runReturnTrap(executeFn, session, bodyStdin, cs)
+      } catch (err) {
+        if (!isUnwinding(err)) throw err
+        throw await carried(err, allStdout.length > 0 ? asyncChain(allStdout) : null, mergedIo)
+      }
       if (returned.length > 0) {
         mergedIo = await land(returned, sink ?? null, allStdout, mergedIo)
         mergedIo.exitCode = status
       }
     })
+  } catch (err) {
+    // An `exec` replaced the shell: the actions went with it, so the ones
+    // the body took from its caller do not come back.
+    if (err instanceof ExitSignal && err.replaced !== null) lifted = [null, null]
+    throw err
   } finally {
     ;[session.parseCurrent, session.parseRow] = outerParse
     if (nested !== null && decisions !== null) decisions.handUp(session.sessionId, nested)

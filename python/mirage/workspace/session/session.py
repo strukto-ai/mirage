@@ -365,14 +365,17 @@ class SessionState:
     exit_trap: str | None = None
     exit_trap_inherited: bool = False
     # The `trap ... ERR` and `trap ... RETURN` actions, "" for an ignored
-    # one, and whether the running scope hides each: a function sees
-    # neither unless `set -E` / `set -T`, a child shell no ERR unless
-    # `set -E`, and a scope that sets one sees it. Live shell state, like
-    # the EXIT action.
+    # one, and whether the running scope hides each: a child shell lists
+    # but runs neither unless `set -E` / `set -T`, and a scope that sets
+    # one sees it. Live shell state, like the EXIT action.
     err_trap: str | None = None
     return_trap: str | None = None
     err_trap_hidden: bool = False
     return_trap_hidden: bool = False
+    # Whether each action is running: bash runs neither again until it
+    # finishes, whatever the action registers meanwhile.
+    err_trap_running: bool = False
+    return_trap_running: bool = False
     tty: Terminal = field(default_factory=Terminal, repr=False)
     job_output: JobOutput | None = field(default=None, repr=False)
     job_waits: JobWaits | None = field(default=None, repr=False)
@@ -385,6 +388,9 @@ class SessionState:
     # after `!`. Everything run there, a function or a subshell included,
     # ignores it (`ignoring_errexit`); a child shell keeps the context.
     errexit_ignored: bool = field(default=False, repr=False)
+    # Whether `set -e` is ending the shell: its statements unwind
+    # without running ERR or RETURN again, as bash's exit leaves at once.
+    errexit_exiting: bool = field(default=False, repr=False)
     # Variables shadowed by `local` / `declare` in the running function;
     # a None value means the caller had no variable of that name. One
     # stack, not one per container: a local shadows the whole record, so

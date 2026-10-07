@@ -136,11 +136,13 @@ export const FORK_FAILED_STATUS = 254
 export const ERREXIT_EXEMPT_TYPES: ReadonlySet<string> = new Set<string>([NodeType.NEGATED_COMMAND])
 
 // Statements whose failure the ERR trap does not answer again: a group,
-// `if`, a loop and `case` ran it for their own failing command already. A
-// subshell and a function call are answered, since the trap is hidden
-// inside them unless `set -E` (pinned against bash 5.2.37).
+// `if`, a loop and `case` ran it for their own failing command already, and
+// an `&&`/`||` list for its right command. A subshell and a function call
+// are answered, since the trap is hidden inside them unless `set -E`
+// (pinned against bash 5.2.37).
 export const ERR_TRAP_EXEMPT_TYPES: ReadonlySet<string> = new Set<string>([
   ...ERREXIT_EXEMPT_TYPES,
+  NodeType.LIST,
   NodeType.COMPOUND_STATEMENT,
   NodeType.IF_STATEMENT,
   NodeType.WHILE_STATEMENT,

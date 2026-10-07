@@ -181,20 +181,24 @@ def ignoring_errexit(session: SessionState) -> Iterator[None]:
 
 
 def errexit_acts(node: TSNodeLike, status: int, session: SessionState) -> bool:
-    """Whether ``set -e`` ends the shell after this statement.
+    """Whether ``set -e`` ends the shell after this statement, marking
+    the shell as ending when it does.
 
     Args:
         node (TSNodeLike): the statement that finished.
         status (int): its status.
         session (SessionState): the shell it ran in.
     """
-    return (
+    acts = (
         status != 0
         and bool(session.shell_options.get("errexit"))
         and node.type not in ERREXIT_EXEMPT_TYPES
         and not session.errexit_immune
         and not session.errexit_ignored
     )
+    if acts:
+        session.errexit_exiting = True
+    return acts
 
 
 async def finish_statement(

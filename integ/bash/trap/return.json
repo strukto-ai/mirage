@@ -237,6 +237,74 @@
         "stdout": "trap -- 'echo X' EXIT\ntrap -- 'echo E' ERR\ntrap -- 'echo R' RETURN\nX\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "return_trap_does_not_run_while_it_runs",
+      "seq": 512087,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( set -T; helper() { echo H; }; trap helper RETURN; f() { :; }; f; echo end )",
+      "expect": {
+        "exit": 0,
+        "stdout": "H\nend\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "return_trap_skipped_when_errexit_ends_a_function",
+      "seq": 512088,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( set -eT; trap 'echo RETURN' RETURN; f() { false; }; f; echo after ); echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": ""
+      }
     }
   ]
 }
