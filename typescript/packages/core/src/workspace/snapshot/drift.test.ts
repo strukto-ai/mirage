@@ -231,8 +231,9 @@ describe('captureFingerprints', () => {
   })
 
   it('a write that carries no token retracts the pin it cannot describe', () => {
-    // gdrive's shape: it stamps a read fingerprint but records a tokenless
-    // write, so the pre-write token must not survive the write.
+    // The shape of a backend whose upload reply carries no token: it stamps a
+    // read fingerprint but records a tokenless write, so the pre-write token
+    // must not survive.
     const mount = makeMount('/s3/', true)
     const registry = makeRegistry([mount])
     const entries = captureFingerprints(

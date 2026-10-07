@@ -64,6 +64,19 @@ _PATCH_TARGETS = {
     "capture_file_metadata": [
         "mirage.core.gdrive.read.capture_file_metadata",
     ],
+    # A write's reply is the uploaded file resource, rendered through
+    # `public` like a listing entry, so the token a write records and the
+    # token a later probe lists cannot disagree.
+    "upload_file": [
+        "mirage.core.gdrive.write.upload_file",
+    ],
+    "update_file_content": [
+        "mirage.core.gdrive.write.update_file_content",
+    ],
+    "create_folder": [
+        "mirage.core.gdrive.mkdir.create_folder",
+        "mirage.core.gdrive.copy.create_folder",
+    ],
     # `stat_from_api` answers a stat made with no index, which is how the
     # read-token contract's unrecorded rows stat. The guard below catches
     # only a target that no longer resolves, so an unlisted binding would
@@ -107,22 +120,55 @@ class FakeGDrive:
         name = parts[-1]
         existing = self._find_child(parent_id, name)
         if existing is not None:
-            self._bytes[existing["id"]] = content
-            existing["size"] = str(len(content))
-            existing["modifiedTime"] = self._next_modified_time()
-            return existing["id"]
-        file_id = self._mk_id("f")
+            return self._overwrite(existing, content)["id"]
+        entry = self._new_file(
+            parent_id, name, content, mime, "2026-04-16T00:00:00Z"
+        )
+        return entry["id"]
+
+    def upload(self, parent_id: str, name: str, content: bytes) -> dict:
+        """Create a file under a folder id, as a multipart upload does.
+
+        Args:
+            parent_id (str): the parent folder's id.
+            name (str): the new file's name.
+            content (bytes): its bytes.
+        """
+        entry = self._new_file(
+            parent_id, name, content, _FILE_MIME, self._next_modified_time()
+        )
+        return self.public(entry)
+
+    def mkdir(self, parent_id: str, name: str) -> dict:
+        """Create a folder under a folder id, as Drive's files.create does.
+
+        Args:
+            parent_id (str): the parent folder's id.
+            name (str): the new folder's name.
+        """
+        folder_id = self._mk_id("d")
         entry = {
-            "id": file_id,
+            "id": folder_id,
             "name": name,
-            "mimeType": mime,
-            "size": str(len(content)),
-            "modifiedTime": "2026-04-16T00:00:00Z",
+            "mimeType": _FOLDER_MIME,
+            "modifiedTime": self._next_modified_time(),
             "parents": [parent_id],
         }
-        self._children[parent_id].append(entry)
-        self._bytes[file_id] = content
-        return file_id
+        self._children.setdefault(parent_id, []).append(entry)
+        self._children[folder_id] = []
+        return self.public(entry)
+
+    def update(self, file_id: str, content: bytes) -> dict:
+        """Replace a file's bytes by id, as a media upload does.
+
+        Args:
+            file_id (str): the file's id.
+            content (bytes): its new bytes.
+        """
+        entry = self._entry(file_id)
+        if entry is None:
+            raise FileNotFoundError(file_id)
+        return self.public(self._overwrite(entry, content))
 
     def set_modified(self, path: str, stamp: str) -> None:
         """Set an item's modifiedTime, as an edit made outside mirage does.
@@ -189,11 +235,8 @@ class FakeGDrive:
         return [self.public(c) for c in self._children.get(folder_id, [])]
 
     def find_entry(self, file_id: str) -> dict | None:
-        for children in self._children.values():
-            for c in children:
-                if c["id"] == file_id:
-                    return self.public(c)
-        return None
+        entry = self._entry(file_id)
+        return self.public(entry) if entry is not None else None
 
     def all_files(self) -> list[dict]:
         result: list[dict] = []
@@ -210,6 +253,40 @@ class FakeGDrive:
 
     def has_id(self, file_id: str) -> bool:
         return file_id in self._bytes
+
+    def _entry(self, file_id: str) -> dict | None:
+        for children in self._children.values():
+            for c in children:
+                if c["id"] == file_id:
+                    return c
+        return None
+
+    def _new_file(
+        self,
+        parent_id: str,
+        name: str,
+        content: bytes,
+        mime: str,
+        modified: str,
+    ) -> dict:
+        file_id = self._mk_id("f")
+        entry = {
+            "id": file_id,
+            "name": name,
+            "mimeType": mime,
+            "size": str(len(content)),
+            "modifiedTime": modified,
+            "parents": [parent_id],
+        }
+        self._children.setdefault(parent_id, []).append(entry)
+        self._bytes[file_id] = content
+        return entry
+
+    def _overwrite(self, entry: dict, content: bytes) -> dict:
+        self._bytes[entry["id"]] = content
+        entry["size"] = str(len(content))
+        entry["modifiedTime"] = self._next_modified_time()
+        return entry
 
     def _mk_id(self, kind: str) -> str:
         i = self._next_id
@@ -391,6 +468,39 @@ def _build_fakes(registry):
         digest = hashlib.md5(_bytes_for(fake, registry, file_id)).hexdigest()
         return digest, f"rev-{digest}"
 
+    async def fake_upload_file(
+        token_manager,
+        name: str,
+        parent_id: str,
+        data: bytes,
+        mime_type: str = _FILE_MIME,
+    ) -> dict:
+        del mime_type
+        fake = _resolve_fake(token_manager, registry)
+        if fake is None:
+            raise FileNotFoundError(parent_id)
+        fake.calls["upload_file"] += 1
+        return fake.upload(parent_id, name, data)
+
+    async def fake_update_file_content(
+        token_manager, file_id: str, data: bytes, mime_type: str = _FILE_MIME
+    ) -> dict:
+        del mime_type
+        fake = _resolve_fake(token_manager, registry)
+        if fake is None:
+            raise FileNotFoundError(file_id)
+        fake.calls["update_file_content"] += 1
+        return fake.update(file_id, data)
+
+    async def fake_create_folder(
+        token_manager, name: str, parent_id: str
+    ) -> dict:
+        fake = _resolve_fake(token_manager, registry)
+        if fake is None:
+            raise FileNotFoundError(parent_id)
+        fake.calls["create_folder"] += 1
+        return fake.mkdir(parent_id, name)
+
     async def fake_render(token_manager, file_id: str) -> bytes:
         fake = _resolve_fake(token_manager, registry)
         if fake is None:
@@ -407,6 +517,9 @@ def _build_fakes(registry):
         "download_file": fake_download_file,
         "capture_file_metadata": fake_capture_file_metadata,
         "get_file": fake_get_file,
+        "upload_file": fake_upload_file,
+        "update_file_content": fake_update_file_content,
+        "create_folder": fake_create_folder,
     }
 
 

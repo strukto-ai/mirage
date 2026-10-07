@@ -23,7 +23,8 @@ from mirage.commands.errors import CommandTimeoutError
 from mirage.context import reset_refusal_sink, set_refusal_sink
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.observe.context import RecordingScope
+from mirage.observe.context import RecordingScope, active_records
+from mirage.observe.record import READ_FINGERPRINT_OPS, OpRecord
 from mirage.policy import Deny, HandOff
 from mirage.runtime.routing import RouteDecision, RouteError
 from mirage.shell.bytes import decode_text
@@ -588,6 +589,12 @@ async def run_prepared_line(
     is_line = record
     scope = RecordingScope(active=is_line)
     parse_scope = ParseScope()
+    # A nested line applies against the records added to the enclosing
+    # line's since it began, copied at apply, reads left out: a
+    # concurrent sibling stage records into the same list, and its read
+    # token would label bytes this line read before the change.
+    outer = None if is_line else active_records()
+    nested_start = len(outer) if outer is not None else 0
 
     session_token = set_current_evaluation(context, owner=ws._session_mgr)
     # Taken before any statement stamps, so a cancelled line can put
@@ -916,7 +923,18 @@ async def run_prepared_line(
         if warnings:
             io.stderr = warnings + await io.materialize_stderr()
         record_status(session, io.exit_code, transparent=True)
-        await ws.apply_io(io, records=scope.records, cache_facts=cache_facts)
+        applied: list[OpRecord] | None = scope.records
+        if not is_line:
+            applied = (
+                None
+                if outer is None
+                else [
+                    r
+                    for r in outer[nested_start:]
+                    if r.op not in READ_FINGERPRINT_OPS
+                ]
+            )
+        await ws.apply_io(io, records=applied, cache_facts=cache_facts)
         return io
     except CommandTimeoutError as exc:
         # The caller's event is read, never written: a timeout is this
@@ -955,7 +973,16 @@ async def run_prepared_line(
         parse_scope.release()
         scope.close()
         reset_current_evaluation(session_token)
-        await ws._session_mgr.flush(session.session_id)
+        # The marks were only for this line's apply_io, so they go however
+        # the save ends, with any a background job added during it; the
+        # seal stops a background command that returns later from marking
+        # a record persisted here, which nothing outside FUSE ever trims.
+        try:
+            await ws._session_mgr.flush(session.session_id)
+        finally:
+            for rec in scope.records:
+                rec.claimed = None
+                rec.sealed = True
         ws._ops.records.extend(scope.records)
         # bash adds a line to history only when it is non-empty
         # (`shell_input_line[0]`): a blank line is skipped, while a

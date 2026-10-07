@@ -14,7 +14,7 @@
 
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
-import { invalidateAfterWrite } from '../../cache/context.ts'
+import { evictAfter, invalidateAfterWrite, invalidateSubtree } from '../../cache/context.ts'
 import { PathSpec } from '../../types.ts'
 import { eisdir, enoent, enotdir } from '../../errors/fs.ts'
 import { copyFile, copyFolder, deleteFile, listFolderItems, type BoxItem } from './api.ts'
@@ -53,14 +53,24 @@ async function copyInto(accessor: BoxAccessor, item: BoxItem, dst: PathSpec): Pr
   }
   if (item.type === 'folder') await copyFolder(tm, item.id, dstParent, newName)
   else await copyFile(tm, item.id, dstParent, newName)
-  // Each landing, not only the operand: a merge adds children to a folder
-  // whose listing an earlier stat may already hold.
-  await invalidateAfterWrite(dst)
 }
 
+/**
+ * Copy a file or folder server-side.
+ *
+ * A folder copy evicts the whole destination subtree: a merge into an
+ * existing folder replaces children below `dst` whose bytes were cached under
+ * their own keys. A file copy evicts just its target: a file has nothing below
+ * it, so it skips the subtree walk, which asks every store (a keyspace scan on
+ * Redis). The eviction runs also when the copy fails, since a merge may have
+ * landed some children before one failed.
+ */
 export async function copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const item = await resolveItem(accessor, pathParts(src))
   if (item === null) throw enoent(src.virtual)
-  await copyInto(accessor, item, dst)
-  await invalidateAfterWrite(dst)
+  const folder = item.type === 'folder'
+  await evictAfter(
+    () => copyInto(accessor, item, dst),
+    () => (folder ? invalidateSubtree(dst) : invalidateAfterWrite(dst)),
+  )
 }

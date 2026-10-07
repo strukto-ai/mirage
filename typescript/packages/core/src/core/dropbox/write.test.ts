@@ -13,8 +13,36 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
+import type * as ObserveModule from '../../observe/context.ts'
+import type * as CacheContextModule from '../../cache/context.ts'
 import type * as ClientModule from './client.ts'
 import type * as ApiModule from './api.ts'
+
+const H = vi.hoisted(() => ({
+  order: [] as string[],
+}))
+
+vi.mock('../../observe/context.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof ObserveModule>()
+  return {
+    ...actual,
+    record: (...args: Parameters<typeof actual.record>) => {
+      H.order.push('record')
+      actual.record(...args)
+    },
+  }
+})
+
+vi.mock('../../cache/context.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof CacheContextModule>()
+  return {
+    ...actual,
+    invalidateAfterWrite: async (...args: Parameters<typeof actual.invalidateAfterWrite>) => {
+      H.order.push('invalidate')
+      await actual.invalidateAfterWrite(...args)
+    },
+  }
+})
 
 vi.mock('./client.ts', async () => {
   const actual = await vi.importActual<typeof ClientModule>('./client.ts')
@@ -35,6 +63,7 @@ vi.mock('./api.ts', async () => {
 })
 
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
+import { runWithRecording } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import * as client from './client.ts'
 import { DropboxApiError, type DropboxTokenManager } from './client.ts'
@@ -74,6 +103,19 @@ const NOT_FOUND = new DropboxApiError('nf', 409, 'path/not_found/...')
 beforeEach(() => {
   vi.resetAllMocks()
 })
+
+// Dropbox's upload reply: the stored file's FileMetadata.
+function fileMetadata(): Record<string, unknown> {
+  return {
+    '.tag': 'file',
+    name: 'note.txt',
+    id: 'id:abc',
+    path_display: '/note.txt',
+    server_modified: '2026-01-01T00:00:00Z',
+    size: 5,
+    content_hash: 'h5',
+  }
+}
 
 describe('dropbox write', () => {
   it('uploads through the subfolder mount root', async () => {
@@ -226,5 +268,40 @@ describe('dropbox exists', () => {
   it('maps 409 to false', async () => {
     vi.mocked(api.getMetadata).mockRejectedValue(NOT_FOUND)
     expect(await exists(makeAccessor(), spec('/ghost'))).toBe(false)
+  })
+})
+
+describe('dropbox write records the upload reply', () => {
+  beforeEach(() => {
+    H.order = []
+  })
+
+  async function writeRecorded(reply: unknown): Promise<unknown[][]> {
+    vi.mocked(client.dropboxUpload).mockResolvedValue(reply as never)
+    const [, records] = await runWithRecording(() =>
+      write(makeAccessor(), spec('/note.txt'), new TextEncoder().encode('hello')),
+    )
+    return records.map((r) => [r.op, r.path, r.bytes, r.fingerprint, r.revision])
+  }
+
+  it.each([
+    ['agrees', fileMetadata(), 'h5'],
+    ['empty reply', null, null],
+  ])('records the reply token (%s)', async (_name, reply, token) => {
+    // 'h5' is a token no local hash produces.
+    expect(await writeRecorded(reply)).toEqual([['write', '/note.txt', 5, token, null]])
+    // Recorded before the eviction, so the record exists when the cache
+    // reacts to the write.
+    expect(H.order).toEqual(['record', 'invalidate'])
+  })
+
+  it('a write whose reply fails still evicts the path', async () => {
+    // Dropbox may have stored the bytes before the reply broke off, so the
+    // cached copy is stale either way.
+    vi.mocked(client.dropboxUpload).mockRejectedValue(new Error('reply cut off'))
+    await expect(
+      write(makeAccessor(), spec('/note.txt'), new TextEncoder().encode('hello')),
+    ).rejects.toThrow('reply cut off')
+    expect(H.order).toEqual(['invalidate'])
   })
 })

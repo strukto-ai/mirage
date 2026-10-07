@@ -73,6 +73,36 @@ describe('OpRecord', () => {
     })
     expect(r.bytes).toBe(0)
   })
+
+  it('serializes only the public observation fields', () => {
+    // The same fields as python's OpRecord.to_dict: the in-process mount
+    // identity, the claimed value and the seal are internal.
+    const r = new OpRecord({
+      op: 'write',
+      path: '/data/file',
+      source: 's3',
+      bytes: 3,
+      timestamp: 1,
+      durationMs: 2,
+      fingerprint: 'fp',
+      revision: 'v1',
+      mountId: 'internal-mount',
+      claimed: new TextEncoder().encode('claimed bytes'),
+      sealed: true,
+    })
+    expect(Object.keys(r.toJSON()).sort()).toEqual(
+      [
+        'bytes',
+        'durationMs',
+        'fingerprint',
+        'op',
+        'path',
+        'revision',
+        'source',
+        'timestamp',
+      ].sort(),
+    )
+  })
 })
 
 describe('ExecutionNode records', () => {

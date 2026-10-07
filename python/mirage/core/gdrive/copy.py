@@ -15,7 +15,11 @@
 import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.context import invalidate_after_write
+from mirage.cache.context import (
+    evict_after,
+    invalidate_after_write,
+    invalidate_subtree,
+)
 from mirage.core.gdrive.resolve import (
     DriveNode,
     drive_target_name,
@@ -60,12 +64,10 @@ async def copy_children(
             await copy_file(token_manager, child.id, child.name, dst_folder_id)
 
 
-@eacces_on_denied
-async def copy(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec) -> None:
+async def _copy_node(
+    accessor: GDriveAccessor, src_node: DriveNode, dst: PathSpec
+) -> None:
     token_manager = accessor.token_manager
-    src_node = await resolve_key(accessor, src.vfs_path)
-    if src_node is None:
-        raise enoent(src.virtual)
     dst_node = await resolve_key(accessor, dst.vfs_path)
     if src_node.is_folder:
         if dst_node is not None and not dst_node.is_folder:
@@ -91,4 +93,32 @@ async def copy(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec) -> None:
         dst_parent_id, _ = await resolve_parent(accessor, dst)
         name = drive_target_name(posixpath.basename(dst.vfs_path), src_node)
         await copy_file(token_manager, src_node.id, name, dst_parent_id)
-    await invalidate_after_write(dst)
+
+
+@eacces_on_denied
+async def copy(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec) -> None:
+    """Copy a file or folder server-side.
+
+    A folder copy evicts the whole destination subtree: Drive keeps both
+    files when a merge lands a name that already exists, so a cached
+    child key below ``dst`` can now name another file. A file copy
+    evicts just its target: a file has nothing below it, so it skips the
+    subtree walk, which asks every store (a keyspace scan on Redis). The
+    eviction runs also when the copy fails, since a merge may have landed
+    some children before one failed.
+
+    Args:
+        accessor (GDriveAccessor): Drive accessor.
+        src (PathSpec): the item to copy.
+        dst (PathSpec): where the copy lands.
+    """
+    src_node = await resolve_key(accessor, src.vfs_path)
+    if src_node is None:
+        raise enoent(src.virtual)
+    folder = src_node.is_folder
+    await evict_after(
+        _copy_node(accessor, src_node, dst),
+        lambda _: (
+            invalidate_subtree(dst) if folder else invalidate_after_write(dst)
+        ),
+    )
