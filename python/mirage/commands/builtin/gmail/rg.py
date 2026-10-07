@@ -18,10 +18,8 @@ from mirage.commands.builtin.generic.rg import (
     refuse_missing_pattern,
     rg_generic,
 )
-from mirage.commands.builtin.generic_bind.adapter import (
-    bound_op,
-    scan_io,
-)
+from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.builtin.generic_bind.factory import scan_io
 from mirage.commands.builtin.gmail.grep import (
     RG_SEARCH_HONORED,
     SEARCH_MAX_RESULTS,

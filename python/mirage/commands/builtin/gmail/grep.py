@@ -14,10 +14,8 @@
 
 from mirage.accessor.gmail import GmailAccessor
 from mirage.commands.builtin.generic.grep import grep_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    bound_op,
-    scan_io,
-)
+from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.builtin.generic_bind.factory import scan_io
 from mirage.commands.builtin.gmail.io import IO
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import (

@@ -25,10 +25,8 @@ from mirage.commands.builtin.generic.rg import (
     refuse_missing_pattern,
     rg_generic,
 )
-from mirage.commands.builtin.generic_bind.adapter import (
-    bound_op,
-    scan_io,
-)
+from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.builtin.generic_bind.factory import scan_io
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import pushdown_operand
 from mirage.commands.builtin.utils.output import format_records

@@ -42,7 +42,6 @@ import {
   dirAwareStat,
   dirAwareStream,
   resolveGlobOf,
-  scanIo,
   scopedIo,
   withDirGuard,
   type CommandIO,
@@ -473,22 +472,6 @@ describe('scopedIo', () => {
     expect(scopedIo(io, free, roots, '/data/').contentSearch).toBe(index)
     expect(scopedIo(io, undefined, roots, '/data/').contentSearch).toBe(index)
     expect(scopedIo(io, judged, roots, '/data/').contentSearch).toBeUndefined()
-  })
-})
-
-describe('scanIo', () => {
-  it('guards only a judged mount', () => {
-    // A bespoke search scans the raw adapter when nothing on its mount is
-    // hidden or refused, and the guarded one when anything is, since the
-    // service's own search can answer for more than the operand.
-    const io: CommandIO = dirOps([])
-    const free = { scoped: () => false }
-    const judged = { scoped: (virtual: string) => virtual === '/data' }
-    expect(scanIo(io, free, '/data/')).toEqual([io, false])
-    expect(scanIo(io, undefined, '/data/')).toEqual([io, false])
-    const [scan, scoped] = scanIo(io, judged, '/data/')
-    expect(scan).not.toBe(io)
-    expect(scoped).toBe(true)
   })
 })
 

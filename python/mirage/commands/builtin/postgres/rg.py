@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.postgres import PostgresAccessor
-from mirage.commands.builtin.generic_bind.adapter import scan_io
+from mirage.commands.builtin.generic_bind.factory import scan_io
 from mirage.commands.builtin.generic_bind.search import run_search
 from mirage.commands.builtin.postgres.io import IO
 from mirage.commands.config import CommandOpts, command

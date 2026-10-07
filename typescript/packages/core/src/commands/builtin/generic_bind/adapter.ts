@@ -1137,26 +1137,6 @@ function guardOperation<Args extends unknown[], R>(
 }
 
 /**
- * The adapter a bespoke search command scans through, and whether a hide,
- * a path rule or a coded preVfs policy judges anything on its mount. The
- * mount, not the operands: a service's own search answers for more than
- * the operand it is given (a whole folder for one of its days, every
- * channel under a container). A judged command must not hand the
- * service's search the answer, since the service sees every entry, and
- * its scan reads the operands through the guards the generic builders
- * bind; an unjudged one scans the raw adapter. Mirrors Python's scan_io.
- */
-export function scanIo<A extends Accessor>(
-  ops: CommandIO<A>,
-  ns: NamespaceView | undefined,
-  prefix: string | undefined,
-): [CommandIO<A>, boolean] {
-  const scoped = ns?.scoped
-  if (!scoped?.(rstripSlash(prefix ?? '') || '/')) return [ops, false]
-  return [withCommandGuards(withPolicyGuard(ops, prefix), prefix), true]
-}
-
-/**
  * Drop the native walks when a hide, a path rule or a coded preVfs
  * policy judges the command's paths, as the command's namespace view
  * (`ns`) answers.

@@ -1589,33 +1589,6 @@ def with_policy_guard(ops: CommandIO) -> CommandIO:
     return replace(ops, **changes)
 
 
-def scan_io(
-    ops: CommandIO,
-    ns: NamespaceView | None,
-    prefix: str,
-) -> tuple[CommandIO, bool]:
-    """The adapter a bespoke search command scans through, and whether a
-    hide, a path rule or a coded pre_vfs policy judges anything on its
-    mount.
-
-    The mount, not the operands: a service's own search answers for more
-    than the operand it is given (a whole folder for one of its days,
-    every channel under a container). A judged command must not hand the
-    service's search the answer, since the service sees every entry, and
-    its scan reads the operands through the guards the generic builders
-    bind; an unjudged one scans the raw adapter.
-
-    Args:
-        ops (CommandIO): the backend's raw IO adapter.
-        ns (NamespaceView | None): the command's namespace view.
-        prefix (str): the prefix of the mount running the command.
-    """
-    scoped = ns.scoped if ns is not None else None
-    if scoped is None or not scoped(prefix.rstrip("/") or "/"):
-        return ops, False
-    return with_command_guards(with_policy_guard(ops)), True
-
-
 def scoped_io(
     ops: CommandIO,
     ns: NamespaceView | None,

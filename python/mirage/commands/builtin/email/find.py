@@ -23,10 +23,8 @@ from mirage.commands.builtin.generic.find import (
     parse_find_args,
     resolve_start,
 )
-from mirage.commands.builtin.generic_bind.adapter import (
-    overlaid_stat,
-    scan_io,
-)
+from mirage.commands.builtin.generic_bind.adapter import overlaid_stat
+from mirage.commands.builtin.generic_bind.factory import scan_io
 from mirage.commands.builtin.grep_pushdown import lone_operand
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts, command
