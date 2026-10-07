@@ -31,7 +31,7 @@ import { identityFrom } from '../../../commands/builtin/utils/identity.ts'
 import type { MountEntry } from '../../mount/mount.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
-import { makeStorageKey } from '../../mount/storage.ts'
+import { makeDeleteCheck, makeStorageKey } from '../../mount/storage.ts'
 import { Consumer, JOB_BUILTINS, dereferences, lookup } from '../../lookup/index.ts'
 import { type Runtime } from '../../../runtime/base.ts'
 import type { RouteDecision } from '../../../runtime/routing/index.ts'
@@ -564,6 +564,7 @@ export async function handleCommand(
         session.cwd,
         spelledWords(parts.slice(1)),
         aggregateFor(cmdName, csScopes, registry),
+        makeDeleteCheck(registry),
       ),
     )
     const csExec = new ExecutionNode({

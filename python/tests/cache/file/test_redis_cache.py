@@ -18,9 +18,15 @@ import pathlib
 
 import pytest
 import pytest_asyncio
+from redis.asyncio.client import Pipeline
 
 from mirage.cache.file import io as cache_io
-from mirage.cache.file.redis import DEL_BATCH, RedisFileCacheStore
+from mirage.cache.file.redis import (
+    DEL_BATCH,
+    KEY_BATCH,
+    VERSION_TTL,
+    RedisFileCacheStore,
+)
 from mirage.io import CachableAsyncIterator, IOResult
 from mirage.observe.record import OpRecord
 
@@ -42,6 +48,14 @@ async def cache(redis_prefix):
     # wrote (the root directory set), and the prefix is this test's own.
     await c.accessor.store.clear()
     await c.close()
+
+
+async def _meta_ttl(cache: RedisFileCacheStore, path: str) -> int:
+    return await cache._cache_client.ttl(cache._meta_key(path))
+
+
+async def _data_ttl(cache: RedisFileCacheStore, path: str) -> int:
+    return await cache._cache_client.ttl(cache._data_key(path))
 
 
 @pytest.mark.asyncio
@@ -255,8 +269,8 @@ async def test_a_token_bearing_set_bounds_its_meta_key_too(cache):
     # false positive the tokenless delete exists to prevent, one branch
     # over.
     await cache.set("/a", b"data", fingerprint="etag-1", ttl=100)
-    assert await cache._cache_client.ttl(cache._meta_key("/a")) > 0
-    assert await cache._cache_client.ttl(cache._data_key("/a")) > 0
+    assert await _meta_ttl(cache, "/a") > 0
+    assert await _data_ttl(cache, "/a") > 0
 
 
 @pytest.mark.asyncio
@@ -268,7 +282,7 @@ async def test_a_tokenless_add_still_bounds_its_data_key(cache):
     # the mount's bound. An immortal tokenless entry is the one thing
     # `bounded` can never expire.
     assert await cache.add("/a", b"data", ttl=100)
-    assert await cache._cache_client.ttl(cache._data_key("/a")) > 0
+    assert await _data_ttl(cache, "/a") > 0
     assert not await cache._cache_client.exists(cache._meta_key("/a"))
 
 
@@ -569,3 +583,100 @@ async def test_a_prefix_drop_under_non_ascii_names(redis_prefix):
     finally:
         await accented.clear()
         await accented.close()
+
+
+@pytest.mark.asyncio
+async def test_a_version_kept_without_bytes_is_never_read(cache):
+    await cache.set_versions({"/a": "v1"})
+    assert not await cache.exists("/a")
+    assert await cache.get("/a") is None
+    assert not await cache.is_fresh("/a", "v1")
+    assert await cache.fingerprint("/a") == "v1"
+    assert await cache.add("/a", b"drained", fingerprint="v1")
+    assert await cache.get("/a") == b"drained"
+
+
+@pytest.mark.asyncio
+async def test_a_kept_version_outlives_its_bytes_bound(cache):
+    await cache.set("/a", b"x", fingerprint="v1", ttl=60)
+    await cache.set_versions({"/a": "v1"})
+    assert 60 < await _meta_ttl(cache, "/a") <= VERSION_TTL
+    assert 0 < await _data_ttl(cache, "/a") <= 60
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "ttl", [None, VERSION_TTL * 2], ids=["unbounded", "longer"]
+)
+async def test_a_version_never_shortens_its_bytes_bound(cache, ttl):
+    # Raise-only: bytes that live longer than a version, or forever, keep
+    # their meta key as long as their data key.
+    await cache.set("/a", b"x", fingerprint="v1", ttl=ttl)
+    await cache.set_versions({"/a": "v1"})
+    meta = await _meta_ttl(cache, "/a")
+    data = await _data_ttl(cache, "/a")
+    assert (meta == -1) if ttl is None else (meta > VERSION_TTL)
+    assert (meta == -1) is (data == -1)
+
+
+@pytest.mark.asyncio
+async def test_a_version_kept_alone_is_bounded(cache):
+    await cache.set_versions({"/a": "v1"})
+    assert 60 < await _meta_ttl(cache, "/a") <= VERSION_TTL
+
+
+@pytest.mark.asyncio
+async def test_a_late_drain_never_shortens_a_version(cache):
+    await cache.set_versions({"/a": "v1"})
+    assert await cache.add("/a", b"x", fingerprint="v1", ttl=60)
+    assert 60 < await _meta_ttl(cache, "/a") <= VERSION_TTL
+    assert 0 < await _data_ttl(cache, "/a") <= 60
+
+
+@pytest.mark.asyncio
+async def test_versions_go_out_in_one_round_trip(cache, monkeypatch):
+    sent = []
+    execute = Pipeline.execute
+
+    async def counted(self, *args, **kwargs):
+        sent.append(len(self.command_stack))
+        return await execute(self, *args, **kwargs)
+
+    monkeypatch.setattr(Pipeline, "execute", counted)
+    await cache.set_versions({"/a": "v1", "/b": "v2", "/c": "v3"})
+    assert sent == [3]
+    # One version goes out as one EVALSHA: a pipeline holding a script
+    # first asks SCRIPT EXISTS, a second round trip.
+    await cache.set_versions({"/d": "v4"})
+    assert sent == [3]
+    # Past KEY_BATCH keys the next batch is a pipeline of its own.
+    many = {f"/m{i}": "v" for i in range(KEY_BATCH + 2)}
+    await cache.set_versions(many)
+    assert sent == [3, KEY_BATCH, 2]
+    assert await cache.fingerprints(["/a", "/b", "/c"]) == ["v1", "v2", "v3"]
+
+
+@pytest.mark.asyncio
+async def test_a_version_never_replaces_bytes_written_since(cache):
+    await cache.set("/a", b"theirs", fingerprint="v2")
+    await cache.set_versions({"/a": "v1"})
+    assert await cache.get("/a") == b"theirs"
+    assert await cache.fingerprint("/a") == "v2"
+    await cache.remove("/a")
+    assert await cache.fingerprint("/a") is None
+
+
+def test_the_two_version_lua_copies_are_byte_identical():
+    root = pathlib.Path(__file__).resolve().parents[3].parent
+    py = (root / "python/mirage/cache/file/version.lua").read_bytes()
+    ts = (
+        root / "typescript/packages/node/src/cache/file/version.lua"
+    ).read_bytes()
+    assert py == ts
+
+
+@pytest.mark.asyncio
+async def test_fingerprints_answers_each_key_in_order(cache):
+    await cache.set("/a", b"x", fingerprint="v1")
+    await cache.set_versions({"/c": "v3"})
+    assert await cache.fingerprints(["/a", "/b", "/c"]) == ["v1", None, "v3"]

@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { captureRead } from './context.ts'
-import { activeRecords } from '../observe/context.ts'
+import { activeRecords, lostPaths } from '../observe/context.ts'
+import { newestVersion, STAMP_FINGERPRINT_OPS } from '../observe/record.ts'
 import { DEFAULT_READ_TTL, type FileStat, PathSpec } from '../types.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
@@ -435,6 +436,9 @@ export class CacheManager {
    * a fetch.
    */
   async cachedBytes(path: PathSpec): Promise<Uint8Array | null> {
+    // The key has dropped a trailing slash; only the backend read answers
+    // ENOTDIR for a plain file named as a directory.
+    if (path.dotted?.endsWith('/') === true) return null
     const key = this.cacheKey(path)
     const cache = this.readableCache(key)
     if (cache === null) return null
@@ -442,6 +446,44 @@ export class CacheManager {
     if (!(await this.mayServeCached(key))) return null
     const cached = await cache.get(key)
     return this.ownsPath(key) ? cached : null
+  }
+
+  /**
+   * The version this mount last saw for `path`, null when none. The running
+   * line's own records come first, newest first: a read or write earlier in
+   * the line names the exact bytes it saw, and a streamed read is not in the
+   * cache until the line ends. Then the cached copy's backend token. Mirrors
+   * Python's `CacheManager.read_version`.
+   */
+  async readVersion(path: PathSpec): Promise<string | null> {
+    return (await this.readVersions([path]))[0] ?? null
+  }
+
+  /** `readVersion` for many paths, asking the cache once. */
+  async readVersions(paths: readonly PathSpec[]): Promise<(string | null)[]> {
+    const out: (string | null)[] = paths.map(() => null)
+    const pending: [number, string][] = []
+    const records = activeRecords()
+    const lost = lostPaths(records)
+    paths.forEach((path, i) => {
+      const key = this.cacheKey(path)
+      if (records !== undefined) {
+        if (lost?.holds(key) === true) return
+        const rec = newestVersion(records, key)
+        if (rec !== null) {
+          out[i] = STAMP_FINGERPRINT_OPS.has(rec.op) ? (rec.fingerprint ?? null) : null
+          return
+        }
+      }
+      if (this.fileCache !== null && this.ownsPath(key)) pending.push([i, key])
+    })
+    if (pending.length > 0 && this.fileCache !== null) {
+      const tokens = await this.fileCache.fingerprints(pending.map(([, key]) => key))
+      pending.forEach(([i], j) => {
+        out[i] = tokens[j] ?? null
+      })
+    }
+    return out
   }
 
   /** Cache a complete backend read before a consumer transforms it. */
@@ -471,7 +513,7 @@ export class CacheManager {
     const [data, facts] = await captureRead(key, fetch)
     if (!(data instanceof Uint8Array)) return data
     const cache = this.readableCache(key)
-    if (cache !== null) {
+    if (cache !== null && data.byteLength <= cache.cacheLimit) {
       await withCacheMutation(cache, async () => {
         if (
           this.ownsPath(key) &&
@@ -482,7 +524,12 @@ export class CacheManager {
           if (facts.length > 0) {
             fingerprint = facts.every((fp) => fp === facts[0]) ? (facts[0] ?? null) : null
           }
-          await cache.set(key, data, { fingerprint, ttl: this.readTtl })
+          try {
+            await cache.set(key, data, { fingerprint, ttl: this.readTtl })
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            console.warn(`cache fill refused for ${key}: ${msg}`)
+          }
         }
       })
     }

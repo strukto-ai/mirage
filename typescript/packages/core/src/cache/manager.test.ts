@@ -27,7 +27,7 @@ import { RedisIndexCacheStore } from './index/redis.ts'
 import { runInCommandScope } from './index/scope.ts'
 import { IndexView } from './index/view.ts'
 import { CacheManager } from './manager.ts'
-import { shiftPerformanceNow } from './_test_util.ts'
+import { RefusingStore, shiftPerformanceNow } from './_test_util.ts'
 import { enoent } from '../errors/fs.ts'
 
 async function seeded(): Promise<[RAMFileCacheStore, RAMIndexCacheStore]> {
@@ -337,6 +337,25 @@ describe('CacheManager read gate', () => {
   }
 
   const ownsAll = () => true
+
+  it.each([
+    [null, 'cached'],
+    ['/data/x.txt', 'cached'],
+    ['/data/x.txt/', null],
+  ] as const)('serves the spelling %s as %s', async (dotted, served) => {
+    // GNU reads `f/` as ENOTDIR for a plain file, which only the backend
+    // read answers; the cache key has already dropped the slash.
+    const [cache, index] = await withEntry()
+    const manager = new CacheManager(cache, index, '/data/', true)
+    const path = new PathSpec({
+      vfsPath: mountKey('/data/x.txt', '/data/'),
+      virtual: '/data/x.txt',
+      directory: '/data/',
+      dotted,
+    })
+    const got = await manager.cachedBytes(path)
+    expect(got === null ? null : new TextDecoder().decode(got)).toBe(served)
+  })
 
   it('a refusal withholds the cached bytes', async () => {
     const [cache, index] = await withEntry()
@@ -881,4 +900,40 @@ it('failed fact capture does not leak into the next fill', async () => {
   expect(await cache.exists('/s3/a.txt')).toBe(false)
   await manager.fill(PathSpec.fromStrPath('/s3/a.txt', 'a.txt'), () => Promise.resolve(data))
   expect(await cache.isFresh('/s3/a.txt', 'orphan')).toBe(false)
+})
+
+describe('a cold read bigger than the cache', () => {
+  it('is not kept', async () => {
+    const cache = new RAMFileCacheStore({ limit: 10 })
+    const index = new RAMIndexCacheStore({ ttl: 600 })
+    await cache.set('/data/warm', new TextEncoder().encode('abc'))
+    const manager = new CacheManager(cache, index, '/data/', true)
+    const big = new TextEncoder().encode('x'.repeat(11))
+    const spec = new PathSpec({
+      vfsPath: mountKey('/data/big', '/data/'),
+      virtual: '/data/big',
+      directory: '/data/',
+    })
+    expect(await manager.fill(spec, () => Promise.resolve(big))).toEqual(big)
+    expect(await cache.exists('/data/big')).toBe(false)
+    expect(new TextDecoder().decode((await cache.get('/data/warm')) ?? new Uint8Array())).toBe(
+      'abc',
+    )
+  })
+
+  it('still returns its bytes when the store refuses the fill', async () => {
+    const manager = new CacheManager(
+      new RefusingStore(),
+      new RAMIndexCacheStore({ ttl: 600 }),
+      '/data/',
+      true,
+    )
+    const hello = new TextEncoder().encode('hello')
+    const spec = new PathSpec({
+      vfsPath: mountKey('/data/a', '/data/'),
+      virtual: '/data/a',
+      directory: '/data/',
+    })
+    expect(await manager.fill(spec, () => Promise.resolve(hello))).toEqual(hello)
+  })
 })

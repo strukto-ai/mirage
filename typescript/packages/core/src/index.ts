@@ -102,6 +102,7 @@ export {
   PathSpec,
   ReadPolicy,
   VFSName,
+  WritePolicy,
 } from './types.ts'
 export type { ReadSpec, WalkEntry } from './types.ts'
 export { eisdir, enoent, enotdir } from './errors/fs.ts'

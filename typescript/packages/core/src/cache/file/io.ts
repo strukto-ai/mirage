@@ -14,9 +14,17 @@
 
 import { CachableAsyncIterator, concat } from '../../io/cachable_iterator.ts'
 import { materialize, type ByteSource, type IOResult } from '../../io/types.ts'
-import { type OpRecord, READ_FINGERPRINT_OPS, WRITE_FINGERPRINT_OPS } from '../../observe/record.ts'
+import type { LostPaths } from '../../observe/context.ts'
+import {
+  newestVersion,
+  type OpRecord,
+  READ_FINGERPRINT_OPS,
+  STAMP_FINGERPRINT_OPS,
+  WRITE_FINGERPRINT_OPS,
+} from '../../observe/record.ts'
 import type { CacheFacts } from '../../types.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 import { drainBudget, type FileCache } from './mixin.ts'
 import { KeyLock } from '../lock.ts'
 
@@ -145,12 +153,18 @@ async function setCachedLocked(
   records: readonly OpRecord[] | undefined,
   ttl: number | null,
 ): Promise<void> {
+  if (data.byteLength > cache.cacheLimit) {
+    // Bytes bigger than the whole cache would flush every warm entry and
+    // then themselves; the version is kept apart.
+    await cache.remove(path)
+    return
+  }
   if (written !== null) {
     const [keep, token] = writtenVerdict(records, path, written, data.byteLength)
     // The claimed path is skipped by applyIo's eviction loop, so the
     // pre-write entry has to go here.
     if (!keep) await cache.remove(path)
-    else await cache.set(path, data, { fingerprint: token, ttl })
+    else await store(cache, path, data, token, ttl)
     return
   }
   const fingerprint = latestFingerprint(records, path)
@@ -164,23 +178,137 @@ async function setCachedLocked(
     // `bounded`, which already calls that entry trusted.
     return
   }
-  await cache.set(path, data, { fingerprint, ttl })
+  await store(cache, path, data, fingerprint, ttl)
+}
+
+/**
+ * Store bytes the line settled on, never failing the line for it: the read
+ * or write behind them already happened, and a store that refuses the fill
+ * (out of memory, a value over its size limit) costs the next read a fetch,
+ * so it is logged and the stale entry dropped. Mirrors python's `_store`.
+ */
+async function store(
+  cache: FileCache,
+  path: string,
+  data: Uint8Array,
+  fingerprint: string | null,
+  ttl: number | null,
+): Promise<void> {
+  try {
+    await cache.set(path, data, { fingerprint, ttl })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.warn(`cache fill refused for ${path}: ${msg}`)
+    try {
+      await cache.remove(path)
+    } catch (dropErr) {
+      const why = dropErr instanceof Error ? dropErr.message : String(dropErr)
+      console.warn(`stale copy not dropped for ${path}: ${why}`)
+    }
+  }
 }
 
 // The drain each read went to; a nested line hands its outer line them too.
 const draining = new WeakMap<CachableAsyncIterator, Promise<void>>()
+
+/**
+ * Whether the line no longer knows the bytes it holds for `path`: its
+ * conditional write lost, or its newest version record removed or moved it
+ * (its own or an ancestor's). Mirrors python's `_gone`.
+ */
+function gone(
+  records: readonly OpRecord[] | undefined,
+  lost: LostPaths | null,
+  path: string,
+): boolean {
+  if (lost?.holds(path) === true) return true
+  if (records === undefined) return false
+  return retracted(newestVersion(records, path))
+}
+
+/** Whether a path's newest version record removed or moved it. */
+function retracted(rec: OpRecord | null): boolean {
+  return rec !== null && !STAMP_FINGERPRINT_OPS.has(rec.op)
+}
+
+/**
+ * Keep the version each path last had on the line, on conditional mounts. A
+ * read that fills no cache (`grep`, `head`) or a write that claims no bytes
+ * (`>>`, a resize, a cross-mount `cp`) still names the version it saw, and
+ * the next line's write on a conditional mount needs it. Runs after the
+ * bytes are settled, so it never undoes a removal. Mirrors python's
+ * `_keep_versions`.
+ */
+async function keepVersions(
+  cache: FileCache,
+  records: readonly OpRecord[],
+  cacheFacts: (path: string) => CacheFacts,
+  lost: LostPaths | null,
+): Promise<void> {
+  const paths = new Set(
+    records
+      .filter((rec) => STAMP_FINGERPRINT_OPS.has(rec.op) && (rec.fingerprint ?? '') !== '')
+      .map((rec) => rec.path),
+  )
+  const versions: Record<string, string> = {}
+  for (const path of paths) {
+    const facts = cacheFacts(path)
+    if (!facts.cacheable || facts.versions !== true) continue
+    if (lost?.holds(path) === true) continue
+    const rec = newestVersion(records, path)
+    if (rec === null || retracted(rec)) continue
+    const fingerprint = rec.fingerprint ?? ''
+    if (fingerprint === '') continue
+    versions[path] = fingerprint
+  }
+  if (Object.keys(versions).length === 0) return
+  try {
+    await withCacheMutation(cache, () => cache.setVersions(versions))
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    const paths = Object.keys(versions).sort(compareCodePoints)
+    console.warn(
+      `versions not kept for ${String(paths.length)} paths, first ${paths[0] ?? ''}: ${msg}`,
+    )
+  }
+}
+
+/**
+ * Mark a command's write records with the value it claims for them.
+ *
+ * A `write` record of a path the command both wrote and listed in
+ * `IOResult.cache` gets that exact `IOResult.writes` value as `claimed`,
+ * which `writtenVerdict` compares with the value the line caches. A record
+ * the line already sealed is left alone: a background command returning
+ * after its line ended must not mark a record that line persisted. `io`
+ * has virtual keys and its streams already wrapped. Mirrors python's
+ * `mark_claimed_writes`.
+ */
+export function markClaimedWrites(records: readonly OpRecord[], io: IOResult): void {
+  const cached = new Set(io.cache)
+  for (const rec of records) {
+    if (rec.sealed || !WRITE_FINGERPRINT_OPS.has(rec.op) || !cached.has(rec.path)) continue
+    const value = io.writes[rec.path]
+    if (value !== undefined) rec.claimed = value
+  }
+}
 
 export async function applyIo(
   cache: FileCache,
   io: IOResult,
   cacheFacts?: (path: string) => CacheFacts,
   records?: readonly OpRecord[],
+  lost: LostPaths | null = null,
 ): Promise<void> {
   // A path both read and written is dropped: neither side is the file.
   const kept = io.cache.filter((p) => !(p in io.reads) || !(p in io.writes))
   const cacheSet = new Set(kept)
   for (const path of kept) {
     if (cacheFacts !== undefined && !cacheFacts(path).cacheable) continue
+    if (gone(records, lost, path)) {
+      await cache.remove(path)
+      continue
+    }
     // The token has to describe the bytes actually stored, so the side this
     // branch took decides which records label them. Set in the branch rather
     // than recovered from the result, so the two cannot disagree.
@@ -233,6 +361,9 @@ export async function applyIo(
     if (cacheSet.has(path)) continue
     if (cacheFacts !== undefined && !cacheFacts(path).cacheable) continue
     await cache.remove(path)
+  }
+  if (records !== undefined && cacheFacts !== undefined) {
+    await keepVersions(cache, records, cacheFacts, lost)
   }
   // An unfinished read no drain owns is closed; unmount waits on it.
   for (const [path, source] of Object.entries(io.reads)) {

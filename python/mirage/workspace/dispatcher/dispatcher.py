@@ -49,7 +49,7 @@ from mirage.errors.fs import (
     walk_refusal,
 )
 from mirage.io import IOResult, OpReport
-from mirage.observe.context import record, start_op
+from mirage.observe.context import active_lost, record, start_op
 from mirage.observe.record import OpRecord
 from mirage.ops.boundary import OpBoundary
 from mirage.ops.config import NO_FOLLOW_OPS, STAMP_WRITE_OPS
@@ -72,6 +72,7 @@ from mirage.types import (
     PathSpec,
     VFSName,
     Visibility,
+    WritePolicy,
 )
 from mirage.utils.hidden import hidden_under, move_reveals, path_visible
 from mirage.utils.key_prefix import mount_key
@@ -273,6 +274,22 @@ class _MountChannel:
             await self.mount.call("rmdir", spec.virtual)
         finally:
             await self.invalidate(spec)
+
+
+def _facts_of(mount: MountEntry | None) -> CacheFacts:
+    """The cache facts of the mount that owns a path.
+
+    Args:
+        mount (MountEntry | None): the owning mount, None when there is
+            none (or it is no longer the one the command started with).
+    """
+    if mount is None or mount.retiring or not mount.vfs.caches_reads:
+        return CacheFacts(cacheable=False, ttl=DEFAULT_READ_TTL)
+    return CacheFacts(
+        cacheable=True,
+        ttl=mount.read.ttl,
+        versions=mount.write is WritePolicy.CONDITIONAL,
+    )
 
 
 def _judge(gate: EntryGate, *paths: PathSpec | None) -> None:
@@ -1792,6 +1809,7 @@ class Dispatcher:
             io,
             cache_facts or self.cache_facts_for,
             records=records,
+            lost=active_lost(),
         )
 
     def capture_cache_facts(self) -> Callable[[str], CacheFacts]:
@@ -1809,14 +1827,7 @@ class Dispatcher:
             prefix = owner_prefix(mounts, path)
             original = mounts.get(prefix) if prefix is not None else None
             mount = self._namespace.try_mount_for(path)
-            if (
-                mount is None
-                or original is not mount
-                or mount.retiring
-                or not mount.vfs.caches_reads
-            ):
-                return CacheFacts(cacheable=False, ttl=DEFAULT_READ_TTL)
-            return CacheFacts(cacheable=True, ttl=mount.read.ttl)
+            return _facts_of(mount if original is mount else None)
 
         return facts
 
@@ -1826,10 +1837,7 @@ class Dispatcher:
         Args:
             path (str): absolute virtual path.
         """
-        mount = self._namespace.try_mount_for(path)
-        if mount is None or mount.retiring or not mount.vfs.caches_reads:
-            return CacheFacts(cacheable=False, ttl=DEFAULT_READ_TTL)
-        return CacheFacts(cacheable=True, ttl=mount.read.ttl)
+        return _facts_of(self._namespace.try_mount_for(path))
 
     async def invalidate_all_after_remote(self) -> None:
         """Drop the file cache and every mount index wholesale.

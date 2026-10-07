@@ -230,6 +230,7 @@ PolymorphicReadResult: TypeAlias = (
 PolymorphicReadFn: TypeAlias = Callable[..., PolymorphicReadResult]
 CopyFn: TypeAlias = Callable[..., Awaitable[None]]
 MoveFn: TypeAlias = Callable[..., Awaitable[None]]
+CheckFn: TypeAlias = Callable[..., None]
 FindFn: TypeAlias = Callable[..., Awaitable[list[str]]]
 ReaddirFn: TypeAlias = Callable[..., Awaitable[list[str]]]
 StatFn: TypeAlias = Callable[..., Awaitable["FileStat"]]
@@ -332,6 +333,7 @@ class PrimitiveMove:
     readdir: ReaddirFn
     unlink: MoveFn
     rmdir: MoveFn
+    check_unlink: CheckFn | None = None
 
 
 MoveStrategy: TypeAlias = NativeMove | PrimitiveMove
@@ -383,6 +385,22 @@ class MountBackend(StrEnum):
 KERNEL_BACKENDS: frozenset[MountBackend] = frozenset(
     {MountBackend.FUSE, MountBackend.FSKIT}
 )
+
+
+class WritePolicy(str, Enum):
+    """Whether a mount's writes carry the version they were based on.
+
+    UNCONDITIONAL writes always land and the last write wins. CONDITIONAL
+    writes send the version the mount last saw for the path (the backend's
+    native precondition, If-Match on the S3 family), so a write based on a
+    stale read is refused instead of overwriting the newer bytes. STAGED
+    names a staging layer mirage does not have; a mount declaring it is
+    refused at mount time, as ``read: pinned`` is.
+    """
+
+    UNCONDITIONAL = "unconditional"
+    CONDITIONAL = "conditional"
+    STAGED = "staged"
 
 
 class ReadPolicy(str, Enum):
@@ -455,10 +473,13 @@ class CacheFacts:
     the mount that produced the bytes rather than whatever holds the
     prefix by then. ``cacheable`` is read first and short-circuits, so
     ``ttl`` is never consulted for a path that is not being cached.
+    ``versions`` is whether the mount's writes are conditional, so a line
+    keeps a path's version even where it keeps no bytes.
     """
 
     cacheable: bool
     ttl: int
+    versions: bool = False
 
 
 MOUNT_MODE_RANK: dict[MountMode, int] = {

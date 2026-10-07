@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
+import type { KnownVersions, WriteCondition } from '../../cache/context.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 
@@ -247,4 +248,63 @@ export interface ObjectStoreDriver<A extends Accessor, C> {
    * absent means find walks `listTree` unnarrowed.
    */
   findTree?: (conn: C, pfx: string, hints: FindHints) => [AsyncIterable<TreeEntry>, boolean]
+  /**
+   * `put` carrying a write condition; a lost one throws `ConditionLost`.
+   * Absent when the store cannot condition a write, which is what keeps
+   * such a store from mounting `write: conditional` at all.
+   */
+  putIf?: (
+    conn: C,
+    key: string,
+    data: Uint8Array,
+    cond: WriteCondition,
+  ) => Promise<ObjectMeta | null>
+  /** `get` plus the token of the bytes returned, for an op that writes back what it read. */
+  getVersioned?: (conn: C, key: string) => Promise<[Uint8Array, string | null] | null>
+  /** `copyFile` with the destination's condition. */
+  copyIf?: (conn: C, srcKey: string, dstKey: string, cond: WriteCondition) => Promise<boolean>
+  /** `deleteFile` with a condition. */
+  deleteIf?: (conn: C, key: string, cond: WriteCondition) => Promise<void>
+  /**
+   * `moveFile` whose copy and delete are both conditioned on the source's
+   * version (the one given, else the one its own lookup sees), and whose
+   * copy carries the destination's.
+   */
+  moveFileIf?: (
+    conn: C,
+    srcKey: string,
+    dstKey: string,
+    cond: WriteCondition,
+    source: string | null,
+  ) => Promise<boolean>
+  /**
+   * `movePrefix` moving each key only if it is still the version the mount
+   * saw (`known`), else the one listed; the keys that changed stay where they
+   * were and are thrown in a ConditionLost.
+   */
+  movePrefixIf?: (conn: C, srcPfx: string, dstPfx: string, known: KnownVersions) => Promise<boolean>
+  /**
+   * `deletePrefix` deleting each key only if it is still the version the
+   * mount saw, else the one listed.
+   */
+  deletePrefixIf?: (conn: C, pfx: string, known: KnownVersions) => Promise<void>
+}
+
+/**
+ * A conditional request the store refused: the object changed since the
+ * version sent, so the write did not land. Mirrors Python's ConditionLost.
+ */
+export class ConditionLost extends Error {
+  /**
+   * @param keys the raw keys whose condition did not hold, in order met
+   * @param landed a move's copy landed and only its source's delete lost,
+   *   so the destination holds the copy
+   */
+  constructor(
+    readonly keys: readonly string[],
+    readonly landed = false,
+  ) {
+    super(`condition lost on '${keys[0] ?? ''}'`)
+    this.name = 'ConditionLost'
+  }
 }

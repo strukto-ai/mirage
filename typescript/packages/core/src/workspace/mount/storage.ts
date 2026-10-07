@@ -13,10 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BaseVFS } from '../../vfs/base.ts'
-import type { PathSpec } from '../../types.ts'
+import { enotsup } from '../../errors/fs.ts'
+import { type PathSpec, WritePolicy } from '../../types.ts'
 import { stripMount } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { MountRegistry } from './registry.ts'
+import { writeConditions } from './write_policy.ts'
 
 // A driver that knows where its bytes live (a disk root, a bucket and key
 // prefix) says so through `storageLocation`; one that does not is its own
@@ -67,5 +69,21 @@ export function makeStorageKey(registry: MountRegistry): (path: PathSpec) => str
     }
     const rel = rstripSlash(stripMount(path.virtual, rstripSlash(entry.prefix)))
     return vfsStorageLocation(entry.vfs) + rel
+  }
+}
+
+/**
+ * Refuse up front a delete the path's mount could not condition: a move
+ * across mounts copies before it deletes, and on a conditional mount whose
+ * backend ignores delete conditions the delete would be refused after the
+ * copy landed. Mirrors Python's `make_delete_check`.
+ */
+export function makeDeleteCheck(registry: MountRegistry): (path: PathSpec) => void {
+  return (path: PathSpec): void => {
+    const entry = registry.tryMountFor(path.virtual)
+    if (entry?.write !== WritePolicy.CONDITIONAL) return
+    if (!writeConditions(entry.vfs).includes('delete')) {
+      throw enotsup(entry.vfs.name, 'conditional delete', path)
+    }
   }
 }

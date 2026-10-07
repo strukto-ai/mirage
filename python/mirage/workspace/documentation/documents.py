@@ -24,7 +24,7 @@ from mirage.context import (
 from mirage.errors.fs import eexist, enoent, enotdir
 from mirage.ops.ops import Ops
 from mirage.policy.profile import CompiledProfile
-from mirage.types import FileType, MountMode, PathSpec, ReadSpec
+from mirage.types import FileType, MountMode, PathSpec, ReadSpec, WritePolicy
 from mirage.utils.hidden import path_visible
 from mirage.utils.path import norm, parent
 from mirage.vfs.document.document import DocumentVFS
@@ -178,7 +178,12 @@ class Documents:
                 path.rsplit("/", 1)[-1], lambda: self.render(kind), kind
             )
             mount = self._registry.mount(
-                path, view, MountMode.READ, ReadSpec(), store=NULL_INDEX
+                path,
+                view,
+                MountMode.READ,
+                ReadSpec(),
+                write=WritePolicy.UNCONDITIONAL,
+                store=NULL_INDEX,
             )
             mount.visible = lambda: (
                 view.global_view

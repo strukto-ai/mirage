@@ -17,6 +17,10 @@ import { createRequire } from 'node:module'
 import { createShellParser } from '@struktoai/mirage-core/shell/parse'
 import type { ShellParser } from '@struktoai/mirage-core/shell/parse'
 import { KERNEL_BACKENDS, MountBackend } from '@struktoai/mirage-core/types'
+import {
+  conditionalOverlap,
+  kernelRefusal,
+} from '@struktoai/mirage-core/workspace/mount/write_policy'
 import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type {
   ExecuteOptions,
@@ -123,7 +127,16 @@ export class Workspace extends CoreWorkspace {
     sessionId?: string,
     backend?: MountBackend,
   ): Promise<string> {
+    // A kernel mount added here skips the constructor's backend check.
+    const conditional = conditionalOverlap(this.mounts(), prefix)
+    if (conditional !== null) {
+      return Promise.reject(new Error(kernelRefusal(conditional, backend ?? MountBackend.FUSE)))
+    }
     return this.kernelMounts.add(prefix, mountpoint, sessionId, backend)
+  }
+
+  protected override kernelExposures(): readonly [string, MountBackend][] {
+    return this.kernelMounts.exposed()
   }
 
   removeFuseMount(prefix: string, sessionId?: string): Promise<void> {

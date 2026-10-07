@@ -104,6 +104,10 @@ function openFailure(name: string, err: unknown): string {
   return `sed: couldn't open file ${name}: ${fsStrerror(err) ?? posixPhrase('EACCES')}\n`
 }
 
+function editFailure(name: string, err: unknown): string {
+  return `sed: couldn't edit ${name}: ${fsStrerror(err) ?? String(err)}\n`
+}
+
 // Truncate the `w` files as GNU opens them when it compiles the script,
 // in order; the first that cannot be opened is GNU's panic.
 async function openWriteFiles(names: readonly string[], doors: SedDoors): Promise<string | null> {
@@ -373,7 +377,14 @@ async function runInPlace(
     const out = machine.process([{ name: p.rawPath, text: byteView(data, utf8) }], false)
     if (machine.panicCode !== null) break
     const newData = fromByteView(out, utf8)
-    await write(p, newData)
+    try {
+      await write(p, newData)
+    } catch (e) {
+      if (!isFsError(e)) throw e
+      err += editFailure(p.rawPath, e)
+      code = 4
+      break
+    }
     writes[p.mountPath] = newData
     edited.push(p.mountPath)
     editedVirtual.add(p.virtual)

@@ -131,6 +131,32 @@ export function isNotFoundError(err: unknown): boolean {
   return e.$metadata?.httpStatusCode === 404
 }
 
+/**
+ * The codes a lost condition comes back as: 412 when the object changed
+ * since the version sent, 409 when another conditional write is in flight.
+ */
+export const CONDITION_LOST_CODES: ReadonlySet<string> = new Set([
+  '412',
+  'PreconditionFailed',
+  '409',
+  'ConditionalRequestConflict',
+])
+
+/**
+ * Whether a conditional request lost: the object changed since the version
+ * sent (412), or another conditional write is in flight (409). Keyed on the
+ * error's code, so any other 409 or 412, and auth, missing-key and transport
+ * failures, keep their own meaning; a bodiless reply (named Unknown) is
+ * judged on its status. Mirrors Python's `is_condition_lost`.
+ */
+export function isConditionLost(err: unknown): boolean {
+  if (err === null || typeof err !== 'object') return false
+  const e = err as { name?: string; $metadata?: { httpStatusCode?: number } }
+  if (e.name !== undefined && CONDITION_LOST_CODES.has(e.name)) return true
+  const status = e.$metadata?.httpStatusCode
+  return e.name === 'Unknown' && status !== undefined && CONDITION_LOST_CODES.has(String(status))
+}
+
 export async function streamToBuffer(stream: unknown): Promise<Uint8Array> {
   if (stream === null || stream === undefined) return new Uint8Array()
   const s = stream as {

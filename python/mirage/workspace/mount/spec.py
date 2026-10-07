@@ -15,7 +15,7 @@
 from dataclasses import dataclass, field
 
 from mirage.cache.index import IndexConfig
-from mirage.types import Limit, MountBackend, MountMode, ReadSpec
+from mirage.types import Limit, MountBackend, MountMode, ReadSpec, WritePolicy
 from mirage.vfs.base import BaseVFS
 
 
@@ -25,7 +25,8 @@ class Mount:
 
     ``backend`` exposes the mount inside the workspace or at a kernel
     ``mountpoint``. ``vfs_ref`` names its registry or code loader for
-    snapshots. ``index`` and ``read`` override the workspace defaults;
+    snapshots. ``index``, ``read`` and ``write`` override the workspace
+    defaults;
     without an index default, RAM uses the driver's ``index_ttl``.
     """
 
@@ -37,3 +38,4 @@ class Mount:
     vfs_ref: str | None = None
     index: IndexConfig | None = None
     read: ReadSpec | None = None
+    write: WritePolicy | str | None = None

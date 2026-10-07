@@ -12,27 +12,34 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+import logging
+from collections.abc import AsyncIterator, Awaitable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 from mirage.accessor.s3 import S3Accessor
+from mirage.cache.context import KnownVersions, WriteCondition
 from mirage.core.object_store.driver import (
     ChildEntry,
+    ConditionLost,
     ObjectMeta,
     ObjectStoreDriver,
     TreeEntry,
 )
 from mirage.core.s3.client import (
+    CONDITION_LOST_CODES,
     _client_kwargs,
     async_session,
     closing_body,
+    is_condition_lost,
     is_not_found,
 )
 from mirage.core.s3.constants import SCOPE_ERROR
 from mirage.utils.dates import to_iso_z
 from mirage.vfs.s3.config import S3Config
+
+logger = logging.getLogger(__name__)
 
 DELETE_BATCH = 1000
 
@@ -174,6 +181,89 @@ async def _head(conn: S3Conn, key: str) -> ObjectMeta | None:
 
 
 async def _get(conn: S3Conn, key: str) -> bytes | None:
+    got = await _get_versioned(conn, key)
+    return got[0] if got is not None else None
+
+
+async def _put(conn: S3Conn, key: str, data: bytes) -> ObjectMeta | None:
+    return await _put_if(conn, key, data, WriteCondition())
+
+
+def _quoted(token: str) -> str:
+    """An ETag as the wire spells it.
+
+    The token is kept unquoted (``_etag_of``), and the probes that
+    measured each store's conditions sent the quoted form a response
+    carries, so that is the form sent back.
+
+    Args:
+        token (str): the ETag, quoted or not.
+    """
+    return token if token.startswith('"') else f'"{token}"'
+
+
+def _condition(cond: WriteCondition) -> dict[str, str]:
+    if cond.if_match is not None:
+        return {"IfMatch": _quoted(cond.if_match)}
+    if cond.if_none_match:
+        return {"IfNoneMatch": "*"}
+    return {}
+
+
+T = TypeVar("T")
+
+
+def _lost_condition(exc: Exception, matched: bool) -> bool:
+    """Whether a conditioned request lost its condition.
+
+    A version sent with ``If-Match`` loses on a 412, and on a 404 too: AWS
+    answers that way for a key deleted since it was read.
+
+    Args:
+        exc (Exception): the error the request raised.
+        matched (bool): whether the request carried an ``If-Match``.
+    """
+    return is_condition_lost(exc) or (matched and is_not_found(exc))
+
+
+async def _guarded(key: str, call: Awaitable[T], matched: bool = False) -> T:
+    try:
+        return await call
+    except Exception as exc:
+        if _lost_condition(exc, matched):
+            raise ConditionLost([key]) from exc
+        raise
+
+
+async def _put_if(
+    conn: S3Conn, key: str, data: bytes, cond: WriteCondition
+) -> ObjectMeta | None:
+    # The ETag is read through the same helper _head uses, so the token a
+    # write stamps and the token a later stat reports are one spelling.
+    # A write carries no type of its own, so the mount's default is the
+    # one the store keeps and serves back.
+    content_type = conn.config.default_content_type
+    resp = await _guarded(
+        key,
+        conn.client.put_object(
+            Bucket=conn.config.bucket,
+            Key=key,
+            Body=data,
+            **({"ContentType": content_type} if content_type else {}),
+            **_condition(cond),
+        ),
+        matched=cond.if_match is not None,
+    )
+    return ObjectMeta(
+        size=len(data),
+        fingerprint=_etag_of(resp) or None,
+        revision=_version_of(resp),
+    )
+
+
+async def _get_versioned(
+    conn: S3Conn, key: str
+) -> tuple[bytes, str | None] | None:
     try:
         resp = await conn.client.get_object(Bucket=conn.config.bucket, Key=key)
     except Exception as exc:
@@ -182,26 +272,196 @@ async def _get(conn: S3Conn, key: str) -> bytes | None:
         raise
     async with closing_body(resp["Body"]) as body:
         data: bytes = await body.read()
-    return data
+    return data, _etag_of(resp) or None
 
 
-async def _put(conn: S3Conn, key: str, data: bytes) -> ObjectMeta | None:
-    # The ETag is read through the same helper _head uses, so the token a
-    # write stamps and the token a later stat reports are one spelling.
-    # A write carries no type of its own, so the mount's default is the
-    # one the store keeps and serves back.
-    content_type = conn.config.default_content_type
-    resp = await conn.client.put_object(
-        Bucket=conn.config.bucket,
-        Key=key,
-        Body=data,
-        **({"ContentType": content_type} if content_type else {}),
+async def _copy_if(
+    conn: S3Conn, src_key: str, dst_key: str, cond: WriteCondition
+) -> bool:
+    try:
+        await conn.client.copy_object(
+            Bucket=conn.config.bucket,
+            CopySource={"Bucket": conn.config.bucket, "Key": src_key},
+            Key=dst_key,
+            **_condition(cond),
+        )
+    except Exception as exc:
+        # A 404 is lost only while the source is still there.
+        lost = is_condition_lost(exc)
+        if not lost and cond.if_match is not None and is_not_found(exc):
+            try:
+                lost = await _head(conn, src_key) is not None
+            except Exception:
+                logger.debug(
+                    "source probe failed for %s", src_key, exc_info=True
+                )
+        if lost:
+            raise ConditionLost([dst_key]) from exc
+        raise
+    return True
+
+
+async def _delete_if(conn: S3Conn, key: str, cond: WriteCondition) -> None:
+    await _guarded(
+        key,
+        conn.client.delete_object(
+            Bucket=conn.config.bucket, Key=key, **_condition(cond)
+        ),
     )
-    return ObjectMeta(
-        size=len(data),
-        fingerprint=_etag_of(resp) or None,
-        revision=_version_of(resp),
+
+
+async def _move_file_if(
+    conn: S3Conn,
+    src_key: str,
+    dst_key: str,
+    cond: WriteCondition,
+    source: str | None,
+) -> bool:
+    # Pin the source to the agent's version, else to this lookup's.
+    if source is None:
+        meta = await _head(conn, src_key)
+        if meta is None:
+            return False
+        source = meta.fingerprint or ""
+    source = _quoted(source)
+    await _guarded(
+        src_key,
+        conn.client.copy_object(
+            Bucket=conn.config.bucket,
+            CopySource={"Bucket": conn.config.bucket, "Key": src_key},
+            Key=dst_key,
+            CopySourceIfMatch=source,
+            **_condition(cond),
+        ),
+        matched=True,
     )
+    try:
+        await _guarded(
+            src_key,
+            conn.client.delete_object(
+                Bucket=conn.config.bucket, Key=src_key, IfMatch=source
+            ),
+            matched=True,
+        )
+    except ConditionLost as exc:
+        raise ConditionLost(exc.keys, landed=True) from exc
+    return True
+
+
+async def _listed(conn: S3Conn, pfx: str) -> list[tuple[str, str]]:
+    paginator = conn.client.get_paginator("list_objects_v2")
+    found: list[tuple[str, str]] = []
+    async for page in paginator.paginate(
+        Bucket=conn.config.bucket, Prefix=pfx
+    ):
+        for obj in page.get("Contents") or []:
+            found.append((obj["Key"], _quoted(str(obj.get("ETag") or ""))))
+    return found
+
+
+def _refused(failed: list[str]) -> PermissionError:
+    """The error for keys a DeleteObjects refused in the body of its 200.
+
+    Args:
+        failed (list[str]): the refused keys, in the order reported.
+    """
+    return PermissionError(
+        f"S3 refused to delete {len(failed)} object(s), "
+        f"starting at {failed[0]!r}"
+    )
+
+
+async def _delete_listed(conn: S3Conn, listed: list[tuple[str, str]]) -> None:
+    """Delete each listed key only while it is the version listed.
+
+    Args:
+        conn (S3Conn): the open connection.
+        listed (list[tuple[str, str]]): each key with the ETag it must
+            still carry.
+
+    Raises:
+        ConditionLost: keys a newer write changed, which were kept.
+        PermissionError: keys the store refused for another reason.
+    """
+    lost: list[str] = []
+    failed: list[str] = []
+    for start in range(0, len(listed), DELETE_BATCH):
+        batch = listed[start : start + DELETE_BATCH]
+        resp = await conn.client.delete_objects(
+            Bucket=conn.config.bucket,
+            Delete={"Objects": [{"Key": k, "ETag": e} for k, e in batch]},
+        )
+        # A refusal comes back per key in the body of a 200.
+        for err in (resp or {}).get("Errors") or []:
+            target = (
+                lost if err.get("Code") in CONDITION_LOST_CODES else failed
+            )
+            target.append(str(err.get("Key", "")))
+    if lost:
+        raise ConditionLost(lost)
+    if failed:
+        raise _refused(failed)
+
+
+async def _known_listing(
+    conn: S3Conn, pfx: str, known: KnownVersions
+) -> list[tuple[str, str]]:
+    """Each key under ``pfx`` with the version it is measured against.
+
+    The version the agent read where there is one, else the listing's.
+
+    Args:
+        conn (S3Conn): the open connection.
+        pfx (str): the key prefix walked.
+        known (KnownVersions): the mount's versions for the listed keys.
+    """
+    listed = await _listed(conn, pfx)
+    versions = await known([key for key, _ in listed])
+    return [
+        (key, _quoted(versions[key]) if key in versions else token)
+        for key, token in listed
+    ]
+
+
+async def _delete_prefix_if(
+    conn: S3Conn, pfx: str, known: KnownVersions
+) -> None:
+    listed = await _known_listing(conn, pfx, known)
+    if listed:
+        await _delete_listed(conn, listed)
+
+
+async def _move_prefix_if(
+    conn: S3Conn, src_pfx: str, dst_pfx: str, known: KnownVersions
+) -> bool:
+    listed = await _known_listing(conn, src_pfx, known)
+    if not listed:
+        return False
+    moved: list[tuple[str, str]] = []
+    lost: list[str] = []
+    for key, token in listed:
+        try:
+            await conn.client.copy_object(
+                Bucket=conn.config.bucket,
+                CopySource={"Bucket": conn.config.bucket, "Key": key},
+                Key=f"{dst_pfx}{key[len(src_pfx) :]}",
+                CopySourceIfMatch=token,
+                IfNoneMatch="*",
+            )
+        except Exception as exc:
+            if not _lost_condition(exc, matched=True):
+                raise
+            lost.append(key)
+            continue
+        moved.append((key, token))
+    try:
+        if moved:
+            await _delete_listed(conn, moved)
+    except ConditionLost as more:
+        lost.extend(more.keys)
+    if lost:
+        raise ConditionLost(lost)
+    return True
 
 
 async def _delete_file(conn: S3Conn, key: str) -> None:
@@ -215,9 +475,16 @@ async def _delete_prefix(conn: S3Conn, pfx: str) -> None:
     ):
         keys = [{"Key": obj["Key"]} for obj in page.get("Contents") or []]
         if keys:
-            await conn.client.delete_objects(
+            resp = await conn.client.delete_objects(
                 Bucket=conn.config.bucket, Delete={"Objects": keys}
             )
+            # A refused key comes back in the body of a 200.
+            failed = [
+                str(err.get("Key", ""))
+                for err in (resp or {}).get("Errors") or []
+            ]
+            if failed:
+                raise _refused(failed)
 
 
 async def _copy_file(conn: S3Conn, src_key: str, dst_key: str) -> bool:
@@ -331,4 +598,11 @@ DRIVER: ObjectStoreDriver[S3Accessor, S3Conn] = ObjectStoreDriver(
     copy_file=_copy_file,
     probe_prefix=_probe_prefix,
     is_not_found=is_not_found,
+    put_if=_put_if,
+    get_versioned=_get_versioned,
+    copy_if=_copy_if,
+    delete_if=_delete_if,
+    move_file_if=_move_file_if,
+    move_prefix_if=_move_prefix_if,
+    delete_prefix_if=_delete_prefix_if,
 )

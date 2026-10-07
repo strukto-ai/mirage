@@ -405,3 +405,67 @@ async def test_is_unbounded_distinguishes_absent_from_boundless():
     assert await cache.is_unbounded("/no-bound") is True
     await cache.set("/bounded", b"x", ttl=30)
     assert await cache.is_unbounded("/bounded") is False
+
+
+@pytest.mark.asyncio
+async def test_a_version_kept_without_bytes_is_never_read():
+    cache = RAMFileCacheStore()
+    await cache.set_versions({"/a": "v1"})
+    assert not await cache.exists("/a")
+    assert await cache.get("/a") is None
+    assert not await cache.is_fresh("/a", "v1")
+    assert not await cache.is_unbounded("/a")
+    assert await cache.fingerprint("/a") == "v1"
+    assert await cache.add("/a", b"drained", fingerprint="v1")
+    assert await cache.get("/a") == b"drained"
+
+
+@pytest.mark.asyncio
+async def test_a_version_never_replaces_bytes_written_since():
+    cache = RAMFileCacheStore()
+    await cache.set("/a", b"theirs", fingerprint="v2")
+    await cache.set_versions({"/a": "v1"})
+    assert await cache.get("/a") == b"theirs"
+    assert await cache.fingerprint("/a") == "v2"
+    await cache.remove("/a")
+    assert await cache.fingerprint("/a") is None
+
+
+@pytest.mark.asyncio
+async def test_a_version_replaces_bytes_past_their_bound():
+    # Past its bound the entry vouches for nothing, as Redis's expired data
+    # key does; the version the line saw since is the one to keep.
+    cache = RAMFileCacheStore()
+    await cache.set("/a", b"old", fingerprint="v1", ttl=0)
+    await cache.set_versions({"/a": "v2"})
+    assert await cache.fingerprint("/a") == "v2"
+    assert await cache.get("/a") is None
+    # The old bytes leave the store with their entry, not outside the limit.
+    assert "/a" not in cache._store.files
+
+
+@pytest.mark.asyncio
+async def test_a_version_restamped_counts_its_size_once():
+    cache = RAMFileCacheStore()
+    for token in ("v1", "v2", "v3"):
+        await cache.set_versions({"/a": token})
+    assert cache.cache_size == len("/a") + len("v3")
+
+
+@pytest.mark.asyncio
+async def test_fingerprints_answers_each_key_in_order():
+    cache = RAMFileCacheStore()
+    await cache.set("/a", b"x", fingerprint="v1")
+    await cache.set_versions({"/c": "v3"})
+    assert await cache.fingerprints(["/a", "/b", "/c"]) == ["v1", None, "v3"]
+
+
+@pytest.mark.asyncio
+async def test_an_expired_entry_still_answers_its_version():
+    # The token stays true for the bytes that were read, which is all a
+    # conditional write's condition says.
+    cache = RAMFileCacheStore()
+    await cache.set("/a", b"x", fingerprint="v1", ttl=1)
+    cache._entries["/a"].cached_at -= 10
+    assert not await cache.exists("/a")
+    assert await cache.fingerprint("/a") == "v1"

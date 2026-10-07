@@ -14,17 +14,21 @@
 
 import type { Accessor } from '../../accessor/base.ts'
 import {
+  conditioned,
   evictAfter,
   invalidateAfterUnlink,
   invalidateAncestors,
   invalidateSubtree,
+  knownVersions,
+  stale,
+  writeCondition,
 } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
-import { eisdir, enoent, enotempty } from '../../errors/fs.ts'
+import { eisdir, enoent, enotempty, enotsup } from '../../errors/fs.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { isDir } from '../../utils/stat_view.ts'
-import type { ObjectStoreDriver, PathFn } from './driver.ts'
+import { type ObjectStoreDriver, type PathFn, ConditionLost } from './driver.ts'
 import { makeStat } from './stat.ts'
 
 /** Build single-key deletion over one driver. */
@@ -34,8 +38,15 @@ export function makeUnlink<A extends Accessor, C>(driver: ObjectStoreDriver<A, C
     // unlink(2) answers ENOENT for a missing name and EISDIR for a
     // directory; a store's delete is silent for both, and only the
     // command builders check first (see `makeRmdir`).
-    if (isDir(await stat(accessor, path))) throw eisdir(path)
+    const found = await stat(accessor, path)
+    if (isDir(found)) throw eisdir(path)
     const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
+    // A delete needs no prior read, only that nobody wrote since.
+    const cond = await writeCondition(path, 'delete', found.fingerprint ?? null, false)
+    if (cond !== null && driver.deleteIf === undefined) {
+      throw enotsup(driver.vfs, 'conditional delete', path)
+    }
+    const { deleteIf } = driver
     const timer = startOp()
     const settle = async (): Promise<void> => {
       // Also when the delete threw: one that throws part-way has already
@@ -55,13 +66,19 @@ export function makeUnlink<A extends Accessor, C>(driver: ObjectStoreDriver<A, C
     // The connect is outside, because a connection that never opened
     // removed nothing.
     const { conn, close } = await driver.connect(accessor)
-    await evictAfter(async () => {
-      try {
-        await driver.deleteFile(conn, key)
-      } finally {
-        await close()
-      }
-    }, settle)
+    try {
+      await evictAfter(async () => {
+        try {
+          if (cond !== null && deleteIf !== undefined) await deleteIf(conn, key, cond)
+          else await driver.deleteFile(conn, key)
+        } finally {
+          await close()
+        }
+      }, settle)
+    } catch (err) {
+      if (err instanceof ConditionLost) throw await stale(path)
+      throw err
+    }
   }
 }
 
@@ -76,7 +93,14 @@ export function makeRemovePrefix<A extends Accessor, C>(
   driver: ObjectStoreDriver<A, C>,
 ): PathFn<A> {
   return async function removePrefix(accessor, path) {
-    const pfx = kp.applyDir(driver.keyPrefixOf(accessor), path.mountPath)
+    const kpfx = driver.keyPrefixOf(accessor)
+    const pfx = kp.applyDir(kpfx, path.mountPath)
+    // Keeps and reports a key changed since the agent (or walk) saw it.
+    const conditional = conditioned(path, 'delete')
+    const { deletePrefixIf } = driver
+    if (conditional && deletePrefixIf === undefined) {
+      throw enotsup(driver.vfs, 'conditional delete', path)
+    }
     const timer = startOp()
     const settle = async (): Promise<void> => {
       // A prefix delete is a paginated walk, so a failure mid-walk has
@@ -92,13 +116,20 @@ export function makeRemovePrefix<A extends Accessor, C>(
       await invalidateAncestors(path)
     }
     const { conn, close } = await driver.connect(accessor)
-    await evictAfter(async () => {
-      try {
-        await driver.deletePrefix(conn, pfx)
-      } finally {
-        await close()
-      }
-    }, settle)
+    try {
+      await evictAfter(async () => {
+        try {
+          if (conditional && deletePrefixIf !== undefined) {
+            await deletePrefixIf(conn, pfx, knownVersions(path, kpfx))
+          } else await driver.deletePrefix(conn, pfx)
+        } finally {
+          await close()
+        }
+      }, settle)
+    } catch (err) {
+      if (!(err instanceof ConditionLost)) throw err
+      throw await stale(kp.keyPath(path, kpfx, err.keys[0] ?? ''))
+    }
   }
 }
 

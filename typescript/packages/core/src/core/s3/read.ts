@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
+import { publishRead } from '../../cache/context.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { record, revisionFor, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
@@ -83,6 +84,9 @@ export async function read(
       fingerprint,
       revision,
     })
+    // A whole read hands its token to an op that writes back what it read;
+    // a window is not the object the token names.
+    if (range === null) publishRead(virtual, bytes, fingerprint)
     return bytes
   } catch (err) {
     if (isNotFoundError(err)) {

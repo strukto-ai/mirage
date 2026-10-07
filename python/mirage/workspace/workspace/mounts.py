@@ -23,7 +23,13 @@ from mirage.cache.index import IndexConfig
 from mirage.cache.index.store import IndexCacheStore
 from mirage.ops import Ops
 from mirage.shell.constants import BIN_PREFIX
-from mirage.types import KERNEL_BACKENDS, MountBackend, MountMode, ReadSpec
+from mirage.types import (
+    KERNEL_BACKENDS,
+    MountBackend,
+    MountMode,
+    ReadSpec,
+    WritePolicy,
+)
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.history import HISTORY_PREFIX
 from mirage.vfs.ram import RAMVFS
@@ -31,6 +37,10 @@ from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.read_policy import check_read_capability
 from mirage.workspace.mount.spec import Mount
+from mirage.workspace.mount.write_policy import (
+    check_write_capability,
+    coerce_write_policy,
+)
 from mirage.workspace.workspace.types import MountSpec, VFSMount
 
 
@@ -72,6 +82,9 @@ def normalize_mounts(
     default_mode: MountMode,
     default_read: ReadSpec,
     index: IndexConfig | None = None,
+    *,
+    default_write: WritePolicy = WritePolicy.UNCONDITIONAL,
+    caching: bool = True,
 ) -> list[MountSpec]:
     """Narrow every accepted ``mounts`` spelling to one shape.
 
@@ -85,6 +98,10 @@ def normalize_mounts(
         default_read (ReadSpec): read policy for entries that name none.
         index (IndexConfig | None): the workspace index a mount that
             names none is given, which a listing-only fresh is judged on.
+        default_write (WritePolicy): write policy for entries that name
+            none.
+        caching (bool): whether the workspace's file cache keeps anything
+            (a zero limit keeps nothing, so no write would have a version).
 
     Raises:
         TypeError: a tuple entry is not (VFS, mode) or
@@ -111,6 +128,9 @@ def normalize_mounts(
                     read=value.read
                     if value.read is not None
                     else default_read,
+                    write=coerce_write_policy(value.write)
+                    if value.write is not None
+                    else default_write,
                 )
             )
         elif isinstance(value, tuple):
@@ -129,6 +149,7 @@ def normalize_mounts(
                     mode=value[1],
                     command_limits=command_limits,
                     read=default_read,
+                    write=default_write,
                 )
             )
         else:
@@ -138,6 +159,7 @@ def normalize_mounts(
                     vfs=value,
                     mode=default_mode,
                     read=default_read,
+                    write=default_write,
                 )
             )
     indexes: dict[int, IndexConfig | None] = {}
@@ -147,6 +169,14 @@ def normalize_mounts(
             id(spec.vfs), spec.index if spec.index is not None else index
         )
         check_read_capability(spec.prefix, spec.vfs, spec.read, effective)
+        check_write_capability(
+            spec.prefix,
+            spec.vfs,
+            spec.write,
+            spec.mode,
+            spec.backend,
+            caching and spec.vfs.caches_reads,
+        )
     return specs
 
 
@@ -201,6 +231,7 @@ def install_mounts(
             spec.vfs,
             spec.mode,
             spec.read,
+            write=spec.write,
             index=spec.index if spec.index is not None else index,
             vfs_ref=spec.vfs_ref,
         )
@@ -214,7 +245,13 @@ def install_mounts(
         # `fresh` would stamp on it exactly the combination the verdict
         # exists to refuse. It is snapshotted like any other mount, so
         # that stray policy came back as a refusal on restore.
-        registry.mount("/", RAMVFS(), default_mode, ReadSpec())
+        registry.mount(
+            "/",
+            RAMVFS(),
+            default_mode,
+            ReadSpec(),
+            write=WritePolicy.UNCONDITIONAL,
+        )
     return implicit_root
 
 

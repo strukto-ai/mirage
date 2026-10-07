@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Generic, Literal, Protocol, TypeVar
 
 from mirage.accessor.base import Accessor
+from mirage.cache.context import KnownVersions, WriteCondition
 from mirage.cache.index import IndexCacheStore
 from mirage.types import FileStat, PathSpec
 
@@ -178,6 +179,23 @@ class ObjectMeta:
     extra: dict[str, str] = field(default_factory=dict)
 
 
+class ConditionLost(Exception):
+    """A conditional request the store refused: the object changed since
+    the version sent, so the write did not land.
+
+    Args:
+        keys (list[str]): the raw keys whose condition did not hold, in
+            the order they were met.
+        landed (bool): a move's copy landed and only its source's delete
+            lost, so the destination holds the copy.
+    """
+
+    def __init__(self, keys: list[str], landed: bool = False) -> None:
+        super().__init__(f"condition lost on {keys[0] if keys else ''!r}")
+        self.keys = keys
+        self.landed = landed
+
+
 @dataclass(frozen=True, slots=True)
 class FindHints:
     """The find predicates a driver may push into its native query.
@@ -276,6 +294,26 @@ class ObjectStoreDriver(Generic[A, C]):
             predicate push-down, returning the iterator and whether the
             query was narrowed beyond the prefix; None means find walks
             ``list_tree`` unnarrowed.
+        put_if (Callable | None): ``put`` carrying a write condition; a
+            lost one raises :class:`ConditionLost`. None when the store
+            cannot condition a write, which is what keeps such a store
+            from mounting ``write: conditional`` at all.
+        get_versioned (Callable | None): ``get`` plus the token of the
+            bytes returned, for an op that writes back what it read.
+        copy_if (Callable | None): ``copy_file`` with the destination's
+            condition and the source's expected token.
+        delete_if (Callable | None): ``delete_file`` with a condition.
+        move_file_if (Callable | None): ``move_file`` whose copy and
+            delete are both conditioned on the source's version (the one
+            given, else the one its own lookup sees), and whose copy
+            carries the destination condition.
+        move_prefix_if (Callable | None): ``move_prefix`` moving each key
+            only if it is still the version the mount saw (``known``), else
+            the one listed; the keys that changed stay where they were and
+            are raised in a ConditionLost.
+        delete_prefix_if (Callable | None): ``delete_prefix`` deleting
+            each key only if it is still the version the mount saw, else
+            the one listed.
     """
 
     vfs: str
@@ -299,4 +337,27 @@ class ObjectStoreDriver(Generic[A, C]):
     find_tree: (
         Callable[[C, str, FindHints], tuple[AsyncIterator[TreeEntry], bool]]
         | None
+    ) = None
+    put_if: (
+        Callable[[C, str, bytes, WriteCondition], Awaitable[ObjectMeta | None]]
+        | None
+    ) = None
+    get_versioned: (
+        Callable[[C, str], Awaitable[tuple[bytes, str | None] | None]] | None
+    ) = None
+    copy_if: (
+        Callable[[C, str, str, WriteCondition], Awaitable[bool]] | None
+    ) = None
+    delete_if: Callable[[C, str, WriteCondition], Awaitable[None]] | None = (
+        None
+    )
+    move_file_if: (
+        Callable[[C, str, str, WriteCondition, str | None], Awaitable[bool]]
+        | None
+    ) = None
+    move_prefix_if: (
+        Callable[[C, str, str, KnownVersions], Awaitable[bool]] | None
+    ) = None
+    delete_prefix_if: (
+        Callable[[C, str, KnownVersions], Awaitable[None]] | None
     ) = None

@@ -18,7 +18,48 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
-from mirage.observe.record import OpRecord
+from mirage.observe.record import STAMP_FINGERPRINT_OPS, OpRecord
+
+
+@dataclass
+class LostPaths:
+    """The paths whose conditional write lost on this line.
+
+    A lost path's cached copy was dropped; nothing the line read of it
+    before the loss may be cached again or sent as a version. A read or
+    write of the path after the loss names the bytes now there, and
+    lifts the mark.
+
+    Args:
+        sink (list[OpRecord]): the line's records, shared with its frames.
+        marks (dict[str, int]): each lost path and where in ``sink`` it
+            was lost.
+    """
+
+    sink: list[OpRecord]
+    marks: dict[str, int] = field(default_factory=dict)
+
+    def mark(self, key: str) -> None:
+        """Record that a conditional write to ``key`` lost.
+
+        Args:
+            key (str): the virtual path.
+        """
+        self.marks[key] = len(self.sink)
+
+    def holds(self, key: str) -> bool:
+        """Whether ``key`` is lost and nothing since has read or written it.
+
+        Args:
+            key (str): the virtual path.
+        """
+        start = self.marks.get(key)
+        if start is None:
+            return False
+        return not any(
+            rec.path == key and rec.op in STAMP_FINGERPRINT_OPS
+            for rec in self.sink[start:]
+        )
 
 
 @dataclass(frozen=True)
@@ -39,6 +80,7 @@ class Recorder:
 
     sink: list[OpRecord] = field(default_factory=list)
     mount_id: str | None = None
+    lost: LostPaths | None = None
 
 
 _recorder: ContextVar[Recorder | None] = ContextVar("_recorder", default=None)
@@ -63,7 +105,8 @@ class RecordingScope:
         self.records: list[OpRecord] = []
         self._token = None
         if active:
-            rec = Recorder()
+            sink: list[OpRecord] = []
+            rec = Recorder(sink=sink, lost=LostPaths(sink))
             self.records = rec.sink
             self._token = _recorder.set(rec)
 
@@ -117,6 +160,23 @@ def command_records() -> Iterator[list[OpRecord]]:
         _command_sink.reset(token)
 
 
+def active_lost() -> LostPaths | None:
+    """The running line's lost paths, None outside a recorded line."""
+    rec = _recorder.get()
+    return rec.lost if rec is not None else None
+
+
+def mark_lost(key: str) -> None:
+    """Mark ``key`` lost on the running line, if one is recording.
+
+    Args:
+        key (str): the virtual path whose conditional write lost.
+    """
+    lost = active_lost()
+    if lost is not None:
+        lost.mark(key)
+
+
 def active_recorder() -> Recorder | None:
     """Return the active Recorder for the current async context, if any."""
     return _recorder.get()
@@ -145,7 +205,9 @@ def push_mount_context(mount_id: str | None):
     """
     rec = _recorder.get()
     return _recorder.set(
-        None if rec is None else Recorder(sink=rec.sink, mount_id=mount_id)
+        None
+        if rec is None
+        else Recorder(sink=rec.sink, mount_id=mount_id, lost=rec.lost)
     )
 
 

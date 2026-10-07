@@ -13,11 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Protocol, TypeVar
+from dataclasses import dataclass
+from typing import Literal, Protocol, TypeVar
 
+from mirage.errors.fs import enotsup, stale_write
+from mirage.errors.types import StaleWriteError
+from mirage.observe.context import mark_lost
 from mirage.types import FileStat, PathSpec
+from mirage.utils.key_prefix import key_path
 
 logger = logging.getLogger(__name__)
 
@@ -247,3 +253,224 @@ def publish_read(path: str, data: bytes, fingerprint: str | None) -> None:
     capture = _read_facts.get()
     if capture is not None and capture[0] == path:
         capture[1].append((data, fingerprint))
+
+
+@dataclass(frozen=True, slots=True)
+class WriteCondition:
+    """The precondition one write carries.
+
+    Args:
+        if_match (str | None): the version the object must still have.
+        if_none_match (bool): the object must not exist yet; sent when no
+            version is known, so a new file is created and an existing
+            one is refused.
+    """
+
+    if_match: str | None = None
+    if_none_match: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class WriteContext:
+    """What a write on a ``write: conditional`` mount needs to know.
+
+    Pushed by the mount's own doors (``execute_op``, ``execute_cmd``), so
+    a write always sees the context of the mount it lands on; an
+    unconditional mount pushes None, which also clears an outer one.
+
+    Args:
+        vfs (str): the backend's name, for a refusal.
+        conditions (frozenset[str]): the ops the backend can condition
+            (put, create, copy, delete).
+        read_version (Callable): the version the mount last saw for a
+            path (its cached copy's token), None when it saw none.
+        read_versions (Callable): ``read_version`` for many paths at
+            once, in one store round trip.
+        drop (Callable): drops the mount's cached copy of a path, so the
+            read a refusal asks for really fetches.
+    """
+
+    vfs: str
+    conditions: frozenset[str]
+    read_version: Callable[[PathSpec], Awaitable[str | None]]
+    read_versions: Callable[[list[PathSpec]], Awaitable[list[str | None]]]
+    drop: Callable[[PathSpec], Awaitable[None]]
+
+
+WriteKind = Literal["write", "copy", "delete"]
+
+# The version the mount saw for each of a walk's keys that it saw one for.
+KnownVersions = Callable[[list[str]], Awaitable[dict[str, str]]]
+
+_write: ContextVar[WriteContext | None] = ContextVar(
+    "_write_context", default=None
+)
+_own_version: ContextVar[str | None] = ContextVar(
+    "_own_write_version", default=None
+)
+
+
+def push_write_context(context: WriteContext | None) -> WriteContext | None:
+    """Set the write context for the current async context.
+
+    Args:
+        context (WriteContext | None): the mount's context, None for an
+            unconditional mount.
+
+    Returns:
+        WriteContext | None: the previous one, for the caller to restore.
+    """
+    prev = _write.get()
+    _write.set(context)
+    return prev
+
+
+async def read_versioned(
+    path: PathSpec, fetch: Callable[[], Awaitable[T]]
+) -> tuple[T, str | None]:
+    """Run a read and return its bytes with the token they carried.
+
+    For an op that writes back what it read: the token is the one its
+    backend published for these exact bytes, None when it published none
+    or published two that disagree.
+
+    Args:
+        path (PathSpec): the path read.
+        fetch (Callable): the read.
+    """
+    data, facts = await capture_read(path.virtual, fetch)
+    token = facts[0] if facts and all(f == facts[0] for f in facts) else None
+    return data, token
+
+
+@contextmanager
+def own_write_version(version: str | None) -> Iterator[None]:
+    """Hand the version an op just read to the write it makes next.
+
+    A read-modify-write op (an append, a pwrite through a descriptor, a
+    resize) bases its write on what it read itself, not on what the
+    agent read, so its write carries that read's version.
+
+    Args:
+        version (str | None): the token of the bytes the op read.
+    """
+    token = _own_version.set(version)
+    try:
+        yield
+    finally:
+        _own_version.reset(token)
+
+
+async def write_condition(
+    path: PathSpec,
+    kind: WriteKind,
+    own: str | None = None,
+    prefer_own: bool = True,
+) -> WriteCondition | None:
+    """The condition a write to ``path`` must carry, None when unconditional.
+
+    The version is the op's own read's (``own``, or one handed down by
+    :func:`own_write_version`) when ``prefer_own``; otherwise the mount's
+    cached version first. With none, the write asks for create-only.
+
+    Args:
+        path (PathSpec): the path written.
+        kind (WriteKind): write, copy or delete.
+        own (str | None): the version the op itself just saw.
+        prefer_own (bool): whether the op's own version wins over the
+            mount's cached one (true for a read-modify-write, false for a
+            delete, which falls back to its own lookup).
+
+    Raises:
+        OperationNotSupportedError: the backend cannot condition this op.
+    """
+    context = _write.get()
+    if context is None:
+        return None
+    own = own if own is not None else _own_version.get()
+    cached = await context.read_version(path)
+    version = (own or cached) if prefer_own else (cached or own)
+    needed = {"copy": "copy", "delete": "delete"}.get(
+        kind, "put" if version else "create"
+    )
+    if needed not in context.conditions:
+        raise enotsup(context.vfs, f"conditional {kind}", path)
+    if version:
+        return WriteCondition(if_match=version)
+    if kind == "delete":
+        return WriteCondition()
+    return WriteCondition(if_none_match=True)
+
+
+def conditioned(path: PathSpec, kind: Literal["copy", "delete"]) -> bool:
+    """Whether a ``kind`` on ``path`` goes out conditioned.
+
+    For a prefix walk, which conditions each key itself and needs no
+    version for the operand.
+
+    Args:
+        path (PathSpec): the operand.
+        kind (Literal["copy", "delete"]): the op.
+
+    Raises:
+        OperationNotSupportedError: the backend cannot condition this op.
+    """
+    context = _write.get()
+    if context is None:
+        return False
+    if kind not in context.conditions:
+        raise enotsup(context.vfs, f"conditional {kind}", path)
+    return True
+
+
+async def drop_cached(path: PathSpec) -> None:
+    """Drop the write context's cached copy of ``path``, if there is one.
+
+    For the other end of a refused move, whose copy is as unsure as the
+    end the refusal names. The line marks it lost too, so nothing it read
+    of the path earlier is cached again when it ends.
+
+    Args:
+        path (PathSpec): the path to drop.
+    """
+    mark_lost(path.virtual)
+    context = _write.get()
+    if context is not None:
+        await context.drop(path)
+
+
+async def stale(path: PathSpec, landed: bool = False) -> StaleWriteError:
+    """The refusal for a lost condition, after dropping the cached copy.
+
+    Args:
+        path (PathSpec): the path whose write lost.
+        landed (bool): a move's copy landed before its source's delete
+            lost.
+    """
+    await drop_cached(path)
+    err = stale_write(path)
+    err.landed = landed
+    return err
+
+
+def known_versions(root: PathSpec, key_prefix: str) -> KnownVersions:
+    """The versions a prefix walk under ``root`` measures its keys against.
+
+    A key the agent read is held to the version it read; the walk's own
+    listing only stands in for keys it never saw.
+
+    Args:
+        root (PathSpec): the walk's operand, for addressing its keys.
+        key_prefix (str): the mount's backend key prefix.
+    """
+
+    async def known(keys: list[str]) -> dict[str, str]:
+        context = _write.get()
+        if context is None or not keys:
+            return {}
+        tokens = await context.read_versions(
+            [key_path(root, key_prefix, key) for key in keys]
+        )
+        return {key: tok for key, tok in zip(keys, tokens) if tok}
+
+    return known

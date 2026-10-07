@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { readVersioned, runWithOwnVersion } from '../../cache/context.ts'
 import { eexist, einval, eisdir, enotsup, isEnotdir, isMissingPath } from '../../errors/fs.ts'
 import { FileType, type FileStat, type PathSpec } from '../../types.ts'
 import { spliceWindow } from '../../utils/ranges.ts'
@@ -52,8 +53,9 @@ export async function appendByRewrite(
     return
   }
   let existing: Uint8Array
+  let own: string | null
   try {
-    existing = await read(path)
+    ;[existing, own] = await readVersioned(path, () => read(path))
   } catch (error) {
     if (!isMissingPath(error)) throw error
     await write(path, data)
@@ -62,7 +64,7 @@ export async function appendByRewrite(
   const joined = new Uint8Array(existing.length + data.length)
   joined.set(existing)
   joined.set(data, existing.length)
-  await write(path, joined)
+  await runWithOwnVersion(own, () => write(path, joined))
 }
 
 /**
@@ -97,8 +99,9 @@ export async function pwriteByRewrite(
     return
   }
   let existing: Uint8Array
+  let own: string | null = null
   try {
-    existing = await read(path)
+    ;[existing, own] = await readVersioned(path, () => read(path))
   } catch (error) {
     if (!isMissingPath(error)) throw error
     let missing: FileStat | null = null
@@ -110,7 +113,7 @@ export async function pwriteByRewrite(
     if (missing !== null && missing.type === FileType.DIRECTORY) throw eisdir(path)
     existing = new Uint8Array()
   }
-  await write(path, spliceWindow(existing, offset, data))
+  await runWithOwnVersion(own, () => write(path, spliceWindow(existing, offset, data)))
 }
 
 /**

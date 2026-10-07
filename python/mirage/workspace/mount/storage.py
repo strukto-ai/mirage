@@ -15,10 +15,12 @@
 import functools
 from typing import Callable
 
-from mirage.types import PathSpec
+from mirage.errors.fs import enotsup
+from mirage.types import PathSpec, WritePolicy
 from mirage.utils.key_prefix import strip_mount
 from mirage.vfs.base import BaseVFS
 from mirage.workspace.mount.registry import MountRegistry
+from mirage.workspace.mount.write_policy import write_conditions
 
 
 def vfs_storage_location(vfs: BaseVFS) -> str:
@@ -78,3 +80,33 @@ def make_storage_key(registry: MountRegistry) -> Callable[[PathSpec], str]:
         registry (MountRegistry): Mount set the operands are addressed in.
     """
     return functools.partial(storage_key, registry)
+
+
+def delete_check(registry: MountRegistry, path: PathSpec) -> None:
+    """Refuse up front a delete ``path``'s mount could not condition.
+
+    A move across mounts copies before it deletes; on a conditional mount
+    whose backend ignores delete conditions the delete would be refused
+    after the copy landed, so the move is refused before it starts.
+
+    Args:
+        registry (MountRegistry): Mount set the operand is addressed in.
+        path (PathSpec): The source operand.
+
+    Raises:
+        OperationNotSupportedError: the mount cannot condition a delete.
+    """
+    entry = registry.try_mount_for(path.virtual)
+    if entry is None or entry.write is not WritePolicy.CONDITIONAL:
+        return
+    if "delete" not in write_conditions(entry.vfs):
+        raise enotsup(entry.vfs.name, "conditional delete", path)
+
+
+def make_delete_check(registry: MountRegistry) -> Callable[[PathSpec], None]:
+    """Bind ``delete_check`` to one mount set for the move generic.
+
+    Args:
+        registry (MountRegistry): Mount set the operands are addressed in.
+    """
+    return functools.partial(delete_check, registry)

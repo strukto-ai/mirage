@@ -33,6 +33,7 @@ class KernelMounts:
         self._sessions = sessions
         self._mountpoints: dict[str, str] = {}
         self._managers: dict[str, FuseManager] = {}
+        self._exposed: dict[str, tuple[str, MountBackend]] = {}
 
     def add(
         self,
@@ -78,7 +79,12 @@ class KernelMounts:
             raise
         if mountpoint is None:
             self._register(key, resolved)
+        self._exposed[key] = (prefix, MountBackend(backend))
         return resolved
+
+    def exposed(self) -> list[tuple[str, MountBackend]]:
+        """Each exposed prefix with the backend exposing it."""
+        return list(self._exposed.values())
 
     def remove(self, prefix: str, session_id: str | None = None) -> None:
         """Unmount one exposed subtree.
@@ -95,6 +101,7 @@ class KernelMounts:
                 return
         self._managers.pop(key, None)
         self._mountpoints.pop(key, None)
+        self._exposed.pop(key, None)
 
     def close(self) -> None:
         """Unmount everything this workspace exposed."""
@@ -102,6 +109,7 @@ class KernelMounts:
             manager.unmount()
         self._managers.clear()
         self._mountpoints.clear()
+        self._exposed.clear()
 
     @property
     def mountpoint(self) -> str | None:

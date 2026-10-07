@@ -629,6 +629,7 @@ describe('savedVfsBuild', () => {
       mode: MountMode.WRITE,
       read: 'bounded',
       ttl: 600,
+      write: 'unconditional',
       vfs_class: type,
       vfs_ref: ref,
       vfs_state: config === undefined ? { type } : { type, config },

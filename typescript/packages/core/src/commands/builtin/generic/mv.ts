@@ -33,7 +33,7 @@ import {
   pathExists,
   type BackendKeyFn,
 } from '../utils/copy.ts'
-import { fsStrerror, isFsError } from '../../../errors/fs.ts'
+import { fsStrerror, isFsError, isLandedMove } from '../../../errors/fs.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import {
   type TransferLinks,
@@ -513,6 +513,15 @@ export async function mvGeneric(
       writes[src.mountPath] = new Uint8Array()
       writes[target.mountPath] = new Uint8Array()
     } else if (isPrimitiveMove(strategy)) {
+      try {
+        strategy.checkUnlink?.(src)
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        errors.push(
+          `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${String(fsStrerror(err))}`,
+        )
+        continue
+      }
       const entries = await cpWalk(strategy.readdir, stat, src, index)
       const { copiedAll, wroteAny } = await copyEntries(
         'mv',
@@ -539,6 +548,14 @@ export async function mvGeneric(
         await strategy.rename(src, target)
       } catch (err) {
         if (!isFsError(err)) throw err
+        if (isLandedMove(err)) {
+          // The copy landed and only the source's removal lost, as a
+          // cross-device GNU mv whose unlink fails.
+          errors.push(`mv: cannot remove '${src.rawPath}': ${String(fsStrerror(err))}`)
+          writes[target.mountPath] = new Uint8Array()
+          if (!srcIsDir) created.add(keyOf(target))
+          continue
+        }
         // A backend rename that refuses (e.g. a destination whose parent
         // chain is not all directories) is one failed operand, not an
         // aborted command: GNU reports it and keeps going with the

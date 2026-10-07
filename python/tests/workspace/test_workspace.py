@@ -1991,14 +1991,20 @@ def test_cache_miss_reads_from_vfs():
     assert sources[0] == "ram"
 
 
-def test_cache_invalidation_after_write():
+def test_a_redirect_write_keeps_its_bytes():
+    # A `>` write keeps the bytes it wrote, as tee does, so the next read
+    # is served from the cache instead of fetching what was just written.
     ws = _ws()
     _exec(ws, "cat /disk/readme.txt")
-    cached = _run(ws._cache.get("/disk/readme.txt"))
-    assert cached is not None
     _exec(ws, "echo updated > /disk/readme.txt")
     cached = _run(ws._cache.get("/disk/readme.txt"))
-    assert cached is None
+    assert cached == b"updated\n"
+    records_before = len(ws.vfs.records)
+    assert _stdout(_exec(ws, "cat /disk/readme.txt")) == b"updated\n"
+    sources = [
+        r.source for r in ws.vfs.records[records_before:] if r.op == "read"
+    ]
+    assert all(s == "ram" for s in sources)
 
 
 def test_grep_uses_cache():

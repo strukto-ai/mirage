@@ -1,0 +1,154 @@
+{
+  "_note": "Which write conditions each VFS honours, per operation, for write: conditional. put = PutObject If-Match; create = PutObject If-None-Match: *; copy = CopyObject If-Match / If-None-Match: * / x-amz-copy-source-if-match; delete = DeleteObject If-Match and the DeleteObjects per-key ETag. A VFS with no op cannot mount conditional. Both hosts' WRITE_CONDITIONS must equal this table, and it must name every registered VFS.",
+  "_evidence": {
+    "s3": "measured: AWS S3 us-west-2, 2026-10-04 (put, create, copy If-Match, multipart, delete If-Match) and 2026-10-06 (copy If-None-Match, CopySourceIfMatch, DeleteObjects ETag)",
+    "seaweedfs": "measured: SeaweedFS 4.48 local, 2026-10-04 and 2026-10-06, all cases honoured",
+    "minio": "measured: MinIO (CI image cgr.dev/chainguard/minio@sha256:bd0143\u2026, release dated 2026-09-22): put and create honoured; copy If-Match and If-None-Match, DeleteObject If-Match and DeleteObjects ETag ignored",
+    "s3+endpoint": "type: s3 with a non-AWS endpoint_url may be any S3-compatible server, MinIO included, so it gets MinIO's row",
+    "assumed": "aliyun, backblaze, ceph, digitalocean, gcs, oci, qingstor, r2, scaleway, supabase, tencent, wasabi: ASSUMED via the shared S3 protocol by user decision (2026-10-05); not measured per provider",
+    "sdk": "botocore 1.40.61 / aiobotocore 2.25.1; @aws-sdk/client-s3 3.1033.0"
+  },
+  "ops": [
+    "put",
+    "create",
+    "copy",
+    "delete"
+  ],
+  "s3+endpoint": [
+    "put",
+    "create"
+  ],
+  "browser_only": [
+    "opfs"
+  ],
+  "vfs": {
+    "airtable": [],
+    "aliyun": [
+      "put",
+      "create",
+      "copy",
+      "delete"
+    ],
+    "backblaze": [
+      "put",
+      "create",
+      "copy",
+      "delete"
+    ],
+    "box": [],
+    "ceph": [
+      "put",
+      "create",
+      "copy",
+      "delete"
+    ],
+    "chroma": [],
+    "databricks_volume": [],
+    "dify": [],
+    "digitalocean": [
+      "put",
+      "create",
+      "copy",
+      "delete"
+    ],
+    "discord": [],
+    "disk": [],
+    "dropbox": [],
+    "email": [],
+    "gcal": [],
+    "gcs": [
+      "put",
+      "create",
+      "copy",
+      "delete"
+    ],
+    "gdocs": [],
+    "gdrive": [],
+    "github": [],
+    "gmail": [],
+    "gridfs": [],
+    "gsheets": [],
+    "gslides": [],
+    "hf_buckets": [],
+    "hf_datasets": [],
+    "hf_models": [],
+    "hf_spaces": [],
+    "jaeger": [],
+    "lancedb": [],
+    "langfuse": [],
+    "linear": [],
+    "mem0": [],
+    "minio": [
+      "put",
+      "create"
+    ],
+    "mongodb": [],
+    "nextcloud": [],
+    "notion": [],
+    "oci": [
+      "put",
+      "create",
+      "copy",
+      "delete"
+    ],
+    "onedrive": [],
+    "opfs": [],
+    "postgres": [],
+    "qdrant": [],
+    "qingstor": [
+      "put",
+      "create",
+      "copy",
+      "delete"
+    ],
+    "r2": [
+      "put",
+      "create",
+      "copy",
+      "delete"
+    ],
+    "ram": [],
+    "redis": [],
+    "s3": [
+      "put",
+      "create",
+      "copy",
+      "delete"
+    ],
+    "scaleway": [
+      "put",
+      "create",
+      "copy",
+      "delete"
+    ],
+    "seaweedfs": [
+      "put",
+      "create",
+      "copy",
+      "delete"
+    ],
+    "sharepoint": [],
+    "slack": [],
+    "ssh": [],
+    "supabase": [
+      "put",
+      "create",
+      "copy",
+      "delete"
+    ],
+    "tencent": [
+      "put",
+      "create",
+      "copy",
+      "delete"
+    ],
+    "trello": [],
+    "wandb": [],
+    "wasabi": [
+      "put",
+      "create",
+      "copy",
+      "delete"
+    ]
+  }
+}

@@ -28,7 +28,7 @@ import type { ProcessHandle } from '../../process/handle.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import { concat } from '../../io/cachable_iterator.ts'
-import { activeRecords, runWithRecording } from '../../observe/context.ts'
+import { activeRecords, lostPaths, runWithRecording } from '../../observe/context.ts'
 import type { Observer } from '../../observe/observer.ts'
 import { READ_FINGERPRINT_OPS, type OpRecord } from '../../observe/record.ts'
 import { Channel } from '../../shell/console/types.ts'
@@ -1087,7 +1087,8 @@ async function runParsedLine(
           : activeRecords()
               ?.slice(nestedStart)
               .filter((r) => !READ_FINGERPRINT_OPS.has(r.op))
-        await abortable(env.dispatcher.applyIo(io, applied, cacheFacts), killed)
+        const lost = lostPaths(isLine ? opRecords : activeRecords())
+        await abortable(env.dispatcher.applyIo(io, applied, cacheFacts, lost), killed)
       }
       stdoutBytes =
         materialized === null

@@ -55,7 +55,7 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
     async def get(self, key: str) -> bytes | None:
         async with self._lock_for(key):
             entry = self._entries.get(key)
-            if entry is None:
+            if entry is None or entry.version_only:
                 return None
             if entry.expired:
                 self._cache_size -= entry.size
@@ -106,7 +106,11 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
         try:
             async with self._lock_for(key):
                 existing = self._entries.get(key)
-                if existing is not None and not existing.expired:
+                if (
+                    existing is not None
+                    and not existing.version_only
+                    and not existing.expired
+                ):
                     return False
                 if self._invalidation.stale(key, stamp):
                     return False
@@ -155,11 +159,50 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
         entry = self._entries.get(
             key if isinstance(key, str) else key.mount_path
         )
-        return entry is not None and not entry.expired
+        return (
+            entry is not None and not entry.version_only and not entry.expired
+        )
+
+    async def fingerprint(self, key: str) -> str | None:
+        entry = self._entries.get(key)
+        return entry.fingerprint if entry is not None else None
+
+    async def set_versions(self, versions: dict[str, str]) -> None:
+        for key, fingerprint in versions.items():
+            await self._set_version(key, fingerprint)
+
+    async def _set_version(self, key: str, fingerprint: str) -> None:
+        stamp = self._invalidation.enter(key)
+        try:
+            async with self._lock_for(key):
+                if self._invalidation.stale(key, stamp):
+                    return
+                entry = self._entries.get(key)
+                if (
+                    entry is not None
+                    and not entry.version_only
+                    and not entry.expired
+                ):
+                    return
+                if entry is not None:
+                    self._cache_size -= entry.size
+                    del self._entries[key]
+                    self._store.files.pop(key, None)
+                version = CacheEntry(
+                    size=len(key) + len(fingerprint),
+                    cached_at=int(time.time()),
+                    fingerprint=fingerprint,
+                    version_only=True,
+                )
+                self._entries[key] = version
+                self._cache_size += version.size
+        finally:
+            self._invalidation.leave(key)
+        await self._evict()
 
     async def is_fresh(self, key: str, remote_fingerprint: str) -> bool:
         entry = self._entries.get(key)
-        if entry is None:
+        if entry is None or entry.version_only:
             return False
         # An entry that carries no token verifies against nothing, and
         # says so here rather than relying on the caller to ask only when
@@ -174,7 +217,9 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
 
     async def is_unbounded(self, key: str) -> bool:
         entry = self._entries.get(key)
-        return entry is not None and entry.ttl is None
+        return (
+            entry is not None and not entry.version_only and entry.ttl is None
+        )
 
     async def clear(self) -> None:
         self._invalidation.invalidate_all()

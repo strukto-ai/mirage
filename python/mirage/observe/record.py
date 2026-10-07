@@ -15,6 +15,7 @@
 from dataclasses import dataclass, field
 
 from mirage.io.types import ByteSource
+from mirage.utils.key_prefix import under_path
 
 # Ops whose record carries a token describing the bytes it moved, split
 # by direction: the file cache stores bytes from either `IOResult.reads`
@@ -56,6 +57,11 @@ CONTENT_CHANGING_OPS = frozenset(
 RETRACT_FINGERPRINT_OPS = frozenset(
     {"unlink", "rm_r", "rmdir", "rename", "rename_prefix", "copy"}
 )
+# What a conditional write reads its version off, within the line: a
+# record that stamps a token names the bytes now at its path, and one that
+# retracts says the line no longer knows them (so the write asks for
+# create-only, never for a version older than the line's own change).
+VERSION_OPS = STAMP_FINGERPRINT_OPS | RETRACT_FINGERPRINT_OPS
 # The subset that moved a whole prefix, and so takes every pin beneath
 # it. Membership is what the op *did*, never what it could have done:
 # rename has two code paths and only one of them is a prefix walk, so it
@@ -129,3 +135,22 @@ class OpRecord:
             "fingerprint": self.fingerprint,
             "revision": self.revision,
         }
+
+
+def newest_version(records: list[OpRecord], key: str) -> OpRecord | None:
+    """The newest record that says which version of ``key`` the line knows.
+
+    A record at the path counts if it stamps or retracts a version; one at
+    an ancestor counts if it moved the whole subtree, which took ``key``
+    with it.
+
+    Args:
+        records (list[OpRecord]): the line's records, oldest first.
+        key (str): the virtual path asked about.
+    """
+    for rec in reversed(records):
+        if rec.path == key and rec.op in VERSION_OPS:
+            return rec
+        if rec.op in SUBTREE_RETRACT_OPS and under_path(key, rec.path):
+            return rec
+    return None

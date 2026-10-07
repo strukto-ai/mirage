@@ -14,6 +14,7 @@
 
 import type { ByteSource } from '../io/types.ts'
 import { VFSName } from '../types.ts'
+import { underPath } from '../utils/key_prefix.ts'
 
 // Ops whose record carries a token describing the bytes it moved, split
 // by direction: the file cache stores bytes from either `IOResult.reads`
@@ -69,6 +70,14 @@ export const RETRACT_FINGERPRINT_OPS: ReadonlySet<string> = new Set([
   'rename_prefix',
   'copy',
 ])
+// What a conditional write reads its version off, within the line: a record
+// that stamps a token names the bytes now at its path, and one that retracts
+// says the line no longer knows them (so the write asks for create-only,
+// never for a version older than the line's own change).
+export const VERSION_OPS: ReadonlySet<string> = new Set([
+  ...STAMP_FINGERPRINT_OPS,
+  ...RETRACT_FINGERPRINT_OPS,
+])
 // The subset that moved a whole prefix, and so takes every pin beneath
 // it. Membership is what the op *did*, never what it could have done:
 // rename has two code paths and only one of them is a prefix walk, so it
@@ -76,6 +85,22 @@ export const RETRACT_FINGERPRINT_OPS: ReadonlySet<string> = new Set([
 // touched one key, and on a keyed store the keys beneath its path are
 // objects of their own.
 export const SUBTREE_RETRACT_OPS: ReadonlySet<string> = new Set(['rm_r', 'rename_prefix'])
+
+/**
+ * The newest record that says which version of `key` the line knows: one at
+ * the path that stamps or retracts a version, or one at an ancestor that
+ * moved the whole subtree, which took `key` with it. Mirrors python's
+ * `newest_version`.
+ */
+export function newestVersion(records: readonly OpRecord[], key: string): OpRecord | null {
+  for (let i = records.length - 1; i >= 0; i--) {
+    const rec = records[i]
+    if (rec === undefined) continue
+    if (rec.path === key && VERSION_OPS.has(rec.op)) return rec
+    if (SUBTREE_RETRACT_OPS.has(rec.op) && underPath(key, rec.path)) return rec
+  }
+  return null
+}
 
 export interface OpRecordInit {
   op: string

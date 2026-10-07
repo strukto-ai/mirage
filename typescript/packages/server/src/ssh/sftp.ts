@@ -15,6 +15,7 @@
 import { constants as fsConstants } from 'node:fs'
 import { constants as osConstants } from 'node:os'
 import { posix } from 'node:path'
+import { conditionalOverlap } from '@struktoai/mirage-core/workspace/mount/write_policy'
 import { MountCore, classifyErrno, type FuseAttr } from '@struktoai/mirage-node'
 import { EACCES, ENOENT, EROFS, errnoError } from '@struktoai/mirage-node/fuse/errors'
 import type { Attributes, FileEntry, SFTPWrapper } from 'ssh2'
@@ -255,6 +256,15 @@ class MirageSFTPServer {
       throw new SFTPStatusError(STATUS.NO_SUCH_FILE, `no such workspace: ${this.workspaceId}`)
     }
     const ws = entry.runner.ws
+    // MountCore cannot carry a write's version; uploads would empty files.
+    const conditional = conditionalOverlap(ws.mounts(), '/')
+    if (conditional !== null) {
+      throw new SFTPStatusError(
+        STATUS.PERMISSION_DENIED,
+        `mount '${conditional}': write: conditional cannot be served over SFTP, ` +
+          'which has no place to carry the version',
+      )
+    }
     await openSession(ws, this.sessionId, {}, keyProfile(this.profile))
     this.entry = entry
     this.core = new MountCore(ws.vfs, { session: ws.getSession(this.sessionId) })

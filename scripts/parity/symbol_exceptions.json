@@ -410,6 +410,81 @@
     "trimSpaces": "String.trim takes no character set; Python strips _SPACES with str.strip.",
     "wallOf": "The wall clock a zone shows for an instant, read off Zone.parts; Python's datetime.astimezone gives it directly."
    }
+  },
+  "workspace/mount/write_policy": {
+   "typescript_only": {
+    "S3ShapedConfig": "The browser host's S3 config carries a presignedUrlProvider, which Python has no twin of; TypeScript reads it through this shape to refuse conditional writes on the presigned fetch client.",
+    "s3Config": "Reads the S3-shaped config off a VFS for the presigned check, which exists only on the TypeScript browser host.",
+    "presigned": "Whether the mount goes through the browser's presigned fetch client, which sends no condition; Python has no presigned path.",
+    "resolvedEndpoint": "TypeScript reads the node S3VFS's resolvedEndpoint getter structurally, beside its s3Config and presigned readers; Python reads it through the EndpointVFS protocol."
+   },
+   "python_only": {
+    "_endpoint": "Python reads the endpoint through the EndpointVFS protocol (S3VFS.resolved_endpoint builds a botocore client offline); TypeScript reads the node S3VFS getter structurally in resolvedEndpoint().",
+    "_resolved": "Python caches each VFS's conditions row, since resolving its endpoint builds a botocore client; TypeScript's resolvedEndpoint reads files and the environment and is memoised per mount by writeContextFor.",
+    "EndpointVFS": "The capability a backend reports its resolved endpoint through: Python's S3VFS.resolved_endpoint builds a botocore client offline; TypeScript's write_policy reads the node S3VFS.resolvedEndpoint getter structurally, with no named protocol."
+   }
+  },
+  "workspace/workspace/mounts": {
+   "typescript_only": {
+    "WriteDefaults": "Python's normalize_mounts takes the write default, mode and caching as keyword arguments; TypeScript's positional signature takes them as one options object."
+   }
+  },
+  "cache/context": {
+   "python_only": {
+    "_write": "Python binds per-call context by setting and restoring a ContextVar (push_cache_manager and _active already do); TypeScript runs a callback in a scoped async-context store (runWithCacheManager and storage). The write context and the op's own version follow that same split.",
+    "own_write_version": "Python binds per-call context by setting and restoring a ContextVar (push_cache_manager and _active already do); TypeScript runs a callback in a scoped async-context store (runWithCacheManager and storage). The write context and the op's own version follow that same split.",
+    "push_write_context": "Python binds per-call context by setting and restoring a ContextVar (push_cache_manager and _active already do); TypeScript runs a callback in a scoped async-context store (runWithCacheManager and storage). The write context and the op's own version follow that same split."
+   },
+   "typescript_only": {
+    "activeWriteContext": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
+    "ownVersionStorage": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
+    "runWithOwnVersion": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
+    "runWithWriteContext": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
+    "writeStorage": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split."
+   }
+  },
+  "observe/context": {
+   "python_only": {
+    "active_lost": "The running line's lost paths ride Python's Recorder, which is still bound when apply_io runs, so the dispatcher reads them from the context. TypeScript applies a line's results after its recording scope ends, so it keys them by the line's records instead (lostPaths/lostByLine)."
+   },
+   "typescript_only": {
+    "lostByLine": "TypeScript keys a line's lost paths by its records array, because applyIo runs after runWithRecording returns; Python keeps them on the Recorder (active_lost)."
+   }
+  },
+  "core/s3/client": {
+   "python_only": {
+    "resolved_endpoint": "Python resolves the endpoint an s3 client sends to by building a botocore client offline (config, AWS_ENDPOINT_URL[_S3], the profile) and caches the row per VFS; TypeScript core cannot read the environment, so the node S3VFS answers it through its resolvedEndpoint getter instead."
+   }
+  },
+  "core/s3/driver": {
+   "typescript_only": {
+    "isMissingBucket": "TypeScript's isNotFoundError counts any 404 (a bodiless reply has no code), so lostCondition excludes a missing bucket by name; Python's is_not_found already takes only NoSuchKey and a bodiless 404."
+   }
+  },
+  "workspace/snapshot/state": {
+   "typescript_only": {
+    "savedName": "Python spells a saved policy with str() inline; TypeScript narrows the unknown JSON value before String(), which the lint requires, in one helper."
+   }
+  },
+  "errors/fs": {
+   "typescript_only": {
+    "isLandedMove": "TypeScript errors are FsError objects tagged by field, so a landed move is read through a type guard, as isDotWalkError reads dotWalk; Python reads StaleWriteError.landed off the class."
+   }
+  },
+  "workspace/mount/storage": {
+   "python_only": {
+    "delete_check": "Python binds the check to a registry with functools.partial (make_delete_check), as it does storage_key; TypeScript's makeDeleteCheck returns a closure, so the unbound function has no twin."
+   }
+  },
+  "types": {
+   "python_only": {
+    "CheckFn": "Python names the PrimitiveMove.check_unlink callable type beside MoveFn, which cannot name PathSpec before its definition; TypeScript types the field inline."
+   }
+  },
+  "cache/file/redis": {
+   "typescript_only": {
+    "luaBody": "node-redis EVALs the script text on every call, so TypeScript drops the Lua files' comment lines first; redis-py registers each script once and sends only its SHA."
+   }
   }
  }
 }

@@ -41,6 +41,7 @@ async def run_mv(
     storage_key: Callable[[PathSpec], str] | None = None,
     ns: NamespaceView | None = None,
     stdin: ByteSource | None = None,
+    delete_check: Callable[[PathSpec], None] | None = None,
 ) -> CrossResult:
     """Move operands that span mounts via the shared generic mv.
 
@@ -57,6 +58,8 @@ async def run_mv(
             source, destroying it.
         ns (NamespaceView | None): Namespace facts for link operands.
         stdin (ByteSource | None): where ``-i`` reads its answers.
+        delete_check (Callable | None): Refuses a source whose mount
+            cannot condition the delete, before anything is copied.
     """
     p = functools.partial
     fl = FlagView(flag_kwargs, spec=SPECS["mv"])
@@ -71,6 +74,7 @@ async def run_mv(
             readdir=primitives["readdir"],
             unlink=p(relay, dispatch, "unlink"),
             rmdir=p(relay, dispatch, "rmdir"),
+            check_unlink=delete_check,
         ),
         flags=parse_flags(fl),
         backend_key=storage_key,

@@ -54,7 +54,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
-from mirage.errors.types import FsCondition
+from mirage.errors.types import FsCondition, StaleWriteError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import (
     MoveStrategy,
@@ -611,6 +611,15 @@ async def mv_generic(
             writes[src.mount_path] = b""
             writes[target.mount_path] = b""
         elif isinstance(strategy, PrimitiveMove):
+            if strategy.check_unlink is not None:
+                try:
+                    strategy.check_unlink(src)
+                except FS_ERRORS as exc:
+                    errors.append(
+                        f"mv: cannot move '{src.raw_path}' to "
+                        f"'{target.raw_path}': {fs_strerror(exc)}"
+                    )
+                    continue
             entries = await walk(strategy.readdir, stat, src)
             copied_all, wrote_any = await copy_entries(
                 "mv",
@@ -641,6 +650,17 @@ async def mv_generic(
             try:
                 await strategy.rename(src, target)
             except FS_ERRORS as exc:
+                if isinstance(exc, StaleWriteError) and exc.landed:
+                    # The copy landed and only the source's removal lost,
+                    # as a cross-device GNU mv whose unlink fails.
+                    errors.append(
+                        f"mv: cannot remove '{src.raw_path}': "
+                        f"{fs_strerror(exc)}"
+                    )
+                    writes[target.mount_path] = b""
+                    if not src_is_dir:
+                        created.add(key_of(target))
+                    continue
                 # A backend rename that refuses (e.g. a destination whose
                 # parent chain is not all directories) is one failed
                 # operand, not an aborted command: GNU reports it and

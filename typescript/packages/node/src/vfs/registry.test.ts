@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -573,5 +573,31 @@ describe('buildVfs colon reference', () => {
 
   it('still reports an unknown bare name as unknown', async () => {
     await expect(buildVfs('nope')).rejects.toThrow('unknown VFS')
+  })
+})
+
+describe('the write-condition table covers the registry', () => {
+  // integ/fixtures/write/conditions.json names every VFS once; a backend
+  // added here without a row would mount write: conditional under whatever
+  // its name happened to match, so every registered name needs one, and a
+  // row naming nothing registered is stale.
+  const fixture = JSON.parse(
+    readFileSync(
+      fileURLToPath(
+        new URL('../../../../../integ/fixtures/write/conditions.json', import.meta.url),
+      ),
+      'utf8',
+    ),
+  ) as { vfs: Record<string, string[]>; browser_only: string[] }
+
+  // Captured as the describe is collected, before any test registers a
+  // backend of its own.
+  const names = knownVfsNames()
+
+  it('has a row for every registered VFS and none that is stale', () => {
+    expect(names.length).toBeGreaterThan(0)
+    // The browser registers a backend of its own (opfs); its twin checks it.
+    const rows = Object.keys(fixture.vfs).filter((n) => !fixture.browser_only.includes(n))
+    expect(new Set(rows)).toEqual(new Set(names))
   })
 })

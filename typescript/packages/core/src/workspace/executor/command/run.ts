@@ -16,7 +16,7 @@ import type { EvaluationContext } from '../../evaluation.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
 import { wrapCachableStreams } from '../../../io/stream.ts'
 import { commandRecords } from '../../../observe/context.ts'
-import { WRITE_FINGERPRINT_OPS, type OpRecord } from '../../../observe/record.ts'
+import { markClaimedWrites } from '../../../cache/file/io.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
 import type { ReaddirPath, StatPath } from '../../../ops/types.ts'
@@ -177,26 +177,6 @@ export async function dropMountCaches(registry: MountRegistry): Promise<void> {
     // repository. Expiring keeps that distinction and the next read refetches.
     await mount.index.invalidate()
     await mount.cacheManager?.dropPrefix()
-  }
-}
-
-/**
- * Mark a command's write records with the value it claims for them.
- *
- * A `write` record of a path the command both wrote and listed in
- * `IOResult.cache` gets that exact `IOResult.writes` value as `claimed`,
- * which `writtenVerdict` compares with the value the line caches. A record
- * the line already sealed is left alone: a background command returning
- * after its line ended must not mark a record that line persisted. `io`
- * has virtual keys and its streams already wrapped. Mirrors python's
- * `_mark_claimed_writes`.
- */
-function markClaimedWrites(records: readonly OpRecord[], io: IOResult): void {
-  const cached = new Set(io.cache)
-  for (const rec of records) {
-    if (rec.sealed || !WRITE_FINGERPRINT_OPS.has(rec.op) || !cached.has(rec.path)) continue
-    const value = io.writes[rec.path]
-    if (value !== undefined) rec.claimed = value
   }
 }
 

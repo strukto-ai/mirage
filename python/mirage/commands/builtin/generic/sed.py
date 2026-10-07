@@ -131,6 +131,11 @@ def _open_failure(name: str, exc: BaseException) -> str:
     return f"sed: couldn't open file {name}: {strerror}\n"
 
 
+def _edit_failure(name: str, exc: BaseException) -> str:
+    strerror = fs_strerror(exc) or str(exc)
+    return f"sed: couldn't edit {name}: {strerror}\n"
+
+
 async def _open_write_files(names: Sequence[str], doors: _Doors) -> str | None:
     """Truncate the ``w`` files as GNU opens them when it compiles.
 
@@ -384,7 +389,12 @@ async def _run_in_place(
         if machine.panic_code is not None:
             break
         new_data = from_byte_view(out, utf8)
-        await write_bytes(p, new_data)
+        try:
+            await write_bytes(p, new_data)
+        except FS_ERRORS as exc:
+            err += _edit_failure(p.raw_path, exc)
+            code = 4
+            break
         writes[p.mount_path] = new_data
         edited.append(p)
     write_err = await _flush_write_files(

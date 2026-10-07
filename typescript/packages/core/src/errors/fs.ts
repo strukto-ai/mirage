@@ -14,7 +14,13 @@
 
 import { CODE_ARMS, OPERAND_CONDITIONS } from './constants.ts'
 import { posixPhrase } from './posix.ts'
-import type { DotWalkError, FsError, MissingOpError, NoMountError } from './types.ts'
+import type {
+  DotWalkError,
+  FsError,
+  MissingOpError,
+  NoMountError,
+  StaleWriteError,
+} from './types.ts'
 import { stripSlash } from '../utils/slash.ts'
 
 // Accepts a PathSpec (reads .rawPath, the word's spelling, which defaults
@@ -59,6 +65,18 @@ export function ebadf(path: string | { virtual: string }): FsError {
  * so a read-family command reports it and moves on. */
 export function efbig(path: string | { virtual: string }): FsError {
   return fsError(path, 'EFBIG')
+}
+
+/** A conditional write the backend refused: the file changed since it was
+ * read, or it exists and there is no version to send. Per-operand, so a
+ * command reports it and moves on; never a read failure. Python's
+ * StaleWriteError. */
+export function staleWrite(path: string | { virtual: string }, landed = false): StaleWriteError {
+  return Object.assign(fsError(path, 'STALE_WRITE'), { landed })
+}
+
+export function isLandedMove(err: unknown): err is StaleWriteError {
+  return hasCode(err, 'STALE_WRITE') && (err as { landed?: unknown }).landed === true
 }
 
 export function ebusy(path: string | { virtual: string }): FsError {

@@ -15,6 +15,7 @@
 from typing import Any
 
 from mirage.accessor.s3 import S3Accessor
+from mirage.cache.context import publish_read
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.s3.client import (
     _client_kwargs,
@@ -97,6 +98,10 @@ async def read(
             fingerprint=fingerprint,
             revision=revision,
         )
+        # A whole read hands its token to an op that writes back what it
+        # read; a window is not the object the token names.
+        if window is None:
+            publish_read(virtual, data, fingerprint)
         return data
     except Exception as exc:
         if (

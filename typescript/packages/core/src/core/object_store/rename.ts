@@ -13,11 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
-import { evictAfter, invalidateAfterMove, invalidateAncestors } from '../../cache/context.ts'
+import {
+  dropCached,
+  evictAfter,
+  invalidateAfterMove,
+  invalidateAncestors,
+  knownVersions,
+  stale,
+  writeCondition,
+} from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
-import { enoent } from '../../errors/fs.ts'
+import { enoent, enotsup } from '../../errors/fs.ts'
 import * as kp from '../../utils/key_prefix.ts'
-import type { ExistsFn, ObjectStoreDriver, PairFn } from './driver.ts'
+import { type ExistsFn, type ObjectStoreDriver, type PairFn, ConditionLost } from './driver.ts'
 
 /**
  * Build file-or-prefix relocation over one driver.
@@ -55,7 +63,27 @@ export function makeRename<A extends Accessor, C>(
     // moveFile leaves this 'rename': the walk never ran, so nothing under
     // the prefix can have moved.
     let op = 'rename'
+    // A move is a copy then a delete, so both carry a condition.
+    const cond = await writeCondition(dst, 'copy')
+    const { moveFileIf, movePrefixIf } = driver
+    let source: string | null = null
+    if (cond !== null) {
+      source = (await writeCondition(src, 'delete'))?.ifMatch ?? null
+      if (moveFileIf === undefined || movePrefixIf === undefined) {
+        throw enotsup(driver.vfs, 'conditional rename', src)
+      }
+    }
     const move = async (conn: C): Promise<boolean> => {
+      if (cond !== null && moveFileIf !== undefined && movePrefixIf !== undefined) {
+        if (await moveFileIf(conn, srcKey, kp.apply(kpfx, dst.mountPath), cond, source)) return true
+        op = 'rename_prefix'
+        return movePrefixIf(
+          conn,
+          kp.applyDir(kpfx, src.mountPath),
+          kp.applyDir(kpfx, dst.mountPath),
+          knownVersions(src, kpfx),
+        )
+      }
       if (await moveFile(conn, srcKey, kp.apply(kpfx, dst.mountPath))) return true
       // A directory owns no object of its own, so a clean false here is
       // the ordinary way into the prefix walk, not an answer about it.
@@ -86,13 +114,21 @@ export function makeRename<A extends Accessor, C>(
       await invalidateAncestors(src)
     }
     const { conn, close } = await driver.connect(accessor)
-    const moved = await evictAfter(async () => {
-      try {
-        return await move(conn)
-      } finally {
-        await close()
-      }
-    }, settle)
+    let moved: boolean
+    try {
+      moved = await evictAfter(async () => {
+        try {
+          return await move(conn)
+        } finally {
+          await close()
+        }
+      }, settle)
+    } catch (err) {
+      if (!(err instanceof ConditionLost)) throw err
+      await dropCached(dst)
+      const key = err.keys[0] ?? srcKey
+      throw await stale(key === srcKey ? src : kp.keyPath(src, kpfx, key), err.landed)
+    }
     if (!moved) throw enoent(src)
   }
 }

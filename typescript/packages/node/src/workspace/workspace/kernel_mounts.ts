@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { MountBackend } from '@struktoai/mirage-core/types'
+import { MountBackend } from '@struktoai/mirage-core/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { FuseManager } from '../fuse.ts'
 
@@ -33,6 +33,7 @@ export class KernelMounts {
   private readonly workspace: Workspace
   private readonly mountpointsMap = new Map<string, string>()
   private readonly managers = new Map<string, FuseManager>()
+  private readonly exposures = new Map<string, [string, MountBackend]>()
 
   constructor(workspace: Workspace) {
     this.workspace = workspace
@@ -71,6 +72,7 @@ export class KernelMounts {
         ...(backend !== undefined ? { backend } : {}),
       })
       if (mountpoint === undefined) this.register(key, resolved)
+      this.exposures.set(key, [prefix, backend ?? MountBackend.FUSE])
       return resolved
     } catch (err) {
       // The mount never came up; drop the manager and any registered path
@@ -96,6 +98,12 @@ export class KernelMounts {
     }
     this.managers.delete(key)
     this.mountpointsMap.delete(key)
+    this.exposures.delete(key)
+  }
+
+  /** Each exposed prefix with the backend exposing it. */
+  exposed(): [string, MountBackend][] {
+    return [...this.exposures.values()]
   }
 
   /** Unmount everything this workspace exposed. */
@@ -103,6 +111,7 @@ export class KernelMounts {
     for (const manager of this.managers.values()) await manager.unmount()
     this.managers.clear()
     this.mountpointsMap.clear()
+    this.exposures.clear()
   }
 
   /** The single active mountpoint, when there is exactly one. */

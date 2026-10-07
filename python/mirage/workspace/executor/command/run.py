@@ -16,6 +16,7 @@ import functools
 import logging
 from collections.abc import Awaitable, Callable
 
+from mirage.cache.file.io import mark_claimed_writes
 from mirage.commands.config import ExecContext
 from mirage.commands.errors import CommandTimeoutError, UsageError
 from mirage.commands.spec.types import CommandSpec, FlagValue
@@ -25,7 +26,6 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
 from mirage.observe.context import command_records
-from mirage.observe.record import WRITE_FINGERPRINT_OPS, OpRecord
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.table import WorkspaceRuntime
@@ -206,32 +206,6 @@ async def run_nested_line(
     return await execute_fn(line, session_id=session_id, stdin=stdin)
 
 
-def _mark_claimed_writes(records: list[OpRecord], io: IOResult) -> None:
-    """Mark a command's write records with the value it claims for them.
-
-    A ``write`` record of a path the command both wrote and listed in
-    ``IOResult.cache`` gets that exact ``IOResult.writes`` value as
-    ``claimed``, which :func:`written_verdict` compares with the value
-    the line caches. A record the line already sealed is left alone: a
-    background command returning after its line ended must not mark a
-    record that line persisted.
-
-    Args:
-        records (list[OpRecord]): The command's own records.
-        io (IOResult): Its result, virtual keys, streams already wrapped.
-    """
-    cached = set(io.cache)
-    for rec in records:
-        if (
-            rec.sealed
-            or rec.op not in WRITE_FINGERPRINT_OPS
-            or rec.path not in cached
-            or rec.path not in io.writes
-        ):
-            continue
-        rec.claimed = io.writes[rec.path]
-
-
 async def run_claiming(
     prefix: str,
     call: Callable[[], Awaitable[tuple[ByteSource | None, IOResult]]],
@@ -241,7 +215,7 @@ async def run_claiming(
     The command's own records are collected while ``call`` runs; its
     keys then gain the mount ``prefix`` (empty for a relay, whose keys
     are already virtual), its streams are wrapped, and
-    :func:`_mark_claimed_writes` marks its write records with the values
+    :func:`mark_claimed_writes` marks its write records with the values
     it put in ``IOResult.writes``.
 
     Args:
@@ -256,7 +230,7 @@ async def run_claiming(
         io.writes = {prefix + k: v for k, v in io.writes.items()}
         io.cache = [prefix + p for p in io.cache]
     stdout, io = wrap_cachable_streams(stdout, io)
-    _mark_claimed_writes(mine, io)
+    mark_claimed_writes(mine, io)
     return stdout, io
 
 

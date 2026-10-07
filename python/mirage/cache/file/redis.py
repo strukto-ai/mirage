@@ -26,6 +26,9 @@ from mirage.vfs.redis.redis import RedisVFS
 
 # Shipped next to this module; byte-identical to the TypeScript add.lua.
 ADD_LUA = (files("mirage.cache.file") / "add.lua").read_text(encoding="utf-8")
+VERSION_LUA = (files("mirage.cache.file") / "version.lua").read_text(
+    encoding="utf-8"
+)
 
 # Hash slots one SCAN call visits. A prefix drop walks the whole server,
 # so this sets both the round trips (dbsize / SCAN_COUNT) and how long
@@ -39,6 +42,12 @@ SCAN_COUNT = 1000
 # about 10 ms for 100 bodies of 512 KB and 1.5 ms for 10. A page goes out
 # as one pipeline of DELs this size, so it is still one round trip.
 DEL_BATCH = 10
+
+# Keys per MGET of versions and per pipeline of kept versions.
+KEY_BATCH = 1000
+
+# Seconds a version kept without its bytes lives (raise-only over bytes).
+VERSION_TTL = 86_400
 
 
 class RedisFileCacheStore(RedisVFS, FileCacheMixin):
@@ -70,6 +79,7 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         self._invalidation = Invalidation()
         self._drain_tasks: dict[str, asyncio.Task[Any]] = {}
         self._add = self._cache_client.register_script(ADD_LUA)
+        self._version = self._cache_client.register_script(VERSION_LUA)
 
     def _data_key(self, key: str) -> str:
         return f"{self._data_prefix}{key}"
@@ -160,9 +170,62 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         name = key if isinstance(key, str) else key.mount_path
         return bool(await self._cache_client.exists(self._data_key(name)))
 
-    async def is_fresh(self, key: str, remote_fingerprint: str) -> bool:
+    async def fingerprint(self, key: str) -> str | None:
         fp = await self._cache_client.get(self._meta_key(key))
         if fp is None:
+            return None
+        return fp.decode() if isinstance(fp, bytes) else str(fp)
+
+    async def fingerprints(self, keys: list[str]) -> list[str | None]:
+        out: list[str | None] = []
+        for start in range(0, len(keys), KEY_BATCH):
+            got = await self._cache_client.mget(
+                [self._meta_key(k) for k in keys[start : start + KEY_BATCH]]
+            )
+            out.extend(
+                None
+                if fp is None
+                else (fp.decode() if isinstance(fp, bytes) else str(fp))
+                for fp in got
+            )
+        return out
+
+    async def set_versions(self, versions: dict[str, str]) -> None:
+        keys = list(versions)
+        for start in range(0, len(keys), KEY_BATCH):
+            batch = keys[start : start + KEY_BATCH]
+            stamps = {key: self._invalidation.enter(key) for key in batch}
+            try:
+                live = [
+                    key
+                    for key in batch
+                    if not self._invalidation.stale(key, stamps[key])
+                ]
+                # A scripted pipeline costs a SCRIPT EXISTS round trip first.
+                pipe = (
+                    self._cache_client.pipeline(transaction=False)
+                    if len(live) > 1
+                    else None
+                )
+                for key in live:
+                    await self._version(
+                        keys=[self._data_key(key), self._meta_key(key)],
+                        args=[versions[key], VERSION_TTL],
+                        client=pipe,
+                    )
+                if pipe is not None:
+                    await pipe.execute()
+            finally:
+                for key in batch:
+                    self._invalidation.leave(key)
+
+    async def is_fresh(self, key: str, remote_fingerprint: str) -> bool:
+        pipe = self._cache_client.pipeline(transaction=False)
+        pipe.exists(self._data_key(key))
+        pipe.get(self._meta_key(key))
+        held, fp = await pipe.execute()
+        # A version kept without its bytes vouches for no bytes.
+        if not held or fp is None:
             return False
         if isinstance(fp, bytes):
             fp = fp.decode()

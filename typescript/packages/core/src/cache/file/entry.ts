@@ -17,6 +17,7 @@ export interface CacheEntryInit {
   cachedAt: number
   fingerprint?: string | null
   ttl?: number | null
+  versionOnly?: boolean
 }
 
 export class CacheEntry {
@@ -24,12 +25,14 @@ export class CacheEntry {
   readonly cachedAt: number
   readonly fingerprint: string | null
   readonly ttl: number | null
+  readonly versionOnly: boolean
 
   constructor(init: CacheEntryInit) {
     this.size = init.size
     this.cachedAt = init.cachedAt
     this.fingerprint = init.fingerprint ?? null
     this.ttl = init.ttl ?? null
+    this.versionOnly = init.versionOnly ?? false
     Object.freeze(this)
   }
 

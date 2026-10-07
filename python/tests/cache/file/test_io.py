@@ -695,6 +695,43 @@ async def test_claimed_written_bytes_take_the_verdict(
         assert not await cache.exists("/s3/f.txt")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("side", ["reads", "writes"])
+async def test_bytes_bigger_than_the_cache_are_not_kept(side):
+    # Bytes bigger than the whole cache, if kept, would flush every warm
+    # entry and then themselves; on Redis they would upload the whole
+    # payload to a shared server. The stale copy goes, too.
+    cache = RAMFileCacheStore(cache_limit=10)
+    await cache.set("/s3/warm", b"abc")
+    await cache.set("/s3/big", b"old")
+    io = IOResult(**{side: {"/s3/big": b"x" * 11}}, cache=["/s3/big"])
+    await cache_io.apply_io(cache, io)
+    assert not await cache.exists("/s3/big")
+    assert await cache.get("/s3/warm") == b"abc"
+
+
+@pytest.mark.asyncio
+async def test_a_fill_the_store_refuses_never_fails_the_line(refusing_store):
+    # The write already landed; a cache that cannot hold the bytes is no
+    # reason to report it failed, nor to skip the evictions after it.
+    cache = refusing_store()
+    await RAMFileCacheStore.set(cache, "/s3/f", b"old")
+    await RAMFileCacheStore.set(cache, "/s3/other", b"old")
+    io = IOResult(writes={"/s3/f": b"new", "/s3/other": b"x"}, cache=["/s3/f"])
+    await cache_io.apply_io(cache, io)
+    assert not await cache.exists("/s3/f")
+    assert not await cache.exists("/s3/other")
+
+
+@pytest.mark.asyncio
+async def test_a_store_that_is_down_never_fails_the_line(refusing_store):
+    # Nor does a server that refuses the drop of the stale copy as well.
+    cache = refusing_store(down=True)
+    await RAMFileCacheStore.set(cache, "/s3/f", b"old")
+    io = IOResult(writes={"/s3/f": b"new"}, cache=["/s3/f"])
+    await cache_io.apply_io(cache, io)
+
+
 # ── the mount's staleness bound reaches the entry ───────────────────────
 
 

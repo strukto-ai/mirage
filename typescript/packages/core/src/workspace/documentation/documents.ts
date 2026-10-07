@@ -16,7 +16,7 @@ import { KeyLock } from '../../cache/lock.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import type { Ops } from '../../ops/ops.ts'
 import type { CompiledProfile } from '../../policy/profile.ts'
-import { DEFAULT_READ_SPEC, FileType, MountMode, PathSpec } from '../../types.ts'
+import { DEFAULT_READ_SPEC, FileType, MountMode, PathSpec, WritePolicy } from '../../types.ts'
 import { eexist, enoent, enotdir, isEnoent } from '../../errors/fs.ts'
 import { pathVisible } from '../../utils/hidden.ts'
 import { norm, parent } from '../../utils/path.ts'
@@ -130,7 +130,9 @@ export class Documents {
       )
       view = new DocumentVFS(path.slice(path.lastIndexOf('/') + 1), () => this.render(kind), kind)
       const document = view
-      const mount = this.registry.mount(path, view, MountMode.READ, DEFAULT_READ_SPEC)
+      const mount = this.registry.mount(path, view, MountMode.READ, DEFAULT_READ_SPEC, {
+        write: WritePolicy.UNCONDITIONAL,
+      })
       mount.visible = () =>
         document.globalView ||
         document.sessions.get(this.session().sessionId) === this.session().createdAt

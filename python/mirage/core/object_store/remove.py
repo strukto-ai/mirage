@@ -13,21 +13,26 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.cache.context import (
+    conditioned,
     evict_after,
     invalidate_after_unlink,
     invalidate_ancestors,
     invalidate_subtree,
+    known_versions,
+    stale,
+    write_condition,
 )
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.object_store.driver import (
     A,
     C,
+    ConditionLost,
     ObjectStoreDriver,
     PathFn,
     RmdirFn,
 )
 from mirage.core.object_store.stat import make_stat
-from mirage.errors.fs import eisdir, enoent, enotempty
+from mirage.errors.fs import eisdir, enoent, enotempty, enotsup
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils import key_prefix as kp
@@ -47,10 +52,15 @@ def make_unlink(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
         # unlink(2) answers ENOENT for a missing name and EISDIR for a
         # directory; a store's delete is silent for both, and only the
         # command builders check first (see `make_rmdir`).
-        if is_dir(await stat(accessor, path_spec, index=NULL_INDEX)):
+        found = await stat(accessor, path_spec, index=NULL_INDEX)
+        if is_dir(found):
             raise eisdir(path_spec)
         path = path_spec.mount_path
         key = kp.apply(driver.key_prefix_of(accessor), path)
+        # A delete needs no prior read, only that nobody wrote since.
+        cond = await write_condition(
+            path_spec, "delete", own=found.fingerprint, prefer_own=False
+        )
         timer = start_op()
 
         async def settle(_: None) -> None:
@@ -71,7 +81,16 @@ def make_unlink(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
         # The connect is outside, because a connection that never opened
         # removed nothing.
         async with driver.connect(accessor) as conn:
-            await evict_after(driver.delete_file(conn, key), settle)
+            if cond is None:
+                op = driver.delete_file(conn, key)
+            elif driver.delete_if is None:
+                raise enotsup(driver.vfs, "conditional delete", path_spec)
+            else:
+                op = driver.delete_if(conn, key, cond)
+            try:
+                await evict_after(op, settle)
+            except ConditionLost as exc:
+                raise await stale(path_spec) from exc
 
     return unlink
 
@@ -89,7 +108,13 @@ def make_remove_prefix(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
 
     async def remove_prefix(accessor: A, path_spec: PathSpec) -> None:
         path = path_spec.mount_path
-        pfx = kp.apply_dir(driver.key_prefix_of(accessor), path)
+        kpfx = driver.key_prefix_of(accessor)
+        pfx = kp.apply_dir(kpfx, path)
+        # Keeps and reports a key changed since the agent (or walk) saw it.
+        conditional = conditioned(path_spec, "delete")
+        delete_prefix_if = driver.delete_prefix_if
+        if conditional and delete_prefix_if is None:
+            raise enotsup(driver.vfs, "conditional delete", path_spec)
         timer = start_op()
 
         async def settle(_: None) -> None:
@@ -106,7 +131,18 @@ def make_remove_prefix(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
             await invalidate_ancestors(path_spec)
 
         async with driver.connect(accessor) as conn:
-            await evict_after(driver.delete_prefix(conn, pfx), settle)
+            if conditional and delete_prefix_if is not None:
+                op = delete_prefix_if(
+                    conn, pfx, known_versions(path_spec, kpfx)
+                )
+            else:
+                op = driver.delete_prefix(conn, pfx)
+            try:
+                await evict_after(op, settle)
+            except ConditionLost as exc:
+                raise await stale(
+                    kp.key_path(path_spec, kpfx, exc.keys[0])
+                ) from exc
 
     return remove_prefix
 

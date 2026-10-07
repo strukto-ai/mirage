@@ -39,6 +39,7 @@ export const POSIX: Record<FsCondition, PosixErrno> = {
   EROFS: { errno: 30, phrase: 'Read-only file system' },
   EFBIG: { errno: 27, phrase: 'File too large' },
   NO_XATTR: { errno: 61, phrase: 'No data available' },
+  STALE_WRITE: { errno: 116, phrase: 'changed since it was read; read it again before writing' },
 }
 
 /** The canonical POSIX errno for a condition. */

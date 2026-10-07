@@ -59,6 +59,7 @@ async def handle_cross_mount(
     cwd: str = "/",
     argv: tuple[str, ...] = (),
     aggregate: AggregateFn | None = None,
+    delete_check: Callable[[PathSpec], None] | None = None,
 ) -> CrossResult:
     """Run a command whose path operands span mounts.
 
@@ -85,6 +86,8 @@ async def handle_cross_mount(
             reads.
         storage_key (Callable | None): Maps an operand to its storage
             identity (RELAY's transfer commands).
+        delete_check (Callable | None): Refuses a move's source whose
+            mount cannot condition the delete, before anything is copied.
         ns (NamespaceView | None): Name-plane facts for the RELAY
             generics that render them (ls).
         session_view (SessionView | None): The session plane's door, for
@@ -160,6 +163,7 @@ async def handle_cross_mount(
                 stdin,
                 cwd,
                 argv,
+                delete_check,
             )
         if strategy is Strategy.STREAM:
             return await run_stream(

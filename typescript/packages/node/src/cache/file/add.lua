@@ -7,8 +7,14 @@
 -- check, both writes and both expirations in one execution is what makes
 -- add() insert-only across processes: a background drain finishing late
 -- cannot land between the check and the write and overwrite a newer fill.
+-- A meta key already holding this fingerprint is a version kept for longer
+-- than the bytes; it keeps the longer bound.
 if redis.call('EXISTS', KEYS[1]) ~= 0 then
   return 0
+end
+local kept = -2
+if ARGV[2] ~= '' and redis.call('GET', KEYS[2]) == ARGV[2] then
+  kept = redis.call('TTL', KEYS[2])
 end
 redis.call('SET', KEYS[1], ARGV[1])
 if ARGV[2] ~= '' then
@@ -19,7 +25,11 @@ end
 if ARGV[3] ~= '' then
   redis.call('EXPIRE', KEYS[1], ARGV[3])
   if ARGV[2] ~= '' then
-    redis.call('EXPIRE', KEYS[2], ARGV[3])
+    if kept > tonumber(ARGV[3]) then
+      redis.call('EXPIRE', KEYS[2], kept)
+    else
+      redis.call('EXPIRE', KEYS[2], ARGV[3])
+    end
   end
 end
 return 1

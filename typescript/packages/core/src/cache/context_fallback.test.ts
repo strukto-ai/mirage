@@ -25,8 +25,14 @@ import {
   invalidateAncestors,
   invalidateSubtree,
   runWithCacheManager,
+  runWithOwnVersion,
+  runWithWriteContext,
+  writeCondition,
 } from './context.ts'
-import { PathSpec } from '../types.ts'
+import { MountMode, PathSpec, WritePolicy } from '../types.ts'
+import { RAMIndexCacheStore } from './index/ram.ts'
+import { MountEntry } from '../workspace/mount/mount.ts'
+import { BaseVFS } from '../vfs/base.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
 
 const captureState = vi.hoisted(() => ({ enabled: false, value: undefined as unknown }))
@@ -238,4 +244,55 @@ it('a pending capture owns completed same-path bodies only weakly', async () => 
     release()
     expect((await pending)[1]).toEqual(['held-token'])
   }
+})
+
+describe('a conditional write on the fallback storage', () => {
+  class S3Stub extends BaseVFS {
+    override readonly name = 's3'
+    override readonly cachesReads = true
+    override close(): Promise<void> {
+      return Promise.resolve()
+    }
+  }
+
+  async function conditional(): Promise<[MountEntry, PathSpec]> {
+    const entry = new MountEntry({
+      prefix: '/s3/',
+      vfs: new S3Stub(),
+      mode: MountMode.WRITE,
+      write: WritePolicy.CONDITIONAL,
+    })
+    const cache = new RAMFileCacheStore()
+    await cache.set('/s3/f', new TextEncoder().encode('one'), { fingerprint: 'v1' })
+    entry.cacheManager = new CacheManager(cache, new RAMIndexCacheStore({ ttl: 600 }), '/s3/', true)
+    const path = new PathSpec({ virtual: '/s3/f', directory: '/s3/', vfsPath: '/f' })
+    return [entry, path]
+  }
+
+  it("agrees with itself across one mount's nested frames", async () => {
+    // A command's frame and its op door's frame are the same mount, so
+    // they are not "overlapping lines" and the write keeps its version.
+    const [entry, path] = await conditional()
+    const cond = await runWithWriteContext(entry.writeContext(), () =>
+      runWithWriteContext(entry.writeContext(), () => writeCondition(path, 'write')),
+    )
+    expect(cond).toEqual({ ifMatch: 'v1' })
+  })
+
+  it('keeps an own version every live frame agrees on', async () => {
+    const [entry, path] = await conditional()
+    const cond = await runWithWriteContext(entry.writeContext(), () =>
+      runWithOwnVersion('v2', () => runWithOwnVersion('v2', () => writeCondition(path, 'write'))),
+    )
+    expect(cond).toEqual({ ifMatch: 'v2' })
+  })
+
+  it('refuses an own version the live frames disagree on', async () => {
+    const [entry, path] = await conditional()
+    await expect(
+      runWithWriteContext(entry.writeContext(), () =>
+        runWithOwnVersion('v2', () => runWithOwnVersion('v3', () => writeCondition(path, 'write'))),
+      ),
+    ).rejects.toMatchObject({ code: 'ENOTSUP' })
+  })
 })

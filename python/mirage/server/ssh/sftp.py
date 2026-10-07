@@ -50,6 +50,7 @@ from mirage.server.ssh.session import (
     open_session,
 )
 from mirage.server.ssh.stream import ENCODING, ERRORS
+from mirage.workspace.mount.write_policy import conditional_overlap
 
 logger = logging.getLogger(__name__)
 
@@ -336,6 +337,13 @@ class MirageSFTPServer(asyncssh.SFTPServer):
                 f"no such workspace: {self._workspace_id}"
             )
         ws = entry.runner.ws
+        # MountCore cannot carry a write's version; uploads would empty files.
+        conditional = conditional_overlap(ws.mounts(), "/")
+        if conditional is not None:
+            raise asyncssh.SFTPPermissionDenied(
+                f"mount {conditional!r}: write: conditional cannot be "
+                "served over SFTP, which has no place to carry the version"
+            )
         profile = key_profile(self._conn)
         await entry.runner.call(
             open_session(ws, self._session_id, profile=profile)

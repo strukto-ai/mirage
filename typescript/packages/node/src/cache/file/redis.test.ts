@@ -16,12 +16,18 @@ import { applyIo } from '@struktoai/mirage-core/cache/file/io'
 import { CachableAsyncIterator } from '@struktoai/mirage-core/io/cachable_iterator'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import { OpRecord } from '@struktoai/mirage-core/observe/record'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RedisClientType } from 'redis'
-import { DEL_BATCH, RedisFileCacheStore } from './redis.ts'
+import { DEL_BATCH, KEY_BATCH, RedisFileCacheStore, VERSION_TTL } from './redis.ts'
 
 const REDIS_URL = process.env.REDIS_URL
 const skip = REDIS_URL === undefined
+
+function ttlClient(cache: RedisFileCacheStore): Promise<{ ttl: (k: string) => Promise<number> }> {
+  return (
+    cache as unknown as { cacheClient: () => Promise<{ ttl: (k: string) => Promise<number> }> }
+  ).cacheClient()
+}
 
 describe('RedisFileCacheStore configuration', () => {
   it('rejects maxDrainBytes above cacheLimit', () => {
@@ -64,7 +70,7 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     expect(await cache.get('/data/sub/nested2')).toBeNull()
   })
 
-  it.each(['set', 'add'] as const)(
+  it.each(['set', 'add', 'setVersions'] as const)(
     '%s discards a fill invalidated while it awaited the client',
     async (method) => {
       // This store's window is its own: `set` and `add` both
@@ -106,12 +112,16 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
         // stamp and is parked inside the gated client, so `invalidate()`
         // runs to completion before the writer ever reaches its stale
         // check. Releasing first is what makes this racy and vacuous.
-        const fill = cache[method]('pending', new Uint8Array([1, 2, 3]))
+        const fill =
+          method === 'setVersions'
+            ? cache.setVersions({ pending: 'v1' })
+            : cache[method]('pending', new Uint8Array([1, 2, 3]))
         await invalidate()
         release()
         cache.cacheClient = real
         await fill
         expect(await cache.get('pending')).toBeNull()
+        expect(await cache.fingerprint('pending')).toBeNull()
         await cache.remove('pending')
       }
     },
@@ -384,6 +394,76 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     expect(cache.drainTasks.has('/slow.txt')).toBe(false)
     await task
     expect(await cache.get('/slow.txt')).toBeNull()
+  })
+
+  it('never reads a version kept without bytes', async () => {
+    await cache.setVersions({ '/a': 'v1' })
+    expect(await cache.exists('/a')).toBe(false)
+    expect(await cache.get('/a')).toBeNull()
+    expect(await cache.isFresh('/a', 'v1')).toBe(false)
+    expect(await cache.fingerprint('/a')).toBe('v1')
+    expect(await cache.add('/a', new TextEncoder().encode('drained'), { fingerprint: 'v1' })).toBe(
+      true,
+    )
+    expect(new TextDecoder().decode((await cache.get('/a')) ?? new Uint8Array())).toBe('drained')
+  })
+
+  it('lets a kept version outlive its bytes bound', async () => {
+    await cache.set('/a', new TextEncoder().encode('x'), { fingerprint: 'v1', ttl: 60 })
+    await cache.setVersions({ '/a': 'v1' })
+    const c = await ttlClient(cache)
+    expect(await c.ttl(`${prefix}meta:/a`)).toBeGreaterThan(60)
+    expect(await c.ttl(`${prefix}meta:/a`)).toBeLessThanOrEqual(VERSION_TTL)
+    expect(await c.ttl(`${prefix}data:/a`)).toBeGreaterThan(0)
+  })
+
+  it('bounds a version kept alone', async () => {
+    await cache.setVersions({ '/a': 'v1' })
+    const c = await ttlClient(cache)
+    expect(await c.ttl(`${prefix}meta:/a`)).toBeGreaterThan(60)
+    expect(await c.ttl(`${prefix}meta:/a`)).toBeLessThanOrEqual(VERSION_TTL)
+  })
+
+  it('never lets a late drain shorten a version', async () => {
+    await cache.setVersions({ '/a': 'v1' })
+    expect(
+      await cache.add('/a', new TextEncoder().encode('x'), { fingerprint: 'v1', ttl: 60 }),
+    ).toBe(true)
+    const c = await ttlClient(cache)
+    expect(await c.ttl(`${prefix}meta:/a`)).toBeGreaterThan(60)
+    expect(await c.ttl(`${prefix}data:/a`)).toBeLessThanOrEqual(60)
+  })
+
+  it('keeps many versions in one round trip', async () => {
+    const c = await (
+      cache as unknown as { cacheClient: () => Promise<Record<string, unknown>> }
+    ).cacheClient()
+    const evalSpy = vi.spyOn(c as { eval: () => unknown }, 'eval')
+    const multiSpy = vi.spyOn(c as { multi: () => unknown }, 'multi')
+    await cache.setVersions({ '/a': 'v1', '/b': 'v2', '/c': 'v3' })
+    expect([evalSpy.mock.calls.length, multiSpy.mock.calls.length]).toEqual([0, 1])
+    // Past KEY_BATCH keys the next batch is a pipeline of its own.
+    await cache.setVersions(
+      Object.fromEntries(Array.from({ length: KEY_BATCH + 2 }, (_, i) => [`/m${String(i)}`, 'v'])),
+    )
+    expect(multiSpy.mock.calls.length).toBe(3)
+    evalSpy.mockRestore()
+    multiSpy.mockRestore()
+    expect(await cache.fingerprints(['/a', '/b', '/c'])).toEqual(['v1', 'v2', 'v3'])
+  })
+
+  it('never replaces bytes written since with a version', async () => {
+    await cache.set('/a', new TextEncoder().encode('theirs'), { fingerprint: 'v2' })
+    await cache.setVersions({ '/a': 'v1' })
+    expect(await cache.fingerprint('/a')).toBe('v2')
+    await cache.remove('/a')
+    expect(await cache.fingerprint('/a')).toBeNull()
+  })
+
+  it('answers fingerprints for each key in order', async () => {
+    await cache.set('/a', new TextEncoder().encode('x'), { fingerprint: 'v1' })
+    await cache.setVersions({ '/c': 'v3' })
+    expect(await cache.fingerprints(['/a', '/b', '/c'])).toEqual(['v1', null, 'v3'])
   })
 })
 

@@ -22,6 +22,7 @@ class CacheEntry(BaseModel):
     cached_at: int
     fingerprint: str | None = None
     ttl: int | None = None
+    version_only: bool = False
 
     @property
     def expired(self) -> bool:

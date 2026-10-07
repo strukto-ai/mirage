@@ -14,7 +14,7 @@
 
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { ContextCall } from '../utils/async_context.ts'
-import { OpRecord } from './record.ts'
+import { OpRecord, STAMP_FINGERPRINT_OPS } from './record.ts'
 
 interface RecordingState {
   records: OpRecord[]
@@ -61,6 +61,50 @@ export function captureRecordingContext(): ContextCall[] {
 export async function commandRecords<T>(fn: (records: OpRecord[]) => Promise<T>): Promise<T> {
   const mine: OpRecord[] = []
   return commandSink.run(mine, () => fn(mine))
+}
+
+/**
+ * The paths whose conditional write lost on a line. A lost path's cached
+ * copy was dropped; nothing the line read of it before the loss may be
+ * cached again or sent as a version. A read or write of the path after the
+ * loss names the bytes now there, and lifts the mark. Mirrors python's
+ * `LostPaths`, which rides the recorder; here it is keyed by the line's
+ * records, since `applyIo` runs after the recording scope ends.
+ */
+export class LostPaths {
+  readonly marks = new Map<string, number>()
+
+  constructor(private readonly records: readonly OpRecord[]) {}
+
+  mark(key: string): void {
+    this.marks.set(key, this.records.length)
+  }
+
+  holds(key: string): boolean {
+    const start = this.marks.get(key)
+    if (start === undefined) return false
+    return !this.records
+      .slice(start)
+      .some((rec) => rec.path === key && STAMP_FINGERPRINT_OPS.has(rec.op))
+  }
+}
+
+const lostByLine = new WeakMap<readonly OpRecord[], LostPaths>()
+
+/** The lost paths of the line whose records these are, null outside a line. */
+export function lostPaths(records: readonly OpRecord[] | undefined): LostPaths | null {
+  if (records === undefined) return null
+  let lost = lostByLine.get(records)
+  if (lost === undefined) {
+    lost = new LostPaths(records)
+    lostByLine.set(records, lost)
+  }
+  return lost
+}
+
+/** Mark `key` lost on the running line, if one is recording. */
+export function markLost(key: string): void {
+  lostPaths(storage.getStore()?.records)?.mark(key)
 }
 
 export function activeRecords(): readonly OpRecord[] | undefined {

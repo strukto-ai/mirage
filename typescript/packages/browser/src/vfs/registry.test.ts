@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OAuthClientMetadata } from '@modelcontextprotocol/client'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { tokenUrl } from '@struktoai/mirage-core/core/google/client'
 import type { TokenManager } from '@struktoai/mirage-core/core/google/client'
@@ -290,5 +292,27 @@ describe('browser registry: trello', () => {
     expect(r.config.apiToken).toBe('t')
     expect(r.config.workspaceId).toBe('w1')
     expect(r.config.boardIds).toEqual(['b1', 'b2'])
+  })
+})
+
+describe('the write-condition table covers the browser registry', () => {
+  // The browser registers a subset of the node backends; each one still
+  // needs its row in the shared table (integ/fixtures/write/conditions.json).
+  const fixture = JSON.parse(
+    readFileSync(
+      fileURLToPath(
+        new URL('../../../../../integ/fixtures/write/conditions.json', import.meta.url),
+      ),
+      'utf8',
+    ),
+  ) as { vfs: Record<string, string[]> }
+
+  // Captured as the describe is collected, before any test registers a
+  // backend of its own.
+  const names = knownVfsNames()
+
+  it('has a row for every registered VFS', () => {
+    expect(names.length).toBeGreaterThan(0)
+    expect(names.filter((n) => !(n in fixture.vfs))).toEqual([])
   })
 })

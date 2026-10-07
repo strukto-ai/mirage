@@ -14,6 +14,7 @@
 
 import {
   createS3Client,
+  isConditionLost,
   isNotFoundError,
   loadS3Module,
   streamToBuffer,
@@ -21,19 +22,6 @@ import {
 } from '../../core/s3/client.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import { generationOf } from './types.ts'
-
-/**
- * True when a conditional write lost: the object changed since the
- * compare-read (412) or a concurrent conditional write is in flight
- * (409). Mirrors the Python `_is_condition_lost`.
- */
-function isConditionLostError(err: unknown): boolean {
-  if (err === null || typeof err !== 'object') return false
-  const e = err as { name?: string; $metadata?: { httpStatusCode?: number } }
-  if (e.name === 'PreconditionFailed' || e.name === 'ConditionalRequestConflict') return true
-  const status = e.$metadata?.httpStatusCode
-  return status === 412 || status === 409
-}
 
 const decoder = new TextDecoder()
 
@@ -123,7 +111,7 @@ export class S3RecordClient {
         }),
       )
     } catch (err) {
-      if (isConditionLostError(err)) return false
+      if (isConditionLost(err)) return false
       throw err
     }
     return true

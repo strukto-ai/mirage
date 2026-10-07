@@ -172,6 +172,29 @@ def test_cached_bytes_local_mount_returns_none():
     assert _run(_cached_local_case()) is None
 
 
+async def _cached_spelled_case(dotted: str | None) -> bytes | None:
+    cache, index = _stores()
+    await cache.set("/data/x.txt", b"cached")
+    manager = CacheManager(cache, index, "/data/", True)
+    spec = PathSpec(
+        vfs_path=mount_key("/data/x.txt", "/data/"),
+        virtual="/data/x.txt",
+        directory="/data/",
+        dotted=dotted,
+    )
+    return await manager.cached_bytes(spec)
+
+
+@pytest.mark.parametrize(
+    "dotted, served",
+    [(None, b"cached"), ("/data/x.txt", b"cached"), ("/data/x.txt/", None)],
+)
+def test_cached_bytes_withholds_a_trailing_slash_spelling(dotted, served):
+    # GNU reads `f/` as ENOTDIR for a plain file, which only the backend
+    # read answers; the cache key has already dropped the slash.
+    assert _run(_cached_spelled_case(dotted)) == served
+
+
 def _spec(path: str = "/data/x.txt") -> PathSpec:
     return PathSpec(
         vfs_path=mount_key(path, "/data/"), virtual=path, directory="/data/"
@@ -1130,3 +1153,32 @@ async def test_failed_fact_capture_does_not_leak_into_next_fill():
         AsyncMock(return_value=data),
     )
     assert not await cache.is_fresh("/s3/a.txt", "orphan")
+
+
+@pytest.mark.asyncio
+async def test_a_cold_read_bigger_than_the_cache_is_not_kept():
+    cache = RAMFileCacheStore(cache_limit=10)
+    index = RAMIndexCacheStore(ttl=600)
+    await cache.set("/data/warm", b"abc")
+    manager = CacheManager(cache, index, "/data/", True)
+
+    async def fetch() -> bytes:
+        return b"x" * 11
+
+    assert await manager.fill(_spec("/data/big"), fetch) == b"x" * 11
+    assert not await cache.exists("/data/big")
+    assert await cache.get("/data/warm") == b"abc"
+
+
+@pytest.mark.asyncio
+async def test_a_cold_read_the_store_refuses_still_returns_its_bytes(
+    refusing_store,
+):
+    manager = CacheManager(
+        refusing_store(), RAMIndexCacheStore(ttl=600), "/data/", True
+    )
+
+    async def fetch() -> bytes:
+        return b"hello"
+
+    assert await manager.fill(_spec("/data/a"), fetch) == b"hello"

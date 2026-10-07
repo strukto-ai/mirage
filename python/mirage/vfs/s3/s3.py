@@ -13,12 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.generic.rewrite import append_by_rewrite
+from mirage.core.s3.client import resolved_endpoint
 from mirage.core.s3.constants import SCOPE_ERROR
 from mirage.core.s3.copy import copy as _copy
 from mirage.core.s3.create import create as _create
@@ -45,6 +47,8 @@ from mirage.vfs.s3.prompt import PROMPT
 from mirage.vfs.types import DuEntries
 from mirage.watch.base import DeltaHook
 
+logger = logging.getLogger(__name__)
+
 
 class S3VFS(BaseVFS):
     accessor: S3Accessor
@@ -65,6 +69,19 @@ class S3VFS(BaseVFS):
         super().__init__()
         self.config = config
         self.accessor = S3Accessor(self.config)
+
+    def resolved_endpoint(self) -> str | None:
+        """The endpoint the client sends to, read off an offline client.
+
+        Mirrors TS ``resolvedEndpoint``.
+        """
+        try:
+            return resolved_endpoint(self.config)
+        except Exception as exc:
+            # A profile that does not exist fails the client too, and the
+            # mount reports that on first use; judge it on what it declared.
+            logger.debug("endpoint not resolved for %s: %s", self.name, exc)
+            return self.config.endpoint_url
 
     async def readdir(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

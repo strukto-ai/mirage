@@ -72,7 +72,7 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
   get(key: string): Promise<Uint8Array | null> {
     return this.lock.withLock(key, () => {
       const entry = this.entries.get(key)
-      if (entry === undefined) return Promise.resolve(null)
+      if (entry === undefined || entry.versionOnly) return Promise.resolve(null)
       if (entry.expired) {
         this.size -= entry.size
         this.entries.delete(key)
@@ -90,7 +90,7 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
   override exists(key: string | PathSpec): Promise<boolean> {
     const k = typeof key === 'string' ? key : key.mountPath
     const entry = this.entries.get(k)
-    return Promise.resolve(entry !== undefined && !entry.expired)
+    return Promise.resolve(entry !== undefined && !entry.versionOnly && !entry.expired)
   }
   async set(
     key: string,
@@ -135,7 +135,9 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
     try {
       placed = await this.lock.withLock(key, async () => {
         const existing = this.entries.get(key)
-        if (existing !== undefined && !existing.expired) return Promise.resolve(false)
+        if (existing !== undefined && !existing.versionOnly && !existing.expired) {
+          return Promise.resolve(false)
+        }
         if (this.invalidation.stale(key, stamp)) return false
         if (existing !== undefined) {
           this.size -= existing.size
@@ -201,9 +203,48 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
       return Promise.resolve()
     })
   }
+  fingerprint(key: string): Promise<string | null> {
+    return Promise.resolve(this.entries.get(key)?.fingerprint ?? null)
+  }
+  fingerprints(keys: readonly string[]): Promise<(string | null)[]> {
+    return Promise.resolve(keys.map((key) => this.entries.get(key)?.fingerprint ?? null))
+  }
+  async setVersions(versions: Readonly<Record<string, string>>): Promise<void> {
+    for (const [key, fingerprint] of Object.entries(versions)) {
+      await this.setVersion(key, fingerprint)
+    }
+  }
+
+  private async setVersion(key: string, fingerprint: string): Promise<void> {
+    const stamp = this.invalidation.enter(key)
+    try {
+      await this.lock.withLock(key, () => {
+        if (this.invalidation.stale(key, stamp)) return Promise.resolve()
+        const entry = this.entries.get(key)
+        if (entry !== undefined && !entry.versionOnly && !entry.expired) return Promise.resolve()
+        if (entry !== undefined) {
+          this.size -= entry.size
+          this.entries.delete(key)
+          this.store.files.delete(key)
+        }
+        const version = new CacheEntry({
+          size: key.length + fingerprint.length,
+          cachedAt: Math.floor(Date.now() / 1000),
+          fingerprint,
+          versionOnly: true,
+        })
+        this.entries.set(key, version)
+        this.size += version.size
+        return Promise.resolve()
+      })
+    } finally {
+      this.invalidation.leave(key)
+    }
+    await this.evict()
+  }
   isFresh(key: string, remoteFingerprint: string): Promise<boolean> {
     const entry = this.entries.get(key)
-    if (entry === undefined) return Promise.resolve(false)
+    if (entry === undefined || entry.versionOnly) return Promise.resolve(false)
     // An entry that carries no token verifies against nothing, and says
     // so here rather than relying on the caller to ask only when it holds
     // one. Without the first clause a caller arriving with no remote
@@ -215,7 +256,7 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
 
   isUnbounded(key: string): Promise<boolean> {
     const entry = this.entries.get(key)
-    return Promise.resolve(entry?.ttl === null)
+    return Promise.resolve(entry !== undefined && !entry.versionOnly && entry.ttl === null)
   }
 
   clear(): Promise<void> {

@@ -418,7 +418,10 @@ describe('a nested line', () => {
     // there could label bytes it never described.
     const ws = await cachingRamWorkspace()
     open.push(ws)
-    expect((await ws.shell('echo a > /r/f')).exitCode).toBe(0)
+    // Seeded through the ops API, which keeps no copy, so both cats below
+    // read the backend and record it; a redirect would now keep its bytes
+    // and serve them from the cache.
+    await ws.vfs.write('/r/f', new TextEncoder().encode('a\n'))
     const captured = captureMarks(ws)
     const line = 'cat /r/f; echo b | tee /r/g; x=$(cat /r/f; echo c | tee /r/h)'
     expect((await ws.shell(line)).exitCode).toBe(0)

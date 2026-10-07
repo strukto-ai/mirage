@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { md5Hex } from '../../utils/hash.ts'
 import { RAMFileCacheStore } from './ram.ts'
@@ -273,5 +273,71 @@ describe('isUnbounded', () => {
     expect(await cache.isUnbounded('/no-bound')).toBe(true)
     await cache.set('/bounded', new TextEncoder().encode('x'), { ttl: 30 })
     expect(await cache.isUnbounded('/bounded')).toBe(false)
+  })
+})
+
+describe('a version kept without bytes', () => {
+  it('is never read', async () => {
+    const c = new RAMFileCacheStore()
+    await c.setVersions({ '/a': 'v1' })
+    expect(await c.exists('/a')).toBe(false)
+    expect(await c.get('/a')).toBeNull()
+    expect(await c.isFresh('/a', 'v1')).toBe(false)
+    expect(await c.isUnbounded('/a')).toBe(false)
+    expect(await c.fingerprint('/a')).toBe('v1')
+    expect(await c.add('/a', encode('drained'), { fingerprint: 'v1' })).toBe(true)
+    expect(decode(await c.get('/a'))).toBe('drained')
+  })
+
+  it('replaces bytes past their bound with a version', async () => {
+    // Past its bound the entry vouches for nothing, as Redis's expired data
+    // key does; the version the line saw since is the one to keep.
+    const c = new RAMFileCacheStore()
+    await c.set('/a', encode('old'), { fingerprint: 'v1', ttl: 0 })
+    await c.setVersions({ '/a': 'v2' })
+    expect(await c.fingerprint('/a')).toBe('v2')
+    expect(await c.get('/a')).toBeNull()
+    // The old bytes leave the store with their entry, not outside the limit.
+    expect(
+      (c as unknown as { store: { files: Map<string, Uint8Array> } }).store.files.has('/a'),
+    ).toBe(false)
+  })
+
+  it('counts a restamped version once', async () => {
+    const c = new RAMFileCacheStore()
+    for (const token of ['v1', 'v2', 'v3']) await c.setVersions({ '/a': token })
+    expect(c.cacheSize).toBe('/a'.length + 'v3'.length)
+  })
+
+  it('never replaces bytes written since', async () => {
+    const c = new RAMFileCacheStore()
+    await c.set('/a', encode('theirs'), { fingerprint: 'v2' })
+    await c.setVersions({ '/a': 'v1' })
+    expect(decode(await c.get('/a'))).toBe('theirs')
+    expect(await c.fingerprint('/a')).toBe('v2')
+    await c.remove('/a')
+    expect(await c.fingerprint('/a')).toBeNull()
+  })
+
+  it('answers fingerprints for each key in order', async () => {
+    const c = new RAMFileCacheStore()
+    await c.set('/a', encode('x'), { fingerprint: 'v1' })
+    await c.setVersions({ '/c': 'v3' })
+    expect(await c.fingerprints(['/a', '/b', '/c'])).toEqual(['v1', null, 'v3'])
+  })
+
+  it('answers the version of an expired entry', async () => {
+    // The token stays true for the bytes that were read, which is all a
+    // conditional write's condition says.
+    vi.useFakeTimers()
+    try {
+      const c = new RAMFileCacheStore()
+      await c.set('/a', encode('x'), { fingerprint: 'v1', ttl: 1 })
+      vi.setSystemTime(Date.now() + 10_000)
+      expect(await c.exists('/a')).toBe(false)
+      expect(await c.fingerprint('/a')).toBe('v1')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

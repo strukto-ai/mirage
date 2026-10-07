@@ -28,6 +28,7 @@ export const StateKey = Object.freeze({
   LIVE_ONLY_MOUNTS: 'live_only_mounts',
   NODES: 'nodes',
   CLIS: 'clis',
+  WRITE: 'write',
 } as const)
 
 export const MountKey = Object.freeze({
@@ -36,6 +37,7 @@ export const MountKey = Object.freeze({
   MODE: 'mode',
   READ: 'read',
   TTL: 'ttl',
+  WRITE: 'write',
   VFS_CLASS: 'vfs_class',
   VFS_REF: 'vfs_ref',
   INDEX_CONFIG: 'index_config',

@@ -21,7 +21,11 @@ from collections.abc import AsyncIterator, Awaitable, Iterable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any, Callable
 
-from mirage.cache.context import push_cache_manager
+from mirage.cache.context import (
+    WriteContext,
+    push_cache_manager,
+    push_write_context,
+)
 from mirage.cache.index import NULL_INDEX
 from mirage.cache.index.config import IndexConfig
 from mirage.cache.index.factory import build_index
@@ -81,6 +85,7 @@ from mirage.types import (
     Producer,
     ReadSpec,
     WalkProbe,
+    WritePolicy,
 )
 from mirage.utils.context_scope import ContextScope
 from mirage.utils.ids import uuid7
@@ -91,6 +96,10 @@ from mirage.vfs.call import call_effect
 from mirage.vfs.types import Effect
 from mirage.workspace.mount.activity import VFSActivity
 from mirage.workspace.mount.read_policy import coerce_read_policy
+from mirage.workspace.mount.write_policy import (
+    coerce_write_policy,
+    write_conditions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -313,6 +322,7 @@ class MountEntry:
         index: IndexCacheStore | None = None,
         vfs_ref: str | None = None,
         index_config: IndexConfig | None = None,
+        write: WritePolicy | str | None = None,
     ) -> None:
         if not prefix.startswith("/"):
             raise ValueError(f"prefix must start with /: {prefix!r}")
@@ -345,6 +355,8 @@ class MountEntry:
         self.read = dataclasses.replace(
             spec, policy=coerce_read_policy(spec.policy)
         )
+        # Coerced so an embedder's bare string still matches `is`.
+        self.write = coerce_write_policy(write)
         # The store this mount runs its driver under, built by the
         # registry when the driver is placed and shared with any alias
         # of the same instance; a bare entry gets a RAM store at the
@@ -787,6 +799,24 @@ class MountEntry:
                         return self._wrap_output(cmd_name, cmd, paths, result)
                 return None, IOResult()
 
+    def write_context(self) -> WriteContext | None:
+        """What a write through this mount must carry, None when its writes
+        are unconditional.
+
+        Pushed by both doors whatever the policy, so an unconditional
+        mount clears a context an outer command's mount set.
+        """
+        manager = self.cache_manager
+        if self.write is not WritePolicy.CONDITIONAL or manager is None:
+            return None
+        return WriteContext(
+            vfs=self.vfs.name,
+            conditions=write_conditions(self.vfs),
+            read_version=manager.read_version,
+            read_versions=manager.read_versions,
+            drop=manager.invalidate_after_write,
+        )
+
     async def _pick_handlers(
         self,
         cmd_name: str,
@@ -955,12 +985,12 @@ class MountEntry:
     def _command_scope(self, context: ExecContext) -> Iterator[None]:
         """Bind what a handler's backend calls read from the context.
 
-        The recorder's mount, the snapshot revision pins and the mount's
-        cache manager; the mode the command tier's mode guard holds each
-        write to (its own region's mode); and what the command tier's
-        walk guard proves an operand's `.` and `..` with: the handler
-        reaches its backend past the door, so the door's stat and link
-        follow are bound here.
+        The recorder's mount, the snapshot revision pins, the mount's
+        cache manager and write context; the mode the command tier's mode
+        guard holds each write to (its own region's mode); and what the
+        command tier's walk guard proves an operand's `.` and `..` with:
+        the handler reaches its backend past the door, so the door's stat
+        and link follow are bound here.
 
         Args:
             context (ExecContext): the invocation's execution context.
@@ -968,6 +998,7 @@ class MountEntry:
         recording_token = push_mount_context(self.mount_id)
         revs_token = push_revisions(self.revisions or None)
         prev_manager = push_cache_manager(self.cache_manager)
+        prev_write = push_write_context(self.write_context())
         gate_token = set_mount_gate(self.prefix, self.mode)
         links = context.ns.links if context.ns is not None else None
         walk_token = (
@@ -989,6 +1020,7 @@ class MountEntry:
             reset_revisions(revs_token)
             reset_active_recorder(recording_token)
             push_cache_manager(prev_manager)
+            push_write_context(prev_write)
 
     def _read_only_refusal(
         self,
@@ -1275,6 +1307,7 @@ class MountEntry:
             )
             recording_token = push_mount_context(self.mount_id)
             revs_token = push_revisions(self.revisions or None)
+            prev_write = push_write_context(self.write_context())
             try:
                 for fn in levels:
                     # The backend's own paths are host paths, so the process
@@ -1296,3 +1329,4 @@ class MountEntry:
             finally:
                 reset_revisions(revs_token)
                 reset_active_recorder(recording_token)
+                push_write_context(prev_write)

@@ -15,12 +15,13 @@
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace, WritePolicy
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
 from mirage.server.clone import clone_workspace_with_override
 from mirage.vfs.ram import RAMVFS
+from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.vfs.slack import SlackConfig, SlackVFS
 
 
@@ -247,5 +248,32 @@ async def test_an_override_pointer_still_builds_the_declared_sources():
                     }
                 },
             )
+    finally:
+        await src.close()
+
+
+@pytest.mark.asyncio
+async def test_a_clone_keeps_each_mounts_write_policy():
+    # S3 comes back through the reuse path (its credentials are redacted),
+    # which rebuilt the mount from its VFS alone; the saved write policy
+    # has to survive it, as mode does.
+    src = Workspace(
+        {
+            "/s3": Mount(
+                S3VFS(S3Config(bucket="b")),
+                mode=MountMode.WRITE,
+                write="conditional",
+            ),
+            "/d": RAMVFS(),
+        },
+        mode=MountMode.WRITE,
+    )
+    try:
+        clone = await clone_workspace_with_override(src, None)
+        try:
+            assert clone.mount("/s3/").write is WritePolicy.CONDITIONAL
+            assert clone.mount("/d/").write is WritePolicy.UNCONDITIONAL
+        finally:
+            await clone.close()
     finally:
         await src.close()

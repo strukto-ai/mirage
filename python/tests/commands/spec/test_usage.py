@@ -22,7 +22,7 @@ from mirage.commands.spec.usage import (
     unknown_option_error,
     usage_exit_code,
 )
-from mirage.errors.fs import efbig
+from mirage.errors.fs import efbig, stale_write
 
 
 def test_exit_codes_match_gnu():
@@ -242,6 +242,8 @@ def test_read_fail_exit_ignores_anything_that_is_not_a_failed_read():
     assert read_fail_exit_code("sed", ValueError("bad script")) == 1
     assert read_fail_exit_code("sort", PermissionError("/locked")) == 1
     assert read_fail_exit_code("sort", RuntimeError("transport")) == 1
+    # A lost conditional write is a write failure, never sort's read 2.
+    assert read_fail_exit_code("sort", stale_write("/x")) == 1
 
 
 def test_read_fail_exit_line_reads_the_terminal_errno():

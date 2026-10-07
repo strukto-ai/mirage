@@ -12,8 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { enotsup, staleWrite } from '../errors/fs.ts'
+import type { FsError } from '../errors/types.ts'
+import { markLost } from '../observe/context.ts'
 import type { FileStat, PathSpec } from '../types.ts'
 import { type ContextCall, createAsyncContext } from '../utils/async_context.ts'
+import { keyPath } from '../utils/key_prefix.ts'
 
 /**
  * What this module needs from a cache manager. `CacheManager` in
@@ -227,5 +231,197 @@ export function publishRead(path: string, data: Uint8Array, fingerprint: string 
     const tokens = capture.facts.get(data) ?? []
     tokens.push(fingerprint)
     capture.facts.set(data, tokens)
+  }
+}
+
+/** The precondition one write carries. Mirrors Python's `WriteCondition`. */
+export interface WriteCondition {
+  /** The version the object must still have. */
+  readonly ifMatch?: string
+  /**
+   * The object must not exist yet; sent when no version is known, so a new
+   * file is created and an existing one is refused.
+   */
+  readonly ifNoneMatch?: true
+}
+
+/**
+ * What a write on a `write: conditional` mount needs to know. Bound by the
+ * mount's own doors (`executeOp`, `executeCmd`), so a write always sees
+ * the context of the mount it lands on; an unconditional mount binds null,
+ * which also clears an outer one. Mirrors Python's `WriteContext`.
+ */
+export interface WriteContext {
+  readonly vfs: string
+  /** The ops the backend can condition: put, create, copy, delete. */
+  readonly conditions: readonly string[]
+  /** The version the mount last saw for a path, null when it saw none. */
+  readVersion(path: PathSpec): Promise<string | null>
+  /** `readVersion` for many paths at once, in one store round trip. */
+  readVersions(paths: readonly PathSpec[]): Promise<(string | null)[]>
+  /** Drops the mount's cached copy, so the read a refusal asks for fetches. */
+  drop(path: PathSpec): Promise<void>
+}
+
+export type WriteKind = 'write' | 'copy' | 'delete'
+
+/**
+ * The version the mount last saw for each of a walk's backend keys, by key,
+ * for the keys it saw one for.
+ */
+export type KnownVersions = (keys: readonly string[]) => Promise<Map<string, string>>
+
+const writeStorage = createAsyncContext<{ context: WriteContext | null }>()
+const ownVersionStorage = createAsyncContext<{ version: string | null }>()
+
+/** Run `fn` with `context` bound as the mount's write context. */
+export function runWithWriteContext<T>(
+  context: WriteContext | null,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return Promise.resolve(writeStorage.run({ context }, fn))
+}
+
+/**
+ * The write context of the current async context. On the fallback storage
+ * the live frames can disagree (overlapping lines on different mounts);
+ * unlike the read side, that cannot read as "none", which would send a
+ * conditional mount's write unconditioned, so it throws and the write is
+ * refused instead.
+ */
+function activeWriteContext(path: PathSpec): WriteContext | null {
+  const states = writeStorage.liveStores()
+  const first = states[0]
+  if (first === undefined) return null
+  for (const state of states) {
+    if (state.context !== first.context) {
+      throw enotsup('workspace', 'conditional write (overlapping lines)', path)
+    }
+  }
+  return first.context
+}
+
+/**
+ * Hand the version an op just read to the write it makes next: a
+ * read-modify-write op (an append, a descriptor pwrite, a resize) bases its
+ * write on what it read itself, not on what the agent read.
+ */
+export function runWithOwnVersion<T>(version: string | null, fn: () => Promise<T>): Promise<T> {
+  return Promise.resolve(ownVersionStorage.run({ version }, fn))
+}
+
+/**
+ * The version an op read itself, handed down to its write. On the fallback
+ * storage the live frames can disagree; like the write context, that is
+ * refused rather than read as "none", which would send the agent's version
+ * in place of the op's own.
+ */
+function ownVersion(path: PathSpec): string | null {
+  const states = ownVersionStorage.liveStores()
+  const first = states[0]
+  if (first === undefined) return null
+  for (const state of states) {
+    if (state.version !== first.version) {
+      throw enotsup('workspace', 'conditional write (overlapping lines)', path)
+    }
+  }
+  return first.version
+}
+
+/**
+ * Run a read and return its bytes with the token they carried: the one its
+ * backend published for these exact bytes, null when it published none or
+ * two that disagree. Mirrors Python's `read_versioned`.
+ */
+export async function readVersioned<T>(
+  path: PathSpec,
+  fetch: () => Promise<T>,
+): Promise<[T, string | null]> {
+  const [data, facts] = await captureRead(path.virtual, fetch)
+  const first = facts[0]
+  const token = first !== undefined && facts.every((f) => f === first) ? first : null
+  return [data, token]
+}
+
+/**
+ * The condition a write to `path` must carry, null when unconditional.
+ * Mirrors Python's `write_condition`.
+ *
+ * @param own the version the op itself just saw
+ * @param preferOwn whether the op's own version wins over the mount's
+ *   cached one (true for a read-modify-write, false for a delete)
+ * @throws an ENOTSUP error when the backend cannot condition this op
+ */
+export async function writeCondition(
+  path: PathSpec,
+  kind: WriteKind,
+  own: string | null = null,
+  preferOwn = true,
+): Promise<WriteCondition | null> {
+  const context = activeWriteContext(path)
+  if (context === null) return null
+  const mine = own ?? ownVersion(path)
+  const cached = await context.readVersion(path)
+  const ownToken = mine === '' ? null : mine
+  const cachedToken = cached === '' ? null : cached
+  const version = preferOwn ? (ownToken ?? cachedToken) : (cachedToken ?? ownToken)
+  const needed =
+    kind === 'copy' ? 'copy' : kind === 'delete' ? 'delete' : version !== null ? 'put' : 'create'
+  if (!context.conditions.includes(needed)) {
+    throw enotsup(context.vfs, `conditional ${kind}`, path)
+  }
+  if (version !== null) return { ifMatch: version }
+  if (kind === 'delete') return {}
+  return { ifNoneMatch: true }
+}
+
+/**
+ * Whether a `kind` on `path` goes out conditioned, for a prefix walk, which
+ * conditions each key itself and needs no version for the operand. Mirrors
+ * python's `conditioned`.
+ *
+ * @throws an ENOTSUP error when the backend cannot condition this op
+ */
+export function conditioned(path: PathSpec, kind: 'copy' | 'delete'): boolean {
+  const context = activeWriteContext(path)
+  if (context === null) return false
+  if (!context.conditions.includes(kind)) throw enotsup(context.vfs, `conditional ${kind}`, path)
+  return true
+}
+
+/** Drop the write context's cached copy of `path`, if there is one. */
+export async function dropCached(path: PathSpec): Promise<void> {
+  markLost(path.virtual)
+  const context = activeWriteContext(path)
+  if (context !== null) await context.drop(path)
+}
+
+/**
+ * The refusal for a lost condition, after dropping the cached copy;
+ * `landed` marks a move whose copy landed before its source's delete lost,
+ * which `mv` reports as a failed removal.
+ */
+export async function stale(path: PathSpec, landed = false): Promise<FsError> {
+  await dropCached(path)
+  return staleWrite(path, landed)
+}
+
+/**
+ * The versions a prefix walk under `root` measures its keys against: a key
+ * the agent read is held to the version it read, and the walk's own listing
+ * only stands in for keys it never saw. Mirrors python's `known_versions`.
+ */
+export function knownVersions(root: PathSpec, keyPrefix: string): KnownVersions {
+  return async (keys) => {
+    const known = new Map<string, string>()
+    if (keys.length === 0) return known
+    const context = activeWriteContext(root)
+    if (context === null) return known
+    const tokens = await context.readVersions(keys.map((key) => keyPath(root, keyPrefix, key)))
+    keys.forEach((key, i) => {
+      const token = tokens[i]
+      if (token !== null && token !== undefined && token !== '') known.set(key, token)
+    })
+    return known
   }
 }

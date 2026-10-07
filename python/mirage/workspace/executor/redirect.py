@@ -16,6 +16,7 @@ import logging
 from enum import Enum, auto
 from functools import partial
 
+from mirage.cache.file.io import mark_claimed_writes
 from mirage.context import reset_redirect_paths, set_redirect_paths
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
@@ -25,6 +26,8 @@ from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, share
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, DeviceInput
+from mirage.observe.context import command_records
+from mirage.observe.record import OpRecord
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
@@ -269,6 +272,34 @@ def _stdin_dest(context: EvaluationContext) -> _Fd | str:
     if identity == TO_STDERR:
         return _TO_STDERR
     return identity
+
+
+def _claim(
+    io: IOResult, records: list[OpRecord], file: FileDescription, data: bytes
+) -> None:
+    """Keep the bytes a redirect wrote, as tee keeps its own.
+
+    The redirect claims the path with the very bytes it wrote and marks
+    its own write records with them, so ``written_verdict`` keeps the
+    bytes with the PUT's token, and a later write in the line still voids
+    an earlier command's claim on the same path. Only a ``>`` write
+    claims: an append's bytes are the file's tail, never the file. A
+    descriptor write records ``pwrite``, which the verdict never reads, so
+    its bytes stay uncached too.
+
+    Args:
+        io (IOResult): the line's result.
+        records (list[OpRecord]): the records this write made.
+        file (FileDescription): the description written through.
+        data (bytes): the bytes written.
+    """
+    path = file.scope.virtual
+    io.writes[path] = data
+    io.cache = [p for p in io.cache if p != path]
+    if file.append:
+        return
+    io.cache.append(path)
+    mark_claimed_writes(records, io)
 
 
 async def handle_redirect(
@@ -640,17 +671,17 @@ async def handle_redirect(
                         if unique
                         else b""
                     )
-                    if data or id(file) not in opened:
-                        await write_description(dispatch, session, file, data)
-                    else:
-                        file.opened = True
+                    with command_records() as mine:
+                        if data or id(file) not in opened:
+                            await write_description(
+                                dispatch, session, file, data
+                            )
+                        else:
+                            file.opened = True
                     if unique:
                         consumed.add(id(file))
                         if data:
-                            io.writes[file.scope.virtual] = data
-                            io.cache = [
-                                p for p in io.cache if p != file.scope.virtual
-                            ]
+                            _claim(io, mine, file, data)
             for key, data in chunks:
                 target = dest(key)
                 if target is _TO_STDOUT:
@@ -664,11 +695,11 @@ async def handle_redirect(
                     and id(target) not in consumed
                 ):
                     failed_scope = target.scope
-                    await write_description(dispatch, session, target, data)
-                    io.writes[target.scope.virtual] = data
-                    io.cache = [
-                        p for p in io.cache if p != target.scope.virtual
-                    ]
+                    with command_records() as mine:
+                        await write_description(
+                            dispatch, session, target, data
+                        )
+                    _claim(io, mine, target, data)
         except FS_ERRORS as exc:
             assert failed_scope is not None
             routed.append(

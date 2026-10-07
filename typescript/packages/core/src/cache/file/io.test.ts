@@ -20,6 +20,7 @@ import { OpRecord } from '../../observe/record.ts'
 import type { CacheFacts, PathSpec } from '../../types.ts'
 import { applyIo, latestFingerprint, writtenVerdict } from './io.ts'
 import { RAMFileCacheStore } from './ram.ts'
+import { RefusingStore } from '../_test_util.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -152,6 +153,49 @@ class CountingCache extends RAMFileCacheStore {
     return await super.exists(key)
   }
 }
+
+describe('what the cache will hold', () => {
+  it.each(['reads', 'writes'] as const)(
+    'keeps no bytes bigger than the cache: %s',
+    async (side) => {
+      // Bytes bigger than the whole cache, if kept, would flush every warm
+      // entry and then themselves; on Redis they would upload the whole
+      // payload to a shared server. The stale copy goes, too.
+      const cache = new RAMFileCacheStore({ limit: 10 })
+      await cache.set('/s3/warm', ENC.encode('abc'))
+      await cache.set('/s3/big', ENC.encode('old'))
+      const io = new IOResult({
+        [side]: { '/s3/big': ENC.encode('x'.repeat(11)) },
+        cache: ['/s3/big'],
+      })
+      await applyIo(cache, io)
+      expect(await cache.exists('/s3/big')).toBe(false)
+      expect(DEC.decode((await cache.get('/s3/warm')) ?? new Uint8Array())).toBe('abc')
+    },
+  )
+
+  it('never fails the line on a fill the store refuses', async () => {
+    // The write already landed; a cache that cannot hold the bytes is no
+    // reason to report it failed, nor to skip the evictions after it.
+    const cache = new RefusingStore()
+    await RAMFileCacheStore.prototype.set.call(cache, '/s3/f', ENC.encode('old'))
+    await RAMFileCacheStore.prototype.set.call(cache, '/s3/other', ENC.encode('old'))
+    const io = new IOResult({
+      writes: { '/s3/f': ENC.encode('new'), '/s3/other': ENC.encode('x') },
+      cache: ['/s3/f'],
+    })
+    await applyIo(cache, io)
+    expect(await cache.exists('/s3/f')).toBe(false)
+    expect(await cache.exists('/s3/other')).toBe(false)
+  })
+
+  it('never fails the line on a store that is down', async () => {
+    // Nor does a server that refuses the drop of the stale copy as well.
+    const cache = new RefusingStore(true)
+    await RAMFileCacheStore.prototype.set.call(cache, '/s3/f', ENC.encode('old'))
+    await applyIo(cache, new IOResult({ writes: { '/s3/f': ENC.encode('new') }, cache: ['/s3/f'] }))
+  })
+})
 
 describe('backend fingerprint threading', () => {
   it('stamps the cache entry with the record fingerprint', async () => {

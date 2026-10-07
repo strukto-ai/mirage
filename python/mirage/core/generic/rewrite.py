@@ -14,6 +14,7 @@
 
 from collections.abc import Awaitable, Callable
 
+from mirage.cache.context import own_write_version, read_versioned
 from mirage.errors.fs import eexist, einval, eisdir, enotsup
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.ranges import splice_window
@@ -52,11 +53,12 @@ async def append_by_rewrite(
             raise eisdir(path.virtual)
         return
     try:
-        existing = await read(path)
+        existing, own = await read_versioned(path, lambda: read(path))
     except FileNotFoundError:
         await write(path, data)
         return
-    await write(path, existing + data)
+    with own_write_version(own):
+        await write(path, existing + data)
 
 
 async def pwrite_by_rewrite(
@@ -94,8 +96,9 @@ async def pwrite_by_rewrite(
         if found.type == FileType.DIRECTORY:
             raise eisdir(path.virtual)
         return
+    own: str | None = None
     try:
-        existing = await read(path)
+        existing, own = await read_versioned(path, lambda: read(path))
     except FileNotFoundError:
         try:
             missing: FileStat | None = await stat(path)
@@ -104,7 +107,8 @@ async def pwrite_by_rewrite(
         if missing is not None and missing.type == FileType.DIRECTORY:
             raise eisdir(path.virtual)
         existing = b""
-    await write(path, splice_window(existing, offset, data))
+    with own_write_version(own):
+        await write(path, splice_window(existing, offset, data))
 
 
 async def truncate_by_rewrite(

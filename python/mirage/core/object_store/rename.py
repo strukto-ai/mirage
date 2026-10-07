@@ -13,18 +13,23 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.cache.context import (
+    drop_cached,
     evict_after,
     invalidate_after_move,
     invalidate_ancestors,
+    known_versions,
+    stale,
+    write_condition,
 )
 from mirage.core.object_store.driver import (
     A,
     C,
+    ConditionLost,
     ExistsFn,
     ObjectStoreDriver,
     PairFn,
 )
-from mirage.errors.fs import enoent
+from mirage.errors.fs import enoent, enotsup
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils import key_prefix as kp
@@ -75,9 +80,35 @@ def make_rename(
         # move_file leaves this "rename": the walk never ran, so nothing
         # under the prefix can have moved.
         op = "rename"
+        # A move is a copy then a delete, so both carry a condition.
+        cond = await write_condition(dst_spec, "copy")
+        move_file_if = driver.move_file_if
+        move_prefix_if = driver.move_prefix_if
+        source: str | None = None
+        if cond is not None:
+            src_cond = await write_condition(src_spec, "delete")
+            source = src_cond.if_match if src_cond is not None else None
+            if move_file_if is None or move_prefix_if is None:
+                raise enotsup(driver.vfs, "conditional rename", src_spec)
 
         async def move(conn: C) -> bool:
             nonlocal op
+            if (
+                cond is not None
+                and move_file_if is not None
+                and move_prefix_if is not None
+            ):
+                if await move_file_if(
+                    conn, src_key, kp.apply(kpfx, dst), cond, source
+                ):
+                    return True
+                op = "rename_prefix"
+                return await move_prefix_if(
+                    conn,
+                    kp.apply_dir(kpfx, src),
+                    kp.apply_dir(kpfx, dst),
+                    known_versions(src_spec, kpfx),
+                )
             if await move_file(conn, src_key, kp.apply(kpfx, dst)):
                 return True
             # A directory owns no object of its own, so a clean False
@@ -114,7 +145,17 @@ def make_rename(
             await invalidate_ancestors(src_spec)
 
         async with driver.connect(accessor) as conn:
-            moved = await evict_after(move(conn), settle)
+            try:
+                moved = await evict_after(move(conn), settle)
+            except ConditionLost as exc:
+                await drop_cached(dst_spec)
+                key = exc.keys[0]
+                lost = (
+                    src_spec
+                    if key == src_key
+                    else kp.key_path(src_spec, kpfx, key)
+                )
+                raise await stale(lost, landed=exc.landed) from exc
         if not moved:
             raise enoent(src_spec.virtual)
 

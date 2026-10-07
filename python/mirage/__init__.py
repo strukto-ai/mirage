@@ -106,6 +106,7 @@ if TYPE_CHECKING:
         ReadPolicy,
         ReadSpec,
         VFSName,
+        WritePolicy,
     )
     from mirage.utils.glob_walk import (
         DEFAULT_MAX_GLOB_MATCHES,
@@ -158,6 +159,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "MountMode",
         "ReadPolicy",
         "ReadSpec",
+        "WritePolicy",
         "ContentType",
         "DriftPolicy",
         "FileType",
@@ -272,6 +274,7 @@ __all__ = [
     "MountMode",
     "ReadPolicy",
     "ReadSpec",
+    "WritePolicy",
     "CLIInvocation",
     "CLISpec",
     "Operand",

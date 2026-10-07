@@ -15,7 +15,7 @@
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { Runtime } from '@struktoai/mirage-core/runtime/base'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
-import { MountMode } from '@struktoai/mirage-core/types'
+import { MountMode, ReadPolicy, WritePolicy } from '@struktoai/mirage-core/types'
 import { RAMNamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/ram'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { normalizeCacheConfig } from '@struktoai/mirage-core/cache/file/config'
@@ -660,6 +660,12 @@ describe('configToWorkspaceArgs', () => {
       '/s3': ['fuse', undefined],
     })
     expect('kernelMounts' in withFuse.options).toBe(false)
+    // The mount itself carries no backend: the node constructor auto-mounts a
+    // kernel backend, and the caller mounts kernelMounts, so carrying both
+    // would expose the mount twice.
+    for (const prefix of ['/data', '/s3']) {
+      expect(withFuse.mounts[prefix]?.options.backend).toBeUndefined()
+    }
     const withoutFuse = await configToWorkspaceArgs(
       loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram' } } }),
     )
@@ -1329,13 +1335,15 @@ describe('CLI to daemon round trip', () => {
 // block that is not a permission verb, then a verb each.
 const ACCEPTED_FIXTURES = ['blocks', 'allow', 'ask', 'deny'] as const
 
-function fixtureCases(name: string): { name: string; config: Record<string, unknown> }[] {
+function fixtureCases(
+  name: string,
+): { name: string; error?: string; config: Record<string, unknown> }[] {
   const path = fileURLToPath(
     new URL(`../../../../integ/fixtures/config/${name}.json`, import.meta.url),
   )
   return (
     JSON.parse(readFileSync(path, 'utf8')) as {
-      cases: { name: string; config: Record<string, unknown> }[]
+      cases: { name: string; error?: string; config: Record<string, unknown> }[]
     }
   ).cases
 }
@@ -1347,8 +1355,10 @@ describe('shared rejection fixture', () => {
     expect(cases.length).toBeGreaterThan(0)
   })
 
-  it.each(cases)('refuses $name', ({ config }) => {
-    expect(() => loadWorkspaceConfig(config)).toThrow()
+  it.each(cases)('refuses $name', ({ config, error }) => {
+    // Where a case names the phrase, both loaders must say it.
+    if (error === undefined) expect(() => loadWorkspaceConfig(config)).toThrow()
+    else expect(() => loadWorkspaceConfig(config)).toThrow(error)
   })
 })
 
@@ -1686,5 +1696,38 @@ describe('mount index block', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+})
+
+// Each mount keeps its own neighbours (read, mode, index) at non-default
+// values, so a door that rebuilt the mount around the new key, instead of
+// setting it, loses them and fails here.
+describe('mount write block', () => {
+  it.each([
+    ['neither', undefined, undefined, WritePolicy.UNCONDITIONAL],
+    ['workspace', 'conditional', undefined, WritePolicy.CONDITIONAL],
+    ['block-overrides', 'conditional', 'unconditional', WritePolicy.UNCONDITIONAL],
+    ['block', undefined, 'conditional', WritePolicy.CONDITIONAL],
+  ] as const)('reaches its mount (%s)', async (_id, workspace, block, expected) => {
+    const a: Record<string, unknown> = {
+      vfs: 's3',
+      config: { bucket: 'b' },
+      mode: 'write',
+      read: 'fresh',
+      ttl: 45,
+      index: { type: 'ram', ttl: 37 },
+    }
+    if (block !== undefined) a.write = block
+    const doc: Record<string, unknown> = {
+      mounts: { '/a': a, '/b': { vfs: 'ram', write: 'unconditional' } },
+    }
+    if (workspace !== undefined) doc.write = workspace
+    const { mounts } = await configToWorkspaceArgs(loadWorkspaceConfig(doc))
+    const options = mounts['/a']?.options
+    expect(options?.write).toBe(expected)
+    expect(options?.mode).toBe(MountMode.WRITE)
+    expect(options?.read).toEqual({ policy: ReadPolicy.FRESH, ttl: 45 })
+    expect(options?.index).toEqual({ type: 'ram', ttl: 37 })
+    expect(mounts['/b']?.options.write).toBe(WritePolicy.UNCONDITIONAL)
   })
 })

@@ -18,15 +18,19 @@ import type { S3Config } from '../../vfs/s3/config.ts'
 import { VFSName } from '../../types.ts'
 import { eacces } from '../../errors/fs.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import type {
-  ChildEntry,
-  ObjectMeta,
-  ObjectStoreConnection,
-  ObjectStoreDriver,
-  TreeEntry,
+import type { KnownVersions, WriteCondition } from '../../cache/context.ts'
+import {
+  type ChildEntry,
+  type ObjectMeta,
+  type ObjectStoreConnection,
+  type ObjectStoreDriver,
+  type TreeEntry,
+  ConditionLost,
 } from '../object_store/driver.ts'
 import {
+  CONDITION_LOST_CODES,
   createS3Client,
+  isConditionLost,
   isNotFoundError,
   loadS3Module,
   streamToBuffer,
@@ -47,7 +51,7 @@ export interface S3Conn {
 
 interface Listing {
   CommonPrefixes?: { Prefix?: string }[]
-  Contents?: { Key?: string; Size?: number; LastModified?: Date | string }[]
+  Contents?: { Key?: string; Size?: number; LastModified?: Date | string; ETag?: string }[]
   IsTruncated?: boolean
   NextContinuationToken?: string
 }
@@ -168,7 +172,87 @@ async function head(conn: S3Conn, key: string): Promise<ObjectMeta | null> {
 }
 
 async function get(conn: S3Conn, key: string): Promise<Uint8Array | null> {
-  let resp: { Body?: unknown }
+  return (await getVersioned(conn, key))?.[0] ?? null
+}
+
+function put(conn: S3Conn, key: string, data: Uint8Array): Promise<ObjectMeta | null> {
+  return putIf(conn, key, data, {})
+}
+
+// The token is kept unquoted (`etagOf`), and the probes that measured each
+// store's conditions sent the quoted form a response carries, so that is the
+// form sent back.
+function quoted(token: string): string {
+  return token.startsWith('"') ? token : `"${token}"`
+}
+
+function condition(cond: WriteCondition): Record<string, string> {
+  if (cond.ifMatch !== undefined) return { IfMatch: quoted(cond.ifMatch) }
+  if (cond.ifNoneMatch === true) return { IfNoneMatch: '*' }
+  return {}
+}
+
+function isMissingBucket(err: unknown): boolean {
+  const e = err as { name?: string; Code?: string }
+  return e.name === 'NoSuchBucket' || e.Code === 'NoSuchBucket'
+}
+
+/**
+ * Whether a conditioned request lost its condition: a version sent with
+ * `If-Match` loses on a 412, and on a 404 for its key (not a missing bucket),
+ * since AWS answers that way for a key deleted since it was read. Mirrors
+ * python's `_lost_condition`.
+ */
+function lostCondition(err: unknown, matched: boolean): boolean {
+  return isConditionLost(err) || (matched && isNotFoundError(err) && !isMissingBucket(err))
+}
+
+async function guarded<T>(key: string, call: Promise<T>, matched = false): Promise<T> {
+  try {
+    return await call
+  } catch (err) {
+    if (lostCondition(err, matched)) throw new ConditionLost([key])
+    throw err
+  }
+}
+
+async function putIf(
+  conn: S3Conn,
+  key: string,
+  data: Uint8Array,
+  cond: WriteCondition,
+): Promise<ObjectMeta | null> {
+  // The ETag is read through the same helper `head` uses, so the token a
+  // write stamps and the token a later stat reports are one spelling.
+  // A write carries no type of its own, so the mount's default is the one the
+  // store keeps and serves back.
+  const contentType = conn.config.defaultContentType
+  const resp = (await guarded(
+    key,
+    conn.send(
+      new conn.mod.PutObjectCommand({
+        Bucket: conn.config.bucket,
+        Key: key,
+        Body: data,
+        ...(contentType !== undefined && contentType !== '' ? { ContentType: contentType } : {}),
+        ...condition(cond),
+      }),
+    ),
+    cond.ifMatch !== undefined,
+  )) as { ETag?: string; VersionId?: string }
+  const etag = etagOf(resp)
+  return {
+    size: data.byteLength,
+    fingerprint: etag !== '' ? etag : null,
+    revision: versionOf(resp),
+  }
+}
+
+async function getVersioned(
+  conn: S3Conn,
+  key: string,
+): Promise<[Uint8Array, string | null] | null> {
+  let resp: { Body?: unknown; ETag?: string }
   try {
     resp = (await conn.send(
       new conn.mod.GetObjectCommand({ Bucket: conn.config.bucket, Key: key }),
@@ -177,29 +261,204 @@ async function get(conn: S3Conn, key: string): Promise<Uint8Array | null> {
     if (isNotFoundError(err)) return null
     throw err
   }
-  return streamToBuffer(resp.Body)
+  const etag = etagOf(resp)
+  return [await streamToBuffer(resp.Body), etag !== '' ? etag : null]
 }
 
-async function put(conn: S3Conn, key: string, data: Uint8Array): Promise<ObjectMeta | null> {
-  // The ETag is read through the same helper `head` uses, so the token a
-  // write stamps and the token a later stat reports are one spelling.
-  // A write carries no type of its own, so the mount's default is the one the
-  // store keeps and serves back.
-  const contentType = conn.config.defaultContentType
-  const resp = (await conn.send(
-    new conn.mod.PutObjectCommand({
-      Bucket: conn.config.bucket,
-      Key: key,
-      Body: data,
-      ...(contentType !== undefined && contentType !== '' ? { ContentType: contentType } : {}),
-    }),
-  )) as { ETag?: string; VersionId?: string }
-  const etag = etagOf(resp)
-  return {
-    size: data.byteLength,
-    fingerprint: etag !== '' ? etag : null,
-    revision: versionOf(resp),
+async function copyIf(
+  conn: S3Conn,
+  srcKey: string,
+  dstKey: string,
+  cond: WriteCondition,
+): Promise<boolean> {
+  try {
+    await conn.send(
+      new conn.mod.CopyObjectCommand({
+        Bucket: conn.config.bucket,
+        CopySource: `${conn.config.bucket}/${srcKey}`,
+        Key: dstKey,
+        ...condition(cond),
+      }),
+    )
+  } catch (err) {
+    // A 404 is lost only while the source is still there.
+    let lost = isConditionLost(err)
+    if (!lost && cond.ifMatch !== undefined && isNotFoundError(err) && !isMissingBucket(err)) {
+      try {
+        lost = (await head(conn, srcKey)) !== null
+      } catch (probeErr) {
+        console.debug(`source probe failed for ${srcKey}: ${String(probeErr)}`)
+      }
+    }
+    if (lost) throw new ConditionLost([dstKey])
+    throw err
   }
+  return true
+}
+
+async function deleteIf(conn: S3Conn, key: string, cond: WriteCondition): Promise<void> {
+  await guarded(
+    key,
+    conn.send(
+      new conn.mod.DeleteObjectCommand({
+        Bucket: conn.config.bucket,
+        Key: key,
+        ...condition(cond),
+      }),
+    ),
+  )
+}
+
+async function moveFileIf(
+  conn: S3Conn,
+  srcKey: string,
+  dstKey: string,
+  cond: WriteCondition,
+  source: string | null,
+): Promise<boolean> {
+  // Pin the source to the agent's version, else to this lookup's.
+  let pinned = source
+  if (pinned === null) {
+    const meta = await head(conn, srcKey)
+    if (meta === null) return false
+    pinned = meta.fingerprint ?? ''
+  }
+  const match = quoted(pinned)
+  await guarded(
+    srcKey,
+    conn.send(
+      new conn.mod.CopyObjectCommand({
+        Bucket: conn.config.bucket,
+        CopySource: `${conn.config.bucket}/${srcKey}`,
+        Key: dstKey,
+        CopySourceIfMatch: match,
+        ...condition(cond),
+      }),
+    ),
+    true,
+  )
+  try {
+    await guarded(
+      srcKey,
+      conn.send(
+        new conn.mod.DeleteObjectCommand({
+          Bucket: conn.config.bucket,
+          Key: srcKey,
+          IfMatch: match,
+        }),
+      ),
+      true,
+    )
+  } catch (err) {
+    if (err instanceof ConditionLost) throw new ConditionLost(err.keys, true)
+    throw err
+  }
+  return true
+}
+
+async function listed(conn: S3Conn, pfx: string): Promise<[string, string][]> {
+  const found: [string, string][] = []
+  for await (const page of listPages(conn, { Bucket: conn.config.bucket, Prefix: pfx })) {
+    for (const obj of page.Contents ?? []) {
+      if (obj.Key !== undefined) found.push([obj.Key, quoted(obj.ETag ?? '')])
+    }
+  }
+  return found
+}
+
+/** The error for keys a DeleteObjects refused in the body of its 200. */
+function refused(failed: readonly string[]): Error {
+  return eacces(
+    `/${failed[0] ?? ''}`,
+    `S3 refused to delete ${String(failed.length)} object(s), starting at '${failed[0] ?? ''}'`,
+  )
+}
+
+/**
+ * Delete each listed key only while it is the version listed. A refusal
+ * comes back per key in the body of a 200.
+ *
+ * @throws ConditionLost for keys a newer write changed, which were kept
+ * @throws EACCES for keys the store refused for another reason
+ */
+async function deleteListed(conn: S3Conn, keys: readonly [string, string][]): Promise<void> {
+  const lost: string[] = []
+  const failed: string[] = []
+  for (let start = 0; start < keys.length; start += DELETE_BATCH) {
+    const batch = keys.slice(start, start + DELETE_BATCH)
+    const resp = (await conn.send(
+      new conn.mod.DeleteObjectsCommand({
+        Bucket: conn.config.bucket,
+        Delete: { Objects: batch.map(([Key, ETag]) => ({ Key, ETag })) },
+      }),
+    )) as { Errors?: { Key?: string; Code?: string }[] }
+    for (const err of resp.Errors ?? []) {
+      ;(CONDITION_LOST_CODES.has(err.Code ?? '') ? lost : failed).push(err.Key ?? '')
+    }
+  }
+  if (lost.length > 0) throw new ConditionLost(lost)
+  if (failed.length > 0) throw refused(failed)
+}
+
+/**
+ * Each key under `pfx` with the version it is measured against: the version
+ * the agent read where there is one, else the listing's. Mirrors python's
+ * `_known_listing`.
+ */
+async function knownListing(
+  conn: S3Conn,
+  pfx: string,
+  known: KnownVersions,
+): Promise<[string, string][]> {
+  const keys = await listed(conn, pfx)
+  const versions = await known(keys.map(([key]) => key))
+  return keys.map(([key, token]) => {
+    const version = versions.get(key)
+    return [key, version !== undefined ? quoted(version) : token]
+  })
+}
+
+async function deletePrefixIf(conn: S3Conn, pfx: string, known: KnownVersions): Promise<void> {
+  const keys = await knownListing(conn, pfx, known)
+  if (keys.length > 0) await deleteListed(conn, keys)
+}
+
+async function movePrefixIf(
+  conn: S3Conn,
+  srcPfx: string,
+  dstPfx: string,
+  known: KnownVersions,
+): Promise<boolean> {
+  const keys = await knownListing(conn, srcPfx, known)
+  if (keys.length === 0) return false
+  const moved: [string, string][] = []
+  const lost: string[] = []
+  for (const [key, token] of keys) {
+    try {
+      await conn.send(
+        new conn.mod.CopyObjectCommand({
+          Bucket: conn.config.bucket,
+          CopySource: `${conn.config.bucket}/${key}`,
+          Key: `${dstPfx}${key.slice(srcPfx.length)}`,
+          CopySourceIfMatch: token,
+          IfNoneMatch: '*',
+        }),
+      )
+    } catch (err) {
+      if (!lostCondition(err, true)) throw err
+      lost.push(key)
+      continue
+    }
+    moved.push([key, token])
+  }
+  try {
+    if (moved.length > 0) await deleteListed(conn, moved)
+  } catch (err) {
+    if (!(err instanceof ConditionLost)) throw err
+    lost.push(...err.keys)
+  }
+  if (lost.length > 0) throw new ConditionLost(lost)
+  return true
 }
 
 async function deleteFile(conn: S3Conn, key: string): Promise<void> {
@@ -213,12 +472,15 @@ async function deletePrefix(conn: S3Conn, pfx: string): Promise<void> {
       .filter((k): k is string => k !== undefined)
       .map((k) => ({ Key: k }))
     if (keys.length > 0) {
-      await conn.send(
+      const resp = (await conn.send(
         new conn.mod.DeleteObjectsCommand({
           Bucket: conn.config.bucket,
           Delete: { Objects: keys },
         }),
-      )
+      )) as { Errors?: { Key?: string }[] }
+      // A refused key comes back in the body of a 200.
+      const failed = (resp.Errors ?? []).map((e) => e.Key ?? '')
+      if (failed.length > 0) throw refused(failed)
     }
   }
 }
@@ -338,5 +600,12 @@ export const DRIVER: ObjectStoreDriver<S3Accessor, S3Conn> = {
   movePrefix,
   copyFile,
   probePrefix,
+  putIf,
+  getVersioned,
+  copyIf,
+  deleteIf,
+  moveFileIf,
+  movePrefixIf,
+  deletePrefixIf,
   isNotFound: isNotFoundError,
 }

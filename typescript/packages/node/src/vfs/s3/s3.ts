@@ -24,6 +24,7 @@ import { VFSName } from '@struktoai/mirage-core/types'
 import { HttpProxyAgent } from 'http-proxy-agent'
 import { HttpsProxyAgent } from 'https-proxy-agent'
 import { redactConfig, type S3Config, type S3ConfigRedacted } from './config.ts'
+import { configuredEndpoint } from './profile.ts'
 import { buildDeltaHook } from '@struktoai/mirage-core/core/s3/watch'
 import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
 
@@ -48,6 +49,18 @@ export class S3VFS extends S3VFSBase {
   override readonly prompt: string = PROMPT
   readonly config: S3Config
   override readonly accessor: S3Accessor
+
+  /**
+   * The endpoint the SDK client sends to: the config's, else the one the SDK
+   * reads from its environment and shared config. Mirrors python's
+   * `resolved_endpoint`.
+   */
+  get resolvedEndpoint(): string | undefined {
+    if (this.config.endpoint !== undefined && this.config.endpoint !== '') {
+      return this.config.endpoint
+    }
+    return configuredEndpoint()
+  }
 
   constructor(config: S3Config) {
     super()

@@ -26,7 +26,17 @@ import { RedisVFS, type RedisVFSOptions } from '../../vfs/redis/redis.ts'
 
 // Shipped next to this module in src and copied beside the bundle in
 // dist (tsup onSuccess); byte-identical to the Python add.lua.
-const ADD_LUA = readFileSync(new URL('./add.lua', import.meta.url), 'utf8')
+// EVAL sends the script text with every call, so its comment lines stay home.
+function luaBody(name: string): string {
+  const text = readFileSync(new URL(name, import.meta.url), 'utf8')
+  return text
+    .split('\n')
+    .filter((line) => !line.startsWith('--'))
+    .join('\n')
+}
+
+const ADD_LUA = luaBody('./add.lua')
+const VERSION_LUA = luaBody('./version.lua')
 
 // Hash slots one SCAN call visits. A prefix drop walks the whole server,
 // so this sets both the round trips (dbsize / SCAN_COUNT) and how long
@@ -40,6 +50,12 @@ const SCAN_COUNT = 1000
 // 10 ms for 100 bodies of 512 KB and 1.5 ms for 10. A page goes out as one
 // pipeline of DELs this size, so it is still one round trip.
 export const DEL_BATCH = 10
+
+// Keys per MGET of versions and per pipeline of kept versions.
+export const KEY_BATCH = 1000
+
+// Seconds a version kept without its bytes lives (raise-only over bytes).
+export const VERSION_TTL = 86_400
 
 function toBuffer(data: Uint8Array): Buffer {
   return Buffer.from(data.buffer, data.byteOffset, data.byteLength)
@@ -209,10 +225,56 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
     pipe.del(this.metaKey(key))
     await pipe.exec()
   }
+  async fingerprint(key: string): Promise<string | null> {
+    const c = await this.cacheClient()
+    return await c.get(this.metaKey(key))
+  }
+
+  async fingerprints(keys: readonly string[]): Promise<(string | null)[]> {
+    const c = await this.cacheClient()
+    const out: (string | null)[] = []
+    for (let start = 0; start < keys.length; start += KEY_BATCH) {
+      const batch = keys.slice(start, start + KEY_BATCH).map((k) => this.metaKey(k))
+      out.push(...(await c.mGet(batch)))
+    }
+    return out
+  }
+
+  async setVersions(versions: Readonly<Record<string, string>>): Promise<void> {
+    const keys = Object.keys(versions)
+    for (let start = 0; start < keys.length; start += KEY_BATCH) {
+      const batch = keys.slice(start, start + KEY_BATCH)
+      const stamps = batch.map((key) => [key, this.invalidation.enter(key)] as const)
+      try {
+        const c = await this.cacheClient()
+        const live = stamps.filter(([key, stamp]) => !this.invalidation.stale(key, stamp))
+        if (live.length > 0) {
+          const pipe = c.multi()
+          for (const [key] of live) {
+            const fingerprint = versions[key]
+            if (fingerprint === undefined) continue
+            pipe.eval(VERSION_LUA, {
+              keys: [this.dataKey(key), this.metaKey(key)],
+              arguments: [fingerprint, String(VERSION_TTL)],
+            })
+          }
+          await pipe.execAsPipeline()
+        }
+      } finally {
+        for (const key of batch) this.invalidation.leave(key)
+      }
+    }
+  }
+
   async isFresh(key: string, remoteFingerprint: string): Promise<boolean> {
     const c = await this.cacheClient()
-    const fp = await c.get(this.metaKey(key))
-    if (fp === null) return false
+    const [held, fp] = (await c
+      .multi()
+      .exists(this.dataKey(key))
+      .get(this.metaKey(key))
+      .execAsPipeline()) as unknown as [number, string | null]
+    // A version kept without its bytes vouches for no bytes.
+    if (held === 0 || fp === null) return false
     return fp === remoteFingerprint
   }
 

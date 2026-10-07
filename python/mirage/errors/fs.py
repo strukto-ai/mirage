@@ -29,6 +29,7 @@ from mirage.errors.types import (
     NoMountError,
     OperationNotSupportedError,
     ReadOnlyError,
+    StaleWriteError,
 )
 from mirage.types import PathSpec
 
@@ -116,6 +117,16 @@ def walk_refusal(path: PathSpec) -> DotWalkError:
 
 def efbig(path: str | PathSpec) -> FileTooLargeError:
     return _stamped(FileTooLargeError, FsCondition.EFBIG, path)
+
+
+def stale_write(path: str | PathSpec) -> StaleWriteError:
+    """A conditional write the backend refused. Mirrors TS ``staleWrite``.
+
+    Args:
+        path (str | PathSpec): the operand; ``virtual`` is the reported
+            spelling.
+    """
+    return _stamped(StaleWriteError, FsCondition.STALE_WRITE, path)
 
 
 def ebusy(path: str | PathSpec) -> OSError:

@@ -71,6 +71,7 @@ export interface ErrnoCodes {
   readonly EROFS?: number
   readonly EFBIG?: number
   readonly ENODATA?: number
+  readonly ESTALE?: number
 }
 
 export interface FSNode {

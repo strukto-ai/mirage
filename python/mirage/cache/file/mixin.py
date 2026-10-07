@@ -68,6 +68,41 @@ class FileCacheMixin:
     async def exists(self, key: str | PathSpec) -> bool:
         raise NotImplementedError
 
+    async def fingerprint(self, key: str) -> str | None:
+        """The backend token the cached copy of ``key`` was stored with.
+
+        The version a conditional write sends. An entry past its bound
+        still answers where the store keeps it: the token stays true for
+        the bytes that were read, which is all a write's condition says.
+
+        Args:
+            key (str): the cache key.
+        """
+        raise NotImplementedError
+
+    async def fingerprints(self, keys: list[str]) -> list[str | None]:
+        """``fingerprint`` for many keys, in key order.
+
+        Args:
+            keys (list[str]): the cache keys.
+        """
+        return [await self.fingerprint(key) for key in keys]
+
+    async def set_versions(self, versions: dict[str, str]) -> None:
+        """Keep each key's version where its bytes are not kept.
+
+        With no entry, the store keeps the version alone: reads treat it
+        as absent, a conditional write sends it. With bytes carrying the
+        same token, it keeps them and lets the version outlive their
+        bound. Live bytes carrying another token were written by someone
+        else since, and are left alone; expired ones are replaced.
+
+        Args:
+            versions (dict[str, str]): each cache key with the backend
+                token the line last saw for it.
+        """
+        raise NotImplementedError
+
     async def is_fresh(self, key: str, remote_fingerprint: str) -> bool:
         raise NotImplementedError
 
