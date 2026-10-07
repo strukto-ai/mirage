@@ -77,6 +77,9 @@ export const OPENER_CLOSERS: ReadonlyMap<string, readonly [string, string]> = ne
 
 export const CLOSING_TOKENS: ReadonlySet<string> = new Set([')', '))', '}', ']'])
 
+/** The operators of an assignment; a `(` right after one opens an array. */
+export const ASSIGNMENT_OPERATORS: ReadonlySet<string> = new Set(['=', '+='])
+
 // The quotes an input can end inside; bash reads on looking for the match.
 export const QUOTE_TOKENS: ReadonlySet<string> = new Set(["'", '"', '`'])
 

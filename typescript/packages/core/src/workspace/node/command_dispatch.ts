@@ -55,7 +55,8 @@ import {
   aliasCommandText,
   expandingAliases,
 } from '../executor/builtins/alias/index.ts'
-import { findSyntaxError, syntaxErrorResult } from '../../shell/parse/index.ts'
+import { syntaxErrorResult } from '../../shell/parse/index.ts'
+import { findSyntaxIssue } from '../../shell/parse/syntax.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import { INTERPRETER_NAMES } from '../lookup/constants.ts'
 import { guardIO, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
@@ -199,9 +200,9 @@ export async function executeCommand(
         const reparse = (text: string): TSNodeLike => scope.parse(text)
         const aliases = expandingAliases(session)
         const offsets = scope.sourceOffsets(line, ast)
-        const offending = findSyntaxError(ast, reparse, aliases, own, offsets)
-        if (offending !== null) {
-          const io = syntaxErrorResult(offending, ast, aliases, own, offsets)
+        const issue = findSyntaxIssue(ast, reparse, aliases, own, offsets)
+        if (issue !== null) {
+          const io = syntaxErrorResult(issue.offending, ast, aliases, own, offsets, issue.span.end)
           const bad = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
           return [
             null,

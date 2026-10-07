@@ -23,7 +23,14 @@ export function diagnose(
   return [
     {
       offending: found.offending,
-      message: syntaxErrorMessage(found.offending, root),
+      message: syntaxErrorMessage(
+        found.offending,
+        root,
+        new Set(),
+        new Map(),
+        undefined,
+        found.span.end,
+      ),
       span: {
         start: offsets[found.span.start] ?? found.span.start,
         end: offsets[found.span.end] ?? found.span.end,

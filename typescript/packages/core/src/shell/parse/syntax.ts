@@ -19,6 +19,7 @@ import { encodeText } from '../bytes.ts'
 import { NodeType as NT, type TSNodeLike } from '../types.ts'
 
 import {
+  ASSIGNMENT_OPERATORS,
   BASH_KEYWORDS,
   CASE_TERMINATORS,
   CLOSING_TOKENS,
@@ -39,17 +40,29 @@ import {
  * strings, comments and heredoc bodies stay opaque. Returns the character
  * bash reports it was looking for. Mirrors Python. */
 export function findUnterminatedQuote(node: TSNodeLike): string | null {
-  const stack: [TSNodeLike, boolean, boolean][] = [[node, false, false]]
+  return unfinished(node)?.[0] ?? null
+}
+
+/** What the input ended inside, as `findUnterminatedQuote` reads it: the
+ * character bash names for the innermost construct left open, and the kind
+ * and start of the outermost one, which an unexpected token before it is
+ * reported ahead of. Mirrors Python's _unfinished. */
+function unfinished(node: TSNodeLike): [string, string, number] | null {
+  const stack: [TSNodeLike, boolean, number | null][] = [[node, false, null]]
   for (let entry = stack.pop(); entry !== undefined; entry = stack.pop()) {
     const [current, visited, quoted] = entry
+    const start = current.startIndex ?? 0
     if (visited) {
       // Diagnose an ERROR span only after its children, as before.
-      if (current.children.length === 0 && current.text.startsWith("'")) return "'"
-      const unclosed = innermostUnclosed(current.children)
-      if (unclosed !== null) return unclosed
+      if (current.children.length === 0 && current.text.startsWith("'")) return ["'", "'", start]
+      const pending = unclosed(current.children)
+      const [outer] = pending ?? []
+      const inner = pending?.at(-1)
+      if (outer !== undefined && inner !== undefined) return [inner[1], outer[2], outer[3]]
       continue
     }
-    if (current.isMissing && QUOTE_TOKENS.has(current.type)) return current.type
+    if (current.isMissing && QUOTE_TOKENS.has(current.type))
+      return [current.type, current.type, current.parent?.startIndex ?? start]
     const closer = CONSTRUCT_CLOSERS.get(current.type)
     // Inside a double-quoted string, bash reads the string's own closing
     // quote into the construct, where it opens another.
@@ -57,15 +70,15 @@ export function findUnterminatedQuote(node: TSNodeLike): string | null {
       closer !== undefined &&
       current.children.some((child) => child.isMissing && CLOSING_TOKENS.has(child.type))
     )
-      return quoted ? '"' : closer
+      return quoted !== null ? ['"', NT.STRING, quoted] : [closer, current.type, start]
     if (current.type === 'ansi_c_string') {
       const before = current.text.slice(0, -1)
       const slashes = /\\+$/.exec(before)?.[0].length ?? 0
-      if (slashes % 2 !== 0) return "'"
+      if (slashes % 2 !== 0) return ["'", current.type, start]
       continue
     }
     if (current.type === 'ERROR') stack.push([current, true, quoted])
-    const inner = quoted || current.type === 'string'
+    const inner = quoted ?? (current.type === NT.STRING ? start : null)
     const children = current.children
     for (let i = children.length - 1; i >= 0; i -= 1) {
       const child = children[i]
@@ -75,29 +88,27 @@ export function findUnterminatedQuote(node: TSNodeLike): string | null {
   return null
 }
 
-/** What the innermost construct an ERROR's tokens open still waits for. */
-function innermostUnclosed(children: readonly TSNodeLike[]): string | null {
-  return unclosed(children)?.at(-1)?.[1] ?? null
-}
-
 /** The constructs an ERROR's tokens leave open, outermost first: each one's
- * closing token, the character bash names for it, and its opener. A double
- * quote or a backtick nests inside a substitution as bash reads it (`"$("`
- * waits for a quote), a lone `)` inside `$((` groups rather than closes, and
- * a `(` right after an assignment's `=` opens an array. Any other closer
- * that does not match the innermost opener is an unexpected token rather
- * than the end of input: null. Mirrors Python's _unclosed. */
-function unclosed(children: readonly TSNodeLike[]): [string, string, string][] | null {
-  const pending: [string, string, string][] = []
+ * closing token, the character bash names for it, its opener and its
+ * start. A double quote or a backtick nests inside a substitution as bash
+ * reads it (`"$("` waits for a quote), a lone `)` inside `$((` groups rather
+ * than closes, and a `(` right after an assignment's `=` or `+=` opens an
+ * array. Any other closer that does not match the innermost opener is an
+ * unexpected token rather than the end of input: null. Mirrors Python's
+ * _unclosed. */
+function unclosed(children: readonly TSNodeLike[]): [string, string, string, number][] | null {
+  const pending: [string, string, string, number][] = []
   let previous: TSNodeLike | null = null
   for (const child of children) {
     const kind = child.type
+    const start = child.startIndex ?? 0
     const opened = OPENER_CLOSERS.get(kind)
     if (kind === '"' || kind === '`') {
       if (pending.at(-1)?.[0] === kind) pending.pop()
-      else pending.push([kind, kind, kind])
-    } else if (opened !== undefined) pending.push([opened[0], opened[1], kind])
-    else if (kind === '(' && previous?.type === '=') pending.push([')', ')', NT.ARRAY])
+      else pending.push([kind, kind, kind, start])
+    } else if (opened !== undefined) pending.push([opened[0], opened[1], kind, start])
+    else if (kind === '(' && previous !== null && ASSIGNMENT_OPERATORS.has(previous.type))
+      pending.push([')', ')', NT.ARRAY, start])
     else if (CLOSING_TOKENS.has(kind) && pending.length > 0) {
       if (!(kind === ')' && pending.at(-1)?.[0] === '))')) {
         if (kind !== pending.at(-1)?.[0]) return null
@@ -109,28 +120,15 @@ function unclosed(children: readonly TSNodeLike[]): [string, string, string][] |
   return pending
 }
 
-/** Whether the outermost construct the input ends inside is an array
- * assignment's `(`. bash's `parse_compound_assignment` refuses that line
- * with status 1 and discards it, where the input ending inside any other
- * construct is a syntax error with status 2. Mirrors Python. */
-export function endsInsideArray(node: TSNodeLike): boolean {
-  const stack: TSNodeLike[] = [node]
-  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
-    if (current.type === NT.ERROR) {
-      const pending = unclosed(current.children)
-      if (pending !== null && pending.length > 0) return pending[0]?.[2] === NT.ARRAY
-    } else if (
-      CONSTRUCT_CLOSERS.has(current.type) &&
-      current.children.some((child) => child.isMissing && CLOSING_TOKENS.has(child.type))
-    ) {
-      return current.type === NT.ARRAY
-    }
-    for (let at = current.children.length - 1; at >= 0; at--) {
-      const child = current.children[at]
-      if (child !== undefined) stack.push(child)
-    }
-  }
-  return false
+/** Whether the input's first error is ending inside an array assignment's
+ * `(`, the outermost construct it leaves open: bash's
+ * `parse_compound_assignment` refuses that line with status 1 and discards
+ * it, where the input ending inside any other construct is a syntax error
+ * with status 2. A flagged span ending before the array opens (`issueEnd`)
+ * is the error bash reports instead. Mirrors Python. */
+export function endsInsideArray(node: TSNodeLike, issueEnd: number | null = null): boolean {
+  const found = unfinished(node)
+  return found !== null && found[1] === NT.ARRAY && (issueEnd === null || issueEnd > found[2])
 }
 
 /** Whether the input ends inside a compound command or after an operator.
@@ -159,7 +157,7 @@ export function endsInsideConstruct(
   for (let top = stack.pop(); top !== undefined; top = stack.pop()) {
     const [current, before] = top
     if (current.type === 'ERROR') {
-      const opened = openCompound(current, before, aliases)
+      const opened = openCompound(current, before, aliases, own, offsets)
       if (opened === null) return false
       unfinished ||= opened && (current.endIndex ?? 0) >= end
     } else if (current.isMissing && (current.startIndex ?? 0) >= end) {
@@ -183,11 +181,14 @@ export function endsInsideConstruct(
  * unexpected unless `()` makes the command a function definition. Text the
  * grammar skipped is unexpected too. A nested ERROR's tokens are read in
  * line, as tokens the grammar could not group. A word in `aliases` is a
- * command where one starts, whatever it spells. Mirrors Python. */
+ * command where one starts, whatever it spells, except inside its own text
+ * (`reservedHere`). Mirrors Python. */
 function openCompound(
   error: TSNodeLike,
   before: TSNodeLike | null,
   aliases: ReadonlySet<string> = new Set(),
+  own: ReadonlyMap<string, readonly [number, number]> = new Map(),
+  offsets?: readonly number[],
 ): boolean | null {
   const origin = error.startIndex ?? 0
   const children = [...errorTokens(error)]
@@ -201,7 +202,9 @@ function openCompound(
     if (
       error.text.slice(cursor - origin, start - origin).trim() !== '' ||
       (['command', 'name', 'list'].includes(expect) && LIST_OPERATORS.has(kind)) ||
-      (expect === 'command' && RESERVED_CLOSERS.has(word) && !aliases.has(word))
+      (expect === 'command' &&
+        RESERVED_CLOSERS.has(word) &&
+        reservedHere(word, start, aliases, own, offsets))
     )
       return null
     const call = expect === 'words' && kind === '('
@@ -232,31 +235,38 @@ function* errorTokens(error: TSNodeLike): Generator<TSNodeLike> {
 
 /** The bash-style diagnostic for an unparsable line: status 2, or 1 for an
  * array assignment it ends inside (`endsInsideArray`). `aliases`, `own` and
- * `offsets` are `findSyntaxIssue`'s. */
+ * `offsets` are `findSyntaxIssue`'s; `issueEnd` is where the flagged span
+ * ends in the parse. */
 export function syntaxErrorResult(
   offending: string,
   node: TSNodeLike,
   aliases: ReadonlySet<string> = new Set(),
   own: ReadonlyMap<string, readonly [number, number]> = new Map(),
   offsets?: readonly number[],
+  issueEnd: number | null = null,
 ): IOResult {
-  const message = syntaxErrorMessage(offending, node, aliases, own, offsets)
+  const message = syntaxErrorMessage(offending, node, aliases, own, offsets, issueEnd)
   return new IOResult({
-    exitCode: endsInsideArray(node) ? 1 : 2,
+    exitCode: endsInsideArray(node, issueEnd) ? 1 : 2,
     stderr: encodeText(message),
   })
 }
 
-/** Format the diagnostic shared by parsed programs and execution results. */
+/** Format the diagnostic shared by parsed programs and execution results.
+ * bash reports the first error it reads: input left open inside a quote or
+ * construct is the error unless the flagged span ends before that construct
+ * opens (`fi; echo "a` is the unexpected `fi`). */
 export function syntaxErrorMessage(
   offending: string,
   node: TSNodeLike,
   aliases: ReadonlySet<string> = new Set(),
   own: ReadonlyMap<string, readonly [number, number]> = new Map(),
   offsets?: readonly number[],
+  issueEnd: number | null = null,
 ): string {
-  const quote =
-    findUnterminatedQuote(node) ?? (findUnterminatedBacktick(offending) === null ? null : '`')
+  let found = unfinished(node)
+  if (found !== null && issueEnd !== null && issueEnd <= found[2]) found = null
+  const quote = found?.[0] ?? (findUnterminatedBacktick(offending) === null ? null : '`')
   const snippet = offending.trim()
   return quote !== null
     ? 'mirage: unexpected EOF while looking for matching `' + quote + "'\n"
@@ -424,12 +434,24 @@ function* strayReservedWords(
     if (name?.type !== 'command_name') continue
     if (!RESERVED_CLOSERS.has(name.text)) continue
     const start = name.startIndex ?? 0
-    const span = own.get(name.text)
-    const at = offsets === undefined ? start : (offsets[start] ?? start)
-    if (!names.has(name.text) || (span !== undefined && span[0] <= at && at < span[1])) {
-      yield [start, name.text]
-    }
+    if (reservedHere(name.text, start, names, own, offsets)) yield [start, name.text]
   }
+}
+
+/** Whether a closing word where a command starts is the reserved word: it
+ * is unless an alias spells it, and an alias never expands inside its own
+ * text. Mirrors Python's _reserved_here. */
+function reservedHere(
+  word: string,
+  start: number,
+  aliases: ReadonlySet<string>,
+  own: ReadonlyMap<string, readonly [number, number]>,
+  offsets: readonly number[] | undefined,
+): boolean {
+  if (!aliases.has(word)) return true
+  const span = own.get(word)
+  const at = offsets === undefined ? start : (offsets[start] ?? start)
+  return span !== undefined && span[0] <= at && at < span[1]
 }
 
 function* walkNamed(node: TSNodeLike): Generator<TSNodeLike> {

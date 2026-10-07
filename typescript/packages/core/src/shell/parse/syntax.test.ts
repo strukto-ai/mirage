@@ -23,7 +23,12 @@ import {
   findUnterminatedBacktick,
   type ShellParser,
 } from './index.ts'
-import { endsInsideArray, endsInsideConstruct, syntaxErrorResult } from './syntax.ts'
+import {
+  endsInsideArray,
+  endsInsideConstruct,
+  findSyntaxIssue,
+  syntaxErrorResult,
+} from './syntax.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -58,6 +63,36 @@ describe('endsInsideConstruct', () => {
     const root = parser.parse('fi; echo a |')
     expect(endsInsideConstruct(root)).toBe(false)
     expect(endsInsideConstruct(root, new Set(['fi']))).toBe(true)
+    // Inside its own text an alias is the reserved word again.
+    const own = parser.parse('if fi; echo a')
+    expect(endsInsideConstruct(own, new Set(['fi']))).toBe(true)
+    expect(endsInsideConstruct(own, new Set(['fi']), new Map([['fi', [0, 5]]]))).toBe(false)
+  })
+})
+
+describe('the first error read', () => {
+  it.each([
+    ['fi; x=(1 2', "mirage: syntax error near 'fi'\n", 2],
+    ['fi; echo "abc', "mirage: syntax error near 'fi'\n", 2],
+    ['if then; x=(1 2', "mirage: syntax error near 'then'\n", 2],
+    ['if true; then x+=(1 2', "mirage: unexpected EOF while looking for matching `)'\n", 1],
+  ])('%s is the one reported', async (line, message, status) => {
+    const root = parser.parse(line)
+    const issue = findSyntaxIssue(root)
+    expect(issue).not.toBeNull()
+    if (issue === null) return
+    const io = syntaxErrorResult(
+      issue.offending,
+      root,
+      new Set(),
+      new Map(),
+      undefined,
+      issue.span.end,
+    )
+    expect([new TextDecoder().decode(await io.materializeStderr()), io.exitCode]).toEqual([
+      message,
+      status,
+    ])
   })
 })
 

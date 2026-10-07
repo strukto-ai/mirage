@@ -28,6 +28,7 @@ from mirage.shell.parse import (
 from mirage.shell.parse.syntax import (
     ends_inside_array,
     ends_inside_construct,
+    find_syntax_issue,
     syntax_error_result,
 )
 from mirage.vfs.ram import RAMVFS
@@ -65,6 +66,33 @@ def test_an_alias_spelling_a_closer_is_a_command_at_the_end():
     root = parse("fi; echo a |")
     assert ends_inside_construct(root) is False
     assert ends_inside_construct(root, frozenset({"fi"})) is True
+    # Inside its own text an alias is the reserved word again.
+    own = parse("if fi; echo a")
+    assert ends_inside_construct(own, frozenset({"fi"})) is True
+    assert (
+        ends_inside_construct(own, frozenset({"fi"}), {"fi": (0, 5)}) is False
+    )
+
+
+@pytest.mark.parametrize(
+    ("line", "message", "status"),
+    [
+        ("fi; x=(1 2", "mirage: syntax error near 'fi'\n", 2),
+        ('fi; echo "abc', "mirage: syntax error near 'fi'\n", 2),
+        ("if then; x=(1 2", "mirage: syntax error near 'then'\n", 2),
+        (
+            "if true; then x+=(1 2",
+            "mirage: unexpected EOF while looking for matching `)'\n",
+            1,
+        ),
+    ],
+)
+def test_the_first_error_read_is_the_one_reported(line, message, status):
+    root = parse(line)
+    issue = find_syntax_issue(root)
+    assert issue is not None
+    io = syntax_error_result(issue.offending, root, issue_end=issue.span.end)
+    assert (io.stderr, io.exit_code) == (message.encode(), status)
 
 
 @pytest.mark.parametrize(

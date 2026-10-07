@@ -77,6 +77,9 @@ OPENER_CLOSERS: dict[str, tuple[str, str]] = {
 
 CLOSING_TOKENS = frozenset({")", "))", "}", "]"})
 
+# The operators of an assignment; a `(` right after one opens an array.
+ASSIGNMENT_OPERATORS = frozenset({"=", "+="})
+
 # The quotes an input can end inside; bash reads on looking for the match.
 QUOTE_TOKENS = frozenset({"'", '"', "`"})
 

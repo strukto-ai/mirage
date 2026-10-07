@@ -35,12 +35,11 @@ from mirage.shell.helpers import input_substitution_redirect
 from mirage.shell.job_table import JobTable, JobWaits
 from mirage.shell.literal import literal_tree
 from mirage.shell.parse import (
-    find_syntax_error,
     find_unterminated_backtick,
     syntax_error_result,
 )
 from mirage.shell.parse.scope import ParseScope
-from mirage.shell.parse.syntax import ends_inside_array
+from mirage.shell.parse.syntax import ends_inside_array, find_syntax_issue
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, Refusal
@@ -610,7 +609,9 @@ async def run_prepared_line(
         # bash: an unparsable line exits 2 and the policy is never
         # consulted about it.
         aliases = expanding_aliases(effective_session)
-        offending = find_syntax_error(ast, aliases, parse_fn=parse_scope.parse)
+        issue = find_syntax_issue(ast, aliases, parse_fn=parse_scope.parse)
+        offending = None if issue is None else issue.offending
+        issue_end = None if issue is None else issue.span.end
         if offending is None and argv is None:
             # tree-sitter accepts an unclosed backtick as a complete
             # command, so the region is scanned separately.
@@ -618,8 +619,10 @@ async def run_prepared_line(
                 decode_text(ast.text or b"")
             )
         if offending is not None:
-            io = syntax_error_result(offending, ast, aliases)
-            if call_stack is not None and ends_inside_array(ast):
+            io = syntax_error_result(
+                offending, ast, aliases, issue_end=issue_end
+            )
+            if call_stack is not None and ends_inside_array(ast, issue_end):
                 # bash discards the line that evaluated it (`eval`,
                 # `source`) with status 1, as its own error would.
                 raise DiscardSignal(await io.materialize_stderr())

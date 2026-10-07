@@ -46,11 +46,11 @@ from mirage.shell.helpers import (
     split_env_prefix,
 )
 from mirage.shell.parse import (
-    find_syntax_error,
     source_offsets,
     syntax_error_result,
 )
 from mirage.shell.parse.scope import ParseScope
+from mirage.shell.parse.syntax import find_syntax_issue
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ProcessSubDirection
 from mirage.shell.variable import TempEnv, VarAttr
@@ -195,12 +195,17 @@ async def execute_command(
                     at = own[alias][1]
                 aliases = expanding_aliases(session)
                 offsets = source_offsets(line, ast)
-                offending = find_syntax_error(
+                issue = find_syntax_issue(
                     ast, aliases, own, offsets, parse_fn=scope.parse
                 )
-                if offending is not None:
+                if issue is not None:
                     io = syntax_error_result(
-                        offending, ast, aliases, own, offsets
+                        issue.offending,
+                        ast,
+                        aliases,
+                        own,
+                        offsets,
+                        issue.span.end,
                     )
                     bad = io.stderr if isinstance(io.stderr, bytes) else b""
                     return (

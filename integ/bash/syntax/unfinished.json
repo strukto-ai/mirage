@@ -721,6 +721,192 @@
         "stdout": "",
         "stderr": "mirage: syntax error near 'fi'\n"
       }
+    },
+    {
+      "id": "syntax_unexpected_closer_before_an_array",
+      "seq": 1338240,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "fi; x=(1 2",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error near 'fi'\n"
+      }
+    },
+    {
+      "id": "syntax_unexpected_closer_before_an_array_in_eval",
+      "seq": 1338241,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "( eval 'fi; x=(1 2'; echo after ); echo outer",
+      "expect": {
+        "exit": 0,
+        "stdout": "after\nouter\n",
+        "stderr": "mirage: syntax error near 'fi'\n"
+      }
+    },
+    {
+      "id": "syntax_unexpected_then_before_an_array",
+      "seq": 1338242,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "if then; x=(1 2",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error near 'then'\n"
+      }
+    },
+    {
+      "id": "syntax_unexpected_closer_before_a_quote",
+      "seq": 1338243,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "fi; echo \"abc",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error near 'fi'\n"
+      }
+    },
+    {
+      "id": "syntax_unfinished_array_append",
+      "seq": 1338244,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "if true; then x+=(1 2",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mirage: unexpected EOF while looking for matching `)'\n"
+      }
+    },
+    {
+      "id": "syntax_unfinished_array_append_in_eval",
+      "seq": 1338245,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "( eval 'x+=(1 2'; echo after ); echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "mirage: unexpected EOF while looking for matching `)'\n"
+      }
     }
   ]
 }

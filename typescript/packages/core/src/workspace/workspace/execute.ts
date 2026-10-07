@@ -43,11 +43,10 @@ import {
 import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
 import {
   syntaxErrorResult,
-  findSyntaxError,
   findUnterminatedBacktick,
   type ShellParser,
 } from '../../shell/parse/index.ts'
-import { endsInsideArray } from '../../shell/parse/syntax.ts'
+import { endsInsideArray, findSyntaxIssue } from '../../shell/parse/syntax.ts'
 import { DiscardSignal } from '../../shell/errors.ts'
 import { formatFsError } from '../../errors/render.ts'
 import { isFsError } from '../../errors/fs.ts'
@@ -433,16 +432,18 @@ async function runPreparedLine(
           // unclosed backtick as a complete command, so the region is scanned
           // separately.
           const aliases = expandingAliases(effectiveSession)
-          const offending =
+          const issue =
             argv === undefined
-              ? (findSyntaxError(root, (source) => parser.parse(source), aliases) ??
-                findUnterminatedBacktick(root.text))
+              ? findSyntaxIssue(root, (source) => parser.parse(source), aliases)
               : null
+          const issueEnd = issue?.span.end ?? null
+          const offending =
+            argv === undefined ? (issue?.offending ?? findUnterminatedBacktick(root.text)) : null
           if (offending !== null) {
-            const io = syntaxErrorResult(offending, root, aliases)
+            const io = syntaxErrorResult(offending, root, aliases, new Map(), undefined, issueEnd)
             // bash discards the line that evaluated it (`eval`, `source`)
             // with status 1, as its own error would.
-            if (options.callStack !== undefined && endsInsideArray(root))
+            if (options.callStack !== undefined && endsInsideArray(root, issueEnd))
               throw new DiscardSignal(await materialize(io.stderr))
             return await answerLine(
               env,

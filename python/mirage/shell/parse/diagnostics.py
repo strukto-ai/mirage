@@ -44,6 +44,8 @@ def diagnose(
                 offsets[start] if start < len(offsets) else start,
                 offsets[end] if end < len(offsets) else end,
             ),
-            syntax_error_message(found.offending, root),
+            syntax_error_message(
+                found.offending, root, issue_end=found.span.end
+            ),
         ),
     )
