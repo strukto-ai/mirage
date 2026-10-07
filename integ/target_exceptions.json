@@ -1014,6 +1014,10 @@
     },
     "integ/unix/consistency/mixed.json :: read_policy_is_per_mount_bounded_default": {
       "box": "box's integ target seeds /data with the shared files/v1 fixture, so the case's `ls /data` lists thirty seeded files beside f.txt; the per-mount policy legs themselves pass on box on both hosts (the fresh leg prints v2, the bounded leg v1). The mechanism under test is the mount registry's, not a backend's, and s3, s3-prefix and dropbox carry it; box's own fresh reads are bound by basic.json's read_fresh_revalidates and walk.json's fresh cases."
+    },
+    "integ/unix/write/conditional.json :: write_conditional_minio_refuses_copy_and_delete": {
+      "s3": "The case asks how the minio VFS row answers a conditional copy and delete, so it needs a mount whose VFS is minio, and only object-storage-prefix declares one (/minio). s3 and s3-prefix mount type s3; the rest of the file runs on them, and their own copy and delete conditions are unit-tested against the extended fake on both hosts, since MinIO ignores both and moto ignores the copy one.",
+      "s3-prefix": "The case asks how the minio VFS row answers a conditional copy and delete, so it needs a mount whose VFS is minio, and only object-storage-prefix declares one (/minio). s3 and s3-prefix mount type s3; the rest of the file runs on them, and their own copy and delete conditions are unit-tested against the extended fake on both hosts, since MinIO ignores both and moto ignores the copy one."
     }
   }
 }

@@ -54,6 +54,8 @@ export interface Case {
   read?: 'fresh' | 'bounded'
   ttl?: number
   mount_read?: Record<string, 'fresh' | 'bounded'>
+  // The write policy both workspaces of a scenario run under.
+  write?: string
   session?: string
   // The host's answer to every approval waiting on the workspace, given
   // before the command runs: `allow_once`, `allow_session` or `deny`.

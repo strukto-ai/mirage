@@ -89,6 +89,7 @@ import {
   RedisConsoleStore,
   RedisVFS,
   type BaseVFS,
+  type WritePolicy,
   S3VFS,
   ScalewayVFS,
   SeaweedFSVFS,
@@ -145,6 +146,8 @@ export interface OpenOptions {
   read?: ReadSpec
   // Per-mount policies over `read`, for the read workspace only.
   mountRead?: Record<string, ReadSpec>
+  // The write policy, for both workspaces: the shadow is a second writer.
+  write?: WritePolicy
 }
 
 type MountMap = ConstructorParameters<typeof Workspace>[0]
@@ -200,11 +203,13 @@ function isMountPair(
  */
 function openWorkspaces(build: () => MountMap, options?: OpenOptions): OpenedWorkspaces {
   const opened: Workspace[] = []
+  const write = options?.write
   const make = (read?: ReadSpec, mountRead?: Record<string, ReadSpec>): ExecWorkspace => {
     const mounts = mountRead !== undefined ? applyMountRead(build(), mountRead) : build()
     const ws = new Workspace(mounts, {
       mode: MountMode.WRITE,
       ...(read !== undefined ? { read } : {}),
+      ...(write !== undefined ? { write } : {}),
     })
     opened.push(ws)
     return ws as unknown as ExecWorkspace
@@ -2384,6 +2389,7 @@ export async function openConsistency(
   target: Target,
   read: ReadSpec,
   mountRead: Record<string, ReadSpec>,
+  write: WritePolicy,
 ): Promise<OpenConsistency | null> {
   // Refused before anything opens, so there is nothing to clean up.
   const paths = new Set(target.mounts.map((m) => m.path))
@@ -2395,7 +2401,7 @@ export async function openConsistency(
   }
   const adapter = ADAPTERS[target.mounts[0].vfs]
   if (adapter === undefined) return null
-  const opened = await adapter(target, { read, mountRead })
+  const opened = await adapter(target, { read, mountRead, write })
   if (opened.shadow === undefined) {
     await opened.cleanup()
     return null
