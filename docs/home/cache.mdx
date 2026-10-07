@@ -49,9 +49,13 @@ One check answers for a whole command: later listings of the same mount (or, on 
 
 ### Writes
 
-A command that writes a file and reports the bytes it wrote, such as `tee`, `sed -i`, `sort -o`, `uniq` or `xxd`, keeps those bytes in the file cache, so the next read needs no download. The cached copy carries the token the upload reply names: the ETag on an object store, the md5 (else the head revision) on Google Drive, the `sha1` on Box, the `content_hash` on Dropbox. That is the kind of token `stat` reports, so under `read: fresh` the next read checks it and downloads nothing.
+A command that writes a file and reports the bytes it wrote, such as a `>` redirect, `tee`, `sed -i`, `sort -o`, `uniq` or `xxd`, keeps those bytes in the file cache, so the next read needs no download. The cached copy carries the token the upload reply names: the ETag on an object store, the md5 (else the head revision) on Google Drive, the `sha1` on Box, the `content_hash` on Dropbox. That is the kind of token `stat` reports, so under `read: fresh` the next read checks it and downloads nothing.
 
 The bytes are kept only when that command made the last change to the file on the line. When something else changed it later on the same line (`sed -n 'w file'`, a script, a concurrent pipeline stage, `xargs -P`, a background job, `truncate`), nothing is cached and the next read downloads the file. In the browser, where concurrent commands cannot be told apart, a later write of the same size is not noticed.
+
+Under [`write: conditional`](/home/yaml#the-write-policy), that token is also the version the next write on the path is based on. On such a mount the line also keeps a path's version where it keeps no bytes (a `grep` or `head` of the file, an own `>>`, a file bigger than the cache) as an entry with no bytes, which reads treat as absent.
+
+Nothing bigger than the whole cache is kept, read or written: such a file would push every other entry out and then itself. A cache store that refuses a fill (Redis out of memory, or a value over its size limit) is logged as a warning and the line carries on; the read or write behind it already happened, so only the next read pays a fetch.
 
 OneDrive and SharePoint record no token for a write: SharePoint can change an Office file after the upload, so the reply's `cTag` cannot vouch for the bytes sent, and under `fresh` the next read downloads the file. Nextcloud, Databricks volumes, SSH and Hugging Face buckets record none either.
 
@@ -121,7 +125,7 @@ The two layers are bounded differently:
 
 | Layer | Holds | Default | Bound | Eviction |
 | --- | --- | --- | --- | --- |
-| **File cache** | object bytes per virtual path | RAM, 512 MB | `cache: {limit}` (`CacheConfig(limit=...)`); without a `cache` config, `cache_limit` (Py) / `cacheLimit` (TS) | LRU on RAM: least-recently-used bytes drop once the total exceeds the limit. On Redis nothing is evicted client-side and the server evicts (below); the limit still caps what each file's background fill buffers when `max_drain_bytes` is unset, and bounds `max_drain_bytes` |
+| **File cache** | object bytes per virtual path | RAM, 512 MB | `cache: {limit}` (`CacheConfig(limit=...)`); without a `cache` config, `cache_limit` (Py) / `cacheLimit` (TS) | LRU on RAM: least-recently-used bytes drop once the total exceeds the limit. On Redis nothing is evicted client-side and the server evicts (below); the limit still keeps out any file bigger than itself, caps what each file's background fill buffers when `max_drain_bytes` is unset, and bounds `max_drain_bytes` |
 | **Index cache** | directory listings + `FileStat` metadata | RAM, the backend's `index_ttl` | the mount's own `index: {ttl}`, else the workspace `index: {ttl}` (`IndexConfig(ttl=...)`), else the backend's `index_ttl` ([Index TTL](#index-ttl)); capped by the mount's `ttl` (seconds) | time-based: listings expire after the TTL, then re-fetch on next access |
 
 Raising the file limit keeps more bytes warm at the cost of memory; lengthening the index TTL reduces API walks at the cost of staleness, up to the mount's `ttl`.
@@ -231,8 +235,9 @@ worker that shares an index together, and flush the key prefix first
 release wrote.
 
 The Redis **file cache** likewise uses server-side limits: nothing is evicted
-client-side (its `limit` caps each file's background fill when
-`max_drain_bytes` is unset, and bounds `max_drain_bytes`), so cap
+client-side (its `limit` keeps out any file bigger than itself, caps each
+file's background fill when `max_drain_bytes` is unset, and bounds
+`max_drain_bytes`), so cap
 memory with `maxmemory` and an LRU `maxmemory-policy`. File bytes and metadata occupy separate
 keys, so server eviction can remove either independently: a freshness check
 alone does not guarantee the bytes remain cached.

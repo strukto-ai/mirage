@@ -15,6 +15,7 @@ A workspace can be described entirely in YAML and loaded with one call — `load
 | `mounts` | map | required | Prefix to mount block. See below. |
 | `mode` | `read` \| `write` \| `exec` | `write` | The mode a mount inherits when it declares none. |
 | `read` | `fresh` \| `bounded` | `bounded` | The read policy a mount inherits when it declares none. There is deliberately no top-level `ttl:` — see [the bound](#the-bound). |
+| `write` | `unconditional` \| `conditional` | `unconditional` | The write policy a mount inherits when it declares none. See [the write policy](#the-write-policy). |
 | `command_limits` | map | — | Per-command caps for every session. See [command limits](#command-limits). |
 | `clis` | map | — | Installed CLIs, keyed by head word. |
 | `runtimes` | list | — | The workspace's ordered runtime world. |
@@ -32,6 +33,7 @@ A workspace can be described entirely in YAML and loaded with one call — `load
 | `config` | map | `{}` | The backend's own config, validated by that backend's model. A key the model does not declare is refused by name (`linear: team_idz: ...`), never ignored. |
 | `mode` | `read` \| `write` \| `exec` | top-level `mode` | This mount's mode. |
 | `read` | `fresh` \| `bounded` | top-level `read` | How this mount's cached bytes are served. |
+| `write` | `unconditional` \| `conditional` | top-level `write` | Whether this mount's writes carry the version they were based on. An empty `write: ""` means `unconditional`; `null` or no key takes the top-level `write`. |
 | `ttl` | integer (seconds) | `600` | The staleness bound for this mount's cached bytes and cached listings, under both `bounded` and `fresh`. |
 | `index` | block | top-level `index` | This mount's own listing store, the top-level `index:` keys (`type`, `ttl`, `url`, `key_prefix`). It replaces the top-level block whole; see [a mount's own index](#a-mounts-own-index). |
 | `command_limits` | map | `{}` | Per-command caps for this mount. |
@@ -199,9 +201,90 @@ written somewhere every store can read it back — Redis keeps no such timestamp
 today. Until then, treat a shared cache as a place where `ttl:` should agree
 across the workspaces that use it.
 
+## The write policy
+
+`write: unconditional`, the default, writes what a command sends, whatever the backend holds by then. `write: conditional` makes every write on the mount carry the version of the file it was based on, and the backend refuses it when the file has changed since:
+
+```yaml
+mounts:
+  /shared:
+    vfs: s3
+    config: {bucket: team}
+    write: conditional
+```
+
+```bash
+cat /shared/notes.txt                 # mirage keeps this version
+# ... another client rewrites notes.txt ...
+echo done > /shared/notes.txt
+# /shared/notes.txt: changed since it was read; read it again before writing
+```
+
+A refused write leaves that file as it was and drops the cached copy, so reading the file again fetches what is there now, and the write after that read goes through. The refusal reads as the command's own failure:
+- `cp: cannot create regular file 'X': changed since it was read; ...`;
+- `rm: cannot remove 'X': ...`;
+- `sed: couldn't edit X: ...` (exit 4, as GNU sed's);
+- for a redirect, `X: changed since it was read; ...`, exit 1.
+
+A command that moves or deletes several files is refused one file at a time, so it can stop partway:
+- **`rm -r`** deletes the files that were still the version it measured, keeps the one that changed, and reports `rm: cannot remove 'd': ...` against its operand, not the file inside it.
+- **A directory `mv`** moves the unchanged files and leaves the changed one where it was.
+- **A file `mv`** whose copy landed before its source changed keeps the copy and reports `mv: cannot remove 'src': ...`, as GNU's `mv` does when its unlink fails.
+
+**Which version a write sends.** A `>>` append, a resize to a nonzero length, and a write at an offset read the file themselves first, so they send the version of the bytes they just read. Any other write sends, in order:
+
+1. what the same line last read or wrote at that path (`cat f; echo x > f`, or two redirects in a row);
+2. the version the mount kept from an earlier line: the cached copy's, or, where the bytes were not kept (a `grep` or `head` of the file, an own append, a file bigger than the cache), the version alone.
+
+With neither, the write is a create: it goes through when the file does not exist and is refused when it does. So on a conditional mount, overwrite a file only after reading it.
+
+**Emptying counts as a whole-file write.** Emptying a file the way opening it for writing does (`open(path, "w")` in a script, `truncate -s 0`) is one of those "any other" writes, not a read-then-write. It needs the file read first.
+
+**`rm` and the source of `mv`** are measured against the version the line or the mount saw, else the one their own lookup finds. They are never refused for want of a read. `rm -r` and a directory `mv` hold each file to the version the agent read where there is one, and otherwise to the version their own listing finds.
+
+### Which backends
+
+A mount is refused at load, naming the reason, when it cannot keep the promise.
+
+**The backend has no write conditions.** Today only the S3 family has them:
+- AWS S3 and SeaweedFS honour them on every write, delete and copy (measured).
+- MinIO, and `vfs: s3` on any endpoint other than AWS's, honour them on a write but not on a copy or delete. There mirage refuses what would copy or delete on that mount (such as a `cp` or `mv` within the mount, a `mv` out of it, `rm`, or `find -delete`) itself, before it changes anything (its lookups still run), with `Operation not supported`; a `cp` or `mv` into it from another mount is a write, and goes through.
+  - The endpoint is the one the client resolves: the config's `endpoint_url`, else `AWS_ENDPOINT_URL_S3` or `AWS_ENDPOINT_URL`, else the AWS profile's (its `services` s3 section first), unless `ignore_configured_endpoint_urls` is `true`. The profile is the one each host's SDK reads: on Python the mount's `aws_profile`, else `AWS_PROFILE`; on TypeScript always `AWS_PROFILE` (or `default`), as the AWS SDK for JavaScript ignores a client's `profile` here.
+  - AWS's China regions count as AWS.
+- The other S3-compatible services (R2, GCS, OCI, Supabase, Ceph, Wasabi, Backblaze B2, DigitalOcean Spaces, Tencent COS, Alibaba OSS, Scaleway, QingStor) are assumed to behave like AWS S3. They are not measured per provider.
+- In the browser, an S3 mount that signs through presigned URLs is refused, since those carry no condition.
+
+**The mount is read-only, or a kernel mount exposes it.** `backend: fuse` or `fskit` has no place to carry a version. A FUSE mount that would expose a conditional mount is refused, and so is a conditional mount added where a live FUSE mount already exposes it, or added over one. An SFTP or `scp` session into a workspace that holds any conditional mount is refused at its first request.
+
+**The mount caches no reads** (including a cache `limit` of 0), since the cache is where the version lives.
+
+`write: staged` is refused as well: it needs a staging layer mirage does not have.
+
+### Known limits
+
+- **Versions belong to the mount, not the session.** Two sessions of one workspace, or two workspaces sharing a Redis cache, share versions, so one session's read lets the other's write through.
+- **A copy has no version yet.** A file `cp` or `mv` just made on the same mount has no version, so overwriting it straight away is refused; read it first. A `cp` from another mount records its own version.
+- **Writes outside a shell line keep no version.** A write made outside any shell line (host code calling `ws.vfs` directly) leaves no version for the next one, except through the cache.
+- **Overwriting files you never read is refused.** A command that writes files it never read, such as `hf download` over existing files, is refused for those files.
+- **Some events clear versions:**
+  - After an external program or a remote runtime line, the mount's cache is cleared ([cache](/home/cache)), so the next write has no version.
+  - A version kept without its bytes lives in the cache like an entry, so a RAM cache's LRU or a Redis server's eviction can drop it. The next write is then a create.
+  - Otherwise a version outlives the cache's `ttl`. On RAM it lives until the LRU drops it; on Redis it lives 24 hours from the line that last saw it, or as long as its bytes when they live longer, so a server under a `volatile-*` or `noeviction` policy still sheds it.
+- **Directory markers are unconditional.** `mkdir` and `rmdir` write directory markers unconditionally; a marker holds no content to lose.
+- **A partial `rm -rv` prints no `removed` lines.** When a refusal stops `rm -rv` partway, it prints no `removed '...'` lines for the files it did delete.
+- **Browser limit.** In the browser, where two lines running at once on different mounts cannot be told apart, a conditional write made while they overlap is refused (`Operation not supported`) rather than sent without its version.
+
+### Across a snapshot
+
+A snapshot records each mount's write policy and the workspace's default, and a restore or `copy()` keeps them, also for a mount handed back through `mounts=`. Unlike `read:`, a saved `conditional` is not dropped there: a stand-in that cannot refuse a stale write is refused at load, rather than restored writing blind, and an override `Mount` that names a different `write:` is refused rather than ignored, as is (in TypeScript, whose `fromState` takes options) a `write` option naming a different workspace default.
+
+A snapshot keeps the versions of the cached copies it holds, but not a version kept without its bytes: after a restore, read such a file again before overwriting it.
+
+A snapshot in another format than this loader's is refused, older (from before the write policy existed) or newer.
+
 ## Not yet accepted
 
-`read: pinned` is refused, naming the layer it needs: pinning reads to the content a commit records requires a version layer mirage does not have. There is no `write:` key yet. Both are reserved rather than silently ignored, so a config that names one fails at load instead of appearing to work.
+`read: pinned` is refused, naming the layer it needs: pinning reads to the content a commit records requires a version layer mirage does not have. `write: staged` is refused the same way. Both are reserved rather than silently ignored, so a config that names one fails at load instead of appearing to work.
 
 ## Time-scoped chat and calendar mounts
 
