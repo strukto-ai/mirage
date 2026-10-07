@@ -14,8 +14,7 @@
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
 import { pathsScoped } from '../../../ops/namespace_view.ts'
-import { withCommandGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
-import { IO } from './io.ts'
+import { withCommandGuards, withPolicyGuard, mountIo } from '../generic_bind/adapter.ts'
 import { SCOPE_ERROR } from '../../../core/github/constants.ts'
 import { readdir as githubReaddir } from '../../../core/github/readdir.ts'
 import { stat as githubStat } from '../../../core/github/stat.ts'
@@ -95,7 +94,7 @@ async function rg(
     }
   }
   const idx = opts.index ?? undefined
-  const io = scoped ? withCommandGuards(withPolicyGuard(IO)) : null
+  const io = scoped ? withCommandGuards(withPolicyGuard(mountIo(opts))) : null
   const stat = (p: PathSpec): Promise<FileStat> =>
     io !== null ? io.stat(accessor, p, idx) : githubStat(accessor, p, idx)
   const readdir = (p: PathSpec): Promise<string[]> =>

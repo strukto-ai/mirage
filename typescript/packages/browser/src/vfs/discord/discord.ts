@@ -12,15 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { DiscordVFSBase } from '@struktoai/mirage-core/vfs/discord/discord'
 import { DiscordAccessor } from '@struktoai/mirage-core/accessor/discord'
-import { DISCORD_COMMANDS } from '@struktoai/mirage-core/commands/builtin/discord/index'
 
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import { BrowserDiscordTransport } from '@struktoai/mirage-core/core/discord/client_browser'
-
-import { DISCORD_OPS } from '@struktoai/mirage-core/ops/discord/index'
-import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 
 import { PROMPT, WRITE_PROMPT } from '@struktoai/mirage-core/vfs/discord/prompt'
 import { VFSName } from '@struktoai/mirage-core/types'
@@ -32,7 +27,7 @@ export interface DiscordVFSState {
   config: DiscordConfigRedacted
 }
 
-export class DiscordVFS extends BaseVFS {
+export class DiscordVFS extends DiscordVFSBase {
   override readonly name: string = VFSName.DISCORD
   override readonly cachesReads: boolean = true
   // Every listed file carries an exact size: chat.jsonl and members/*.json
@@ -55,14 +50,6 @@ export class DiscordVFS extends BaseVFS {
       config,
     )
     this.prompt = PROMPT + this.accessor.timeRange.prompt()
-  }
-
-  override commands(): readonly RegisteredCommand[] {
-    return DISCORD_COMMANDS
-  }
-
-  override ops(): readonly RegisteredOp[] {
-    return DISCORD_OPS
   }
 
   override getState(): Promise<DiscordVFSState> {

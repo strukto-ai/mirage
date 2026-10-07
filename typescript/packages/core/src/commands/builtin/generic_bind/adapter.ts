@@ -14,15 +14,27 @@
 
 import type {
   ContentSearchOps,
-  ReadOps,
-  NativeReadOps,
-  WriteOps,
-  SearchOps,
-  ReadStreamOp,
+  CopyOp,
+  DuOps,
+  ExistsOp,
+  FindOp,
   MkdirOp,
+  PathOp,
+  PwriteOp,
+  ReadBytesOp,
+  ReaddirOp,
+  ReadStreamOp,
+  RenameOp,
   ResolveGlobOp,
+  RmdirOp,
+  SearchOps,
+  SearchQuery,
   StatOp,
+  WriteOp,
 } from '../../../vfs/types.ts'
+import type { BaseVFS, FindOptions } from '../../../vfs/base.ts'
+import { getExtension } from '../../resolve.ts'
+import { streamFromBytes } from '../utils/wrap.ts'
 
 import type { Accessor } from '../../../accessor/base.ts'
 import {
@@ -44,10 +56,17 @@ import { hasAborted, makeAbortError } from '../../../workspace/abort.ts'
 import { hiddenUnder, moveReveals, pathVisible } from '../../../utils/hidden.ts'
 import { removeRemnants, visibleBelow, type RemnantChannel } from '../../../utils/remnants.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { refuseTaken } from '../../../ops/generic/factory.ts'
+import { refuseTaken } from '../../../core/generic/rewrite.ts'
 import type { NamespaceView, StatOverlay } from '../../../ops/types.ts'
 
-import { FileType, MountMode, PathSpec, type FileStat, type WalkProbe } from '../../../types.ts'
+import {
+  FileType,
+  MountMode,
+  PathSpec,
+  type FileStat,
+  type SetAttrFields,
+  type WalkProbe,
+} from '../../../types.ts'
 import {
   eacces,
   eexist,
@@ -58,6 +77,7 @@ import {
   erofs,
   isDotWalkError,
   isEnoent,
+  isEnotdir,
   isMissError,
   walkRefusal,
 } from '../../../errors/fs.ts'
@@ -67,11 +87,44 @@ import { makeResolveGlob, type TargetStat } from '../../../utils/glob_walk.ts'
 import { norm, parent } from '../../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 
-import type { AggregateFn, CommandFnResult, CommandOpts } from '../../config.ts'
+import type { AggregateFn, CommandFn, CommandFnResult, CommandOpts } from '../../config.ts'
 
-export interface CommandIO<A extends Accessor = Accessor>
-  extends ReadOps<A>, NativeReadOps<A>, WriteOps<A> {
+/**
+ * The command tier's table: the mounted VFS's functions, each taking the
+ * accessor in front as a command calls it. A slot the VFS does not define
+ * is absent. Built per mount by {@link commandIo}; a command reaches its
+ * mount's table through {@link mountIo}.
+ */
+export interface CommandIO<A extends Accessor = Accessor> {
+  readdir: ReaddirOp<A>
+  readBytes: ReadBytesOp<A>
+  stat: StatOp<A>
   readStream: ReadStreamOp<A>
+  readRange?: (
+    accessor: A,
+    path: PathSpec,
+    index: IndexCacheStore | undefined,
+    offset: number,
+    size: number | null,
+  ) => Promise<Uint8Array>
+  exists?: ExistsOp<A>
+  find?: FindOp<A>
+  du?: DuOps<A>
+  write?: WriteOp<A>
+  append?: WriteOp<A>
+  pwrite?: PwriteOp<A>
+  create?: PathOp<A>
+  mkdir?: MkdirOp<A>
+  unlink?: PathOp<A>
+  rmdir?: RmdirOp<A>
+  rmR?: PathOp<A>
+  rename?: RenameOp<A>
+  copy?: CopyOp<A>
+  dirCopy?: CopyOp<A>
+  /** noCreate requires an atomic existence precondition, or ENOTSUP before writing. */
+  truncate?: (accessor: A, path: PathSpec, length: number, noCreate?: boolean) => Promise<void>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setAttrs?: (...args: any[]) => unknown
   isMounted: (accessor: A) => boolean
   streamsBytes?: boolean
   local?: boolean
@@ -91,6 +144,197 @@ export interface CommandIO<A extends Accessor = Accessor>
   globTargetStat?: TargetStat
 }
 
+/**
+ * The table of the mount a command runs on. Throws when the command ran
+ * outside a mount. Mirrors Python's `mount_io`.
+ */
+export function mountIo(opts: CommandOpts): CommandIO {
+  if (opts.io === undefined)
+    throw new TypeError(`${opts.command ?? ''}: ran without its mount's table`)
+  return opts.io
+}
+
+/**
+ * A handler that builds `build`'s handler over the running mount's table,
+ * wrapped by `wrap`, on every call. For a builder that reads its slots
+ * once, up front: the table is the mount's, so it is only known once a
+ * command runs. Mirrors Python's `over_mount_io`.
+ */
+export function overMountIo(
+  build: (io: CommandIO) => CommandFn,
+  wrap?: (io: CommandIO) => CommandIO,
+): CommandFn {
+  return (accessor, paths, texts, opts) => {
+    const io = mountIo(opts)
+    return build(wrap === undefined ? io : wrap(io))(accessor, paths, texts, opts)
+  }
+}
+
+// What a command calls a slot with: the accessor in front, which the VFS
+// holds itself, so it is dropped here.
+function withoutAccessor<T extends unknown[], R>(
+  method: (...args: T) => R,
+): (accessor: unknown, ...args: T) => R {
+  return (_accessor, ...args) => method(...args)
+}
+
+async function existsByStat(vfs: BaseVFS, path: PathSpec): Promise<boolean> {
+  try {
+    await vfs.stat(path)
+    return true
+  } catch (error) {
+    if (isEnoent(error) || isEnotdir(error)) return false
+    throw error
+  }
+}
+
+// `vfs.read`, or the renderer of the path's filetype where the VFS renders
+// one, which is what a command reads. Both are looked up per call, as the
+// op door looks them up.
+function reader(
+  vfs: BaseVFS,
+): (
+  path: PathSpec,
+  index?: IndexCacheStore,
+  offset?: number,
+  size?: number | null,
+) => Promise<Uint8Array> {
+  return (path, index, offset = 0, size = null) => {
+    const renderer = vfs.renderers[getExtension(path.virtual) ?? '']
+    if (renderer === undefined) return vfs.read(path, index, offset, size)
+    const render = (vfs as unknown as Record<string, typeof vfs.read>)[renderer]
+    if (render === undefined) throw new TypeError(`${vfs.name}: no renderer named ${renderer}`)
+    return render.call(vfs, path, index, offset, size)
+  }
+}
+
+/**
+ * The command tier's table for `vfs`, built from its functions.
+ *
+ * A function the VFS does not define is an absent slot, except the two
+ * every reader needs: a stream, which reads the file whole when the VFS
+ * does not stream, and an existence check, which asks `stat`. A ranged
+ * read is the VFS's own `read` only when it reads ranges. Mirrors Python's
+ * `command_io`.
+ */
+export function commandIo(vfs: BaseVFS): CommandIO {
+  const has = (name: string): boolean => vfs.supports(name)
+  const read = reader(vfs)
+  const readBytes: ReadBytesOp = (_accessor, path, index) => read(path, index)
+  const streams = has('readStream')
+  return {
+    readdir: withoutAccessor((path: PathSpec, index?: IndexCacheStore) => vfs.readdir(path, index)),
+    readBytes,
+    stat: withoutAccessor((path: PathSpec, index?: IndexCacheStore) => vfs.stat(path, index)),
+    readStream: streams
+      ? withoutAccessor((path: PathSpec, index?: IndexCacheStore) => vfs.readStream(path, index))
+      : (a, p, i) => streamFromBytes(readBytes, a, p, i),
+    streamsBytes: !streams,
+    ...(vfs.readsRanges
+      ? {
+          readRange: (
+            _a: Accessor,
+            path: PathSpec,
+            index: IndexCacheStore | undefined,
+            offset: number,
+            size: number | null,
+          ) => read(path, index, offset, size),
+        }
+      : {}),
+    exists: has('exists')
+      ? withoutAccessor((path: PathSpec) => vfs.exists(path))
+      : (_a: Accessor, path: PathSpec) => existsByStat(vfs, path),
+    ...(has('find')
+      ? {
+          find: withoutAccessor((path: PathSpec, options: FindOptions, index?: IndexCacheStore) =>
+            vfs.find(path, options, index),
+          ),
+        }
+      : {}),
+    ...(has('duSize') && has('duEntries')
+      ? {
+          du: {
+            size: withoutAccessor((path: PathSpec, index?: IndexCacheStore) =>
+              vfs.duSize(path, index),
+            ),
+            entries: withoutAccessor((path: PathSpec, index?: IndexCacheStore) =>
+              vfs.duEntries(path, index),
+            ),
+          },
+        }
+      : {}),
+    ...(has('write')
+      ? { write: withoutAccessor((p: PathSpec, d: Uint8Array) => vfs.write(p, d)) }
+      : {}),
+    ...(has('append')
+      ? { append: withoutAccessor((p: PathSpec, d: Uint8Array) => vfs.append(p, d)) }
+      : {}),
+    ...(has('pwrite')
+      ? { pwrite: withoutAccessor((p: PathSpec, d: Uint8Array, o: number) => vfs.pwrite(p, d, o)) }
+      : {}),
+    ...(has('create') ? { create: withoutAccessor((p: PathSpec) => vfs.create(p)) } : {}),
+    ...(has('mkdir')
+      ? { mkdir: withoutAccessor((p: PathSpec, parents?: boolean) => vfs.mkdir(p, parents)) }
+      : {}),
+    ...(has('unlink') ? { unlink: withoutAccessor((p: PathSpec) => vfs.unlink(p)) } : {}),
+    ...(has('rmdir')
+      ? { rmdir: withoutAccessor((p: PathSpec, index?: IndexCacheStore) => vfs.rmdir(p, index)) }
+      : {}),
+    ...(has('rmR') ? { rmR: withoutAccessor((p: PathSpec) => vfs.rmR(p)) } : {}),
+    ...(has('rename')
+      ? { rename: withoutAccessor((src: PathSpec, dst: PathSpec) => vfs.rename(src, dst)) }
+      : {}),
+    ...(has('copy')
+      ? { copy: withoutAccessor((src: PathSpec, dst: PathSpec) => vfs.copy(src, dst)) }
+      : {}),
+    ...(has('dirCopy')
+      ? { dirCopy: withoutAccessor((src: PathSpec, dst: PathSpec) => vfs.dirCopy(src, dst)) }
+      : {}),
+    ...(has('truncate')
+      ? {
+          truncate: withoutAccessor((p: PathSpec, length: number, noCreate?: boolean) =>
+            vfs.truncate(p, length, noCreate),
+          ),
+        }
+      : {}),
+    ...(has('setattr')
+      ? {
+          setAttrs: withoutAccessor((p: PathSpec, fields: SetAttrFields) => vfs.setattr(p, fields)),
+        }
+      : {}),
+    isMounted: () => vfs.isMounted(),
+    local: vfs.local,
+    maxGlobMatches: vfs.maxGlobMatches,
+    maxDuEntries: vfs.maxDuEntries,
+    ...(has('search')
+      ? {
+          search: {
+            search: withoutAccessor((p: PathSpec, q: SearchQuery, index?: IndexCacheStore) =>
+              vfs.search(p, q, index),
+            ),
+            ...(has('searchMany')
+              ? {
+                  searchMany: withoutAccessor(
+                    (ps: PathSpec[], q: SearchQuery, index?: IndexCacheStore) =>
+                      vfs.searchMany(ps, q, index),
+                  ),
+                }
+              : {}),
+            meta: vfs.searchMeta,
+          },
+        }
+      : {}),
+    ...(has('narrowPaths')
+      ? {
+          contentSearch: {
+            narrowPaths: withoutAccessor((q: string, ps: PathSpec[]) => vfs.narrowPaths(q, ps)),
+            enabled: () => vfs.contentSearchEnabled(),
+          },
+        }
+      : {}),
+  }
+}
+
 export function resolveGlobOf<A extends Accessor = Accessor>(ops: CommandIO<A>): ResolveGlobOp<A> {
   return makeResolveGlob(
     ops.readdir,
@@ -99,32 +343,6 @@ export function resolveGlobOf<A extends Accessor = Accessor>(ops: CommandIO<A>):
     ops.stat,
     ops.globTargetStat,
   )
-}
-
-/**
- * A `readRange` slot built from a backend read that already takes a byte
- * window as its options argument.
- *
- * Without the slot the ops factory reads the whole object and slices, so
- * `head -c 100` on a 2 GiB S3 key downloads 2 GiB. Python has pushed the
- * window down on every one of these backends since the slot existed by
- * pointing `read_range` at its own `read_bytes`; this is the same move,
- * spelled for a read whose window arrives in an options object.
- *
- * Args:
- *   read: the backend's whole-file read, whose fourth argument is an
- *     `{offset?, size?}` window.
- */
-export function rangeOf<A extends Accessor = Accessor>(
-  read: (
-    accessor: A,
-    path: PathSpec,
-    index: IndexCacheStore | undefined,
-    options: { offset?: number; size?: number },
-  ) => Promise<Uint8Array>,
-): NonNullable<CommandIO<A>['readRange']> {
-  return (accessor, path, index, offset, size) =>
-    read(accessor, path, index, size === null ? { offset } : { offset, size })
 }
 
 // Whether a path that failed with ENOENT is an implicit directory. Keyed
@@ -723,7 +941,7 @@ async function mkdirOnWritable<A extends Accessor>(
   path: PathSpec,
   parents: boolean,
 ): Promise<void> {
-  await refuseTaken(stat, accessor, path, parents)
+  await refuseTaken((p) => stat(accessor, p), path, parents)
   await mkdir(accessor, path, parents)
 }
 

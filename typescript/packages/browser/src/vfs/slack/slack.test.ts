@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { SLACK_COMMANDS } from '@struktoai/mirage-core/commands/builtin/slack/index'
-import { SLACK_OPS } from '@struktoai/mirage-core/ops/slack/index'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mountCommands } from '@struktoai/mirage-core/commands/builtin/backends'
 import { buildVfs } from '../registry.ts'
 import { redactSlackConfig } from './config.ts'
 import { SlackVFS } from './slack.ts'
@@ -58,14 +58,9 @@ describe('SlackVFS (browser)', () => {
     expect(r.config.getHeaders).toBe(headers)
   })
 
-  it('commands() returns SLACK_COMMANDS', () => {
+  it('serves SLACK_COMMANDS', () => {
     const r = new SlackVFS({ proxyUrl: '/api/slack' })
-    expect(r.commands()).toBe(SLACK_COMMANDS)
-  })
-
-  it('ops() returns SLACK_OPS', () => {
-    const r = new SlackVFS({ proxyUrl: '/api/slack' })
-    expect(r.ops()).toBe(SLACK_OPS)
+    expect(mountCommands(r)).toEqual(SLACK_COMMANDS)
   })
 
   it('getState() redacts getHeaders but keeps proxyUrl visible', async () => {

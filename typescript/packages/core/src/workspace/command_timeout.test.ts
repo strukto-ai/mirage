@@ -18,7 +18,6 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { DEFAULT_COMMAND_LIMITS } from '../policy/builtin/output_cap.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
 import type { RunArgs, RunResult } from '../runtime/types.ts'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { Limit, MountMode } from '../types.ts'
@@ -62,9 +61,7 @@ afterEach(() => {
 
 function buildWs(): Workspace {
   const ram = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram)
-  return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops: registry, shellParser: parser })
+  return new Workspace({ '/': ram }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 describe('command timeout', () => {
@@ -128,13 +125,10 @@ describe('python3 command timeout', () => {
 
   function buildPyWs(limits?: Record<string, Record<string, Limit>>): Workspace {
     const ram = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(ram)
     return new Workspace(
       { '/data': [ram, MountMode.EXEC, limits?.['/data'] ?? {}] },
       {
         mode: MountMode.EXEC,
-        ops: registry,
         shellParser: parser,
         runtimes: ['monty', 'quickjs', 'workspace'],
       },
@@ -185,13 +179,10 @@ describe('python3 command timeout', () => {
   it('the timeout aborts the run signal so a runtime can reclaim what it spawned', async () => {
     const probe = new SignalProbeRuntime()
     const ram = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(ram)
     const ws = new Workspace(
       { '/data': ram },
       {
         mode: MountMode.EXEC,
-        ops: registry,
         shellParser: parser,
         runtimes: [probe, 'workspace'],
         commandLimits: { python3: new Limit({ timeoutSeconds: 0.1 }) },
@@ -208,13 +199,10 @@ describe('python3 command timeout', () => {
 
   it('a busy pyodide loop trips the limit instead of wedging the event loop', async () => {
     const ram = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(ram)
     const ws = new Workspace(
       { '/data': ram },
       {
         mode: MountMode.EXEC,
-        ops: registry,
         shellParser: parser,
         runtimes: ['pyodide', 'workspace'],
         commandLimits: { python3: new Limit({ timeoutSeconds: 0.5 }) },
@@ -247,13 +235,10 @@ describe('python3 command timeout', () => {
 
   it('a busy JS loop trips the limit instead of wedging the event loop', async () => {
     const ram = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(ram)
     const ws = new Workspace(
       { '/data': ram },
       {
         mode: MountMode.EXEC,
-        ops: registry,
         shellParser: parser,
         runtimes: ['quickjs', 'workspace'],
         commandLimits: { node: new Limit({ timeoutSeconds: 0.3 }) },
@@ -275,11 +260,9 @@ describe('background job kill', () => {
   it('kill %1 aborts the runtime run of a background job', async () => {
     const probe = new SignalProbeRuntime()
     const ram = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(ram)
     const ws = new Workspace(
       { '/data': ram },
-      { mode: MountMode.EXEC, ops: registry, shellParser: parser, runtimes: [probe, 'workspace'] },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: [probe, 'workspace'] },
     )
     try {
       await ws.shell('python3 -c "hang" &')

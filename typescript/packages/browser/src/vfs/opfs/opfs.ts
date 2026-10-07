@@ -12,17 +12,35 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { lstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { OPFSAccessor } from '../../accessor/opfs.ts'
-import { OPFS_COMMANDS } from '../../commands/builtin/opfs/index.ts'
 import { iterEntries, toWritableChunk } from '../../core/opfs/utils.ts'
-import { OPFS_OPS } from '../../ops/opfs/index.ts'
 import { PROMPT } from './prompt.ts'
+import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
+import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
+import type { FindOptions } from '@struktoai/mirage-core/vfs/base'
+import type { DuEntries } from '@struktoai/mirage-core/vfs/types'
+import { readdir as opfsReaddir } from '../../core/opfs/readdir.ts'
+import { read as opfsRead } from '../../core/opfs/read.ts'
+import { stat as opfsStat } from '../../core/opfs/stat.ts'
+import { readStream as opfsStream } from '../../core/opfs/stream.ts'
+import { exists as opfsExists } from '../../core/opfs/exists.ts'
+import { find as opfsFind } from '../../core/opfs/find.ts'
+import { size as opfsDu, entries as opfsDuAll } from '../../core/opfs/du/index.ts'
+import { write as opfsWrite } from '../../core/opfs/write.ts'
+import { appendBytes as opfsAppend } from '../../core/opfs/append.ts'
+import { create as opfsCreate } from '../../core/opfs/create.ts'
+import { mkdir as opfsMkdir } from '../../core/opfs/mkdir.ts'
+import { unlink as opfsUnlink } from '../../core/opfs/unlink.ts'
+import { rmdir as opfsRmdir } from '../../core/opfs/rmdir.ts'
+import { rmR as opfsRmR } from '../../core/opfs/rm.ts'
+import { rename as opfsRename } from '../../core/opfs/rename.ts'
+import { copy as opfsCopy } from '../../core/opfs/copy.ts'
+import { truncate as opfsTruncate } from '../../core/opfs/truncate.ts'
+import { SCOPE_ERROR } from '../../core/opfs/constants.ts'
 export interface OPFSVFSOptions {
   root?: string
 }
@@ -119,13 +137,90 @@ export class OPFSVFS extends BaseVFS {
     return this.openPromise
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return OPFS_OPS
+  override readonly readsRanges: boolean = true
+
+  override readonly local: boolean = true
+
+  override readonly maxGlobMatches: number = SCOPE_ERROR
+
+  override readdir(path: PathSpec, _index?: IndexCacheStore): Promise<string[]> {
+    return opfsReaddir(this.accessor, path)
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return OPFS_COMMANDS
+  override read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    if (offset === 0 && size === null) return opfsRead(this.accessor, path, index)
+    return opfsRead(this.accessor, path, index, size === null ? { offset } : { offset, size })
   }
+
+  override stat(path: PathSpec, _index?: IndexCacheStore): Promise<FileStat> {
+    return opfsStat(this.accessor, path)
+  }
+
+  override readStream(path: PathSpec, _index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    return opfsStream(this.accessor, path)
+  }
+
+  override exists(path: PathSpec): Promise<boolean> {
+    return opfsExists(this.accessor, path)
+  }
+
+  override find(path: PathSpec, options: FindOptions, _index?: IndexCacheStore): Promise<string[]> {
+    return opfsFind(this.accessor, path, options)
+  }
+
+  override duSize(path: PathSpec, _index?: IndexCacheStore): Promise<number> {
+    return opfsDu(this.accessor, path)
+  }
+
+  override duEntries(path: PathSpec, _index?: IndexCacheStore): Promise<DuEntries> {
+    return opfsDuAll(this.accessor, path)
+  }
+
+  override write(path: PathSpec, data: Uint8Array): Promise<void> {
+    return opfsWrite(this.accessor, path, data)
+  }
+
+  override append(path: PathSpec, data: Uint8Array): Promise<void> {
+    return opfsAppend(this.accessor, path, data)
+  }
+
+  override create(path: PathSpec): Promise<void> {
+    return opfsCreate(this.accessor, path)
+  }
+
+  override mkdir(path: PathSpec, parents = false): Promise<void> {
+    return opfsMkdir(this.accessor, path, parents)
+  }
+
+  override unlink(path: PathSpec): Promise<void> {
+    return opfsUnlink(this.accessor, path)
+  }
+
+  override rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
+    return opfsRmdir(this.accessor, path)
+  }
+
+  override rmR(path: PathSpec): Promise<void> {
+    return opfsRmR(this.accessor, path)
+  }
+
+  override rename(src: PathSpec, dst: PathSpec): Promise<void> {
+    return opfsRename(this.accessor, src, dst)
+  }
+
+  override copy(src: PathSpec, dst: PathSpec): Promise<void> {
+    return opfsCopy(this.accessor, src, dst)
+  }
+
+  override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
+    return opfsTruncate(this.accessor, path, length, noCreate)
+  }
+
   override async getState(): Promise<OPFSVFSState> {
     const handle = await this.root()
     const files: Record<string, Uint8Array> = {}

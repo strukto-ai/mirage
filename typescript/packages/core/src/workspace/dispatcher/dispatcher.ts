@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { OpKwargs } from '../../ops/types.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { applyIo } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
@@ -51,8 +52,6 @@ import type { EntryGate, Visibility } from '../../types.ts'
 import { record, runWithMountContext, runWithRevisions, startOp } from '../../observe/context.ts'
 import { wrapOpStream } from '../mount/mount.ts'
 import type { OpRecord } from '../../observe/record.ts'
-import type { OpsRegistry } from '../../ops/registry.ts'
-import { type OpKwargs } from '../../ops/registry.ts'
 import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../../ops/config.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../ops/namespace_view.ts'
 import { ebusy, isMissingPath } from '../../errors/fs.ts'
@@ -274,7 +273,6 @@ type AdmitWrite = <T>(write: () => Promise<T>) => Promise<T>
 export class Dispatcher {
   private readonly namespace: Namespace
   private readonly cache: FileCache & BaseVFS
-  private readonly opsRegistry: OpsRegistry
   private readonly policies: Policies
   // The snapshot drift queue rides along because this is the one door:
   // a strict restore's pending fingerprint checks must run before ANY
@@ -295,7 +293,6 @@ export class Dispatcher {
   constructor(
     namespace: Namespace,
     cache: FileCache & BaseVFS,
-    opsRegistry: OpsRegistry,
     policies?: Policies,
     drift?: DriftQueue,
     admitWrite?: AdmitWrite,
@@ -303,12 +300,11 @@ export class Dispatcher {
   ) {
     this.namespace = namespace
     this.cache = cache
-    this.opsRegistry = opsRegistry
     this.policies = policies ?? new Policies()
     this.drift = drift ?? null
     this.admitWrite = admitWrite ?? null
     this.decisions = decisions ?? null
-    this.reconciler = new Reconciler(cache, namespace, opsRegistry)
+    this.reconciler = new Reconciler(cache, namespace)
   }
 
   /**
@@ -667,9 +663,8 @@ export class Dispatcher {
 
   /** Whether a filetype renderer answers this read on `vfs`; asked each
    * time, since a renderer can land while the read runs. */
-  private rendersRead(call: Call, vfs: BaseVFS): boolean {
-    const type = readType(call)
-    return type !== null && this.opsRegistry.find('read', vfs, type) !== null
+  private rendersRead(call: Call, mount: MountEntry): boolean {
+    return mount.renders(readType(call))
   }
 
   /**
@@ -696,7 +691,7 @@ export class Dispatcher {
     if (
       cached === null ||
       !(await this.reconciler.mayServeCached(mount, call.path.virtual)) ||
-      this.rendersRead(call, vfs) ||
+      this.rendersRead(call, mount) ||
       mount.retiring ||
       this.namespace.tryMountFor(call.path.virtual) !== mount
     ) {
@@ -732,8 +727,8 @@ export class Dispatcher {
       !rawRead(call) &&
       DISPATCH_READ_OPS.has(call.opName) &&
       size !== 0 &&
-      (whole || !this.opsRegistry.readsRanges(vfs, getExtension(call.path.virtual))) &&
-      !this.rendersRead(call, vfs)
+      (whole || !mount.readsRanges(call.path.virtual)) &&
+      !this.rendersRead(call, mount)
       ? mount.cacheManager
       : null
   }
@@ -758,7 +753,7 @@ export class Dispatcher {
     const filetype = getExtension(p.virtual)
     const [readOffset, readSize] = readWindow(kwargs)
     const whole = readOffset === 0 && readSize === null
-    if (this.opsRegistry.find(opName, vfs)?.write === true) {
+    if (mount.writes(opName)) {
       if (effectivePathMode(p.virtual, mountPrefix, mode) === MountMode.READ) {
         throw erofs(p, `mount at '${p.virtual}' is read-only`)
       }
@@ -809,7 +804,7 @@ export class Dispatcher {
                 const pending = Promise.resolve(
                   opName === 'setattr'
                     ? this.applySetattr(mount, vfs, scope, p, opKwargs)
-                    : this.opsRegistry.call(opName, vfs, vfs.accessor, scope, fullArgs, opKwargs),
+                    : mount.callOp(opName, scope, fullArgs, opKwargs),
                 )
                 onCall?.(pending)
                 return runWithTimeout(pending, opTimeout, opName)
@@ -822,7 +817,7 @@ export class Dispatcher {
         const kept = await filler.fill(
           p,
           () => run(wholeRead(fullKwargs)),
-          () => !this.rendersRead(call, vfs),
+          () => !this.rendersRead(call, mount),
         )
         result =
           whole || !(kept instanceof Uint8Array) ? kept : sliceWindow(kept, readOffset, readSize)
@@ -1104,15 +1099,15 @@ export class Dispatcher {
    * same mode fence, index stamping and mount-prefix context normal
    * dispatch applies, plus the boundary's admission and completion for
    * writes (Python's `_MountChannel` holds the same `OpBoundary`) and the
-   * dispatcher's own write invalidation, because raw registry calls
-   * run outside the cache context dispatch establishes, so the cores'
+   * dispatcher's own write invalidation, because a raw mount call
+   * runs outside the cache context dispatch establishes, so the cores'
    * invalidation cannot land. Invalidation runs even when the op
    * fails: a missing-path failure means the tree changed under the
    * walk, and the walk's own earlier listing is exactly the entry that
    * must not survive. Only the visibility filter stays off, which is
    * what lets a remnant walk see hidden entries. Every internal
-   * registry call in this class routes through here; a bare
-   * opsRegistry.call outside dispatch is a bug.
+   * backend call in this class routes through here; a bare
+   * `callOp` outside dispatch is a bug.
    */
   private async fencedCall(
     vfs: BaseVFS,
@@ -1124,7 +1119,7 @@ export class Dispatcher {
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
     const mount = this.namespace.mountFor(spec.virtual)
-    const write = this.opsRegistry.find(opName, vfs)?.write === true
+    const write = mount.writes(opName)
     const boundary = new OpBoundary(this.policies, mountPrefix, mode, sessionId(), this.decisions)
     if (write) {
       // The same pre-vfs admission a dispatched op answers, with the
@@ -1147,7 +1142,7 @@ export class Dispatcher {
         const answer = await runWithMountContext(
           () =>
             runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, () =>
-              this.opsRegistry.call(opName, vfs, vfs.accessor, spec, [], {
+              mount.callOp(opName, spec, [], {
                 ...this.indexKwargs(mount),
                 ...kwargs,
               }),
@@ -1624,19 +1619,20 @@ export class Dispatcher {
     resolved: [BaseVFS, PathSpec, MountMode],
     issuer?: symbol,
   ): Promise<unknown> {
-    const [vfs, scope] = resolved
+    const [, scope] = resolved
     const mount = this.namespace.tryMountFor(scope.virtual)
+    if (mount === null) return null
     const boundary = this.boundary(mount)
     await boundary.admit(opName, scope, false, {}, issuer)
-    await mount?.ensureReady()
+    await mount.ensureReady()
     const filetype = getExtension(scope.virtual)
     try {
-      const call = () =>
-        this.opsRegistry.call(opName, vfs, vfs.accessor, scope, [], {
+      const result = await mount.use(() =>
+        mount.callOp(opName, scope, [], {
           ...this.indexKwargs(mount),
           ...(filetype !== null ? { filetype } : {}),
-        })
-      const result = await (mount === null ? call() : mount.use(call))
+        }),
+      )
       return await boundary.complete(opName, scope, false, result)
     } catch (err) {
       // Final on every channel: a plain file above the path means nothing
@@ -1752,12 +1748,12 @@ export class Dispatcher {
     let stat: FileStat | null = null
     let missing: unknown = null
     if (mount !== null) {
-      const [vfs, scope] = await this.namespace.resolve(path.virtual, false)
+      const [, scope] = await this.namespace.resolve(path.virtual, false)
       await mount.ensureReady()
       const filetype = getExtension(scope.virtual)
       try {
         const found = await mount.use(() =>
-          this.opsRegistry.call('stat', vfs, vfs.accessor, scope, [], {
+          mount.callOp('stat', scope, [], {
             ...this.indexKwargs(mount),
             ...(filetype !== null ? { filetype } : {}),
           }),
@@ -1792,13 +1788,13 @@ export class Dispatcher {
     p: PathSpec,
     kwargs: OpKwargs,
   ): Promise<Record<string, number | string>> {
-    if (this.namespace.isLink(p.virtual) || this.opsRegistry.find('setattr', vfs) === null) {
+    if (this.namespace.isLink(p.virtual) || !mount.hasOp('setattr')) {
       // No backend inode answers for the path here, so nothing would
       // refuse a missing one: the overlay would stamp it.
       await this.xattrTarget(mount, p)
       return this.overlaySetattr(p, kwargs)
     }
-    const raw = await this.opsRegistry.call('setattr', vfs, vfs.accessor, scope, [], kwargs)
+    const raw = await mount.callOp('setattr', scope, [], kwargs)
     const residual = raw as Record<string, number | string>
     const applied = SETATTR_KEYS.filter(
       (key) => kwargs[key] !== undefined && kwargs[key] !== null && !(key in residual),

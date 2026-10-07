@@ -15,11 +15,11 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { command, type CommandFnResult, type CommandOpts, type CommandFn } from '../../config.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { requireOp } from '../generic_bind/adapter.ts'
+import { requireOp, overMountIo } from '../generic_bind/adapter.ts'
 import { createdLines, createdNames, makeDirectory } from '../generic_bind/builders/mkdir.ts'
 import { resolveGlobOf, type CommandIO } from '../generic_bind/index.ts'
 import { mkdirLinkRefusal } from '../utils/slash_links.ts'
@@ -28,7 +28,7 @@ import { missingOperandError } from '../../spec/usage.ts'
 const ENC = new TextEncoder()
 
 /** Build the implicit-parents mkdir override for one keyed store. */
-export function makeMkdir<A extends Accessor>(vfs: string, io: CommandIO<A>): RegisteredCommand[] {
+function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
   const mkdirImpl = requireOp(io.mkdir, 'mkdir')
   const resolveGlob = resolveGlobOf(io)
 
@@ -76,11 +76,16 @@ export function makeMkdir<A extends Accessor>(vfs: string, io: CommandIO<A>): Re
     ]
   }
 
-  return command<A>({
+  return mkdirCommand
+}
+
+/** The keyed-store `mkdir` over the running mount's table, guarded by `wrap`. */
+export function makeMkdir(vfs: string, wrap: (io: CommandIO) => CommandIO): RegisteredCommand[] {
+  return command({
     name: 'mkdir',
     vfs,
     spec: specOf('mkdir'),
-    fn: mkdirCommand,
+    fn: overMountIo(build, wrap),
     write: true,
     pathGuarded: true,
   })

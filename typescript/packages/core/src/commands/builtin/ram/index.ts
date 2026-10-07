@@ -12,12 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RAMAccessor } from '../../../accessor/ram.ts'
 import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
 
 export const RAM_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<RAMAccessor>(VFSName.RAM, IO),
+  ...makeGenericCommands(VFSName.RAM, { local: true }),
 ]

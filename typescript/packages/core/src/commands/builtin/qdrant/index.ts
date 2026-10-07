@@ -12,14 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { QdrantAccessor } from '../../../accessor/qdrant.ts'
 import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeSearch } from '../generic/search.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
 
 export const QDRANT_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<QdrantAccessor>(VFSName.QDRANT, IO),
-  ...makeSearch(VFSName.QDRANT, IO.search),
+  ...makeGenericCommands(VFSName.QDRANT),
+  ...makeSearch(VFSName.QDRANT),
 ]

@@ -15,7 +15,6 @@
 import type { Evicted } from '../cache/index/config.ts'
 import { ListingCheckStore } from '../cache/index/ram.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
-import type { OpsRegistry } from '../ops/registry.ts'
 import type { BaseVFS } from '../vfs/base.ts'
 import { FileStat, ListingVersion, PathSpec, ReadPolicy } from '../types.ts'
 import { enoent, isEnoent, isEnotdir, isMissingOp } from '../errors/fs.ts'
@@ -75,12 +74,10 @@ enum Verdict {
 export class Reconciler {
   private readonly cache: FileCache & BaseVFS
   private readonly namespace: Namespace
-  private readonly opsRegistry: OpsRegistry
 
-  constructor(cache: FileCache & BaseVFS, namespace: Namespace, opsRegistry: OpsRegistry) {
+  constructor(cache: FileCache & BaseVFS, namespace: Namespace) {
     this.cache = cache
     this.namespace = namespace
-    this.opsRegistry = opsRegistry
   }
 
   // Re-stat the backend and apply the matching cache/overlay reaction. A
@@ -91,7 +88,6 @@ export class Reconciler {
   // backend is reused (CacheManager.probedStat) until a write lands: the
   // verdict and its reactions still run, only the round trip is skipped.
   private async probe(mount: MountEntry, path: string): Promise<Verdict> {
-    const vfs = mount.vfs
     const scope = scopeOf(mount, path)
     const manager = mount.cacheManager
     let remoteStat: unknown = manager?.probedStat(scope) ?? null
@@ -101,9 +97,7 @@ export class Reconciler {
       scratch = new ListingCheckStore({ hints: mount.index })
       try {
         // No cached row answers; the mount's rows ride along as hints.
-        remoteStat = await this.opsRegistry.call('stat', vfs, vfs.accessor, scope, [], {
-          index: scratch,
-        })
+        remoteStat = await mount.callOp('stat', scope, [], { index: scratch })
       } catch (err) {
         if (isEnoent(err) || isEnotdir(err)) {
           await this.onMissing(path)
@@ -265,17 +259,9 @@ export class Reconciler {
   // Ask the backend for the version a listing check compares: the mount root
   // or the folder the version covers.
   private async listingFingerprint(mount: MountEntry, path: string): Promise<string | null> {
-    const vfs = mount.vfs
-    const remote = await this.opsRegistry.call(
-      'stat',
-      vfs,
-      vfs.accessor,
-      scopeOf(mount, path),
-      [],
-      {
-        index: new ListingCheckStore(),
-      },
-    )
+    const remote = await mount.callOp('stat', scopeOf(mount, path), [], {
+      index: new ListingCheckStore(),
+    })
     return remote instanceof FileStat ? remote.fingerprint : null
   }
 

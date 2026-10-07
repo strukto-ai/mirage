@@ -19,7 +19,7 @@ describe('@struktoai/mirage-node barrel exports', () => {
   it('re-exports core symbols (Workspace, MountMode, RAMVFS, …)', () => {
     expect(nodePkg.MountMode).toBeDefined()
     expect(nodePkg.RAMVFS).toBeDefined()
-    expect(nodePkg.OpsRegistry).toBeDefined()
+    expect(nodePkg.vfsCall).toBeDefined()
     expect(nodePkg.PathSpec).toBeDefined()
   })
 
@@ -31,11 +31,6 @@ describe('@struktoai/mirage-node barrel exports', () => {
   it('exports DiskVFS', () => {
     expect(nodePkg.DiskVFS).toBeDefined()
     expect(typeof nodePkg.DiskVFS).toBe('function')
-  })
-
-  it('exports DISK_OPS array', () => {
-    expect(Array.isArray(nodePkg.DISK_OPS)).toBe(true)
-    expect(nodePkg.DISK_OPS.length).toBeGreaterThan(0)
   })
 
   it('exports DISK_PROMPT string', () => {

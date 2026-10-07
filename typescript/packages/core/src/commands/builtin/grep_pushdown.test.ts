@@ -34,6 +34,7 @@ import {
 } from './grep_pushdown.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { Accessor } from '../../accessor/base.ts'
+import { commandIo, type CommandIO } from './generic_bind/adapter.ts'
 import { materialize } from '../../io/types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { FakeDiscordTransport, makeFakeVfs as discordVfs } from './discord/_test_util.ts'
@@ -411,18 +412,20 @@ describe('textCandidates', () => {
   })
 })
 
-function slackEmpty(): [{ endpoint: string }[], Accessor] {
+function slackEmpty(): [{ endpoint: string }[], Accessor, CommandIO] {
   const transport = new FakeSlackTransport((endpoint) =>
     endpoint === 'search.files'
       ? { ok: true, files: { matches: [] } }
       : { ok: true, messages: { matches: [] } },
   )
-  return [transport.calls, slackVfs(transport).accessor]
+  const vfs = slackVfs(transport)
+  return [transport.calls, vfs.accessor, commandIo(vfs)]
 }
 
-function discordEmpty(): [{ endpoint: string }[], Accessor] {
+function discordEmpty(): [{ endpoint: string }[], Accessor, CommandIO] {
   const transport = new FakeDiscordTransport(() => ({ total_results: 0, messages: [] }))
-  return [transport.calls, discordVfs(transport).accessor]
+  const vfs = discordVfs(transport)
+  return [transport.calls, vfs.accessor, commandIo(vfs)]
 }
 
 const SLACK_CHANNEL = ['/mnt/slack', '/channels/general__C1'] as const
@@ -453,7 +456,7 @@ describe('an empty search answer', () => {
   ])('is final for %s', async (_name, commands, empty, [prefix, rest], flags, searches) => {
     const cmd = commands[0]
     if (cmd === undefined) throw new Error('command not registered')
-    const [calls, accessor] = empty()
+    const [calls, accessor, io] = empty()
     const virtual = prefix + rest
     const spec = new PathSpec({
       virtual,
@@ -465,12 +468,13 @@ describe('an empty search answer', () => {
       stdin: null,
       flags,
       filetypeFns: null,
+      io,
       cwd: '/',
     })
     if (result === null) throw new Error('no result')
-    const [out, io] = result
+    const [out, ioResult] = result
     expect(calls.map((c) => c.endpoint)).toEqual(searches)
-    expect(io.exitCode).toBe(1)
+    expect(ioResult.exitCode).toBe(1)
     expect(await materialize(out)).toEqual(new Uint8Array())
   })
 })

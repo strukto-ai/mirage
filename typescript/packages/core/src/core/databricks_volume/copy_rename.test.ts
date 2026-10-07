@@ -17,8 +17,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runWithCacheManager } from '../../cache/context.ts'
 import { copy } from './copy.ts'
 import { rename } from './rename.ts'
-import { resolveGlobOf } from '../../commands/builtin/generic_bind/index.ts'
-import { IO } from '../../commands/builtin/databricks_volume/io.ts'
+import { makeResolveGlob } from '../../utils/glob_walk.ts'
+import { readdir as dbxReaddir } from './readdir.ts'
+import { stat as dbxStat } from './stat.ts'
 import { PathSpec } from '../../types.ts'
 import {
   jsonResponse,
@@ -30,7 +31,7 @@ import {
   type FetchCall,
 } from './_test_util.ts'
 
-const resolveGlob = resolveGlobOf(IO)
+const resolveGlob = makeResolveGlob(dbxReaddir, undefined, undefined, dbxStat)
 
 class FakeManager {
   listingTrusted(_folder: string): boolean {

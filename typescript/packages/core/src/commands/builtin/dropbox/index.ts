@@ -12,13 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { DropboxAccessor } from '../../../accessor/dropbox.ts'
 import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
 
-export const DROPBOX_COMMANDS: readonly RegisteredCommand[] = makeGenericCommands<DropboxAccessor>(
-  VFSName.DROPBOX,
-  IO,
-)
+export const DROPBOX_COMMANDS: readonly RegisteredCommand[] = makeGenericCommands(VFSName.DROPBOX)

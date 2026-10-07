@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { MountEntry } from '../../workspace/mount/mount.ts'
+import { mountCommands } from '../../commands/builtin/backends.ts'
 import { describe, expect, it } from 'vitest'
 import { MountMode } from '../../types.ts'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
@@ -27,15 +29,15 @@ describe('BinViewVFS', () => {
       () => ['ls'],
       (name) => (name === 'ls' ? 'ls' : null),
     )
-    const names = new Set(vfs.commands().map((cmd) => cmd.name))
+    const names = new Set(mountCommands(vfs).map((cmd) => cmd.name))
     // Every generic command registers, the writers included: `gzip -c`
     // reads the view like any reader, and a line that writes is refused
     // at the op the view does not have.
     for (const name of ['cat', 'ls', 'stat', 'gzip', 'rm', 'cp']) {
       expect(names.has(name)).toBe(true)
     }
-    const ops = new Map(vfs.ops().map((op) => [op.name, op]))
-    for (const name of ['read', 'readdir', 'stat']) expect(ops.has(name)).toBe(true)
+    const mount = new MountEntry({ prefix: '/', vfs })
+    for (const name of ['read', 'readdir', 'stat']) expect(mount.hasOp(name)).toBe(true)
     for (const name of [
       'write',
       'append',
@@ -47,7 +49,7 @@ describe('BinViewVFS', () => {
       'truncate',
       'setattr',
     ]) {
-      expect(ops.get(name)?.write).toBe(true)
+      expect(mount.hasOp(name) && mount.writes(name)).toBe(true)
     }
   })
 

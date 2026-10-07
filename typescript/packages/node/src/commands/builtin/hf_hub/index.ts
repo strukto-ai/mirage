@@ -15,8 +15,6 @@
 import { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import { VFSName } from '@struktoai/mirage-core/types'
-import type { HfHubAccessor } from '../../../accessor/hf_hub.ts'
-import { IO } from './io.ts'
 
 // The three git-repo VFS. `hf_buckets` is deliberately absent: it is a
 // different Hugging Face product (Xet-backed mutable object storage, no
@@ -24,5 +22,5 @@ import { IO } from './io.ts'
 export const HF_HUB_VFS_NAMES = [VFSName.HF_MODELS, VFSName.HF_DATASETS, VFSName.HF_SPACES] as const
 
 export const HF_HUB_COMMANDS: readonly RegisteredCommand[] = HF_HUB_VFS_NAMES.flatMap((vfs) =>
-  makeGenericCommands<HfHubAccessor>(vfs, IO),
+  makeGenericCommands(vfs),
 )

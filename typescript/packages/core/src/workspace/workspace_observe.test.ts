@@ -16,7 +16,6 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { RAMObserverStore } from '../observe/store.ts'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { MountMode } from '../types.ts'
@@ -36,13 +35,10 @@ beforeAll(async () => {
 
 function buildWorkspace(observe?: RAMObserverStore): Workspace {
   const ram = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram)
   return new Workspace(
     { '/data': ram },
     {
       mode: MountMode.WRITE,
-      ops: registry,
       shellParser: parser,
       ...(observe !== undefined ? { observe } : {}),
     },
@@ -167,12 +163,9 @@ describe('Workspace observer wiring', () => {
   it('records the op path per mount, not mount-relative', async () => {
     const s3 = new RAMVFS()
     const db = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(s3)
-    registry.registerVfs(db)
     const ws = new Workspace(
       { '/s3': s3, '/db': db },
-      { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+      { mode: MountMode.WRITE, shellParser: parser },
     )
     for (const line of [
       'echo one > /s3/report.json',

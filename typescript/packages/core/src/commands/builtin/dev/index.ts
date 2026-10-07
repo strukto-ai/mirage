@@ -13,13 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RAMAccessor } from '../../../accessor/ram.ts'
+import { readStream } from '../../../core/dev/stream.ts'
 import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
-import { IO, DEV_STREAMING } from './io.ts'
+import { type CommandIO, makeGenericCommands } from '../generic_bind/index.ts'
 
+function endless(io: CommandIO): CommandIO {
+  return {
+    ...io,
+    readStream: (accessor, path, index) => readStream(accessor as RAMAccessor, path, index),
+  }
+}
+
+// /dev is a RAM mount whose read and stat know the two synthetic character
+// devices. Commands that consume a whole input read a finite stream, while
+// the two bounded streaming commands opt into the endless source.
 export const DEV_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<RAMAccessor>(VFSName.RAM, IO, {
-    opsOverrides: { cat: DEV_STREAMING, head: DEV_STREAMING },
-  }),
+  ...makeGenericCommands(VFSName.RAM, { adapt: { cat: endless, head: endless }, local: true }),
 ]

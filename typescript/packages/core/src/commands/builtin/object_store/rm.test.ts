@@ -31,7 +31,7 @@ it.each([
       rmR: unlink,
       isMounted: () => true,
     }
-    const command = makeRm('s3', withCommandGuards(io))[0]
+    const command = makeRm('s3', withCommandGuards)[0]
     if (command === undefined) throw new Error('rm was not registered')
     const refused = new PathSpec({
       virtual: '/data',
@@ -46,6 +46,7 @@ it.each([
       stdin: null,
       filetypeFns: null,
       cwd: '/',
+      io,
     })
     expect(result?.[1].exitCode).toBe(code)
     expect(new TextDecoder().decode(await materialize(result?.[1].stderr ?? null))).toBe(err)

@@ -190,7 +190,7 @@ async function shell(ws: NodeWorkspace, line: string): Promise<void> {
 
 async function throwawayStat(ws: NodeWorkspace, mount: MountEntry, key: string): Promise<FileStat> {
   const spec = new PathSpec({ virtual: key, directory: '/', vfsPath: '' })
-  return (await ws.opsRegistry.call('stat', mount.vfs, mount.vfs.accessor, spec, [], {
+  return (await mount.callOp('stat', spec, [], {
     index: new ListingCheckStore(),
   })) as FileStat
 }

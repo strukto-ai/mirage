@@ -17,7 +17,6 @@ import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { CLISpec } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import type { FileEvent, PathSpec } from '../types.ts'
@@ -37,12 +36,7 @@ beforeAll(async () => {
 
 function build(): Workspace {
   const ram = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram)
-  return new Workspace(
-    { '/data': ram },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {

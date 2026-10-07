@@ -15,10 +15,8 @@
 import type { Evicted } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { RAMAccessor } from '../../accessor/ram.ts'
-import { DEV_COMMANDS } from '../../commands/builtin/dev/index.ts'
-import { DEV_OPS } from '../../ops/dev/index.ts'
-import type { RegisteredCommand } from '../../commands/config.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { PathSpec } from '../../types.ts'
 
 import { RAMVFS } from '../ram/ram.ts'
 import type { RAMStore } from '../ram/store.ts'
@@ -62,11 +60,13 @@ export class DevVFS extends RAMVFS {
     }
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return DEV_OPS
-  }
-
-  override commands(): readonly RegisteredCommand[] {
-    return DEV_COMMANDS
+  /**
+   * The stream is finite: a command that consumes a whole input reads the
+   * refusing read, and only the two bounded streaming commands opt into the
+   * endless source (`commands/builtin/dev`).
+   */
+  override async *readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    const data = await this.read(path, index)
+    if (data.byteLength > 0) yield data
   }
 }

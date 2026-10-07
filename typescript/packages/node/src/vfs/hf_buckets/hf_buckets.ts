@@ -14,16 +14,11 @@
 
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
-
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
 import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
-import { HF_BUCKETS_COMMANDS } from '../../commands/builtin/hf_buckets/index.ts'
 import { buildDeltaHook } from '../../core/hf_buckets/watch.ts'
-import { HF_BUCKETS_OPS } from '../../ops/hf_buckets/index.ts'
 import {
   assertHfRepoId,
   type HfBucketsConfig,
@@ -31,6 +26,23 @@ import {
   redactHfBucketsConfig,
 } from './config.ts'
 import { PROMPT } from './prompt.ts'
+import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
+import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
+import type { FindOptions } from '@struktoai/mirage-core/vfs/base'
+import type { DuEntries } from '@struktoai/mirage-core/vfs/types'
+import { readdir as hfReaddir } from '../../core/hf_buckets/readdir.ts'
+import { read as hfRead } from '../../core/hf_buckets/read.ts'
+import { stat as hfStat } from '../../core/hf_buckets/stat.ts'
+import { readStream as hfStream } from '../../core/hf_buckets/stream.ts'
+import { exists as hfExists } from '../../core/hf_buckets/exists.ts'
+import { find as hfFind } from '../../core/hf_buckets/find.ts'
+import { size as hfDu, entries as hfDuAll } from '../../core/hf_buckets/du/index.ts'
+import { write as hfWrite } from '../../core/hf_buckets/write.ts'
+import { create as hfCreate } from '../../core/hf_buckets/create.ts'
+import { mkdir as hfMkdir } from '../../core/hf_buckets/mkdir.ts'
+import { unlink as hfUnlink } from '../../core/hf_buckets/unlink.ts'
+import { rmR as hfRmR } from '../../core/hf_buckets/rm.ts'
+import { SCOPE_ERROR } from '../../core/hf_buckets/constants.ts'
 
 export interface HfBucketsVFSState {
   type: string
@@ -67,12 +79,66 @@ export class HfBucketsVFS extends BaseVFS {
     this.accessor = new HfBucketsAccessor(this.config)
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return HF_BUCKETS_COMMANDS
+  override readonly readsRanges: boolean = true
+
+  override readonly maxGlobMatches: number = SCOPE_ERROR
+
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return hfReaddir(this.accessor, path, index)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return HF_BUCKETS_OPS
+  override read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    if (offset === 0 && size === null) return hfRead(this.accessor, path, index)
+    return hfRead(this.accessor, path, index, size === null ? { offset } : { offset, size })
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return hfStat(this.accessor, path, index)
+  }
+
+  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    return hfStream(this.accessor, path, index)
+  }
+
+  override exists(path: PathSpec): Promise<boolean> {
+    return hfExists(this.accessor, path)
+  }
+
+  override find(path: PathSpec, options: FindOptions, index?: IndexCacheStore): Promise<string[]> {
+    return hfFind(this.accessor, path, options, index)
+  }
+
+  override duSize(path: PathSpec, index?: IndexCacheStore): Promise<number> {
+    return hfDu(this.accessor, path, index)
+  }
+
+  override duEntries(path: PathSpec, index?: IndexCacheStore): Promise<DuEntries> {
+    return hfDuAll(this.accessor, path, index)
+  }
+
+  override write(path: PathSpec, data: Uint8Array): Promise<void> {
+    return hfWrite(this.accessor, path, data)
+  }
+
+  override create(path: PathSpec): Promise<void> {
+    return hfCreate(this.accessor, path)
+  }
+
+  override mkdir(path: PathSpec, parents = false): Promise<void> {
+    return hfMkdir(this.accessor, path, parents)
+  }
+
+  override unlink(path: PathSpec): Promise<void> {
+    return hfUnlink(this.accessor, path)
+  }
+
+  override rmR(path: PathSpec): Promise<void> {
+    return hfRmR(this.accessor, path)
   }
 
   override deltaHook(): DeltaHook {

@@ -18,7 +18,6 @@ import { RegisteredCommand } from '../commands/config.ts'
 import { CommandSpec, Operand } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import { RAMObserverStore } from '../observe/store.ts'
-import { OpsRegistry } from '../ops/registry.ts'
 import type { Action, VfsContext } from '../policy/index.ts'
 import { RAMSessionStore } from './session/ram.ts'
 import type { SessionFields } from './session/store.ts'
@@ -45,12 +44,7 @@ async function makeWs(): Promise<Workspace> {
   r.store.files.set('/subdir/file.txt', ENC.encode('hello'))
   r.store.files.set('/subdir/nested/deep.txt', ENC.encode('deep'))
 
-  const registry = new OpsRegistry()
-  registry.registerVfs(r)
-  return new Workspace(
-    { '/ram/': r },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  return new Workspace({ '/ram/': r }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 describe('execute({ cwd }): bash subshell semantics', () => {
@@ -554,8 +548,6 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     // reach the door. Python's cancelled task never gets there.
     const parser = await getTestParser()
     const ram = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(ram)
     const seen: string[] = []
     const held: { armed: boolean; release: () => void } = { armed: false, release: () => undefined }
     const first = new Promise<void>((resolve) => {
@@ -565,7 +557,6 @@ describe('execute({ signal }): mid-flight cancellation', () => {
       { '/ram/': ram },
       {
         mode: MountMode.WRITE,
-        ops: registry,
         shellParser: parser,
         policies: [
           {
@@ -600,8 +591,6 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     // its bytes.
     const parser = await getTestParser()
     const ram = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(ram)
     const seen: string[] = []
     const held: { armed: boolean; release: () => void } = { armed: false, release: () => undefined }
     const first = new Promise<void>((resolve) => {
@@ -611,7 +600,6 @@ describe('execute({ signal }): mid-flight cancellation', () => {
       { '/ram/': ram },
       {
         mode: MountMode.WRITE,
-        ops: registry,
         shellParser: parser,
         policies: [
           {

@@ -15,9 +15,7 @@
 import { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import { VFSName } from '@struktoai/mirage-core/types'
-import type { OPFSAccessor } from '../../../accessor/opfs.ts'
-import { IO } from './io.ts'
 
 export const OPFS_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<OPFSAccessor>(VFSName.OPFS, IO),
+  ...makeGenericCommands(VFSName.OPFS, { local: true }),
 ]

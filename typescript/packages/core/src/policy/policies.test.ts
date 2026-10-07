@@ -16,7 +16,6 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
 
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { Limit, MountMode, OnExceed, PathSpec, type Refusal } from '../types.ts'
@@ -171,13 +170,10 @@ function executableWorkspace(
   policies?: readonly Policy[],
 ): Workspace {
   const ram = new RAMVFS()
-  const ops = new OpsRegistry()
-  ops.registerVfs(ram)
   return new Workspace(
     { '/data/': ram },
     {
       mode: MountMode.WRITE,
-      ops,
       shellParser: parser,
       ...(deny ? { profiles: { default: { commands: { allow: null, ask: [], deny } } } } : {}),
       ...(policies ? { policies } : {}),

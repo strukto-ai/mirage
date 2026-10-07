@@ -37,8 +37,21 @@ import type {
 import { STDIN_DASH_COMMANDS, STDIN_DASH_LEADING } from '../../commands/spec/constants.ts'
 import { hasInjectedVersion } from '../../commands/spec/standard.ts'
 import { ROOT_CWD } from '../../commands/constants.ts'
-import { type OpKwargs, type RegisteredOp } from '../../ops/registry.ts'
-import type { LinkView } from '../../ops/types.ts'
+import type { LinkView, OpKwargs } from '../../ops/types.ts'
+import {
+  type CommandIO,
+  commandIo,
+  resolveGlobOf,
+} from '../../commands/builtin/generic_bind/adapter.ts'
+import {
+  appendByRewrite,
+  expectOffset,
+  pwriteByRewrite,
+  refuseTaken,
+} from '../../core/generic/rewrite.ts'
+import { callEffect } from '../../vfs/call.ts'
+import { Effect } from '../../vfs/types.ts'
+import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 
 import { getExtension } from '../../commands/resolve.ts'
 import { resolveLimit } from '../../policy/index.ts'
@@ -65,6 +78,7 @@ import type { BaseVFS } from '../../vfs/base.ts'
 import {
   type Limit,
   type ReadSpec,
+  type SetAttrFields,
   DEFAULT_READ_SPEC,
   FileType,
   MountMode,
@@ -79,7 +93,19 @@ import { compareCodePoints } from '../../utils/sort.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
 type CmdKey = string
-type OpKey = string
+
+/**
+ * One way to answer an op on a mount: the scope keyed below the mount, the
+ * op's positional arguments and its keywords.
+ */
+type OpCall = (scope: PathSpec, args: readonly unknown[], kwargs: OpKwargs) => unknown
+
+type ReadFn = (
+  path: PathSpec,
+  index?: IndexCacheStore,
+  offset?: number,
+  size?: number | null,
+) => Promise<Uint8Array>
 
 // Ops that mutate everything under their endpoints in one backend call
 // (a directory rename relocates its whole subtree), so the door also
@@ -92,12 +118,65 @@ function cmdKey(name: string, filetype: string | null): CmdKey {
   return `${name}\u0000${filetype ?? ''}`
 }
 
-function isRegisteredOp(item: RegisteredCommand | RegisteredOp): item is RegisteredOp {
-  return typeof (item as RegisteredOp).fn === 'function' && !('spec' in item)
+function writeData(args: readonly unknown[]): Uint8Array {
+  const first = args[0]
+  if (first instanceof Uint8Array) return first
+  throw new TypeError('write op requires a Uint8Array as the first arg')
 }
 
-function opKey(name: string, filetype: string | null): OpKey {
-  return `${name}\u0000${filetype ?? ''}`
+function lengthArg(value: unknown): number {
+  if (typeof value !== 'number') {
+    throw new TypeError('truncate op requires a number length as the first arg')
+  }
+  return value
+}
+
+function offsetArg(value: unknown, path: PathSpec): number {
+  if (typeof value !== 'number') {
+    throw new TypeError('pwrite op requires a number offset as the second arg')
+  }
+  return expectOffset(value, path)
+}
+
+function dstArg(value: unknown): PathSpec {
+  if (!(value instanceof PathSpec)) {
+    throw new TypeError('rename op requires a dst PathSpec as the first arg')
+  }
+  return value
+}
+
+/**
+ * A read, honoring a byte window when one is asked for.
+ *
+ * A VFS that reads ranges natively fetches only the window, which is the
+ * whole point on an object store: one ranged GET instead of the whole file.
+ * Every other read is whole and sliced, which is the only meaningful
+ * behavior for content that is rendered rather than stored. A zero-length
+ * read is answered here rather than sent anywhere, and a window starting at
+ * or past EOF answers empty, the POSIX answer, where an HTTP store refuses
+ * with 416: normalizing here keeps the op's contract one thing whichever
+ * path answers it. Mirrors Python's `_read_window`.
+ */
+async function readWindow(
+  read: ReadFn,
+  ranges: boolean,
+  path: PathSpec,
+  kwargs: OpKwargs,
+): Promise<Uint8Array> {
+  const offset = typeof kwargs.offset === 'number' ? kwargs.offset : 0
+  const size = typeof kwargs.size === 'number' ? kwargs.size : null
+  if (size === 0) return new Uint8Array(0)
+  const whole = offset === 0 && size === null
+  if (ranges && !whole) {
+    try {
+      return await read(path, kwargs.index, offset, size)
+    } catch (err) {
+      if (!isUnsatisfiableRange(err)) throw err
+      return new Uint8Array(0)
+    }
+  }
+  const data = await read(path, kwargs.index)
+  return whole ? data : sliceWindow(data, offset, size)
 }
 
 export interface MountInit {
@@ -135,6 +214,8 @@ export class MountEntry {
   readonly mountId = uuid7()
   readonly prefix: string
   readonly vfs: BaseVFS
+  // The command tier's table, built once from the VFS's functions.
+  readonly io: CommandIO
   mode: MountMode
   readonly read: ReadSpec
   // `index` is this same store scoped by the cache manager, which is
@@ -162,8 +243,6 @@ export class MountEntry {
   private readonly generalCmds = new Map<string, RegisteredCommand>()
   private readonly cmdSpecs = new Map<string, CommandSpec>()
   readonly commandLimits = new Map<string, Limit>()
-  private readonly ops = new Map<OpKey, RegisteredOp>()
-  private readonly generalOps = new Map<string, RegisteredOp>()
   // first token -> descending token counts of multi-word command names
   // (e.g. "gws docs documents get"); backs longest-prefix command
   // resolution. null until first built; invalidated on register.
@@ -182,6 +261,7 @@ export class MountEntry {
     }
     this.prefix = prefix
     this.vfs = init.vfs
+    this.io = commandIo(init.vfs)
     this.mode = init.mode ?? MountMode.READ
     // A frozen copy carrying the coerced policy, not the caller's object.
     //
@@ -203,38 +283,35 @@ export class MountEntry {
     this.vfsRef = init.vfsRef ?? null
   }
 
-  /** Whether the op table serves `name`, on any level of the cascade. */
+  /** Whether this mount answers the op `name`. */
   hasOp(name: string): boolean {
-    return this.resolveCascade(name, null, this.ops, this.generalOps).length > 0
+    return this.calls(name, null).length > 0
   }
 
   /**
-   * Expand glob words through the `glob` op, one pattern spec at a time;
-   * a driver whose table carries none leaves every word as typed. The
-   * mount stamps each word's mount-relative key before the op sees it,
-   * since the key is the placement's to know, and keeps the VFS retained
-   * while the walk reads metadata.
+   * Expand glob words through the VFS's `readdir`, one pattern spec at a
+   * time; a VFS with no `readdir` leaves every word as typed. The mount
+   * stamps each word's mount-relative key before the walk sees it, since
+   * the key is the placement's to know, and keeps the VFS retained while
+   * the walk reads metadata.
    */
   async expandGlob(paths: readonly PathSpec[], prefix: string): Promise<PathSpec[]> {
-    const levels = this.resolveCascade('glob', null, this.ops, this.generalOps)
-    if (levels.length === 0) return [...paths]
+    if (!this.vfs.supports('readdir')) return [...paths]
     return this.use(async () => {
       const manager = this.cacheManager
-      if (manager === null) return this.runGlob(levels, paths, prefix, this.indexStore)
+      if (manager === null) return this.runGlob(paths, prefix, this.indexStore)
       return manager.withMutation(async () => {
         await this.ensureReady()
-        return this.runGlob(levels, paths, prefix, manager.scopeIndexLocked(this.indexStore))
+        return this.runGlob(paths, prefix, manager.scopeIndexLocked(this.indexStore))
       })
     })
   }
 
   private async runGlob(
-    levels: readonly RegisteredOp[],
     paths: readonly PathSpec[],
     prefix: string,
     index: IndexCacheStore,
   ): Promise<PathSpec[]> {
-    const kwargs: OpKwargs = { index }
     const out: PathSpec[] = []
     for (const p of paths) {
       const spec = prefix
@@ -247,15 +324,14 @@ export class MountEntry {
             rawPath: p.rawPath,
           })
         : p
-      for (const op of levels) {
-        const matches = await op.fn(this.vfs.accessor, spec, [], kwargs)
-        if (matches !== null && matches !== undefined) {
-          out.push(...(matches as PathSpec[]))
-          break
-        }
-      }
+      out.push(...(await this.glob(spec, index)))
     }
     return out
+  }
+
+  /** Expand one pattern, keyed below the mount, through the VFS's `readdir` and `stat`. */
+  glob(path: PathSpec, index?: IndexCacheStore): Promise<PathSpec[]> {
+    return resolveGlobOf(this.io)(this.vfs.accessor, [path], index)
   }
 
   /** Metadata access bound to this mount's ownership. */
@@ -408,10 +484,6 @@ export class MountEntry {
       }
       this.generalCmds.delete(name)
       this.cmdSpecs.delete(name)
-      for (const [key, ro] of this.ops) {
-        if (ro.name === name) this.ops.delete(key)
-      }
-      this.generalOps.delete(name)
     }
   }
 
@@ -428,66 +500,51 @@ export class MountEntry {
     return sortFiletypeMap(result)
   }
 
-  registeredOps(): Record<string, (string | null)[]> {
-    const result = new Map<string, (string | null)[]>()
-    for (const ro of this.ops.values()) {
-      const list = result.get(ro.name) ?? []
-      list.push(ro.filetype)
-      result.set(ro.name, list)
-    }
-    for (const name of this.generalOps.keys()) {
-      if (!result.has(name)) result.set(name, [])
-    }
-    return sortFiletypeMap(result)
+  /**
+   * Whether a ranged read of `path` fetches only that range. False where
+   * the read that answers it reads the whole file and slices: a VFS with no
+   * native range, or a rendered filetype.
+   */
+  readsRanges(path: string): boolean {
+    return this.vfs.readsRanges && !this.renders(getExtension(path))
   }
 
-  // ── op registration ───────────────────────────────
-
-  registerOp(op: RegisteredOp): void {
-    this.ops.set(opKey(op.name, op.filetype), op)
-  }
-
-  registerGeneralOp(op: RegisteredOp): void {
-    this.generalOps.set(op.name, op)
+  /** Whether the VFS declares the function `opName` a write. */
+  writes(opName: string): boolean {
+    return callEffect(this.vfs.constructor as { prototype: object }, opName) === Effect.WRITE
   }
 
   /**
-   * Batch-register commands and ops. Mirrors Python's
-   * `Mount.register_fns(...)`. Each entry is a `RegisteredCommand` or
-   * `RegisteredOp`; commands with `vfs: null` go to the general
-   * table, ops with `vfs: null` likewise. Multi-VFS entries
-   * (sharing the same name across mounts) are filtered to this
-   * mount's VFS kind; if a name has entries but none match this
-   * mount, throw.
+   * Whether the VFS renders a read of `filetype`. A rendered read is never
+   * served from or kept in the file cache.
    */
-  registerFns(items: readonly (RegisteredCommand | RegisteredOp)[]): void {
+  renders(filetype: string | null): boolean {
+    return filetype !== null && Object.hasOwn(this.vfs.renderers, filetype)
+  }
+
+  /**
+   * Batch-register commands. Mirrors Python's `Mount.register_fns(...)`.
+   * Commands with `vfs: null` go to the general table. Multi-VFS entries
+   * (sharing the same name across mounts) are filtered to this mount's VFS
+   * kind; if a name has entries but none match this mount, throw.
+   */
+  registerFns(items: readonly RegisteredCommand[]): void {
     const kind = this.vfs.name
-    interface Group<T> {
-      toRegister: T[]
+    interface Group {
+      toRegister: RegisteredCommand[]
       attempted: Set<string>
     }
-    const cmdGroups = new Map<string, Group<RegisteredCommand>>()
-    const opGroups = new Map<string, Group<RegisteredOp>>()
+    const groups = new Map<string, Group>()
     for (const item of items) {
-      if (isRegisteredOp(item)) {
-        let g = opGroups.get(item.name)
-        if (!g) {
-          g = { toRegister: [], attempted: new Set() }
-          opGroups.set(item.name, g)
-        }
-        if (item.vfs === null || item.vfs === kind) g.toRegister.push(item)
-        else g.attempted.add(item.vfs)
-      } else {
-        let g = cmdGroups.get(item.name)
-        if (!g) {
-          g = { toRegister: [], attempted: new Set() }
-          cmdGroups.set(item.name, g)
-        }
-        if (item.vfs === null || item.vfs === kind) g.toRegister.push(item)
-        else g.attempted.add(item.vfs)
+      let g = groups.get(item.name)
+      if (!g) {
+        g = { toRegister: [], attempted: new Set() }
+        groups.set(item.name, g)
       }
+      if (item.vfs === null || item.vfs === kind) g.toRegister.push(item)
+      else g.attempted.add(item.vfs)
     }
-    for (const [name, g] of cmdGroups) {
+    for (const [name, g] of groups) {
       if (g.toRegister.length === 0) {
         const list = [...g.attempted].sort(compareCodePoints)
         throw new Error(
@@ -495,26 +552,150 @@ export class MountEntry {
         )
       }
     }
-    for (const [name, g] of opGroups) {
-      if (g.toRegister.length === 0) {
-        const list = [...g.attempted].sort(compareCodePoints)
-        throw new Error(
-          `op '${name}' is for VFS(s) [${list.map((r) => `'${r}'`).join(', ')}], not '${kind}'`,
-        )
-      }
-    }
-    for (const g of cmdGroups.values()) {
+    for (const g of groups.values()) {
       for (const cmd of g.toRegister) {
         if (cmd.vfs === null) this.registerGeneral(cmd)
         else this.register(cmd)
       }
     }
-    for (const g of opGroups.values()) {
-      for (const o of g.toRegister) {
-        if (o.vfs === null) this.registerGeneralOp(o)
-        else this.registerOp(o)
+  }
+
+  /**
+   * What answers `opName` on this mount, in the order to try.
+   *
+   * A rendered filetype's renderer answers a read before `read` does,
+   * window and all, and the first answer that is not null wins. The rest
+   * is the op door's own shape around the VFS's functions: a read takes a
+   * window, `append` and `pwrite` are a rewrite where the VFS only writes
+   * whole files, `mkdir` refuses a taken name first, and `glob` walks
+   * `readdir`. Only a method marked `@vfsCall` is reachable by name, and a
+   * custom one is handed the scope and the op's positional arguments.
+   * Mirrors Python's `MountEntry._calls`.
+   */
+  calls(opName: string, filetype: string | null): OpCall[] {
+    const vfs = this.vfs
+    if (opName === 'read') {
+      const levels: OpCall[] = []
+      const renderer = filetype !== null ? vfs.renderers[filetype] : undefined
+      const render =
+        renderer === undefined
+          ? undefined
+          : (vfs as unknown as Record<string, ReadFn | undefined>)[renderer]
+      if (render !== undefined) {
+        levels.push((scope, _args, kw) => readWindow(render.bind(vfs), true, scope, kw))
+      }
+      if (vfs.supports('read')) {
+        levels.push((scope, _args, kw) =>
+          readWindow(vfs.read.bind(vfs), vfs.readsRanges, scope, kw),
+        )
+      }
+      return levels
+    }
+    if (opName === 'glob') {
+      return vfs.supports('readdir') ? [(scope, _args, kw) => this.glob(scope, kw.index)] : []
+    }
+    if ((opName === 'append' || opName === 'pwrite') && !vfs.supports(opName)) {
+      if (!vfs.supports('write')) return []
+      return opName === 'append'
+        ? [(scope, args, kw) => this.appendByRewrite(scope, writeData(args), kw.index)]
+        : [
+            (scope, args, kw) =>
+              this.pwriteByRewrite(scope, writeData(args), offsetArg(args[1], scope), kw.index),
+          ]
+    }
+    if (callEffect(vfs.constructor as { prototype: object }, opName) === null) return []
+    if (!vfs.supports(opName)) return []
+    switch (opName) {
+      case 'readdir':
+        return [(scope, _args, kw) => vfs.readdir(scope, kw.index)]
+      case 'stat':
+        return [(scope, _args, kw) => vfs.stat(scope, kw.index)]
+      case 'write':
+        return [(scope, args) => vfs.write(scope, writeData(args))]
+      case 'append':
+        return [(scope, args, kw) => vfs.append(scope, writeData(args), kw.index)]
+      case 'pwrite':
+        return [
+          (scope, args, kw) =>
+            vfs.pwrite(scope, writeData(args), offsetArg(args[1], scope), kw.index),
+        ]
+      case 'create':
+        return [(scope) => vfs.create(scope)]
+      case 'mkdir':
+        return [(scope, _args, kw) => this.mkdir(scope, kw.parents === true)]
+      case 'unlink':
+        return [(scope) => vfs.unlink(scope)]
+      case 'rmdir':
+        return [(scope, _args, kw) => vfs.rmdir(scope, kw.index)]
+      case 'rename':
+        return [(scope, args) => vfs.rename(scope, dstArg(args[0]))]
+      case 'truncate':
+        return [(scope, args, kw) => vfs.truncate(scope, lengthArg(args[0]), kw.no_create === true)]
+      case 'setattr':
+        return [(scope, _args, kw) => vfs.setattr(scope, kw as SetAttrFields)]
+      default: {
+        const method = (vfs as unknown as Record<string, (...args: unknown[]) => unknown>)[opName]
+        return method === undefined ? [] : [(scope, args) => method.call(vfs, scope, ...args)]
       }
     }
+  }
+
+  private appendByRewrite(
+    path: PathSpec,
+    data: Uint8Array,
+    index?: IndexCacheStore,
+  ): Promise<void> {
+    return appendByRewrite(
+      (p) => this.vfs.read(p, index),
+      (p, d) => this.vfs.write(p, d),
+      (p) => this.vfs.stat(p, index),
+      path,
+      data,
+    )
+  }
+
+  private pwriteByRewrite(
+    path: PathSpec,
+    data: Uint8Array,
+    offset: number,
+    index?: IndexCacheStore,
+  ): Promise<void> {
+    return pwriteByRewrite(
+      (p) => this.vfs.read(p, index),
+      (p, d) => this.vfs.write(p, d),
+      (p) => this.vfs.stat(p, index),
+      path,
+      data,
+      offset,
+    )
+  }
+
+  private async mkdir(path: PathSpec, parents: boolean): Promise<void> {
+    await refuseTaken((p) => this.vfs.stat(p), path, parents)
+    await this.vfs.mkdir(path, parents)
+  }
+
+  /**
+   * Run `opName` on this mount's VFS over a scope already keyed below the
+   * mount: each level in turn until one answers with something other than
+   * null. A read resolves its renderer by `kwargs.filetype` when the caller
+   * names one (null asks for the stored bytes) and by the path's extension
+   * otherwise.
+   */
+  async callOp(
+    opName: string,
+    scope: PathSpec,
+    args: readonly unknown[] = [],
+    kwargs: OpKwargs = {},
+  ): Promise<unknown> {
+    const filetype = kwargs.filetype === undefined ? getExtension(scope.virtual) : kwargs.filetype
+    const levels = this.calls(opName, filetype)
+    if (levels.length === 0) throw enotsup(this.vfs.name, opName, scope)
+    for (const call of levels) {
+      const result = await call(scope, args, kwargs)
+      if (result !== null && result !== undefined) return result
+    }
+    return null
   }
 
   private resolveCascade<T>(
@@ -688,6 +869,7 @@ export class MountEntry {
       command: cmdName,
       cwd: context.cwd ?? ROOT_CWD,
       index: this.index,
+      io: this.io,
       ...(context.dispatch !== undefined ? { dispatch: context.dispatch } : {}),
       ...(context.sessionId !== undefined ? { sessionId: context.sessionId } : {}),
       ...(context.env !== undefined ? { env: context.env } : {}),
@@ -837,6 +1019,15 @@ export class MountEntry {
     ]
   }
 
+  /**
+   * Run an op on this mount's VFS. A read tries a rendered filetype's
+   * renderer first, then the VFS's own function; the first answer that is
+   * not null wins. A caller may name the filetype, and null asks for the
+   * stored bytes even where the VFS renders the filetype: a
+   * read-modify-write hands whatever it read straight back to `write`,
+   * which always stores, so reading a rendered form would store the
+   * rendering over the file. Mirrors Python's `MountEntry.execute_op`.
+   */
   async executeOp(
     opName: string,
     path: string,
@@ -844,12 +1035,12 @@ export class MountEntry {
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
     return this.use(async (): Promise<unknown> => {
-      const filetype = getExtension(path)
-      const levels = this.resolveCascade(opName, filetype, this.ops, this.generalOps)
+      const filetype = kwargs.filetype === undefined ? getExtension(path) : kwargs.filetype
+      const levels = this.calls(opName, filetype)
       if (levels.length === 0) {
         throw enotsup(this.vfs.name, opName, path)
       }
-      if (levels.some((o) => o.write)) {
+      if (this.writes(opName)) {
         const dst = kwargs.dst
         const endpoints = [PathSpec.fromStrPath(path)]
         if (dst instanceof PathSpec) endpoints.push(dst)
@@ -865,9 +1056,7 @@ export class MountEntry {
       const effectiveKwargs: OpKwargs = {
         ...kwargs,
         ...(kwargs.index === undefined ? { index: this.index } : {}),
-        ...(filetype !== null && kwargs.filetype === undefined ? { filetype } : {}),
       }
-      const accessor = this.vfs.accessor
       // Per-op caps are policy and fire at the op door (postVfs); only
       // the timeout stays here, bounding the backend call itself.
       const opOverride = this.commandLimits.get(opName) ?? null
@@ -875,9 +1064,9 @@ export class MountEntry {
       return runWithMountContext(
         () =>
           runWithRevisions(this.revisions.size > 0 ? this.revisions : null, async () => {
-            for (const op of levels) {
+            for (const call of levels) {
               const result = await runWithTimeout(
-                Promise.resolve(op.fn(accessor, scope, args, effectiveKwargs)),
+                Promise.resolve(call(scope, args, effectiveKwargs)),
                 opTimeout,
                 opName,
               )

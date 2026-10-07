@@ -33,8 +33,6 @@ import { PolicyDenied } from '../policy/errors.ts'
 import type { Policy } from '../policy/index.ts'
 import type { Action, SessionContext } from '../policy/types.ts'
 import { secretStr } from '../vfs/secrets.ts'
-import { OpsRegistry, type RegisteredOp } from '../ops/registry.ts'
-import type { RegisteredCommand } from '../commands/config.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { type JobResult } from '../shell/job_table/index.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
@@ -135,9 +133,7 @@ it.each(['redis://localhost:6379/2', 'redis://user:secret@localhost:6379/2'])(
 
 function buildWorkspace(): Workspace {
   const ram = new RAMVFS()
-  const ops = new OpsRegistry()
-  ops.registerVfs(ram)
-  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE, ops, shellParser: parser })
+  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 describe('toStateDict / applyStateDict', () => {
@@ -162,7 +158,6 @@ describe('toStateDict / applyStateDict', () => {
     await ws.snapshot(path)
     const loaded = await Workspace.load(path, {
       mode: MountMode.WRITE,
-      ops: new OpsRegistry(),
       shellParser: parser,
     })
     const entries = await loaded.history()
@@ -176,9 +171,7 @@ describe('toStateDict / applyStateDict', () => {
   it('restores cache entries even when every mount has redacted config', async () => {
     const ram = new RAMVFS()
     ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
-    const ops = new OpsRegistry()
-    ops.registerVfs(ram)
-    const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE, ops, shellParser: parser })
+    const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
     await ws.shell('echo "cached" | tee /data/x.txt > /dev/null')
     await ws.shell('cat /data/x.txt > /dev/null')
     const state = await toStateDict(ws)
@@ -191,7 +184,7 @@ describe('toStateDict / applyStateDict', () => {
     for (const m of state.mounts) overrides[m.prefix] = new RAMVFS()
     const restored = await Workspace.fromState(
       state,
-      { mode: MountMode.WRITE, ops: new OpsRegistry(), shellParser: parser },
+      { mode: MountMode.WRITE, shellParser: parser },
       overrides,
     )
     const cacheKeys = (
@@ -218,12 +211,6 @@ describe('toStateDict / applyStateDict', () => {
       constructor() {
         super()
         Object.defineProperty(this, 'name', { value: 'notes' })
-      }
-      override ops(): readonly RegisteredOp[] {
-        return super.ops().map((op) => ({ ...op, vfs: 'notes' }))
-      }
-      override commands(): readonly RegisteredCommand[] {
-        return []
       }
     }
     const notes = new NotesRAM()
@@ -270,7 +257,6 @@ describe('Workspace.snapshot / Workspace.load', () => {
 
     const loaded = await Workspace.load(path, {
       mode: MountMode.WRITE,
-      ops: new OpsRegistry(),
       shellParser: parser,
     })
     const r = await loaded.shell('cat /data/x.txt')
@@ -286,7 +272,6 @@ describe('Workspace.snapshot / Workspace.load', () => {
     await expect(
       Workspace.fromState(state, {
         mode: MountMode.WRITE,
-        ops: new OpsRegistry(),
         shellParser: parser,
       }),
     ).rejects.toThrow(/snapshot format/)
@@ -347,7 +332,6 @@ describe('Workspace.snapshot / load — filenames with spaces and unicode', () =
     await src.snapshot(path)
     const loaded = await Workspace.load(path, {
       mode: MountMode.WRITE,
-      ops: new OpsRegistry(),
       shellParser: parser,
     })
     const dstMount = loaded.mount('/data/')
@@ -418,7 +402,6 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
 
     const ws2 = await Workspace.fromState(state, {
       mode: MountMode.WRITE,
-      ops: new OpsRegistry(),
       shellParser: parser,
     })
     const def = ws2.sessionManager.get(ws2.sessionManager.defaultId)
@@ -440,11 +423,9 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
 
   it('preserves a non-default default session id and agent id', async () => {
     const ram = new RAMVFS()
-    const ops = new OpsRegistry()
-    ops.registerVfs(ram)
     const ws = new Workspace(
       { '/data': ram },
-      { mode: MountMode.WRITE, ops, shellParser: parser, sessionId: 'main', agentId: 'agent-7' },
+      { mode: MountMode.WRITE, shellParser: parser, sessionId: 'main', agentId: 'agent-7' },
     )
     await ws.shell('cd /data')
     await ws.shell('export FOO=bar')
@@ -455,7 +436,6 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
 
     const ws2 = await Workspace.fromState(state, {
       mode: MountMode.WRITE,
-      ops: new OpsRegistry(),
       shellParser: parser,
     })
     expect(ws2.sessionManager.defaultId).toBe('main')
@@ -478,14 +458,11 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
   })
 
   it('aggregates every redacted mount missing an override into one error', async () => {
-    const ops = new OpsRegistry()
     const ramA = new RAMVFS()
     const ramB = new RAMVFS()
-    ops.registerVfs(ramA)
-    ops.registerVfs(ramB)
     const ws = new Workspace(
       { '/a': ramA, '/b': ramB },
-      { mode: MountMode.WRITE, ops, shellParser: parser },
+      { mode: MountMode.WRITE, shellParser: parser },
     )
     const state = await toStateDict(ws)
     for (const m of state.mounts) {
@@ -495,7 +472,6 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     try {
       await Workspace.fromState(state, {
         mode: MountMode.WRITE,
-        ops: new OpsRegistry(),
         shellParser: parser,
       })
     } catch (e) {
@@ -766,13 +742,10 @@ class DenyGate implements Policy {
 
 function gatedWorkspace(prefix = '/data', sessionId?: string): Workspace {
   const ram = new RAMVFS()
-  const ops = new OpsRegistry()
-  ops.registerVfs(ram)
   return new Workspace(
     { [prefix]: ram },
     {
       mode: MountMode.WRITE,
-      ops,
       shellParser: parser,
       policies: [new DenyGate()],
       ...(sessionId !== undefined ? { sessionId } : {}),
@@ -813,11 +786,9 @@ describe('applyStateDict and the deployment', () => {
   // close would then persist. Every table is vetted before anything lands.
   it('a refused session table leaves the workspace untouched', async () => {
     const ram = new RAMVFS()
-    const ops = new OpsRegistry()
-    ops.registerVfs(ram)
     const source = new Workspace(
       { '/data': ram },
-      { mode: MountMode.WRITE, ops, shellParser: parser, sessionId: 'src' },
+      { mode: MountMode.WRITE, shellParser: parser, sessionId: 'src' },
     )
     expect((await source.shell('echo restored > /data/f.txt')).exitCode).toBe(0)
     expect((await source.shell('export PUBLIC_A=1')).exitCode).toBe(0)
@@ -839,11 +810,9 @@ describe('applyStateDict and the deployment', () => {
   // lands no session either.
   it('a refused env template lands no session', async () => {
     const ram = new RAMVFS()
-    const ops = new OpsRegistry()
-    ops.registerVfs(ram)
     const source = new Workspace(
       { '/data': ram },
-      { mode: MountMode.WRITE, ops, shellParser: parser, env: { GATE_X: '1' } },
+      { mode: MountMode.WRITE, shellParser: parser, env: { GATE_X: '1' } },
     )
     expect((await source.shell('unset GATE_X; export PUBLIC_A=1')).exitCode).toBe(0)
     const state = await toStateDict(source)
@@ -869,13 +838,10 @@ describe('applyStateDict and the deployment', () => {
     const state = await toStateDict(source)
     await source.close()
     const ram = new RAMVFS()
-    const ops = new OpsRegistry()
-    ops.registerVfs(ram)
     const target = new Workspace(
       { '/data': ram },
       {
         mode: MountMode.WRITE,
-        ops,
         shellParser: parser,
         profiles: {
           default: { commands: { deny: [{ reason: 'no removals', commands: ['rm'] }] } },
@@ -908,11 +874,9 @@ describe('applyStateDict and the deployment', () => {
       const state = await toStateDict(source)
       await source.close()
       const other = new RAMVFS()
-      const ops = new OpsRegistry()
-      ops.registerVfs(other)
       const target = new Workspace(
         { '/elsewhere': other },
-        { mode: MountMode.WRITE, ops, shellParser: parser },
+        { mode: MountMode.WRITE, shellParser: parser },
       )
       await applyStateDict(target, state)
       await target.close()
@@ -934,22 +898,18 @@ describe('applyStateDict and the deployment', () => {
     try {
       const data = new RAMVFS()
       const keep = new RAMVFS()
-      const ops = new OpsRegistry()
-      ops.registerVfs(data)
       const source = new Workspace(
         { '/data': data, '/keep': keep },
-        { mode: MountMode.WRITE, ops, shellParser: parser },
+        { mode: MountMode.WRITE, shellParser: parser },
       )
       const state = await toStateDict(source)
       await source.close()
       for (const m of state.mounts) m.vfs_state = { ...m.vfs_state, needs_override: true }
       const live = new RAMVFS()
-      const liveOps = new OpsRegistry()
-      liveOps.registerVfs(live)
       const loadState = vi.spyOn(live, 'loadState')
       const target = new Workspace(
         { '/keep': live },
-        { mode: MountMode.WRITE, ops: liveOps, shellParser: parser },
+        { mode: MountMode.WRITE, shellParser: parser },
       )
       await applyStateDict(target, state)
       await target.close()

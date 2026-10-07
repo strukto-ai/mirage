@@ -19,7 +19,7 @@ import { RegisteredCommand } from '../commands/config.ts'
 import { CommandSpec, Operand } from '../commands/spec/types.ts'
 import { runWithSession } from '../context/session_context.ts'
 import { IOResult } from '../io/types.ts'
-import { OpsRegistry, type RegisteredOp } from '../ops/registry.ts'
+import { BaseVFS } from '../vfs/base.ts'
 import type {
   Action,
   Decision,
@@ -54,12 +54,15 @@ class DenyOp implements Policy {
   }
 }
 
-// Ops resolve by VFS name in the workspace registry, so an
-// overlay-backend simulation blocks registration itself.
-class NoSetattrRegistry extends OpsRegistry {
-  override register(ro: RegisteredOp): void {
-    if (ro.name === 'setattr') return
-    super.register(ro)
+class OverlayRAMVFS extends RAMVFS {
+  static {
+    // No setattr of its own, as an API backend with no attribute slot:
+    // attrs land in the namespace overlay.
+    Object.defineProperty(
+      this.prototype,
+      'setattr',
+      Object.getOwnPropertyDescriptor(BaseVFS.prototype, 'setattr') ?? {},
+    )
   }
 }
 
@@ -225,14 +228,13 @@ describe('name-plane writes go through the door', () => {
     // A backend with no native setattr op stores attrs in the namespace
     // overlay; that write must clear the same gates as a native one.
     const parser = await getTestParser()
-    const vfs = new RAMVFS()
+    const vfs = new OverlayRAMVFS()
     vfs.store.files.set('/f.txt', ENC.encode('body\n'))
     const ws = new Workspace(
       { '/o': vfs },
       {
         mode: MountMode.WRITE,
         shellParser: parser,
-        ops: new NoSetattrRegistry(),
         policies: [new DenyOp('setattr')],
       },
     )
@@ -245,12 +247,9 @@ describe('name-plane writes go through the door', () => {
 
   it('overlay setattr still lands without policies', async () => {
     const parser = await getTestParser()
-    const vfs = new RAMVFS()
+    const vfs = new OverlayRAMVFS()
     vfs.store.files.set('/f.txt', ENC.encode('body\n'))
-    const ws = new Workspace(
-      { '/o': vfs },
-      { mode: MountMode.WRITE, shellParser: parser, ops: new NoSetattrRegistry() },
-    )
+    const ws = new Workspace({ '/o': vfs }, { mode: MountMode.WRITE, shellParser: parser })
     open.push(ws)
     const io = await ws.shell('chmod 600 /o/f.txt')
     expect(io.exitCode).toBe(0)

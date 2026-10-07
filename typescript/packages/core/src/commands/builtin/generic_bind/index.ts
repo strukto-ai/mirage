@@ -16,8 +16,10 @@ export {
   type Builder,
   type BuilderFn,
   type CommandIO,
+  commandIo,
+  mountIo,
+  overMountIo,
   overlaidStat,
-  rangeOf,
   resolveGlobOf,
 } from './adapter.ts'
 export { type DuOps, type ResolveGlobOp } from '../../../vfs/types.ts'

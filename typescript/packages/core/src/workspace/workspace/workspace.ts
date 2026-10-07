@@ -23,7 +23,7 @@ import { normalizeIndexConfig, type IndexConfig } from '../../cache/index/config
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { type EventDict, Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
-import { type OpKwargs, OpsRegistry } from '../../ops/registry.ts'
+import type { OpKwargs } from '../../ops/types.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import { HISTORY_PREFIX, HistoryViewVFS } from '../../vfs/history/history.ts'
@@ -164,12 +164,6 @@ export class Workspace {
   private readonly ownsStateStore: boolean
   private readonly sharedMounts = new Set<BaseVFS>()
   private readonly meta: WorkspaceMeta
-  /**
-   * The op table every mount's ops are registered on. Not the op
-   * facade: `vfs` is the door a caller reads and writes through, this
-   * is the registry it dispatches into.
-   */
-  readonly opsRegistry: OpsRegistry
   private readonly indexConfig: IndexConfig | undefined
   private readonly readDefault: ReadSpec
   private shellParser: ShellParser | null
@@ -322,7 +316,6 @@ export class Workspace {
       this.sessionManager,
       options.sessionId !== undefined,
     )
-    this.opsRegistry = options.ops ?? new OpsRegistry()
     this.shellParser = options.shellParser ?? null
     this.shellParserFactory = options.shellParserFactory ?? null
     this.agentId = options.agentId ?? null
@@ -424,7 +417,6 @@ export class Workspace {
     this.dispatcher = new Dispatcher(
       this.namespace,
       this.cache,
-      this.opsRegistry,
       this.registry.policies,
       this.drift,
       (write) => this.admitWrite(write),
@@ -453,9 +445,6 @@ export class Workspace {
     const defaultBase = this.baseProfile(null)
     this.sessionManager.defaultProfile =
       defaultBase === null ? null : compileProfile(defaultBase, this.profileName(null))
-    for (const vfs of [...this.registry.allMounts().map((m) => m.vfs), this.cache]) {
-      this.opsRegistry.registerVfs(vfs)
-    }
     this.registry.commandLimits = { ...options.commandLimits }
     for (const [prefix, limits] of Object.entries(normalized.commandLimits)) {
       const mount = this.registry.mountForPrefix(prefix)
@@ -484,7 +473,6 @@ export class Workspace {
     )
     this.documents = new Documents(
       this.registry,
-      this.opsRegistry,
       this.vfs,
       this.sessionManager,
       () => getCurrentSessionUnlessForeign(this.sessionManager) ?? this.opSession(),
@@ -1274,8 +1262,7 @@ export class Workspace {
   }
 
   /**
-   * Add a mount to a running workspace. Registers the VFS's ops globally
-   * on this workspace's OpsRegistry so dispatch can find them.
+   * Add a mount to a running workspace.
    *
    * The runtime door runs the same read-policy verdict the constructor
    * does: a mount added here is no more able to declare a policy its
@@ -1307,7 +1294,6 @@ export class Workspace {
       vfsRef,
     })
     prepareAddedMount(this.registry, m, previous)
-    this.opsRegistry.registerVfs(vfs)
     return m
   }
 
@@ -1330,7 +1316,6 @@ export class Workspace {
     await unmountPrefix(
       {
         registry: this.registry,
-        opsRegistry: this.opsRegistry,
         sharedMounts: this.sharedMounts,
         isShuttingDown: () => this.isShuttingDown(),
       },
@@ -2043,7 +2028,6 @@ export class Workspace {
     }
     const copyAgentId = options.agentId ?? this.agentId
     if (copyAgentId !== null) opts.agentId = copyAgentId
-    opts.ops = options.ops ?? this.opsRegistry
     const parser = options.shellParser ?? this.shellParser
     if (parser !== null) opts.shellParser = parser
     const overrides: Record<string, Mount> = {}

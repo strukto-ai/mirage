@@ -12,12 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { DatabricksVolumeAccessor } from '../../../accessor/databricks_volume.ts'
 import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
 
 export const DATABRICKS_VOLUME_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<DatabricksVolumeAccessor>(VFSName.DATABRICKS_VOLUME, IO),
+  ...makeGenericCommands(VFSName.DATABRICKS_VOLUME),
 ]

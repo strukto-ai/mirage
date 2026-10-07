@@ -16,7 +16,6 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { JsonValue, PathSpec, VFSName } from '../../../types.ts'
 import { searchResources } from '../../../vfs/search.ts'
-import type { SearchOps } from '../../../vfs/types.ts'
 import {
   command,
   type CommandFnResult,
@@ -51,14 +50,13 @@ export function semanticOptions(fl: FlagView): Record<string, JsonValue> {
  * query is a usage error; the backend reads the rest of its options off the
  * flags. Mirrors `make_search` in `commands/builtin/generic/search.py`.
  */
-export function makeSearch<A extends Accessor>(
+export function makeSearch(
   vfs: VFSName,
-  capability: SearchOps<A> | undefined,
   options: (fl: FlagView) => Record<string, JsonValue> = semanticOptions,
   { name = 'search' }: { name?: string } = {},
 ): RegisteredCommand[] {
   async function search(
-    accessor: A,
+    accessor: Accessor,
     paths: PathSpec[],
     texts: string[],
     opts: CommandOpts,
@@ -69,7 +67,7 @@ export function makeSearch<A extends Accessor>(
     const targets = defaultPaths(paths, opts.cwd, opts.mountPrefix ?? '')
     try {
       const out = await searchResources(
-        capability,
+        opts.io?.search,
         accessor,
         targets,
         { query, options: options(fl) },

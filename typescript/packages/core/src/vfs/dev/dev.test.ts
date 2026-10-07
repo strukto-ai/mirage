@@ -18,36 +18,25 @@ import { runWithSession } from '../../context/session_context.ts'
 import { SessionState } from '../../workspace/session/session.ts'
 import { IOResult } from '../../io/types.ts'
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../../ops/registry.ts'
+import { ops } from '../../test-utils.ts'
 import { MountMode, PathSpec, VFSName } from '../../types.ts'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../ram/ram.ts'
 import { DevVFS } from './dev.ts'
 
-function setupOps(): { dev: DevVFS; registry: OpsRegistry } {
-  const dev = new DevVFS()
-  const registry = new OpsRegistry()
-  for (const op of dev.ops()) registry.register(op)
-  return { dev, registry }
+function setupOps(): { dev: DevVFS } {
+  return { dev: new DevVFS() }
 }
 
-function call(
-  registry: OpsRegistry,
-  name: string,
-  dev: DevVFS,
-  path: string,
-  ...args: unknown[]
-): Promise<unknown> {
-  return registry.call(name, VFSName.RAM, dev.accessor, PathSpec.fromStrPath(path), args)
+function call(name: string, dev: DevVFS, path: string, ...args: unknown[]): Promise<unknown> {
+  return ops(dev).call(name, PathSpec.fromStrPath(path), args)
 }
 
 async function makeWs(): Promise<Workspace> {
   const parser = await getTestParser()
-  const ops = new OpsRegistry()
   const data = new RAMVFS()
-  ops.registerVfs(data)
-  return new Workspace({ '/data': data }, { mode: MountMode.WRITE, ops, shellParser: parser })
+  return new Workspace({ '/data': data }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 describe('DevVFS', () => {
@@ -56,43 +45,36 @@ describe('DevVFS', () => {
   })
 
   it('exposes the same op surface as RAMVFS', () => {
-    const dev = new DevVFS()
-    const names = dev
-      .ops()
-      .map((o) => o.name)
-      .sort()
-    expect(names).toContain('read')
-    expect(names).toContain('write')
-    expect(names).toContain('readdir')
-    expect(names).toContain('stat')
+    const door = ops(new DevVFS())
+    for (const name of ['read', 'write', 'readdir', 'stat']) expect(door.has(name)).toBe(true)
   })
 
   it('reads /null as empty bytes', async () => {
-    const { dev, registry } = setupOps()
-    const data = (await call(registry, 'read', dev, '/null')) as Uint8Array
+    const { dev } = setupOps()
+    const data = (await call('read', dev, '/null')) as Uint8Array
     expect(data.byteLength).toBe(0)
   })
 
   it('refuses to materialize all of /zero', async () => {
-    const { dev, registry } = setupOps()
-    await expect(call(registry, 'read', dev, '/zero')).rejects.toMatchObject({ code: 'EINVAL' })
+    const { dev } = setupOps()
+    await expect(call('read', dev, '/zero')).rejects.toMatchObject({ code: 'EINVAL' })
   })
 
   it('writes are silently discarded', async () => {
-    const { dev, registry } = setupOps()
-    await call(registry, 'write', dev, '/null', new TextEncoder().encode('ignored'))
-    const after = (await call(registry, 'read', dev, '/null')) as Uint8Array
+    const { dev } = setupOps()
+    await call('write', dev, '/null', new TextEncoder().encode('ignored'))
+    const after = (await call('read', dev, '/null')) as Uint8Array
     expect(after.byteLength).toBe(0)
   })
 
   it('reads of unknown paths throw file-not-found', async () => {
-    const { dev, registry } = setupOps()
-    await expect(call(registry, 'read', dev, '/nope')).rejects.toMatchObject({ code: 'ENOENT' })
+    const { dev } = setupOps()
+    await expect(call('read', dev, '/nope')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('readdir of root lists /null and /zero', async () => {
-    const { dev, registry } = setupOps()
-    const entries = (await call(registry, 'readdir', dev, '/')) as string[]
+    const { dev } = setupOps()
+    const entries = (await call('readdir', dev, '/')) as string[]
     expect(entries.sort()).toEqual(['/null', '/zero'])
   })
 })

@@ -12,15 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { AirtableAccessor } from '../../../accessor/airtable.ts'
 import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { AIRTABLE_HEAD } from './head.ts'
-import { IO } from './io.ts'
 
 export const AIRTABLE_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<AirtableAccessor>(VFSName.AIRTABLE, IO, {
+  ...makeGenericCommands(VFSName.AIRTABLE, {
     overrides: new Set(['head']),
   }),
   ...AIRTABLE_HEAD,

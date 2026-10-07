@@ -21,6 +21,7 @@ import type { Runtime } from '../runtime/base.ts'
 import type { DispatchFn, ShellFn } from '../runtime/types.ts'
 import type { NamespaceView, ReaddirPath, SessionView, StatPath } from '../ops/types.ts'
 import type { AggregateResult } from './builtin/aggregators.ts'
+import type { CommandIO } from './builtin/generic_bind/adapter.ts'
 import { isBuiltinGrammar, registeredSpec } from './spec/builtins.ts'
 import { OWN_OPTION_LOOP } from './spec/constants.ts'
 import { helpPage, versionLine } from './spec/standard.ts'
@@ -79,6 +80,8 @@ export interface CommandOpts {
   command?: string
   /** The mount's index cache. */
   index?: IndexCacheStore | null
+  /** The command table of the mount running the command. */
+  io?: CommandIO
   /** The workspace op dispatcher. */
   dispatch?: DispatchFn
   /** The calling session. */

@@ -12,14 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { LanceDBAccessor } from '../../../accessor/lancedb.ts'
 import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeSearch } from '../generic/search.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
 
 export const LANCEDB_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<LanceDBAccessor>(VFSName.LANCEDB, IO),
-  ...makeSearch(VFSName.LANCEDB, IO.search),
+  ...makeGenericCommands(VFSName.LANCEDB),
+  ...makeSearch(VFSName.LANCEDB),
 ]

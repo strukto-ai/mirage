@@ -12,13 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { BoxAccessor } from '../../../accessor/box.ts'
 import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
 
-export const BOX_COMMANDS: readonly RegisteredCommand[] = makeGenericCommands<BoxAccessor>(
-  VFSName.BOX,
-  IO,
-)
+export const BOX_COMMANDS: readonly RegisteredCommand[] = makeGenericCommands(VFSName.BOX)

@@ -21,7 +21,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 
-import { OpsRegistry } from '../../../../ops/registry.ts'
 import { createShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
@@ -140,14 +139,9 @@ function served(name: string, extra: string): void {
 }
 
 async function workspace(): Promise<Workspace> {
-  const registry = new OpsRegistry()
   const ram = new RAMVFS()
-  registry.registerVfs(ram)
   const parser = await createShellParser({ engineWasm, grammarWasm })
-  const ws = new Workspace(
-    { '/w': ram },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  const ws = new Workspace({ '/w': ram }, { mode: MountMode.WRITE, shellParser: parser })
   ws.registerCli('git', GIT)
   return ws
 }

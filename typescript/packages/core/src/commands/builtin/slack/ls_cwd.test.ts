@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
@@ -68,6 +69,7 @@ describe('slack ls (no args) after cd preserves mount prefix', () => {
         stdin: null,
         flags: {},
         filetypeFns: null,
+        io: commandIo(vfs),
         cwd: '/slack/channels',
         mountPrefix: '/slack',
         index: idx,
@@ -79,6 +81,7 @@ describe('slack ls (no args) after cd preserves mount prefix', () => {
       stdin: null,
       flags: {},
       filetypeFns: null,
+      io: commandIo(vfs),
       cwd: '/slack/channels/general__C1',
       mountPrefix: '/slack',
       index: idx,

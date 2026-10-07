@@ -12,14 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountMode, OpsRegistry, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { miragePlugin } from '@struktoai/mirage-agents/opencode'
 
 async function makeWs(sessionID: string): Promise<Workspace> {
   const ram = new RAMVFS()
-  const ops = new OpsRegistry()
-  for (const op of ram.ops()) ops.register(op)
-  const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+  const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE })
   await ws.vfs.write('/hello.txt', `hi from session ${sessionID}`)
   return ws
 }

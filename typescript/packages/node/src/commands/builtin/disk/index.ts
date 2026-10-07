@@ -12,18 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import {
+  type CommandIO,
+  makeGenericCommands,
+} from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import { VFSName } from '@struktoai/mirage-core/types'
-import type { DiskAccessor } from '../../../accessor/disk.ts'
-import { IO } from './io.ts'
 
 // Shell traversals need partial results and per-directory errors; the shared
 // readdir/stat walker owns those. Direct VFS aggregate methods remain strict.
-const walkIO = { ...IO }
-delete walkIO.find
-delete walkIO.du
+function walked(io: CommandIO): CommandIO {
+  const rest = { ...io }
+  delete rest.find
+  delete rest.du
+  return rest
+}
 
 export const DISK_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<DiskAccessor>(VFSName.DISK, walkIO),
+  ...makeGenericCommands(VFSName.DISK, { table: walked, local: true }),
 ]

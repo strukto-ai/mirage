@@ -12,13 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PostgresAccessor } from '../../../accessor/postgres.ts'
 import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { POSTGRES_GREP } from './grep.ts'
 import { POSTGRES_HEAD } from './head.ts'
-import { IO } from './io.ts'
 import { POSTGRES_RG } from './rg.ts'
 import { POSTGRES_TAIL } from './tail.ts'
 import { POSTGRES_WC } from './wc.ts'
@@ -26,7 +24,7 @@ import { POSTGRES_WC } from './wc.ts'
 const POSTGRES_OVERRIDES = new Set(['grep', 'head', 'rg', 'tail', 'wc'])
 
 export const POSTGRES_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<PostgresAccessor>(VFSName.POSTGRES, IO, {
+  ...makeGenericCommands(VFSName.POSTGRES, {
     overrides: POSTGRES_OVERRIDES,
   }),
   ...POSTGRES_GREP,

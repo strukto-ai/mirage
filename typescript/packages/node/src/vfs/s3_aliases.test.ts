@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { mountCommands } from '@struktoai/mirage-core/commands/builtin/backends'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { S3VFS } from './s3/s3.ts'
 import type { S3Config } from './s3/config.ts'
@@ -204,13 +205,13 @@ describe('region-derived S3 aliases', () => {
       expect(norm).not.toHaveProperty('access_key_id')
     })
 
-    it(`${c.name}: VFS remaps name, ops, and commands`, () => {
+    it(`${c.name}: VFS remaps name and commands`, () => {
       const vfs = c.build(c.make(c.region) as never)
       expect(vfs.name).toBe(c.kind)
       expect(vfs).toBeInstanceOf(S3VFS)
-      expect(vfs.ops().length).toBeGreaterThan(0)
-      for (const op of vfs.ops()) expect(op.vfs).toBe(c.kind)
-      for (const cmd of vfs.commands()) expect(cmd.vfs).toBe(c.kind)
+      const commands = mountCommands(vfs)
+      expect(commands.length).toBeGreaterThan(0)
+      for (const cmd of commands) expect(cmd.vfs).toBe(c.kind)
     })
 
     it(`${c.name}: getState redacts creds`, async () => {
@@ -266,7 +267,7 @@ describe('wasabi endpoint defaults', () => {
   it('VFS remaps name and redacts state', async () => {
     const vfs = new WasabiVFS({ ...CREDS })
     expect(vfs.name).toBe(VFSName.WASABI)
-    for (const op of vfs.ops()) expect(op.vfs).toBe(VFSName.WASABI)
+    for (const cmd of mountCommands(vfs)) expect(cmd.vfs).toBe(VFSName.WASABI)
     const blob = JSON.stringify(await vfs.getState())
     expect(blob.includes('SECRET-LEAK')).toBe(false)
     expect(blob.includes('<REDACTED>')).toBe(true)
@@ -338,8 +339,7 @@ describe('endpoint-required S3 aliases (minio/ceph/seaweedfs)', () => {
       expect(vfs.name).toBe(c.kind)
       expect(vfs).toBeInstanceOf(S3VFS)
       expect(vfs.storageLocation()).toBe(new S3VFS(c.toS3(c.make() as never)).storageLocation())
-      for (const op of vfs.ops()) expect(op.vfs).toBe(c.kind)
-      for (const cmd of vfs.commands()) expect(cmd.vfs).toBe(c.kind)
+      for (const cmd of mountCommands(vfs)) expect(cmd.vfs).toBe(c.kind)
       const blob = JSON.stringify(await vfs.getState())
       expect(blob.includes('AKIA-LEAK')).toBe(false)
       expect(blob.includes('SECRET-LEAK')).toBe(false)

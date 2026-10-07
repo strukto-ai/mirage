@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountCommands } from '../../commands/builtin/backends.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import {
@@ -22,11 +23,9 @@ import {
 } from '../../commands/config.ts'
 import { CommandSpec, Operand, Option } from '../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
-import type { Accessor } from '../../accessor/base.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { revisionFor } from '../../observe/context.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
 import { MountEntry } from './mount.ts'
@@ -44,8 +43,8 @@ const OK_CMD: CommandFn = () => [null, new IOResult({ exitCode: 0 })]
 const OK_CMD_STDOUT: CommandFn = () => [new TextEncoder().encode('ok'), new IOResult()]
 const HANG_CMD: CommandFn = () => new Promise(() => undefined)
 
-function makeMount(mode: MountMode = MountMode.WRITE): MountEntry {
-  return new MountEntry({ prefix: '/ram/', vfs: new StubVFS(), mode })
+function makeMount(mode: MountMode = MountMode.WRITE, vfs: BaseVFS = new StubVFS()): MountEntry {
+  return new MountEntry({ prefix: '/ram/', vfs, mode })
 }
 
 describe('Mount constructor validation', () => {
@@ -103,20 +102,12 @@ describe('Mount.executeCmd glob operands', () => {
   // The dispatcher hands a pattern to the handler whole. Resolving is the
   // handler's job, done once through the shared adapter, which is where
   // the namespace facts (links, nested mount roots, a trailing slash) are
-  // in view; the VFS's own glob op cannot see them, so expanding
-  // here would destroy what the handler needs. Python's dispatcher never
+  // in view; the mount's own glob cannot see them, so expanding here
+  // would destroy what the handler needs. Python's dispatcher never
   // expands either.
   class GlobbingVFS extends StubVFS {
-    override ops(): readonly RegisteredOp[] {
-      return [
-        {
-          name: 'glob',
-          vfs: this.name,
-          filetype: null,
-          write: false,
-          fn: () => Promise.resolve([PathSpec.fromStrPath('/ram/a.txt', 'a.txt')]),
-        },
-      ]
+    override readdir(): Promise<string[]> {
+      return Promise.resolve(['/ram/a.txt'])
     }
   }
   const pattern = new PathSpec({
@@ -131,7 +122,6 @@ describe('Mount.executeCmd glob operands', () => {
   it('hands the pattern to the handler rather than expanding it', async () => {
     const vfs = new GlobbingVFS()
     const m = new MountEntry({ prefix: '/ram/', vfs, mode: MountMode.WRITE })
-    m.registerFns(vfs.ops())
     let got: string[] = []
     const [cmd] = command({
       name: 'cat',
@@ -438,17 +428,13 @@ describe('Mount.executeCmd', () => {
 })
 
 describe('Mount.executeOp', () => {
-  it('dispatches to a registered op', async () => {
-    const m = makeMount()
-    const op: RegisteredOp = {
-      name: 'read',
-      vfs: 'ram',
-      filetype: null,
-      write: false,
-      fn: (_accessor: Accessor, path: PathSpec) =>
-        Promise.resolve(new TextEncoder().encode(path.virtual)),
+  it('dispatches to the VFS function', async () => {
+    class Reading extends StubVFS {
+      override read(path: PathSpec): Promise<Uint8Array> {
+        return Promise.resolve(new TextEncoder().encode(path.virtual))
+      }
     }
-    m.registerOp(op)
+    const m = makeMount(MountMode.WRITE, new Reading())
     const result = await m.executeOp('read', '/x.txt')
     expect(result).toBeInstanceOf(Uint8Array)
   })
@@ -459,15 +445,12 @@ describe('Mount.executeOp', () => {
   })
 
   it('rejects write ops on READ mount', async () => {
-    const m = makeMount(MountMode.READ)
-    const op: RegisteredOp = {
-      name: 'write',
-      vfs: 'ram',
-      filetype: null,
-      write: true,
-      fn: () => Promise.resolve(),
+    class Writing extends StubVFS {
+      override write(): Promise<void> {
+        return Promise.resolve()
+      }
     }
-    m.registerOp(op)
+    const m = makeMount(MountMode.READ, new Writing())
     await expect(m.executeOp('write', '/x')).rejects.toThrow(/read-only/)
   })
 })
@@ -479,35 +462,27 @@ describe('Mount.revisions', () => {
   })
 
   it('exposes installed pins to read functions via revisionFor during executeOp', async () => {
-    const m = makeMount()
-    m.revisions.set('/ram/x.txt', 'rev-1')
     let observed: string | null = '<unset>'
-    const op: RegisteredOp = {
-      name: 'read',
-      vfs: 'ram',
-      filetype: null,
-      write: false,
-      fn: (_accessor: Accessor, path: PathSpec) => {
+    class Pinned extends StubVFS {
+      override read(path: PathSpec): Promise<Uint8Array> {
         observed = revisionFor(path.virtual)
         return Promise.resolve(new Uint8Array())
-      },
+      }
     }
-    m.registerOp(op)
+    const m = makeMount(MountMode.WRITE, new Pinned())
+    m.revisions.set('/ram/x.txt', 'rev-1')
     await m.executeOp('read', '/ram/x.txt')
     expect(observed).toBe('rev-1')
   })
 
   it('does not leak revisions outside the executeOp scope', async () => {
-    const m = makeMount()
-    m.revisions.set('/ram/x.txt', 'rev-1')
-    const op: RegisteredOp = {
-      name: 'read',
-      vfs: 'ram',
-      filetype: null,
-      write: false,
-      fn: () => Promise.resolve(new Uint8Array()),
+    class Empty extends StubVFS {
+      override read(): Promise<Uint8Array> {
+        return Promise.resolve(new Uint8Array())
+      }
     }
-    m.registerOp(op)
+    const m = makeMount(MountMode.WRITE, new Empty())
+    m.revisions.set('/ram/x.txt', 'rev-1')
     await m.executeOp('read', '/ram/x.txt')
     expect(revisionFor('/ram/x.txt')).toBeNull()
   })
@@ -532,7 +507,7 @@ it('a path-guarded command is still held at its write', async () => {
   const vfs = new RAMVFS()
   vfs.store.files.set('/a', new TextEncoder().encode('original'))
   const mount = new MountEntry({ prefix: '/ram/', vfs, mode: MountMode.READ })
-  const cmd = vfs.commands().find((cmd) => cmd.name === 'gzip')
+  const cmd = mountCommands(vfs).find((cmd) => cmd.name === 'gzip')
   if (cmd === undefined) throw new Error('missing gzip')
   expect(cmd.pathGuarded).toBe(true)
   mount.register(cmd)

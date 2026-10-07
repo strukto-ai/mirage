@@ -487,8 +487,9 @@ describe('S3 cache consistency (mocked)', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     try {
       await ws.shell('cat /s3/c.txt')
-      const real = ws.opsRegistry.call.bind(ws.opsRegistry)
-      vi.spyOn(ws.opsRegistry, 'call').mockImplementation((...args) =>
+      const mount = ws.mount('/s3')
+      const real = mount.callOp.bind(mount)
+      vi.spyOn(mount, 'callOp').mockImplementation((...args) =>
         args[0] === 'stat' ? Promise.reject(new TypeError('probe bug')) : real(...args),
       )
       const ls = await ws.shell('ls -l /s3/c.txt; echo survived')

@@ -184,10 +184,10 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
       MountMode.READ,
     )
     const b = reg.mountForPrefix('/b')
-    const [grepB] = command({ name: 'grep', vfs: 'ram', spec: EMPTY_SPEC, fn: NOOP_CMD })
-    if (grepB === undefined) throw new Error('missing grep cmd')
-    b.register(grepB)
-    const mount = await reg.resolveMount('grep', [], '/a/x')
+    const [onlyB] = command({ name: 'only-on-b', vfs: 'ram', spec: EMPTY_SPEC, fn: NOOP_CMD })
+    if (onlyB === undefined) throw new Error('missing only-on-b cmd')
+    b.register(onlyB)
+    const mount = await reg.resolveMount('only-on-b', [], '/a/x')
     expect(mount).toBe(b)
   })
 

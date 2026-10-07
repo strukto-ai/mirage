@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { mountCommands } from '@struktoai/mirage-core/commands/builtin/backends'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { normalizeDatabricksVolumeConfig, redactDatabricksVolumeConfig } from './config.ts'
 import { DatabricksVolumeVFS } from './databricks_volume.ts'
@@ -70,12 +71,12 @@ describe('parseDatabricksCfg', () => {
 })
 
 describe('DatabricksVolumeVFS', () => {
-  it('creates with explicit credentials and exposes commands/ops', async () => {
+  it('creates with explicit credentials and exposes commands and writes', async () => {
     const vfs = await DatabricksVolumeVFS.create(normalizeDatabricksVolumeConfig(BASE_CONFIG))
     expect(vfs.name).toBe(VFSName.DATABRICKS_VOLUME)
     expect(vfs.cachesReads).toBe(true)
-    expect(vfs.commands().length).toBeGreaterThan(20)
-    expect(vfs.ops().map((op) => op.name)).toContain('write')
+    expect(mountCommands(vfs).length).toBeGreaterThan(20)
+    expect(vfs.supports('write')).toBe(true)
     const state = await vfs.getState()
     expect(state.config.token).toBe('<REDACTED>')
   })

@@ -15,6 +15,18 @@ import type {
 
 export type DuEntries = [entries: [string, number][], total: number]
 
+/**
+ * What a dispatchable VFS function does to the mount. READ leaves the mount
+ * as it was. WRITE changes what it stores, so a read-only mount refuses the
+ * call and admission judges it as a write. Mirrors Python's `Effect`.
+ */
+export const Effect = Object.freeze({
+  READ: 'read',
+  WRITE: 'write',
+} as const)
+
+export type Effect = (typeof Effect)[keyof typeof Effect]
+
 export type ReaddirOp<A extends Accessor = Accessor> = ReaddirFn<
   [accessor: A, path: PathSpec, index?: IndexCacheStore]
 >
@@ -114,44 +126,6 @@ export type ResolveGlobOp<A extends Accessor = Accessor> = (
 export interface DuOps<A extends Accessor = Accessor> {
   size: DuSizeOp<A>
   entries: DuEntriesOp<A>
-}
-
-export interface ReadOps<A extends Accessor = Accessor> {
-  readdir: ReaddirOp<A>
-  readBytes: ReadBytesOp<A>
-  stat: StatOp<A>
-}
-
-export interface NativeReadOps<A extends Accessor = Accessor> {
-  readStream?: ReadStreamOp<A>
-  readRange?: (
-    accessor: A,
-    path: PathSpec,
-    index: IndexCacheStore | undefined,
-    offset: number,
-    size: number | null,
-  ) => Promise<Uint8Array>
-  exists?: ExistsOp<A>
-  find?: FindOp<A>
-  du?: DuOps<A>
-}
-
-export interface WriteOps<A extends Accessor = Accessor> {
-  write?: WriteOp<A>
-  append?: WriteOp<A>
-  pwrite?: PwriteOp<A>
-  create?: PathOp<A>
-  mkdir?: MkdirOp<A>
-  unlink?: PathOp<A>
-  rmdir?: RmdirOp<A>
-  rmR?: PathOp<A>
-  rename?: RenameOp<A>
-  copy?: CopyOp<A>
-  dirCopy?: CopyOp<A>
-  /** noCreate requires an atomic existence precondition, or ENOTSUP before writing. */
-  truncate?: (accessor: A, path: PathSpec, length: number, noCreate?: boolean) => Promise<void>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  setAttrs?: (...args: any[]) => unknown
 }
 
 /** A resource query and backend-specific arguments, validated by the backend. */

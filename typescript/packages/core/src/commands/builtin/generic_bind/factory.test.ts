@@ -59,19 +59,17 @@ describe('makeGenericCommands', () => {
       const stat = makeStat(driver)
       const copied: string[] = []
       const index = new RAMIndexCacheStore()
-      const commands = makeGenericCommands(
-        's3',
-        makeOps({
-          local: false,
-          find: (_accessor, path, options, idx) => find(accessor, path, options, idx),
-          stat: (_accessor, path, idx) => stat(accessor, path, idx),
-          mkdir: () => Promise.resolve(),
-          copy: (_accessor, _src, dst) => {
-            copied.push(dst.virtual)
-            return Promise.resolve()
-          },
-        }),
-      )
+      const io = makeOps({
+        local: false,
+        find: (_accessor, path, options, idx) => find(accessor, path, options, idx),
+        stat: (_accessor, path, idx) => stat(accessor, path, idx),
+        mkdir: () => Promise.resolve(),
+        copy: (_accessor, _src, dst) => {
+          copied.push(dst.virtual)
+          return Promise.resolve()
+        },
+      })
+      const commands = makeGenericCommands('s3')
       const command = commands.find((c) => c.name === name)
       if (command === undefined) throw new Error('command missing')
       const opts = {
@@ -80,6 +78,7 @@ describe('makeGenericCommands', () => {
         filetypeFns: null,
         cwd: '/mnt',
         index,
+        io,
       }
       const paths = name === 'cp' ? [spec('/data'), spec('/copy')] : [spec('/data')]
       const cold = await command.fn(accessor, paths, [], opts)
@@ -96,14 +95,14 @@ describe('makeGenericCommands', () => {
   )
 
   it('emits read/metadata commands from the catalog', () => {
-    const names = new Set(makeGenericCommands('ram', makeOps()).map((c) => c.name))
+    const names = new Set(makeGenericCommands('ram').map((c) => c.name))
     expect(names.has('cat')).toBe(true)
     expect(names.has('ls')).toBe(true)
     expect(names.has('stat')).toBe(true)
   })
 
   it('skips overridden commands', () => {
-    const names = makeGenericCommands('ram', makeOps(), {
+    const names = makeGenericCommands('ram', {
       overrides: new Set(['stat', 'du']),
     }).map((c) => c.name)
     expect(names).not.toContain('stat')
@@ -115,19 +114,17 @@ describe('makeGenericCommands', () => {
   // beside the bespoke command, and mem0's `search` read as if it displaced
   // something.
   it('refuses a name no builder has', () => {
-    expect(() =>
-      makeGenericCommands('fake', makeOps(), { overrides: new Set(['cat', 'search']) }),
-    ).toThrow(/no generic builder named search/)
-    expect(() =>
-      makeGenericCommands('fake', makeOps(), { opsOverrides: { lss: makeOps() } }),
-    ).toThrow(/no generic builder named lss/)
+    expect(() => makeGenericCommands('fake', { overrides: new Set(['cat', 'search']) })).toThrow(
+      /no generic builder named search/,
+    )
+    expect(() => makeGenericCommands('fake', { adapt: { lss: (io) => io } })).toThrow(
+      /no generic builder named lss/,
+    )
   })
 
   it('attaches aggregate only for local backends', () => {
-    const local = makeGenericCommands('ram', makeOps({ local: true })).find((c) => c.name === 'cat')
-    const remote = makeGenericCommands('s3', makeOps({ local: false })).find(
-      (c) => c.name === 'cat',
-    )
+    const local = makeGenericCommands('ram', { local: true }).find((c) => c.name === 'cat')
+    const remote = makeGenericCommands('s3').find((c) => c.name === 'cat')
     expect(local?.aggregate).not.toBeNull()
     expect(remote?.aggregate).toBeNull()
   })
@@ -137,7 +134,7 @@ describe('makeGenericCommands', () => {
     // `gzip -c`, `tar -t` and `split -n 1/2` only read, and a line that
     // writes is refused at the missing op instead of the command being
     // absent.
-    const names = new Set(makeGenericCommands('hf_buckets', makeOps()).map((c) => c.name))
+    const names = new Set(makeGenericCommands('hf_buckets').map((c) => c.name))
     expect(names).toEqual(new Set(BUILDERS.map((b) => b.name)))
   })
 
@@ -159,23 +156,14 @@ describe('makeGenericCommands', () => {
   })
 
   it('registers ops-gated commands once the backend supplies them', () => {
-    const names = new Set(
-      makeGenericCommands(
-        'disk',
-        makeOps({
-          write: () => Promise.resolve(),
-          rmdir: () => Promise.resolve(),
-          truncate: () => Promise.resolve(),
-        }),
-      ).map((c) => c.name),
-    )
+    const names = new Set(makeGenericCommands('disk').map((c) => c.name))
     expect(names.has('rmdir')).toBe(true)
     expect(names.has('truncate')).toBe(true)
   })
 
   it('registers shuf on a read-only backend', () => {
     // Only `shuf -o` writes, so a backend with no write op still serves it.
-    const shuf = makeGenericCommands('chroma', makeOps()).find((c) => c.name === 'shuf')
+    const shuf = makeGenericCommands('chroma').find((c) => c.name === 'shuf')
     expect(shuf).toBeDefined()
     expect(shuf?.write).toBe(false)
   })
@@ -349,21 +337,21 @@ describe('a command with its own stat', () => {
         return Promise.resolve(file(7))
       },
     })
-    const commands = makeGenericCommands('s3', base, {
-      opsOverrides: {
-        ls: {
-          ...base,
+    const commands = makeGenericCommands('s3', {
+      adapt: {
+        ls: (io) => ({
+          ...io,
           stat: () => {
             calls.light += 1
             return Promise.resolve(file(1))
           },
-        },
+        }),
       },
     })
     const run = async (name: string): Promise<string> => {
       const command = commands.find((c) => c.name === name)
       if (command === undefined) throw new Error('command missing')
-      const opts = { stdin: null, flags: {}, filetypeFns: null, cwd: '/mnt' }
+      const opts = { stdin: null, flags: {}, filetypeFns: null, cwd: '/mnt', io: base }
       const out = await command.fn(new FakeAccessor(), [spec('/a.txt')], [], opts)
       return new TextDecoder().decode(await materialize(out?.[0] ?? null))
     }

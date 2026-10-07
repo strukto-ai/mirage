@@ -15,9 +15,7 @@
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { VFSName } from '../../../types.ts'
-import type { RedisAccessor } from '../../../accessor/redis.ts'
-import { IO } from './io.ts'
 
 export const REDIS_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<RedisAccessor>(VFSName.REDIS, IO),
+  ...makeGenericCommands(VFSName.REDIS, { local: true }),
 ]

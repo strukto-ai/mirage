@@ -16,8 +16,8 @@ import { describe, expect, it } from 'vitest'
 import { LangfuseAccessor, type LangfuseAccessorConfig } from '../../accessor/langfuse.ts'
 import type { Evicted, IndexEntry, SetDirOptions } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { IO } from '../../commands/builtin/langfuse/io.ts'
-import { BaseVFS } from '../../vfs/base.ts'
+import { vfsOver } from '../../test-utils.ts'
+import { LangfuseVFS } from '../../vfs/langfuse/langfuse.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
 import { PathSpec } from '../../types.ts'
@@ -170,10 +170,8 @@ describe('langfuse bounded trace listing', () => {
   const TRACES = { '/api/public/traces': { data: [{ id: 't1' }, { id: 't2' }] } }
   it('fetches a full page once through the workspace index view', async () => {
     const transport = new RecordingTransport(TRACES)
-    const vfs = new BaseVFS({
+    const vfs = vfsOver(LangfuseVFS, accessor(transport, { defaultTraceLimit: 2 }), {
       name: 'langfuse',
-      accessor: accessor(transport, { defaultTraceLimit: 2 }),
-      io: IO,
     })
     const ws = new Workspace({ '/nested/lf/': vfs }, { shellParser: await getTestParser() })
     try {

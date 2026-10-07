@@ -17,11 +17,11 @@ import {
   normalizeDiscordConfig,
   redactDiscordConfig,
 } from '@struktoai/mirage-core/vfs/discord/config'
-import { DISCORD_OPS } from '@struktoai/mirage-core/ops/discord/index'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mountCommands } from '@struktoai/mirage-core/commands/builtin/backends'
 import { buildVfs } from '../registry.ts'
 import { DiscordVFS } from './discord.ts'
 
@@ -58,14 +58,9 @@ describe('DiscordVFS (node)', () => {
     expect(typeof r.writePrompt).toBe('string')
   })
 
-  it('commands() returns DISCORD_COMMANDS', () => {
+  it('serves DISCORD_COMMANDS', () => {
     const r = new DiscordVFS({ token: 'bot-test' })
-    expect(r.commands()).toBe(DISCORD_COMMANDS)
-  })
-
-  it('ops() returns DISCORD_OPS', () => {
-    const r = new DiscordVFS({ token: 'bot-test' })
-    expect(r.ops()).toBe(DISCORD_OPS)
+    expect(mountCommands(r)).toEqual(DISCORD_COMMANDS)
   })
 
   it('getState() redacts token', async () => {

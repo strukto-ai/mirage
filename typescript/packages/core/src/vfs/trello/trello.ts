@@ -15,17 +15,18 @@
 import { BaseVFS } from '../base.ts'
 import { TrelloAccessor } from '../../accessor/trello.ts'
 
-import { TRELLO_COMMANDS } from '../../commands/builtin/trello/index.ts'
-import type { RegisteredCommand } from '../../commands/config.ts'
 import { HttpTrelloTransport } from '../../core/trello/client.ts'
-
-import type { RegisteredOp } from '../../ops/registry.ts'
-import { TRELLO_OPS } from '../../ops/trello/index.ts'
 
 import { PROMPT, WRITE_PROMPT } from './prompt.ts'
 import { VFSName } from '../../types.ts'
 
 import { redactTrelloConfig, type TrelloConfig, type TrelloConfigRedacted } from './config.ts'
+import type { PathSpec, FileStat } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
+import { readdir as trelloReaddir } from '../../core/trello/readdir.ts'
+import { read as trelloRead } from '../../core/trello/read.ts'
+import { stat as trelloStat } from '../../core/trello/stat.ts'
 
 export interface TrelloVFSState {
   type: string
@@ -54,12 +55,22 @@ export class TrelloVFS extends BaseVFS {
     this.accessor = new TrelloAccessor(new HttpTrelloTransport(transportOpts), accessorOpts)
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return TRELLO_COMMANDS
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return trelloReaddir(this.accessor, path, index)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return TRELLO_OPS
+  override async read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const data = await trelloRead(this.accessor, path, index)
+    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return trelloStat(this.accessor, path, index)
   }
 
   override getState(): Promise<TrelloVFSState> {

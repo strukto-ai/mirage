@@ -12,11 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { TrelloAccessor } from '../../../accessor/trello.ts'
 import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
 import { TRELLO_CARD_ASSIGN } from './trello_card_assign.ts'
 import { TRELLO_CARD_COMMENT_ADD } from './trello_card_comment_add.ts'
 import { TRELLO_CARD_COMMENT_UPDATE } from './trello_card_comment_update.ts'
@@ -30,7 +28,7 @@ import { makeTrelloReadCommands } from './reads.ts'
 const TRELLO_OVERRIDES = new Set<string>()
 
 export const TRELLO_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<TrelloAccessor>(VFSName.TRELLO, IO, {
+  ...makeGenericCommands(VFSName.TRELLO, {
     overrides: TRELLO_OVERRIDES,
   }),
   ...TRELLO_CARD_ASSIGN,

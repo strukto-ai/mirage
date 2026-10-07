@@ -17,7 +17,6 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import {
   MountMode,
-  OpsRegistry,
   RAMVFS,
   S3VFS,
   SlackVFS,
@@ -55,11 +54,6 @@ const ram = new RAMVFS()
 const s3 = new S3VFS(s3Config)
 const slack = new SlackVFS(slackConfig)
 
-const ops = new OpsRegistry()
-for (const op of ram.ops()) ops.register(op)
-for (const op of s3.ops()) ops.register(op)
-for (const op of slack.ops()) ops.register(op)
-
 const ws = new Workspace(
   {
     '/': ram,
@@ -68,7 +62,6 @@ const ws = new Workspace(
   },
   {
     mode: MountMode.WRITE,
-    ops,
   },
 )
 const openAI = configureOpenAIExample(ws, 'gpt-5.5')

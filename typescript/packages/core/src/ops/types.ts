@@ -13,7 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type ShellValue, type VarAttr } from '../shell/variable.ts'
+import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { FileStat, PathSpec, Visibility } from '../types.ts'
+
+/**
+ * The keywords an op carries through the door: the mount's index, the
+ * filetype a read resolves by (null asks for the stored bytes), and the
+ * op's own (`offset`, `size`, `parents`, `no_create`, the setattr fields).
+ */
+export interface OpKwargs {
+  index?: IndexCacheStore
+  filetype?: string | null
+  [k: string]: unknown
+}
 
 export type StatOverlay = (path: string, stat: FileStat) => FileStat
 

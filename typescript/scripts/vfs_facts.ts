@@ -19,20 +19,20 @@ import ts from 'typescript'
 
 import { ListingVersion } from '@struktoai/mirage-core'
 
-// Capability values and CommandIO slots are read from the source rather
-// than from a live object on purpose. Python can introspect its VFS
-// classes because the values are class attributes, but the typescript
-// twins are instance fields, so the only way to observe them at runtime
-// is to construct the VFS — and construction is not inert here:
-// `buildVfs('github', {})` issues an HTTP request and `postgres`
+// Capability values and the functions a class defines are read from the
+// source rather than from a live object on purpose. Python can introspect
+// its VFS classes because the values are class attributes, but the
+// typescript twins are instance fields, so the only way to observe them
+// at runtime is to construct the VFS — and construction is not inert
+// here: `buildVfs('github', {})` issues an HTTP request and `postgres`
 // opens a connection. A generator that reaches the network produces a
 // different spec depending on who runs it, so the values come from the
 // declarations instead.
 
-// What a declaration slot can be read as: a numeric or boolean literal, or
-// a string -- which covers both a named constant reported by its name and a
-// slot declared with no initializer at all.
-type CapabilityValue = number | boolean | string
+// What a declaration slot can be read as: a numeric or boolean literal,
+// null, or a string -- which covers both a named constant reported by its
+// name and a slot declared with no initializer at all.
+type CapabilityValue = number | boolean | string | null
 
 const CAPABILITY_FIELDS = [
   'indexTtl',
@@ -41,11 +41,42 @@ const CAPABILITY_FIELDS = [
   'supportsSnapshot',
   'sizesAlwaysKnown',
   'listingVersion',
+  'readsRanges',
+  'local',
+  'maxGlobMatches',
+  'maxDuEntries',
 ] as const
 
-// Slots that carry a configuration value rather than an operation. They
-// are reported as values; every other key of the literal is a wired slot.
-const IO_VALUE_FIELDS = new Set(['local', 'streamsBytes', 'maxGlobMatches', 'maxDuEntries'])
+// The functions a backend may define, as BaseVFS declares them. Which ones
+// a class overrides decides what its mount and its commands can do.
+const VFS_FUNCTIONS = new Set([
+  'readdir',
+  'read',
+  'stat',
+  'readStream',
+  'exists',
+  'find',
+  'duSize',
+  'duEntries',
+  'write',
+  'append',
+  'pwrite',
+  'create',
+  'mkdir',
+  'unlink',
+  'rmdir',
+  'rmR',
+  'rename',
+  'copy',
+  'dirCopy',
+  'truncate',
+  'setattr',
+  'search',
+  'searchMany',
+  'narrowPaths',
+  'contentSearchEnabled',
+  'isMounted',
+])
 
 const BASE_CLASS = 'BaseVFS'
 
@@ -60,13 +91,11 @@ export interface Capabilities {
   capacity: boolean
   has_prompt: boolean
   has_write_prompt: boolean
-}
-
-export interface CommandIoFacts {
-  slots: string[]
-  local: boolean
-  max_glob_matches: number | null
-  max_du_entries: number | null
+  functions: string[]
+  reads_ranges: boolean | string
+  local: boolean | string
+  max_glob_matches: number | string | null
+  max_du_entries: number | string | null
 }
 
 interface ClassInfo {
@@ -100,6 +129,7 @@ function sourceFiles(dir: string): string[] {
 // read is a value it must not guess.
 function literalValue(node: ts.Expression | undefined): CapabilityValue {
   if (node === undefined) return '<declared, no initializer>'
+  if (node.kind === ts.SyntaxKind.NullKeyword) return null
   if (ts.isNumericLiteral(node)) return Number(node.text.replaceAll('_', ''))
   if (node.kind === ts.SyntaxKind.TrueKeyword) return true
   if (node.kind === ts.SyntaxKind.FalseKeyword) return false
@@ -286,10 +316,24 @@ export function capabilitiesOf(className: string, classes: Map<string, ClassInfo
       const name = member.name.getText(info.source)
       if (!(CAPABILITY_FIELDS as readonly string[]).includes(name)) continue
       if (name in values) continue
-      values[name] = literalValue(member.initializer)
+      const init = member.initializer
+      const value = literalValue(init)
+      values[name] =
+        init !== undefined && ts.isIdentifier(init) && typeof value === 'string'
+          ? (resolveIdentifier(info.source, init.text) ?? value)
+          : value
     }
   }
   const overrides = ancestry.filter((info) => info.decl.name?.text !== BASE_CLASS)
+  const functions = new Set<string>()
+  for (const info of overrides) {
+    for (const member of info.decl.members) {
+      if (!ts.isMethodDeclaration(member)) continue
+      if (member.modifiers?.some((m) => m.kind === ts.SyntaxKind.StaticKeyword) === true) continue
+      const name = member.name.getText(info.source)
+      if (VFS_FUNCTIONS.has(name)) functions.add(snake(name))
+    }
+  }
   return {
     index_ttl: numericCapability(values, 'indexTtl', 600, className),
     caches_reads: booleanCapability(values, 'cachesReads', false, className),
@@ -301,6 +345,11 @@ export function capabilitiesOf(className: string, classes: Map<string, ClassInfo
     capacity: overrides.some((info) => declaresMethod(info, 'capacity')),
     has_prompt: givesText(ancestry, 'prompt'),
     has_write_prompt: givesText(ancestry, 'writePrompt'),
+    functions: [...functions].sort(compareCodePoints),
+    reads_ranges: booleanCapability(values, 'readsRanges', false, className),
+    local: booleanCapability(values, 'local', false, className),
+    max_glob_matches: nullableNumber(values, 'maxGlobMatches', className),
+    max_du_entries: nullableNumber(values, 'maxDuEntries', className),
   }
 }
 
@@ -318,8 +367,22 @@ function numericCapability(
 ): number | string {
   const value = values[name]
   if (value === undefined) return fallback
-  if (typeof value === 'boolean') {
-    throw new Error(`${className}.${name} is a boolean, expected a number`)
+  if (typeof value === 'boolean' || value === null) {
+    throw new Error(`${className}.${name} is ${String(value)}, expected a number`)
+  }
+  return value
+}
+
+// A cap BaseVFS declares with a default, so every chain reaches a value;
+// null means no cap.
+function nullableNumber(
+  values: Record<string, CapabilityValue>,
+  name: string,
+  className: string,
+): number | string | null {
+  const value = values[name]
+  if (value === undefined || typeof value === 'boolean') {
+    throw new Error(`${className}.${name} is ${String(value)}, expected a number or null`)
   }
   return value
 }
@@ -332,8 +395,8 @@ function booleanCapability(
 ): boolean | string {
   const value = values[name]
   if (value === undefined) return fallback
-  if (typeof value === 'number') {
-    throw new Error(`${className}.${name} is a number, expected a boolean`)
+  if (typeof value === 'number' || value === null) {
+    throw new Error(`${className}.${name} is ${String(value)}, expected a boolean`)
   }
   return value
 }
@@ -384,78 +447,6 @@ function resolveIdentifier(
     }
   }
   return undefined
-}
-
-// The file a local name was imported from, and the name it has there.
-// `import { read as s3Read }` binds `s3Read` locally to an exported
-// `read`, so both halves are needed to find the declaration.
-function importedFrom(
-  source: ts.SourceFile,
-  local: string,
-): { file: string; exported: string } | undefined {
-  for (const statement of source.statements) {
-    if (!ts.isImportDeclaration(statement)) continue
-    const bindings = statement.importClause?.namedBindings
-    if (bindings === undefined || !ts.isNamedImports(bindings)) continue
-    for (const element of bindings.elements) {
-      if (element.name.text !== local) continue
-      const specifier = (statement.moduleSpecifier as ts.StringLiteral).text
-      if (!specifier.startsWith('.')) return undefined
-      const file = resolve(source.fileName, '..', specifier)
-      if (!existsSync(file)) return undefined
-      return { file, exported: (element.propertyName ?? element.name).text }
-    }
-  }
-  return undefined
-}
-
-// Whether a backend's whole-file read declares a fourth parameter, i.e.
-// the `{offset, size}` window the `readRange` slot exists to hand it.
-// Parameter count rather than arity, because optional and defaulted
-// parameters do not show up in `Function.length` — `read(a, b, c?, opts =
-// {})` reports 2 at runtime, so nothing observable at runtime can answer
-// this question.
-function takesWindow(source: ts.SourceFile, local: string): boolean {
-  const origin = importedFrom(source, local)
-  if (origin === undefined) return false
-  const declared = parse(origin.file)
-  for (const statement of declared.statements) {
-    if (!ts.isFunctionDeclaration(statement) || statement.name === undefined) continue
-    if (statement.name.text !== origin.exported) continue
-    const options = statement.parameters[3]?.type
-    if (options === undefined) return false
-    // The fourth parameter is not automatically a byte window — linear's
-    // is a `ReadFilter` of query terms — so the type has to declare an
-    // `offset` before this counts as a range the slot could carry.
-    if (ts.isTypeLiteralNode(options)) return declaresOffset(options.members)
-    if (!ts.isTypeReferenceNode(options) || !ts.isIdentifier(options.typeName)) return false
-    return declaresOffsetNamed(declared, options.typeName.text)
-  }
-  return false
-}
-
-// A byte window is `offset` *and* `size`, the pair python's own opt-in
-// test keys on. `offset` alone is not enough: postgres pairs it with
-// `limit` to mean a SQL row range, which no byte slot can carry.
-function declaresOffset(members: ts.NodeArray<ts.TypeElement>): boolean {
-  const names = new Set(members.filter((m) => m.name !== undefined).map((m) => m.name?.getText()))
-  return names.has('offset') && names.has('size')
-}
-
-function declaresOffsetNamed(source: ts.SourceFile, name: string): boolean {
-  for (const statement of source.statements) {
-    if (ts.isInterfaceDeclaration(statement) && statement.name.text === name) {
-      return declaresOffset(statement.members)
-    }
-  }
-  const origin = importedFrom(source, name)
-  if (origin === undefined) return false
-  for (const statement of parse(origin.file).statements) {
-    if (ts.isInterfaceDeclaration(statement) && statement.name.text === origin.exported) {
-      return declaresOffset(statement.members)
-    }
-  }
-  return false
 }
 
 // Whether a registry factory exists only to explain that this runtime
@@ -546,144 +537,6 @@ export function registryClasses(registryFile: string): Map<string, string | null
   visit(source)
   if (out.size === 0) throw new Error(`no REGISTRY object literal found in ${registryFile}`)
   return out
-}
-
-/**
- * The wired `CommandIO` slots per backend command directory.
- *
- * The adapter's slot set is a hand-filled literal that nothing reads, so
- * a backend can omit `du` or `find` and quietly fall back to the capped
- * readdir walk while its twin pushes the work down. Dumping the key set
- * makes that omission a spec diff.
- *
- * Args:
- *   packagesRoot: the `typescript/packages` directory.
- *   pkgs: package names to scan, in the variant's resolution order.
- */
-export function commandIoFacts(
-  packagesRoot: string,
-  pkgs: readonly string[],
-  defaults: { maxGlobMatches: number; maxDuEntries: number },
-): Record<string, CommandIoFacts> {
-  const out: Record<string, CommandIoFacts> = {}
-  for (const pkg of pkgs) {
-    const root = resolve(packagesRoot, pkg, 'src', 'commands', 'builtin')
-    if (!existsSync(root)) continue
-    for (const entry of readdirSync(root, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
-      const file = resolve(root, entry.name, 'io.ts')
-      if (!existsSync(file)) continue
-      const source = parse(file)
-      let literal: ts.ObjectLiteralExpression | undefined
-      let adapted = false
-      const visit = (node: ts.Node): void => {
-        if (
-          ts.isVariableDeclaration(node) &&
-          ts.isIdentifier(node.name) &&
-          node.name.text === 'IO' &&
-          node.initializer !== undefined
-        ) {
-          let value = node.initializer
-          if (
-            ts.isCallExpression(value) &&
-            ts.isPropertyAccessExpression(value.expression) &&
-            value.expression.name.text === 'toCommandIO' &&
-            ts.isNewExpression(value.expression.expression) &&
-            value.expression.expression.expression.getText(source) === 'VFSAdapter'
-          ) {
-            const options = value.expression.expression.arguments?.[0]
-            if (options === undefined) throw new Error(`${file}: VFSAdapter needs options`)
-            value = options
-            adapted = true
-          }
-          if (!ts.isObjectLiteralExpression(value)) {
-            throw new Error(`${file}: cannot inspect the IO declaration`)
-          }
-          if (literal !== undefined) {
-            throw new Error(`${file} declares more than one IO object literal`)
-          }
-          literal = value
-        }
-        ts.forEachChild(node, visit)
-      }
-      visit(source)
-      if (literal === undefined) continue
-      const slots: string[] = adapted ? ['read_stream', 'is_mounted', 'exists'] : []
-      const values: Record<string, CapabilityValue> = {}
-      let readBytes: string | undefined
-      const properties = literal.properties.flatMap((prop) => {
-        if (
-          adapted &&
-          ts.isPropertyAssignment(prop) &&
-          ['read', 'native', 'writes'].includes(prop.name.getText(source))
-        ) {
-          if (!ts.isObjectLiteralExpression(prop.initializer)) {
-            throw new Error(`${file}: adapter capabilities must be inspectable literals`)
-          }
-          return [...prop.initializer.properties]
-        }
-        return [prop]
-      })
-      for (const prop of properties) {
-        if (ts.isSpreadAssignment(prop)) {
-          throw new Error(
-            `${file} spreads into its IO literal; the slot dump cannot see through it`,
-          )
-        }
-        const name = prop.name?.getText(source)
-        if (name === undefined) continue
-        if (IO_VALUE_FIELDS.has(name)) {
-          let value = ts.isPropertyAssignment(prop) ? literalValue(prop.initializer) : true
-          if (
-            ts.isPropertyAssignment(prop) &&
-            ts.isIdentifier(prop.initializer) &&
-            typeof value === 'string'
-          ) {
-            value = resolveIdentifier(source, prop.initializer.text) ?? value
-          }
-          values[name] = value
-          continue
-        }
-        if (
-          name === 'readBytes' &&
-          ts.isPropertyAssignment(prop) &&
-          ts.isIdentifier(prop.initializer)
-        ) {
-          readBytes = prop.initializer.text
-        }
-        slots.push(snake(name))
-      }
-      // A reader that already takes a window but no `readRange` slot is
-      // the silent case: the ops factory reads the whole object and
-      // slices, which is correct, quiet, and throws the pushdown away.
-      // Python asserts the same rule from its own signatures
-      // (tests/commands/test_read_range_optin.py); without this the two
-      // sides can only diverge, never be caught.
-      if (
-        !slots.includes('read_range') &&
-        readBytes !== undefined &&
-        takesWindow(source, readBytes)
-      ) {
-        throw new Error(
-          `${file}: readBytes takes a byte window but no readRange slot is wired, ` +
-            `so every ranged read downloads the whole object and slices — ` +
-            `add \`readRange: rangeOf(${readBytes})\``,
-        )
-      }
-      out[entry.name] = {
-        slots: [...new Set(slots)].sort(compareCodePoints),
-        local: values.local === undefined ? !adapted : values.local === true,
-        max_glob_matches: numeric(values.maxGlobMatches, defaults.maxGlobMatches),
-        max_du_entries: numeric(values.maxDuEntries, defaults.maxDuEntries),
-      }
-    }
-  }
-  return out
-}
-
-function numeric(value: number | boolean | string | undefined, fallback: number): number | null {
-  if (value === undefined) return fallback
-  return typeof value === 'number' ? value : null
 }
 
 // ---------------------------------------------------------------------------
@@ -783,8 +636,8 @@ function registryNormalizers(
 }
 
 // The file a local name was imported from, and the name it has there,
-// following both the relative specifiers `importedFrom` handles and the
-// `@struktoai/mirage-core/...` subpaths the node and browser packages use.
+// following both relative specifiers and the `@struktoai/mirage-core/...`
+// subpaths the node and browser packages use.
 function importOrigin(
   source: ts.SourceFile,
   local: string,

@@ -87,7 +87,7 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
 
   // The cache's own key test, part of `FileCache` and not a driver verb:
   // the key is the cache entry's, not a path the mount resolves.
-  exists(key: string | PathSpec): Promise<boolean> {
+  override exists(key: string | PathSpec): Promise<boolean> {
     const k = typeof key === 'string' ? key : key.mountPath
     const entry = this.entries.get(k)
     return Promise.resolve(entry !== undefined && !entry.expired)

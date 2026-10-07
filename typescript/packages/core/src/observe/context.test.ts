@@ -224,20 +224,15 @@ describe('revisions context', () => {
 // the workspace, neither may gain the mount's prefix.
 describe('recorder stores the path as given', () => {
   it('record keeps both paths through a dispatched op', async () => {
-    const ws = new Workspace({ '/m': new RAMVFS() }, { mode: MountMode.WRITE })
+    const ram = new RAMVFS()
     let calls = 0
-    ws.opsRegistry.register({
-      name: 'read',
-      vfs: 'ram',
-      filetype: null,
-      write: false,
-      fn: async () => {
-        calls += 1
-        record('read', '/x/y', 'ram', 1, startOp())
-        record('read', '/m/k.txt', 'ram', 1, startOp())
-        return new Uint8Array([1])
-      },
-    })
+    ram.read = async () => {
+      calls += 1
+      record('read', '/x/y', 'ram', 1, startOp())
+      record('read', '/m/k.txt', 'ram', 1, startOp())
+      return new Uint8Array([1])
+    }
+    const ws = new Workspace({ '/m': ram }, { mode: MountMode.WRITE })
     try {
       const [, records] = await runWithRecording(() => ws.dispatch('read', '/m/k.txt'))
       expect(calls).toBe(1)
@@ -248,20 +243,15 @@ describe('recorder stores the path as given', () => {
   })
 
   it('recordStream keeps both paths through a dispatched op', async () => {
-    const ws = new Workspace({ '/m': new RAMVFS() }, { mode: MountMode.WRITE })
+    const ram = new RAMVFS()
     let calls = 0
-    ws.opsRegistry.register({
-      name: 'read',
-      vfs: 'ram',
-      filetype: null,
-      write: false,
-      fn: async () => {
-        calls += 1
-        recordStream('read', '/x/y', 'ram')
-        recordStream('read', '/m/k.txt', 'ram')
-        return new Uint8Array([1])
-      },
-    })
+    ram.read = async () => {
+      calls += 1
+      recordStream('read', '/x/y', 'ram')
+      recordStream('read', '/m/k.txt', 'ram')
+      return new Uint8Array([1])
+    }
+    const ws = new Workspace({ '/m': ram }, { mode: MountMode.WRITE })
     try {
       const [, records] = await runWithRecording(() => ws.dispatch('read', '/m/k.txt'))
       expect(calls).toBe(1)

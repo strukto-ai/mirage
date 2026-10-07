@@ -14,9 +14,10 @@
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { SCOPE_WARN } from '../../../core/github/constants.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
+import { SCOPE_ERROR, SCOPE_WARN } from '../../../core/github/constants.ts'
+import { readdir as githubReaddir } from '../../../core/github/readdir.ts'
+import { stat as githubStat } from '../../../core/github/stat.ts'
+import { makeResolveGlob } from '../../../utils/glob_walk.ts'
 import {
   countScopeFiles,
   isDirectoryKey,
@@ -30,7 +31,7 @@ import { narrowPaths } from '../../../core/github/search.ts'
 import type { PathSpec } from '../../../types.ts'
 import { textCandidates, wholeWordLiteral } from '../grep_pushdown.ts'
 
-const resolveGlob = resolveGlobOf(IO)
+const resolveGlob = makeResolveGlob(githubReaddir, SCOPE_ERROR, undefined, githubStat)
 
 export interface NarrowResult {
   resolved: PathSpec[]

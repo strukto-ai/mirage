@@ -28,6 +28,8 @@ import { materialize } from '../../../io/types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { PathSpec } from '../../../types.ts'
 import { DATABRICKS_VOLUME_COMMANDS } from './index.ts'
+import { ioFor } from '../../../test-utils.ts'
+import { DatabricksVolumeVFSBase } from '../../../vfs/databricks_volume/databricks_volume.ts'
 
 const MS = 1_700_000_000_000
 const FROZEN_NOW_S = 1_700_000_000
@@ -109,10 +111,12 @@ async function findText(
   index: IndexCacheStore,
 ): Promise<string> {
   const cmd = cmdOf('find')
-  const result = await cmd.fn(makeAccessor(), paths, texts, {
+  const accessor = makeAccessor()
+  const result = await cmd.fn(accessor, paths, texts, {
     stdin: null,
     flags: {},
     filetypeFns: null,
+    io: ioFor(DatabricksVolumeVFSBase, accessor),
     cwd: '/',
     index,
   })
@@ -131,10 +135,12 @@ async function runCmd(
   index: IndexCacheStore,
 ): Promise<void> {
   const cmd = cmdOf(name)
-  const result = await cmd.fn(makeAccessor(), paths, texts, {
+  const accessor = makeAccessor()
+  const result = await cmd.fn(accessor, paths, texts, {
     stdin: null,
     flags,
     filetypeFns: null,
+    io: ioFor(DatabricksVolumeVFSBase, accessor),
     cwd: '/',
     index,
   })

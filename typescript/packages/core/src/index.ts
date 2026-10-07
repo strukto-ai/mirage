@@ -47,7 +47,6 @@ export type { CommandFnResult } from './commands/config.ts'
 export { CommandSpec, Operand, Option, SPECS, specOf } from './commands/spec/index.ts'
 export { MemoryOAuthClientProvider } from './core/notion/client.ts'
 export { IOResult } from './io/types.ts'
-export { OpsRegistry } from './ops/registry.ts'
 export type {
   Action,
   CommandContext,
@@ -63,21 +62,9 @@ export { normalizeDatabricksVolumeConfig } from './vfs/databricks_volume/config.
 export { DevVFS } from './vfs/dev/dev.ts'
 export { DifyVFS } from './vfs/dify/dify.ts'
 export { AirtableVFS } from './vfs/airtable/airtable.ts'
-export {
-  checkDriverContract,
-  checkReadContract,
-  DriverOps,
-  type ReadFixture,
-} from './vfs/testing.ts'
-export { VFSAdapter } from './vfs/adapter.ts'
-export type {
-  NativeReadOps,
-  ReadOps,
-  WriteOps,
-  SearchOps,
-  SearchQuery,
-  DuOps,
-} from './vfs/types.ts'
+export { checkReadContract, type ReadFixture } from './vfs/testing.ts'
+export { vfsCall } from './vfs/call.ts'
+export { Effect, type SearchQuery } from './vfs/types.ts'
 export { Mem0VFS } from './vfs/mem0/mem0.ts'
 export { OneDriveVFS } from './vfs/onedrive/onedrive.ts'
 export { QdrantVFS } from './vfs/qdrant/qdrant.ts'

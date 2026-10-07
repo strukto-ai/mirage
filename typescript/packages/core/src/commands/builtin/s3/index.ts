@@ -12,16 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { S3Accessor } from '../../../accessor/s3.ts'
 import { VFSName } from '../../../types.ts'
 import { CommandCatalog } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { makeObjectStoreCommands, OBJECT_STORE_OVERRIDES } from '../object_store/index.ts'
-import { IO } from './io.ts'
 
 export const S3_COMMANDS = new CommandCatalog([
-  ...makeGenericCommands<S3Accessor>(VFSName.S3, IO, {
+  ...makeGenericCommands(VFSName.S3, {
     overrides: OBJECT_STORE_OVERRIDES,
   }),
-  ...makeObjectStoreCommands(VFSName.S3, IO),
+  ...makeObjectStoreCommands(VFSName.S3),
 ])

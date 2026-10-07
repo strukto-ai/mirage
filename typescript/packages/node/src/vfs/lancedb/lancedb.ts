@@ -12,13 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { LanceDBVFSBase } from '@struktoai/mirage-core/vfs/lancedb/lancedb'
 import { LanceDBAccessor } from '@struktoai/mirage-core/accessor/lancedb'
-import { LANCEDB_COMMANDS } from '@struktoai/mirage-core/commands/builtin/lancedb/index'
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-
-import { LANCEDB_OPS } from '@struktoai/mirage-core/ops/lancedb/index'
-import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 
 import {
   redactLanceDBConfig,
@@ -46,7 +41,7 @@ export interface LanceDBVFSState {
   needs_override: true
 }
 
-export class LanceDBVFS extends BaseVFS {
+export class LanceDBVFS extends LanceDBVFSBase {
   override readonly name: string = VFSName.LANCEDB
   override readonly cachesReads: boolean
   // readdir seeds exact card sizes from the widened select and stat falls
@@ -83,13 +78,5 @@ export class LanceDBVFS extends BaseVFS {
   override async close(): Promise<void> {
     await this.store.close()
     await super.close()
-  }
-
-  override ops(): readonly RegisteredOp[] {
-    return LANCEDB_OPS
-  }
-
-  override commands(): readonly RegisteredCommand[] {
-    return LANCEDB_COMMANDS
   }
 }

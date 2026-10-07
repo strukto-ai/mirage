@@ -7,7 +7,6 @@ import { IOResult, materialize } from '../../io/types.ts'
 import { PathSpec } from '../../types.ts'
 import { eacces } from '../../errors/fs.ts'
 import { MountEntry } from '../mount/mount.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 
@@ -61,14 +60,8 @@ it.each([
 })
 
 class FailingListing extends RAMVFS {
-  override ops(): readonly RegisteredOp[] {
-    return super
-      .ops()
-      .map((ro) =>
-        ro.name === 'readdir'
-          ? { ...ro, fn: () => Promise.reject(new Error('remote failure')) }
-          : ro,
-      )
+  override readdir(): Promise<string[]> {
+    return Promise.reject(new Error('remote failure'))
   }
 }
 

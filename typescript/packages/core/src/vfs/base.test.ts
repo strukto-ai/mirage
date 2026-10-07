@@ -15,19 +15,18 @@
 import { describe, expect, it } from 'vitest'
 import { Accessor, NOOPAccessor } from '../accessor/base.ts'
 import { RAMAccessor } from '../accessor/ram.ts'
-import { IO } from '../commands/builtin/ram/io.ts'
-import type { CommandIO } from '../commands/builtin/generic_bind/index.ts'
-import { streamFromBytes } from '../commands/builtin/utils/wrap.ts'
+import type { IndexCacheStore } from '../cache/index/store.ts'
+import { mountCommands } from '../commands/builtin/backends.ts'
 import { command, type RegisteredCommand } from '../commands/config.ts'
 import { CommandSpec, Operand } from '../commands/spec/types.ts'
 import { CLISpec, type CLIInvocation } from '../commands/cli/types.ts'
 import { RuntimeVFS } from '../runtime/vfs.ts'
 import { IOResult } from '../io/types.ts'
-import type { RegisteredOp } from '../ops/registry.ts'
 import { ops } from '../test-utils.ts'
 import { CapacityState, ContentType, FileStat, FileType, MountMode, PathSpec } from '../types.ts'
 import { getTestParser, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
 import { buildMountArgs, toStateDict } from '../workspace/snapshot/state.ts'
+import { MountEntry } from '../workspace/mount/mount.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { BaseVFS, VFS_BRAND, type VFSOptions } from './base.ts'
 import { RAMVFS } from './ram/ram.ts'
@@ -108,24 +107,29 @@ const wikiHello: readonly RegisteredCommand[] = command({
   fn: () => [ENC.encode('hello custom verb\n'), new IOResult()],
 })
 
-function makeIO(): CommandIO<WikiAccessor> {
-  return {
-    readdir,
-    readBytes,
-    readStream: (a, p, i) => streamFromBytes(readBytes, a, p, i),
-    stat,
-    isMounted: () => true,
-    local: false,
+/** A plug-in VFS over a tree of pages: the three required reads. */
+class WikiVFS extends BaseVFS<WikiAccessor> {
+  override readdir(path: PathSpec): Promise<string[]> {
+    return readdir(this.accessor, path)
+  }
+
+  override async read(
+    path: PathSpec,
+    _index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const data = await readBytes(this.accessor, path)
+    return data.slice(offset, size === null ? undefined : offset + size)
+  }
+
+  override stat(path: PathSpec): Promise<FileStat> {
+    return stat(this.accessor, path)
   }
 }
 
-function makeVfs(extra: Partial<VFSOptions<WikiAccessor>> = {}): BaseVFS<WikiAccessor> {
-  return new BaseVFS<WikiAccessor>({
-    name: 'wiki',
-    accessor: new WikiAccessor(PAGES),
-    io: makeIO(),
-    ...extra,
-  })
+function makeVfs(extra: VFSOptions<WikiAccessor> = {}): WikiVFS {
+  return new WikiVFS({ name: 'wiki', accessor: new WikiAccessor(PAGES), ...extra })
 }
 
 function leafDir(accessor: WikiAccessor, path: PathSpec): [Tree, string] {
@@ -157,18 +161,50 @@ function unlink(accessor: WikiAccessor, path: PathSpec): Promise<void> {
   return Promise.resolve()
 }
 
-function writableVfs(): [BaseVFS<WikiAccessor>, WikiAccessor] {
-  const accessor = new WikiAccessor(structuredClone(PAGES))
-  const vfs = new BaseVFS<WikiAccessor>({
-    name: 'wiki',
-    accessor,
-    io: { ...makeIO(), write, exists, unlink },
-  })
-  return [vfs, accessor]
+class WritableWiki extends WikiVFS {
+  override write(path: PathSpec, data: Uint8Array): Promise<void> {
+    return write(this.accessor, path, data)
+  }
+
+  override exists(path: PathSpec): Promise<boolean> {
+    return exists(this.accessor, path)
+  }
+
+  override unlink(path: PathSpec): Promise<void> {
+    return unlink(this.accessor, path)
+  }
 }
 
-function commandNames(vfs: BaseVFS<WikiAccessor>): Set<string> {
-  return new Set(vfs.commands().map((rc) => rc.name))
+function writableVfs(): [WritableWiki, WikiAccessor] {
+  const accessor = new WikiAccessor(structuredClone(PAGES))
+  return [new WritableWiki({ name: 'wiki', accessor }), accessor]
+}
+
+function commandNames(vfs: BaseVFS): Set<string> {
+  return new Set(mountCommands(vfs).map((rc) => rc.name))
+}
+
+const DOOR_OPS = ['read', 'readdir', 'stat', 'glob', 'write', 'unlink', 'mkdir', 'rename']
+
+function served(vfs: BaseVFS): Set<string> {
+  const mount = new MountEntry({ prefix: '/', vfs })
+  return new Set(DOOR_OPS.filter((op) => mount.hasOp(op)))
+}
+
+/**
+ * A RAM VFS over `store` that does not define `names`, as a plug-in that
+ * leaves those functions out would not.
+ */
+function ramWithout(store: RAMStore, names: readonly string[], name = 'custom'): RAMVFS {
+  class Custom extends RAMVFS {}
+  for (const n of names) {
+    Object.defineProperty(Custom.prototype, n, {
+      value: (BaseVFS.prototype as unknown as Record<string, unknown>)[n],
+    })
+  }
+  const vfs = new Custom()
+  Object.assign(vfs, { name, store, accessor: new RAMAccessor(store) })
+  return vfs
 }
 
 describe('BaseVFS contract', () => {
@@ -176,9 +212,9 @@ describe('BaseVFS contract', () => {
     expect(new Probe()[VFS_BRAND]).toBe(true)
   })
 
-  it('serves no tables', () => {
+  it('serves nothing', () => {
     const r = new Probe()
-    expect(r.ops()).toEqual([])
+    expect(served(r)).toEqual(new Set())
     expect(r.commands()).toEqual([])
   })
 
@@ -189,7 +225,7 @@ describe('BaseVFS contract', () => {
     expect(new Probe().accessor).toBeInstanceOf(NOOPAccessor)
   })
 
-  it('keeps the accessor a table-built driver was handed', () => {
+  it('keeps the accessor a driver was handed', () => {
     const accessor = new WikiAccessor(PAGES)
     expect(makeVfs({ accessor }).accessor).toBe(accessor)
   })
@@ -208,21 +244,20 @@ describe('BaseVFS contract', () => {
 })
 
 describe('BaseVFS state', () => {
-  // Mirrors Python `BaseVFS.get_state` / `load_state`: a VFS that
-  // holds nothing of its own names only the class to rebuild.
-  it('getState names the VFS kind and carries no config', () => {
-    expect(new Probe().getState()).toEqual({ type: 'probe' })
+  // Mirrors Python `BaseVFS.get_state` / `load_state`: the base cannot
+  // know a subclass's constructor, so it asks to be handed back live.
+  it('getState names the VFS kind and asks to be handed back', () => {
+    expect(new Probe().getState()).toEqual({ type: 'probe', needs_override: true })
   })
 
   it('loadState takes nothing back', () => {
     expect(new Probe().loadState({ type: 'probe' })).toBeUndefined()
   })
 
-  // A bare `{type}` leaves no redaction marker, which is exactly why a
-  // config-backed VFS may not inherit it: the marker is what makes
-  // load demand a fresh config instead of substituting an empty mount.
-  it('the default state does not ask for an override at load', () => {
-    expect(vfsStateRequiresOverride(new Probe().getState())).toBe(false)
+  // A load then demands the live VFS instead of substituting an empty
+  // mount; a VFS that owns its content overrides the state to carry it.
+  it('the default state asks for an override at load', () => {
+    expect(vfsStateRequiresOverride(new Probe().getState())).toBe(true)
   })
 })
 
@@ -236,7 +271,7 @@ describe('BaseVFS close', () => {
   })
 })
 
-describe('BaseVFS wires a backend from one CommandIO table', () => {
+describe('a plug-in VFS', () => {
   it('registers the generic command set', () => {
     const names = commandNames(makeVfs())
     for (const name of ['ls', 'cat', 'grep', 'find', 'head', 'wc']) {
@@ -262,9 +297,9 @@ describe('BaseVFS wires a backend from one CommandIO table', () => {
   })
 
   it('refuses an empty name', () => {
-    expect(
-      () => new BaseVFS({ name: '', accessor: new WikiAccessor(PAGES), io: makeIO() }),
-    ).toThrow(/non-empty name/)
+    expect(() => new WikiVFS({ name: '', accessor: new WikiAccessor(PAGES) })).toThrow(
+      /non-empty name/,
+    )
   })
 
   it('reports the name as its snapshot type, and asks to be handed back', () => {
@@ -290,7 +325,7 @@ describe('BaseVFS wires a backend from one CommandIO table', () => {
     expect(vfs.writePrompt).toBe('writable')
   })
 
-  it('resolves a glob through the table readdir', async () => {
+  it('resolves a glob through its readdir', async () => {
     const matches = await ops(makeVfs()).glob(
       new PathSpec({
         vfsPath: 'guides/quick*',
@@ -303,32 +338,8 @@ describe('BaseVFS wires a backend from one CommandIO table', () => {
     expect(matches.map((m) => m.virtual)).toEqual(['/guides/quickstart.md'])
   })
 
-  it('derives the op set from the table', () => {
-    const derived = new Set(
-      makeVfs()
-        .ops()
-        .map((ro) => `${ro.name}:${String(ro.write)}`),
-    )
-    expect(derived).toEqual(new Set(['glob:false', 'read:false', 'readdir:false', 'stat:false']))
-  })
-
-  it('registers no ops when autoOps is off', () => {
-    expect(makeVfs({ autoOps: false }).ops()).toEqual([])
-  })
-
-  it('lets a user op shadow the derived one of the same name', () => {
-    const myRead: RegisteredOp = {
-      name: 'read',
-      vfs: 'wiki',
-      filetype: null,
-      fn: () => ENC.encode('custom'),
-      write: false,
-    }
-    const reads = makeVfs({ ops: [myRead] })
-      .ops()
-      .filter((ro) => ro.name === 'read')
-    expect(reads).toHaveLength(1)
-    expect(reads[0]?.fn).toBe(myRead.fn)
+  it('serves its reads at the door', () => {
+    expect(served(makeVfs())).toEqual(new Set(['glob', 'read', 'readdir', 'stat']))
   })
 
   it('declares the FSKit and snapshot flags it was given', () => {
@@ -361,7 +372,7 @@ describe('BaseVFS wires a backend from one CommandIO table', () => {
     }
   })
 
-  it('forwards an optional call through to the table', async () => {
+  it('serves an optional function it defines', async () => {
     const [vfs, accessor] = writableVfs()
     const spec = new PathSpec({ vfsPath: 'new.md', virtual: '/new.md', directory: '/' })
     expect(await exists(accessor, spec)).toBe(false)
@@ -382,10 +393,7 @@ describe('custom VFS capability fallbacks', () => {
     const store = new RAMStore()
     store.dirs.add('/empty')
     store.files.set('/file', ENC.encode('keep'))
-    const io = { ...IO }
-    delete io.rmR
-    delete io.rmdir
-    const vfs = new BaseVFS({ name: 'custom', accessor: new RAMAccessor(store), io })
+    const vfs = ramWithout(store, ['rmR', 'rmdir'])
     const ws = new Workspace({ '/custom': [vfs, mode] }, { shellParser: await getTestParser() })
     try {
       const result = await ws.shell(`rm ${flag} /custom/empty /custom/file`)
@@ -411,10 +419,7 @@ describe('custom VFS capability fallbacks', () => {
       const store = new RAMStore()
       for (const dir of ['/src', '/src/empty', '/src/sub']) store.dirs.add(dir)
       store.files.set('/src/sub/file', ENC.encode('payload'))
-      const io = { ...IO }
-      delete io.copy
-      delete io.find
-      const vfs = new BaseVFS({ name: 'custom', accessor: new RAMAccessor(store), io })
+      const vfs = ramWithout(store, ['copy', 'find'])
       const ws = new Workspace(
         { '/custom': vfs },
         { mode: MountMode.WRITE, shellParser: await getTestParser() },
@@ -443,10 +448,7 @@ describe('custom VFS capability fallbacks', () => {
     for (const dir of ['/src', '/src/empty']) store.dirs.add(dir)
     store.files.set('/src/file', ENC.encode('payload'))
     const before = new Set(store.dirs)
-    const io = { ...IO }
-    delete io.copy
-    delete io.write
-    const vfs = new BaseVFS({ name: 'custom', accessor: new RAMAccessor(store), io })
+    const vfs = ramWithout(store, ['copy', 'write'])
     const ws = new Workspace({ '/custom': [vfs, mode] }, { shellParser: await getTestParser() })
     try {
       const result = await ws.shell(`cp ${flags} /custom/src /custom/dst`)
@@ -467,9 +469,7 @@ describe('custom VFS capability fallbacks', () => {
     const path = new PathSpec({ virtual: '/data/a', directory: '/data', vfsPath: 'a' })
     const before = ENC.encode('before')
     await ops(builtin).write(path, before)
-    const vfs = custom
-      ? new BaseVFS({ name: 'probe', accessor: builtin.accessor, io: IO })
-      : builtin
+    const vfs = custom ? ramWithout(builtin.store, [], 'probe') : builtin
     const ws = new Workspace(
       { '/data': vfs },
       { mode: MountMode.READ, shellParser: await getTestParser() },

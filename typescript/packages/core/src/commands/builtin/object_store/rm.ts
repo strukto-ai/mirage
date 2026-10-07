@@ -16,13 +16,13 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, type PathSpec } from '../../../types.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { command, type CommandFnResult, type CommandOpts, type CommandFn } from '../../config.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { cpWalk } from '../generic/cp.ts'
 import { rmWithoutOperands } from '../generic/rm_cmd.ts'
-import { requireOp } from '../generic_bind/adapter.ts'
+import { requireOp, overMountIo } from '../generic_bind/adapter.ts'
 import { resolveGlobOf, type CommandIO } from '../generic_bind/index.ts'
 import { formatRecords } from '../utils/output.ts'
 import { isSlashedLink, rmLinkRefusal } from '../utils/slash_links.ts'
@@ -38,7 +38,7 @@ interface RmOpts {
 }
 
 /** Build the no-real-directories rm override for one keyed store. */
-export function makeRm<A extends Accessor>(vfs: string, io: CommandIO<A>): RegisteredCommand[] {
+function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
   const stat = io.stat
   const readdir = io.readdir
   const resolveGlob = resolveGlobOf(io)
@@ -153,11 +153,16 @@ export function makeRm<A extends Accessor>(vfs: string, io: CommandIO<A>): Regis
     ]
   }
 
-  return command<A>({
+  return rmCommand
+}
+
+/** The keyed-store `rm` over the running mount's table, guarded by `wrap`. */
+export function makeRm(vfs: string, wrap: (io: CommandIO) => CommandIO): RegisteredCommand[] {
+  return command({
     name: 'rm',
     vfs,
     spec: specOf('rm'),
-    fn: rmCommand,
+    fn: overMountIo(build, wrap),
     write: true,
     pathGuarded: true,
   })

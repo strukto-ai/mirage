@@ -32,7 +32,6 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 import { IOResult } from '../../../../io/types.ts'
-import { OpsRegistry } from '../../../../ops/registry.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
@@ -122,20 +121,16 @@ async function harness(prepare?: (repo: string) => void, nested?: string): Promi
   prepare?.(repo)
 
   const ram = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram)
   // `nested` mounts a second VFS inside the repository, which is the
   // one shape a verb cannot rename: its keys live in another VFS, so
   // the backend holding the parent path cannot carry them along.
   const mounts: Record<string, RAMVFS> = { '/repo': ram }
   if (nested !== undefined) {
     const child = new RAMVFS()
-    registry.registerVfs(child)
     mounts[nested] = child
   }
   const ws = new Workspace(mounts, {
     mode: MountMode.WRITE,
-    ops: registry,
     shellParser: parser,
   })
   const dispatch: Dispatch = async (op, path, args = [], kwargs = {}) => [

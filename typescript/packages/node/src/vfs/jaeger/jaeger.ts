@@ -12,15 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { JaegerVFSBase } from '@struktoai/mirage-core/vfs/jaeger/jaeger'
 import { JaegerAccessor } from '@struktoai/mirage-core/accessor/jaeger'
 
-import { JAEGER_COMMANDS } from '@struktoai/mirage-core/commands/builtin/jaeger/index'
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import { HttpJaegerTransport } from '@struktoai/mirage-core/core/jaeger/client'
-
-import { JAEGER_OPS } from '@struktoai/mirage-core/ops/jaeger/index'
-import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 
 import { PROMPT } from '@struktoai/mirage-core/vfs/jaeger/prompt'
 import { VFSName } from '@struktoai/mirage-core/types'
@@ -32,7 +27,7 @@ export interface JaegerVFSState {
   config: JaegerConfigRedacted
 }
 
-export class JaegerVFS extends BaseVFS {
+export class JaegerVFS extends JaegerVFSBase {
   override readonly name: string = VFSName.JAEGER
   override readonly cachesReads: boolean = true
   // Every listed file carries an exact size: a trace is rendered at readdir
@@ -64,14 +59,6 @@ export class JaegerVFS extends BaseVFS {
       accessorConfig.defaultToTimestamp = config.defaultToTimestamp
     }
     this.accessor = new JaegerAccessor(new HttpJaegerTransport(transportOpts), accessorConfig)
-  }
-
-  override commands(): readonly RegisteredCommand[] {
-    return JAEGER_COMMANDS
-  }
-
-  override ops(): readonly RegisteredOp[] {
-    return JAEGER_OPS
   }
 
   override getState(): Promise<JaegerVFSState> {

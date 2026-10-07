@@ -15,6 +15,8 @@
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { SlackAccessor } from '../../../accessor/slack.ts'
 import { describe, expect, it } from 'vitest'
+import { ioFor } from '../../../test-utils.ts'
+import { SlackVFSBase } from '../../../vfs/slack/slack.ts'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { PathSpec } from '../../../types.ts'
 import { FakeSlackTransport, seedChannel } from './_test_util.ts'
@@ -27,8 +29,9 @@ describe('slack grep on a time-scoped mount', () => {
     const transport = new FakeSlackTransport()
     const cmd = SLACK_GREP[0]
     if (cmd === undefined) throw new Error('grep not registered')
+    const accessor = new SlackAccessor(transport, { startTime: '2026-01-01T00:00:00Z' })
     const result = await cmd.fn(
-      new SlackAccessor(transport, { startTime: '2026-01-01T00:00:00Z' }),
+      accessor,
       [
         new PathSpec({
           virtual: '/mnt/slack/channels/general__C1',
@@ -38,7 +41,14 @@ describe('slack grep on a time-scoped mount', () => {
         }),
       ],
       ['hello'],
-      { stdin: null, flags: { w: true }, filetypeFns: null, cwd: '/', index: idx },
+      {
+        stdin: null,
+        flags: { w: true },
+        filetypeFns: null,
+        io: ioFor(SlackVFSBase, accessor),
+        cwd: '/',
+        index: idx,
+      },
     )
     expect(transport.calls.map((c) => c.endpoint)).not.toContain('search.messages')
     expect(result?.[1].exitCode).toBe(2)

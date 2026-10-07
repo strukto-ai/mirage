@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { RAM_COMMANDS } from './index.ts'
 import { type CommandOpts, type RegisteredCommand } from '../../config.ts'
 import { describe, expect, it } from 'vitest'
@@ -97,6 +98,7 @@ async function runCmd(
     stdin: null,
     flags,
     filetypeFns: null,
+    io: commandIo(vfs),
     cwd: '/',
     mountPrefix,
     ...(links !== null ? { ns: { links } } : {}),

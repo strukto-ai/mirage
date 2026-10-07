@@ -25,17 +25,13 @@ import {
   Option as OptionClass,
   SPECS,
 } from '@struktoai/mirage-core/commands/spec/index'
-import { DEFAULT_MAX_DU_ENTRIES } from '@struktoai/mirage-core/commands/builtin/generic/du'
-import { DEFAULT_MAX_GLOB_MATCHES } from '@struktoai/mirage-core/utils/glob_walk'
 
 import type { CommandSpec, Operand, Option } from '@struktoai/mirage-core/commands/spec/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 
 import {
   type Capabilities,
-  type CommandIoFacts,
   type ConfigFacts,
-  commandIoFacts,
   configFacts,
   registryCapabilities,
 } from './vfs_facts.ts'
@@ -306,18 +302,17 @@ function sortedStringify(value: unknown): string {
 // cannot be mounted by name, which is how chroma/dify/lancedb/qdrant stayed
 // unconstructible in typescript while appearing in every command's `_meta`.
 //
-// `capabilities` and `command_io` carry the values behind those names.
-// Registry membership only says a backend can be built; how it behaves is
-// a second hand-maintained surface that drifted just as quietly — Python
-// served ten-minute-stale listings of a live postgres schema because its
+// `capabilities` carries the values behind those names. Registry membership
+// only says a backend can be built; how it behaves is a second
+// hand-maintained surface that drifted just as quietly — Python served
+// ten-minute-stale listings of a live postgres schema because its
 // `index_ttl` kept the 600 s default where typescript pinned 0, and box's
-// `du` slot is wired on one side and absent on the other.
+// `du` was defined on one side and absent on the other.
 function emitVfsNames(
   name: string,
   knownVfsNames: string[],
   registry: Record<string, RegisteredCommand[]>,
   capabilities: Record<string, Capabilities | null>,
-  commandIo: Record<string, CommandIoFacts>,
   configs: Record<string, ConfigFacts | null>,
 ): void {
   const commandVfsNames = new Set<string>()
@@ -328,7 +323,6 @@ function emitVfsNames(
     registry: [...knownVfsNames].sort(compareCodePoints),
     command_vfs_names: [...commandVfsNames].sort(compareCodePoints),
     capabilities,
-    command_io: commandIo,
     configs,
   }
   const path = resolve(SPEC_ROOT, name, 'vfs.json')
@@ -402,10 +396,6 @@ function emitVariant(
     knownVfsNames,
     registry,
     registryCapabilities(PACKAGES, pkgs),
-    commandIoFacts(PACKAGES, pkgs, {
-      maxGlobMatches: DEFAULT_MAX_GLOB_MATCHES,
-      maxDuEntries: DEFAULT_MAX_DU_ENTRIES,
-    }),
     configFacts(
       resolve(PACKAGES, pkgs[pkgs.length - 1] as string, 'src', 'vfs', 'registry.ts'),
       PACKAGES,
