@@ -15,8 +15,8 @@
 import re
 
 IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-# bash's `legal_number`: strtoimax's leading whitespace and sign, then
-# the trailing blanks bash skips itself.
+# A number as bash's builtins read one: strtoimax's leading whitespace
+# and sign, then the trailing blanks bash skips itself.
 COUNT_WORD_RE = re.compile(r"[ \t\n\v\f\r]*[+-]?[0-9]+[ \t]*")
 
 # An assignment target with an optional subscript (`name` or `name[sub]`).
@@ -26,6 +26,6 @@ TARGET_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)(?:\[(.+)\])?\Z")
 
 # What makes bash's bare `set` single-quote a value: IFS whitespace,
 # quoting and control characters, reserved-word and glob characters, and
-# the expansion introducers (`sh_contains_shell_metas`). A `~` counts at
+# the expansion introducers (`$` and a backquote). A `~` counts at
 # the start or after `=` or `:`, and a `#` only at the start.
 SET_QUOTED_CHARS = frozenset(" \t\n'\"\\|&;()<>!{}*[?]^$`")

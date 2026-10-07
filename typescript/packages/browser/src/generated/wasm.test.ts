@@ -12,8 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ENGINE_WASM_BASE64, GRAMMAR_WASM_BASE64 } from './wasm.ts'
+
+const require = createRequire(import.meta.url)
 
 function decode(b64: string): Uint8Array {
   const bin = atob(b64)
@@ -36,4 +41,26 @@ describe('generated/wasm', () => {
     expect(Array.from(engine.slice(0, 4))).toEqual([0x00, 0x61, 0x73, 0x6d])
     expect(Array.from(grammar.slice(0, 4))).toEqual([0x00, 0x61, 0x73, 0x6d])
   })
+
+  // The package ships both modules inside dist, so it must ship their MIT
+  // notices too: THIRD_PARTY_NOTICES, built from licenses/third_party/, has to
+  // name the version embed-wasm.mjs embeds and carry its LICENSE verbatim.
+  it.each(['web-tree-sitter/web-tree-sitter.wasm', 'tree-sitter-bash/tree-sitter-bash.wasm'])(
+    'ships the notice of the %s it embeds',
+    (wasm) => {
+      const notices = readFileSync(new URL('../../THIRD_PARTY_NOTICES', import.meta.url), 'utf8')
+      const root = dirname(require.resolve(wasm))
+      const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
+        name: string
+        version: string
+      }
+      const notice = readFileSync(
+        new URL(`../../../../../licenses/third_party/${manifest.name}.txt`, import.meta.url),
+        'utf8',
+      )
+      expect(notice).toContain(`${manifest.name} ${manifest.version}`)
+      expect(notice).toContain(readFileSync(join(root, 'LICENSE'), 'utf8'))
+      expect(notices).toContain(notice)
+    },
+  )
 })

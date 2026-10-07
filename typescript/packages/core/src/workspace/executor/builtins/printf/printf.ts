@@ -162,8 +162,8 @@ export async function handlePrintf(
       }
     } else if (first === '--help') {
       // bash answers the EXACT word `--help` for every builtin, ahead of
-      // `internal_getopt`, by writing the builtin's help page to STDOUT and
-      // exiting 2 -- only a spelling internal_getopt actually reads (`--hel`,
+      // its option scan, by writing the builtin's help page to STDOUT and
+      // exiting 2 -- only a spelling the option scan actually reads (`--hel`,
       // `--version`) takes the invalid-option path below (bash 5.2.37). The
       // page is the BUILTIN's, in bash's own words and layout, because that
       // is whose printf this is; see HELP.
@@ -174,7 +174,7 @@ export async function handlePrintf(
         new ExecutionNode({ command: 'printf', exitCode: 2 }),
       ]
     } else if (first.startsWith('-') && first.length > 1 && first !== '-v') {
-      // bash's `internal_getopt` takes single letters only, so it reports the
+      // bash's option scan takes single letters only, so it reports the
       // first character it does not know spelled with ONE dash: a long
       // spelling answers for its second dash and its text never reaches the
       // message, which is why `printf --zzz`, `printf --hel` and

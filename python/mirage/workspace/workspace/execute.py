@@ -985,7 +985,7 @@ async def run_prepared_line(
                 rec.sealed = True
         ws._ops.records.extend(scope.records)
         # bash adds a line to history only when it is non-empty
-        # (`shell_input_line[0]`): a blank line is skipped, while a
+        # (anything before its newline): a blank line is skipped, while a
         # whitespace-only or comment-only line is kept.
         if is_line and command.strip("\n"):
             await ws.observer.log_execution(

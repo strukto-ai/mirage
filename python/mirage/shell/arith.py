@@ -445,8 +445,8 @@ class ArithEvaluator:
                 # `$((a))` is 4); the env holds scalars only, so the
                 # element resolver answers for the arrays.
                 value = self.elements.read(name, "0")
-            # Under `set -u` a name no variable holds is fatal, as
-            # bash's expr_streval has it; an array counts whatever its
+            # Under `set -u` a name no variable holds is fatal, as it
+            # is in bash's arithmetic; an array counts whatever its
             # element 0 holds.
             if (
                 value is None

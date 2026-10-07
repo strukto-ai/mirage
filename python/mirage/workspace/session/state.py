@@ -639,8 +639,8 @@ def note_random_kind(
 ) -> None:
     """End ``RANDOM``'s special meaning when a non-string lands on it.
 
-    bash's ``convert_var_to_array`` drops the dynamic value and the
-    assign hook, so ``RANDOM=(1 2)``, ``declare -a RANDOM``,
+    Once bash turns ``RANDOM`` into an array it neither draws nor seeds,
+    so ``RANDOM=(1 2)``, ``declare -a RANDOM``,
     ``RANDOM[1]=5`` and ``RANDOM+=(3)`` all leave an ordinary array that
     ``$RANDOM`` reads element 0 of, for good, as ``unset RANDOM`` does.
     Every store door calls this, gated or not, since a host seeding an
@@ -658,8 +658,8 @@ def note_random_kind(
 def conversion_scalar(session: SessionState, name: str) -> str | None:
     """The scalar an array conversion keeps as element 0.
 
-    bash's ``convert_var_to_array`` copies the variable's current value
-    into element 0, and for a live ``RANDOM`` looking the name up is
+    When bash turns a variable into an array, its current value becomes
+    element 0, and for a live ``RANDOM`` looking the name up is
     what draws: ``RANDOM[1]=5`` leaves ``[0]`` holding one draw and
     ``declare -a RANDOM`` one alone, after which the array is ordinary.
 
@@ -695,8 +695,8 @@ class RandomReader:
 
     Lives beside the door rather than with the generator because the
     door needs it too: ``RANDOM=RANDOM`` draws once while the seed is
-    evaluated, then seeds with the draw, as bash's ``assign_random``
-    does through ``evalexp``.
+    evaluated, then seeds with the draw, as bash does: it reads an
+    assigned seed as an arithmetic expression.
 
     Args:
         session (SessionState): generator and visibility state.
