@@ -111,11 +111,27 @@ async def run_shell_function(
     # 0; it reads aliases at its definition, or as a parse of its own
     # when it came from a stored session.
     outer_parse = (session._parse_current, session._parse_row)
-    defined = session._function_marks.get(cmd_name)
-    if defined is None:
+    site = session._function_sites.get(cmd_name)
+    if site is not None and site.source != session.functions[cmd_name]:
+        site = None
+    if site is None:
         session._parse_seq += 1
-        defined = (session._parse_seq, 0)
-    session._parse_current, session._parse_row = defined
+        mark = (session._parse_seq, 0)
+    else:
+        mark = site.mark
+    session._parse_current, session._parse_row = mark
+    # Its commands stand under the definition's place, on a hand-off of
+    # their own as every re-parse does, so two definitions of one text
+    # each need a nod and a second call runs on the first's.
+    origin = site.origin if site is not None else None
+    nested = (
+        HandOff(parent=handed, origin=origin)
+        if handed is not None and origin is not None
+        else None
+    )
+    body_handed = nested if nested is not None else handed
+    if nested is not None:
+        execute_node = partial(execute_node, handed=nested)
     try:
         all_stdout: list[Any] = []
         merged_io = IOResult()
@@ -132,7 +148,7 @@ async def run_shell_function(
                     cs,
                     job_table,
                     agent_id,
-                    handed,
+                    body_handed,
                     decisions,
                 )
             except ReturnSignal as sig:
@@ -169,6 +185,8 @@ async def run_shell_function(
         return combined, merged_io, last_exec
     finally:
         session._parse_current, session._parse_row = outer_parse
+        if nested is not None and decisions is not None:
+            decisions.hand_up(session.session_id, nested)
         scope.release()
         reset_program_invocation(marked)
         cs.pop()

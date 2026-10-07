@@ -20,6 +20,7 @@ import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../../types.ts'
 import { getTestParser, stdoutStr } from '../../../fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
+import { applyStateDict, toStateDict } from '../../../snapshot/state.ts'
 
 describe('alias', () => {
   // Pinned against bash 5.2.37: an alias is tried before a reserved word where
@@ -69,5 +70,38 @@ describe('alias', () => {
     let io = await ws.shell(':')
     for (const line of lines) io = await ws.shell(line)
     expect([stdoutStr(io), io.exitCode]).toEqual([out, code])
+  })
+
+  // A call with overrides runs on a fork, which starts its alias marks
+  // fresh along with its parse count, so no new parse can match an old
+  // mark.
+  it('reads the same aliases in a call with its own env or cwd', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    for (const line of ['shopt -s expand_aliases', "alias a='echo works'", 'f() { a; }'])
+      await ws.shell(line)
+    for (const opts of [{}, { env: {} }, { cwd: '/data' }]) {
+      const io = await ws.shell('f', opts)
+      expect([stdoutStr(io), io.exitCode]).toEqual(['works\n', 0])
+    }
+  })
+
+  // Checkout restores the table but not where the live definitions were
+  // made; a site recorded for another source is not the function's, so
+  // the restored body runs as a parse of its own.
+  it('does not read the replaced site after a checkout', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    for (const line of ['shopt -s expand_aliases', "alias a='echo works'", 'f() { a; }'])
+      await ws.shell(line)
+    const state = await toStateDict(ws)
+    await ws.shell("alias a='echo works'; f() { :; }")
+    await applyStateDict(ws, state)
+    const io = await ws.shell('f')
+    expect([stdoutStr(io), io.exitCode]).toEqual(['works\n', 0])
   })
 })

@@ -24,6 +24,7 @@ import pytest
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from mirage.workspace.snapshot.state import apply_state_dict, to_state_dict
 
 
 def _ws() -> Workspace:
@@ -171,4 +172,41 @@ async def test_a_function_reads_aliases_where_it_was_defined(lines, out, code):
     for line in lines:
         result = await _run(ws, line)
     assert result == (out, code)
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_call_with_its_own_env_or_cwd_reads_the_same_aliases():
+    # A call with overrides runs on a fork, which starts its alias marks
+    # fresh along with its parse count, so no new parse can match an old
+    # mark.
+    ws = _ws()
+    for line in (
+        "shopt -s expand_aliases",
+        "alias a='echo works'",
+        "f() { a; }",
+    ):
+        await ws.shell(line)
+    for kwargs in ({}, {"env": {}}, {"cwd": "/data"}):
+        io = await ws.shell("f", **kwargs)
+        assert ((await io.stdout_str()), io.exit_code) == ("works\n", 0)
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_checked_out_function_does_not_read_the_replaced_site():
+    # Checkout restores the table but not where the live definitions
+    # were made; a site recorded for another source is not the
+    # function's, so the restored body runs as a parse of its own.
+    ws = _ws()
+    for line in (
+        "shopt -s expand_aliases",
+        "alias a='echo works'",
+        "f() { a; }",
+    ):
+        await ws.shell(line)
+    state = await to_state_dict(ws)
+    await ws.shell("alias a='echo works'; f() { :; }")
+    await apply_state_dict(ws, state)
+    assert await _run(ws, "f") == ("works\n", 0)
     await ws.close()

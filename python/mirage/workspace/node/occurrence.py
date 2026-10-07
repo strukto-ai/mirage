@@ -19,7 +19,8 @@ from typing import Any
 
 from mirage.policy import Claimant, HandOff, Occurrence
 from mirage.shell.backticks import split_backtick_region
-from mirage.shell.helpers import byte_offset, get_text
+from mirage.shell.helpers import byte_offset, get_function_name, get_text
+from mirage.workspace.session import SessionState
 
 # What opens and closes a substitution's body, in the order the
 # openers are tried; the body between them is the text a nested line
@@ -84,13 +85,126 @@ def root_frame(node: Any, parent: Occurrence | None) -> Frame:
     root = node
     while root.parent is not None and root.type != "function_definition":
         root = root.parent
-    if (
-        root.type == "function_definition"
-        and root.parent is not None
-        and root.parent.type == "redirected_statement"
-    ):
-        root = root.parent
+    if root.type == "function_definition":
+        root = _definition_root(root)
     return Frame(get_text(root), root.start_byte, parent)
+
+
+def _definition_root(node: Any) -> Any:
+    """A function definition with the redirects stored with it.
+
+    Args:
+        node (Any): a ``function_definition`` node.
+    """
+    parent = node.parent
+    if parent is not None and parent.type == "redirected_statement":
+        return parent
+    return node
+
+
+def definition_frame(node: Any, frame: Frame) -> Frame:
+    """The frame of a function body as a pass walks its definition.
+
+    The body runs from its own parse of the stored source, so its
+    commands stand at offsets from the definition, under the
+    definition's own place on the line: two definitions of one text are
+    two places, each needing a nod of its own.
+
+    Args:
+        node (Any): the ``function_definition`` node.
+        frame (Frame): the scope the definition was walked in.
+    """
+    root = _definition_root(node)
+    return Frame(get_text(root), root.start_byte, occurrence_in(root, frame))
+
+
+def defined_at(node: Any, handed: HandOff | None) -> Occurrence | None:
+    """The place a function definition the executor runs stands on its
+    line, which the body's commands stand under when it is called;
+    None outside a line.
+
+    Args:
+        node (Any): the ``function_definition`` node.
+        handed (HandOff | None): the line's hand-off.
+    """
+    if handed is None:
+        return None
+    root = _definition_root(node)
+    if root.parent is None:
+        return occurrence_in(
+            root, Frame(get_text(root), root.start_byte, handed.origin)
+        )
+    return occurrence_in(root, root_frame(root.parent, handed.origin))
+
+
+def _enclosing_definition(node: Any) -> Any:
+    """The nearest ``function_definition`` at or above a node, or None.
+
+    Args:
+        node (Any): any node of the tree.
+    """
+    current = node.parent
+    while current is not None and current.type != "function_definition":
+        current = current.parent
+    return current
+
+
+def _definition_origin(
+    definition: Any, line: Any, session: SessionState, handed: HandOff
+) -> Occurrence | None:
+    """The place a call runs a definition's body under, as the gate will
+    find it: ``defined_at`` for one written on this line (under the
+    definition holding it, for one written inside another), the stored
+    site for a body parsed from the session's table, None for one whose
+    site is gone.
+
+    Args:
+        definition (Any): the ``function_definition`` node.
+        line (Any): the root of the line's own tree.
+        session (SessionState): the session running the line.
+        handed (HandOff): the line's hand-off.
+    """
+    outer = _enclosing_definition(definition)
+    if outer is not None:
+        frame = root_frame(definition.parent, handed.origin)
+        origin = _definition_origin(outer, line, session, handed)
+        parent = origin if origin is not None else handed.origin
+        root = _definition_root(definition)
+        return occurrence_in(root, Frame(frame.text, frame.base, parent))
+    # Nodes are fresh objects per read, so the trees are told apart by
+    # their roots' ids.
+    if root_of(definition).id == line.id:
+        return defined_at(definition, handed)
+    name = get_function_name(definition)
+    site = session._function_sites.get(name)
+    if site is None or site.source != session.functions.get(name):
+        return None
+    return site.origin
+
+
+def gate_frame(
+    node: Any, line: Any, session: SessionState, handed: HandOff
+) -> Frame:
+    """The frame a node's gate will read it in, for a pass that reads it
+    ahead of the gate: its own tree's, and for a node in a function body
+    under the place the call runs the body under.
+
+    Args:
+        node (Any): a node of the line's tree or of a stored body.
+        line (Any): the root of the line's own tree.
+        session (SessionState): the session running the line.
+        handed (HandOff): the line's hand-off.
+    """
+    frame = root_frame(node, handed.origin)
+    definition = (
+        node
+        if node.type == "function_definition"
+        else _enclosing_definition(node)
+    )
+    if definition is None:
+        return frame
+    origin = _definition_origin(definition, line, session, handed)
+    return frame if origin is None else Frame(frame.text, frame.base, origin)
 
 
 def line_frame(text: str, parent: Occurrence) -> Frame:

@@ -117,6 +117,7 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.assignment import execute_assignment
 from mirage.workspace.node.command_dispatch import execute_command
 from mirage.workspace.node.declaration import execute_declaration
+from mirage.workspace.node.occurrence import defined_at
 from mirage.workspace.node.program import execute_program
 from mirage.workspace.node.test_expr import (
     expand_double_bracket,
@@ -124,6 +125,7 @@ from mirage.workspace.node.test_expr import (
 )
 from mirage.workspace.node.timing import timing_report
 from mirage.workspace.session.elements import assign_element
+from mirage.workspace.session.functions import FunctionSite
 from mirage.workspace.session.state import (
     ensure_var_visible,
     random_reader,
@@ -1593,10 +1595,12 @@ async def _execute_node(
                     command=f"function {name}", exit_code=1, stderr=err
                 ),
             )
-        session.functions[name] = get_function_source(node)
-        session._function_marks[name] = (
-            session._parse_current,
-            session._parse_row + node.start_point[0],
+        source = get_function_source(node)
+        session.functions[name] = source
+        session._function_sites[name] = FunctionSite(
+            source,
+            (session._parse_current, session._parse_row + node.start_point[0]),
+            defined_at(node, handed),
         )
         return (
             None,

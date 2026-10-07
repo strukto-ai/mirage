@@ -69,6 +69,8 @@ from mirage.workspace.node.occurrence import (
     Frame,
     argv_frame,
     body_frame,
+    definition_frame,
+    gate_frame,
     line_frame,
     occurrence_in,
     root_frame,
@@ -699,7 +701,7 @@ def _walk_node(
             ``Walked`` carries it.
     """
     if node.type == NodeType.FUNCTION_DEFINITION:
-        frame = root_frame(node, frame.parent)
+        frame = definition_frame(node, frame)
     if node.type == NodeType.COMMAND:
         walked = session, lost
         words = _words_of(node, home)
@@ -1282,7 +1284,7 @@ async def unrefused_nodes(
         # is never one literal command and its frame goes unread; its
         # gate reads it under the word that invoked it.
         item = _sole_literal_command(
-            node, session, root_frame(node, handed.origin)
+            node, session, gate_frame(node, nodes[0], session, handed)
         )
         if item is None:
             out.append(node)

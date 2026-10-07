@@ -1,3 +1,5 @@
+import type { Occurrence } from '../../policy/types.ts'
+
 /** Copy portable function definitions without parsing or executing them. */
 export function functionSources(value: unknown = {}): Record<string, string> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -11,4 +13,20 @@ export function functionSources(value: unknown = {}): Record<string, string> {
     result[name] = source
   }
   return result
+}
+
+/**
+ * Where a function was defined, for the source it was defined as. The
+ * body is parsed again from that source at every call, so its own rows
+ * and offsets start at zero; the site puts them back where the
+ * definition stood. A site whose source no longer matches the table (a
+ * checkout, a stored session) is not the function's. `mark` is the parse
+ * and row the body reads aliases at; `origin` the definition's place on
+ * its line, which the body's approvals stand under, null outside a line.
+ * Mirrors Python's FunctionSite.
+ */
+export interface FunctionSite {
+  readonly source: string
+  readonly mark: readonly [number, number]
+  readonly origin: Occurrence | null
 }

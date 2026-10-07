@@ -1185,6 +1185,30 @@ async def test_asked_function_body_fetches_only_after_approval():
 
 
 @pytest.mark.asyncio
+async def test_two_definitions_of_one_text_each_ask_before_the_fetch():
+    # Each definition is a place of its own, read by the fill's pass
+    # under the place its call runs it, so each asks once and the gate
+    # spends the nod the pass claimed rather than asking again.
+    calls, fetch = counting_source({"TOKEN": "t0"})
+    register_secrets("fake", FakeConfig, fetch)
+
+    async def approve(record: Decision) -> Decision:
+        calls.append("ask")
+        return dataclasses.replace(record, outcome=Outcome.ALLOW)
+
+    ws = _asking_ws(
+        "printenv", {"TOKEN": {"from": "fake", "ref": "r"}}, approve
+    )
+    try:
+        line = "f() { printenv TOKEN; }; f; f() { printenv TOKEN; }; f"
+        io = await ws.shell(line)
+        assert (await io.stdout_str()) == "t0\nt0\n"
+        assert calls == ["ask", "ask", "r"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_asked_function_body_denied_never_fetches():
     calls, fetch = counting_source({"TOKEN": "t0"})
     register_secrets("fake", FakeConfig, fetch)

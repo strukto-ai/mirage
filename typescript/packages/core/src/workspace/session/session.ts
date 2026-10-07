@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { compareCodePoints } from '../../utils/sort.ts'
-import { functionSources } from './functions.ts'
+import { type FunctionSite, functionSources } from './functions.ts'
 import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
 
 import {
@@ -439,10 +439,10 @@ export class SessionState {
   // for a line, a function's definition row for its body, which is parsed
   // again from its own source but reads aliases where it was written.
   parseRow = 0
-  // Where each function was defined, as an alias mark, so its body expands
-  // the aliases of that place; a function loaded from a stored session
-  // has none and runs as a parse of its own.
-  functionMarks = new Map<string, [number, number]>()
+  // Where each function was defined (`FunctionSite`), so its body expands
+  // the aliases of that place and its approvals stand under it; a function
+  // loaded from a stored session has none and runs as a parse of its own.
+  functionSites = new Map<string, FunctionSite>()
   // The owner of this session's terminal streams, which an `exec` copy of
   // one names (`exec 3>&1`), and whether a line of the session is running,
   // whose outermost program routes what was written to them. Each fork gets
@@ -606,7 +606,6 @@ export class SessionState {
     forked.getoptsOptind = this.getoptsOptind
     forked.shopts = { ...this.shopts }
     forked.aliases = { ...this.aliases }
-    forked.aliasMarks = new Map(this.aliasMarks)
     forked.umask = this.umask
     forked.descriptors = new Map(this.descriptors)
     forked.execStdout = this.execStdout
@@ -634,7 +633,7 @@ export class SessionState {
     child.parseCurrent = this.parseCurrent
     child.parseRow = this.parseRow
     child.aliasMarks = new Map(this.aliasMarks)
-    child.functionMarks = new Map(this.functionMarks)
+    child.functionSites = new Map(this.functionSites)
     child.aliasStack = [...this.aliasStack]
     child.localVars = this.localVars === null ? null : copyLocals(this.localVars)
     child.localFrames = this.localFrames.map((frame) =>

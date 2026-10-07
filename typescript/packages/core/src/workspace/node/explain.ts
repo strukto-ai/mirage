@@ -62,6 +62,8 @@ import {
   type Frame,
   bodyFrame,
   argvFrame,
+  definitionFrame,
+  gateFrame,
   lineFrame,
   occurrenceIn,
   rootFrame,
@@ -532,7 +534,7 @@ function* walkNode(
   reparse: (line: string) => TSNodeLike,
   lost = false,
 ): Walk {
-  if (node.type === NodeType.FUNCTION_DEFINITION) frame = rootFrame(node, frame.parent)
+  if (node.type === NodeType.FUNCTION_DEFINITION) frame = definitionFrame(node, frame)
   if (node.type === NodeType.COMMAND) {
     let walked: [SessionState, boolean] = [session, lost]
     const words = wordsOf(node, home)
@@ -1079,7 +1081,12 @@ export async function unrefusedNodes(
     // word no reader can spell (`lineNodes`), so it is never one literal
     // command and its frame goes unread; its gate reads it under the
     // word that invoked it.
-    const item = soleLiteralCommand(node, session, rootFrame(node, handed.origin), reparse)
+    const item = soleLiteralCommand(
+      node,
+      session,
+      gateFrame(node, nodes[0] ?? node, session, handed),
+      reparse,
+    )
     if (item === null) {
       out.push(node)
       continue

@@ -100,6 +100,7 @@ import { executeAssignment } from './assignment.ts'
 import { executeDeclaration } from './declaration.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { HandOff } from '../../policy/types.ts'
+import { definedAt } from './occurrence.ts'
 import type { SessionView } from '../../ops/types.ts'
 import {
   ensureVarVisible,
@@ -1568,11 +1569,13 @@ async function executeNodeBody(
         new ExecutionNode({ command: `function ${name}`, exitCode: 1, stderr: err }),
       ]
     }
-    session.functions[name] = getFunctionSource(node)
-    session.functionMarks.set(name, [
-      session.parseCurrent,
-      session.parseRow + (node.startPosition?.row ?? 0),
-    ])
+    const source = getFunctionSource(node)
+    session.functions[name] = source
+    session.functionSites.set(name, {
+      source,
+      mark: [session.parseCurrent, session.parseRow + (node.startPosition?.row ?? 0)],
+      origin: definedAt(node, deps.handed ?? null),
+    })
     return [null, new IOResult(), new ExecutionNode({ command: `function ${name}`, exitCode: 0 })]
   }
 

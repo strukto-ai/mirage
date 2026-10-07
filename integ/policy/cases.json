@@ -254,6 +254,20 @@
     {"op": "exec", "session": "agent", "command": "rm /x", "expect": {"value": {"exit_code": 126, "stderr": "rm: Permission denied\n", "refusal": "nod"}}},
     {"op": "asks", "session": "agent", "expect": {"value": [{"command": "rm", "paths": ["/x"], "reason": "nod"}]}}
    ]
+  },
+  {
+   "id": "two_definitions_of_one_function_text_each_need_a_nod",
+   "note": "A function body runs from its own parse, at offsets from its definition and under the definition's place on the line: two definitions of one text are two places, and one nod does not let both run.",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "agent", "profile": {"commands": {"ask": [{"reason": "secret needs sign-off", "paths": ["/data/secret"]}]}}},
+    {"op": "exec", "command": "echo s > /data/secret", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "f(){ cat /data/secret; }; f; f(){ cat /data/secret; }; f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cat: Permission denied\n", "refusal": "secret needs sign-off"}}},
+    {"op": "answer", "outcome": "allow", "scope": "once"},
+    {"op": "exec", "session": "agent", "command": "f(){ cat /data/secret; }; f; f(){ cat /data/secret; }; f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cat: Permission denied\n", "refusal": "secret needs sign-off"}}},
+    {"op": "answer", "outcome": "allow", "scope": "once"},
+    {"op": "exec", "session": "agent", "command": "f(){ cat /data/secret; }; f; f(){ cat /data/secret; }; f", "expect": {"value": {"exit_code": 0, "stdout": "s\ns\n", "stderr": "", "refusal": null}}}
+   ]
   }
  ]
 }

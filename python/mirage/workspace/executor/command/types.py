@@ -19,6 +19,7 @@ from mirage.commands.spec.argmatch import ArgmatchChoices
 from mirage.commands.spec.types import FlagValue
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.policy.types import HandOff
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.types import TSNodeLike
@@ -43,6 +44,7 @@ class ExecuteNodeFn(Protocol):
         call_stack: CallStack,
         *,
         sink: JobConsole | None = None,
+        handed: HandOff | None = None,
     ) -> Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]: ...
 
 

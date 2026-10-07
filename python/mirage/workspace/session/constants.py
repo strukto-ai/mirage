@@ -90,7 +90,7 @@ TRANSIENT_FIELDS: tuple[str, ...] = (
     "_parse_seq",
     "_parse_current",
     "_parse_row",
-    "_function_marks",
+    "_function_sites",
     "_line_open",
     "terminal",
     "_alias_marks",

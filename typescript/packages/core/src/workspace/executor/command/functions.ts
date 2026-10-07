@@ -92,12 +92,21 @@ export async function executeShellFunction(
   // it reads aliases at its definition, or as a parse of its own when it
   // came from a stored session.
   const outerParse: [number, number] = [session.parseCurrent, session.parseRow]
-  let defined = session.functionMarks.get(cmdName)
-  if (defined === undefined) {
+  let site = session.functionSites.get(cmdName)
+  if (site !== undefined && site.source !== source) site = undefined
+  if (site === undefined) {
     session.parseSeq += 1
-    defined = [session.parseSeq, 0]
+    ;[session.parseCurrent, session.parseRow] = [session.parseSeq, 0]
+  } else {
+    ;[session.parseCurrent, session.parseRow] = site.mark
   }
-  ;[session.parseCurrent, session.parseRow] = defined
+  // Its commands stand under the definition's place, on a hand-off of
+  // their own as every re-parse does, so two definitions of one text each
+  // need a nod and a second call runs on the first's.
+  const origin = site?.origin ?? null
+  const nested: HandOff | null =
+    handed !== null && origin !== null ? { claimed: [], parent: handed, origin } : null
+  const bodyHanded = nested ?? handed
 
   try {
     // The body is shell code: the builtins it runs are the shell's,
@@ -107,9 +116,14 @@ export async function executeShellFunction(
         try {
           const cmdNode = cmd
           const [rawStdout, io, execNode] = await runStatement(
-            sink === undefined
+            sink === undefined && nested === null
               ? executeNode
-              : (n, s, i, c, opts) => executeNode(n, s, i, c, { sink, ...opts }),
+              : (n, s, i, c, opts) =>
+                  executeNode(n, s, i, c, {
+                    ...(sink === undefined ? {} : { sink }),
+                    ...(nested === null ? {} : { handed: nested }),
+                    ...opts,
+                  }),
             cmdNode,
             context,
             bodyStdin,
@@ -117,7 +131,7 @@ export async function executeShellFunction(
             cs,
             jobTable,
             agentId,
-            handed,
+            bodyHanded,
             decisions,
           )
           // $? tracks each statement inside the body, so a bare `return`
@@ -151,6 +165,7 @@ export async function executeShellFunction(
     })
   } finally {
     ;[session.parseCurrent, session.parseRow] = outerParse
+    if (nested !== null && decisions !== null) decisions.handUp(session.sessionId, nested)
     scope.release()
     cs.pop()
     if (session.functionNames !== null) session.functionNames = outerNames

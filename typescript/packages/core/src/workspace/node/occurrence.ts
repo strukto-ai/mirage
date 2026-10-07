@@ -2,6 +2,8 @@ import type { Claimant, HandOff, Occurrence } from '../../policy/types.ts'
 import { splitBacktickRegion } from '../../shell/backticks.ts'
 import { shellJoin } from '../../shell/join.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
+import { getFunctionName } from '../../shell/helpers.ts'
+import type { SessionState } from '../session/session.ts'
 
 /**
  * What opens and closes a substitution's body, in the order the openers
@@ -54,9 +56,96 @@ export function rootOf(node: TSNodeLike): TSNodeLike {
 export function rootFrame(node: TSNodeLike, parent: Occurrence | null): Frame {
   let root = node
   while (root.parent != null && root.type !== 'function_definition') root = root.parent
-  if (root.type === 'function_definition' && root.parent?.type === 'redirected_statement')
-    root = root.parent
+  if (root.type === 'function_definition') root = definitionRoot(root)
   return { text: root.text, base: root.startIndex ?? 0, parent }
+}
+
+/** A function definition with the redirects stored with it. */
+function definitionRoot(node: TSNodeLike): TSNodeLike {
+  return node.parent?.type === 'redirected_statement' ? node.parent : node
+}
+
+/**
+ * The frame of a function body as a pass walks its definition. The body
+ * runs from its own parse of the stored source, so its commands stand at
+ * offsets from the definition, under the definition's own place on the
+ * line: two definitions of one text are two places, each needing a nod
+ * of its own. Mirrors Python's definition_frame.
+ */
+export function definitionFrame(node: TSNodeLike, frame: Frame): Frame {
+  const root = definitionRoot(node)
+  return { text: root.text, base: root.startIndex ?? 0, parent: occurrenceIn(root, frame) }
+}
+
+/**
+ * The place a function definition the executor runs stands on its line,
+ * which the body's commands stand under when it is called; null outside
+ * a line. Mirrors Python's defined_at.
+ */
+export function definedAt(node: TSNodeLike, handed: HandOff | null): Occurrence | null {
+  if (handed === null) return null
+  const root = definitionRoot(node)
+  if (root.parent == null) {
+    return occurrenceIn(root, {
+      text: root.text,
+      base: root.startIndex ?? 0,
+      parent: handed.origin,
+    })
+  }
+  return occurrenceIn(root, rootFrame(root.parent, handed.origin))
+}
+
+/** The nearest `function_definition` above a node, or null. */
+function enclosingDefinition(node: TSNodeLike): TSNodeLike | null {
+  let current = node.parent ?? null
+  while (current !== null && current.type !== 'function_definition')
+    current = current.parent ?? null
+  return current
+}
+
+/**
+ * The place a call runs a definition's body under, as the gate will find
+ * it: `definedAt` for one written on this line (under the definition
+ * holding it, for one written inside another), the stored site for a body
+ * parsed from the session's table, null for one whose site is gone.
+ */
+function definitionOrigin(
+  definition: TSNodeLike,
+  line: TSNodeLike,
+  session: SessionState,
+  handed: HandOff,
+): Occurrence | null {
+  const outer = enclosingDefinition(definition)
+  if (outer !== null && definition.parent != null) {
+    const frame = rootFrame(definition.parent, handed.origin)
+    const parent = definitionOrigin(outer, line, session, handed) ?? handed.origin
+    return occurrenceIn(definitionRoot(definition), { ...frame, parent })
+  }
+  // Nodes are fresh objects per read, so the trees are told apart by their
+  // roots' ids.
+  if (rootOf(definition).id === line.id) return definedAt(definition, handed)
+  const name = getFunctionName(definition)
+  const site = session.functionSites.get(name)
+  if (site === undefined || site.source !== session.functions[name]) return null
+  return site.origin
+}
+
+/**
+ * The frame a node's gate will read it in, for a pass that reads it ahead
+ * of the gate: its own tree's, and for a node in a function body under the
+ * place the call runs the body under. Mirrors Python's gate_frame.
+ */
+export function gateFrame(
+  node: TSNodeLike,
+  line: TSNodeLike,
+  session: SessionState,
+  handed: HandOff,
+): Frame {
+  const frame = rootFrame(node, handed.origin)
+  const definition = node.type === 'function_definition' ? node : enclosingDefinition(node)
+  if (definition === null) return frame
+  const origin = definitionOrigin(definition, line, session, handed)
+  return origin === null ? frame : { ...frame, parent: origin }
 }
 
 /**

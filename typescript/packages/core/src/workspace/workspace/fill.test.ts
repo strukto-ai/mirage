@@ -1141,6 +1141,30 @@ describe('fillEnv through execute', () => {
     }
   })
 
+  // Each definition is a place of its own, read by the fill's pass under
+  // the place its call runs it, so each asks once and the gate spends the
+  // nod the pass claimed rather than asking again.
+  it('two definitions of one text each ask before the fetch', async () => {
+    const { calls, fetch } = countingSource({ TOKEN: 't0' })
+    registerSecrets('fake-two-defs', FakeConfig, fetch)
+    const approve: AskHandler = (record: Decision) => {
+      calls.push('ask')
+      return Promise.resolve({ ...record, outcome: Outcome.ALLOW })
+    }
+    const ws = await makeWs(
+      { TOKEN: { from: 'fake-two-defs', ref: 'r' } },
+      [new AskNamed('printenv')],
+      approve,
+    )
+    try {
+      const io = await ws.shell('f() { printenv TOKEN; }; f; f() { printenv TOKEN; }; f')
+      expect(stdoutStr(io)).toBe('t0\nt0\n')
+      expect(calls).toEqual(['ask', 'ask', 'r'])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('an asked function body denied never fetches', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-body-ask-deny', FakeConfig, fetch)

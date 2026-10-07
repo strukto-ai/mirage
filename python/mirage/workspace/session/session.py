@@ -58,7 +58,10 @@ from mirage.types import (
 )
 from mirage.workspace.abort import StatusWriter
 from mirage.workspace.session.constants import INHERITED_FIELDS
-from mirage.workspace.session.functions import function_sources
+from mirage.workspace.session.functions import (
+    FunctionSite,
+    function_sources,
+)
 from mirage.workspace.session.serialize import (
     commands_from_dict,
     commands_to_dict,
@@ -457,10 +460,11 @@ class SessionState:
         default_factory=dict, repr=False
     )
     _alias_stack: list[str] = field(default_factory=list, repr=False)
-    # Where each function was defined, as an alias mark, so its body
-    # expands the aliases of that place; a function loaded from a
-    # stored session has none and runs as a parse of its own.
-    _function_marks: dict[str, tuple[int, int]] = field(
+    # Where each function was defined (``FunctionSite``), so its body
+    # expands the aliases of that place and its approvals stand under
+    # it; a function loaded from a stored session has none and runs as a
+    # parse of its own.
+    _function_sites: dict[str, FunctionSite] = field(
         default_factory=dict, repr=False
     )
 
@@ -827,7 +831,7 @@ class SessionState:
         child._parse_current = self._parse_current
         child._parse_row = self._parse_row
         child._alias_marks = dict(self._alias_marks)
-        child._function_marks = dict(self._function_marks)
+        child._function_sites = dict(self._function_sites)
         child._alias_stack = list(self._alias_stack)
         child._local_vars = (
             None if self._local_vars is None else copy_locals(self._local_vars)
