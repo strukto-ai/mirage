@@ -155,6 +155,57 @@
         "stdout": "{\"id\":1,\"title\":\"alpha\",\"author\":\"ada\",\"year\":2020,\"rating\":4.5}\n{\"id\":3,\"title\":\"gamma\",\"author\":\"cara\",\"year\":2022,\"rating\":5}\n{\"id\":4,\"title\":\"delta\",\"author\":\"ada\",\"year\":2023,\"rating\":4}\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "postgres_grep_keeps_a_hidden_table_out",
+      "seq": 610068,
+      "targets": [
+        "postgres"
+      ],
+      "command": "grep -r epsilon /pg/public/tables; echo grep=$?; grep -rF epsilon /pg/public/tables; echo grepF=$?; rg -F epsilon /pg/public/tables; echo rgF=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grep=1\ngrepF=1\nrgF=1\n",
+        "stderr": ""
+      },
+      "session": "postgres-hide",
+      "session_profiles": {
+        "postgres-hide": {
+          "paths": {
+            "hide": [
+              "/pg/public/tables/books"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "postgres_grep_refuses_a_denied_table",
+      "seq": 610069,
+      "targets": [
+        "postgres"
+      ],
+      "command": "grep -r epsilon /pg/public/tables 2>/dev/null; echo grep=$?; grep -rF epsilon /pg/public/tables 2>/dev/null; echo grepF=$?; rg -F epsilon /pg/public/tables 2>/dev/null; echo rgF=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grep=2\ngrepF=2\nrgF=2\n",
+        "stderr": ""
+      },
+      "session": "postgres-deny",
+      "session_profiles": {
+        "postgres-deny": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/pg/public/tables/books/*"
+                ]
+              }
+            ]
+          }
+        }
+      }
     }
   ]
 }

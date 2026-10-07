@@ -12,9 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
-
 from mirage.accessor.postgres import PostgresAccessor
+from mirage.commands.builtin.generic_bind.factory import scan_io
 from mirage.commands.builtin.generic_bind.search import run_search
 from mirage.commands.builtin.postgres.io import IO
 from mirage.commands.config import CommandOpts, command
@@ -22,12 +21,10 @@ from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
+
 # The push-down is a literal-substring search that prints each matching
 # row as a whole line; literal_pushdown_operand defers a real regex, a
 # multi-operand line and every shaping flag to the generic scan.
-_search = partial(run_search, IO, "grep")
-
-
 @command("grep", vfs="postgres", spec=SPECS["grep"])
 async def grep(
     accessor: PostgresAccessor,
@@ -35,4 +32,5 @@ async def grep(
     texts: list[str],
     opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
-    return await _search(accessor, paths, texts, opts)
+    scan, _ = scan_io(IO, opts.ns, opts.mount_prefix)
+    return await run_search(scan, "grep", accessor, paths, texts, opts)

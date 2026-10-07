@@ -52,9 +52,9 @@ SCOPES = (
 
 detect_scope = make_detect_scope(SCOPES)
 
-# Kinds the guild search push-down may answer for. A chat.jsonl operand
-# is deliberately absent: `search_guild` takes a channel but no date, so
-# serving a one-day file from a channel-wide search would report
+# Kinds the guild search push-down may answer for. A day, its chat.jsonl
+# and its files are deliberately absent: `search_guild` takes a channel
+# but no date, so serving one day from a channel-wide search would report
 # messages the line did not ask for. Same doctrine for `file_blob` and
 # `member`, whose bytes the message search does not carry.
-NATIVE_KINDS = frozenset({"guild", "channels_dir", "channel", "day", "files"})
+NATIVE_KINDS = frozenset({"guild", "channels_dir", "channel"})

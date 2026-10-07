@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { prefixAggregate } from '@struktoai/mirage-core/commands/builtin/aggregators'
 import { grepGeneric } from '@struktoai/mirage-core/commands/builtin/generic/grep'
-import { resolveGlobOf } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import { resolveGlobOf, scanIo } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import {
   compilePattern,
   matcherSyntax,
@@ -38,14 +37,9 @@ import { VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { EmailAccessor } from '../../../accessor/email.ts'
-import { read as emailRead } from '../../../core/email/read.ts'
-import { readdir as emailReaddir } from '../../../core/email/readdir.ts'
-import { stat as emailStat } from '../../../core/email/stat.ts'
 import { detectScope, NATIVE_KINDS } from '../../../core/email/scope.ts'
 import { searchAndFormat } from '../../../core/email/search.ts'
 import { IO } from './io.ts'
-
-const resolveGlob = resolveGlobOf(IO)
 
 // The email push-down is not a "print the provider's answer" push-down: IMAP
 // search only picks the candidate messages, and `grepLines` then runs the
@@ -77,14 +71,6 @@ export function messageLines(text: string): string[] {
   return stripped === '' ? [] : stripped.split('\n')
 }
 
-async function* emailStream(
-  accessor: EmailAccessor,
-  p: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  yield await emailRead(accessor, p, index)
-}
-
 async function grep(
   accessor: EmailAccessor,
   paths: PathSpec[],
@@ -98,7 +84,8 @@ async function grep(
   // waits for it too; every other reason to defer is the shared gate's. A
   // scope that names no folder falls through to the generic scan rather than
   // answering, which is what the mount root does.
-  const operand = pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
+  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
+  const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
   // IMAP TEXT is a case-insensitive substring search, not a regex engine,
   // so the server is asked for the literal every match must contain and
   // the real pattern runs over each candidate. A pattern with no such
@@ -168,12 +155,12 @@ async function grep(
   }
 
   const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  const stat = (p: PathSpec): Promise<FileStat> => emailStat(accessor, p, opts.index ?? undefined)
+    paths.length > 0 ? await resolveGlobOf(scan)(accessor, paths, opts.index ?? undefined) : []
+  const stat = (p: PathSpec): Promise<FileStat> => scan.stat(accessor, p, opts.index ?? undefined)
   const readdir = (p: PathSpec): Promise<string[]> =>
-    emailReaddir(accessor, p, opts.index ?? undefined)
+    scan.readdir(accessor, p, opts.index ?? undefined)
   return grepGeneric('grep', resolved, texts, opts, stat, readdir, (p) =>
-    emailStream(accessor, p, opts.index ?? undefined),
+    scan.readStream(accessor, p, opts.index ?? undefined),
   )
 }
 

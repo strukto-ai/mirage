@@ -17,6 +17,7 @@ import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import { VFSName } from '../../../types.ts'
 import { command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { scanIo } from '../generic_bind/index.ts'
 import { runSearch } from '../generic_bind/search.ts'
 
 import { IO } from './io.ts'
@@ -30,5 +31,12 @@ export const MONGODB_GREP = command({
   vfs: VFSName.MONGODB,
   spec: specOf('grep'),
   fn: (accessor: MongoDBAccessor, paths, texts, opts) =>
-    runSearch<MongoDBAccessor>(IO, 'grep', accessor, paths, texts, opts),
+    runSearch<MongoDBAccessor>(
+      scanIo(IO, opts.ns, opts.mountPrefix)[0],
+      'grep',
+      accessor,
+      paths,
+      texts,
+      opts,
+    ),
 })

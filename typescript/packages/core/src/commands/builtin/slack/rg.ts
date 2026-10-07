@@ -14,12 +14,8 @@
 
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { SlackAccessor } from '../../../accessor/slack.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
+import { resolveGlobOf, scanIo } from '../generic_bind/index.ts'
 import { IO } from './io.ts'
-import { read as slackRead } from '../../../core/slack/read.ts'
-import { readdir as slackReaddir } from '../../../core/slack/readdir.ts'
-import { stat as slackStat } from '../../../core/slack/stat.ts'
 import {
   buildQuery,
   formatFileGrepResults,
@@ -37,17 +33,7 @@ import { parseFlags, refuseMissingPattern, rgGeneric } from '../generic/rg.ts'
 import { RG_SEARCH_HONORED, SEARCH_MAX_RESULTS } from './grep.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 
-const resolveSlackGlob = resolveGlobOf(IO)
-
 const ENC = new TextEncoder()
-
-async function* slackStream(
-  accessor: SlackAccessor,
-  p: PathSpec,
-  index: IndexCacheStore | undefined,
-): AsyncIterable<Uint8Array> {
-  yield await slackRead(accessor, p, index)
-}
 
 async function rg(
   accessor: SlackAccessor,
@@ -63,7 +49,8 @@ async function rg(
   const pushdownWarnings: string[] = []
   // Same gate as slack grep, from the same table: only a lone concrete
   // operand with no reshaping flag may be answered by the search API.
-  const operand = pushdownOperand(paths, opts.flags, pattern, RG_SEARCH_HONORED)
+  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
+  const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, RG_SEARCH_HONORED)
   if (operand !== null && pattern !== null && fl.asBool('word_regexp')) {
     const match = detectScope(operand)
     if (
@@ -102,12 +89,12 @@ async function rg(
   }
 
   const resolved =
-    paths.length > 0 ? await resolveSlackGlob(accessor, paths, opts.index ?? undefined) : []
-  const stat = (p: PathSpec): Promise<FileStat> => slackStat(accessor, p, opts.index ?? undefined)
+    paths.length > 0 ? await resolveGlobOf(scan)(accessor, paths, opts.index ?? undefined) : []
+  const stat = (p: PathSpec): Promise<FileStat> => scan.stat(accessor, p, opts.index ?? undefined)
   const readdir = (p: PathSpec): Promise<string[]> =>
-    slackReaddir(accessor, p, opts.index ?? undefined)
+    scan.readdir(accessor, p, opts.index ?? undefined)
   const result = await rgGeneric(resolved, texts, opts, stat, readdir, (p) =>
-    slackStream(accessor, p, opts.index ?? undefined),
+    scan.readStream(accessor, p, opts.index ?? undefined),
   )
   if (result !== null && pushdownWarnings.length > 0) {
     result[1].stderr = ENC.encode(pushdownWarnings.join('\n') + '\n')

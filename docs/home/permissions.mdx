@@ -96,12 +96,14 @@ The reason is only on the result's `refusal` record. Text surfaces append
 
 A rule also covers what a command reaches on its own: every entry of a
 walk (`grep -r`, `tar`, `cp -r`, `find -delete`), files a command opens
-(`awk print >`, `sed w`) and cached bytes. Only rules with paths and no
-command reach the VFS-only doors (FUSE, `ws.vfs`, SFTP).
+(`awk print >`, `sed w`) and cached bytes. A `grep` or `rg` that a
+backend answers with its own search (Slack, Gmail, Postgres, GitHub, ...)
+walks instead when a hide or a rule covers anything it would search. Only
+rules with paths and no command reach the VFS-only doors (FUSE, `ws.vfs`,
+SFTP).
 
 Not covered yet: file access inside a CLI or interpreter (`git`,
-`python3`) and in `getfattr`, `setfattr`, `ln`, `readlink`; backends that
-search on their own side (`grep -r` on a GitHub mount).
+`python3`) and in `getfattr`, `setfattr`, `ln`, `readlink`.
 
 ### `paths` and `vars`
 

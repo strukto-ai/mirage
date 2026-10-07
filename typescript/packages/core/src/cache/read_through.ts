@@ -13,9 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../accessor/base.ts'
-import { PathSpec, type ReadBytesFn, type ReadStreamFn } from '../types.ts'
+import { type EntryGate, PathSpec, type ReadBytesFn, type ReadStreamFn } from '../types.ts'
 import type { IndexCacheStore } from './index/store.ts'
 import { type CacheInvalidator, activeCacheManager } from './context.ts'
+import { getAdmission } from '../context/session_context.ts'
 
 type OpStream<A extends Accessor> = ReadStreamFn<
   [accessor: A, path: PathSpec, index?: IndexCacheStore]
@@ -74,12 +75,30 @@ export function cacheAwareReadBytes<A extends Accessor>(raw: OpBytes<A>): OpByte
 }
 
 /**
+ * The manager a generic's own read may serve a warm copy from: none where
+ * anything could refuse the path for the running command (a rule in force,
+ * or a coded or scripted preVfs policy, which only the guarded reader
+ * asks). That reader answers instead, and the factory's cache beneath its
+ * guards serves the copy once the path is admitted.
+ */
+function serving(
+  manager: CacheInvalidator | null,
+  gate: EntryGate | null,
+  path: PathSpec,
+): CacheInvalidator | null {
+  return gate !== null && path instanceof PathSpec && gate.scopes(path.virtual) ? null : manager
+}
+
+/**
  * Wrap a path-keyed stream reader (the shape generics receive) for warm
  * read-through, reading the manager when the reader is called. Used by
  * grep/rg, whose consumers invoke the reader inside the command scope.
+ * The reader may be guarded, so a path the running command could be
+ * refused is left to it (`serving`).
  */
 export function cacheAwareStream(raw: PathStream): PathStream {
-  return (path) => serveStream(activeCacheManager(), path, () => raw(path))
+  return (path) =>
+    serveStream(serving(activeCacheManager(), getAdmission(), path), path, () => raw(path))
 }
 
 /**
@@ -88,11 +107,14 @@ export function cacheAwareStream(raw: PathStream): PathStream {
  * head/tail/wc, whose multi-file consumers drain lazily after the mount's
  * cache scope is gone, so reading the manager at drain time would always
  * miss. Apply inside the command's scope (the consumers do) so the
- * captured manager travels with the stream.
+ * captured manager travels with the stream. The admission gate is
+ * captured with it, and a path the running command could be refused is
+ * left to the reader, which may be guarded (`serving`).
  */
 export function cacheAwareStreamEager(raw: PathStream): PathStream {
   const manager = activeCacheManager()
-  return (path) => serveStream(manager, path, () => raw(path))
+  const gate = getAdmission()
+  return (path) => serveStream(serving(manager, gate, path), path, () => raw(path))
 }
 
 /**

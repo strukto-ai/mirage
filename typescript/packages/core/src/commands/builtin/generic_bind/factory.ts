@@ -20,7 +20,7 @@ import { cacheAwareReadBytes, cacheAwareReadStream } from '../../../cache/read_t
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
-import type { ChildMounts, LinkView } from '../../../ops/types.ts'
+import type { ChildMounts, LinkView, NamespaceView } from '../../../ops/types.ts'
 import { type CommandFn, type RegisteredCommand, command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import {
@@ -34,6 +34,7 @@ import {
 import { type StatOp } from '../../../vfs/types.ts'
 import { BUILDERS } from './builders/index.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
 
 function cachedStat<A extends Accessor>(stat: StatOp<A>): StatOp<A> {
   return async (accessor: A, path: PathSpec, index?: IndexCacheStore) => {
@@ -119,6 +120,28 @@ export function withReadCache<A extends Accessor>(ops: CommandIO<A>): CommandIO<
       : cacheAwareReadStream(ops.readStream),
     readBytes,
   }
+}
+
+/**
+ * The adapter a bespoke search command scans through, and whether a hide,
+ * a path rule or a coded preVfs policy judges anything on its mount. The
+ * mount, not the operands: a service's own search answers for more than
+ * the operand it is given (a whole folder for one of its days, every
+ * channel under a container). A judged command must not hand the
+ * service's search the answer, since the service sees every entry, and
+ * its scan reads the operands through the guards the generic builders
+ * bind, over the read cache as theirs is, so a warm copy is served only
+ * once the path is admitted; an unjudged one scans the raw adapter.
+ * Mirrors Python's scan_io.
+ */
+export function scanIo<A extends Accessor>(
+  ops: CommandIO<A>,
+  ns: NamespaceView | undefined,
+  prefix: string | undefined,
+): [CommandIO<A>, boolean] {
+  const scoped = ns?.scoped
+  if (!scoped?.(rstripSlash(prefix ?? '') || '/')) return [ops, false]
+  return [withCommandGuards(withPolicyGuard(withReadCache(ops), prefix), prefix), true]
 }
 
 // The builder tier's cache and slash wraps, chosen at registration from

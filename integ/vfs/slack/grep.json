@@ -103,6 +103,93 @@
         "stdout": "/slack/channels/product-runtime__C7/2026-01-15/files/runtime_spec__F6.md:# Kestrel Runtime Spec (Quokka)\nrc=0\n/slack/channels/product-runtime__C7/2026-01-15/files/runtime_spec__F6.md:# Kestrel Runtime Spec (Quokka)\nrc=0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "slack_grep_keeps_a_hidden_channel_out",
+      "seq": 520032,
+      "targets": [
+        "slack"
+      ],
+      "command": "grep -r runway /slack/channels; echo grep=$?; grep -rw runway /slack/channels; echo grepw=$?; rg -w runway /slack/channels; echo rgw=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grep=1\ngrepw=1\nrgw=1\n",
+        "stderr": ""
+      },
+      "session": "slack-hide",
+      "session_profiles": {
+        "slack-hide": {
+          "paths": {
+            "hide": [
+              "/slack/channels/leadership__C5"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "slack_grep_refuses_a_denied_channel",
+      "seq": 520033,
+      "targets": [
+        "slack"
+      ],
+      "command": "grep -rw runway /slack/channels/leadership__C5/ 2>/dev/null; echo grepw=$?; grep -r runway /slack/channels/leadership__C5/ 2>/dev/null; echo grep=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grepw=2\ngrep=2\n",
+        "stderr": ""
+      },
+      "session": "slack-deny",
+      "session_profiles": {
+        "slack-deny": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/slack/channels/leadership__C5/*"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "slack_search_on_a_day_reports_that_day_only",
+      "seq": 520034,
+      "targets": [
+        "slack"
+      ],
+      "command": "grep -rw canary /slack/channels/engineering__C3/2025-11-06 | cut -d: -f1 | uniq",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/engineering__C3/2025-11-06/chat.jsonl\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_search_keeps_a_hidden_dm_out_of_the_channels",
+      "seq": 520035,
+      "targets": [
+        "slack"
+      ],
+      "command": "grep -rw commit /slack/channels; echo grepw=$?; rg -w commit /slack/channels; echo rgw=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grepw=1\nrgw=1\n",
+        "stderr": ""
+      },
+      "session": "slack-hide-dm",
+      "session_profiles": {
+        "slack-hide-dm": {
+          "paths": {
+            "hide": [
+              "/slack/dms/marcus__D1"
+            ]
+          }
+        }
+      }
     }
   ]
 }

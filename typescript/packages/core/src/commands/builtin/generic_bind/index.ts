@@ -21,4 +21,4 @@ export {
   resolveGlobOf,
 } from './adapter.ts'
 export { type DuOps, type ResolveGlobOp } from '../../../vfs/types.ts'
-export { type MakeGenericCommandsOptions, makeGenericCommands } from './factory.ts'
+export { type MakeGenericCommandsOptions, makeGenericCommands, scanIo } from './factory.ts'

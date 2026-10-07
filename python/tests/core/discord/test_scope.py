@@ -108,9 +108,10 @@ def test_dot_segment_is_invalid():
 
 
 def test_native_kinds_exclude_the_rendered_leaves():
-    # chat.jsonl, member profiles and stored blobs are not answerable by
-    # the guild message search; the containers above them are.
-    assert "messages" not in NATIVE_KINDS
-    assert "member" not in NATIVE_KINDS
-    assert "file_blob" not in NATIVE_KINDS
-    assert {"guild", "channel", "day", "files"} <= NATIVE_KINDS
+    # A day and what it holds, member profiles and stored blobs are not
+    # answerable by the guild message search, which takes no date; the
+    # containers above them are.
+    assert {"day", "messages", "files", "member", "file_blob"}.isdisjoint(
+        NATIVE_KINDS
+    )
+    assert {"guild", "channels_dir", "channel"} <= NATIVE_KINDS

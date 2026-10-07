@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.commands.builtin.slack.grep import grep as slack_grep
+from mirage.commands.builtin.slack.io import IO as SLACK_IO
 from mirage.types import ContentType, FileStat, FileType
 from mirage.vfs.slack import SlackConfig, SlackVFS
 
@@ -49,13 +52,13 @@ async def test_slack_grep_glob_expanded_to_60_paths_reads_those_60_days():
         )
     )
     try:
-        with (
-            patch(
-                "mirage.commands.builtin.slack.grep.search_messages",
-                new=AsyncMock(),
-            ) as fake_search,
-            patch("mirage.commands.builtin.slack.grep.slack_read", new=read),
-            patch("mirage.commands.builtin.slack.grep._stat", new=stat),
+        fake_search = AsyncMock()
+        with patch.dict(
+            slack_grep.__wrapped__.__globals__,
+            {
+                "search_messages": fake_search,
+                "IO": replace(SLACK_IO, read_bytes=read, stat=stat),
+            },
         ):
             result = await ws.shell(f"grep -iw hello {expanded}")
         fake_search.assert_not_awaited()

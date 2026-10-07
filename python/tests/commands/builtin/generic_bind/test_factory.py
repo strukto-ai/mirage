@@ -26,6 +26,7 @@ from mirage.commands.builtin.generic_bind.builders import BUILDERS
 from mirage.commands.builtin.generic_bind.factory import (
     _run_with_namespace_globs,
     make_generic_commands,
+    scan_io,
     with_probe_answers,
     with_read_cache,
     with_slash_guard,
@@ -142,6 +143,38 @@ async def test_cold_read_falls_through_to_backend():
         push_cache_manager(prev)
     assert out == b"payload"
     assert backend.stream_calls == 1
+
+
+def test_scan_io_guards_only_a_judged_mount():
+    # A bespoke search scans the raw adapter when nothing on its mount is
+    # hidden or refused, and the guarded one when anything is, since the
+    # service's own search can answer for more than the operand.
+    io = _ops(_CountingBackend(b"payload"))
+    free = NamespaceView(scoped=lambda _virtual: False)
+    judged = NamespaceView(scoped=lambda virtual: virtual == "/s3")
+    for ns in (free, None):
+        scan, scoped = scan_io(io, ns, "/s3/")
+        assert scan is io and not scoped
+    scan, scoped = scan_io(io, judged, "/s3/")
+    assert scan is not io and scoped
+
+
+@pytest.mark.asyncio
+async def test_a_judged_scan_serves_warm_bytes_below_its_guards():
+    # The generics' own cache steps aside for a judged path, so the
+    # guarded scan reads the cache itself once its guards admit the path.
+    backend = _CountingBackend(b"payload")
+    cache = RAMFileCacheStore()
+    await cache.set("/s3/a.txt", b"payload")
+    manager = CacheManager(cache, None, "/s3/", True)
+    judged = NamespaceView(scoped=lambda _virtual: True)
+    prev = push_cache_manager(manager)
+    try:
+        scan, _ = scan_io(_ops(backend), judged, "/s3/")
+        out = await scan.read_bytes(None, _spec())
+    finally:
+        push_cache_manager(prev)
+    assert (out, backend.bytes_calls) == (b"payload", 0)
 
 
 @pytest.mark.asyncio

@@ -93,12 +93,13 @@ describe('detectScope', () => {
 
 describe('NATIVE_KINDS', () => {
   it('excludes the rendered leaves', () => {
-    // chat.jsonl, member profiles and stored blobs are not answerable by
-    // the guild message search; the containers above them are.
-    expect(NATIVE_KINDS.has('messages')).toBe(false)
-    expect(NATIVE_KINDS.has('member')).toBe(false)
-    expect(NATIVE_KINDS.has('file_blob')).toBe(false)
-    for (const kind of ['guild', 'channel', 'day', 'files']) {
+    // A day and what it holds, member profiles and stored blobs are not
+    // answerable by the guild message search, which takes no date; the
+    // containers above them are.
+    for (const kind of ['day', 'messages', 'files', 'member', 'file_blob']) {
+      expect(NATIVE_KINDS.has(kind)).toBe(false)
+    }
+    for (const kind of ['guild', 'channels_dir', 'channel']) {
       expect(NATIVE_KINDS.has(kind)).toBe(true)
     }
   })
