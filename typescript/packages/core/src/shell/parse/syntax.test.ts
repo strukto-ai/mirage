@@ -23,12 +23,7 @@ import {
   findUnterminatedBacktick,
   type ShellParser,
 } from './index.ts'
-import {
-  endsInsideArray,
-  endsInsideConstruct,
-  findSyntaxIssue,
-  syntaxErrorResult,
-} from './syntax.ts'
+import { endsInsideConstruct, failsInArray, findSyntaxIssue, syntaxErrorResult } from './syntax.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -48,6 +43,7 @@ describe('endsInsideConstruct', () => {
     ['( ( echo a', true],
     ['echo a |', true],
     ['if true; then echo a; else', true],
+    ['case x in a) echo', true],
     ['if then', false],
     ['if ;', false],
     ['if }', false],
@@ -55,6 +51,15 @@ describe('endsInsideConstruct', () => {
     ['( then', false],
     ['if true; then else', false],
     ['for i in 1; do ;', false],
+    [') ; if true; then', false],
+    ['; if true; then', false],
+    ['while ) ; do', false],
+    ['echo a ) ; if true; then', false],
+    ['echo a | ; if true; then', false],
+    ['f() ; if true; then', false],
+    ['echo a\n; while true; do', false],
+    ['case x in a', false],
+    ['case x in a) echo;; b', false],
   ])('%s: %s', (line, unfinished) => {
     expect(endsInsideConstruct(parser.parse(line))).toBe(unfinished)
   })
@@ -76,6 +81,9 @@ describe('the first error read', () => {
     ['fi; echo "abc', "mirage: syntax error near 'fi'\n", 2],
     ['if then; x=(1 2', "mirage: syntax error near 'then'\n", 2],
     ['if true; then x+=(1 2', "mirage: unexpected EOF while looking for matching `)'\n", 1],
+    ['x=(1 2; fi', "mirage: syntax error near ';'\n", 1],
+    ['x=(1 2 | cat', "mirage: syntax error near '|'\n", 1],
+    ['x=(1 2 >f', "mirage: syntax error near '>'\n", 1],
   ])('%s is the one reported', async (line, message, status) => {
     const root = parser.parse(line)
     const issue = findSyntaxIssue(root)
@@ -96,19 +104,21 @@ describe('the first error read', () => {
   })
 })
 
-describe('endsInsideArray', () => {
+describe('failsInArray', () => {
   it.each([
     ['x=(1 2', true],
     ['x=(1 $(echo', true],
     ['x=(1 "a', true],
     ['if true; then x=(1 2', true],
     ['x=(1 2) ; y=(', true],
+    ['x=(1 2; fi', true],
     ['echo $(x=(1 2)', false],
+    ['x=(1 (2', false],
     ['echo $(echo', false],
     ['x=(1 2)', false],
   ])('%s: %s', (line, inside) => {
     const root = parser.parse(line)
-    expect(endsInsideArray(root)).toBe(inside)
+    expect(failsInArray(root)).toBe(inside)
     if (inside) expect(syntaxErrorResult(line, root).exitCode).toBe(1)
   })
 })

@@ -26,8 +26,8 @@ from mirage.shell.parse import (
     source_offsets,
 )
 from mirage.shell.parse.syntax import (
-    ends_inside_array,
     ends_inside_construct,
+    fails_in_array,
     find_syntax_issue,
     syntax_error_result,
 )
@@ -49,6 +49,7 @@ def test_partial_quoted_heredoc_end_is_not_syntax_error():
         ("( ( echo a", True),
         ("echo a |", True),
         ("if true; then echo a; else", True),
+        ("case x in a) echo", True),
         ("if then", False),
         ("if ;", False),
         ("if }", False),
@@ -56,6 +57,15 @@ def test_partial_quoted_heredoc_end_is_not_syntax_error():
         ("( then", False),
         ("if true; then else", False),
         ("for i in 1; do ;", False),
+        (") ; if true; then", False),
+        ("; if true; then", False),
+        ("while ) ; do", False),
+        ("echo a ) ; if true; then", False),
+        ("echo a | ; if true; then", False),
+        ("f() ; if true; then", False),
+        ("echo a\n; while true; do", False),
+        ("case x in a", False),
+        ("case x in a) echo;; b", False),
     ],
 )
 def test_only_input_bash_took_whole_ends_inside_a_construct(line, unfinished):
@@ -85,6 +95,9 @@ def test_an_alias_spelling_a_closer_is_a_command_at_the_end():
             "mirage: unexpected EOF while looking for matching `)'\n",
             1,
         ),
+        ("x=(1 2; fi", "mirage: syntax error near ';'\n", 1),
+        ("x=(1 2 | cat", "mirage: syntax error near '|'\n", 1),
+        ("x=(1 2 >f", "mirage: syntax error near '>'\n", 1),
     ],
 )
 def test_the_first_error_read_is_the_one_reported(line, message, status):
@@ -103,14 +116,16 @@ def test_the_first_error_read_is_the_one_reported(line, message, status):
         ('x=(1 "a', True),
         ("if true; then x=(1 2", True),
         ("x=(1 2) ; y=(", True),
+        ("x=(1 2; fi", True),
         ("echo $(x=(1 2)", False),
+        ("x=(1 (2", False),
         ("echo $(echo", False),
         ("x=(1 2)", False),
     ],
 )
 def test_an_unfinished_array_is_the_outermost_construct(line, inside):
     root = parse(line)
-    assert ends_inside_array(root) is inside
+    assert fails_in_array(root) is inside
     if inside:
         assert syntax_error_result(line, root).exit_code == 1
 

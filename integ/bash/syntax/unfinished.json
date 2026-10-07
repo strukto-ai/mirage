@@ -907,6 +907,294 @@
         "stdout": "rc=1\n",
         "stderr": "mirage: unexpected EOF while looking for matching `)'\n"
       }
+    },
+    {
+      "id": "syntax_operator_cuts_an_array",
+      "seq": 1338246,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; x=(1 2; fi",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mirage: syntax error near ';'\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_pipe_cuts_an_array",
+      "seq": 1338247,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; x=(1 2 | cat",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mirage: syntax error near '|'\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_redirect_cuts_an_array",
+      "seq": 1338248,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; x=(1 2 >f",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mirage: syntax error near '>'\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_operator_cuts_an_array_in_eval",
+      "seq": 1338249,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "( eval 'x=(1 2; echo b'; echo after ); echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "mirage: syntax error near ';'\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_unexpected_paren_where_a_command_starts",
+      "seq": 1338250,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; while ) ; do",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error near 'echo ran; while ) ; do'\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_unexpected_paren_before_an_array",
+      "seq": 1338251,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; ) ; x=(1 2",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error near ') ;'\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_unfinished_case_pattern_is_unexpected",
+      "seq": 1338252,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; case x in a) echo;; b",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error near 'echo ran; case x in a) echo;; b'\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_unfinished_case_item",
+      "seq": 1338253,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; case x in a) echo",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error: unexpected end of file\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_alias_name_is_reserved_in_its_own_text",
+      "seq": 1338254,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "( shopt -s expand_aliases; alias fi='{ fi'; eval 'fi'; echo \"rc=$?\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\n",
+        "stderr": "mirage: syntax error near '{ fi'\n"
+      },
+      "flags": []
     }
   ]
 }

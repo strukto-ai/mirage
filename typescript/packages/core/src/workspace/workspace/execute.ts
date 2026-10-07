@@ -46,7 +46,7 @@ import {
   findUnterminatedBacktick,
   type ShellParser,
 } from '../../shell/parse/index.ts'
-import { endsInsideArray, findSyntaxIssue } from '../../shell/parse/syntax.ts'
+import { failsInArray, findSyntaxIssue } from '../../shell/parse/syntax.ts'
 import { DiscardSignal } from '../../shell/errors.ts'
 import { formatFsError } from '../../errors/render.ts'
 import { isFsError } from '../../errors/fs.ts'
@@ -443,7 +443,7 @@ async function runPreparedLine(
             const io = syntaxErrorResult(offending, root, aliases, new Map(), undefined, issueEnd)
             // bash discards the line that evaluated it (`eval`, `source`)
             // with status 1, as its own error would.
-            if (options.callStack !== undefined && endsInsideArray(root, issueEnd))
+            if (options.callStack !== undefined && failsInArray(root, issueEnd))
               throw new DiscardSignal(await materialize(io.stderr))
             return await answerLine(
               env,

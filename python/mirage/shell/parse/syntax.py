@@ -471,32 +471,40 @@ def find_unterminated_quote(node: TSNodeLike) -> str | None:
         str | None: the character bash reports it was looking for.
     """
     found = _unfinished(node)
-    return None if found is None else found[0]
+    return None if found is None or found[3] else found[0]
 
 
-def _unfinished(node: TSNodeLike) -> tuple[str, str, int] | None:
+def _unfinished(node: TSNodeLike) -> tuple[str, str, int, bool] | None:
     """What the input ended inside, as ``find_unterminated_quote`` reads
     it: the character bash names for the innermost construct left open,
-    and the kind and start of the outermost one, which an unexpected
-    token before it is reported ahead of.
+    the kind and start of the outermost one, which an unexpected token
+    before it is reported ahead of, and whether an operator cut that
+    construct short instead, the first item then being that operator: an
+    array assignment's ``(`` takes only words up to its ``)``
+    (``_array_cut``).
 
     Args:
         node (TSNodeLike): the parsed command being refused.
     """
+    end = node.start_byte + len((node.text or b"").rstrip())
     stack: list[tuple[TSNodeLike, bool, int | None]] = [(node, False, None)]
     while stack:
         current, visited, quoted = stack.pop()
         if visited:
             # Diagnose an ERROR span only after its children, as before.
             if not current.children and (current.text or b"").startswith(b"'"):
-                return "'", "'", current.start_byte
+                return "'", "'", current.start_byte, False
             pending = _unclosed(current.children)
             if pending:
-                return pending[-1][1], pending[0][2], pending[0][3]
+                return pending[-1][1], pending[0][2], pending[0][3], False
             continue
         if current.is_missing and current.type in QUOTE_TOKENS:
             opened = current.parent if current.parent is not None else current
-            return current.type, current.type, opened.start_byte
+            return current.type, current.type, opened.start_byte, False
+        if current.type == NT.ARRAY:
+            cut = _array_cut(current, node, end)
+            if cut is not None:
+                return cut, NT.ARRAY, current.start_byte, True
         closer = CONSTRUCT_CLOSERS.get(current.type)
         if closer is not None and any(
             child.is_missing and child.type in CLOSING_TOKENS
@@ -505,13 +513,13 @@ def _unfinished(node: TSNodeLike) -> tuple[str, str, int] | None:
             # Inside a double-quoted string, bash reads the string's own
             # closing quote into the construct, where it opens another.
             if quoted is not None:
-                return '"', NT.STRING, quoted
-            return closer, current.type, current.start_byte
+                return '"', NT.STRING, quoted, False
+            return closer, current.type, current.start_byte, False
         if current.type == "ansi_c_string":
             source = decode_text(current.text or b"")
             before = source[:-1]
             if (len(before) - len(before.rstrip("\\"))) % 2:
-                return "'", current.type, current.start_byte
+                return "'", current.type, current.start_byte, False
             continue
         if current.type == "ERROR":
             stack.append((current, True, quoted))
@@ -537,7 +545,8 @@ def _unclosed(
     it (``"$("`` waits for a quote), a lone ``)`` inside ``$((`` groups
     rather than closes, and a ``(`` right after an assignment's ``=``
     opens an array. Any other closer that does not match the innermost
-    opener is an unexpected token rather than the end of input: None.
+    opener is an unexpected token rather than the end of input, as is a
+    ``(`` inside an array: None.
 
     Args:
         children (Sequence[TSNodeLike]): the ERROR node's children, in order.
@@ -560,6 +569,8 @@ def _unclosed(
             and previous.type in ASSIGNMENT_OPERATORS
         ):
             pending.append((")", ")", NT.ARRAY, start))
+        elif kind == "(" and pending and pending[-1][2] == NT.ARRAY:
+            return None
         elif kind in CLOSING_TOKENS and pending:
             if not (kind == ")" and pending[-1][0] == "))"):
                 if kind != pending[-1][0]:
@@ -569,12 +580,60 @@ def _unclosed(
     return pending
 
 
-def ends_inside_array(node: TSNodeLike, issue_end: int | None = None) -> bool:
-    """Whether the input's first error is ending inside an array
-    assignment's ``(``, the outermost construct it leaves open: bash's
-    ``parse_compound_assignment`` refuses that line with status 1 and
-    discards it, where the input ending inside any other construct is a
-    syntax error with status 2.
+def _array_cut(array: TSNodeLike, root: TSNodeLike, end: int) -> str | None:
+    """The operator that cut an array assignment's ``(`` short: bash reads
+    only words up to its ``)`` and reports the first other token, one the
+    grammar refused inside the array (``>``), or the one after the ``)``
+    it marks missing before the input ends (``;``).
+
+    Args:
+        array (TSNodeLike): the array.
+        root (TSNodeLike): the parsed line.
+        end (int): where the line's text ends.
+    """
+    stack = list(reversed(array.children))
+    while stack:
+        current = stack.pop()
+        if current.type == "ERROR":
+            return _token_after(current, current.start_byte)
+        if current.type not in CONSTRUCT_CLOSERS and current.type != NT.STRING:
+            stack.extend(reversed(current.children))
+    closer = array.children[-1] if array.children else None
+    if closer is None or not closer.is_missing or closer.start_byte >= end:
+        return None
+    return _token_after(root, closer.start_byte)
+
+
+def _token_after(node: TSNodeLike, at: int) -> str | None:
+    """The first token of a parse from a byte on, comments aside: what
+    bash reads next there.
+
+    Args:
+        node (TSNodeLike): the parse.
+        at (int): the byte.
+    """
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if (
+            current.end_byte <= at
+            or current.is_missing
+            or current.type == "comment"
+        ):
+            continue
+        if current.children:
+            stack.extend(reversed(current.children))
+        elif current.start_byte >= at:
+            return decode_text(current.text or b"")
+    return None
+
+
+def fails_in_array(node: TSNodeLike, issue_end: int | None = None) -> bool:
+    """Whether the first error bash reads is inside an array assignment's
+    ``(``, the outermost construct the input leaves open or one an
+    operator cuts short: bash's ``parse_compound_assignment`` refuses that
+    line with status 1 and discards it, where any other syntax error has
+    status 2.
 
     Args:
         node (TSNodeLike): the parsed line.
@@ -594,6 +653,7 @@ def ends_inside_construct(
     aliases: frozenset[str] = frozenset(),
     own: Mapping[str, tuple[int, int]] | None = None,
     offsets: Sequence[int] | None = None,
+    issue_end: int | None = None,
 ) -> bool:
     """Whether the input ends inside a compound command or after an operator.
 
@@ -602,7 +662,8 @@ def ends_inside_construct(
     missing at the end (``(echo a``, ``echo a |``), or an ERROR reaching
     the end leaves a compound open (``{ echo a``, ``if true; then``,
     ``case a in``). A token it could not take (``if then``, ``if ;``,
-    ``( then``) is the error bash reports instead; a closing reserved
+    ``( then``) is the error bash reports instead, as is a flagged span
+    ending before the unfinished construct starts; a closing reserved
     word an alias spells is a command there.
 
     Args:
@@ -613,6 +674,8 @@ def ends_inside_construct(
             text the line opens with, to the span of the line it covers.
         offsets (Sequence[int] | None): where each byte the parser read
             sits in the line; None where the two are the same.
+        issue_end (int | None): where the flagged span ends in the parse;
+            None when it is not known.
     """
     stray = chain(
         _stray_case_terminators(node),
@@ -623,19 +686,25 @@ def ends_inside_construct(
         return False
     end = node.start_byte + len((node.text or b"").rstrip())
     unfinished = False
-    stack: list[tuple[TSNodeLike, TSNodeLike | None]] = [(node, None)]
+    stack: list[tuple[TSNodeLike, TSNodeLike | None, TSNodeLike | None]] = [
+        (node, None, None)
+    ]
     while stack:
-        current, before = stack.pop()
+        current, before, parent = stack.pop()
         if current.type == "ERROR":
-            opened = _open_compound(current, before, aliases, own, offsets)
+            opened = _open_compound(
+                current, before, parent, aliases, own, offsets
+            )
             if opened is None:
                 return False
-            unfinished = unfinished or (opened and current.end_byte >= end)
-        elif current.is_missing and current.start_byte >= end:
+            at_end = opened and current.end_byte >= end
+        else:
+            at_end = current.is_missing and current.start_byte >= end
+        if at_end and (issue_end is None or issue_end >= current.start_byte):
             unfinished = True
         previous = None
         for child in current.children:
-            stack.append((child, previous))
+            stack.append((child, previous, current))
             previous = child
     return unfinished
 
@@ -643,6 +712,7 @@ def ends_inside_construct(
 def _open_compound(
     error: TSNodeLike,
     before: TSNodeLike | None,
+    parent: TSNodeLike | None,
     aliases: frozenset[str] = frozenset(),
     own: Mapping[str, tuple[int, int]] | None = None,
     offsets: Sequence[int] | None = None,
@@ -650,18 +720,25 @@ def _open_compound(
     """Read an ERROR's tokens as bash does: whether they leave a compound
     open, or None at the first token bash cannot take where it stands.
 
-    A command must follow the tokens in ``COMMAND_FOLLOWS`` and a word
-    those in ``NAME_FOLLOWS``: a list operator there is unexpected, as is
-    a closing reserved word where a command starts, and a list operator
-    right after another. After a command's words a ``(`` is unexpected
-    unless ``()`` makes the command a function definition. Text the
-    grammar skipped is unexpected too. A nested ERROR's tokens are read
-    in line, as tokens the grammar could not group.
+    A command must follow the tokens in ``COMMAND_FOLLOWS``, a function's
+    ``()`` and, at the top of the line, where nothing is open, a
+    separator (a newline among them); a word must follow those in
+    ``NAME_FOLLOWS``. A list
+    operator, a ``)`` or a closing reserved word is unexpected where a
+    command must come, as is a list operator right after another, and at
+    the top of the line a ``)`` closing nothing. After a command's words a
+    ``(`` is unexpected unless ``()`` makes the command a function
+    definition. After a case's ``in`` the grammar groups each whole
+    ``pattern)`` item, so any other token but ``esac`` is a pattern still
+    waiting for its ``)``. Text the grammar skipped is unexpected too. A
+    nested ERROR's tokens are read in line, as tokens the grammar could
+    not group.
 
     Args:
         error (TSNodeLike): the ERROR node.
         before (TSNodeLike | None): its previous sibling; after a
             command, the node starts among that command's words.
+        parent (TSNodeLike | None): the node holding it.
         aliases (frozenset[str]): alias names expanded where a command
             starts, which are commands there whatever they spell, except
             inside their own text (``_reserved_here``).
@@ -672,7 +749,31 @@ def _open_compound(
     """
     text = error.text or b""
     children = list(_error_tokens(error))
-    expect = "words" if before is not None and before.type == "command" else ""
+    top = parent is not None and parent.type == "program"
+    after = None if before is None else before.type
+    if before is not None and parent is not None:
+        gap = (parent.text or b"")[
+            before.end_byte - parent.start_byte : error.start_byte
+            - parent.start_byte
+        ]
+        if b"\n" in gap.replace(b"\\\n", b""):
+            after = ";"
+    if after == "command":
+        expect = "words"
+    elif (
+        after in COMMAND_FOLLOWS
+        or (top and (after is None or after in SEPARATOR_TOKENS))
+        or (
+            after == ")"
+            and parent is not None
+            and parent.type == "function_definition"
+        )
+    ):
+        expect = "command"
+    elif after in SEPARATOR_TOKENS:
+        expect = "list"
+    else:
+        expect = ""
     pending: list[str] = []
     cursor = error.start_byte
     for i, child in enumerate(children):
@@ -684,8 +785,19 @@ def _open_compound(
         if (
             skipped.strip()
             or (
+                expect == "items"
+                and kind not in ("case_item", "esac", "comment")
+            )
+            or (
                 expect in ("command", "name", "list")
                 and kind in LIST_OPERATORS
+            )
+            or (
+                kind == ")"
+                and (
+                    expect == "command"
+                    or (top and not pending and expect != "call")
+                )
             )
             or (
                 expect == "command"
@@ -704,7 +816,15 @@ def _open_compound(
             pending.append(closer)
         elif pending and kind == pending[-1]:
             pending.pop()
-        if kind in COMMAND_FOLLOWS:
+        if call:
+            expect = "call"
+        elif expect == "call":
+            expect = "command"
+        elif (expect == "items" and kind != "esac") or (
+            kind == "in" and pending and pending[-1] == "esac"
+        ):
+            expect = "items"
+        elif kind in COMMAND_FOLLOWS:
             expect = "command"
         elif kind in NAME_FOLLOWS:
             expect = "name"
@@ -740,7 +860,7 @@ def syntax_error_result(
     issue_end: int | None = None,
 ) -> IOResult:
     """The bash-style diagnostic for an unparsable line: status 2, or 1
-    for an array assignment it ends inside (``ends_inside_array``).
+    for an array assignment it fails inside (``fails_in_array``).
 
     Args:
         offending (str): the span the parser flagged.
@@ -756,7 +876,7 @@ def syntax_error_result(
     message = syntax_error_message(
         offending, node, aliases, own, offsets, issue_end
     )
-    array = node is not None and ends_inside_array(node, issue_end)
+    array = node is not None and fails_in_array(node, issue_end)
     return IOResult(exit_code=1 if array else 2, stderr=encode_text(message))
 
 
@@ -772,7 +892,9 @@ def syntax_error_message(
 
     bash reports the first error it reads: input left open inside a quote
     or construct is the error unless the flagged span ends before that
-    construct opens (``fi; echo "a`` is the unexpected ``fi``).
+    construct opens (``fi; echo "a`` is the unexpected ``fi``), and an
+    operator cutting an array short is the token it reports (``x=(1 2;
+    fi`` is the unexpected ``;``).
 
     Args:
         offending (str): the span the parser flagged.
@@ -789,13 +911,17 @@ def syntax_error_message(
     found = _unfinished(node) if node is not None else None
     if found is not None and issue_end is not None and issue_end <= found[2]:
         found = None
+    if found is not None and found[3]:
+        return f"mirage: syntax error near '{found[0]}'\n"
     quote = None if found is None else found[0]
     if quote is None and find_unterminated_backtick(offending) is not None:
         quote = "`"
     snippet = offending.strip()
     if quote is not None:
         return f"mirage: unexpected EOF while looking for matching `{quote}'\n"
-    if node is not None and ends_inside_construct(node, aliases, own, offsets):
+    if node is not None and ends_inside_construct(
+        node, aliases, own, offsets, issue_end
+    ):
         return "mirage: syntax error: unexpected end of file\n"
     if snippet:
         return f"mirage: syntax error near '{snippet}'\n"

@@ -39,7 +39,7 @@ from mirage.shell.parse import (
     syntax_error_result,
 )
 from mirage.shell.parse.scope import ParseScope
-from mirage.shell.parse.syntax import ends_inside_array, find_syntax_issue
+from mirage.shell.parse.syntax import fails_in_array, find_syntax_issue
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, Refusal
@@ -622,7 +622,7 @@ async def run_prepared_line(
             io = syntax_error_result(
                 offending, ast, aliases, issue_end=issue_end
             )
-            if call_stack is not None and ends_inside_array(ast, issue_end):
+            if call_stack is not None and fails_in_array(ast, issue_end):
                 # bash discards the line that evaluated it (`eval`,
                 # `source`) with status 1, as its own error would.
                 raise DiscardSignal(await io.materialize_stderr())
