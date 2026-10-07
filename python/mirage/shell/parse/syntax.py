@@ -490,8 +490,11 @@ def _unfinished(node: TSNodeLike) -> tuple[str, str, int, bool] | None:
             # Diagnose an ERROR span only after its children, as before.
             if not current.children and (current.text or b"").startswith(b"'"):
                 return "'", "'", current.start_byte, False
-            pending = _unclosed(current.children)
-            if pending:
+            found = _unclosed(current.children)
+            if found is not None and found[0]:
+                pending, cut = found
+                if cut is not None:
+                    return cut, pending[0][2], pending[0][3], True
                 return pending[-1][1], pending[0][2], pending[0][3], False
             continue
         if current.is_missing and current.type in QUOTE_TOKENS:
@@ -532,17 +535,17 @@ def _unfinished(node: TSNodeLike) -> tuple[str, str, int, bool] | None:
 
 def _unclosed(
     children: Sequence[TSNodeLike],
-) -> list[tuple[str, str, str, int]] | None:
-    """The constructs an ERROR's tokens leave open, outermost first: each
+) -> tuple[list[tuple[str, str, str, int]], str | None] | None:
+    """The constructs an ERROR's tokens leave open, outermost first (each
     one's closing token, the character bash names for it, its opener and
-    its start.
+    its start), and the operator that cut an array short, if one did.
 
     A double quote or a backtick nests inside a substitution as bash reads
     it (``"$("`` waits for a quote), a lone ``)`` inside ``$((`` groups
-    rather than closes, and a ``(`` right after an assignment's ``=``
-    opens an array. Any other closer that does not match the innermost
-    opener is an unexpected token rather than the end of input, as is a
-    ``(`` inside an array: None.
+    rather than closes, a ``(`` right after an assignment's ``=`` opens an
+    array, and a ``(`` inside one cuts it short. Any other closer that
+    does not match the innermost opener is an unexpected token rather than
+    the end of input: None.
 
     Args:
         children (Sequence[TSNodeLike]): the ERROR node's children, in order.
@@ -566,14 +569,14 @@ def _unclosed(
         ):
             pending.append((")", ")", NT.ARRAY, start))
         elif kind == "(" and pending and pending[-1][2] == NT.ARRAY:
-            return None
+            return pending, kind
         elif kind in CLOSING_TOKENS and pending:
             if not (kind == ")" and pending[-1][0] == "))"):
                 if kind != pending[-1][0]:
                     return None
                 pending.pop()
         previous = child
-    return pending
+    return pending, None
 
 
 def _array_cut(array: TSNodeLike, root: TSNodeLike, end: int) -> str | None:

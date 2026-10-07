@@ -387,10 +387,13 @@ function unfinished(node: TSNodeLike): [string, string, number, boolean] | null 
       // Diagnose an ERROR span only after its children, as before.
       if (current.children.length === 0 && current.text.startsWith("'"))
         return ["'", "'", start, false]
-      const pending = unclosed(current.children)
-      const [outer] = pending ?? []
-      const inner = pending?.at(-1)
-      if (outer !== undefined && inner !== undefined) return [inner[1], outer[2], outer[3], false]
+      const [pending, cut] = unclosed(current.children) ?? [[], null]
+      const [outer] = pending
+      const inner = pending.at(-1)
+      if (outer !== undefined && inner !== undefined)
+        return cut !== null
+          ? [cut, outer[2], outer[3], true]
+          : [inner[1], outer[2], outer[3], false]
       continue
     }
     if (current.isMissing && QUOTE_TOKENS.has(current.type))
@@ -426,15 +429,18 @@ function unfinished(node: TSNodeLike): [string, string, number, boolean] | null 
   return null
 }
 
-/** The constructs an ERROR's tokens leave open, outermost first: each one's
+/** The constructs an ERROR's tokens leave open, outermost first (each one's
  * closing token, the character bash names for it, its opener and its
- * start. A double quote or a backtick nests inside a substitution as bash
- * reads it (`"$("` waits for a quote), a lone `)` inside `$((` groups rather
- * than closes, and a `(` right after an assignment's `=` or `+=` opens an
- * array. Any other closer that does not match the innermost opener is an
- * unexpected token rather than the end of input, as is a `(` inside an
- * array: null. Mirrors Python's _unclosed. */
-function unclosed(children: readonly TSNodeLike[]): [string, string, string, number][] | null {
+ * start), and the operator that cut an array short, if one did. A double
+ * quote or a backtick nests inside a substitution as bash reads it (`"$("`
+ * waits for a quote), a lone `)` inside `$((` groups rather than closes, a
+ * `(` right after an assignment's `=` or `+=` opens an array, and a `(`
+ * inside one cuts it short. Any other closer that does not match the
+ * innermost opener is an unexpected token rather than the end of input:
+ * null. Mirrors Python's _unclosed. */
+function unclosed(
+  children: readonly TSNodeLike[],
+): [[string, string, string, number][], string | null] | null {
   const pending: [string, string, string, number][] = []
   let previous: TSNodeLike | null = null
   for (const child of children) {
@@ -447,7 +453,7 @@ function unclosed(children: readonly TSNodeLike[]): [string, string, string, num
     } else if (opened !== undefined) pending.push([opened[0], opened[1], kind, start])
     else if (kind === '(' && previous !== null && ASSIGNMENT_OPERATORS.has(previous.type))
       pending.push([')', ')', NT.ARRAY, start])
-    else if (kind === '(' && pending.at(-1)?.[2] === NT.ARRAY) return null
+    else if (kind === '(' && pending.at(-1)?.[2] === NT.ARRAY) return [pending, kind]
     else if (CLOSING_TOKENS.has(kind) && pending.length > 0) {
       if (!(kind === ')' && pending.at(-1)?.[0] === '))')) {
         if (kind !== pending.at(-1)?.[0]) return null
@@ -456,7 +462,7 @@ function unclosed(children: readonly TSNodeLike[]): [string, string, string, num
     }
     previous = child
   }
-  return pending
+  return [pending, null]
 }
 
 /** The operator that cut an array assignment's `(` short: bash reads only

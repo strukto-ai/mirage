@@ -120,11 +120,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "( for l in 'x=(1 2' 'if true; then x+=(1 2' 'x=(1 \"a' 'x=(1 2; fi' 'x=(1 2 | cat' 'x=(1 2 >f' 'echo $(x=(1 2)'; do bash -c \"$l\"; echo $?; done )",
+      "command": "( for l in 'x=(1 2' 'if true; then x+=(1 2' 'x=(1 \"a' 'x=(1 2; fi' 'x=(1 2 | cat' 'x=(1 2 >f' 'x=(1 (2' 'echo $(x=(1 2)'; do bash -c \"$l\"; echo $?; done )",
       "expect": {
         "exit": 0,
-        "stdout": "1\n1\n1\n1\n1\n1\n2\n",
-        "stderr": "mirage: unexpected EOF while looking for matching `)'\nmirage: unexpected EOF while looking for matching `)'\nmirage: unexpected EOF while looking for matching `\"'\nmirage: syntax error near ';'\nmirage: syntax error near '|'\nmirage: syntax error near '>'\nmirage: unexpected EOF while looking for matching `)'\n"
+        "stdout": "1\n1\n1\n1\n1\n1\n1\n2\n",
+        "stderr": "mirage: unexpected EOF while looking for matching `)'\nmirage: unexpected EOF while looking for matching `)'\nmirage: unexpected EOF while looking for matching `\"'\nmirage: syntax error near ';'\nmirage: syntax error near '|'\nmirage: syntax error near '>'\nmirage: syntax error near '('\nmirage: unexpected EOF while looking for matching `)'\n"
       },
       "flags": []
     },
@@ -152,11 +152,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "( eval 'x=(1 2'; echo no ); echo \"rc=$?\"; ( eval 'x=(1 2; echo b'; echo no ); echo \"rc=$?\"; ( eval 'fi; x=(1 2'; echo \"after $?\" ); echo \"rc=$?\"",
+      "command": "( eval 'x=(1 2'; echo no ); echo \"rc=$?\"; ( eval 'x=(1 2; echo b'; echo no ); echo \"rc=$?\"; ( eval 'x=(1 (2'; echo no ); echo \"rc=$?\"; ( eval 'fi; x=(1 2'; echo \"after $?\" ); echo \"rc=$?\"",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\nrc=1\nafter 2\nrc=0\n",
-        "stderr": "mirage: unexpected EOF while looking for matching `)'\nmirage: syntax error near ';'\nmirage: syntax error near 'fi'\n"
+        "stdout": "rc=1\nrc=1\nrc=1\nafter 2\nrc=0\n",
+        "stderr": "mirage: unexpected EOF while looking for matching `)'\nmirage: syntax error near ';'\nmirage: syntax error near '('\nmirage: syntax error near 'fi'\n"
       },
       "flags": []
     },
