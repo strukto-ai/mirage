@@ -1,7 +1,18 @@
 import codecs
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from functools import cmp_to_key
 
+from mirage.commands.builtin.generic.iconv_multibyte import (
+    CUT,
+    ILLEGAL,
+    MULTIBYTE_CHARSETS,
+    Decoded,
+    MultibyteEncoder,
+    MultibyteSpec,
+    multibyte_table,
+)
 from mirage.commands.builtin.utils.stream import read_stdin_async, stdin_bytes
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
@@ -10,14 +21,19 @@ from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
+from mirage.utils.strverscmp import strverscmp
 
 _HINT = "Try `iconv --help' or `iconv --usage' for more information."
 _INCOMPLETE = "incomplete character or shift sequence at end of buffer"
+_NAME_TRAIL = " \t\n\v\f\r,/"
+_NAME_DROPS = re.compile(r"[^0-9A-Za-z_.,:/-]")
 
-# glibc's names for the charsets both hosts convert by hand, upper-cased:
-# glibc matches a name without regard to case but not to punctuation, so
-# LATIN-1 and UTF_8 are refused while ISO88591 and UCS2 are not.
+# glibc's names for the charsets both hosts convert by hand, upper-cased.
+# glibc reads a typed name without regard to case, and drops every
+# character but letters, digits and _-.,: before it does, so "utf 8" is
+# UTF8 while LATIN-1 and UTF_8 are refused.
 CHARSETS: dict[str, str] = {
     "UTF-8": "utf-8",
     "UTF8": "utf-8",
@@ -67,23 +83,18 @@ _BULK = {
     "ascii": "ascii",
 }
 
-# Python's codec registry reads names loosely (latin-1, utf_8, u8, 646);
-# a loose name for a hand-written charset is one glibc refuses.
-_HAND_CODECS = frozenset(
-    {"utf-8", "utf-16", "utf-16-le", "utf-16-be", "iso8859-1", "ascii"}
+# Python's codec registry reads names loosely (latin-1, utf_8, u8,
+# shiftjis); a loose name for a charset converted above is one glibc
+# refuses.
+_OWN_CODECS = frozenset(
+    codecs.lookup(codec).name
+    for codec in [
+        *_BULK.values(),
+        *(spec.codec for spec in MULTIBYTE_CHARSETS.values()),
+    ]
 )
-_ILLEGAL = -1
-_CUT = -2
 
-# One decoded character as (code point, bytes used); the code point is
-# _ILLEGAL or _CUT when there is none.
-_Decoded = tuple[int, int]
-
-
-@dataclass(frozen=True, slots=True)
-class _Charset:
-    name: str
-    by_hand: bool
+_Charset = str | MultibyteSpec | codecs.CodecInfo
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,26 +104,71 @@ class _Converted:
     error: str | None
 
 
-def _charset_of(name: str) -> _Charset | None:
-    """The charset an iconv name selects, None when there is none.
+def _charset_key(name: str) -> str | None:
+    """The name glibc looks a typed charset up by, None when it has none.
 
-    glibc's ``//TRANSLIT`` and ``//IGNORE`` suffixes are not supported.
+    glibc drops the blanks, commas and slashes that end a name, then
+    every character but an ASCII letter, a digit, ``_-.,:`` and ``/``,
+    and reads the rest without regard to case and with a final slash
+    dropped: ``s(jis)//`` and ``SJIS/!`` are SJIS, while ``S_JIS``,
+    ``/SJIS`` and ``ſjis`` (a long s) are not. A name with nothing left
+    is the default charset. A second slash starts a suffix, and glibc's
+    ``//TRANSLIT`` and ``//IGNORE`` are not supported.
 
     Args:
         name (str): the charset as typed.
     """
-    own = CHARSETS.get(name.upper())
+    code = name.rstrip(_NAME_TRAIL)
+    if code.count("/") > 1:
+        return None
+    key = _NAME_DROPS.sub("", code).upper().removesuffix("/")
+    return None if "/" in key else key or "UTF-8"
+
+
+def _charset_of(name: str) -> _Charset | None:
+    """The charset an iconv name selects, None when there is none.
+
+    A hand-written charset is its name in ``CHARSETS`` and a multi-byte
+    one its ``MultibyteSpec``; any other name python's codecs know
+    selects that codec, unless it is a loose spelling of one of those or
+    names no text encoding (``base64``).
+
+    Args:
+        name (str): the charset as typed.
+    """
+    key = _charset_key(name)
+    if key is None:
+        return None
+    own = CHARSETS.get(key) or MULTIBYTE_CHARSETS.get(key)
     if own is not None:
-        return _Charset(own, True)
+        return own
     try:
-        codec = codecs.lookup(name).name
+        info = codecs.lookup(key)
     except LookupError:
         return None
-    return None if codec in _HAND_CODECS else _Charset(codec, False)
+    if info.name in _OWN_CODECS or not info._is_text_encoding:
+        return None
+    return info
 
 
-def _unsupported(from_enc: str, to_enc: str, from_ok: bool) -> bytes:
-    if not from_ok and _charset_of(to_enc) is None:
+def list_text() -> bytes:
+    """What ``iconv -l`` prints: one name per line, as glibc does to a pipe.
+
+    glibc lists every name with the ``//`` that ends an empty suffix, in
+    ``strverscmp`` order; mirage lists only the charsets it converts as
+    glibc does, none of python's other codecs.
+    """
+    names = sorted(
+        (f"{name}//" for name in [*CHARSETS, *MULTIBYTE_CHARSETS]),
+        key=cmp_to_key(strverscmp),
+    )
+    return "".join(f"{name}\n" for name in names).encode()
+
+
+def _unsupported(
+    from_enc: str, to_enc: str, from_ok: bool, to_ok: bool
+) -> bytes:
+    if not (from_ok or to_ok):
         line = (
             f"iconv: conversions from `{from_enc}' and to `{to_enc}' "
             "are not supported"
@@ -121,19 +177,18 @@ def _unsupported(from_enc: str, to_enc: str, from_ok: bool) -> bytes:
         line = f"iconv: conversion from `{from_enc}' is not supported"
     else:
         line = f"iconv: conversion to `{to_enc}' is not supported"
-    return f"{line}\n{_HINT}\n".encode()
+    return encode_text(f"{line}\n{_HINT}\n")
 
 
-def _unit_of(charset: _Charset) -> int:
+def _unit_of(name: str) -> int:
     """The bytes a refused sequence spans, so ``-c`` skips it whole.
 
     Args:
-        charset (_Charset): the source charset.
+        name (str): a hand-written charset, or a python codec's name.
     """
-    name = charset.name.replace("-", "").replace("_", "")
-    if name.startswith(("utf16", "ucs2")):
+    if name.startswith(("utf-16", "ucs-2")):
         return 2
-    return 4 if name.startswith("utf32") else 1
+    return 4 if name.startswith("utf-32") else 1
 
 
 def _utf8_second(lead: int) -> tuple[int, int]:
@@ -146,7 +201,7 @@ def _utf8_second(lead: int) -> tuple[int, int]:
     return (0x80, 0x8F) if lead == 0xF4 else (0x80, 0xBF)
 
 
-def _decode_utf8(raw: bytes, at: int) -> _Decoded:
+def _decode_utf8(raw: bytes, at: int) -> Decoded:
     lead = raw[at]
     if lead < 0x80:
         return lead, 1
@@ -157,44 +212,44 @@ def _decode_utf8(raw: bytes, at: int) -> _Decoded:
     elif 0xF0 <= lead <= 0xF4:
         length, cp = 4, lead & 0x07
     else:
-        return _ILLEGAL, 0
+        return ILLEGAL, 0
     for i in range(1, length):
         if at + i >= len(raw):
-            return _CUT, 0
+            return CUT, 0
         low, high = _utf8_second(lead) if i == 1 else (0x80, 0xBF)
         if not low <= raw[at + i] <= high:
-            return _ILLEGAL, 0
+            return ILLEGAL, 0
         cp = (cp << 6) | (raw[at + i] & 0x3F)
     return cp, length
 
 
-def _decode_utf16(raw: bytes, at: int, little: bool, pairs: bool) -> _Decoded:
+def _decode_utf16(raw: bytes, at: int, little: bool, pairs: bool) -> Decoded:
     def unit(offset: int) -> int:
         return int.from_bytes(
             raw[offset : offset + 2], "little" if little else "big"
         )
 
     if at + 2 > len(raw):
-        return _CUT, 0
+        return CUT, 0
     first = unit(at)
     if 0xDC00 <= first <= 0xDFFF or (0xD800 <= first <= 0xDBFF and not pairs):
-        return _ILLEGAL, 0
+        return ILLEGAL, 0
     if not 0xD800 <= first <= 0xDBFF:
         return first, 2
     if at + 4 > len(raw):
-        return _CUT, 0
+        return CUT, 0
     second = unit(at + 2)
     if not 0xDC00 <= second <= 0xDFFF:
-        return _ILLEGAL, 0
+        return ILLEGAL, 0
     return 0x10000 + ((first - 0xD800) << 10) + (second - 0xDC00), 4
 
 
-def _decode_at(raw: bytes, at: int, charset: str, little: bool) -> _Decoded:
+def _decode_at(raw: bytes, at: int, charset: str, little: bool) -> Decoded:
     """One character of a hand-written charset: (code point, bytes used).
 
-    The code point is ``_ILLEGAL`` for a sequence the charset does not
-    allow and ``_CUT`` for one the input ends inside of. Mirrors the
-    TypeScript ``decodeAt``.
+    The code point is ``ILLEGAL`` for a sequence the charset does not
+    allow, with the bytes ``-c`` skips, and ``CUT`` for one the input
+    ends inside of. Mirrors the TypeScript ``decodeAt``.
 
     Args:
         raw (bytes): the input.
@@ -206,10 +261,14 @@ def _decode_at(raw: bytes, at: int, charset: str, little: bool) -> _Decoded:
     if charset == "latin1":
         return byte, 1
     if charset == "ascii":
-        return (byte, 1) if byte < 0x80 else (_ILLEGAL, 0)
-    if charset == "utf-8":
-        return _decode_utf8(raw, at)
-    return _decode_utf16(raw, at, little, charset.startswith("utf-16"))
+        cp, length = (byte, 1) if byte < 0x80 else (ILLEGAL, 0)
+    elif charset == "utf-8":
+        cp, length = _decode_utf8(raw, at)
+    else:
+        cp, length = _decode_utf16(
+            raw, at, little, charset.startswith("utf-16")
+        )
+    return (ILLEGAL, _unit_of(charset)) if cp == ILLEGAL else (cp, length)
 
 
 class _HandEncoder:
@@ -255,9 +314,6 @@ class _HandEncoder:
                 return b"\xff\xfe" + data
         return data
 
-    def finish(self) -> bytes:
-        return b""
-
 
 class _CodecEncoder:
     """The target side of any other charset python's codecs convert.
@@ -266,16 +322,11 @@ class _CodecEncoder:
     and closes it in ``finish``, as glibc writes the reset sequence.
     """
 
-    def __init__(self, codec: str) -> None:
-        self.encoder = codecs.getincrementalencoder(codec)("strict")
+    def __init__(self, info: codecs.CodecInfo) -> None:
+        self.encoder = info.incrementalencoder("strict")
 
     def encode_char(self, cp: int) -> bytes | None:
-        state = self.encoder.getstate()
-        try:
-            return self.encoder.encode(chr(cp))
-        except UnicodeEncodeError:
-            self.encoder.setstate(state)
-            return None
+        return self.encode_text(chr(cp))
 
     def encode_text(self, text: str) -> bytes | None:
         state = self.encoder.getstate()
@@ -289,49 +340,54 @@ class _CodecEncoder:
         return self.encoder.encode("", final=True)
 
 
-def _bulk_text(raw: bytes, charset: _Charset) -> str | None:
+_Encoder = _HandEncoder | MultibyteEncoder | _CodecEncoder
+
+
+def _bulk_text(raw: bytes, charset: str | codecs.CodecInfo) -> str | None:
     """The whole input decoded at once, None when it needs the slow walk.
 
     Args:
         raw (bytes): one input.
-        charset (_Charset): the source charset.
+        charset (str | codecs.CodecInfo): a hand-written source charset,
+            or a python codec.
     """
-    codec = _BULK[charset.name] if charset.by_hand else charset.name
+    if isinstance(charset, codecs.CodecInfo):
+        codec, ucs2 = charset.name, False
+    else:
+        codec, ucs2 = _BULK[charset], charset.startswith("ucs-2")
     try:
         text = raw.decode(codec)
     except UnicodeDecodeError:
         return None
-    if charset.name.startswith("ucs-2") and any(ord(c) > 0xFFFF for c in text):
-        return None
-    return text
+    return None if ucs2 and any(ord(c) > 0xFFFF for c in text) else text
 
 
-def _walk_by_hand(
-    raw: bytes, charset: str, encoder: "_Encoder", omit: bool
+def _walk(
+    raw: bytes,
+    start: int,
+    decode: Callable[[bytes, int], Decoded],
+    encoder: _Encoder,
+    omit: bool,
 ) -> _Converted:
     """Convert one input character by character, as glibc reports it.
 
-    Mirrors the TypeScript ``convert``.
+    Mirrors the TypeScript ``walk``.
 
     Args:
         raw (bytes): one input, whole.
-        charset (str): the hand-written source charset.
+        start (int): offset of the first character, past a BOM.
+        decode (Callable[[bytes, int], Decoded]): reads one character.
         encoder (_Encoder): the target, shared by every input.
         omit (bool): ``-c``.
     """
     out = bytearray()
     dropped = False
-    at = 0
-    little = not charset.endswith("be")
-    if charset == "utf-16" and raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
-        little = raw[:2] == b"\xff\xfe"
-        at = 2
-    unit = _unit_of(_Charset(charset, True))
+    at = start
     while at < len(raw):
-        cp, length = _decode_at(raw, at, charset, little)
-        if cp == _CUT:
+        cp, length = decode(raw, at)
+        if cp == CUT:
             return _Converted(bytes(out), dropped, _INCOMPLETE)
-        if cp == _ILLEGAL:
+        if cp == ILLEGAL:
             if not omit:
                 return _Converted(
                     bytes(out),
@@ -339,7 +395,7 @@ def _walk_by_hand(
                     f"illegal input sequence at position {at}",
                 )
             dropped = True
-            at += unit
+            at += length
             continue
         data = encoder.encode_char(cp)
         if data is None:
@@ -357,18 +413,18 @@ def _walk_by_hand(
 
 
 def _walk_codec(
-    raw: bytes, charset: _Charset, encoder: "_Encoder", omit: bool
+    raw: bytes, charset: codecs.CodecInfo, encoder: _Encoder, omit: bool
 ) -> _Converted:
     """Convert one input of a codec charset a byte at a time.
 
     Args:
         raw (bytes): one input, whole.
-        charset (_Charset): the codec source charset.
+        charset (codecs.CodecInfo): the codec source charset.
         encoder (_Encoder): the target, shared by every input.
         omit (bool): ``-c``.
     """
-    decoder = codecs.getincrementaldecoder(charset.name)("strict")
-    unit = _unit_of(charset)
+    decoder = charset.incrementaldecoder("strict")
+    unit = _unit_of(charset.name)
     out = bytearray()
     dropped = False
     start = 0
@@ -410,20 +466,34 @@ def _walk_codec(
     return _Converted(bytes(out), dropped, None)
 
 
-_Encoder = _HandEncoder | _CodecEncoder
-
-
 def _convert(
     raw: bytes, charset: _Charset, encoder: _Encoder, omit: bool
 ) -> _Converted:
+    if isinstance(charset, MultibyteSpec):
+        table = multibyte_table(charset)
+        step = charset.step
+
+        def decode_multibyte(data: bytes, at: int) -> Decoded:
+            return step(data, at, table)
+
+        return _walk(raw, 0, decode_multibyte, encoder, omit)
     text = _bulk_text(raw, charset)
     if text is not None:
         data = encoder.encode_text(text) if text else b""
         if data is not None:
             return _Converted(data, False, None)
-    if charset.by_hand:
-        return _walk_by_hand(raw, charset.name, encoder, omit)
-    return _walk_codec(raw, charset, encoder, omit)
+    if isinstance(charset, codecs.CodecInfo):
+        return _walk_codec(raw, charset, encoder, omit)
+    start = 0
+    little = not charset.endswith("be")
+    if charset == "utf-16" and raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        little = raw[:2] == b"\xff\xfe"
+        start = 2
+
+    def decode_hand(data: bytes, at: int) -> Decoded:
+        return _decode_at(data, at, charset, little)
+
+    return _walk(raw, start, decode_hand, encoder, omit)
 
 
 async def iconv(
@@ -445,6 +515,9 @@ async def iconv(
     read. An input that cannot be opened is reported and skipped; one
     that opens and then refuses the read, a directory, ends the run. A
     stateful target is closed with its reset sequence either way.
+    The charsets ``iconv -l`` names convert byte for byte as glibc 2.41
+    does; any other name python's codecs know converts through that
+    codec, which the TypeScript host refuses.
     Deliberate divergence: with no ``-f`` or ``-t`` the charset is UTF-8,
     where GNU takes the locale's (ASCII under ``LC_ALL=C``).
 
@@ -463,13 +536,17 @@ async def iconv(
     if source is None or target is None:
         return None, IOResult(
             exit_code=1,
-            stderr=_unsupported(from_enc, to_enc, source is not None),
+            stderr=_unsupported(
+                from_enc, to_enc, source is not None, target is not None
+            ),
         )
-    encoder: _Encoder = (
-        _HandEncoder(target.name)
-        if target.by_hand
-        else _CodecEncoder(target.name)
-    )
+    encoder: _Encoder
+    if isinstance(target, MultibyteSpec):
+        encoder = MultibyteEncoder(target)
+    elif isinstance(target, codecs.CodecInfo):
+        encoder = _CodecEncoder(target)
+    else:
+        encoder = _HandEncoder(target)
     read = stdin_bytes(read_bytes, stdin)
     out = bytearray()
     errors: list[str] = []
@@ -501,8 +578,9 @@ async def iconv(
             errors.append(f"iconv: {converted.error}")
             failed = True
             break
-    out += encoder.finish()
-    stderr = "".join(f"{line}\n" for line in errors).encode() or None
+    if isinstance(encoder, _CodecEncoder):
+        out += encoder.finish()
+    stderr = encode_text("".join(f"{line}\n" for line in errors)) or None
     encoded = bytes(out)
     if output_path is not None:
         await write_bytes(output_path, encoded)
@@ -523,16 +601,17 @@ class IconvFlags:
     to_enc: str = "utf-8"
     ignore_errors: bool = False
     output_path: PathSpec | None = None
+    list_charsets: bool = False
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> IconvFlags:
     fl = FlagView(flags, spec=SPECS["iconv"])
-    output = fl.raw("o")
     return IconvFlags(
         from_enc=fl.as_str("f") or "utf-8",
         to_enc=fl.as_str("t") or "utf-8",
         ignore_errors=fl.as_bool("c"),
-        output_path=output if isinstance(output, PathSpec) else None,
+        output_path=fl.as_path("o"),
+        list_charsets=fl.as_bool("list"),
     )
 
 
@@ -544,6 +623,8 @@ async def iconv_generic(
     write_bytes: Callable[..., Awaitable[None]],
 ) -> tuple[ByteSource | None, IOResult]:
     parsed = parse_flags(opts.flags)
+    if parsed.list_charsets:
+        return list_text(), IOResult()
     return await iconv(
         paths,
         read_bytes=read_bytes,
