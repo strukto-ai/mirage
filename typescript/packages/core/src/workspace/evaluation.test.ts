@@ -3,13 +3,12 @@ import { afterEach, assert, expect, test, vi } from 'vitest'
 import { CLISpec } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 import { Channel } from '../shell/console/index.ts'
-import { ProgramNode, type ParsedProgram } from '../shell/parse/program.ts'
+import { type ParsedProgram } from '../shell/parse/program.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { SessionState } from './session/session.ts'
 import { seedVar } from './session/state.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { childContext, EvaluationContext } from './evaluation.ts'
-import type { TSNodeLike } from '../shell/types.ts'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -58,19 +57,20 @@ it('keeps temporary frames off persistent state and child writes off the parent'
 })
 
 it('retains a background function through late substitutions and foreground unset', async ({
-  owned: { ws },
+  owned: { ws, programs },
 }) => {
   const gate = barrier()
   installStall(ws, gate)
   try {
     await ws.shell('f() { echo retained; }')
-    const stored = ws.getSession(ws.defaultSessionId).functions.f as TSNodeLike[]
-    assert(stored[0] instanceof ProgramNode)
-    const defining = stored[0].program
+    expect(typeof ws.getSession(ws.defaultSessionId).functions.f).toBe('string')
+    const defining = programs.at(-1)
+    assert(defining)
+    expect(defining.references).toBe(0)
     await ws.shell('{ stall; echo "$(f):$(</dev/null)"; } &')
     await gate.entered
     await ws.shell('unset -f f')
-    expect(defining.references).toBeGreaterThan(0)
+    expect(defining.references).toBe(0)
     const job = ws.jobTable.get(1, ws.defaultSessionId)
     assert(job)
     gate.release()
@@ -101,15 +101,6 @@ it('releases each alias expansion when it ends, not when the line does', async (
   await ws.shell("alias a='true'")
   await ws.shell(`for i in ${'x '.repeat(50)}; do a; done; probe`)
   expect(live).toBe(1)
-})
-
-it('explain borrows function programs without retaining another session', async ({
-  owned: { ws, programs },
-}) => {
-  await ws.shell('f() { echo retained; }')
-  const before = programs.map((program) => program.references)
-  await ws.explain('cd /; f')
-  expect(programs.slice(0, before.length).map((program) => program.references)).toEqual(before)
 })
 
 it.for([

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import time
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any
@@ -38,7 +38,6 @@ from mirage.shell.constants import (
 )
 from mirage.shell.descriptors import Descriptor, StreamOwner
 from mirage.shell.job_table import JobWaits
-from mirage.shell.types import FunctionBody
 from mirage.shell.variable import (
     ManagedRef,
     ShellVar,
@@ -59,7 +58,10 @@ from mirage.types import (
 )
 from mirage.workspace.abort import StatusWriter
 from mirage.workspace.session.constants import INHERITED_FIELDS
-from mirage.workspace.session.functions import FunctionTable
+from mirage.workspace.session.functions import (
+    FunctionSite,
+    function_sources,
+)
 from mirage.workspace.session.serialize import (
     commands_from_dict,
     commands_to_dict,
@@ -76,9 +78,6 @@ def copy_state(value: Any) -> Any:
     Args:
         value (Any): the field value.
     """
-    if isinstance(value, FunctionTable):
-        # The fork's own table leases the bodies when it is built.
-        return dict(value)
     if isinstance(value, ShellVar):
         # The record is frozen, but an indexed or associative value is
         # a live container, so the copy has to reach inside it.
@@ -280,11 +279,10 @@ class SessionState:
     # value it describes.
     vars: dict[str, ShellVar] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
-    functions: MutableMapping[str, FunctionBody] = field(default_factory=dict)
+    functions: dict[str, str] = field(default_factory=dict)
     # The functions `readonly -f` has frozen. A set beside `functions`
-    # rather than a flag on the body because a body is a list of parsed
-    # nodes shared with the parser, and the readonly fact is the
-    # session's, not the definition's. Kept in step with the readonly
+    # rather than a flag on the source because readonly is the
+    # session's property, not the definition's. Kept in step with the readonly
     # *variable* set only by name: `readonly -f f` and `readonly f` are
     # two different frozen things in bash, and each refuses in its own
     # voice.
@@ -446,6 +444,11 @@ class SessionState:
     exec_stdin_identity: str | None = None
     _parse_seq: int = field(default=0, repr=False)
     _parse_current: int = field(default=0, repr=False)
+    # The row the running parse starts on in the text that spelled it: 0
+    # for a line, a function's definition row for its body, which is
+    # parsed again from its own source but reads aliases where it was
+    # written.
+    _parse_row: int = field(default=0, repr=False)
     # The owner of this session's terminal streams, which an `exec` copy
     # of one names (`exec 3>&1`), and whether a line of the session is
     # running, whose outermost program routes what was written to them.
@@ -457,6 +460,13 @@ class SessionState:
         default_factory=dict, repr=False
     )
     _alias_stack: list[str] = field(default_factory=list, repr=False)
+    # Where each function was defined (``FunctionSite``), so its body
+    # expands the aliases of that place and its approvals stand under
+    # it; a function loaded from a stored session has none and runs as a
+    # parse of its own.
+    _function_sites: dict[str, FunctionSite] = field(
+        default_factory=dict, repr=False
+    )
 
     def to_dict(self) -> dict[str, Any]:
         # A managed name serializes as its pointer, never its value: a
@@ -503,6 +513,10 @@ class SessionState:
                     entry["fetch"] = "eager"
                 refs[name] = entry
             data["managed"] = refs
+        if self.functions:
+            data["functions"] = dict(self.functions)
+        if self.readonly_functions:
+            data["readonly_functions"] = sorted(self.readonly_functions)
         if self.mount_modes is not None:
             data["mount_modes"] = {
                 prefix: mode.value for prefix, mode in self.mount_modes.items()
@@ -586,6 +600,11 @@ class SessionState:
                     ),
                 )
             data["vars"] = out_vars
+        if "readonly_functions" in data:
+            data = {
+                **data,
+                "readonly_functions": set(data["readonly_functions"]),
+            }
         modes = data.get("mount_modes")
         paths = data.get("hidden_paths")
         shown = data.get("shown_paths")
@@ -739,7 +758,7 @@ class SessionState:
         )
 
     def __post_init__(self) -> None:
-        self.functions = FunctionTable(self.functions)
+        self.functions = function_sources(self.functions)
         # bash exports `$PWD` from startup, so a session that has never
         # run `cd` still has one. Seeding here rather than at lookup time
         # is what makes it an ordinary variable: assignable, unsettable,
@@ -800,7 +819,7 @@ class SessionState:
 
         ``fork`` copies what a session keeps; a child shell (a command
         substitution, a subshell, a nested ``bash``) also inherits the
-        reader's position, the alias bookkeeping and the local frames,
+        reader's position, the aliases being expanded and the local frames,
         and reseeds ``$RANDOM`` on its first draw instead of replaying
         this session's seed.
 
@@ -808,9 +827,8 @@ class SessionState:
             None
         """
         child = self.fork()
-        child._parse_seq = self._parse_seq
         child._parse_current = self._parse_current
-        child._alias_marks = dict(self._alias_marks)
+        child._parse_row = self._parse_row
         child._alias_stack = list(self._alias_stack)
         child._local_vars = (
             None if self._local_vars is None else copy_locals(self._local_vars)

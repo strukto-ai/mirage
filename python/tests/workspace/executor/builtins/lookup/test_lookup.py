@@ -1,9 +1,6 @@
 import pytest
 
 from mirage.commands.cli.types import CLISpec
-from mirage.shell.helpers import get_function_body
-from mirage.shell.parse import parse
-from mirage.shell.types import FunctionBody
 from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.executor.builtins.lookup.lookup import (
     handle_type,
@@ -33,10 +30,6 @@ def make_session() -> SessionState:
     return SessionState(session_id="s1")
 
 
-def _body(definition: str) -> FunctionBody:
-    return get_function_body(parse(definition).named_children[0])
-
-
 def make_registry(with_cli: bool = False) -> FakeRegistry:
     return FakeRegistry({"cat", "grep", "ls", "jq"}, with_cli=with_cli)
 
@@ -61,7 +54,7 @@ def test_type_reports_keyword():
 
 def test_type_a_prints_the_function_under_a_keyword():
     session = make_session()
-    session.functions["then"] = _body("then() { echo x; }")
+    session.functions["then"] = "then() { echo x; }"
     assert _out(handle_type(["-a", "then"], session, make_registry())) == (
         "then is a shell keyword\nthen is a function\n"
         "function then () \n{ \n    echo x\n}\n"
@@ -139,7 +132,7 @@ def test_type_p_prints_a_programs_file_and_P_searches_past_a_builtin():
 
 def test_type_a_prints_every_layer():
     session = make_session()
-    session.functions["linear"] = _body("linear() { :; }")
+    session.functions["linear"] = "linear() { :; }"
     assert _out(
         handle_type(["-a", "linear"], session, make_registry(True))
     ) == (
@@ -168,7 +161,7 @@ def test_type_f_skips_functions_without_touching_the_session():
 
 def test_type_f_on_a_function_only_name_is_not_found():
     session = make_session()
-    session.functions["myfn"] = []
+    session.functions["myfn"] = "myfn() { :; }"
     out, io, _ = handle_type(["-f", "myfn"], session, make_registry())
     assert out is None
     assert io.exit_code == 1
@@ -236,8 +229,8 @@ def test_which_does_not_resolve_a_keyword():
 def test_which_does_not_resolve_a_function():
     # `which` searches PATH, which holds no function.
     session = make_session()
-    session.functions["then"] = []
-    session.functions["myfn"] = []
+    session.functions["then"] = "then() { :; }"
+    session.functions["myfn"] = "myfn() { :; }"
     for name in ("then", "myfn"):
         out, io, _ = handle_which([name], session, make_registry())
         assert out is None
@@ -259,7 +252,7 @@ def test_which_no_operands_exits_1():
 def test_which_a_prints_the_one_file_past_a_shadowing_function():
     # One directory on PATH, so one line; the function has no file.
     session = make_session()
-    session.functions["linear"] = []
+    session.functions["linear"] = "linear() { :; }"
     out, io, _ = handle_which(["-a", "linear"], session, make_registry(True))
     assert out.decode() == "/usr/bin/linear\n"
     assert io.exit_code == 0

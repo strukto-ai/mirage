@@ -240,7 +240,10 @@ async def alias_builtin(call: BuiltinCall) -> Result:
     return await handle_alias(
         list(call.argv.args),
         call.context.session,
-        (call.context.session._parse_current, call.row),
+        (
+            call.context.session._parse_current,
+            call.context.session._parse_row + call.row,
+        ),
     )
 
 

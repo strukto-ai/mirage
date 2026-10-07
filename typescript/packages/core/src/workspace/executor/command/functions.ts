@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { EvaluationContext } from '../../evaluation.ts'
-import { retainPrograms } from '../../../shell/parse/program.ts'
-import type { TSNodeLike } from '../../../shell/types.ts'
+import { parseFunction } from '../../../shell/helpers.ts'
+import type { ParseScope } from '../../../shell/parse/scope.ts'
 
 import type { ShellVar } from '../../../shell/variable.ts'
 import type { ByteSource } from '../../../io/types.ts'
@@ -44,7 +44,8 @@ import type { Result } from './types.ts'
 export async function executeShellFunction(
   executeNode: ExecuteNodeFn,
   cmdName: string,
-  body: unknown[],
+  source: string,
+  parser: ParseScope,
   restParts: readonly (string | PathSpec)[],
   context: EvaluationContext,
   stdin: ByteSource | null,
@@ -59,7 +60,14 @@ export async function executeShellFunction(
 ): Promise<Result> {
   const session = context.session
   // The body's statements read the caller's stdin in turn.
-  const releaseProgram = retainPrograms(body as TSNodeLike[])
+  const scope = parser.fork()
+  let body
+  try {
+    body = parseFunction(source, (line) => scope.parse(line))
+  } catch (error) {
+    scope.release()
+    throw error
+  }
   const bodyStdin = share(stdin)
   const cs = callStack ?? new CallStack()
   // Positional args carry the word as typed ($1 stays sub/a.txt).
@@ -80,6 +88,25 @@ export async function executeShellFunction(
   let mergedIo = new IOResult()
   let lastExec = new ExecutionNode({ command: cmdName, exitCode: 0 })
   const bound = fd0Binding(session)
+  // The body is parsed again from its source, so its rows restart at 0;
+  // it reads aliases at its definition, or as a parse of its own when it
+  // came from a stored session.
+  const outerParse: [number, number] = [session.parseCurrent, session.parseRow]
+  let site = session.functionSites.get(cmdName)
+  if (site !== undefined && site.source !== source) site = undefined
+  if (site === undefined) {
+    session.parseSeq += 1
+    ;[session.parseCurrent, session.parseRow] = [session.parseSeq, 0]
+  } else {
+    ;[session.parseCurrent, session.parseRow] = site.mark
+  }
+  // Its commands stand under the definition's place, on a hand-off of
+  // their own as every re-parse does, so two definitions of one text each
+  // need a nod and a second call runs on the first's.
+  const origin = site?.origin ?? null
+  const nested: HandOff | null =
+    handed !== null && origin !== null ? { claimed: [], parent: handed, origin } : null
+  const bodyHanded = nested ?? handed
 
   try {
     // The body is shell code: the builtins it runs are the shell's,
@@ -87,11 +114,16 @@ export async function executeShellFunction(
     await runAsShell(async () => {
       for (const cmd of body) {
         try {
-          const cmdNode = cmd as Parameters<ExecuteNodeFn>[0]
+          const cmdNode = cmd
           const [rawStdout, io, execNode] = await runStatement(
-            sink === undefined
+            sink === undefined && nested === null
               ? executeNode
-              : (n, s, i, c, opts) => executeNode(n, s, i, c, { sink, ...opts }),
+              : (n, s, i, c, opts) =>
+                  executeNode(n, s, i, c, {
+                    ...(sink === undefined ? {} : { sink }),
+                    ...(nested === null ? {} : { handed: nested }),
+                    ...opts,
+                  }),
             cmdNode,
             context,
             bodyStdin,
@@ -99,7 +131,7 @@ export async function executeShellFunction(
             cs,
             jobTable,
             agentId,
-            handed,
+            bodyHanded,
             decisions,
           )
           // $? tracks each statement inside the body, so a bare `return`
@@ -132,7 +164,9 @@ export async function executeShellFunction(
       }
     })
   } finally {
-    releaseProgram()
+    ;[session.parseCurrent, session.parseRow] = outerParse
+    if (nested !== null && decisions !== null) decisions.handUp(session.sessionId, nested)
+    scope.release()
     cs.pop()
     if (session.functionNames !== null) session.functionNames = outerNames
     restoreLocals(session, savedLocals)

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ParseScope } from '../../shell/parse/scope.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -312,6 +313,7 @@ export async function executeDeclaration(
   registry: MountRegistry,
   namespace: Namespace,
   callStack: CallStack | null,
+  parser?: ParseScope,
 ): Promise<Result> {
   const session = context.session
   const keyword = getDeclarationKeyword(node)
@@ -419,7 +421,7 @@ export async function executeDeclaration(
     // `-f`/`-F` select functions, not variables: `-rf` freezes, `-f
     // NAME` prints the body, `-F NAME` prints the name, and a missing
     // name is exit 1 without a word.
-    return handleDeclareFunctions(cmdWord, session, flagChars, assignments)
+    return handleDeclareFunctions(cmdWord, session, flagChars, assignments, parser)
   }
   const isReadonly = keyword === 'readonly' || flagChars.has('r')
   // `-l` and `-u` cannot both hold; a cluster naming both sets neither

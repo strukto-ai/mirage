@@ -178,6 +178,8 @@ async def test_manager_hydrates_from_store():
             "env": {"K": "v"},
             "created_at": 1.0,
             "mount_modes": {"/data": "read"},
+            "functions": {"f": "f() { echo persisted; }"},
+            "readonly_functions": ["f"],
         },
     )
     mgr = SessionManager("default", store=store)
@@ -186,6 +188,8 @@ async def test_manager_hydrates_from_store():
     assert s.cwd == "/w"
     assert s.env == {"K": "v", "PWD": "/w", "PATH": "/usr/bin", "IFS": " \t\n"}
     assert s.mount_modes == {"/data": MountMode.READ}
+    assert s.functions == {"f": "f() { echo persisted; }"}
+    assert s.readonly_functions == {"f"}
 
 
 @pytest.mark.asyncio
@@ -203,10 +207,19 @@ async def test_manager_hydration_local_wins():
 async def test_manager_default_adopts_stored_fields():
     store = RAMSessionStore()
     await store.set(
-        "default", {"session_id": "default", "cwd": "/w", "env": {"A": "1"}}
+        "default",
+        {
+            "session_id": "default",
+            "cwd": "/w",
+            "env": {"A": "1"},
+            "functions": {"f": "f() { :; }"},
+            "readonly_functions": ["f"],
+        },
     )
     mgr = SessionManager("default", store=store)
     await mgr.ensure_loaded()
+    assert mgr.get("default").functions == {"f": "f() { :; }"}
+    assert mgr.get("default").readonly_functions == {"f"}
     assert mgr.cwd == "/w"
     assert mgr.env == {
         "A": "1",

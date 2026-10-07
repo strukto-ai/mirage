@@ -195,6 +195,17 @@ backend, CLI or package belongs in the filter that tests it, a module joins
 the drop list only when nothing kept imports it, and a runtime case that
 starts mounting a dropped backend takes that name off the list.
 
+The CLI snapshot smoke also runs the shared
+`function_sources_survive_snapshot_restore` lifecycle case in fresh Python
+and TypeScript processes, in both directions. It checks function calls,
+heredocs, redirects, nested definitions, jobs, printing, redefinition and
+readonly enforcement after restoration. The CLI workflow therefore includes
+`integ/lifecycle/cases.json` in its path filter. Functions persist as source
+through the existing session record; parser trees and running work remain
+local to execution. The existing Redis/S3 state-store handoff also checks
+functions and readonly metadata in both default and named sessions across
+languages. This does not resume a running job on another worker.
+
 `integ-hosting` runs `hosting/cases.json` against real FastAPI and Fastify
 listeners in child processes. It checks parallel foreground HTTP requests,
 same-session queueing, independent sessions and workspaces, health responses,

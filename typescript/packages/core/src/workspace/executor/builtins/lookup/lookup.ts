@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ParseScope } from '../../../../shell/parse/scope.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
@@ -55,6 +56,7 @@ export function handleType(
   args: readonly string[],
   session: SessionState,
   registry: MountRegistry,
+  parser?: ParseScope,
 ): Result {
   const scan = scanOptions(args, TYPE_OPTIONS)
   if (scan.bad !== null) return optionError('type', scan.bad, TYPE_USAGE, 'bash: ')
@@ -79,7 +81,7 @@ export function handleType(
     if (mode === 't') outLines.push(...kinds.map((kind) => `${kind}\n`))
     else if (mode === 'p') {
       for (const kind of kinds) if (kind === NameKind.FILE) outLines.push(`${programFile(name)}\n`)
-    } else outLines.push(...kinds.map((kind) => `${describe(name, kind, session)}\n`))
+    } else outLines.push(...kinds.map((kind) => `${describe(name, kind, session, parser)}\n`))
   }
   const out = outLines.length > 0 ? encodeText(outLines.join('')) : null
   const err = encodeText(errLines.join(''))
@@ -134,7 +136,9 @@ export function handleWhich(
 
 /** The `type` arm. */
 export function typeBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(handleType([...call.argv.args], call.context.session, call.registry))
+  return Promise.resolve(
+    handleType([...call.argv.args], call.context.session, call.registry, call.parser),
+  )
 }
 
 /** The `which` arm. */

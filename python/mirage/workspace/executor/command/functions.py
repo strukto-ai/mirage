@@ -26,8 +26,9 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
 from mirage.shell.errors import ReturnSignal
+from mirage.shell.helpers import parse_function
 from mirage.shell.job_table import JobTable
-from mirage.shell.parse.program import retain_programs
+from mirage.shell.parse.scope import ParseScope
 from mirage.shell.variable import ShellVar
 from mirage.types import PathSpec, word_text
 from mirage.workspace.evaluation import EvaluationContext
@@ -77,8 +78,12 @@ async def run_shell_function(
             finishes, None to return the body's output.
     """
     session = context.session
-    func_body = session.functions[cmd_name]
-    release_program = retain_programs(func_body)
+    scope = ParseScope()
+    try:
+        func_body = parse_function(session.functions[cmd_name], scope.parse)
+    except BaseException:
+        scope.release()
+        raise
     if sink is not None:
         execute_node = partial(execute_node, sink=sink)
     # The body's statements read the caller's stdin in turn.
@@ -102,6 +107,31 @@ async def run_shell_function(
     # The body is shell code: the builtins it runs are the shell's,
     # whatever `xargs` or `env` marked the line that called it.
     marked = clear_program_invocation()
+    # The body is parsed again from its source, so its rows restart at
+    # 0; it reads aliases at its definition, or as a parse of its own
+    # when it came from a stored session.
+    outer_parse = (session._parse_current, session._parse_row)
+    site = session._function_sites.get(cmd_name)
+    if site is not None and site.source != session.functions[cmd_name]:
+        site = None
+    if site is None:
+        session._parse_seq += 1
+        mark = (session._parse_seq, 0)
+    else:
+        mark = site.mark
+    session._parse_current, session._parse_row = mark
+    # Its commands stand under the definition's place, on a hand-off of
+    # their own as every re-parse does, so two definitions of one text
+    # each need a nod and a second call runs on the first's.
+    origin = site.origin if site is not None else None
+    nested = (
+        HandOff(parent=handed, origin=origin)
+        if handed is not None and origin is not None
+        else None
+    )
+    body_handed = nested if nested is not None else handed
+    if nested is not None:
+        execute_node = partial(execute_node, handed=nested)
     try:
         all_stdout: list[Any] = []
         merged_io = IOResult()
@@ -118,7 +148,7 @@ async def run_shell_function(
                     cs,
                     job_table,
                     agent_id,
-                    handed,
+                    body_handed,
                     decisions,
                 )
             except ReturnSignal as sig:
@@ -154,7 +184,10 @@ async def run_shell_function(
         last_exec.exit_code = merged_io.exit_code
         return combined, merged_io, last_exec
     finally:
-        release_program()
+        session._parse_current, session._parse_row = outer_parse
+        if nested is not None and decisions is not None:
+            decisions.hand_up(session.session_id, nested)
+        scope.release()
         reset_program_invocation(marked)
         cs.pop()
         if session.function_names is not None:

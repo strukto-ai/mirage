@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.shell.constants import BIN_PREFIX
-from mirage.shell.printer import function_text
+from mirage.shell.printer import stored_function_text
 from mirage.workspace.executor.builtins.lookup.constants import DESCRIPTIONS
 from mirage.workspace.executor.builtins.lookup.types import NameKind
 from mirage.workspace.lookup import Consumer, lookup, lookup_all, program
@@ -172,7 +172,7 @@ def describe(
     ):
         return (
             f"{name} is a function\n"
-            f"{function_text(name, session.functions[name])}"
+            f"{stored_function_text(name, session.functions[name])}"
         )
     if kind is NameKind.FILE:
         return f"{name} is {program_file(name)}"

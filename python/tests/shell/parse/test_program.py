@@ -5,16 +5,13 @@ import pytest
 from mirage.shell.helpers import get_function_body
 from mirage.shell.parse.parse import parse_program
 from mirage.shell.parse.program import retain_programs
-from mirage.workspace.session.functions import FunctionTable
 
 
-def test_function_and_invocation_retain_the_defining_program():
+def test_invocation_retains_its_parsed_program():
     program = parse_program("f() { echo hello; } 2>/dev/null")
     body = get_function_body(program.root.named_children[0])
-    functions = FunctionTable({"f": body})
     invoke = retain_programs(body)
     program.release()
-    del functions["f"]
     assert b"echo hello" in body[0].text
     assert program.references == 1
     invoke()

@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { runWithEvaluation, type EvaluationContext, childContext } from '../evaluation.ts'
-import { releaseFunctions } from '../session/functions.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 
 import { ExecutionScope } from '../execution.ts'
@@ -45,7 +44,7 @@ import {
   getCaseWord,
   getCforParts,
   getForParts,
-  getFunctionBody,
+  getFunctionSource,
   getFunctionName,
   getIfBranches,
   getListParts,
@@ -101,6 +100,7 @@ import { executeAssignment } from './assignment.ts'
 import { executeDeclaration } from './declaration.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { HandOff } from '../../policy/types.ts'
+import { definedAt } from './occurrence.ts'
 import type { SessionView } from '../../ops/types.ts'
 import {
   ensureVarVisible,
@@ -1220,19 +1220,15 @@ async function executeNodeBody(
         },
       })
     } catch (error) {
-      releaseFunctions(child.session.functions)
       if ((error as { code?: unknown }).code === 'EAGAIN')
         throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
       throw error
     }
     child.session.processId = process.info.pid
-    try {
-      await process.task
-      if (result === undefined) throw new Error('subshell completed without a result')
-      return result
-    } finally {
-      releaseFunctions(child.session.functions)
-    }
+
+    await process.task
+    if (result === undefined) throw new Error('subshell completed without a result')
+    return result
   }
 
   if (kind === NodeKind.COMPOUND && node.children[0]?.type === NT.ARITH_OPEN) {
@@ -1573,14 +1569,27 @@ async function executeNodeBody(
         new ExecutionNode({ command: `function ${name}`, exitCode: 1, stderr: err }),
       ]
     }
-    const body = getFunctionBody(node)
-    session.functions[name] = body
+    const source = getFunctionSource(node)
+    session.functions[name] = source
+    session.functionSites.set(name, {
+      source,
+      mark: [session.parseCurrent, session.parseRow + (node.startPosition?.row ?? 0)],
+      origin: definedAt(node, deps.handed ?? null),
+    })
     return [null, new IOResult(), new ExecutionNode({ command: `function ${name}`, exitCode: 0 })]
   }
 
   if (kind === NodeKind.DECLARATION) {
     return await runInCommandScope(() =>
-      executeDeclaration(node, context, executeFn, registry, deps.namespace, callStack),
+      executeDeclaration(
+        node,
+        context,
+        executeFn,
+        registry,
+        deps.namespace,
+        callStack,
+        deps.parser,
+      ),
     )
   }
 

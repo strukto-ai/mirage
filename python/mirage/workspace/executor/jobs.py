@@ -201,7 +201,6 @@ async def handle_background(
 
     def release_job(_: asyncio.Task[Any] | None = None) -> None:
         release_program()
-        bg_session.functions.clear()
 
     inherit_exit_trap(bg_session)
     output = session.job_output or session.tty.jobs

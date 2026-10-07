@@ -695,6 +695,7 @@ async def test_a_grant_does_not_outlive_a_line_that_fails_before_it_runs(
         "until sleep 0.2 && cat /data/secret.txt & do echo no; done",
         "{ sleep 0.2 && cat /data/secret.txt & }",
         "f() { sleep 0.2 && cat /data/secret.txt & }; f",
+        "echo λ🙂; f() { sleep 0.2 && cat /data/secret.txt & }; f",
         "eval 'sleep 0.2 && cat /data/secret.txt &'",
         "eval \"eval 'sleep 0.2 && cat /data/secret.txt &'\"",
     ],

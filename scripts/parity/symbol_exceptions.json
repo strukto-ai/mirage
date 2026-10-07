@@ -330,13 +330,6 @@
     "parse_program": "Python exposes the native singleton entry point as a module function; TypeScript exposes parseProgram on the asynchronously created ShellParser instance."
    }
   },
-  "workspace/session/functions": {
-   "typescript_only": {
-    "collected": "The JavaScript function record is a Proxy whose leases live in a WeakMap and are closed through releaseFunctions, with a FinalizationRegistry fallback. Python uses FunctionTable.clear and an instance-owned weakref.finalize.",
-    "leases": "The JavaScript function record is a Proxy whose leases live in a WeakMap and are closed through releaseFunctions, with a FinalizationRegistry fallback. Python uses FunctionTable.clear and an instance-owned weakref.finalize.",
-    "releaseFunctions": "The JavaScript function record is a Proxy whose leases live in a WeakMap and are closed through releaseFunctions, with a FinalizationRegistry fallback. Python uses FunctionTable.clear and an instance-owned weakref.finalize."
-   }
-  },
   "workspace/node/explain": {
    "typescript_only": {
     "Scope": "explainedLine groups judgments by the scope they were evaluated from; Python keys a dict by (parent occurrence, text), which needs no named shape.",

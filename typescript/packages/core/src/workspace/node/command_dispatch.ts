@@ -176,7 +176,10 @@ export async function executeCommand(
     headNode.namedChildren[0]?.type === NT.WORD
   ) {
     const head = getText(headNode)
-    const mark: AliasMark = [session.parseCurrent, node.startPosition?.row ?? 0]
+    const mark: AliasMark = [
+      session.parseCurrent,
+      session.parseRow + (node.startPosition?.row ?? 0),
+    ]
     const source = getText(node)
     const base = node.startIndex ?? 0
     const rest = source.slice((headNode.endIndex ?? 0) - base)
@@ -358,6 +361,7 @@ export async function executeCommand(
       handed,
       seedPrefix,
       sink,
+      parser,
     )
   } finally {
     const frames = session.localFrames
@@ -398,6 +402,7 @@ async function runCommandBody(
   handed?: HandOff,
   seedPrefix?: (command: string) => void,
   sink?: JobConsole,
+  parser?: ParseScope,
 ): Promise<Result> {
   const session = context.session
   const stdin = stdinIn
@@ -507,6 +512,7 @@ async function runCommandBody(
         claimant,
         sink,
         redirectOpenerFor(node),
+        parser,
       ),
       timeout,
       argv.name !== '' ? argv.name : '?',
@@ -588,6 +594,7 @@ async function runArgv(
   sink?: JobConsole,
   // Opens the redirect targets once the line is admitted.
   opener: RedirectOpener | null = null,
+  parser?: ParseScope,
 ): Promise<Result> {
   const session = context.session
   const name = argv.name
@@ -691,6 +698,7 @@ async function runArgv(
       agentId,
       claimant?.line ?? null,
       sink,
+      parser,
     )
   const gated = admitted
   if (gated === null) return runWithOpPolicies(registry.policies, route)
@@ -738,6 +746,7 @@ async function routeArgv(
   agentId: string,
   handed: HandOff | null,
   sink?: JobConsole,
+  parser?: ParseScope,
 ): Promise<Result> {
   const session = context.session
   // The half of `runArgv` past the gate, split out so the gate's verdict
@@ -805,6 +814,7 @@ async function routeArgv(
       registry,
       namespace,
       executeFn,
+      ...(parser === undefined ? {} : { parser }),
       ...(sink === undefined ? {} : { sink }),
       ...(jobTable === null ? {} : { jobTable }),
     })
@@ -950,6 +960,7 @@ async function routeArgv(
     handed ?? null,
     signal,
     sink,
+    parser,
   )
 
   if (io.exitCode === 0 && namespace.nodes.size > 0) {

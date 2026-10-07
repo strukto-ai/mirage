@@ -163,7 +163,6 @@ async def handle_exec_path(
             )
         finally:
             reset_program_invocation(token)
-            session.functions.clear()
             reset_current_evaluation(child_token)
     words = shebang_words(script)
     interp = words[0] if words else "sh"

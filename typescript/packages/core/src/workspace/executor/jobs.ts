@@ -14,7 +14,6 @@
 
 import { childContext, runWithEvaluation, type EvaluationContext } from '../evaluation.ts'
 import { retainPrograms } from '../../shell/parse/program.ts'
-import { releaseFunctions } from '../session/functions.ts'
 
 import { ExecutionScope } from '../execution.ts'
 import type { SharedInput } from '../../io/async_line_iterator.ts'
@@ -264,7 +263,7 @@ export async function handleBackground(
       return await (asyncContextIsolatesTasks ? runWithEvaluation(childEvaluation, body) : body())
     } finally {
       releaseProgram()
-      releaseFunctions(bgSession.functions)
+
       if (jobHanded !== null && decisions !== null) {
         await decisions.revoke(session.sessionId, jobHanded)
       }
@@ -288,7 +287,7 @@ export async function handleBackground(
     })
   } catch (err) {
     releaseProgram()
-    releaseFunctions(bgSession.functions)
+
     // A submission that fails (a console the table cannot build, a
     // session at its process cap) starts no runner, so nothing would ever
     // revoke the job's hand-off: its grants would stay reserved for good,

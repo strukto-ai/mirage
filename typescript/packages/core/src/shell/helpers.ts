@@ -16,6 +16,8 @@ import { expandTilde } from '../utils/path.ts'
 import { encodeText } from './bytes.ts'
 import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from './constants.ts'
 import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from './escapes.ts'
+import { ProgramNode } from './parse/program.ts'
+import { HeredocNode } from './parse/heredoc/node.ts'
 import { bodyPrefix, cleanDelimiter, delimiterQuoted } from './parse/heredoc/index.ts'
 import type { PipelineStages, TSNodeLike } from './types.ts'
 import { NodeType as NT, ProcessSubDirection, Redirect, RedirectKind } from './types.ts'
@@ -962,6 +964,76 @@ export function getFunctionRedirects(node: TSNodeLike): TSNodeLike[] {
     redirects.push(...outer.namedChildren.slice(1).filter((c) => REDIRECT_NODE_TYPES.has(c.type)))
   }
   return redirects
+}
+
+/**
+ * Where a node's own words end in the original source. A heredoc redirect
+ * ends at its delimiter word: the lowering folds the body into the
+ * redirect's span, and the body sits after whatever else the line goes on
+ * to say.
+ */
+function syntaxEnd(node: TSNodeLike, offsets: readonly number[] | undefined): number {
+  if (node.heredoc !== undefined) return node.heredoc.wordEnd
+  if (node.children.length > 0) {
+    let end = 0
+    for (const child of node.children) end = Math.max(end, syntaxEnd(child, offsets))
+    return end
+  }
+  const startIndex = node.startIndex ?? 0
+  const endIndex = node.endIndex ?? startIndex
+  if (endIndex > startIndex) return (offsets?.[endIndex - 1] ?? endIndex - 1) + 1
+  return offsets?.[startIndex] ?? startIndex
+}
+
+/** The definition's source, including redirects and heredoc bodies. */
+export function getFunctionSource(node: TSNodeLike): string {
+  const source = node.parent?.type === NT.REDIRECTED_STATEMENT ? node.parent : node
+  if (source.startIndex === undefined || source.endIndex === undefined)
+    return source.sourceText ?? source.text
+  let root = source
+  while (root.parent != null) root = root.parent
+  const original =
+    source instanceof ProgramNode ? source.program.original : (root.sourceText ?? root.text)
+  const offsets =
+    source instanceof ProgramNode
+      ? source.program.offsets
+      : root instanceof HeredocNode
+        ? root.offsets
+        : undefined
+  const start = offsets?.[source.startIndex] ?? source.startIndex
+  const end = syntaxEnd(source, offsets)
+  let text = original.slice(start, end)
+  // A heredoc can follow the closing brace and other commands; copy only its body and delimiter.
+  const documents = new Map<number, number>()
+  const pending = [source]
+  for (;;) {
+    const current = pending.pop()
+    if (current === undefined) break
+    const doc = current.heredoc
+    if (doc !== undefined && doc.bodyStart >= end) documents.set(doc.bodyStart, doc.end)
+    pending.push(...current.namedChildren)
+  }
+  if (documents.size > 0)
+    text +=
+      '\n' +
+      [...documents]
+        .sort(([a], [b]) => a - b)
+        .map(([begin, stop]) => original.slice(begin, stop))
+        .join('')
+  return text
+}
+
+/** Parse one stored definition inside the caller's owned parse scope. */
+export function parseFunction(source: string, parse: (source: string) => TSNodeLike): TSNodeLike[] {
+  const nodes = parse(source).namedChildren.filter((node) => node.type !== NT.COMMENT)
+  let node = nodes.length === 1 ? nodes[0] : undefined
+  if (node?.type === NT.REDIRECTED_STATEMENT) node = node.namedChildren[0]
+  if (node?.type !== NT.FUNCTION_DEFINITION) {
+    throw new Error('stored function must contain one definition')
+  }
+  const body = getFunctionBody(node)
+  if (body === null) throw new Error('function definition has no body')
+  return body
 }
 
 export function getFunctionBody(node: TSNodeLike): TSNodeLike[] | null {

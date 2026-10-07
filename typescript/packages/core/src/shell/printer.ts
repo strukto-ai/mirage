@@ -19,7 +19,9 @@ import {
   getForParts,
   getFunctionRedirects,
   getText,
+  parseFunction,
 } from './helpers.ts'
+import type { ParseScope } from './parse/scope.ts'
 import { BASH_KEYWORDS } from './parse/constants.ts'
 import { delimiterEnd } from './parse/heredoc/reader.ts'
 import type { Heredoc } from './parse/heredoc/types.ts'
@@ -38,6 +40,20 @@ const RESERVED: ReadonlySet<string> = new Set([
   'time',
   'coproc',
 ])
+
+/** Render a portable definition without keeping its parsed tree. */
+export function storedFunctionText(name: string, source: string, parser?: ParseScope): string {
+  if (parser === undefined) throw new Error('function rendering requires a parse scope')
+  const scope = parser.fork()
+  try {
+    return functionText(
+      name,
+      parseFunction(source, (line) => scope.parse(line)),
+    )
+  } finally {
+    scope.release()
+  }
+}
 
 /**
  * A function as `declare -f` and `type` print it. bash prints its own
@@ -97,7 +113,14 @@ class Printer {
           : this.command(body, inner)
     const keyword = indent !== '' || RESERVED.has(name)
     const head = `${keyword ? 'function ' : ''}${name} () \n`
-    return `${head}${indent}{ \n${inner}${text}\n${indent}}${this.redirects(getFunctionRedirects(node))}`
+    let out = `${head}${indent}{ \n${inner}${text}\n${indent}}${this.redirects(getFunctionRedirects(node))}`
+    // The definition's own heredocs follow its line, as bash prints them;
+    // a nested definition's wait for the statement it ends.
+    if (indent === '' && this.deferred.length > 0) {
+      out += '\n' + this.deferred.join('')
+      this.deferred = []
+    }
+    return out
   }
 
   /**

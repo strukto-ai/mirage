@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { retainPrograms } from '../../../../shell/parse/program.ts'
-import type { TSNodeLike } from '../../../../shell/types.ts'
+import type { ParseScope } from '../../../../shell/parse/scope.ts'
 
 import { IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
@@ -47,6 +46,7 @@ function probe(
   rest: readonly string[],
   session: SessionState,
   registry: MountRegistry,
+  parser?: ParseScope,
 ): Result {
   const outLines: string[] = []
   const errLines: string[] = []
@@ -62,7 +62,7 @@ function probe(
     // is not just the name.
     const line =
       mode === 'V'
-        ? describe(name, kind, session)
+        ? describe(name, kind, session, parser)
         : kind === NameKind.ALIAS
           ? `alias ${name}=${singleQuote(sessionEntry(session.aliases, name) ?? '')}`
           : kind === NameKind.FILE
@@ -102,6 +102,7 @@ export async function handleCommandBuiltin(
   // bash, so an `exit` in it ends the shell and a `return` the function.
   // Null runs the target as a line of its own.
   callStack: CallStack | null = null,
+  parser?: ParseScope,
 ): Promise<Result> {
   const scan = scanOptions(args, 'pvV')
   if (scan.bad !== null) {
@@ -114,7 +115,7 @@ export async function handleCommandBuiltin(
   }
   const mode = lastOf(scan.letters, 'vV')
   const rest = scan.operands
-  if (mode !== null) return probe(mode, rest, session, registry)
+  if (mode !== null) return probe(mode, rest, session, registry, parser)
   if (rest.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: 'command', exitCode: 0 })]
   }
@@ -124,7 +125,6 @@ export async function handleCommandBuiltin(
   // Function bodies are never undefined, so a defined captured value means
   // a shadowing function was masked and must be restored after the run.
   const savedFn = session.functions[innerName]
-  const releaseProgram = retainPrograms(Array.isArray(savedFn) ? (savedFn as TSNodeLike[]) : [])
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
   delete session.functions[innerName]
   // An alias is masked the same way: bash expands an alias only as a
@@ -142,7 +142,6 @@ export async function handleCommandBuiltin(
     return [io.stdout, io, new ExecutionNode({ command: 'command', exitCode: io.exitCode })]
   } finally {
     if (savedFn !== undefined) session.functions[innerName] = savedFn
-    releaseProgram()
     if (savedAlias !== undefined) session.aliases[innerName] = savedAlias
   }
 }
@@ -156,5 +155,6 @@ export async function commandBuiltin(call: BuiltinCall): Promise<Result> {
     call.registry,
     call.stdin,
     call.callStack,
+    call.parser,
   )
 }

@@ -174,7 +174,10 @@ async def execute_command(
     ):
         head_node = parts[0]
         head = get_text(head_node)
-        mark = (session._parse_current, node.start_point[0])
+        mark = (
+            session._parse_current,
+            session._parse_row + node.start_point[0],
+        )
         source = node.text or b""
         base = node.start_byte
         rest = decode_text(source[head_node.end_byte - base :])

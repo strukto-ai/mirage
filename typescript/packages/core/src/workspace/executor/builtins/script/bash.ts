@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type EvaluationContext, childContext } from '../../../evaluation.ts'
-import { releaseFunctions } from '../../../session/functions.ts'
 
 import { runAsShell } from '../../../../context/session_context.ts'
 import { materialize, IOResult } from '../../../../io/types.ts'
@@ -180,27 +179,24 @@ export async function handleBash(
   // `wait` see only them, its EXIT action's included, and they are not its
   // caller's.
   const jobs = jobTable === undefined ? {} : { jobTable: jobTable.child() }
-  let io
   // A nested shell is a program of its own: the builtins it runs are its
   // builtins again, whatever `find -exec` marked the outer line.
-  try {
-    io = await runAsShell(async () =>
-      finishShell(
-        (action, opts) => executeFn(action, { ...opts, ...jobs, context }),
-        session,
-        await executeFn(script, {
-          context,
-          sessionId: session.sessionId,
-          stdin,
-          ...(sink === undefined ? {} : { sink }),
-          ...jobs,
-        }),
+
+  const io = await runAsShell(async () =>
+    finishShell(
+      (action, opts) => executeFn(action, { ...opts, ...jobs, context }),
+      session,
+      await executeFn(script, {
+        context,
+        sessionId: session.sessionId,
         stdin,
-      ),
-    )
-  } finally {
-    releaseFunctions(session.functions)
-  }
+        ...(sink === undefined ? {} : { sink }),
+        ...jobs,
+      }),
+      stdin,
+    ),
+  )
+
   const label = parsed.path !== null ? `${name} ${parsed.path}` : `${name} -c ${script}`
   return [io.stdout, io, new ExecutionNode({ command: label, exitCode: io.exitCode })]
 }

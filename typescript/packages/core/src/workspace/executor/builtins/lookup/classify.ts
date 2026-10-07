@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { storedFunctionText } from '../../../../shell/printer.ts'
+import type { ParseScope } from '../../../../shell/parse/scope.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import { BASH_BUILTINS, KEYWORDS } from '../../../lookup/constants.ts'
 import { lookup, lookupAll, program } from '../../../lookup/lookup.ts'
@@ -19,8 +21,6 @@ import { Consumer } from '../../../lookup/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { BIN_PREFIX } from '../../../../shell/constants.ts'
 import { DESCRIPTIONS } from './constants.ts'
-import { functionText } from '../../../../shell/printer.ts'
-import type { TSNodeLike } from '../../../../shell/types.ts'
 import { NameKind } from './types.ts'
 import { sessionEntry } from '../../../session/session.ts'
 
@@ -124,13 +124,18 @@ export function programFile(name: string): string {
  * is followed by its body as `declare -f` prints it. `session` is needed to
  * read an alias's value and a function's body; every other kind renders from
  * the name alone. */
-export function describe(name: string, kind: NameKind, session?: SessionState): string {
+export function describe(
+  name: string,
+  kind: NameKind,
+  session?: SessionState,
+  parser?: ParseScope,
+): string {
   if (kind === NameKind.ALIAS && session !== undefined) {
     return `${name} is aliased to \`${sessionEntry(session.aliases, name) ?? ''}'`
   }
   const body = session === undefined ? undefined : sessionEntry(session.functions, name)
   if (kind === NameKind.FUNCTION && body !== undefined)
-    return `${name} is a function\n${functionText(name, body as TSNodeLike[])}`
+    return `${name} is a function\n${storedFunctionText(name, body, parser)}`
   if (kind === NameKind.FILE) return `${name} is ${programFile(name)}`
   return `${name} is ${DESCRIPTIONS[kind] ?? ''}`
 }
