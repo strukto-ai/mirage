@@ -311,8 +311,8 @@ export function builtinError(name: string, message: string): Uint8Array {
 }
 
 /**
- * The words a numeric builtin reads: a leading `--` ends its options, as
- * bash's `get_numeric_arg` skips it. Mirrors Python's numeric_operands.
+ * The words a numeric builtin reads: a leading `--` ends its options, and
+ * bash skips it before it reads the number. Mirrors Python's numeric_operands.
  */
 export function numericOperands(args: readonly string[]): readonly string[] {
   return args[0] === '--' ? args.slice(1) : args

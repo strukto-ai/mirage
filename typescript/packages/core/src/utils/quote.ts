@@ -205,8 +205,8 @@ export function shellQuote(name: string): string {
   return shellQuoteAlways(name)
 }
 
-// Wrap text so bash reads it back as exactly one word: bash's own
-// sh_single_quote, always the 'text' form, with an embedded quote spelled
+// Wrap text so bash reads it back as exactly one word: the quoting bash
+// itself writes, always the 'text' form, with an embedded quote spelled
 // '\'' and every other character, newlines included, left as itself. This
 // is not shellQuoteAlways, which is GNU's diagnostic rendering and may
 // answer with the "text" form or a $'...' group; bash uses this one

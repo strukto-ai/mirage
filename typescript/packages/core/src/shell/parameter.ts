@@ -41,9 +41,9 @@ export function scanParameter(text: string, start: number): [string, number] | n
   return [name, end]
 }
 
-// What bash's parameter_brace_expand (subst.c) reads a braced name against:
-// what ends a name, what ends one after a special parameter, the specials a
-// `#` measures and a `!` follows, the special parameters themselves, the
+// What bash reads a braced name against when it expands `${...}`: what ends
+// a name, what ends one after a special parameter, the specials a `#`
+// measures and a `!` follows, the special parameters themselves, the
 // operators a `:` arms, and what may follow a name.
 const NAME_ENDS = '#%^,~:-=?+/@}'
 const SPECIAL_ENDS = '#%:-=?+/@}'
@@ -62,9 +62,9 @@ const DIGITS = /^[0-9]+$/
  * reports `bad substitution` for a name that is no identifier, positional or
  * special parameter (`${a b}`, `${ a}`, `${}`), an element reference that is
  * not one whole (`${a[1]x}`), a `#` measuring more than a name (`${#a-x}`),
- * or a name followed by anything but an operator (`${a:}`, `${a*}`). This
- * follows `parameter_brace_expand` in subst.c, so `${!a b*}`, which bash
- * reads as a prefix, passes as it does there. `text` runs from `${` through
+ * or a name followed by anything but an operator (`${a:}`, `${a*}`). The
+ * braces are read as bash reads them, so `${!a b*}`, which bash reads as a
+ * prefix, passes here as it does in bash. `text` runs from `${` through
  * its closing `}`. Mirrors Python's bad_substitution.
  */
 export function badSubstitution(text: string): boolean {

@@ -368,7 +368,7 @@ describe('history recording boundaries (GNU line-reader semantics)', () => {
   })
 
   // bash 5.2 adds a line to history only when it is non-empty
-  // (`shell_input_line[0]`): a blank line is never recorded, while a
+  // (anything before its newline): a blank line is never recorded, while a
   // whitespace-only or comment-only line is. Pinned in debian:stable-slim
   // with `printf 'echo one\n\n   \n# comment\n' | bash -i; history -w`.
   it('a blank line is not recorded but whitespace and comments are', async () => {
