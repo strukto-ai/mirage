@@ -27,6 +27,7 @@ import {
   CLOSING_WORDS,
   COMPOUND_OPENERS,
   EXTGLOB_OPENERS,
+  MAX_NESTING,
   NAME_CHARS,
   NAME_START,
   NEAR_TEXT_STOPS,
@@ -58,6 +59,13 @@ interface Token {
   readonly end: number
   readonly plain: boolean
   readonly assign: boolean
+}
+
+interface Heredoc {
+  readonly at: number
+  readonly delimiter: string
+  readonly strip: boolean
+  readonly quoted: boolean
 }
 
 function token(
@@ -111,7 +119,8 @@ class TestFailure extends Error {
  * Status 1 is an array assignment bash cannot read; bash discards that line
  * and reads on from the next, where a later error's status wins. Status 127
  * is a command or process substitution whose body bash cannot parse. A line
- * nested deeper than the reader can recurse is left to the grammar (`null`).
+ * nested deeper than the reader goes (`MAX_NESTING` constructs, or the host's
+ * own stack) is refused, as bash refuses one nested past its reader.
  *
  * `aliases` are the names the shell would expand where a command starts; a
  * closing reserved word among them is a command there. `own` maps each alias
@@ -128,8 +137,8 @@ export function checkSyntax(
   try {
     found = new LineReader(command, aliases, own).refusals()
   } catch (err) {
-    if (err instanceof RangeError) return null
-    throw err
+    if (!(err instanceof RangeError)) throw err
+    found = [new Refusal(['syntax error: nesting too deep'], 2, '', 0, 0, false)]
   }
   const first = found[0]
   const last = found.at(-1)
@@ -159,7 +168,9 @@ export function syntaxErrorResult(found: SyntaxDiagnostic): IOResult {
  * word expands (a bad substitution), a `[` test's arguments by that builtin,
  * and a `$(...)` body as the line it runs as; the words of an associative
  * subscript may hold blanks, and the grammar recovers a quoted heredoc's last
- * line and a `for` header's `in` as errors of its own.
+ * line and a `for` header's `in` as errors of its own, and the `;` it misses
+ * between a compound command and the reserved word closing around it
+ * (`{ { a; } }`) as a missing token.
  */
 export function findSyntaxIssue(node: TSNodeLike): SyntaxDiagnostic | null {
   if (node.type === 'expansion' || !node.hasError) return null
@@ -174,7 +185,7 @@ export function findSyntaxIssue(node: TSNodeLike): SyntaxDiagnostic | null {
       child.children.every((part) => part.type === 'word' && !part.hasError)
     )
       continue
-    if (child.isMissing) return issue(child)
+    if (child.isMissing && child.type !== ';') return issue(child)
     if (
       child.type === 'ERROR' &&
       isStructuralError(child) &&
@@ -331,7 +342,7 @@ function trailingBackslashes(text: string): number {
 type ReaderState = readonly [
   number,
   readonly [number, number, Token] | null,
-  [string, boolean, boolean][],
+  readonly Heredoc[],
   boolean,
 ]
 
@@ -350,11 +361,14 @@ class LineReader {
   private limit: number | null = null
   private floor = 0
   private frames: string[] = []
-  private heredocs: [string, boolean, boolean][] = []
+  private heredocs: readonly Heredoc[] = []
   private peeked: readonly [number, number, Token] | null = null
   private after = false
   private matching = false
   private depth = 0
+  private nesting = 0
+  private braces = 0
+  private readonly subs = new Map<string, readonly [number, readonly Heredoc[]]>()
 
   constructor(
     private readonly text: string,
@@ -377,6 +391,8 @@ class LineReader {
     this.after = false
     this.matching = false
     this.depth = 0
+    this.nesting = 0
+    this.braces = 0
   }
 
   /** Every error bash reports for the line, in order. An array bash cannot
@@ -531,20 +547,22 @@ class LineReader {
    * `$"` open nothing. */
   dollar(i: number, quoted: boolean): number {
     const text = this.text
-    const next = text.charAt(i + 1)
-    if (next === '$') return i + 2
+    const at = this.joined(i + 1)
+    const next = text.charAt(at)
+    if (next === '$') return at + 1
     if (next === '(') {
-      if (text.charAt(i + 2) === '(') {
-        const end = this.matched(i + 3, i)
+      const inner = this.joined(at + 1)
+      if (text.charAt(inner) === '(') {
+        const end = this.matched(inner + 1, i)
         if (text.charAt(end + 1) === ')') return end + 2
-        return this.matched(i + 2, i) + 1
+        return this.matched(at + 1, i) + 1
       }
-      return this.substitution(i + 2)
+      return this.substitution(i, at + 1)
     }
-    if (next === '{') return this.brace(i + 2, i)
-    if (next === '[') return this.matched(i + 2, i, '[', ']') + 1
-    if (!quoted && next === "'") return this.ansiQuote(i + 1)
-    if (!quoted && next === '"') return this.doubleQuote(i + 1)
+    if (next === '{') return this.brace(at + 1, i)
+    if (next === '[') return this.matched(at + 1, i, '[', ']') + 1
+    if (!quoted && next === "'") return this.ansiQuote(at)
+    if (!quoted && next === '"') return this.doubleQuote(at)
     return i + 1
   }
 
@@ -561,8 +579,9 @@ class LineReader {
   /** Skip `<(` or `>(`: parsed, unless `((` follows, which bash matches as
    * text. */
   processSubstitution(i: number): number {
-    if (this.text.charAt(i + 2) === '(') return this.matched(i + 2, i) + 1
-    return this.substitution(i + 2)
+    const at = this.joined(i + 1)
+    if (this.charAt(at + 1) === '(') return this.matched(at + 1, i) + 1
+    return this.substitution(i, at + 1)
   }
 
   /** Skip an expansion's `${...}`: the first unquoted `}` closes it. */
@@ -571,7 +590,7 @@ class LineReader {
     while (j < this.n) {
       const c = text.charAt(j)
       if (c === '}') return j + 1
-      if ((c === '<' || c === '>') && text.charAt(j + 1) === '(') {
+      if ((c === '<' || c === '>') && this.charAt(j + 1) === '(') {
         j = this.processSubstitution(j)
         continue
       }
@@ -614,7 +633,7 @@ class LineReader {
       else if (c === "'") j = this.singleQuote(j)
       else if (c === '"') j = this.doubleQuote(j)
       else if (c === '`') j = this.backtick(j)
-      else if (c === '$' && text.charAt(j + 1) === '(') j = this.dollar(j, false)
+      else if (c === '$' && this.charAt(j + 1) === '(') j = this.dollar(j, false)
       else j += 1
     }
     this.failMatch(right, opened)
@@ -630,15 +649,25 @@ class LineReader {
     ;[this.pos, this.peeked, this.heredocs, this.after] = state
   }
 
-  /** Parse a substitution's command list; the index past its `)`. Heredocs
-   * opened inside and still pending at its `)` read their bodies after the
-   * line's next newline. */
-  substitution(j: number): number {
+  /** Parse a substitution's command list, opened at `opened` and starting at
+   * `j`; the index past its `)`. Heredocs opened inside and still pending at
+   * its `)` read their bodies after the line's next newline. A body read once
+   * is not read again when its word is. */
+  substitution(opened: number, j: number): number {
+    const key = `${String(j)}:${String(this.limit)}`
+    const known = this.subs.get(key)
+    if (known !== undefined) {
+      this.pend(known[1])
+      return known[0]
+    }
+    if (this.nesting >= MAX_NESTING)
+      this.failToken(token('op', this.text.slice(opened, j).replaceAll('\\\n', ''), opened, j))
     const state = this.save()
     this.pos = j
     this.peeked = null
     this.heredocs = []
     this.frames.push('sub')
+    this.nesting += 1
     this.linebreak()
     let tok: Token
     for (;;) {
@@ -654,15 +683,20 @@ class LineReader {
       else if (tok.kind === 'op' && tok.text === ')') break
       else this.failToken(tok)
     }
+    this.nesting -= 1
     this.frames.pop()
     const pending = this.heredocs
     this.restore(state)
-    this.heredocs = [...this.heredocs, ...pending]
+    this.pend(pending)
+    this.subs.set(key, [tok.end, pending])
     return tok.end
   }
 
   /** Read an array assignment's words; the index past its `)`. Only words
-   * and newlines may stand inside: any other token is the error, status 1.
+   * and newlines may stand inside: any other token is the error, status 1. A
+   * newline inside reads the heredoc bodies pending there, which bash reads
+   * again after the array; heredocs opened inside and pending at its `)` read
+   * theirs after it.
    * `mode` is the assignment's `READ_*` flags: with `READ_BODY` the array
    * stands where a function body must, so a reserved word inside is one;
    * with `READ_KEYS` an element's `name[` reads a subscript. */
@@ -691,7 +725,9 @@ class LineReader {
       this.failToken(tok)
     }
     this.frames.pop()
+    const opened = this.heredocs.filter((heredoc) => heredoc.at > i)
     this.restore(state)
+    this.pend(opened)
     return tok.end
   }
 
@@ -765,7 +801,7 @@ class LineReader {
     const text = this.text
     const n = this.n
     const nested = this.frames.includes('sub')
-    for (const [delimiter, strip, quoted] of this.heredocs) {
+    for (const { delimiter, strip, quoted } of this.heredocs) {
       while (i < n) {
         let end = text.indexOf('\n', i)
         if (end < 0) end = n
@@ -796,6 +832,26 @@ class LineReader {
     return i
   }
 
+  /** Add heredocs whose bodies the next newline reads, each once: a word read
+   * again in another mode opens the same ones again. */
+  pend(heredocs: readonly Heredoc[]): void {
+    const known = new Set(this.heredocs.map((heredoc) => heredoc.at))
+    this.heredocs = [...this.heredocs, ...heredocs.filter((heredoc) => !known.has(heredoc.at))]
+  }
+
+  /** Where the next character is once continued lines are joined, as bash
+   * joins them before it reads one. */
+  joined(i: number): number {
+    while (this.text.startsWith('\\\n', i)) i += 2
+    return i
+  }
+
+  /** The character at `i` once continued lines are joined, or `''` at the
+   * end of the line. */
+  charAt(i: number): string {
+    return this.text.charAt(this.joined(i))
+  }
+
   /** Read the token at `i` in `mode`. */
   lex(i: number, mode: number): Token {
     const text = this.text
@@ -818,7 +874,7 @@ class LineReader {
     if (c === '\n') return token('newline', '\n', i, i + 1)
     if ((mode & READ_ARITH) !== 0 && text.startsWith('((', i))
       return this.arithCommand(i, (mode & READ_START) !== 0)
-    if ((c === '<' || c === '>') && text.charAt(i + 1) === '(') return this.word(i, 0)
+    if ((c === '<' || c === '>') && this.charAt(i + 1) === '(') return this.word(i, 0)
     const op = this.operator(i)
     if (op !== null) return token('op', op[0], i, op[1])
     if (c === '{' && (mode & READ_TEST) === 0) {
@@ -867,7 +923,7 @@ class LineReader {
         continue
       }
       if (WORD_BREAKS.has(c)) {
-        if ((c === '<' || c === '>') && text.charAt(i + 1) === '(') {
+        if ((c === '<' || c === '>') && this.charAt(i + 1) === '(') {
           i = this.processSubstitution(i)
           plain = false
           state = 'none'
@@ -875,7 +931,7 @@ class LineReader {
         }
         break
       }
-      const equals = c === '=' || (c === '+' && text.charAt(i + 1) === '=')
+      const equals = c === '=' || (c === '+' && this.charAt(i + 1) === '=')
       if (state === 'start' || state === 'name') {
         if (NAME_START.has(c) || (state === 'name' && NAME_CHARS.has(c))) state = 'name'
         else if (state === 'name' && c === '[') {
@@ -893,9 +949,10 @@ class LineReader {
       if (state === 'equals') {
         assign = true
         state = 'none'
-        i += c === '=' ? 1 : 2
-        if ((mode & READ_ARRAYS) !== 0 && text.charAt(i) === '(') {
-          i = this.array(i, mode)
+        i = (c === '=' ? i : this.joined(i + 1)) + 1
+        const opener = this.joined(i)
+        if ((mode & READ_ARRAYS) !== 0 && text.charAt(opener) === '(') {
+          i = this.array(opener, mode)
           plain = false
         }
         continue
@@ -927,6 +984,8 @@ class LineReader {
     const end = this.matched(i + 2, i)
     if (text.charAt(end + 1) === ')') return token('arith', text.slice(i, end + 2), i, end + 2)
     if (start && (end + 1 >= this.n || text.charAt(end + 1) === '\n')) {
+      if (this.nesting >= MAX_NESTING) this.failToken(token('op', '(', i, i + 1))
+      this.nesting += 1
       const state = this.save()
       const outer: [number | null, number] = [this.limit, this.floor]
       this.limit = end + 1
@@ -1088,8 +1147,11 @@ class LineReader {
     this.failToken(tok)
   }
 
-  /** Parse a compound command, a function definition or a coproc. */
+  /** Parse a compound command, a function definition or a coproc; one nested
+   * `MAX_NESTING` deep is refused at its opener. */
   compound(tok: Token): void {
+    if (this.nesting >= MAX_NESTING) this.failToken(tok)
+    this.nesting += 1
     const word = this.keyword(tok)
     if (tok.kind === 'arith') this.take(tok)
     else if (tok.kind === 'op' && tok.text === '(') {
@@ -1097,7 +1159,9 @@ class LineReader {
       this.take(this.compoundList(new Set(), new Set([')'])))
     } else if (word === '{') {
       this.take(tok)
+      this.braces += 1
       this.take(this.compoundList(new Set(['}']), new Set()))
+      this.braces -= 1
     } else if (word === 'if') this.ifClause(tok)
     else if (word === 'while' || word === 'until') {
       this.take(tok)
@@ -1106,14 +1170,11 @@ class LineReader {
     } else if (word === 'for' || word === 'select') this.forClause(tok)
     else if (word === 'case') this.caseClause(tok)
     else if (word === '[[') this.conditional(tok)
-    else if (word === 'function') {
-      this.function(tok)
-      return
-    } else if (word === 'coproc') {
-      this.coproc(tok)
-      return
-    } else this.failToken(tok)
-    this.after = true
+    else if (word === 'function') this.function(tok)
+    else if (word === 'coproc') this.coproc(tok)
+    else this.failToken(tok)
+    this.nesting -= 1
+    if (word !== 'function' && word !== 'coproc') this.after = true
   }
 
   redirects(): void {
@@ -1143,10 +1204,14 @@ class LineReader {
     if (target.kind !== 'word') this.failToken(target)
     this.take(target)
     if (tok.text === '<<' || tok.text === '<<-') {
-      this.heredocs.push([
-        cleanDelimiter(target.text),
-        tok.text === '<<-',
-        delimiterQuoted(target.text),
+      const word = this.text.slice(target.start, target.end)
+      this.pend([
+        {
+          at: tok.start,
+          delimiter: cleanDelimiter(word),
+          strip: tok.text === '<<-',
+          quoted: delimiterQuoted(word),
+        },
       ])
     }
   }
@@ -1367,7 +1432,9 @@ class LineReader {
     }
   }
 
-  /** Parse `case WORD in [(]PATTERN[|PATTERN]...) LIST ;; ... esac`. */
+  /** Parse `case WORD in [(]PATTERN[|PATTERN]...) LIST ;; ... esac`. Inside a
+   * brace group a `}` where a pattern word starts closes the group, as bash
+   * reads it, but for the word right after `in` on its line. */
   caseClause(tok: Token): void {
     this.take(tok)
     const subject = this.peek()
@@ -1377,6 +1444,7 @@ class LineReader {
     const word = this.peek()
     if (this.keyword(word) !== 'in') this.failToken(word)
     this.take(word)
+    let afterIn = this.peek().kind !== 'newline'
     this.linebreak()
     for (;;) {
       let next = this.peek()
@@ -1387,9 +1455,15 @@ class LineReader {
       if (next.kind === 'op' && next.text === '(') {
         this.take(next)
         next = this.peek()
+        afterIn = false
       }
       for (;;) {
-        if (next.kind !== 'word') this.failToken(next)
+        if (
+          next.kind !== 'word' ||
+          (this.braces > 0 && !afterIn && next.plain && next.text === '}')
+        )
+          this.failToken(next)
+        afterIn = false
         this.take(next)
         next = this.peek()
         if (next.kind === 'op' && next.text === ')') {
@@ -1565,8 +1639,10 @@ class LineReader {
 
   /** Parse `( EXPR )`; every error inside adds that bash expected the `)`. */
   testGroup(tok: Token): void {
+    if (this.nesting >= MAX_NESTING) this.failToken(tok)
     this.take(tok)
     this.depth += 1
+    this.nesting += 1
     let close: Token
     try {
       this.testOr()
@@ -1577,6 +1653,7 @@ class LineReader {
       throw err
     } finally {
       this.depth -= 1
+      this.nesting -= 1
     }
     if (close.kind === 'op' && close.text === ')') {
       this.take(close)

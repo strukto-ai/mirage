@@ -289,6 +289,102 @@
       "flags": []
     },
     {
+      "id": "syntax_continued_openers_join",
+      "seq": 1338227,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "x=\\\n(1 2); echo \"${x[1]}\" $\\\n(echo a) $\\\n((1+2)); cat <\\\n(echo b)",
+      "expect": {
+        "exit": 0,
+        "stdout": "2 a 3\nb\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_quoted_delimiter_keeps_its_continuation",
+      "seq": 1338228,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<'EO\\\nF'\nbody\nEOF\nfi",
+      "expect": {
+        "exit": 0,
+        "stdout": "body\nEOF\nfi\n",
+        "stderr": "mirage: line 5: warning: here-document at line 2 delimited by end-of-file (wanted `EO\\\nF')\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "syntax_compound_before_a_closer",
+      "seq": 1338229,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "( for l in '{ { echo x; } }' '{ if true; then echo y; fi }' '{ for i in 1 2; do echo $i; done }' 'f() { { echo f; } }; f'; do bash -c \"$l\"; done )",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\ny\n1\n2\nf\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
       "id": "syntax_unfinished_array_is_status_1",
       "seq": 1338232,
       "targets": [

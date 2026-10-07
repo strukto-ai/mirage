@@ -153,7 +153,7 @@ def read_heredocs(
         line = (
             data.count(b"\n", 0, max(0, start - 1)) + 1
             if line_end == previous_line
-            else data.count(b"\n", 0, operator.word_start) + 1
+            else data.count(b"\n", 0, end) + 1
         )
         if (
             line_end == previous_line

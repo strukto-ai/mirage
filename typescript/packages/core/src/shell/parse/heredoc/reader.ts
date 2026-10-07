@@ -105,7 +105,7 @@ export function readHeredocs(text: string, operators: HeredocOperator[]): Heredo
     let line =
       lineEnd === previousLine
         ? text.slice(0, Math.max(0, start - 1)).split('\n').length
-        : text.slice(0, operator.wordStart).split('\n').length
+        : text.slice(0, end).split('\n').length
     const previous = documents.at(-1)
     if (lineEnd === previousLine && previous !== undefined && !previous.terminated)
       line = previous.eofLine

@@ -178,6 +178,11 @@ EXTGLOB_OPENERS = frozenset("@!+*?")
 # which it keeps.
 NEAR_TEXT_STOPS = frozenset(";&|")
 
+# How deep the syntax reader nests compound commands, substitutions and
+# `[[ ]]` groups before it refuses a line at the next opener, as bash
+# refuses a line nested past its own reader (thousands deep there).
+MAX_NESTING = 64
+
 # How the syntax reader takes the next token: whether `name=(` opens an
 # array, `name[` reads a subscript up to its `]` across blanks, `((`
 # opens arithmetic (and, where a command starts, is read again as two

@@ -18,8 +18,8 @@ from pathlib import Path
 import pytest
 
 from mirage.shell.bytes import decode_text, encode_text
-from mirage.shell.parse import check_syntax, parse, syntax_error_result
-from mirage.shell.parse.syntax import find_syntax_issue
+from mirage.shell.parse import check_syntax, syntax_error_result
+from mirage.shell.parse.constants import MAX_NESTING
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
@@ -66,11 +66,21 @@ def test_a_diagnostic_keeps_an_invalid_byte_as_typed(raw, stderr):
     assert syntax_error_result(found).stderr == stderr
 
 
-def test_a_line_deeper_than_the_reader_refuses_through_the_tree():
-    depth = 4096
-    line = "echo " + "$(echo " * depth + "x" + ")" * depth + " ("
-    found = check_syntax(line) or find_syntax_issue(parse(line))
-    assert found is not None and found.offending == "("
+def test_a_line_nested_past_the_reader_is_refused_at_the_next_opener():
+    # bash refuses a line nested past its own reader at the opener it can
+    # no longer take (thousands deep there), so nothing on the line runs.
+    deep = "echo " + "$(echo " * 4096 + "x" + ")" * 4096 + "; fi"
+    found = check_syntax(deep)
+    assert found is not None and found.offending == "$("
+    assert (
+        check_syntax("{ " * MAX_NESTING + "a; " + "} " * MAX_NESTING) is None
+    )
+    found = check_syntax("{ " * (MAX_NESTING + 1) + "a; " + "} " * MAX_NESTING)
+    assert found is not None and found.offending == "{"
+
+
+def test_a_substitution_is_read_once_however_often_its_word_is():
+    assert check_syntax("x=$(" * 40 + "echo hi" + ")" * 40) is None
 
 
 @pytest.mark.parametrize(

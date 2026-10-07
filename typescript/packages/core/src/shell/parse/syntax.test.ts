@@ -18,7 +18,7 @@ import { createRequire } from 'node:module'
 import { assert, beforeAll, describe, expect, it } from 'vitest'
 import { decodeText } from '../bytes.ts'
 import { checkSyntax, createShellParser, syntaxErrorResult, type ShellParser } from './index.ts'
-import { findSyntaxIssue } from './syntax.ts'
+import { MAX_NESTING } from './constants.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -79,10 +79,18 @@ describe('checkSyntax', () => {
     expect(Array.from(await syntaxErrorResult(found).materializeStderr())).toEqual(stderr)
   })
 
-  it('refuses a line deeper than the reader through the tree', () => {
-    const depth = 4096
-    const line = `echo ${'$(echo '.repeat(depth)}x${')'.repeat(depth)} (`
-    expect((checkSyntax(line) ?? findSyntaxIssue(parser.parse(line)))?.offending).toBe('(')
+  it('refuses a line nested past the reader at the next opener', () => {
+    // bash refuses a line nested past its own reader at the opener it can no
+    // longer take (thousands deep there), so nothing on the line runs.
+    const deep = `echo ${'$(echo '.repeat(4096)}x${')'.repeat(4096)}; fi`
+    expect(checkSyntax(deep)?.offending).toBe('$(')
+    const braces = (n: number) => `${'{ '.repeat(n)}a; ${'} '.repeat(MAX_NESTING)}`
+    expect(checkSyntax(braces(MAX_NESTING))).toBeNull()
+    expect(checkSyntax(braces(MAX_NESTING + 1))?.offending).toBe('{')
+  })
+
+  it('reads a substitution once however often its word is', () => {
+    expect(checkSyntax(`${'x=$('.repeat(40)}echo hi${')'.repeat(40)}`)).toBeNull()
   })
 
   // Pinned against bash 5.2.37, which takes the reserved word first inside
