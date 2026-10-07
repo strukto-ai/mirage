@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { storedFunctionText } from '../../../../shell/printer.ts'
+import type { ParseScope } from '../../../../shell/parse/scope.ts'
 import { IOResult } from '../../../../io/types.ts'
-import { functionText } from '../../../../shell/printer.ts'
-import type { TSNodeLike } from '../../../../shell/types.ts'
 import { ArithError, DiscardSignal } from '../../../../shell/errors.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { buildAssocLiteral, buildIndexedLiteral, type ShellArray } from '../../../../shell/array.ts'
@@ -379,7 +379,8 @@ export function readonlyFunctions(session: SessionState, names: readonly string[
   }
   const errors: string[] = []
   for (const name of names) {
-    if (!(name in session.functions)) {
+    const source = session.functions[name]
+    if (source === undefined) {
       errors.push(`bash: readonly: ${name}: not a function`)
       continue
     }
@@ -409,18 +410,20 @@ export function handleDeclareFunctions(
   session: SessionState,
   flags: ReadonlySet<string>,
   names: readonly string[],
+  parser?: ParseScope,
 ): Result {
   if (flags.has('r')) return readonlyFunctions(session, names)
   const targets = names.length > 0 ? names : Object.keys(session.functions).sort(compareCodePoints)
   const lines: string[] = []
   let missing = false
   for (const name of targets) {
-    if (!(name in session.functions)) {
+    const source = session.functions[name]
+    if (source === undefined) {
       missing = true
       continue
     }
     if (flags.has('F')) lines.push(names.length > 0 ? name : `declare -f ${name}`)
-    else lines.push(functionText(name, session.functions[name] as TSNodeLike[]))
+    else lines.push(storedFunctionText(name, source, parser))
   }
   const out = encodeText(lines.length > 0 ? `${lines.join('\n')}\n` : '')
   const code = missing ? 1 : 0

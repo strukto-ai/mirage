@@ -313,7 +313,6 @@ async def recurse(
             io.stderr = err or None
     finally:
         if substitution:
-            session.functions.clear()
             if child_token is not None:
                 reset_current_evaluation(child_token)
     if io.refusal is not None:
@@ -972,8 +971,6 @@ async def run_prepared_line(
         # event's exit_code says whether the line that emitted them
         # succeeded.
         parse_scope.release()
-        if effective_session is not session:
-            effective_session.functions.clear()
         scope.close()
         reset_current_evaluation(session_token)
         # The marks were only for this line's apply_io, so they go however

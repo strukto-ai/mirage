@@ -22,6 +22,7 @@ sys.path[:] = [
 ]
 
 import asyncio
+import json
 import subprocess
 from tempfile import TemporaryDirectory
 
@@ -41,6 +42,31 @@ async def check(ws: Workspace, command: str, stdout: str = "") -> None:
     assert await result.stdout_str() == stdout, command
 
 
+async def functions(ws: Workspace, phase: str) -> None:
+    """Run the shared portable-function case across a process boundary."""
+    corpus = json.loads(
+        (Path(__file__).parent / "lifecycle/cases.json").read_text()
+    )
+    case = next(
+        c
+        for c in corpus["cases"]
+        if c["id"] == "function_sources_survive_snapshot_restore"
+    )
+    steps = case["steps"]
+    boundary = "snapshot" if phase == "write" else "checkout"
+    at = next(i for i, step in enumerate(steps) if step["op"] == boundary)
+    selected = steps[:at] if phase == "write" else steps[at + 1 :]
+    for step in selected:
+        command = step["command"].replace("/data/", "/direct/")
+        result = await ws.shell(command)
+        expected = step["expect"]["value"]
+        assert {
+            "exit_code": result.exit_code,
+            "stdout": await result.stdout_str(),
+            "stderr": await result.stderr_str(),
+        } == expected, command
+
+
 async def write(path: Path) -> None:
     ws = Workspace(
         {
@@ -57,6 +83,7 @@ async def write(path: Path) -> None:
         await check(ws, "printf 'portable\\n' > /direct/note.txt")
         await check(ws, "printf 'registered\\n' > /nested/registered/note.txt")
         await check(ws, "ln -s /direct/note.txt /nested/registered/link")
+        await functions(ws, "write")
         await ws.snapshot(path)
     finally:
         await ws.close()
@@ -68,6 +95,7 @@ async def read(path: Path) -> None:
         await check(ws, "cat /direct/note.txt", "portable\n")
         await check(ws, "cat /nested/registered/*.txt", "registered\n")
         await check(ws, "cat /nested/registered/link", "portable\n")
+        await functions(ws, "read")
         registered = next(
             m for m in ws.mounts() if m.prefix == "/nested/registered/"
         )
@@ -106,7 +134,7 @@ async def main() -> None:
         await read(path)
     print(
         "Snapshot smoke passed in both directions: "
-        "direct and registered mounts"
+        "direct/registered mounts and portable functions"
     )
 
 

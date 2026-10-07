@@ -596,6 +596,35 @@ async def test_pre_vfs_denied_entries_still_list_and_stat():
         await ws.close()
 
 
+@pytest.mark.asyncio
+async def test_pre_vfs_holds_warm_reads():
+    # The read cache is shared by every session, so a copy an earlier
+    # read warmed is still the policy's to admit: each command that
+    # reads through the cache answers as it would cold.
+    vfs = RAMVFS()
+    vfs.caches_reads = True
+    ws = Workspace({"/data/": vfs}, mode=MountMode.WRITE)
+    try:
+        await ws.vfs.write("/data/secret.txt", b"sealed\n")
+        await ws.vfs.write("/data/ok.txt", b"has sealed word\n")
+        for line in ("cat /data/secret.txt", "cat /data/ok.txt"):
+            assert (await ws.shell(line)).exit_code == 0
+        ws.policies.add(SealedPaths())
+        for line in (
+            "grep sealed /data/secret.txt",
+            "rg sealed /data/secret.txt",
+            "head -c 3 /data/secret.txt",
+            "tail -c 3 /data/secret.txt",
+            "wc -c /data/secret.txt",
+        ):
+            io = await ws.shell(line)
+            assert (io.stdout or b"", io.exit_code != 0) == (b"", True), line
+        fine = await ws.shell("grep sealed /data/ok.txt")
+        assert fine.stdout == b"has sealed word\n"
+    finally:
+        await ws.close()
+
+
 class OpRecorder(Policy):
     def __init__(self) -> None:
         self.asked: list[tuple[str, str, bool]] = []

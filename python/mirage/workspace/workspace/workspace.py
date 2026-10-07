@@ -1037,10 +1037,7 @@ class Workspace:
         def spawn(request: SpawnRequest) -> ChildProcess:
             view.check_spawn()
             child = session.fork(process_id=parent_pid)
-            try:
-                return self._spawn_for_session(request, child)
-            finally:
-                child.functions.clear()
+            return self._spawn_for_session(request, child)
 
         return replace(view, spawn=spawn, depth=session.process_depth)
 
@@ -1131,7 +1128,6 @@ class Workspace:
             finally:
                 reset_program_invocation(program_token)
                 reset_current_session(token)
-                child.functions.clear()
                 input_stream.stop()
                 output.end()
 

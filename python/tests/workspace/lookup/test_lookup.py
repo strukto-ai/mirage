@@ -77,19 +77,19 @@ def test_namespace_commands():
 
 def test_function_routes_function():
     session, ws = _fixture()
-    session.functions["greet"] = []
+    session.functions["greet"] = "greet() { :; }"
     assert lookup("greet", session, ws._registry) is Consumer.FUNCTION
 
 
 def test_builtin_shadows_function():
     session, ws = _fixture()
-    session.functions["echo"] = []
+    session.functions["echo"] = "echo() { :; }"
     assert lookup("echo", session, ws._registry) is Consumer.SESSION
 
 
 def test_function_shadows_mount_command():
     session, ws = _fixture()
-    session.functions["cat"] = []
+    session.functions["cat"] = "cat() { :; }"
     assert lookup("cat", session, ws._registry) is Consumer.FUNCTION
 
 
@@ -113,7 +113,7 @@ def test_installed_cli_routes_cli():
 def test_function_shadows_installed_cli():
     session, ws = _fixture()
     ws.register_cli("prog", _cli_tree())
-    session.functions["prog"] = []
+    session.functions["prog"] = "prog() { :; }"
     assert lookup("prog", session, ws._registry) is Consumer.FUNCTION
 
 
@@ -139,7 +139,7 @@ def test_route_all_reports_every_layer_winner_first():
     session, ws = _fixture()
     ws.register_cli("prog", _cli_tree())
     assert lookup_all("prog", session, ws._registry) == [Consumer.CLI]
-    session.functions["prog"] = []
+    session.functions["prog"] = "prog() { :; }"
     assert lookup_all("prog", session, ws._registry) == [
         Consumer.FUNCTION,
         Consumer.CLI,
@@ -155,7 +155,7 @@ def test_route_all_is_empty_where_route_says_unknown():
 def test_route_agrees_with_the_first_layer_route_all_reports():
     session, ws = _fixture()
     ws.register_cli("prog", _cli_tree())
-    session.functions["greet"] = []
+    session.functions["greet"] = "greet() { :; }"
     for name in ("cd", "ln", "greet", "prog", "cat", "bogus"):
         layers = lookup_all(name, session, ws._registry)
         winner = layers[0] if layers else Consumer.UNKNOWN
@@ -207,15 +207,15 @@ def test_allow_lists_filter_every_layer_and_spare_only_functions():
     # A function is the session's own state, visible where it is what
     # runs; named after a hidden builtin it is as unreachable as the
     # builtin, since builtins shadow functions here.
-    session.functions["deploy"] = []
+    session.functions["deploy"] = "deploy() { :; }"
     assert lookup("deploy", session, reg) is Consumer.FUNCTION
     assert command_visible("deploy", session)
-    session.functions["sleep"] = []
+    session.functions["sleep"] = "sleep() { :; }"
     assert lookup("sleep", session, reg) is Consumer.UNKNOWN
     assert not command_visible("sleep", session)
     # A function shadowing a hidden CLI or mount command runs, and the
     # hidden layer stays out of `type -a`.
-    session.functions["rm"] = []
+    session.functions["rm"] = "rm() { :; }"
     assert lookup_all("rm", session, reg) == [Consumer.FUNCTION]
     # No allow list at all: nothing filtered (the function still
     # shadows).
@@ -243,8 +243,8 @@ def test_program_is_what_a_real_system_ships_as_a_file():
 def test_execs_finds_programs_functions_and_paths():
     session, ws = _fixture()
     registry = ws._registry
-    session.functions["myfn"] = []
-    session.functions["cd"] = []
+    session.functions["myfn"] = "myfn() { :; }"
+    session.functions["cd"] = "cd() { :; }"
     for name in ("cat", "echo", "xargs", "myfn", "./run.sh", "/data/x"):
         assert execs(name, session, registry)
     for name in ("cd", "export", "if", "nope-xyz"):
@@ -253,10 +253,10 @@ def test_execs_finds_programs_functions_and_paths():
 
 def test_program_keeps_the_file_under_a_shadowing_function():
     session, ws = _fixture()
-    session.functions["cat"] = []
+    session.functions["cat"] = "cat() { :; }"
     assert lookup("cat", session, ws._registry) is Consumer.FUNCTION
     assert program("cat", session, ws._registry) is Consumer.MOUNT
-    session.functions["myfn"] = []
+    session.functions["myfn"] = "myfn() { :; }"
     assert program("myfn", session, ws._registry) is None
 
 

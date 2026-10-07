@@ -612,6 +612,7 @@ describe('prejudge', () => {
     'until sleep 0.2 && cat /data/secret.txt & do echo no; done',
     '{ sleep 0.2 && cat /data/secret.txt & }',
     'f() { sleep 0.2 && cat /data/secret.txt & }; f',
+    'echo λ🙂; f() { sleep 0.2 && cat /data/secret.txt & }; f',
 
     "eval 'sleep 0.2 && cat /data/secret.txt &'",
     `eval "eval 'sleep 0.2 && cat /data/secret.txt &'"`,

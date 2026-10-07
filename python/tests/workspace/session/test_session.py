@@ -14,13 +14,10 @@
 
 import dataclasses
 import json
-import sys
 
 from mirage.policy.match import Outcome
 from mirage.policy.types import AdmissionRules, CommandRule, Decision, Scope
 from mirage.secrets.config import EnvVar
-from mirage.shell.helpers import get_function_body
-from mirage.shell.parse.parse import parse_program
 from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
 from mirage.types import MountMode
 from mirage.workspace.session import SessionState
@@ -28,7 +25,6 @@ from mirage.workspace.session.constants import (
     INHERITED_FIELDS,
     TRANSIENT_FIELDS,
 )
-from mirage.workspace.session.functions import FunctionTable
 from mirage.workspace.session.session import (
     vars_from_entries,
     vars_from_env,
@@ -70,7 +66,7 @@ def test_session_env_mutation():
 
 def test_session_functions():
     s = SessionState(session_id="s1")
-    s.functions["myfunc"] = []
+    s.functions["myfunc"] = "myfunc() { :; }"
     assert "myfunc" in s.functions
 
 
@@ -142,7 +138,7 @@ def test_fork_copies_every_field_including_mount_modes():
     original = SessionState(
         session_id="orig",
         cwd="/disk",
-        functions={"f": object()},
+        functions={"f": "f() { :; }"},
         last_exit_code=7,
         shell_options={"errexit": True},
         vars={
@@ -587,21 +583,16 @@ def test_session_profile_round_trips_and_is_omitted_when_none():
     assert original.fork().profile == "admin"
 
 
-def test_fork_leases_each_stored_function_once(monkeypatch):
-    program = parse_program("f() { echo a; }")
-    body = get_function_body(program.root.named_children[0])
-    parent = SessionState(session_id="s", functions={"f": body})
-    module = sys.modules[FunctionTable.__module__]
-    original = module.retain_programs
-    leases = []
-
-    def counted(nodes):
-        leases.append(nodes)
-        return original(nodes)
-
-    monkeypatch.setattr(module, "retain_programs", counted)
-    child = parent.fork()
-    assert len(leases) == 1
-    assert program.references == 3
+def test_function_sources_and_readonly_metadata_round_trip_without_tree_ownership():
+    source = "f() { echo a; }"
+    parent = SessionState(
+        session_id="s", functions={"f": source}, readonly_functions={"f"}
+    )
+    restored = SessionState.from_dict(parent.to_dict())
+    assert restored.functions == {"f": source}
+    assert restored.readonly_functions == {"f"}
+    child = restored.fork()
     child.functions.clear()
-    assert program.references == 2
+    child.readonly_functions.clear()
+    assert restored.functions == parent.functions
+    assert restored.readonly_functions == {"f"}

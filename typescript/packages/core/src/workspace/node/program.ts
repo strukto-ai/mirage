@@ -81,8 +81,9 @@ export async function executeProgram(
   // a use on the same parse and row. Restored on the way out so a nested
   // parse (`eval`, `source`, `bash -c`) does not leave its id behind.
   session.parseSeq += 1
-  const outerParse = session.parseCurrent
+  const outerParse: [number, number] = [session.parseCurrent, session.parseRow]
   session.parseCurrent = session.parseSeq
+  session.parseRow = 0
   const root = !session.lineOpen
   session.lineOpen = true
   try {
@@ -103,7 +104,7 @@ export async function executeProgram(
       executeFn,
     )
   } finally {
-    session.parseCurrent = outerParse
+    ;[session.parseCurrent, session.parseRow] = outerParse
     if (root) session.lineOpen = false
   }
 }

@@ -17,6 +17,7 @@ import type { LangfuseAccessor } from '../../../accessor/langfuse.ts'
 import { VFSName } from '../../../types.ts'
 import { command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { scanIo } from '../generic_bind/index.ts'
 import { runSearch } from '../generic_bind/search.ts'
 
 import { IO } from './io.ts'
@@ -26,5 +27,5 @@ export const LANGFUSE_GREP = command({
   vfs: VFSName.LANGFUSE,
   spec: specOf('grep'),
   fn: (accessor: LangfuseAccessor, paths, texts, opts) =>
-    runSearch(IO, 'grep', accessor, paths, texts, opts),
+    runSearch(scanIo(IO, opts.ns, opts.mountPrefix)[0], 'grep', accessor, paths, texts, opts),
 })

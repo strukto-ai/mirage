@@ -1069,10 +1069,8 @@ describe('fillEnv through execute', () => {
       new DenyNamed('printenv'),
     ])
     try {
-      const parser = await getTestParser()
       const session = ws.getSession(ws.defaultSessionId)
-      const tree = parser.parse('printenv TOKEN; echo "e:$TOKEN"')
-      session.functions.f = tree.namedChildren.filter((node) => node.type === 'command')
+      session.functions.f = 'f() { printenv TOKEN; echo "e:$TOKEN"; }'
       const io = await ws.shell('f')
       expect(stdoutStr(io)).toBe('e:t0\n')
       expect(io.refusal?.reason).toContain('printenv is off')
@@ -1138,6 +1136,30 @@ describe('fillEnv through execute', () => {
       expect(stdoutStr(io)).toBe('t0\n')
       expect(calls).toEqual(['ask', 'r'])
       expect(ws.decisions.pending()).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Each definition is a place of its own, read by the fill's pass under
+  // the place its call runs it, so each asks once and the gate spends the
+  // nod the pass claimed rather than asking again.
+  it('two definitions of one text each ask before the fetch', async () => {
+    const { calls, fetch } = countingSource({ TOKEN: 't0' })
+    registerSecrets('fake-two-defs', FakeConfig, fetch)
+    const approve: AskHandler = (record: Decision) => {
+      calls.push('ask')
+      return Promise.resolve({ ...record, outcome: Outcome.ALLOW })
+    }
+    const ws = await makeWs(
+      { TOKEN: { from: 'fake-two-defs', ref: 'r' } },
+      [new AskNamed('printenv')],
+      approve,
+    )
+    try {
+      const io = await ws.shell('f() { printenv TOKEN; }; f; f() { printenv TOKEN; }; f')
+      expect(stdoutStr(io)).toBe('t0\nt0\n')
+      expect(calls).toEqual(['ask', 'ask', 'r'])
     } finally {
       await ws.close()
     }

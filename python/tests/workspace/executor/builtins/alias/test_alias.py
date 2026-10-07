@@ -24,6 +24,7 @@ import pytest
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from mirage.workspace.snapshot.state import apply_state_dict, to_state_dict
 
 
 def _ws() -> Workspace:
@@ -150,4 +151,68 @@ async def test_an_alias_after_a_non_ascii_assignment_keeps_its_arguments():
     ws = _ws()
     await _run(ws, "shopt -s expand_aliases; alias e='echo E'")
     assert await _run(ws, "X=☕ e arg") == ("E arg\n", 0)
+    await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "lines, out, code",
+    [
+        (["alias a='echo works'\nf() { a; }\nf"], "works\n", 0),
+        (["alias a='echo x'; f() { a; }; f"], "", 127),
+        (["alias a='echo x'; f() { a; }", "f"], "", 127),
+        (["alias a='echo nested'\ng() { a; }\nf() { g; }\nf"], "nested\n", 0),
+    ],
+)
+async def test_a_function_reads_aliases_where_it_was_defined(lines, out, code):
+    # Pinned against bash 5.2.37: the body is read when the function is
+    # defined, so an alias from the same row stays a plain word.
+    ws = _ws()
+    await ws.shell("shopt -s expand_aliases")
+    for line in lines:
+        result = await _run(ws, line)
+    assert result == (out, code)
+    await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "lines, out, code",
+    [
+        (["alias a='echo works'", "f() { a; }"], "works\n", 0),
+        (["alias a='echo x'; f() { a; }"], "", 127),
+    ],
+)
+async def test_a_call_with_its_own_env_or_cwd_reads_the_same_aliases(
+    lines, out, code
+):
+    # A call with overrides runs on a fork, which carries the parse
+    # count, the alias marks and where each function was defined, so it
+    # reads the aliases a plain call reads.
+    ws = _ws()
+    await ws.shell("shopt -s expand_aliases")
+    for line in lines:
+        await ws.shell(line)
+    for kwargs in ({}, {"env": {}}, {"cwd": "/data"}):
+        io = await ws.shell("f", **kwargs)
+        assert ((await io.stdout_str()), io.exit_code) == (out, code)
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_checked_out_function_does_not_read_the_replaced_site():
+    # Checkout restores the table but not where the live definitions
+    # were made; a site recorded for another source is not the
+    # function's, so the restored body runs as a parse of its own.
+    ws = _ws()
+    for line in (
+        "shopt -s expand_aliases",
+        "alias a='echo works'",
+        "f() { a; }",
+    ):
+        await ws.shell(line)
+    state = await to_state_dict(ws)
+    await ws.shell("alias a='echo works'; f() { :; }")
+    await apply_state_dict(ws, state)
+    assert await _run(ws, "f") == ("works\n", 0)
     await ws.close()

@@ -112,7 +112,7 @@ describe('executeNode dispatcher', () => {
     const [stdout, io] = await executeNode(buildDeps(reg), fnNode, new EvaluationContext(session))
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(0)
-    expect(session.functions.greet).toEqual([stmt])
+    expect(typeof session.functions.greet).toBe('string')
   })
 
   it('VARIABLE_ASSIGNMENT writes env var', async () => {

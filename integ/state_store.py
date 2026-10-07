@@ -96,6 +96,12 @@ async def write(prefix: str) -> None:
     ws.create_session("narrow", mounts={"/data": "read"})
     shared = ws.create_session("shared")
     seed_var(shared, "ORIGIN", "py")
+    for sid in (ws.default_session_id, "shared"):
+        result = await ws.shell(
+            'cloud_fn() { echo "cloud:$1"; }; readonly -f cloud_fn',
+            session_id=sid,
+        )
+        check(f"py write: portable function in {sid}", result.exit_code == 0)
     await ws.flush_sessions()
     check(
         "py write: shared session at generation 1",
@@ -132,6 +138,19 @@ async def read(prefix: str) -> None:
         ws.default_session_id == pointer,
         f"got {ws.default_session_id!r} want {pointer!r}",
     )
+    for sid in (ws.default_session_id, "shared"):
+        result = await ws.shell("cloud_fn restored", session_id=sid)
+        check(
+            f"py read: foreign function runs in {sid}",
+            result.exit_code == 0
+            and await result.stdout_str() == "cloud:restored\n",
+        )
+        result = await ws.shell("unset -f cloud_fn", session_id=sid)
+        check(
+            f"py read: function stays readonly in {sid}",
+            result.exit_code == 1
+            and "readonly function" in await result.stderr_str(),
+        )
     result = await ws.shell("history")
     check(
         "py read: history has marker",

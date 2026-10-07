@@ -12,17 +12,31 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from mirage.commands.builtin.discord.grep import grep
+from mirage.commands.builtin.discord.io import IO as DISCORD_IO
 from mirage.commands.builtin.discord.rg import rg
 from mirage.commands.config import CommandOpts
 from mirage.core.time_range import TimeRange
 from mirage.io.types import IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+
+
+def _io(**slots: Callable[..., Any]) -> SimpleNamespace:
+    """The command's IO with the given slots faked; the rest stay real."""
+    real = {
+        "readdir": DISCORD_IO.readdir,
+        "stat": DISCORD_IO.stat,
+        "read_bytes": DISCORD_IO.read_bytes,
+    }
+    return SimpleNamespace(**{**real, **slots})
 
 
 def _path(path: str) -> PathSpec:
@@ -37,19 +51,17 @@ async def test_grep_emits_token_hint_on_forbidden():
     accessor.time_range = TimeRange()
     accessor.config = AsyncMock()
     paths = [_path("/discord/myguild__G1/channels/general__C1")]
-    with (
-        patch(
-            "mirage.commands.builtin.discord.grep.search_guild",
-            new=AsyncMock(side_effect=RuntimeError("403 Forbidden")),
-        ),
-        patch(
-            "mirage.commands.builtin.discord.grep.resolve_glob",
-            new=AsyncMock(return_value=paths),
-        ),
-        patch(
-            "mirage.commands.builtin.discord.grep.grep_generic",
-            new=AsyncMock(return_value=(b"", IOResult(exit_code=1))),
-        ),
+    with patch.dict(
+        grep.__wrapped__.__globals__,
+        {
+            "search_guild": AsyncMock(
+                side_effect=RuntimeError("403 Forbidden")
+            ),
+            "IO": _io(resolve_glob=AsyncMock(return_value=paths)),
+            "grep_generic": AsyncMock(
+                return_value=(b"", IOResult(exit_code=1))
+            ),
+        },
     ):
         _out, io = await grep(
             accessor, paths, ["hi"], CommandOpts(flags={"w": True, "r": True})
@@ -65,19 +77,15 @@ async def test_rg_emits_warning_on_rate_limit():
     accessor.time_range = TimeRange()
     accessor.config = AsyncMock()
     paths = [_path("/discord/myguild__G1/channels/general__C1")]
-    with (
-        patch(
-            "mirage.commands.builtin.discord.rg.search_guild",
-            new=AsyncMock(side_effect=RuntimeError("rate limited 429")),
-        ),
-        patch(
-            "mirage.commands.builtin.discord.rg.resolve_glob",
-            new=AsyncMock(return_value=paths),
-        ),
-        patch(
-            "mirage.commands.builtin.discord.rg.rg_generic",
-            new=AsyncMock(return_value=(b"", IOResult(exit_code=1))),
-        ),
+    with patch.dict(
+        rg.__wrapped__.__globals__,
+        {
+            "search_guild": AsyncMock(
+                side_effect=RuntimeError("rate limited 429")
+            ),
+            "IO": _io(resolve_glob=AsyncMock(return_value=paths)),
+            "rg_generic": AsyncMock(return_value=(b"", IOResult(exit_code=1))),
+        },
     ):
         _out, io = await rg(
             accessor, paths, ["hi"], CommandOpts(flags={"word_regexp": True})

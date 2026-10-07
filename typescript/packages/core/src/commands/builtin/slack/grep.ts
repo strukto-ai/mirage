@@ -14,19 +14,15 @@
 
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { SlackAccessor } from '../../../accessor/slack.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import {
   buildQuery,
   formatFileGrepResults,
   formatGrepResults,
 } from '../../../core/slack/formatters.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
+import { resolveGlobOf, scanIo } from '../generic_bind/index.ts'
 import { IO } from './io.ts'
-import { read as slackRead } from '../../../core/slack/read.ts'
-import { readdir as slackReaddir } from '../../../core/slack/readdir.ts'
 import { detectScope, NATIVE_KINDS, searchTarget } from '../../../core/slack/scope.ts'
 import { searchFiles, searchMessages } from '../../../core/slack/search.ts'
-import { stat as slackStat } from '../../../core/slack/stat.ts'
 import { IOResult } from '../../../io/types.ts'
 import { type FileStat, type PathSpec, VFSName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
@@ -36,8 +32,6 @@ import { patternArg } from '../grep_pattern.ts'
 import { pushdownOperand, textSearchResults } from '../grep_pushdown.ts'
 import { prependStderr } from '../utils/output.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-
-const resolveSlackGlob = resolveGlobOf(IO)
 
 const ENC = new TextEncoder()
 
@@ -58,14 +52,6 @@ export const SEARCH_HONORED = ['w'] as const
 export const RG_SEARCH_HONORED = ['word_regexp'] as const
 export const SEARCH_MAX_RESULTS = 100
 
-async function* slackStream(
-  accessor: SlackAccessor,
-  p: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  yield await slackRead(accessor, p, index)
-}
-
 async function grep(
   accessor: SlackAccessor,
   paths: PathSpec[],
@@ -78,7 +64,8 @@ async function grep(
   const pushdownWarnings: string[] = []
   // Output-shaping flags, a glob operand and a multi-operand line all need
   // the per-message scan; see SEARCH_HONORED above.
-  const operand = pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
+  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
+  const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
   if (pattern !== null && operand !== null && fl.asBool('w')) {
     const match = detectScope(operand)
     if (
@@ -118,12 +105,12 @@ async function grep(
   }
 
   const resolved =
-    paths.length > 0 ? await resolveSlackGlob(accessor, paths, opts.index ?? undefined) : []
-  const stat = (p: PathSpec): Promise<FileStat> => slackStat(accessor, p, opts.index ?? undefined)
+    paths.length > 0 ? await resolveGlobOf(scan)(accessor, paths, opts.index ?? undefined) : []
+  const stat = (p: PathSpec): Promise<FileStat> => scan.stat(accessor, p, opts.index ?? undefined)
   const readdir = (p: PathSpec): Promise<string[]> =>
-    slackReaddir(accessor, p, opts.index ?? undefined)
+    scan.readdir(accessor, p, opts.index ?? undefined)
   const result = await grepGeneric('grep', resolved, texts, opts, stat, readdir, (p) =>
-    slackStream(accessor, p, opts.index ?? undefined),
+    scan.readStream(accessor, p, opts.index ?? undefined),
   )
   if (result === null) return result
   if (pushdownWarnings.length > 0) await prependStderr(result[1], pushdownWarnings)

@@ -89,19 +89,19 @@ describe('lookup', () => {
 
   it('routes user functions to FUNCTION', () => {
     const { session, ws } = fixture()
-    session.functions.greet = []
+    session.functions.greet = 'greet() { :; }'
     expect(lookup('greet', session, ws.registry)).toBe(Consumer.FUNCTION)
   })
 
   it('builtin shadows a function of the same name', () => {
     const { session, ws } = fixture()
-    session.functions.echo = []
+    session.functions.echo = 'echo() { :; }'
     expect(lookup('echo', session, ws.registry)).toBe(Consumer.SESSION)
   })
 
   it('function shadows a mount command', () => {
     const { session, ws } = fixture()
-    session.functions.cat = []
+    session.functions.cat = 'cat() { :; }'
     expect(lookup('cat', session, ws.registry)).toBe(Consumer.FUNCTION)
   })
 
@@ -125,7 +125,7 @@ describe('lookup', () => {
   it('function shadows an installed CLI', () => {
     const { session, ws } = fixture()
     ws.registerCli('prog', cliTree())
-    session.functions.prog = []
+    session.functions.prog = 'prog() { :; }'
     expect(lookup('prog', session, ws.registry)).toBe(Consumer.FUNCTION)
   })
 
@@ -291,15 +291,15 @@ describe('allow lists', () => {
     // A function is the session's own state, visible where it is what
     // runs; named after a hidden builtin it is as unreachable as the
     // builtin, since builtins shadow functions here.
-    session.functions.deploy = []
+    session.functions.deploy = 'deploy() { :; }'
     expect(lookup('deploy', session, reg)).toBe(Consumer.FUNCTION)
     expect(commandVisible('deploy', session)).toBe(true)
-    session.functions.sleep = []
+    session.functions.sleep = 'sleep() { :; }'
     expect(lookup('sleep', session, reg)).toBe(Consumer.UNKNOWN)
     expect(commandVisible('sleep', session)).toBe(false)
     // A function shadowing a hidden CLI or mount command runs, and the
     // hidden layer stays out of `type -a`.
-    session.functions.rm = []
+    session.functions.rm = 'rm() { :; }'
     expect(lookupAll('rm', session, reg)).toEqual([Consumer.FUNCTION])
     // No allow list at all: nothing filtered (the function still
     // shadows).

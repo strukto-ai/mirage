@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { functionTable } from './functions.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
+import { type FunctionSite, functionSources } from './functions.ts'
 import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
 
 import {
@@ -97,7 +98,7 @@ export interface SessionInit {
   logicalCwd?: string | undefined
   vars?: Record<string, ShellVar>
   createdAt?: number
-  functions?: Record<string, unknown>
+  functions?: Record<string, string>
   readonlyFunctions?: Set<string>
   lastExitCode?: number
   positionalArgs?: string[]
@@ -358,7 +359,7 @@ export class SessionState {
   // describes.
   vars: Record<string, ShellVar>
   createdAt: number
-  functions: Record<string, unknown>
+  functions: Record<string, string>
   // The functions `readonly -f` has frozen. A set beside `functions`
   // rather than a flag on the body, because the readonly fact is the
   // session's, not the definition's. Kept apart from the readonly
@@ -434,6 +435,14 @@ export class SessionState {
   aliasStack: string[] = []
   parseSeq = 0
   parseCurrent = 0
+  // The row the running parse starts on in the text that spelled it: 0
+  // for a line, a function's definition row for its body, which is parsed
+  // again from its own source but reads aliases where it was written.
+  parseRow = 0
+  // Where each function was defined (`FunctionSite`), so its body expands
+  // the aliases of that place and its approvals stand under it; a function
+  // loaded from a stored session has none and runs as a parse of its own.
+  functionSites = new Map<string, FunctionSite>()
   // The owner of this session's terminal streams, which an `exec` copy of
   // one names (`exec 3>&1`), and whether a line of the session is running,
   // whose outermost program routes what was written to them. Each fork gets
@@ -494,7 +503,7 @@ export class SessionState {
     this.logicalCwd = init.logicalCwd
     this.vars = ownRecord(init.vars)
     this.createdAt = init.createdAt ?? Date.now() / 1000
-    this.functions = functionTable(init.functions)
+    this.functions = functionSources(init.functions)
     this.readonlyFunctions = new Set(init.readonlyFunctions ?? [])
     this.lastExitCode = init.lastExitCode ?? 0
     this.positionalArgs = init.positionalArgs ?? []
@@ -597,7 +606,9 @@ export class SessionState {
     forked.getoptsOptind = this.getoptsOptind
     forked.shopts = { ...this.shopts }
     forked.aliases = { ...this.aliases }
+    forked.parseSeq = this.parseSeq
     forked.aliasMarks = new Map(this.aliasMarks)
+    forked.functionSites = new Map(this.functionSites)
     forked.umask = this.umask
     forked.descriptors = new Map(this.descriptors)
     forked.execStdout = this.execStdout
@@ -616,14 +627,13 @@ export class SessionState {
    * A child shell of this session: a fork that reads on from here. `fork`
    * copies what a session keeps; a child shell (a command substitution, a
    * subshell, a nested `bash`) also inherits the reader's position, the
-   * alias bookkeeping and the local frames, and reseeds `$RANDOM` on its
+   * aliases being expanded and the local frames, and reseeds `$RANDOM` on its
    * first draw instead of replaying this session's seed. Mirrors Python.
    */
   subshell(): SessionState {
     const child = this.fork()
-    child.parseSeq = this.parseSeq
     child.parseCurrent = this.parseCurrent
-    child.aliasMarks = new Map(this.aliasMarks)
+    child.parseRow = this.parseRow
     child.aliasStack = [...this.aliasStack]
     child.localVars = this.localVars === null ? null : copyLocals(this.localVars)
     child.localFrames = this.localFrames.map((frame) =>
@@ -750,6 +760,9 @@ export class SessionState {
       }
       data.managed = refs
     }
+    if (Object.keys(this.functions).length > 0) data.functions = { ...this.functions }
+    if (this.readonlyFunctions.size > 0)
+      data.readonly_functions = [...this.readonlyFunctions].sort(compareCodePoints)
     if (this.mountModes !== null) {
       data.mount_modes = Object.fromEntries(this.mountModes)
     }
@@ -809,11 +822,15 @@ export class SessionState {
     processes?: ProcessPermissions
     decisions?: DecisionJSON[] | null
     generation?: number
+    functions?: Record<string, string>
+    readonly_functions?: string[]
   }): SessionState {
     const commands = data.commands != null ? commandsFromJSON(data.commands) : null
     const processes = parseProcessPermissions(data.processes ?? DEFAULT_PROCESS_PERMISSIONS)
     return new SessionState({
       sessionId: data.session_id,
+      ...(data.functions === undefined ? {} : { functions: data.functions }),
+      readonlyFunctions: new Set(data.readonly_functions ?? []),
       ...(data.cwd !== undefined ? { cwd: data.cwd } : {}),
       // No `var_attrs` at all means the payload is a bare process
       // environment -- an embedder's record, or one another writer

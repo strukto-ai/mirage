@@ -172,6 +172,7 @@ export async function handleUnset(
       if (session.readonlyFunctions.has(name)) return readonlyFunctionUnset(name)
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete session.functions[name]
+      session.functionSites.delete(name)
       continue
     }
     const match = TARGET_RE.exec(name)
@@ -226,6 +227,7 @@ export async function handleUnset(
       if (session.readonlyFunctions.has(name)) return readonlyFunctionUnset(name)
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete session.functions[name]
+      session.functionSites.delete(name)
     }
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'unset', exitCode: 0 })]

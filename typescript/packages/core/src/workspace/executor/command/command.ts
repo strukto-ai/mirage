@@ -85,6 +85,7 @@ import { applyFindActions } from '../find_action_dispatch.ts'
 import { sessionView } from '../../session/state.ts'
 import { optionError, parseFlags } from './flags.ts'
 import type { HandOff } from '../../../policy/types.ts'
+import type { ParseScope } from '../../../shell/parse/scope.ts'
 import { executeShellFunction } from './functions.ts'
 import {
   CWD_DEFAULT_RAW,
@@ -195,6 +196,7 @@ export async function handleCommand(
   signal?: AbortSignal,
   // Where a function body writes its statements as they finish.
   sink?: JobConsole,
+  parser?: ParseScope,
 ): Promise<Result> {
   const session = context.session
   if (parts.length === 0) {
@@ -235,11 +237,13 @@ export async function handleCommand(
   }
 
   const funcBody = session.functions[cmdName]
-  if (funcBody !== undefined && Array.isArray(funcBody)) {
+  if (funcBody !== undefined) {
+    if (parser === undefined) throw new Error('function invocation requires a parse scope')
     return executeShellFunction(
       executeNode,
       cmdName,
-      funcBody as unknown[],
+      funcBody,
+      parser,
       parts.slice(1),
       context,
       stdin,

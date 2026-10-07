@@ -49,8 +49,8 @@ from mirage.shell.helpers import (
     get_case_word,
     get_cfor_parts,
     get_for_parts,
-    get_function_body,
     get_function_name,
+    get_function_source,
     get_if_branches,
     get_list_parts,
     get_negated_command,
@@ -117,6 +117,7 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.assignment import execute_assignment
 from mirage.workspace.node.command_dispatch import execute_command
 from mirage.workspace.node.declaration import execute_declaration
+from mirage.workspace.node.occurrence import defined_at
 from mirage.workspace.node.program import execute_program
 from mirage.workspace.node.test_expr import (
     expand_double_bracket,
@@ -124,6 +125,7 @@ from mirage.workspace.node.test_expr import (
 )
 from mirage.workspace.node.timing import timing_report
 from mirage.workspace.session.elements import assign_element
+from mirage.workspace.session.functions import FunctionSite
 from mirage.workspace.session.state import (
     ensure_var_visible,
     random_reader,
@@ -1302,14 +1304,10 @@ async def _execute_node(
                 limit=session.processes.max,
             )
         except BlockingIOError as exc:
-            child.session.functions.clear()
             raise ExitSignal(FORK_FAILED_STATUS, stderr=FORK_FAILED) from exc
         child.session.process_id = process.info.pid
-        try:
-            await process.task
-            return results[0]
-        finally:
-            child.session.functions.clear()
+        await process.task
+        return results[0]
 
     # ── arithmetic command ((( ... ))) ──────────
     if (
@@ -1597,8 +1595,13 @@ async def _execute_node(
                     command=f"function {name}", exit_code=1, stderr=err
                 ),
             )
-        func_body = get_function_body(node)
-        session.functions[name] = func_body
+        source = get_function_source(node)
+        session.functions[name] = source
+        session._function_sites[name] = FunctionSite(
+            source,
+            (session._parse_current, session._parse_row + node.start_point[0]),
+            defined_at(node, handed),
+        )
         return (
             None,
             IOResult(),

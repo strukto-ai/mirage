@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type EvaluationContext, childContext } from '../../../evaluation.ts'
-import { releaseFunctions } from '../../../session/functions.ts'
 
 import { runAsShell } from '../../../../context/session_context.ts'
 import { resolvePath } from '../../../../utils/path.ts'
@@ -131,19 +130,16 @@ export async function handleExecPath(
     // its command gate, without needing permission for the stub's helper.
     context = childContext(context)
     session = context.session
-    try {
-      return await runAsShell(() =>
-        handleCommandBuiltin(
-          (command, opts) => executeFn(command, { ...opts, context }),
-          ['--', stripSlash(spec.mountPath), ...args],
-          session,
-          registry,
-          stdin,
-        ),
-      )
-    } finally {
-      releaseFunctions(session.functions)
-    }
+
+    return await runAsShell(() =>
+      handleCommandBuiltin(
+        (command, opts) => executeFn(command, { ...opts, context }),
+        ['--', stripSlash(spec.mountPath), ...args],
+        session,
+        registry,
+        stdin,
+      ),
+    )
   }
   const words = shebangWords(script)
   const interp = words[0] ?? 'sh'

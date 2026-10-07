@@ -837,6 +837,70 @@
         "stdout": "/mail/INBOX/2026-01-07/Server_alert_worker-3__3.email.json\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "email_search_keeps_a_hidden_day_out",
+      "seq": 540223,
+      "targets": [
+        "email"
+      ],
+      "command": "grep -rlw Budget /mail/INBOX; echo grepw=$?; rg -lw Budget /mail/INBOX; echo rgw=$?; find /mail/INBOX -name '*Budget*'; echo find=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grepw=1\nrgw=1\nfind=0\n",
+        "stderr": ""
+      },
+      "session": "email-hide",
+      "session_profiles": {
+        "email-hide": {
+          "paths": {
+            "hide": [
+              "/mail/INBOX/2026-01-05"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "email_search_refuses_a_denied_day",
+      "seq": 540224,
+      "targets": [
+        "email"
+      ],
+      "command": "grep -rlw Budget /mail/INBOX 2>/dev/null; echo grepw=$?; find /mail/INBOX -name '*Budget*' 2>/dev/null; echo find=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grepw=2\n/mail/INBOX/2026-01-05/Q2_Budget_Review__1\n/mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json\nfind=1\n",
+        "stderr": ""
+      },
+      "session": "email-deny",
+      "session_profiles": {
+        "email-deny": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/mail/INBOX/2026-01-05/*"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "email_search_on_a_day_reports_that_day_only",
+      "seq": 540225,
+      "targets": [
+        "email"
+      ],
+      "command": "grep -rw Budget /mail/INBOX/2026-01-07; echo grepw=$?; rg -w Budget /mail/INBOX/2026-01-07; echo rgw=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grepw=1\nrgw=1\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -12,9 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
-
 from mirage.accessor.mongodb import MongoDBAccessor
+from mirage.commands.builtin.generic_bind.factory import scan_io
 from mirage.commands.builtin.generic_bind.search import run_search
 from mirage.commands.builtin.mongodb.io import IO
 from mirage.commands.config import CommandOpts, command
@@ -22,13 +21,11 @@ from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
+
 # The $regex push-down prints each matching document as a whole line;
 # pushdown_operand defers shaping flags and multi-operand lines to the
 # generic scan, which streams documents rather than reading whole
 # collections.
-_search = partial(run_search, IO, "grep")
-
-
 @command("grep", vfs="mongodb", spec=SPECS["grep"])
 async def grep(
     accessor: MongoDBAccessor,
@@ -36,4 +33,5 @@ async def grep(
     texts: list[str],
     opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
-    return await _search(accessor, paths, texts, opts)
+    scan, _ = scan_io(IO, opts.ns, opts.mount_prefix)
+    return await run_search(scan, "grep", accessor, paths, texts, opts)

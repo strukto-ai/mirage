@@ -14,12 +14,8 @@
 
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { GmailAccessor } from '../../../accessor/gmail.ts'
-import type { IndexCacheStore } from '../../../cache/index/index.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
+import { resolveGlobOf, scanIo } from '../generic_bind/index.ts'
 import { IO } from './io.ts'
-import { read as gmailRead } from '../../../core/gmail/read.ts'
-import { readdir as gmailReaddir } from '../../../core/gmail/readdir.ts'
-import { stat as gmailStat } from '../../../core/gmail/stat.ts'
 import { detectScope, NATIVE_KINDS } from '../../../core/gmail/scope.ts'
 import { formatGrepResults, searchMessages } from '../../../core/gmail/search.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
@@ -32,17 +28,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { parseFlags, refuseMissingPattern, rgGeneric } from '../generic/rg.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 
-const resolveGlob = resolveGlobOf(IO)
-
 const ENC = new TextEncoder()
-
-async function* gmailStream(
-  accessor: GmailAccessor,
-  p: PathSpec,
-  index: IndexCacheStore | undefined,
-): AsyncIterable<Uint8Array> {
-  yield await gmailRead(accessor, p, index)
-}
 
 async function rg(
   accessor: GmailAccessor,
@@ -56,7 +42,8 @@ async function rg(
   if (refused !== null) return refused
   // Same gate as gmail grep, from the same table: only a lone concrete
   // operand with no reshaping flag may be answered by the search API.
-  const operand = pushdownOperand(paths, opts.flags, pattern, RG_SEARCH_HONORED)
+  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
+  const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, RG_SEARCH_HONORED)
   if (operand !== null && pattern !== null && fl.asBool('word_regexp')) {
     const match = detectScope(operand)
     if (NATIVE_KINDS.has(match.kind)) {
@@ -77,12 +64,12 @@ async function rg(
   }
 
   const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  const stat = (p: PathSpec): Promise<FileStat> => gmailStat(accessor, p, opts.index ?? undefined)
+    paths.length > 0 ? await resolveGlobOf(scan)(accessor, paths, opts.index ?? undefined) : []
+  const stat = (p: PathSpec): Promise<FileStat> => scan.stat(accessor, p, opts.index ?? undefined)
   const readdir = (p: PathSpec): Promise<string[]> =>
-    gmailReaddir(accessor, p, opts.index ?? undefined)
+    scan.readdir(accessor, p, opts.index ?? undefined)
   return rgGeneric(resolved, texts, opts, stat, readdir, (p) =>
-    gmailStream(accessor, p, opts.index ?? undefined),
+    scan.readStream(accessor, p, opts.index ?? undefined),
   )
 }
 

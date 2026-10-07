@@ -607,7 +607,6 @@ async def _run_lines(
         finally:
             reset_program_invocation(marked)
             reset_current_evaluation(token)
-            child.functions.clear()
             taken.discard(slot)
 
     async def worker() -> None:

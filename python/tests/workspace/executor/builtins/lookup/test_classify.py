@@ -54,7 +54,7 @@ def test_classify_bash_builtins_are_builtins_and_programs_are_files():
 
 def test_classify_function_and_not_found():
     session = make_session()
-    session.functions["myfn"] = []
+    session.functions["myfn"] = "myfn() { :; }"
     registry = make_registry()
     assert classify("myfn", session, registry) is NameKind.FUNCTION
     assert classify("nope_xyz", session, registry) is None
@@ -71,7 +71,7 @@ def test_classify_all_reports_a_function_shadowing_a_cli():
     session = make_session()
     registry = make_registry(True)
     assert classify_all("linear", session, registry) == [NameKind.FILE]
-    session.functions["linear"] = []
+    session.functions["linear"] = "linear() { :; }"
     assert classify_all("linear", session, registry) == [
         NameKind.FUNCTION,
         NameKind.FILE,
@@ -99,7 +99,7 @@ def test_classify_all_keeps_the_layers_under_a_keyword():
     # bash: `function time { :; }; type -a time` prints the keyword line
     # then the function line.
     session = make_session()
-    session.functions["then"] = []
+    session.functions["then"] = "then() { :; }"
     assert classify_all("then", session, make_registry()) == [
         NameKind.KEYWORD,
         NameKind.FUNCTION,
@@ -111,7 +111,7 @@ def test_time_is_a_keyword_and_coproc_is_unimplemented():
     registry = make_registry()
     assert classify("time", session, registry) is NameKind.KEYWORD
     assert classify("coproc", session, registry) is None
-    session.functions["time"] = []
+    session.functions["time"] = "time() { :; }"
     assert classify("time", session, registry) is NameKind.KEYWORD
 
 

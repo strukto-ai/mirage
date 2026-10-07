@@ -20,7 +20,7 @@ export { CAS_MAX_RETRIES, generationOf }
 // One session's durable fields: the JSON-able `SessionState.toJSON()` payload
 // (session_id, cwd, env, created_at, mount_modes — snake_case so Python
 // and TypeScript workspaces can share one store). Volatile shell state
-// (functions, arrays, stdin buffers) never persists.
+// (arrays, stdin buffers) never persists.
 // A session's stored shape is one keyed record like any other, so the alias
 // and the CAS helpers come from the record tier rather than being restated
 // here. The name stays SessionFields at this seam because that is what a

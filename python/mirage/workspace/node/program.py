@@ -90,8 +90,9 @@ async def execute_program(
     # out so a nested parse (`eval`, `source`, `bash -c`) does not leave
     # its id on the enclosing one.
     session._parse_seq += 1
-    outer_parse = session._parse_current
+    outer_parse = (session._parse_current, session._parse_row)
     session._parse_current = session._parse_seq
+    session._parse_row = 0
     root = not session._line_open
     session._line_open = True
     try:
@@ -112,7 +113,7 @@ async def execute_program(
             execute_fn,
         )
     finally:
-        session._parse_current = outer_parse
+        session._parse_current, session._parse_row = outer_parse
         if root:
             session._line_open = False
 

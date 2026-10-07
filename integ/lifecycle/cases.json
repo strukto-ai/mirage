@@ -3598,6 +3598,114 @@
           "op": "drain_processes"
         }
       ]
+    },
+    {
+      "id": "function_sources_survive_snapshot_restore",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "config": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "MESSAGE=hello\nportable() { local arg=\"$1\"; printf '%s:%s\\n' \"$MESSAGE\" \"$arg\"; }\nreadonly -f portable\nheredoc() { cat <<'EOF'; }; ignored() { echo unrelated; }\nλ🙂 $literal\nEOF\nredirected() { echo \"$1\"; } >/data/function.txt 2>&1\nnested() { inner() { echo \"inner:$1\"; }; inner \"$1\"; }\nbackground() { echo job & wait; }\nreplace_me() { echo original; }\nalias_line() { alias late='echo wrong'; late; }\n",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "snapshot"
+        },
+        {
+          "op": "exec",
+          "command": "unset -f heredoc redirected nested background replace_me; MESSAGE=changed",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "checkout"
+        },
+        {
+          "op": "exec",
+          "command": "portable world; heredoc; redirected saved; cat /data/function.txt; nested arg; background; replace_me",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "hello:world\nλ🙂 $literal\nsaved\ninner:arg\njob\noriginal\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "portable() { echo replaced; }",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "",
+              "stderr": "bash: portable: readonly function\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "unset -f portable",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "",
+              "stderr": "bash: unset: portable: cannot unset: readonly function\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "replace_me() { echo replacement; }; replace_me; unset -f replace_me; type -t replace_me",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "replacement\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "declare -f portable",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "portable () \n{ \n    local arg=\"$1\";\n    printf '%s:%s\\n' \"$MESSAGE\" \"$arg\"\n}\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "alias_line",
+          "expect": {
+            "value": {
+              "exit_code": 127,
+              "stdout": "",
+              "stderr": "late: command not found\n"
+            }
+          }
+        }
+      ]
     }
   ]
 }

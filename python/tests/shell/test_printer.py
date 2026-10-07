@@ -14,7 +14,7 @@
 
 from mirage.shell.helpers import get_function_body
 from mirage.shell.parse import parse
-from mirage.shell.printer import function_text
+from mirage.shell.printer import function_text, stored_function_text
 
 
 def test_function_text_reads_the_definition_under_its_redirects():
@@ -23,3 +23,11 @@ def test_function_text_reads_the_definition_under_its_redirects():
     definition = parse("f() { echo a; } >o 2>&1").named_children[0]
     body = get_function_body(definition.named_children[0])
     assert function_text("f", body) == "f () \n{ \n    echo a\n} > o 2>&1"
+
+
+def test_stored_function_text_prints_the_definitions_own_heredocs():
+    # bash prints a definition's heredoc bodies after its closing line.
+    source = "f() { cat; } <<A >/dev/null <<B\na\nA\nb\nB"
+    assert stored_function_text("f", source) == (
+        "f () \n{ \n    cat\n} <<A > /dev/null <<B\na\nA\nb\nB\n"
+    )
