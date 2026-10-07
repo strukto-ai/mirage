@@ -235,9 +235,7 @@ async def _delete(
         await dispatch(op, ps)
         return True
     except (OSError, ValueError) as exc:
-        why = (
-            exc.strerror if isinstance(exc, OSError) else None
-        ) or failure_text(exc)
+        why = failure_text(exc)
         errors.append(encode_text(f"find: cannot delete '{path}': {why}\n"))
         return False
 

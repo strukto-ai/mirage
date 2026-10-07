@@ -2046,12 +2046,14 @@ export class Workspace {
           `the options ask write: ${asked}`,
       )
     }
+    // The saved default comes last: an option naming another was refused
+    // above, and one left undefined must not overwrite it.
     const mergedOptions: WorkspaceOptions = {
-      write: args.writeDefault,
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
       ...(args.defaultAgentId !== null ? { agentId: args.defaultAgentId } : {}),
       ...(args.clis !== undefined ? { clis: args.clis } : {}),
       ...options,
+      write: args.writeDefault,
     }
     const ws = new this(mounts, mergedOptions) as InstanceType<T>
     for (const override of Object.values(overrides)) {

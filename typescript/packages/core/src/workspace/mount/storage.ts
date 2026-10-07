@@ -15,7 +15,7 @@
 import type { BaseVFS } from '../../vfs/base.ts'
 import { enotsup } from '../../errors/fs.ts'
 import { type PathSpec, WritePolicy } from '../../types.ts'
-import { stripMount } from '../../utils/key_prefix.ts'
+import { stripMount, underPath } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { MountRegistry } from './registry.ts'
 import { writeConditions } from './write_policy.ts'
@@ -73,17 +73,24 @@ export function makeStorageKey(registry: MountRegistry): (path: PathSpec) => str
 }
 
 /**
- * Refuse up front a delete the path's mount could not condition: a move
- * across mounts copies before it deletes, and on a conditional mount whose
- * backend ignores delete conditions the delete would be refused after the
- * copy landed. Mirrors Python's `make_delete_check`.
+ * Refuse up front a delete a mount under the path could not condition: a
+ * move across mounts copies before it deletes, and on a conditional mount
+ * whose backend ignores delete conditions the delete would be refused after
+ * the copy landed. The owning mount counts, and so does any mount nested
+ * under the path, which the walk would cross; a mount above the owner is
+ * never touched. Mirrors Python's `make_delete_check`.
  */
 export function makeDeleteCheck(registry: MountRegistry): (path: PathSpec) => void {
   return (path: PathSpec): void => {
-    const entry = registry.tryMountFor(path.virtual)
-    if (entry?.write !== WritePolicy.CONDITIONAL) return
-    if (!writeConditions(entry.vfs).includes('delete')) {
-      throw enotsup(entry.vfs.name, 'conditional delete', path)
+    const owner = registry.tryMountFor(path.virtual)
+    for (const entry of registry.allMounts()) {
+      if (
+        entry.write === WritePolicy.CONDITIONAL &&
+        (entry === owner || underPath(entry.prefix, path.virtual)) &&
+        !writeConditions(entry.vfs).includes('delete')
+      ) {
+        throw enotsup(entry.vfs.name, 'conditional delete', path)
+      }
     }
   }
 }

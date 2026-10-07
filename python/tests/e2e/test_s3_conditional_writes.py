@@ -21,6 +21,7 @@ from mirage.errors.types import StaleWriteError
 from mirage.vfs.minio import MinIOConfig, MinIOVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
+from mirage.workspace.workspace.types import VFSMount
 from tests.e2e.s3_mock import (
     MUTATIONS,
     MultiBucketS3Client,
@@ -44,9 +45,9 @@ def fake():
 
 
 def _workspace(
-    write: WritePolicy = WritePolicy.CONDITIONAL, **mounts: object
+    write: WritePolicy = WritePolicy.CONDITIONAL, **mounts: VFSMount
 ) -> Workspace:
-    table: dict[str, object] = {
+    table: dict[str, VFSMount] = {
         "/s3": Mount(
             S3VFS(S3Config(bucket="b", region="us-east-1")),
             mode=MountMode.WRITE,
@@ -107,8 +108,9 @@ async def test_a_read_gives_the_next_write_its_version(fake):
 
 @pytest.mark.asyncio
 async def test_a_redirect_write_gives_the_next_write_its_version(fake):
-    # The redirect keeps its bytes and the PUT's ETag, so rewriting a file
-    # the agent itself wrote is not refused for want of a read.
+    # The redirect keeps the PUT's ETag as a version without bytes, so
+    # rewriting a file the agent itself wrote is not refused for want of a
+    # read.
     ws = _workspace()
     try:
         await _run(ws, "echo a > /s3/new")
@@ -237,6 +239,62 @@ async def test_a_file_deleted_since_it_was_read_is_refused_then_free(
         assert (code, STALE in err) == (1, True)
         assert "f" not in fake.buckets["b"]
         assert (await _run(ws, line))[0] == 0
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", ["truncate -s 5 /s3/f", "echo x >> /s3/f"])
+async def test_an_op_finding_a_read_file_gone_refuses_before_writing(
+    fake, line
+):
+    # Its own read found nothing, but the agent read the file: that view
+    # is stale, as for a plain `>`. Sending the old version instead would
+    # let a restore of those bytes be overwritten from an empty file.
+    ws = _workspace()
+    try:
+        await _run(ws, "cat /s3/f")
+        del fake.buckets["b"]["f"]
+        fake.ledger.clear()
+        # A restore of the old bytes between this op's read and its write.
+        fake.before(
+            "put_object",
+            lambda: fake.buckets["b"].__setitem__("f", SEED["f"]) or None,
+        )
+        code, _, err = await _run(ws, line)
+        assert (code, STALE in err) == (1, True), err
+        assert _mutations(fake) == []
+        assert "f" not in fake.buckets["b"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "call, data",
+    [("append", b"x\n"), ("append", b""), ("pwrite", b"G"), ("pwrite", b"")],
+)
+async def test_an_ops_call_finding_a_read_file_gone_refuses_before_writing(
+    fake, call, data
+):
+    # The same rule through the ops API, which runs the generic append and
+    # pwrite; an empty one stats instead of reading.
+    ws = _workspace()
+    try:
+        await ws.vfs.read("/s3/f")
+        del fake.buckets["b"]["f"]
+        fake.ledger.clear()
+        fake.before(
+            "put_object",
+            lambda: fake.buckets["b"].__setitem__("f", SEED["f"]) or None,
+        )
+        with pytest.raises(StaleWriteError):
+            if call == "append":
+                await ws.vfs.append("/s3/f", data)
+            else:
+                await ws.vfs.pwrite("/s3/f", data, 0)
+        assert _mutations(fake) == []
+        assert "f" not in fake.buckets["b"]
     finally:
         await ws.close()
 
@@ -744,6 +802,7 @@ async def test_a_write_route_nobody_listed_still_carries_a_condition(fake):
         "rm /m/g",
         "rm -r /m/d",
         "mv /m/g /ram/g",
+        "find /m -name g -delete",
     ],
 )
 async def test_minio_refuses_what_it_cannot_condition_before_sending(
@@ -774,6 +833,125 @@ async def test_minio_takes_a_file_from_another_mount(fake, verb):
         line = f"echo r > /ram/r; {verb} /ram/r /m/new"
         assert await _run(ws, line) == (0, "", "")
         assert fake.buckets["b"]["new"] == b"r\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flags", ["-b", "--backup=numbered", "-S .bak -b"])
+async def test_a_refused_move_out_leaves_the_destination_in_place(fake, flags):
+    # Refused before anything moves: no backup renames the destination
+    # aside first.
+    ws = _minio_workspace()
+    try:
+        await _run(ws, "echo mine > /ram/f")
+        code, _, err = await _run(ws, f"mv {flags} /m/f /ram/f")
+        assert code == 1 and "Operation not supported" in err, err
+        assert (await _run(ws, "cat /ram/f"))[1] == "mine\n"
+        assert (await _run(ws, "ls /ram"))[1] == "f\n"
+        assert _mutations(fake) == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_move_holding_a_nested_minio_mount_is_refused_up_front(fake):
+    # The walk would copy the nested mount too and then find its deletes
+    # refused, leaving the tree half moved.
+    minio = MinIOVFS(
+        MinIOConfig(
+            bucket="b",
+            endpoint_url="http://127.0.0.1:9000",
+            access_key_id="k",
+            secret_access_key="s",
+        )
+    )
+    ws = _workspace(
+        **{
+            "/other": (RAMVFS(), MountMode.WRITE),
+            "/ram/d/m": Mount(
+                minio, mode=MountMode.WRITE, write="conditional"
+            ),
+        }
+    )
+    try:
+        await _run(ws, "mkdir -p /ram/d; echo a > /ram/d/a")
+        code, _, err = await _run(ws, "mv /ram/d /other/d")
+        assert code == 1 and "Operation not supported" in err, err
+        assert (await _run(ws, "cat /ram/d/a"))[1] == "a\n"
+        assert (await _run(ws, "ls /other"))[1] == ""
+        assert _mutations(fake) == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_move_out_of_a_mount_nested_in_minio_goes_through(fake):
+    # The source's own mount deletes it; the minio mount above is untouched.
+    minio = MinIOVFS(
+        MinIOConfig(
+            bucket="b",
+            endpoint_url="http://127.0.0.1:9000",
+            access_key_id="k",
+            secret_access_key="s",
+        )
+    )
+    ws = _workspace(
+        **{
+            "/data": Mount(minio, mode=MountMode.WRITE, write="conditional"),
+            "/data/scratch": (RAMVFS(), MountMode.WRITE),
+            "/other": (RAMVFS(), MountMode.WRITE),
+        }
+    )
+    try:
+        await _run(ws, "echo a > /data/scratch/a")
+        code, _, err = await _run(ws, "mv /data/scratch/a /other/a")
+        assert code == 0, err
+        assert (await _run(ws, "cat /other/a"))[1] == "a\n"
+        assert _mutations(fake) == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_conditional_rm_r_deletes_page_by_page(fake):
+    # As the unconditional rm -r does: memory stays one page, not the
+    # whole prefix.
+    for name in ("c", "d", "e"):
+        fake.buckets["b"][f"d/{name}"] = name.encode()
+    fake.page_size = 2
+    ws = _workspace()
+    try:
+        assert (await _run(ws, "rm -r /s3/d"))[0] == 0
+        assert not [k for k in fake.buckets["b"] if k.startswith("d/")]
+        deletes = [op for op, _ in _mutations(fake) if op == "delete_objects"]
+        assert len(deletes) == 3
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_conditional_dir_mv_copies_everything_before_deleting(fake):
+    # As GNU mv across devices: a copy failing on a later page leaves the
+    # source whole.
+    for name in ("c", "d", "e"):
+        fake.buckets["b"][f"d/{name}"] = name.encode()
+    before = {k: v for k, v in fake.buckets["b"].items() if k.startswith("d/")}
+    fake.page_size = 2
+
+    def fail() -> None:
+        raise ConnectionError("network down")
+
+    for hook in (lambda: None, lambda: None, lambda: None, fail):
+        fake.before("copy_object", hook)
+    ws = _workspace()
+    try:
+        assert (await _run(ws, "mv /s3/d /s3/e"))[0] == 1
+        after = {
+            k: v for k, v in fake.buckets["b"].items() if k.startswith("d/")
+        }
+        assert after == before
+        assert "delete_objects" not in [op for op, _ in _mutations(fake)]
     finally:
         await ws.close()
 

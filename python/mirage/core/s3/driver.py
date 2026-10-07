@@ -348,15 +348,34 @@ async def _move_file_if(
     return True
 
 
-async def _listed(conn: S3Conn, pfx: str) -> list[tuple[str, str]]:
+async def _known_pages(
+    conn: S3Conn, pfx: str, known: KnownVersions
+) -> AsyncIterator[list[tuple[str, str]]]:
+    """Each listing page under ``pfx``, every key with its version.
+
+    The version the agent read where there is one, else the listing's,
+    one page at a time.
+
+    Args:
+        conn (S3Conn): the open connection.
+        pfx (str): the key prefix walked.
+        known (KnownVersions): the mount's versions for the listed keys.
+    """
     paginator = conn.client.get_paginator("list_objects_v2")
-    found: list[tuple[str, str]] = []
     async for page in paginator.paginate(
         Bucket=conn.config.bucket, Prefix=pfx
     ):
-        for obj in page.get("Contents") or []:
-            found.append((obj["Key"], _quoted(str(obj.get("ETag") or ""))))
-    return found
+        listed = [
+            (obj["Key"], _quoted(str(obj.get("ETag") or "")))
+            for obj in page.get("Contents") or []
+        ]
+        if not listed:
+            continue
+        versions = await known([key for key, _ in listed])
+        yield [
+            (key, _quoted(versions[key]) if key in versions else token)
+            for key, token in listed
+        ]
 
 
 def _refused(failed: list[str]) -> PermissionError:
@@ -371,7 +390,9 @@ def _refused(failed: list[str]) -> PermissionError:
     )
 
 
-async def _delete_listed(conn: S3Conn, listed: list[tuple[str, str]]) -> None:
+async def _delete_batch(
+    conn: S3Conn, listed: list[tuple[str, str]]
+) -> tuple[list[str], list[str]]:
     """Delete each listed key only while it is the version listed.
 
     Args:
@@ -379,9 +400,9 @@ async def _delete_listed(conn: S3Conn, listed: list[tuple[str, str]]) -> None:
         listed (list[tuple[str, str]]): each key with the ETag it must
             still carry.
 
-    Raises:
-        ConditionLost: keys a newer write changed, which were kept.
-        PermissionError: keys the store refused for another reason.
+    Returns:
+        tuple[list[str], list[str]]: the keys a newer write changed, which
+        were kept, and the keys the store refused for another reason.
     """
     lost: list[str] = []
     failed: list[str] = []
@@ -397,71 +418,67 @@ async def _delete_listed(conn: S3Conn, listed: list[tuple[str, str]]) -> None:
                 lost if err.get("Code") in CONDITION_LOST_CODES else failed
             )
             target.append(str(err.get("Key", "")))
+    return lost, failed
+
+
+def _raise_kept(lost: list[str], failed: list[str]) -> None:
+    """Raise for the keys a prefix op kept.
+
+    Lost keys come first, so the caller drops their cached copies; keys
+    the store refused for another reason come next.
+
+    Args:
+        lost (list[str]): keys a newer write changed.
+        failed (list[str]): keys the store refused for another reason.
+
+    Raises:
+        ConditionLost: some keys were lost.
+        PermissionError: no key was lost and some were refused.
+    """
     if lost:
         raise ConditionLost(lost)
     if failed:
         raise _refused(failed)
 
 
-async def _known_listing(
-    conn: S3Conn, pfx: str, known: KnownVersions
-) -> list[tuple[str, str]]:
-    """Each key under ``pfx`` with the version it is measured against.
-
-    The version the agent read where there is one, else the listing's.
-
-    Args:
-        conn (S3Conn): the open connection.
-        pfx (str): the key prefix walked.
-        known (KnownVersions): the mount's versions for the listed keys.
-    """
-    listed = await _listed(conn, pfx)
-    versions = await known([key for key, _ in listed])
-    return [
-        (key, _quoted(versions[key]) if key in versions else token)
-        for key, token in listed
-    ]
-
-
 async def _delete_prefix_if(
     conn: S3Conn, pfx: str, known: KnownVersions
 ) -> None:
-    listed = await _known_listing(conn, pfx, known)
-    if listed:
-        await _delete_listed(conn, listed)
+    lost: list[str] = []
+    failed: list[str] = []
+    async for listed in _known_pages(conn, pfx, known):
+        page_lost, page_failed = await _delete_batch(conn, listed)
+        lost += page_lost
+        failed += page_failed
+    _raise_kept(lost, failed)
 
 
 async def _move_prefix_if(
     conn: S3Conn, src_pfx: str, dst_pfx: str, known: KnownVersions
 ) -> bool:
-    listed = await _known_listing(conn, src_pfx, known)
-    if not listed:
-        return False
-    moved: list[tuple[str, str]] = []
+    found = False
     lost: list[str] = []
-    for key, token in listed:
-        try:
-            await conn.client.copy_object(
-                Bucket=conn.config.bucket,
-                CopySource={"Bucket": conn.config.bucket, "Key": key},
-                Key=f"{dst_pfx}{key[len(src_pfx) :]}",
-                CopySourceIfMatch=token,
-                IfNoneMatch="*",
-            )
-        except Exception as exc:
-            if not _lost_condition(exc, matched=True):
-                raise
-            lost.append(key)
-            continue
-        moved.append((key, token))
-    try:
-        if moved:
-            await _delete_listed(conn, moved)
-    except ConditionLost as more:
-        lost.extend(more.keys)
-    if lost:
-        raise ConditionLost(lost)
-    return True
+    moved: list[tuple[str, str]] = []
+    async for listed in _known_pages(conn, src_pfx, known):
+        found = True
+        for key, token in listed:
+            try:
+                await conn.client.copy_object(
+                    Bucket=conn.config.bucket,
+                    CopySource={"Bucket": conn.config.bucket, "Key": key},
+                    Key=f"{dst_pfx}{key[len(src_pfx) :]}",
+                    CopySourceIfMatch=token,
+                    IfNoneMatch="*",
+                )
+            except Exception as exc:
+                if not _lost_condition(exc, matched=True):
+                    raise
+                lost.append(key)
+                continue
+            moved.append((key, token))
+    delete_lost, failed = await _delete_batch(conn, moved)
+    _raise_kept(lost + delete_lost, failed)
+    return found
 
 
 async def _delete_file(conn: S3Conn, key: str) -> None:

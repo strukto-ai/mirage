@@ -576,6 +576,21 @@ async def mv_generic(
             copies is not None
             and copies.links.stat_at(src.virtual) is not None
         )
+        # A source whose delete would be refused is refused here, before a
+        # backup renames the destination aside.
+        if (
+            isinstance(strategy, PrimitiveMove)
+            and strategy.check_unlink is not None
+            and not source_link
+        ):
+            try:
+                strategy.check_unlink(src)
+            except FS_ERRORS as exc:
+                errors.append(
+                    f"mv: cannot move '{src.raw_path}' to "
+                    f"'{target.raw_path}': {fs_strerror(exc)}"
+                )
+                continue
         backup_strategy = (
             NativeMove(rename=partial(rename_link, copies))
             if copies is not None
@@ -611,15 +626,6 @@ async def mv_generic(
             writes[src.mount_path] = b""
             writes[target.mount_path] = b""
         elif isinstance(strategy, PrimitiveMove):
-            if strategy.check_unlink is not None:
-                try:
-                    strategy.check_unlink(src)
-                except FS_ERRORS as exc:
-                    errors.append(
-                        f"mv: cannot move '{src.raw_path}' to "
-                        f"'{target.raw_path}': {fs_strerror(exc)}"
-                    )
-                    continue
             entries = await walk(strategy.readdir, stat, src)
             copied_all, wrote_any = await copy_entries(
                 "mv",

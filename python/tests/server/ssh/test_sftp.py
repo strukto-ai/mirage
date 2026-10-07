@@ -417,3 +417,29 @@ async def test_a_workspace_with_a_conditional_mount_is_not_served(tmp_path):
                 await sftp.listdir("/")
     finally:
         await stop_harness(harness)
+
+
+@pytest.mark.asyncio
+async def test_a_live_session_is_refused_once_a_conditional_mount_is_added(
+    tmp_path,
+):
+    # The session's core was built before the mount existed; it is judged
+    # again on each request, not only on the first.
+    ws = Workspace({"/": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
+    harness = await start_harness(tmp_path, ws)
+    try:
+        async with (
+            harness.connect() as conn,
+            conn.start_sftp_client() as sftp,
+        ):
+            await sftp.listdir("/")
+            ws.add_mount(
+                "/s3",
+                S3VFS(S3Config(bucket="b")),
+                MountMode.WRITE,
+                write="conditional",
+            )
+            with pytest.raises(asyncssh.SFTPPermissionDenied, match="/s3/"):
+                await sftp.listdir("/")
+    finally:
+        await stop_harness(harness)

@@ -16,7 +16,7 @@ import { CachableAsyncIterator, concat } from '../../io/cachable_iterator.ts'
 import { materialize, type ByteSource, type IOResult } from '../../io/types.ts'
 import type { LostPaths } from '../../observe/context.ts'
 import {
-  newestVersion,
+  RecordIndex,
   type OpRecord,
   READ_FINGERPRINT_OPS,
   STAMP_FINGERPRINT_OPS,
@@ -216,14 +216,10 @@ const draining = new WeakMap<CachableAsyncIterator, Promise<void>>()
  * conditional write lost, or its newest version record removed or moved it
  * (its own or an ancestor's). Mirrors python's `_gone`.
  */
-function gone(
-  records: readonly OpRecord[] | undefined,
-  lost: LostPaths | null,
-  path: string,
-): boolean {
+function gone(index: RecordIndex | undefined, lost: LostPaths | null, path: string): boolean {
   if (lost?.holds(path) === true) return true
-  if (records === undefined) return false
-  return retracted(newestVersion(records, path))
+  if (index === undefined) return false
+  return retracted(index.newestVersion(path))
 }
 
 /** Whether a path's newest version record removed or moved it. */
@@ -242,6 +238,7 @@ function retracted(rec: OpRecord | null): boolean {
 async function keepVersions(
   cache: FileCache,
   records: readonly OpRecord[],
+  index: RecordIndex,
   cacheFacts: (path: string) => CacheFacts,
   lost: LostPaths | null,
 ): Promise<void> {
@@ -255,7 +252,7 @@ async function keepVersions(
     const facts = cacheFacts(path)
     if (!facts.cacheable || facts.versions !== true) continue
     if (lost?.holds(path) === true) continue
-    const rec = newestVersion(records, path)
+    const rec = index.newestVersion(path)
     if (rec === null || retracted(rec)) continue
     const fingerprint = rec.fingerprint ?? ''
     if (fingerprint === '') continue
@@ -303,9 +300,10 @@ export async function applyIo(
   // A path both read and written is dropped: neither side is the file.
   const kept = io.cache.filter((p) => !(p in io.reads) || !(p in io.writes))
   const cacheSet = new Set(kept)
+  const index = records !== undefined ? new RecordIndex(records) : undefined
   for (const path of kept) {
     if (cacheFacts !== undefined && !cacheFacts(path).cacheable) continue
-    if (gone(records, lost, path)) {
+    if (gone(index, lost, path)) {
       await cache.remove(path)
       continue
     }
@@ -362,8 +360,8 @@ export async function applyIo(
     if (cacheFacts !== undefined && !cacheFacts(path).cacheable) continue
     await cache.remove(path)
   }
-  if (records !== undefined && cacheFacts !== undefined) {
-    await keepVersions(cache, records, cacheFacts, lost)
+  if (records !== undefined && index !== undefined && cacheFacts !== undefined) {
+    await keepVersions(cache, records, index, cacheFacts, lost)
   }
   // An unfinished read no drain owns is closed; unmount waits on it.
   for (const [path, source] of Object.entries(io.reads)) {

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpRecord } from './record.ts'
+import { OpRecord, RecordIndex } from './record.ts'
 import { ExecutionNode } from '../workspace/types.ts'
 
 describe('OpRecord', () => {
@@ -130,5 +130,84 @@ describe('ExecutionNode records', () => {
     const node = new ExecutionNode({ command: 'cat /x', exitCode: 0 })
     const d = node.toJSON()
     expect(d).not.toHaveProperty('records')
+  })
+})
+
+describe('RecordIndex.newestVersion', () => {
+  const op = (name: string, path: string): OpRecord =>
+    new OpRecord({ op: name, path, source: 's3', bytes: 0, timestamp: 0, durationMs: 0 })
+  it.each([
+    ['a read', [['read', '/a']], '/a', 0],
+    [
+      'the newer of two',
+      [
+        ['read', '/a'],
+        ['write', '/a'],
+      ],
+      '/a',
+      1,
+    ],
+    [
+      'a stat counts for nothing',
+      [
+        ['read', '/a'],
+        ['stat', '/a'],
+      ],
+      '/a',
+      0,
+    ],
+    [
+      'a later subtree retract above',
+      [
+        ['read', '/d/a'],
+        ['rm_r', '/d'],
+      ],
+      '/d/a',
+      1,
+    ],
+    [
+      'a read after the retract',
+      [
+        ['rm_r', '/d'],
+        ['read', '/d/a'],
+      ],
+      '/d/a',
+      1,
+    ],
+    [
+      'a sibling prefix is not above',
+      [
+        ['read', '/d/a'],
+        ['rm_r', '/dx'],
+      ],
+      '/d/a',
+      0,
+    ],
+    [
+      'a retract among others',
+      [
+        ['read', '/d/a'],
+        ['rename_prefix', '/d'],
+        ['read', '/e'],
+      ],
+      '/d/a',
+      1,
+    ],
+    [
+      'the later of two retracts',
+      [
+        ['rm_r', '/d'],
+        ['read', '/d/a'],
+        ['rm_r', '/d'],
+      ],
+      '/d/a',
+      2,
+    ],
+    ['nothing for the path', [['read', '/b']], '/a', null],
+  ] as const)('%s', (_name, ops, key, newest) => {
+    const records = ops.map(([name, path]) => op(name, path))
+    const want = newest === null ? null : records[newest]
+    expect(new RecordIndex(records).newestVersion(key)).toBe(want)
+    expect(new RecordIndex(records, new Set([key])).newestVersion(key)).toBe(want)
   })
 })

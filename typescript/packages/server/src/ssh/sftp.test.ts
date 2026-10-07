@@ -403,6 +403,30 @@ describe('sftp', () => {
     ).rejects.toSatisfy((err) => codeOf(err) === STATUS.PERMISSION_DENIED)
   })
 
+  it('refuses a live session once a conditional mount is added', async () => {
+    // The session's core was built before the mount existed; it is judged
+    // again on each request, not only on the first.
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    const sftp = await sftpOf(await connect(await startHarness(MountMode.WRITE, ws)))
+    await call<FileEntryWithStats[]>((cb) => {
+      sftp.readdir('/', cb)
+    })
+    ws.addMount(
+      '/s3',
+      new S3VFS({ bucket: 'b', region: 'us-east-1', accessKeyId: 'k', secretAccessKey: 's' }),
+      MountMode.WRITE,
+      undefined,
+      null,
+      undefined,
+      WritePolicy.CONDITIONAL,
+    )
+    await expect(
+      call<FileEntryWithStats[]>((cb) => {
+        sftp.readdir('/', cb)
+      }),
+    ).rejects.toSatisfy((err) => codeOf(err) === STATUS.PERMISSION_DENIED)
+  })
+
   it('serves nothing for an unknown workspace', async () => {
     const sftp = await sftpOf(await connect(await startHarness(), 'nope'))
     await expect(

@@ -12,7 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.observe import OpRecord
+from mirage.observe.record import RecordIndex
 from mirage.workspace.types import ExecutionNode
 
 
@@ -155,3 +158,45 @@ def test_the_claim_and_seal_are_out_of_equality_and_repr():
     assert marked == plain
     assert "claimed" not in repr(marked)
     assert "sealed" not in repr(marked)
+
+
+def _op(op: str, path: str) -> OpRecord:
+    return OpRecord(
+        op=op, path=path, source="s3", bytes=0, timestamp=0, duration_ms=0
+    )
+
+
+@pytest.mark.parametrize(
+    "ops, key, newest",
+    [
+        ([("read", "/a")], "/a", 0),
+        ([("read", "/a"), ("write", "/a")], "/a", 1),
+        ([("read", "/a"), ("stat", "/a")], "/a", 0),
+        ([("read", "/d/a"), ("rm_r", "/d")], "/d/a", 1),
+        ([("rm_r", "/d"), ("read", "/d/a")], "/d/a", 1),
+        ([("read", "/d/a"), ("rm_r", "/dx")], "/d/a", 0),
+        (
+            [("read", "/d/a"), ("rename_prefix", "/d"), ("read", "/e")],
+            "/d/a",
+            1,
+        ),
+        ([("rm_r", "/d"), ("read", "/d/a"), ("rm_r", "/d")], "/d/a", 2),
+        ([("read", "/b")], "/a", None),
+    ],
+    ids=[
+        "a read",
+        "the newer of two",
+        "a stat counts for nothing",
+        "a later subtree retract above",
+        "a read after the retract",
+        "a sibling prefix is not above",
+        "a retract among others",
+        "the later of two retracts",
+        "nothing for the path",
+    ],
+)
+@pytest.mark.parametrize("asked", [False, True])
+def test_the_index_finds_the_newest_version_record(ops, key, newest, asked):
+    records = [_op(op, path) for op, path in ops]
+    found = RecordIndex(records, {key} if asked else None).newest_version(key)
+    assert found is (records[newest] if newest is not None else None)

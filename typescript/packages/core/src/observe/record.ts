@@ -87,19 +87,38 @@ export const VERSION_OPS: ReadonlySet<string> = new Set([
 export const SUBTREE_RETRACT_OPS: ReadonlySet<string> = new Set(['rm_r', 'rename_prefix'])
 
 /**
- * The newest record that says which version of `key` the line knows: one at
- * the path that stamps or retracts a version, or one at an ancestor that
- * moved the whole subtree, which took `key` with it. Mirrors python's
- * `newest_version`.
+ * A line's records indexed once, for many per-path version lookups; `keys`
+ * names the only paths that will be asked about, or null for any.
  */
-export function newestVersion(records: readonly OpRecord[], key: string): OpRecord | null {
-  for (let i = records.length - 1; i >= 0; i--) {
-    const rec = records[i]
-    if (rec === undefined) continue
-    if (rec.path === key && VERSION_OPS.has(rec.op)) return rec
-    if (SUBTREE_RETRACT_OPS.has(rec.op) && underPath(key, rec.path)) return rec
+export class RecordIndex {
+  private readonly records: readonly OpRecord[]
+  private readonly at = new Map<string, number>()
+  private readonly subtree: number[] = []
+
+  constructor(records: readonly OpRecord[], keys: ReadonlySet<string> | null = null) {
+    this.records = records
+    records.forEach((rec, i) => {
+      if (VERSION_OPS.has(rec.op) && (keys === null || keys.has(rec.path))) this.at.set(rec.path, i)
+      if (SUBTREE_RETRACT_OPS.has(rec.op)) this.subtree.push(i)
+    })
   }
-  return null
+
+  /**
+   * The newest record that says which version of `key` the line knows: one
+   * at the path that stamps or retracts a version, or one at an ancestor
+   * that moved the whole subtree, which took `key` with it. Mirrors
+   * python's `RecordIndex.newest_version`.
+   */
+  newestVersion(key: string): OpRecord | null {
+    const at = this.at.get(key) ?? -1
+    for (let j = this.subtree.length - 1; j >= 0; j--) {
+      const i = this.subtree[j] ?? -1
+      if (i <= at) break
+      const rec = this.records[i]
+      if (rec !== undefined && underPath(key, rec.path)) return rec
+    }
+    return at >= 0 ? (this.records[at] ?? null) : null
+  }
 }
 
 export interface OpRecordInit {

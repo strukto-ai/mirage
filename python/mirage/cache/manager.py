@@ -32,7 +32,7 @@ from mirage.cache.index.scope import command_started, tick
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.view import IndexView
 from mirage.observe.context import active_recorder
-from mirage.observe.record import STAMP_FINGERPRINT_OPS, newest_version
+from mirage.observe.record import STAMP_FINGERPRINT_OPS, RecordIndex
 from mirage.types import DEFAULT_READ_TTL, FileStat, PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -575,13 +575,18 @@ class CacheManager:
         """
         out: list[str | None] = [None] * len(paths)
         pending: list[tuple[int, str]] = []
+        keys = [self._cache_key(path) for path in paths]
         recorder = active_recorder()
-        for i, path in enumerate(paths):
-            key = self._cache_key(path)
-            if recorder is not None:
+        index = (
+            RecordIndex(recorder.sink, set(keys))
+            if recorder is not None
+            else None
+        )
+        for i, key in enumerate(keys):
+            if recorder is not None and index is not None:
                 if recorder.lost is not None and recorder.lost.holds(key):
                     continue
-                rec = newest_version(recorder.sink, key)
+                rec = index.newest_version(key)
                 if rec is not None:
                     if rec.op in STAMP_FINGERPRINT_OPS:
                         out[i] = rec.fingerprint or None

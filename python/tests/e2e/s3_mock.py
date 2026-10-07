@@ -128,9 +128,11 @@ class _MultiBucketPaginator:
         self,
         buckets: dict[str, dict[str, bytes]],
         bucket_calls: Counter[tuple[str, str]],
+        page_size: int | None = None,
     ) -> None:
         self.buckets = buckets
         self.bucket_calls = bucket_calls
+        self.page_size = page_size
 
     async def paginate(
         self, Bucket: str, Prefix: str = "", Delimiter: str | None = None
@@ -139,8 +141,14 @@ class _MultiBucketPaginator:
         objects = self.buckets.get(Bucket, {})
         if Delimiter == "/":
             yield _paginate_directory(objects, Prefix)
-        else:
-            yield _paginate_flat(objects, Prefix)
+            return
+        page = _paginate_flat(objects, Prefix)
+        rows = page.get("Contents") or []
+        if self.page_size is None or len(rows) <= self.page_size:
+            yield page
+            return
+        for start in range(0, len(rows), self.page_size):
+            yield {"Contents": rows[start : start + self.page_size]}
 
 
 class MultiBucketS3Client:
@@ -161,6 +169,8 @@ class MultiBucketS3Client:
         self.bucket_calls: Counter[tuple[str, str]] = Counter()
         # Keys DeleteObjects refuses, reported under "Errors" in a 200.
         self.undeletable: set[str] = set()
+        # Rows per list_objects_v2 page; None answers in one page.
+        self.page_size: int | None = None
         # Every request in order, with the condition parameters it sent:
         # what a conditional-write test reads to learn which version went
         # out, rather than a count that HEAD+PUT would also satisfy.
@@ -294,7 +304,9 @@ class MultiBucketS3Client:
 
     def get_paginator(self, name: str):
         assert name == "list_objects_v2"
-        return _MultiBucketPaginator(self.buckets, self.bucket_calls)
+        return _MultiBucketPaginator(
+            self.buckets, self.bucket_calls, self.page_size
+        )
 
     async def put_object(
         self, Bucket: str, Key: str, Body: bytes, **kwargs: object

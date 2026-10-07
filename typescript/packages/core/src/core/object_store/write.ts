@@ -14,6 +14,7 @@
 
 import type { Accessor } from '../../accessor/base.ts'
 import {
+  OwnRead,
   type WriteCondition,
   invalidateAfterWrite,
   invalidateAncestors,
@@ -130,11 +131,11 @@ export function makeTruncate<A extends Accessor, C>(
       } else {
         // Conditioned on the bytes this op read itself.
         let existing: Uint8Array | null
-        let own: string | null = null
+        let own: string | OwnRead | null = null
         if (driver.getVersioned !== undefined) {
           const got = await driver.getVersioned(conn, key)
           existing = got?.[0] ?? null
-          own = got?.[1] ?? null
+          own = got === null ? OwnRead.ABSENT : got[1]
         } else {
           existing = await driver.get(conn, key)
         }

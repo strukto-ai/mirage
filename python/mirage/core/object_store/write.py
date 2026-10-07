@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.cache.context import (
+    OwnRead,
     WriteCondition,
     invalidate_after_write,
     invalidate_ancestors,
@@ -173,11 +174,13 @@ def make_truncate(driver: ObjectStoreDriver[A, C]) -> TruncateFn[A]:
                 result = b""
                 cond = await write_condition(path_spec, "write")
             else:
-                own: str | None = None
+                own: str | OwnRead | None = None
                 if driver.get_versioned is not None:
                     # Conditioned on the bytes this op read itself.
                     got = await driver.get_versioned(conn, key)
-                    data, own = got if got is not None else (None, None)
+                    data, own = (
+                        got if got is not None else (None, OwnRead.ABSENT)
+                    )
                 else:
                     data = await driver.get(conn, key)
                 if data is None:

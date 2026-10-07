@@ -14,7 +14,7 @@
 
 import { captureRead } from './context.ts'
 import { activeRecords, lostPaths } from '../observe/context.ts'
-import { newestVersion, STAMP_FINGERPRINT_OPS } from '../observe/record.ts'
+import { RecordIndex, STAMP_FINGERPRINT_OPS } from '../observe/record.ts'
 import { DEFAULT_READ_TTL, type FileStat, PathSpec } from '../types.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
@@ -465,11 +465,12 @@ export class CacheManager {
     const pending: [number, string][] = []
     const records = activeRecords()
     const lost = lostPaths(records)
-    paths.forEach((path, i) => {
-      const key = this.cacheKey(path)
-      if (records !== undefined) {
+    const keys = paths.map((path) => this.cacheKey(path))
+    const index = records !== undefined ? new RecordIndex(records, new Set(keys)) : undefined
+    keys.forEach((key, i) => {
+      if (index !== undefined) {
         if (lost?.holds(key) === true) return
-        const rec = newestVersion(records, key)
+        const rec = index.newestVersion(key)
         if (rec !== null) {
           out[i] = STAMP_FINGERPRINT_OPS.has(rec.op) ? (rec.fingerprint ?? null) : null
           return

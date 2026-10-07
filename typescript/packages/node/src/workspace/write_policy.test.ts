@@ -397,6 +397,25 @@ describe('the workspace write default in a snapshot', () => {
       Workspace.fromState(state, { mode: MountMode.WRITE, write: 'unconditional' }),
     ).rejects.toThrow('saved write: conditional')
   })
+
+  it('keeps the saved default when an option leaves write undefined', async () => {
+    // A JS caller or a looser tsconfig can spread write: undefined in.
+    const ws = new Workspace(
+      { '/d': new Mount(new RAMVFS(), { mode: MountMode.WRITE, write: 'unconditional' }) },
+      { mode: MountMode.WRITE, write: 'conditional' },
+    )
+    const state = await toStateDict(ws)
+    await ws.close()
+    const options = { mode: MountMode.WRITE, write: undefined } as unknown as Parameters<
+      typeof Workspace.fromState
+    >[1]
+    const restored = await Workspace.fromState(state, options)
+    try {
+      expect(restored.addMount('/more', s3(), MountMode.WRITE).write).toBe(WritePolicy.CONDITIONAL)
+    } finally {
+      await restored.close()
+    }
+  })
 })
 
 describe('a version kept without bytes', () => {

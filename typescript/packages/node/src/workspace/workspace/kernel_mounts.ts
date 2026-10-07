@@ -16,6 +16,12 @@ import { MountBackend } from '@struktoai/mirage-core/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { FuseManager } from '../fuse.ts'
 
+/** Restore `map`'s entry for `key` to `value`, or remove it when undefined. */
+function putBack<V>(map: Map<string, V>, key: string, value: V | undefined): void {
+  if (value === undefined) map.delete(key)
+  else map.set(key, value)
+}
+
 /**
  * The workspace's real mountpoints, one {@link FuseManager} per subtree.
  *
@@ -59,11 +65,16 @@ export class KernelMounts {
   ): Promise<string> {
     const session = sessionId !== undefined ? this.workspace.getSession(sessionId) : undefined
     const key = sessionId === undefined ? prefix : `${prefix}@${sessionId}`
+    const priorManager = this.managers.get(key)
+    const priorMountpoint = this.mountpointsMap.get(key)
+    const priorExposure = this.exposures.get(key)
     // Register a pinned path BEFORE mounting so a collision is rejected
     // without leaving a partial mount.
     if (mountpoint !== undefined) this.register(key, mountpoint)
     const manager = new FuseManager()
     this.managers.set(key, manager)
+    // Exposed from the start, so a mount added during setup sees it.
+    this.exposures.set(key, [prefix, backend ?? MountBackend.FUSE])
     try {
       const resolved = await manager.setup(this.workspace, {
         rootPrefix: prefix,
@@ -72,13 +83,13 @@ export class KernelMounts {
         ...(backend !== undefined ? { backend } : {}),
       })
       if (mountpoint === undefined) this.register(key, resolved)
-      this.exposures.set(key, [prefix, backend ?? MountBackend.FUSE])
       return resolved
     } catch (err) {
-      // The mount never came up; drop the manager and any registered path
-      // so mountpoints does not misreport it as live.
-      this.managers.delete(key)
-      this.mountpointsMap.delete(key)
+      // The mount never came up; put back what the key held before, so a
+      // live mount under the same key keeps its records.
+      putBack(this.managers, key, priorManager)
+      putBack(this.mountpointsMap, key, priorMountpoint)
+      putBack(this.exposures, key, priorExposure)
       throw err
     }
   }

@@ -780,3 +780,38 @@ async def test_apply_io_skips_a_path_its_mount_does_not_cache():
     io = IOResult(reads={"/s3/f.txt": b"hello"}, cache=["/s3/f.txt"])
     await cache_io.apply_io(cache, io, _facts(30, cacheable=False))
     assert not await cache.exists("/s3/f.txt")
+
+
+@pytest.mark.asyncio
+async def test_apply_io_indexes_the_line_once(monkeypatch):
+    # Every per-path lookup reads one index; rebuilding it per path made a
+    # line over N files cost N passes over its records.
+    built = []
+    real = cache_io.RecordIndex.__init__
+
+    def counted(self, records):
+        built.append(len(records))
+        real(self, records)
+
+    monkeypatch.setattr(cache_io.RecordIndex, "__init__", counted)
+    paths = [f"/s3/f{i}" for i in range(50)]
+    records = [
+        OpRecord(
+            op="read",
+            path=p,
+            source="s3",
+            bytes=1,
+            timestamp=0,
+            duration_ms=0,
+            fingerprint=f"v{i}",
+        )
+        for i, p in enumerate(paths)
+    ]
+    io = IOResult(reads={p: b"x" for p in paths}, cache=paths)
+    await cache_io.apply_io(
+        RAMFileCacheStore(),
+        io,
+        lambda _p: CacheFacts(cacheable=True, ttl=60, versions=True),
+        records,
+    )
+    assert built == [len(records)]

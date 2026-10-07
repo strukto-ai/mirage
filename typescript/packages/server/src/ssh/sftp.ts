@@ -16,6 +16,7 @@ import { constants as fsConstants } from 'node:fs'
 import { constants as osConstants } from 'node:os'
 import { posix } from 'node:path'
 import { conditionalOverlap } from '@struktoai/mirage-core/workspace/mount/write_policy'
+import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { MountCore, classifyErrno, type FuseAttr } from '@struktoai/mirage-node'
 import { EACCES, ENOENT, EROFS, errnoError } from '@struktoai/mirage-node/fuse/errors'
 import type { Attributes, FileEntry, SFTPWrapper } from 'ssh2'
@@ -144,6 +145,22 @@ function exitZero(sftp: SFTPWrapper): void {
 }
 
 /**
+ * Refuse a workspace holding a conditional mount: MountCore cannot carry a
+ * write's version, so uploads would empty files. Mirrors Python's
+ * `_refuse_conditional`.
+ */
+function refuseConditional(ws: Workspace): void {
+  const conditional = conditionalOverlap(ws.mounts(), '/')
+  if (conditional !== null) {
+    throw new SFTPStatusError(
+      STATUS.PERMISSION_DENIED,
+      `mount '${conditional}': write: conditional cannot be served over SFTP, ` +
+        'which has no place to carry the version',
+    )
+  }
+}
+
+/**
  * SFTP onto a workspace, through the MountCore FUSE uses.
  *
  * Every request lands on one MountCore bound to a session of its own, so
@@ -250,21 +267,17 @@ class MirageSFTPServer {
   }
 
   private async mount(): Promise<MountCore> {
-    if (this.core !== null) return this.core
+    if (this.core !== null && this.entry !== null) {
+      // A mount added since the core was built is judged too.
+      refuseConditional(this.entry.runner.ws)
+      return this.core
+    }
     const entry = loginEntry(this.registry, this.workspaceId, this.account)
     if (entry === null) {
       throw new SFTPStatusError(STATUS.NO_SUCH_FILE, `no such workspace: ${this.workspaceId}`)
     }
     const ws = entry.runner.ws
-    // MountCore cannot carry a write's version; uploads would empty files.
-    const conditional = conditionalOverlap(ws.mounts(), '/')
-    if (conditional !== null) {
-      throw new SFTPStatusError(
-        STATUS.PERMISSION_DENIED,
-        `mount '${conditional}': write: conditional cannot be served over SFTP, ` +
-          'which has no place to carry the version',
-      )
-    }
+    refuseConditional(ws)
     await openSession(ws, this.sessionId, {}, keyProfile(this.profile))
     this.entry = entry
     this.core = new MountCore(ws.vfs, { session: ws.getSession(this.sessionId) })

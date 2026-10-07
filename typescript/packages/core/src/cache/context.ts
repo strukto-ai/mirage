@@ -272,7 +272,12 @@ export type WriteKind = 'write' | 'copy' | 'delete'
 export type KnownVersions = (keys: readonly string[]) => Promise<Map<string, string>>
 
 const writeStorage = createAsyncContext<{ context: WriteContext | null }>()
-const ownVersionStorage = createAsyncContext<{ version: string | null }>()
+/** An op's own read that found no file, as against one it never made. */
+export enum OwnRead {
+  ABSENT = 'absent',
+}
+
+const ownVersionStorage = createAsyncContext<{ version: string | OwnRead | null }>()
 
 /** Run `fn` with `context` bound as the mount's write context. */
 export function runWithWriteContext<T>(
@@ -306,7 +311,10 @@ function activeWriteContext(path: PathSpec): WriteContext | null {
  * read-modify-write op (an append, a descriptor pwrite, a resize) bases its
  * write on what it read itself, not on what the agent read.
  */
-export function runWithOwnVersion<T>(version: string | null, fn: () => Promise<T>): Promise<T> {
+export function runWithOwnVersion<T>(
+  version: string | OwnRead | null,
+  fn: () => Promise<T>,
+): Promise<T> {
   return Promise.resolve(ownVersionStorage.run({ version }, fn))
 }
 
@@ -316,7 +324,7 @@ export function runWithOwnVersion<T>(version: string | null, fn: () => Promise<T
  * refused rather than read as "none", which would send the agent's version
  * in place of the op's own.
  */
-function ownVersion(path: PathSpec): string | null {
+function ownVersion(path: PathSpec): string | OwnRead | null {
   const states = ownVersionStorage.liveStores()
   const first = states[0]
   if (first === undefined) return null
@@ -355,13 +363,16 @@ export async function readVersioned<T>(
 export async function writeCondition(
   path: PathSpec,
   kind: WriteKind,
-  own: string | null = null,
+  own: string | OwnRead | null = null,
   preferOwn = true,
 ): Promise<WriteCondition | null> {
   const context = activeWriteContext(path)
   if (context === null) return null
-  const mine = own ?? ownVersion(path)
+  const read = own ?? ownVersion(path)
   const cached = await context.readVersion(path)
+  // The op's own read found no file: one the mount saw was removed since.
+  if (read === OwnRead.ABSENT && cached !== null && cached !== '') throw await stale(path)
+  const mine = read === OwnRead.ABSENT ? null : read
   const ownToken = mine === '' ? null : mine
   const cachedToken = cached === '' ? null : cached
   const version = preferOwn ? (ownToken ?? cachedToken) : (cachedToken ?? ownToken)

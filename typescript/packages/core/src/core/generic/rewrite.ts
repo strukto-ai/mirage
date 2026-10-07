@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readVersioned, runWithOwnVersion } from '../../cache/context.ts'
+import { OwnRead, readVersioned, runWithOwnVersion } from '../../cache/context.ts'
 import { eexist, einval, eisdir, enotsup, isEnotdir, isMissingPath } from '../../errors/fs.ts'
 import { FileType, type FileStat, type PathSpec } from '../../types.ts'
 import { spliceWindow } from '../../utils/ranges.ts'
@@ -46,19 +46,19 @@ export async function appendByRewrite(
       found = await stat(path)
     } catch (error) {
       if (!isMissingPath(error)) throw error
-      await write(path, data)
+      await runWithOwnVersion(OwnRead.ABSENT, () => write(path, data))
       return
     }
     if (found.type === FileType.DIRECTORY) throw eisdir(path)
     return
   }
   let existing: Uint8Array
-  let own: string | null
+  let own: string | OwnRead | null
   try {
     ;[existing, own] = await readVersioned(path, () => read(path))
   } catch (error) {
     if (!isMissingPath(error)) throw error
-    await write(path, data)
+    await runWithOwnVersion(OwnRead.ABSENT, () => write(path, data))
     return
   }
   const joined = new Uint8Array(existing.length + data.length)
@@ -92,14 +92,14 @@ export async function pwriteByRewrite(
       found = await stat(path)
     } catch (error) {
       if (!isMissingPath(error)) throw error
-      await write(path, data)
+      await runWithOwnVersion(OwnRead.ABSENT, () => write(path, data))
       return
     }
     if (found.type === FileType.DIRECTORY) throw eisdir(path)
     return
   }
   let existing: Uint8Array
-  let own: string | null = null
+  let own: string | OwnRead | null = null
   try {
     ;[existing, own] = await readVersioned(path, () => read(path))
   } catch (error) {
@@ -112,6 +112,7 @@ export async function pwriteByRewrite(
     }
     if (missing !== null && missing.type === FileType.DIRECTORY) throw eisdir(path)
     existing = new Uint8Array()
+    own = OwnRead.ABSENT
   }
   await runWithOwnVersion(own, () => write(path, spliceWindow(existing, offset, data)))
 }

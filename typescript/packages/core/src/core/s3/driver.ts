@@ -356,14 +356,29 @@ async function moveFileIf(
   return true
 }
 
-async function listed(conn: S3Conn, pfx: string): Promise<[string, string][]> {
-  const found: [string, string][] = []
+/**
+ * Each listing page under `pfx`, every key with the version it is measured
+ * against: the version the agent read where there is one, else the
+ * listing's, one page at a time.
+ * Mirrors python's `_known_pages`.
+ */
+async function* knownPages(
+  conn: S3Conn,
+  pfx: string,
+  known: KnownVersions,
+): AsyncIterable<[string, string][]> {
   for await (const page of listPages(conn, { Bucket: conn.config.bucket, Prefix: pfx })) {
+    const listed: [string, string][] = []
     for (const obj of page.Contents ?? []) {
-      if (obj.Key !== undefined) found.push([obj.Key, quoted(obj.ETag ?? '')])
+      if (obj.Key !== undefined) listed.push([obj.Key, quoted(obj.ETag ?? '')])
     }
+    if (listed.length === 0) continue
+    const versions = await known(listed.map(([key]) => key))
+    yield listed.map(([key, token]) => {
+      const version = versions.get(key)
+      return [key, version !== undefined ? quoted(version) : token]
+    })
   }
-  return found
 }
 
 /** The error for keys a DeleteObjects refused in the body of its 200. */
@@ -375,13 +390,14 @@ function refused(failed: readonly string[]): Error {
 }
 
 /**
- * Delete each listed key only while it is the version listed. A refusal
- * comes back per key in the body of a 200.
- *
- * @throws ConditionLost for keys a newer write changed, which were kept
- * @throws EACCES for keys the store refused for another reason
+ * Delete each listed key only while it is the version listed, returning the
+ * keys a newer write changed (kept) and the keys the store refused for
+ * another reason. A refusal comes back per key in the body of a 200.
  */
-async function deleteListed(conn: S3Conn, keys: readonly [string, string][]): Promise<void> {
+async function deleteBatch(
+  conn: S3Conn,
+  keys: readonly [string, string][],
+): Promise<[string[], string[]]> {
   const lost: string[] = []
   const failed: string[] = []
   for (let start = 0; start < keys.length; start += DELETE_BATCH) {
@@ -396,31 +412,28 @@ async function deleteListed(conn: S3Conn, keys: readonly [string, string][]): Pr
       ;(CONDITION_LOST_CODES.has(err.Code ?? '') ? lost : failed).push(err.Key ?? '')
     }
   }
-  if (lost.length > 0) throw new ConditionLost(lost)
-  if (failed.length > 0) throw refused(failed)
+  return [lost, failed]
 }
 
 /**
- * Each key under `pfx` with the version it is measured against: the version
- * the agent read where there is one, else the listing's. Mirrors python's
- * `_known_listing`.
+ * Raise for the keys a prefix op kept: lost keys first, so the caller drops
+ * their cached copies, then keys the store refused. Mirrors Python's
+ * `_raise_kept`.
  */
-async function knownListing(
-  conn: S3Conn,
-  pfx: string,
-  known: KnownVersions,
-): Promise<[string, string][]> {
-  const keys = await listed(conn, pfx)
-  const versions = await known(keys.map(([key]) => key))
-  return keys.map(([key, token]) => {
-    const version = versions.get(key)
-    return [key, version !== undefined ? quoted(version) : token]
-  })
+function raiseKept(lost: readonly string[], failed: readonly string[]): void {
+  if (lost.length > 0) throw new ConditionLost([...lost])
+  if (failed.length > 0) throw refused(failed)
 }
 
 async function deletePrefixIf(conn: S3Conn, pfx: string, known: KnownVersions): Promise<void> {
-  const keys = await knownListing(conn, pfx, known)
-  if (keys.length > 0) await deleteListed(conn, keys)
+  const lost: string[] = []
+  const failed: string[] = []
+  for await (const listed of knownPages(conn, pfx, known)) {
+    const [pageLost, pageFailed] = await deleteBatch(conn, listed)
+    lost.push(...pageLost)
+    failed.push(...pageFailed)
+  }
+  raiseKept(lost, failed)
 }
 
 async function movePrefixIf(
@@ -429,36 +442,33 @@ async function movePrefixIf(
   dstPfx: string,
   known: KnownVersions,
 ): Promise<boolean> {
-  const keys = await knownListing(conn, srcPfx, known)
-  if (keys.length === 0) return false
-  const moved: [string, string][] = []
+  let found = false
   const lost: string[] = []
-  for (const [key, token] of keys) {
-    try {
-      await conn.send(
-        new conn.mod.CopyObjectCommand({
-          Bucket: conn.config.bucket,
-          CopySource: `${conn.config.bucket}/${key}`,
-          Key: `${dstPfx}${key.slice(srcPfx.length)}`,
-          CopySourceIfMatch: token,
-          IfNoneMatch: '*',
-        }),
-      )
-    } catch (err) {
-      if (!lostCondition(err, true)) throw err
-      lost.push(key)
-      continue
+  const moved: [string, string][] = []
+  for await (const listed of knownPages(conn, srcPfx, known)) {
+    found = true
+    for (const [key, token] of listed) {
+      try {
+        await conn.send(
+          new conn.mod.CopyObjectCommand({
+            Bucket: conn.config.bucket,
+            CopySource: `${conn.config.bucket}/${key}`,
+            Key: `${dstPfx}${key.slice(srcPfx.length)}`,
+            CopySourceIfMatch: token,
+            IfNoneMatch: '*',
+          }),
+        )
+      } catch (err) {
+        if (!lostCondition(err, true)) throw err
+        lost.push(key)
+        continue
+      }
+      moved.push([key, token])
     }
-    moved.push([key, token])
   }
-  try {
-    if (moved.length > 0) await deleteListed(conn, moved)
-  } catch (err) {
-    if (!(err instanceof ConditionLost)) throw err
-    lost.push(...err.keys)
-  }
-  if (lost.length > 0) throw new ConditionLost(lost)
-  return true
+  const [deleteLost, failed] = await deleteBatch(conn, moved)
+  raiseKept([...lost, ...deleteLost], failed)
+  return found
 }
 
 async function deleteFile(conn: S3Conn, key: string): Promise<void> {

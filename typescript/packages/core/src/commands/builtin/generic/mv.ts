@@ -481,6 +481,19 @@ export async function mvGeneric(
       }
     }
     const sourceLink = copies !== undefined && copies.links.statAt(src.virtual) !== null
+    // A source whose delete would be refused is refused here, before a
+    // backup renames the destination aside.
+    if (isPrimitiveMove(strategy) && !sourceLink) {
+      try {
+        strategy.checkUnlink?.(src)
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        errors.push(
+          `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${String(fsStrerror(err))}`,
+        )
+        continue
+      }
+    }
     const backupStrategy =
       copies !== undefined
         ? { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) }
@@ -513,15 +526,6 @@ export async function mvGeneric(
       writes[src.mountPath] = new Uint8Array()
       writes[target.mountPath] = new Uint8Array()
     } else if (isPrimitiveMove(strategy)) {
-      try {
-        strategy.checkUnlink?.(src)
-      } catch (err) {
-        if (!isFsError(err)) throw err
-        errors.push(
-          `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${String(fsStrerror(err))}`,
-        )
-        continue
-      }
       const entries = await cpWalk(strategy.readdir, stat, src, index)
       const { copiedAll, wroteAny } = await copyEntries(
         'mv',

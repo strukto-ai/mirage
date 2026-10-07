@@ -27,7 +27,7 @@ from mirage.observe.record import (
     STAMP_FINGERPRINT_OPS,
     WRITE_FINGERPRINT_OPS,
     OpRecord,
-    newest_version,
+    RecordIndex,
 )
 from mirage.types import CacheFacts
 
@@ -277,7 +277,7 @@ def mark_claimed_writes(records: list[OpRecord], io: IOResult) -> None:
 
 
 def _gone(
-    records: list[OpRecord] | None, lost: LostPaths | None, path: str
+    index: RecordIndex | None, lost: LostPaths | None, path: str
 ) -> bool:
     """Whether the line no longer knows the bytes it holds for ``path``.
 
@@ -286,15 +286,15 @@ def _gone(
     bytes describe any more.
 
     Args:
-        records (list[OpRecord] | None): the line's records.
+        index (RecordIndex | None): the line's records, indexed.
         lost (LostPaths | None): the line's lost paths.
         path (str): virtual path used as the cache key.
     """
     if lost is not None and lost.holds(path):
         return True
-    if records is None:
+    if index is None:
         return False
-    return _retracted(newest_version(records, path))
+    return _retracted(index.newest_version(path))
 
 
 def _retracted(rec: OpRecord | None) -> bool:
@@ -309,6 +309,7 @@ def _retracted(rec: OpRecord | None) -> bool:
 async def _keep_versions(
     cache: FileCacheMixin,
     records: list[OpRecord],
+    index: RecordIndex,
     cache_facts: Callable[[str], CacheFacts],
     lost: LostPaths | None,
 ) -> None:
@@ -322,6 +323,7 @@ async def _keep_versions(
     Args:
         cache (FileCacheMixin): the file cache.
         records (list[OpRecord]): the line's records.
+        index (RecordIndex): the same records, indexed.
         cache_facts (Callable[[str], CacheFacts]): per-path facts.
         lost (LostPaths | None): the line's lost paths.
     """
@@ -337,7 +339,7 @@ async def _keep_versions(
             continue
         if lost is not None and lost.holds(path):
             continue
-        rec = newest_version(records, path)
+        rec = index.newest_version(path)
         if rec is None or _retracted(rec) or not rec.fingerprint:
             continue
         versions[path] = rec.fingerprint
@@ -372,10 +374,11 @@ async def apply_io(
     # A path both read and written is dropped: neither side is the file.
     kept = [p for p in io.cache if p not in io.reads or p not in io.writes]
     cache_set = set(kept)
+    index = RecordIndex(records) if records is not None else None
     for path in kept:
         if cache_facts is not None and not cache_facts(path).cacheable:
             continue
-        if _gone(records, lost, path):
+        if _gone(index, lost, path):
             await cache.remove(path)
             continue
         # The token has to describe the bytes actually stored, so the
@@ -434,8 +437,8 @@ async def apply_io(
         if cache_facts is not None and not cache_facts(path).cacheable:
             continue
         await cache.remove(path)
-    if records is not None and cache_facts is not None:
-        await _keep_versions(cache, records, cache_facts, lost)
+    if records is not None and index is not None and cache_facts is not None:
+        await _keep_versions(cache, records, index, cache_facts, lost)
     # An unfinished read no drain owns is closed; unmount waits on it.
     drains = getattr(cache, "_drain_tasks", {})
     for path, data in io.reads.items():

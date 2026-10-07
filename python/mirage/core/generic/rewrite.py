@@ -14,7 +14,7 @@
 
 from collections.abc import Awaitable, Callable
 
-from mirage.cache.context import own_write_version, read_versioned
+from mirage.cache.context import OwnRead, own_write_version, read_versioned
 from mirage.errors.fs import eexist, einval, eisdir, enotsup
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.ranges import splice_window
@@ -47,7 +47,8 @@ async def append_by_rewrite(
         try:
             found = await stat(path)
         except FileNotFoundError:
-            await write(path, data)
+            with own_write_version(OwnRead.ABSENT):
+                await write(path, data)
             return
         if found.type == FileType.DIRECTORY:
             raise eisdir(path.virtual)
@@ -55,7 +56,8 @@ async def append_by_rewrite(
     try:
         existing, own = await read_versioned(path, lambda: read(path))
     except FileNotFoundError:
-        await write(path, data)
+        with own_write_version(OwnRead.ABSENT):
+            await write(path, data)
         return
     with own_write_version(own):
         await write(path, existing + data)
@@ -91,12 +93,13 @@ async def pwrite_by_rewrite(
         try:
             found = await stat(path)
         except FileNotFoundError:
-            await write(path, data)
+            with own_write_version(OwnRead.ABSENT):
+                await write(path, data)
             return
         if found.type == FileType.DIRECTORY:
             raise eisdir(path.virtual)
         return
-    own: str | None = None
+    own: str | OwnRead | None = None
     try:
         existing, own = await read_versioned(path, lambda: read(path))
     except FileNotFoundError:
@@ -106,7 +109,7 @@ async def pwrite_by_rewrite(
             missing = None
         if missing is not None and missing.type == FileType.DIRECTORY:
             raise eisdir(path.virtual)
-        existing = b""
+        existing, own = b"", OwnRead.ABSENT
     with own_write_version(own):
         await write(path, splice_window(existing, offset, data))
 

@@ -17,7 +17,7 @@ from typing import Callable
 
 from mirage.errors.fs import enotsup
 from mirage.types import PathSpec, WritePolicy
-from mirage.utils.key_prefix import strip_mount
+from mirage.utils.key_prefix import strip_mount, under_path
 from mirage.vfs.base import BaseVFS
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.mount.write_policy import write_conditions
@@ -83,24 +83,29 @@ def make_storage_key(registry: MountRegistry) -> Callable[[PathSpec], str]:
 
 
 def delete_check(registry: MountRegistry, path: PathSpec) -> None:
-    """Refuse up front a delete ``path``'s mount could not condition.
+    """Refuse up front a delete a mount under ``path`` could not condition.
 
     A move across mounts copies before it deletes; on a conditional mount
     whose backend ignores delete conditions the delete would be refused
-    after the copy landed, so the move is refused before it starts.
+    after the copy landed, so the move is refused before it starts. The
+    mount owning the source counts, and so does any mount nested under it,
+    which the walk would cross; a mount above the owner is never touched.
 
     Args:
         registry (MountRegistry): Mount set the operand is addressed in.
         path (PathSpec): The source operand.
 
     Raises:
-        OperationNotSupportedError: the mount cannot condition a delete.
+        OperationNotSupportedError: a mount cannot condition a delete.
     """
-    entry = registry.try_mount_for(path.virtual)
-    if entry is None or entry.write is not WritePolicy.CONDITIONAL:
-        return
-    if "delete" not in write_conditions(entry.vfs):
-        raise enotsup(entry.vfs.name, "conditional delete", path)
+    owner = registry.try_mount_for(path.virtual)
+    for entry in registry.mounts():
+        if (
+            entry.write is WritePolicy.CONDITIONAL
+            and (entry is owner or under_path(entry.prefix, path.virtual))
+            and "delete" not in write_conditions(entry.vfs)
+        ):
+            raise enotsup(entry.vfs.name, "conditional delete", path)
 
 
 def make_delete_check(registry: MountRegistry) -> Callable[[PathSpec], None]:

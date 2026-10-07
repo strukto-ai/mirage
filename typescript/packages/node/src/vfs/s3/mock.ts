@@ -220,6 +220,8 @@ export interface S3Mock {
   ledger: [string, Record<string, string>][]
   /** Run `hook` once, just before the next `op` request lands. */
   before(op: string, hook: () => void | Promise<void>): void
+  /** Drop every hook not yet run, so one a test left queued fires in no other. */
+  clearHooks(): void
   /**
    * Throw on a mutation that carries no condition. A marker key (trailing
    * slash) is exempt, because rmdir is unconditional.
@@ -227,6 +229,8 @@ export interface S3Mock {
   tripwire: boolean
   /** Keys DeleteObjects refuses with AccessDenied in its body, as python's `undeletable`. */
   undeletable: Set<string>
+  /** Rows per flat ListObjectsV2 page; null answers in one page, as python's `page_size`. */
+  pageSize: number | null
 }
 
 /**
@@ -254,7 +258,7 @@ export function installS3Mock(
   const etag = (data: Uint8Array): string => `"${md5Hex(data)}${suffix}"`
   const ledger: [string, Record<string, string>][] = []
   const hooks = new Map<string, (() => void | Promise<void>)[]>()
-  const state = { tripwire: false }
+  const state: { tripwire: boolean; pageSize: number | null } = { tripwire: false, pageSize: null }
   const undeletable = new Set<string>()
   const enter = async (op: string, key: string, sent: Record<string, string>): Promise<void> => {
     ledger.push([op, sent])
@@ -313,23 +317,40 @@ export function installS3Mock(
 
   mock
     .on(ListObjectsV2Command)
-    .callsFake((input: { Bucket: string; Prefix?: string; Delimiter?: string }) => {
-      const objects = store.objects(input.Bucket)
-      const prefix = input.Prefix ?? ''
-      const page =
-        input.Delimiter === '/' ? paginateDirectory(objects, prefix) : paginateFlat(objects, prefix)
-      // Real S3 lists each object's ETag, which a per-key conditional delete
-      // reads its versions off.
-      return Promise.resolve({
-        Contents: (page.Contents ?? []).map((c) => {
-          const data = objects.get(c.Key)
-          return data === undefined ? c : { ...c, ETag: etag(data) }
-        }),
-        ...(page.CommonPrefixes !== undefined ? { CommonPrefixes: page.CommonPrefixes } : {}),
-        IsTruncated: false,
-        KeyCount: page.Contents?.length ?? 0,
-      })
-    })
+    .callsFake(
+      (input: {
+        Bucket: string
+        Prefix?: string
+        Delimiter?: string
+        ContinuationToken?: string
+      }) => {
+        const objects = store.objects(input.Bucket)
+        const prefix = input.Prefix ?? ''
+        const full =
+          input.Delimiter === '/'
+            ? paginateDirectory(objects, prefix)
+            : paginateFlat(objects, prefix)
+        // Real S3 continues after the last key it sent, so a key deleted
+        // between pages never shifts the next one.
+        const after = input.ContinuationToken
+        const rows = (full.Contents ?? []).filter((c) => after === undefined || c.Key > after)
+        const size = input.Delimiter === '/' ? null : state.pageSize
+        const truncated = size !== null && rows.length > size
+        const page = { ...full, Contents: truncated ? rows.slice(0, size) : rows }
+        // Real S3 lists each object's ETag, which a per-key conditional delete
+        // reads its versions off.
+        return Promise.resolve({
+          Contents: page.Contents.map((c) => {
+            const data = objects.get(c.Key)
+            return data === undefined ? c : { ...c, ETag: etag(data) }
+          }),
+          ...(page.CommonPrefixes !== undefined ? { CommonPrefixes: page.CommonPrefixes } : {}),
+          IsTruncated: truncated,
+          ...(truncated ? { NextContinuationToken: page.Contents.at(-1)?.Key ?? '' } : {}),
+          KeyCount: page.Contents.length,
+        })
+      },
+    )
 
   mock
     .on(PutObjectCommand)
@@ -438,7 +459,16 @@ export function installS3Mock(
       queue.push(hook)
       hooks.set(op, queue)
     },
+    clearHooks: () => {
+      hooks.clear()
+    },
     undeletable,
+    get pageSize() {
+      return state.pageSize
+    },
+    set pageSize(value: number | null) {
+      state.pageSize = value
+    },
     get tripwire() {
       return state.tripwire
     },

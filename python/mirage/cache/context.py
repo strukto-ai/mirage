@@ -17,6 +17,7 @@ from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from enum import Enum, auto
 from typing import Literal, Protocol, TypeVar
 
 from mirage.errors.fs import enotsup, stale_write
@@ -305,7 +306,15 @@ KnownVersions = Callable[[list[str]], Awaitable[dict[str, str]]]
 _write: ContextVar[WriteContext | None] = ContextVar(
     "_write_context", default=None
 )
-_own_version: ContextVar[str | None] = ContextVar(
+
+
+class OwnRead(Enum):
+    """An op's own read that found no file, as against one it never made."""
+
+    ABSENT = auto()
+
+
+_own_version: ContextVar[str | OwnRead | None] = ContextVar(
     "_own_write_version", default=None
 )
 
@@ -344,7 +353,7 @@ async def read_versioned(
 
 
 @contextmanager
-def own_write_version(version: str | None) -> Iterator[None]:
+def own_write_version(version: str | OwnRead | None) -> Iterator[None]:
     """Hand the version an op just read to the write it makes next.
 
     A read-modify-write op (an append, a pwrite through a descriptor, a
@@ -352,7 +361,8 @@ def own_write_version(version: str | None) -> Iterator[None]:
     agent read, so its write carries that read's version.
 
     Args:
-        version (str | None): the token of the bytes the op read.
+        version (str | OwnRead | None): the token of the bytes the op
+            read, or ABSENT when its read found no file.
     """
     token = _own_version.set(version)
     try:
@@ -364,7 +374,7 @@ def own_write_version(version: str | None) -> Iterator[None]:
 async def write_condition(
     path: PathSpec,
     kind: WriteKind,
-    own: str | None = None,
+    own: str | OwnRead | None = None,
     prefer_own: bool = True,
 ) -> WriteCondition | None:
     """The condition a write to ``path`` must carry, None when unconditional.
@@ -376,12 +386,16 @@ async def write_condition(
     Args:
         path (PathSpec): the path written.
         kind (WriteKind): write, copy or delete.
-        own (str | None): the version the op itself just saw.
+        own (str | OwnRead | None): the version the op itself just saw,
+            or ABSENT when its read found no file: a file the mount holds a
+            version of was removed since, so the write is refused; one it
+            never saw is created.
         prefer_own (bool): whether the op's own version wins over the
             mount's cached one (true for a read-modify-write, false for a
             delete, which falls back to its own lookup).
 
     Raises:
+        StaleWriteError: the op found removed a file the mount saw.
         OperationNotSupportedError: the backend cannot condition this op.
     """
     context = _write.get()
@@ -389,6 +403,10 @@ async def write_condition(
         return None
     own = own if own is not None else _own_version.get()
     cached = await context.read_version(path)
+    if own is OwnRead.ABSENT:
+        if cached:
+            raise await stale(path)
+        own = None
     version = (own or cached) if prefer_own else (cached or own)
     needed = {"copy": "copy", "delete": "delete"}.get(
         kind, "put" if version else "create"

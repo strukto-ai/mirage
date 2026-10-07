@@ -12,10 +12,28 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import TypeVar
+
 from mirage.ops import Ops
 from mirage.types import MountBackend
 from mirage.workspace.fuse import FuseManager
 from mirage.workspace.session import SessionManager
+
+_V = TypeVar("_V")
+
+
+def _put_back(table: dict[str, _V], key: str, value: _V | None) -> None:
+    """Restore ``table[key]`` to ``value``, or remove it when None.
+
+    Args:
+        table (dict[str, _V]): the table to restore.
+        key (str): the mount key.
+        value (_V | None): what the key held before.
+    """
+    if value is None:
+        table.pop(key, None)
+    else:
+        table[key] = value
 
 
 class KernelMounts:
@@ -63,23 +81,28 @@ class KernelMounts:
             self._sessions.get(session_id) if session_id is not None else None
         )
         key = prefix if session_id is None else f"{prefix}@{session_id}"
+        prior_manager = self._managers.get(key)
+        prior_mountpoint = self._mountpoints.get(key)
+        prior_exposure = self._exposed.get(key)
         if mountpoint is not None:
             self._register(key, mountpoint)
         manager = FuseManager()
         self._managers[key] = manager
+        # Exposed from the start, so a mount added during setup sees it.
+        self._exposed[key] = (prefix, MountBackend(backend))
         try:
             resolved = manager.setup(
                 self._ops, prefix, mountpoint, session=session, backend=backend
             )
         except Exception:
-            # The mount never came up; drop the manager and any
-            # registered path so mountpoints does not misreport it.
-            self._managers.pop(key, None)
-            self._mountpoints.pop(key, None)
+            # The mount never came up; put back what the key held before,
+            # so a live mount under the same key keeps its records.
+            _put_back(self._managers, key, prior_manager)
+            _put_back(self._mountpoints, key, prior_mountpoint)
+            _put_back(self._exposed, key, prior_exposure)
             raise
         if mountpoint is None:
             self._register(key, resolved)
-        self._exposed[key] = (prefix, MountBackend(backend))
         return resolved
 
     def exposed(self) -> list[tuple[str, MountBackend]]:

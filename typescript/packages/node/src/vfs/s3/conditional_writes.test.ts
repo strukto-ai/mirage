@@ -80,6 +80,7 @@ describe('conditional writes on an S3 mount', () => {
     for (const [k, v] of Object.entries(SEED)) mock.store.set('b', k, ENC.encode(v))
     mock.ledger.length = 0
     mock.tripwire = false
+    mock.clearHooks()
   })
 
   const mutations = (): [string, Record<string, string>][] =>
@@ -105,8 +106,9 @@ describe('conditional writes on an S3 mount', () => {
   })
 
   it("gives the next write a redirect's own version", async () => {
-    // The redirect keeps its bytes and the PUT's ETag, so rewriting a file
-    // the agent itself wrote is not refused for want of a read.
+    // The redirect keeps the PUT's ETag as a version without bytes, so
+    // rewriting a file the agent itself wrote is not refused for want of a
+    // read.
     const ws = workspace()
     try {
       await run(ws, 'echo a > /s3/new')
@@ -191,6 +193,62 @@ describe('conditional writes on an S3 mount', () => {
         expect([code, err.includes(STALE)]).toEqual([1, true])
         expect(object('f')).toBeUndefined()
         expect((await run(ws, line))[0]).toBe(0)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it.each(['truncate -s 5 /s3/f', 'echo x >> /s3/f'])(
+    'refuses an op finding a read file gone, before writing: %s',
+    async (line) => {
+      // Its own read found nothing, but the agent read the file: that view
+      // is stale, as for a plain `>`. Sending the old version instead would
+      // let a restore of those bytes be overwritten from an empty file.
+      const ws = workspace()
+      try {
+        await run(ws, 'cat /s3/f')
+        mock.store.delete('b', 'f')
+        mock.ledger.length = 0
+        // A restore of the old bytes between this op's read and its write.
+        mock.before('PutObject', () => {
+          mock.store.set('b', 'f', ENC.encode(SEED.f ?? ''))
+        })
+        const [code, , err] = await run(ws, line)
+        expect([code, err.includes(STALE)], err).toEqual([1, true])
+        expect(mutations()).toEqual([])
+        expect(object('f')).toBeUndefined()
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it.each([
+    ['append', 'x\n'],
+    ['append', ''],
+    ['pwrite', 'G'],
+    ['pwrite', ''],
+  ] as const)(
+    'refuses an ops call finding a read file gone, before writing: %s %j',
+    async (call, data) => {
+      // The same rule through the ops API, which runs the generic append
+      // and pwrite; an empty one stats instead of reading.
+      const ws = workspace()
+      try {
+        await ws.vfs.read('/s3/f')
+        mock.store.delete('b', 'f')
+        mock.ledger.length = 0
+        mock.before('PutObject', () => {
+          mock.store.set('b', 'f', ENC.encode(SEED.f ?? ''))
+        })
+        const op =
+          call === 'append'
+            ? ws.vfs.append('/s3/f', ENC.encode(data))
+            : ws.vfs.pwrite('/s3/f', ENC.encode(data), 0)
+        await expect(op).rejects.toMatchObject({ code: 'STALE_WRITE' })
+        expect(mutations()).toEqual([])
+        expect(object('f')).toBeUndefined()
       } finally {
         await ws.close()
       }
@@ -630,26 +688,137 @@ describe('conditional writes on an S3 mount', () => {
     }
   })
 
-  it.each(['cp /m/g /m/f', 'mv /m/g /m/h', 'rm /m/g', 'rm -r /m/d', 'mv /m/g /ram/g'])(
-    'refuses on minio what it cannot condition, before sending: %s',
-    async (line) => {
+  it.each([
+    'cp /m/g /m/f',
+    'mv /m/g /m/h',
+    'rm /m/g',
+    'rm -r /m/d',
+    'mv /m/g /ram/g',
+    'find /m -name g -delete',
+  ])('refuses on minio what it cannot condition, before sending: %s', async (line) => {
+    const ws = minioWorkspace()
+    try {
+      await run(ws, 'cat /m/f; cat /m/g')
+      mock.ledger.length = 0
+      const [code, , err] = await run(ws, line)
+      expect(code === 1 && err.includes('Operation not supported'), err).toBe(true)
+      expect(mutations()).toEqual([])
+      expect(object('g')).toBe('gee\n')
+      // Refused before anything moved: a mv out copies nothing either.
+      expect((await run(ws, 'cat /ram/g'))[0]).toBe(1)
+      // A plain overwrite is protected, so it is allowed.
+      expect((await run(ws, 'echo x > /m/f'))[0]).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each(['-b', '--backup=numbered', '-S .bak -b'])(
+    'leaves the destination in place when a move out is refused: %s',
+    async (flags) => {
+      // Refused before anything moves: no backup renames the destination
+      // aside first.
       const ws = minioWorkspace()
       try {
-        await run(ws, 'cat /m/f; cat /m/g')
-        mock.ledger.length = 0
-        const [code, , err] = await run(ws, line)
+        await run(ws, 'echo mine > /ram/f')
+        const [code, , err] = await run(ws, `mv ${flags} /m/f /ram/f`)
         expect(code === 1 && err.includes('Operation not supported'), err).toBe(true)
+        expect((await run(ws, 'cat /ram/f'))[1]).toBe('mine\n')
+        expect((await run(ws, 'ls /ram'))[1]).toBe('f\n')
         expect(mutations()).toEqual([])
-        expect(object('g')).toBe('gee\n')
-        // Refused before anything moved: a mv out copies nothing either.
-        expect((await run(ws, 'cat /ram/g'))[0]).toBe(1)
-        // A plain overwrite is protected, so it is allowed.
-        expect((await run(ws, 'echo x > /m/f'))[0]).toBe(0)
       } finally {
         await ws.close()
       }
     },
   )
+
+  it('refuses up front a move holding a nested minio mount', async () => {
+    // The walk would copy the nested mount too and then find its deletes
+    // refused, leaving the tree half moved.
+    const minio = new MinIOVFS({
+      bucket: 'b',
+      endpoint: 'http://127.0.0.1:9000',
+      accessKeyId: 'k',
+      secretAccessKey: 's',
+    })
+    const ws = workspace(WritePolicy.CONDITIONAL, {
+      '/other': new Mount(new RAMVFS(), { mode: MountMode.WRITE }),
+      '/ram/d/m': new Mount(minio, { mode: MountMode.WRITE, write: WritePolicy.CONDITIONAL }),
+    })
+    try {
+      await run(ws, 'mkdir -p /ram/d; echo a > /ram/d/a')
+      const [code, , err] = await run(ws, 'mv /ram/d /other/d')
+      expect(code === 1 && err.includes('Operation not supported'), err).toBe(true)
+      expect((await run(ws, 'cat /ram/d/a'))[1]).toBe('a\n')
+      expect((await run(ws, 'ls /other'))[1]).toBe('')
+      expect(mutations()).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('moves a file out of a mount nested in a minio mount', async () => {
+    // The source's own mount deletes it; the minio mount above is untouched.
+    const minio = new MinIOVFS({
+      bucket: 'b',
+      endpoint: 'http://127.0.0.1:9000',
+      accessKeyId: 'k',
+      secretAccessKey: 's',
+    })
+    const ws = workspace(WritePolicy.CONDITIONAL, {
+      '/data': new Mount(minio, { mode: MountMode.WRITE, write: WritePolicy.CONDITIONAL }),
+      '/data/scratch': new Mount(new RAMVFS(), { mode: MountMode.WRITE }),
+      '/other': new Mount(new RAMVFS(), { mode: MountMode.WRITE }),
+    })
+    try {
+      await run(ws, 'echo a > /data/scratch/a')
+      const [code, , err] = await run(ws, 'mv /data/scratch/a /other/a')
+      expect(code, err).toBe(0)
+      expect((await run(ws, 'cat /other/a'))[1]).toBe('a\n')
+      expect(mutations()).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('deletes a conditional rm -r page by page', async () => {
+    // As the unconditional rm -r does: memory stays one page, not the
+    // whole prefix.
+    for (const name of ['c', 'd', 'e']) mock.store.set('b', `d/${name}`, ENC.encode(name))
+    mock.pageSize = 2
+    const ws = workspace()
+    try {
+      expect((await run(ws, 'rm -r /s3/d'))[0]).toBe(0)
+      expect([...mock.store.objects('b').keys()].filter((k) => k.startsWith('d/'))).toEqual([])
+      expect(mutations().filter(([op]) => op === 'DeleteObjects').length).toBe(3)
+    } finally {
+      mock.pageSize = null
+      await ws.close()
+    }
+  })
+
+  it('copies a conditional dir mv whole before deleting', async () => {
+    // As GNU mv across devices: a copy failing on a later page leaves the
+    // source whole.
+    for (const name of ['c', 'd', 'e']) mock.store.set('b', `d/${name}`, ENC.encode(name))
+    const under = (): string[] =>
+      [...mock.store.objects('b').keys()].filter((k) => k.startsWith('d/')).sort()
+    const before = under()
+    mock.pageSize = 2
+    for (let i = 0; i < 3; i++) mock.before('CopyObject', () => undefined)
+    mock.before('CopyObject', () => {
+      throw new Error('network down')
+    })
+    const ws = workspace()
+    try {
+      expect((await run(ws, 'mv /s3/d /s3/e'))[0]).toBe(1)
+      expect(under()).toEqual(before)
+      expect(mutations().filter(([op]) => op === 'DeleteObjects')).toEqual([])
+    } finally {
+      mock.pageSize = null
+      await ws.close()
+    }
+  })
 
   it.each(['cp', 'mv'])('lets minio take a file from another mount: %s', async (verb) => {
     // Into MinIO from elsewhere is a write, which MinIO does condition.

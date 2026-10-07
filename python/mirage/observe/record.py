@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Collection
 from dataclasses import dataclass, field
 
 from mirage.io.types import ByteSource
@@ -137,20 +138,41 @@ class OpRecord:
         }
 
 
-def newest_version(records: list[OpRecord], key: str) -> OpRecord | None:
-    """The newest record that says which version of ``key`` the line knows.
-
-    A record at the path counts if it stamps or retracts a version; one at
-    an ancestor counts if it moved the whole subtree, which took ``key``
-    with it.
+class RecordIndex:
+    """A line's records indexed once, for many per-path version lookups.
 
     Args:
         records (list[OpRecord]): the line's records, oldest first.
-        key (str): the virtual path asked about.
+        keys (Collection[str] | None): the only paths that will be asked
+            about, or None for any.
     """
-    for rec in reversed(records):
-        if rec.path == key and rec.op in VERSION_OPS:
-            return rec
-        if rec.op in SUBTREE_RETRACT_OPS and under_path(key, rec.path):
-            return rec
-    return None
+
+    def __init__(
+        self, records: list[OpRecord], keys: Collection[str] | None = None
+    ) -> None:
+        self._records = records
+        self._at: dict[str, int] = {}
+        self._subtree: list[int] = []
+        for i, rec in enumerate(records):
+            if rec.op in VERSION_OPS and (keys is None or rec.path in keys):
+                self._at[rec.path] = i
+            if rec.op in SUBTREE_RETRACT_OPS:
+                self._subtree.append(i)
+
+    def newest_version(self, key: str) -> OpRecord | None:
+        """The newest record that says which version of ``key`` the line knows.
+
+        A record at the path counts if it stamps or retracts a version; one
+        at an ancestor counts if it moved the whole subtree, which took
+        ``key`` with it.
+
+        Args:
+            key (str): the virtual path asked about.
+        """
+        at = self._at.get(key, -1)
+        for i in reversed(self._subtree):
+            if i <= at:
+                break
+            if under_path(key, self._records[i].path):
+                return self._records[i]
+        return self._records[at] if at >= 0 else None

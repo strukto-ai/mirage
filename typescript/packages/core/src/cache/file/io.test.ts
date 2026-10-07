@@ -12,15 +12,28 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { CachableAsyncIterator } from '../../io/cachable_iterator.ts'
 import { IOResult, type ByteSource } from '../../io/types.ts'
 import { OpRecord } from '../../observe/record.ts'
+import type * as RecordModule from '../../observe/record.ts'
 import type { CacheFacts, PathSpec } from '../../types.ts'
 import { applyIo, latestFingerprint, writtenVerdict } from './io.ts'
 import { RAMFileCacheStore } from './ram.ts'
 import { RefusingStore } from '../_test_util.ts'
+
+const built = vi.hoisted((): number[] => [])
+vi.mock('../../observe/record.ts', async (importOriginal) => {
+  const real = await importOriginal<typeof RecordModule>()
+  class CountedIndex extends real.RecordIndex {
+    constructor(records: readonly OpRecord[], keys: ReadonlySet<string> | null = null) {
+      built.push(records.length)
+      super(records, keys)
+    }
+  }
+  return { ...real, RecordIndex: CountedIndex }
+})
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -695,5 +708,26 @@ describe('applyIo bound stamping', () => {
     const io = new IOResult({ reads: { '/s3/f.txt': ENC.encode('hello') }, cache: ['/s3/f.txt'] })
     await applyIo(cache, io, facts(30, false))
     expect(await cache.exists('/s3/f.txt')).toBe(false)
+  })
+})
+
+describe('version lookups', () => {
+  it('indexes the line once', async () => {
+    // Every per-path lookup reads one index; rebuilding it per path made a
+    // line over N files cost N passes over its records.
+    const paths = Array.from({ length: 50 }, (_, i) => `/s3/f${String(i)}`)
+    const records = paths.map((p, i) => readRecord(p, `v${String(i)}`))
+    const io = new IOResult({
+      reads: Object.fromEntries(paths.map((p) => [p, ENC.encode('x')])),
+      cache: paths,
+    })
+    built.length = 0
+    await applyIo(
+      new RAMFileCacheStore(),
+      io,
+      () => ({ cacheable: true, ttl: 60, versions: true }),
+      records,
+    )
+    expect(built).toEqual([records.length])
   })
 })
