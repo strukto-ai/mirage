@@ -197,15 +197,11 @@ export async function executeCommand(
           at += text.length
         }
         const reparse = (text: string): TSNodeLike => scope.parse(text)
-        const offending = findSyntaxError(
-          ast,
-          reparse,
-          expandingAliases(session),
-          own,
-          scope.sourceOffsets(line, ast),
-        )
+        const aliases = expandingAliases(session)
+        const offsets = scope.sourceOffsets(line, ast)
+        const offending = findSyntaxError(ast, reparse, aliases, own, offsets)
         if (offending !== null) {
-          const io = syntaxErrorResult(offending, ast)
+          const io = syntaxErrorResult(offending, ast, aliases, own, offsets)
           const bad = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
           return [
             null,

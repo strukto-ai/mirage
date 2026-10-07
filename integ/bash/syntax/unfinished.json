@@ -473,6 +473,254 @@
         "stdout": "",
         "stderr": "mirage: syntax error near 'else'\n"
       }
+    },
+    {
+      "id": "syntax_unfinished_array_is_status_1",
+      "seq": 1338232,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; x=(1 2",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mirage: unexpected EOF while looking for matching `)'\n"
+      }
+    },
+    {
+      "id": "syntax_unfinished_array_in_a_compound",
+      "seq": 1338233,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "if true; then x=(1 2",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mirage: unexpected EOF while looking for matching `)'\n"
+      }
+    },
+    {
+      "id": "syntax_unfinished_array_quote_reports_the_quote",
+      "seq": 1338234,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "x=(1 \"a",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mirage: unexpected EOF while looking for matching `\"'\n"
+      }
+    },
+    {
+      "id": "syntax_unfinished_array_in_eval_discards_the_line",
+      "seq": 1338235,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "( eval 'x=(1 2'; echo \"rc=$?\" ); echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "mirage: unexpected EOF while looking for matching `)'\n"
+      }
+    },
+    {
+      "id": "syntax_unfinished_substitution_holding_an_array",
+      "seq": 1338236,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo $(x=(1 2)",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: unexpected EOF while looking for matching `)'\n"
+      }
+    },
+    {
+      "id": "syntax_alias_closer_is_a_command_at_eof",
+      "seq": 1338237,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "( shopt -s expand_aliases; alias fi=true; eval 'fi; echo a |'; echo \"rc=$?\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\n",
+        "stderr": "mirage: syntax error: unexpected end of file\n"
+      }
+    },
+    {
+      "id": "syntax_alias_closer_in_a_test_at_eof",
+      "seq": 1338238,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "( shopt -s expand_aliases; alias fi=true; eval 'if fi; then'; echo \"rc=$?\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\n",
+        "stderr": "mirage: syntax error: unexpected end of file\n"
+      }
+    },
+    {
+      "id": "syntax_unexpected_closer_before_unfinished_input",
+      "seq": 1338239,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; fi; echo a |",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error near 'fi'\n"
+      }
     }
   ]
 }

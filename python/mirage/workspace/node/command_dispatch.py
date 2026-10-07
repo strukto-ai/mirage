@@ -193,15 +193,15 @@ async def execute_command(
                 for alias, text in texts:
                     own[alias] = (at, at + len(encode_text(text)))
                     at = own[alias][1]
+                aliases = expanding_aliases(session)
+                offsets = source_offsets(line, ast)
                 offending = find_syntax_error(
-                    ast,
-                    expanding_aliases(session),
-                    own,
-                    source_offsets(line, ast),
-                    parse_fn=scope.parse,
+                    ast, aliases, own, offsets, parse_fn=scope.parse
                 )
                 if offending is not None:
-                    io = syntax_error_result(offending, ast)
+                    io = syntax_error_result(
+                        offending, ast, aliases, own, offsets
+                    )
                     bad = io.stderr if isinstance(io.stderr, bytes) else b""
                     return (
                         None,

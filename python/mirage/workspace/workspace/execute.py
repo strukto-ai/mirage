@@ -30,6 +30,7 @@ from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole, Terminal
 from mirage.shell.constants import FORK_FAILED, FORK_FAILED_STATUS
+from mirage.shell.errors import DiscardSignal
 from mirage.shell.helpers import input_substitution_redirect
 from mirage.shell.job_table import JobTable, JobWaits
 from mirage.shell.literal import literal_tree
@@ -39,6 +40,7 @@ from mirage.shell.parse import (
     syntax_error_result,
 )
 from mirage.shell.parse.scope import ParseScope
+from mirage.shell.parse.syntax import ends_inside_array
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, Refusal
@@ -607,11 +609,8 @@ async def run_prepared_line(
         # Syntax gates before policy, mirroring the TS order and
         # bash: an unparsable line exits 2 and the policy is never
         # consulted about it.
-        offending = find_syntax_error(
-            ast,
-            expanding_aliases(effective_session),
-            parse_fn=parse_scope.parse,
-        )
+        aliases = expanding_aliases(effective_session)
+        offending = find_syntax_error(ast, aliases, parse_fn=parse_scope.parse)
         if offending is None and argv is None:
             # tree-sitter accepts an unclosed backtick as a complete
             # command, so the region is scanned separately.
@@ -619,7 +618,11 @@ async def run_prepared_line(
                 decode_text(ast.text or b"")
             )
         if offending is not None:
-            io = syntax_error_result(offending, ast)
+            io = syntax_error_result(offending, ast, aliases)
+            if call_stack is not None and ends_inside_array(ast):
+                # bash discards the line that evaluated it (`eval`,
+                # `source`) with status 1, as its own error would.
+                raise DiscardSignal(await io.materialize_stderr())
             record_status(session, io.exit_code)
             return io
         nested = NestedRefusal()

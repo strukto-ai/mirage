@@ -32,6 +32,7 @@ from mirage.shell.parse.constants import (
     STRUCTURAL_TOKENS,
 )
 from mirage.shell.parse.types import SourceSpan, SyntaxIssue
+from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 
 
@@ -481,33 +482,81 @@ def find_unterminated_quote(node: TSNodeLike) -> str | None:
 def _innermost_unclosed(children: Sequence[TSNodeLike]) -> str | None:
     """What the innermost construct an ERROR's tokens open still waits for.
 
+    Args:
+        children (Sequence[TSNodeLike]): the ERROR node's children, in order.
+    """
+    pending = _unclosed(children)
+    return pending[-1][1] if pending else None
+
+
+def _unclosed(
+    children: Sequence[TSNodeLike],
+) -> list[tuple[str, str, str]] | None:
+    """The constructs an ERROR's tokens leave open, outermost first: each
+    one's closing token, the character bash names for it, and its opener.
+
     A double quote or a backtick nests inside a substitution as bash reads
     it (``"$("`` waits for a quote), a lone ``)`` inside ``$((`` groups
-    rather than closes, and any other closer that does not match the
-    innermost opener is an unexpected token rather than the end of input.
+    rather than closes, and a ``(`` right after an assignment's ``=``
+    opens an array. Any other closer that does not match the innermost
+    opener is an unexpected token rather than the end of input: None.
 
     Args:
         children (Sequence[TSNodeLike]): the ERROR node's children, in order.
     """
-    pending: list[tuple[str, str]] = []
+    pending: list[tuple[str, str, str]] = []
+    previous: TSNodeLike | None = None
     for child in children:
-        if child.type in ('"', "`"):
-            if pending and pending[-1][0] == child.type:
+        kind = child.type
+        if kind in ('"', "`"):
+            if pending and pending[-1][0] == kind:
                 pending.pop()
             else:
-                pending.append((child.type, child.type))
-        elif child.type in OPENER_CLOSERS:
-            pending.append(OPENER_CLOSERS[child.type])
-        elif child.type in CLOSING_TOKENS and pending:
-            if child.type == ")" and pending[-1][0] == "))":
-                continue
-            if child.type != pending[-1][0]:
-                return None
-            pending.pop()
-    return pending[-1][1] if pending else None
+                pending.append((kind, kind, kind))
+        elif kind in OPENER_CLOSERS:
+            pending.append((*OPENER_CLOSERS[kind], kind))
+        elif kind == "(" and previous is not None and previous.type == "=":
+            pending.append((")", ")", NT.ARRAY))
+        elif kind in CLOSING_TOKENS and pending:
+            if not (kind == ")" and pending[-1][0] == "))"):
+                if kind != pending[-1][0]:
+                    return None
+                pending.pop()
+        previous = child
+    return pending
 
 
-def ends_inside_construct(node: TSNodeLike) -> bool:
+def ends_inside_array(node: TSNodeLike) -> bool:
+    """Whether the outermost construct the input ends inside is an array
+    assignment's ``(``. bash's ``parse_compound_assignment`` refuses that
+    line with status 1 and discards it, where the input ending inside any
+    other construct is a syntax error with status 2.
+
+    Args:
+        node (TSNodeLike): the parsed line.
+    """
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if current.type == NT.ERROR:
+            pending = _unclosed(current.children)
+            if pending:
+                return pending[0][2] == NT.ARRAY
+        elif current.type in CONSTRUCT_CLOSERS and any(
+            child.is_missing and child.type in CLOSING_TOKENS
+            for child in current.children
+        ):
+            return current.type == NT.ARRAY
+        stack.extend(reversed(current.children))
+    return False
+
+
+def ends_inside_construct(
+    node: TSNodeLike,
+    aliases: frozenset[str] = frozenset(),
+    own: Mapping[str, tuple[int, int]] | None = None,
+    offsets: Sequence[int] | None = None,
+) -> bool:
     """Whether the input ends inside a compound command or after an operator.
 
     bash reads such a line as unfinished when it took every token where
@@ -515,15 +564,22 @@ def ends_inside_construct(node: TSNodeLike) -> bool:
     missing at the end (``(echo a``, ``echo a |``), or an ERROR reaching
     the end leaves a compound open (``{ echo a``, ``if true; then``,
     ``case a in``). A token it could not take (``if then``, ``if ;``,
-    ``( then``) is the error bash reports instead.
+    ``( then``) is the error bash reports instead; a closing reserved
+    word an alias spells is a command there.
 
     Args:
         node (TSNodeLike): the parsed line.
+        aliases (frozenset[str]): alias names the shell would expand where
+            a command starts (``find_syntax_issue``).
+        own (Mapping[str, tuple[int, int]] | None): each alias whose own
+            text the line opens with, to the span of the line it covers.
+        offsets (Sequence[int] | None): where each byte the parser read
+            sits in the line; None where the two are the same.
     """
     stray = chain(
         _stray_case_terminators(node),
         _empty_compounds(node),
-        _stray_reserved_words(node, frozenset(), {}, None),
+        _stray_reserved_words(node, aliases, own or {}, offsets),
     )
     if any(text for _, text in stray):
         return False
@@ -533,7 +589,7 @@ def ends_inside_construct(node: TSNodeLike) -> bool:
     while stack:
         current, before = stack.pop()
         if current.type == "ERROR":
-            opened = _open_compound(current, before)
+            opened = _open_compound(current, before, aliases)
             if opened is None:
                 return False
             unfinished = unfinished or (opened and current.end_byte >= end)
@@ -547,7 +603,9 @@ def ends_inside_construct(node: TSNodeLike) -> bool:
 
 
 def _open_compound(
-    error: TSNodeLike, before: TSNodeLike | None
+    error: TSNodeLike,
+    before: TSNodeLike | None,
+    aliases: frozenset[str] = frozenset(),
 ) -> bool | None:
     """Read an ERROR's tokens as bash does: whether they leave a compound
     open, or None at the first token bash cannot take where it stands.
@@ -564,6 +622,8 @@ def _open_compound(
         error (TSNodeLike): the ERROR node.
         before (TSNodeLike | None): its previous sibling; after a
             command, the node starts among that command's words.
+        aliases (frozenset[str]): alias names expanded where a command
+            starts, which are commands there whatever they spell.
     """
     text = error.text or b""
     children = list(_error_tokens(error))
@@ -582,7 +642,11 @@ def _open_compound(
                 expect in ("command", "name", "list")
                 and kind in LIST_OPERATORS
             )
-            or (expect == "command" and word in _RESERVED_CLOSERS)
+            or (
+                expect == "command"
+                and word in _RESERVED_CLOSERS
+                and word not in aliases
+            )
         ):
             return None
         call = expect == "words" and kind == "("
@@ -621,27 +685,48 @@ def _error_tokens(error: TSNodeLike) -> Iterator[TSNodeLike]:
 
 
 def syntax_error_result(
-    offending: str, node: TSNodeLike | None = None
+    offending: str,
+    node: TSNodeLike | None = None,
+    aliases: frozenset[str] = frozenset(),
+    own: Mapping[str, tuple[int, int]] | None = None,
+    offsets: Sequence[int] | None = None,
 ) -> IOResult:
-    """Exit 2 with the bash-style diagnostic for an unparsable line.
+    """The bash-style diagnostic for an unparsable line: status 2, or 1
+    for an array assignment it ends inside (``ends_inside_array``).
 
     Args:
         offending (str): the span the parser flagged.
         node (TSNodeLike | None): the parsed command, for quote diagnostics.
+        aliases (frozenset[str]): alias names expanded where a command
+            starts.
+        own (Mapping[str, tuple[int, int]] | None): each alias whose own
+            text the line opens with, to the span it covers.
+        offsets (Sequence[int] | None): where each parsed byte sits in the
+            line.
     """
-    return IOResult(
-        exit_code=2, stderr=encode_text(syntax_error_message(offending, node))
-    )
+    message = syntax_error_message(offending, node, aliases, own, offsets)
+    status = 1 if node is not None and ends_inside_array(node) else 2
+    return IOResult(exit_code=status, stderr=encode_text(message))
 
 
 def syntax_error_message(
-    offending: str, node: TSNodeLike | None = None
+    offending: str,
+    node: TSNodeLike | None = None,
+    aliases: frozenset[str] = frozenset(),
+    own: Mapping[str, tuple[int, int]] | None = None,
+    offsets: Sequence[int] | None = None,
 ) -> str:
     """Format the diagnostic shared by parsed programs and execution results.
 
     Args:
         offending (str): the span the parser flagged.
         node (TSNodeLike | None): the parsed command, for quote diagnostics.
+        aliases (frozenset[str]): alias names expanded where a command
+            starts.
+        own (Mapping[str, tuple[int, int]] | None): each alias whose own
+            text the line opens with, to the span it covers.
+        offsets (Sequence[int] | None): where each parsed byte sits in the
+            line.
     """
     quote = find_unterminated_quote(node) if node is not None else None
     if quote is None and find_unterminated_backtick(offending) is not None:
@@ -649,7 +734,7 @@ def syntax_error_message(
     snippet = offending.strip()
     if quote is not None:
         return f"mirage: unexpected EOF while looking for matching `{quote}'\n"
-    if node is not None and ends_inside_construct(node):
+    if node is not None and ends_inside_construct(node, aliases, own, offsets):
         return "mirage: syntax error: unexpected end of file\n"
     if snippet:
         return f"mirage: syntax error near '{snippet}'\n"

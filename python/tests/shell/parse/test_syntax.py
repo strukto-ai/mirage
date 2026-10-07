@@ -26,6 +26,7 @@ from mirage.shell.parse import (
     source_offsets,
 )
 from mirage.shell.parse.syntax import (
+    ends_inside_array,
     ends_inside_construct,
     syntax_error_result,
 )
@@ -58,6 +59,32 @@ def test_partial_quoted_heredoc_end_is_not_syntax_error():
 )
 def test_only_input_bash_took_whole_ends_inside_a_construct(line, unfinished):
     assert ends_inside_construct(parse(line)) is unfinished
+
+
+def test_an_alias_spelling_a_closer_is_a_command_at_the_end():
+    root = parse("fi; echo a |")
+    assert ends_inside_construct(root) is False
+    assert ends_inside_construct(root, frozenset({"fi"})) is True
+
+
+@pytest.mark.parametrize(
+    ("line", "inside"),
+    [
+        ("x=(1 2", True),
+        ("x=(1 $(echo", True),
+        ('x=(1 "a', True),
+        ("if true; then x=(1 2", True),
+        ("x=(1 2) ; y=(", True),
+        ("echo $(x=(1 2)", False),
+        ("echo $(echo", False),
+        ("x=(1 2)", False),
+    ],
+)
+def test_an_unfinished_array_is_the_outermost_construct(line, inside):
+    root = parse(line)
+    assert ends_inside_array(root) is inside
+    if inside:
+        assert syntax_error_result(line, root).exit_code == 1
 
 
 def test_a_syntax_error_span_keeps_an_invalid_byte_as_typed():

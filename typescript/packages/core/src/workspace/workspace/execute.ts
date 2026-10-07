@@ -47,6 +47,8 @@ import {
   findUnterminatedBacktick,
   type ShellParser,
 } from '../../shell/parse/index.ts'
+import { endsInsideArray } from '../../shell/parse/syntax.ts'
+import { DiscardSignal } from '../../shell/errors.ts'
 import { formatFsError } from '../../errors/render.ts'
 import { isFsError } from '../../errors/fs.ts'
 import {
@@ -430,16 +432,18 @@ async function runPreparedLine(
           // and the policy is never consulted about it. tree-sitter accepts an
           // unclosed backtick as a complete command, so the region is scanned
           // separately.
+          const aliases = expandingAliases(effectiveSession)
           const offending =
             argv === undefined
-              ? (findSyntaxError(
-                  root,
-                  (source) => parser.parse(source),
-                  expandingAliases(effectiveSession),
-                ) ?? findUnterminatedBacktick(root.text))
+              ? (findSyntaxError(root, (source) => parser.parse(source), aliases) ??
+                findUnterminatedBacktick(root.text))
               : null
           if (offending !== null) {
-            const io = syntaxErrorResult(offending, root)
+            const io = syntaxErrorResult(offending, root, aliases)
+            // bash discards the line that evaluated it (`eval`, `source`)
+            // with status 1, as its own error would.
+            if (options.callStack !== undefined && endsInsideArray(root))
+              throw new DiscardSignal(await materialize(io.stderr))
             return await answerLine(
               env,
               command,

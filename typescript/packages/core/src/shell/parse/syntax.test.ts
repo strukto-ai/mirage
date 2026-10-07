@@ -23,7 +23,7 @@ import {
   findUnterminatedBacktick,
   type ShellParser,
 } from './index.ts'
-import { endsInsideConstruct, syntaxErrorResult } from './syntax.ts'
+import { endsInsideArray, endsInsideConstruct, syntaxErrorResult } from './syntax.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -52,6 +52,29 @@ describe('endsInsideConstruct', () => {
     ['for i in 1; do ;', false],
   ])('%s: %s', (line, unfinished) => {
     expect(endsInsideConstruct(parser.parse(line))).toBe(unfinished)
+  })
+
+  it('takes an alias spelling a closer as a command at the end', () => {
+    const root = parser.parse('fi; echo a |')
+    expect(endsInsideConstruct(root)).toBe(false)
+    expect(endsInsideConstruct(root, new Set(['fi']))).toBe(true)
+  })
+})
+
+describe('endsInsideArray', () => {
+  it.each([
+    ['x=(1 2', true],
+    ['x=(1 $(echo', true],
+    ['x=(1 "a', true],
+    ['if true; then x=(1 2', true],
+    ['x=(1 2) ; y=(', true],
+    ['echo $(x=(1 2)', false],
+    ['echo $(echo', false],
+    ['x=(1 2)', false],
+  ])('%s: %s', (line, inside) => {
+    const root = parser.parse(line)
+    expect(endsInsideArray(root)).toBe(inside)
+    if (inside) expect(syntaxErrorResult(line, root).exitCode).toBe(1)
   })
 })
 

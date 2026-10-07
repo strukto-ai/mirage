@@ -16,7 +16,7 @@ import type { SyntaxIssue } from './types.ts'
 
 import { IOResult } from '../../io/types.ts'
 import { encodeText } from '../bytes.ts'
-import type { TSNodeLike } from '../types.ts'
+import { NodeType as NT, type TSNodeLike } from '../types.ts'
 
 import {
   BASH_KEYWORDS,
@@ -75,28 +75,62 @@ export function findUnterminatedQuote(node: TSNodeLike): string | null {
   return null
 }
 
-/** What the innermost construct an ERROR's tokens open still waits for. A
- * double quote or a backtick nests inside a substitution as bash reads it
- * (`"$("` waits for a quote), a lone `)` inside `$((` groups rather than
- * closes, and any other closer that does not match the innermost opener is
- * an unexpected token rather than the end of input. */
+/** What the innermost construct an ERROR's tokens open still waits for. */
 function innermostUnclosed(children: readonly TSNodeLike[]): string | null {
-  const pending: (readonly [string, string])[] = []
+  return unclosed(children)?.at(-1)?.[1] ?? null
+}
+
+/** The constructs an ERROR's tokens leave open, outermost first: each one's
+ * closing token, the character bash names for it, and its opener. A double
+ * quote or a backtick nests inside a substitution as bash reads it (`"$("`
+ * waits for a quote), a lone `)` inside `$((` groups rather than closes, and
+ * a `(` right after an assignment's `=` opens an array. Any other closer
+ * that does not match the innermost opener is an unexpected token rather
+ * than the end of input: null. Mirrors Python's _unclosed. */
+function unclosed(children: readonly TSNodeLike[]): [string, string, string][] | null {
+  const pending: [string, string, string][] = []
+  let previous: TSNodeLike | null = null
   for (const child of children) {
-    if (child.type === '"' || child.type === '`') {
-      if (pending.at(-1)?.[0] === child.type) pending.pop()
-      else pending.push([child.type, child.type])
-      continue
+    const kind = child.type
+    const opened = OPENER_CLOSERS.get(kind)
+    if (kind === '"' || kind === '`') {
+      if (pending.at(-1)?.[0] === kind) pending.pop()
+      else pending.push([kind, kind, kind])
+    } else if (opened !== undefined) pending.push([opened[0], opened[1], kind])
+    else if (kind === '(' && previous?.type === '=') pending.push([')', ')', NT.ARRAY])
+    else if (CLOSING_TOKENS.has(kind) && pending.length > 0) {
+      if (!(kind === ')' && pending.at(-1)?.[0] === '))')) {
+        if (kind !== pending.at(-1)?.[0]) return null
+        pending.pop()
+      }
     }
-    const opened = OPENER_CLOSERS.get(child.type)
-    if (opened !== undefined) pending.push(opened)
-    else if (CLOSING_TOKENS.has(child.type) && pending.length > 0) {
-      if (child.type === ')' && pending.at(-1)?.[0] === '))') continue
-      if (child.type !== pending.at(-1)?.[0]) return null
-      pending.pop()
+    previous = child
+  }
+  return pending
+}
+
+/** Whether the outermost construct the input ends inside is an array
+ * assignment's `(`. bash's `parse_compound_assignment` refuses that line
+ * with status 1 and discards it, where the input ending inside any other
+ * construct is a syntax error with status 2. Mirrors Python. */
+export function endsInsideArray(node: TSNodeLike): boolean {
+  const stack: TSNodeLike[] = [node]
+  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
+    if (current.type === NT.ERROR) {
+      const pending = unclosed(current.children)
+      if (pending !== null && pending.length > 0) return pending[0]?.[2] === NT.ARRAY
+    } else if (
+      CONSTRUCT_CLOSERS.has(current.type) &&
+      current.children.some((child) => child.isMissing && CLOSING_TOKENS.has(child.type))
+    ) {
+      return current.type === NT.ARRAY
+    }
+    for (let at = current.children.length - 1; at >= 0; at--) {
+      const child = current.children[at]
+      if (child !== undefined) stack.push(child)
     }
   }
-  return pending.at(-1)?.[1] ?? null
+  return false
 }
 
 /** Whether the input ends inside a compound command or after an operator.
@@ -104,13 +138,19 @@ function innermostUnclosed(children: readonly TSNodeLike[]): string | null {
  * stood and still wants more: the grammar marks the token it needed missing
  * at the end (`(echo a`, `echo a |`), or an ERROR reaching the end leaves a
  * compound open (`{ echo a`, `if true; then`, `case a in`). A token it could
- * not take (`if then`, `if ;`, `( then`) is the error bash reports instead.
- * Mirrors Python. */
-export function endsInsideConstruct(node: TSNodeLike): boolean {
+ * not take (`if then`, `if ;`, `( then`) is the error bash reports instead;
+ * a closing reserved word an alias spells is a command there. `aliases`,
+ * `own` and `offsets` are `findSyntaxIssue`'s. Mirrors Python. */
+export function endsInsideConstruct(
+  node: TSNodeLike,
+  aliases: ReadonlySet<string> = new Set(),
+  own: ReadonlyMap<string, readonly [number, number]> = new Map(),
+  offsets?: readonly number[],
+): boolean {
   const stray = [
     ...strayCaseTerminators(node),
     ...emptyCompounds(node),
-    ...strayReservedWords(node, new Set(), new Map(), undefined),
+    ...strayReservedWords(node, aliases, own, offsets),
   ]
   if (stray.some(([, text]) => text !== '')) return false
   const end = (node.startIndex ?? 0) + node.text.trimEnd().length
@@ -119,7 +159,7 @@ export function endsInsideConstruct(node: TSNodeLike): boolean {
   for (let top = stack.pop(); top !== undefined; top = stack.pop()) {
     const [current, before] = top
     if (current.type === 'ERROR') {
-      const opened = openCompound(current, before)
+      const opened = openCompound(current, before, aliases)
       if (opened === null) return false
       unfinished ||= opened && (current.endIndex ?? 0) >= end
     } else if (current.isMissing && (current.startIndex ?? 0) >= end) {
@@ -142,8 +182,13 @@ export function endsInsideConstruct(node: TSNodeLike): boolean {
  * another. After a command's words (`before` is that command) a `(` is
  * unexpected unless `()` makes the command a function definition. Text the
  * grammar skipped is unexpected too. A nested ERROR's tokens are read in
- * line, as tokens the grammar could not group. Mirrors Python. */
-function openCompound(error: TSNodeLike, before: TSNodeLike | null): boolean | null {
+ * line, as tokens the grammar could not group. A word in `aliases` is a
+ * command where one starts, whatever it spells. Mirrors Python. */
+function openCompound(
+  error: TSNodeLike,
+  before: TSNodeLike | null,
+  aliases: ReadonlySet<string> = new Set(),
+): boolean | null {
   const origin = error.startIndex ?? 0
   const children = [...errorTokens(error)]
   let expect = before?.type === 'command' ? 'words' : ''
@@ -156,7 +201,7 @@ function openCompound(error: TSNodeLike, before: TSNodeLike | null): boolean | n
     if (
       error.text.slice(cursor - origin, start - origin).trim() !== '' ||
       (['command', 'name', 'list'].includes(expect) && LIST_OPERATORS.has(kind)) ||
-      (expect === 'command' && RESERVED_CLOSERS.has(word))
+      (expect === 'command' && RESERVED_CLOSERS.has(word) && !aliases.has(word))
     )
       return null
     const call = expect === 'words' && kind === '('
@@ -185,19 +230,37 @@ function* errorTokens(error: TSNodeLike): Generator<TSNodeLike> {
   }
 }
 
-/** Exit 2 with the bash-style diagnostic for an unparsable line. */
-export function syntaxErrorResult(offending: string, node: TSNodeLike): IOResult {
-  return new IOResult({ exitCode: 2, stderr: encodeText(syntaxErrorMessage(offending, node)) })
+/** The bash-style diagnostic for an unparsable line: status 2, or 1 for an
+ * array assignment it ends inside (`endsInsideArray`). `aliases`, `own` and
+ * `offsets` are `findSyntaxIssue`'s. */
+export function syntaxErrorResult(
+  offending: string,
+  node: TSNodeLike,
+  aliases: ReadonlySet<string> = new Set(),
+  own: ReadonlyMap<string, readonly [number, number]> = new Map(),
+  offsets?: readonly number[],
+): IOResult {
+  const message = syntaxErrorMessage(offending, node, aliases, own, offsets)
+  return new IOResult({
+    exitCode: endsInsideArray(node) ? 1 : 2,
+    stderr: encodeText(message),
+  })
 }
 
 /** Format the diagnostic shared by parsed programs and execution results. */
-export function syntaxErrorMessage(offending: string, node: TSNodeLike): string {
+export function syntaxErrorMessage(
+  offending: string,
+  node: TSNodeLike,
+  aliases: ReadonlySet<string> = new Set(),
+  own: ReadonlyMap<string, readonly [number, number]> = new Map(),
+  offsets?: readonly number[],
+): string {
   const quote =
     findUnterminatedQuote(node) ?? (findUnterminatedBacktick(offending) === null ? null : '`')
   const snippet = offending.trim()
   return quote !== null
     ? 'mirage: unexpected EOF while looking for matching `' + quote + "'\n"
-    : endsInsideConstruct(node)
+    : endsInsideConstruct(node, aliases, own, offsets)
       ? 'mirage: syntax error: unexpected end of file\n'
       : snippet.length > 0
         ? `mirage: syntax error near '${snippet}'\n`
