@@ -19,8 +19,7 @@ import { parseSessionProfile } from '../policy/profile.ts'
 import type { Action, VfsContext, VfsResultContext, Policy } from '../policy/index.ts'
 import { runWithSession } from '../context/session_context.ts'
 import { getTestParser, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
-import { Session } from './workspace/handle.ts'
-import { Workspace } from './workspace/workspace.ts'
+import { Session, Workspace } from './workspace/workspace.ts'
 
 /** Refuse the unlink of one exact path, whatever door asked. */
 class DenyRemnantUnlink implements Policy {

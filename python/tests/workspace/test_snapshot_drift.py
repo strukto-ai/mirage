@@ -50,7 +50,9 @@ def test_install_fingerprints_pins_revision_and_queues_drift():
         },
     ]
 
-    install_fingerprints(ws, entries, DriftPolicy.STRICT)
+    install_fingerprints(
+        ws._registry, ws._cache, ws._drift, entries, DriftPolicy.STRICT
+    )
 
     mount = ws._registry.mount_for("/m/pinned.txt")
     assert mount.revisions["/m/pinned.txt"] == "v9"

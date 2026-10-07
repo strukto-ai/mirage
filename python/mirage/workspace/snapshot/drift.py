@@ -14,21 +14,22 @@
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Sequence
+from typing import Any, Callable
 
+from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.observe.record import (
     CONTENT_CHANGING_OPS,
     RETRACT_FINGERPRINT_OPS,
     STAMP_FINGERPRINT_OPS,
     SUBTREE_RETRACT_OPS,
+    OpRecord,
 )
 from mirage.types import DriftPolicy
 from mirage.workspace.mount.mount import MountEntry
+from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.snapshot.keys import FingerprintKey
-
-if TYPE_CHECKING:
-    from mirage.workspace.workspace import Workspace
 
 TryMountFor = Callable[[str], MountEntry | None]
 
@@ -181,7 +182,8 @@ def _drop_pin(
 
 
 def capture_fingerprints(
-    ws: "Workspace",
+    records: Sequence[OpRecord],
+    registry: MountRegistry,
 ) -> list[dict[str, Any]]:
     """Walk session ops and emit one pin per path still worth checking.
 
@@ -209,7 +211,8 @@ def capture_fingerprints(
     a retraction names may no longer be the one that set the pin.
 
     Args:
-        ws (Workspace): workspace whose ops log to walk.
+        records (Sequence[OpRecord]): the workspace's op log.
+        registry (MountRegistry): resolves a path to its mount.
 
     Returns:
         list[dict]: one entry per surviving path, with ``PATH``,
@@ -223,11 +226,11 @@ def capture_fingerprints(
     # record appends as it happens, so the list is flush-ordered and a
     # retraction can otherwise sit before the write it retracts. The
     # sort is stable, so same-millisecond records keep their order.
-    for rec in sorted(ws._ops.records, key=lambda r: r.timestamp):
+    for rec in sorted(records, key=lambda r: r.timestamp):
         if rec.op in RETRACT_FINGERPRINT_OPS:
             # Resolved to bound the sweep, never to gate the drop: a
             # retraction whose mount has since gone still applies.
-            retracted = ws._registry.try_mount_for(rec.path)
+            retracted = registry.try_mount_for(rec.path)
             _drop_pin(
                 out,
                 rec.path,
@@ -249,7 +252,7 @@ def capture_fingerprints(
             continue
         if rec.fingerprint is None and rec.revision is None:
             continue
-        mount = ws._registry.try_mount_for(rec.path)
+        mount = registry.try_mount_for(rec.path)
         if mount is None or (
             rec.mount_id is not None and rec.mount_id != mount.mount_id
         ):
@@ -269,11 +272,13 @@ def capture_fingerprints(
 
 
 def install_fingerprints(
-    ws: "Workspace",
+    registry: MountRegistry,
+    cache: FileCacheMixin,
+    drift: DriftQueue,
     fingerprint_entries: list[dict[str, Any]],
     drift_policy: DriftPolicy,
 ) -> None:
-    """Install snapshot fingerprints/revisions onto a reconstructed ws.
+    """Install snapshot fingerprints/revisions onto a reconstructed workspace.
 
     Revisions pin replay reads to exact backend versions; bare
     fingerprints queue an eager drift check. OFF drops the restored RAM
@@ -283,20 +288,22 @@ def install_fingerprints(
     is nothing to drop.
 
     Args:
-        ws: the reconstructed workspace to install onto.
+        registry (MountRegistry): the reconstructed workspace's mounts.
+        cache (FileCacheMixin): its file cache.
+        drift (DriftQueue): its drift queue.
         fingerprint_entries: entries from a snapshot's FINGERPRINTS.
         drift_policy: STRICT queues drift checks; OFF skips them and
             drops the restored cache entries.
     """
     if drift_policy == DriftPolicy.OFF:
         if fingerprint_entries:
-            ws._cache.evict_paths(
+            cache.evict_paths(
                 f[FingerprintKey.PATH] for f in fingerprint_entries
             )
         return
     for f in fingerprint_entries:
         path = f[FingerprintKey.PATH]
-        mount = ws._registry.try_mount_for(path)
+        mount = registry.try_mount_for(path)
         if mount is None:
             continue
         revision = f.get(FingerprintKey.REVISION)
@@ -305,11 +312,12 @@ def install_fingerprints(
             continue
         fingerprint = f.get(FingerprintKey.FINGERPRINT)
         if fingerprint is not None:
-            ws._drift.queue(path, fingerprint, mount.mount_id)
+            drift.queue(path, fingerprint, mount.mount_id)
 
 
 def live_only_mount_prefixes(
-    ws: "Workspace",
+    registry: MountRegistry,
+    implicit_root: bool,
 ) -> list[str]:
     """Return mount prefixes whose VFS opts out of snapshot replay.
 
@@ -320,12 +328,16 @@ def live_only_mount_prefixes(
     The implicit scratch root is not one of them: nobody mounted it, so
     a load has nothing to warn the user about, and TypeScript, which
     keeps that anchor out of its mount table altogether, never lists it.
+
+    Args:
+        registry (MountRegistry): the workspace's mounts.
+        implicit_root (bool): the scratch root is the implicit one.
     """
     out: list[str] = []
-    for m in ws._registry.mounts():
+    for m in registry.mounts():
         if m.prefix in {"/dev/", "/.bash_history/", "/usr/bin/"}:
             continue
-        if ws._implicit_root and m.prefix == "/":
+        if implicit_root and m.prefix == "/":
             continue
         # A document binding is not saved at all, so a load never serves
         # it live either.

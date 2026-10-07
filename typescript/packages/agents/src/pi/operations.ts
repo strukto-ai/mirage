@@ -26,7 +26,7 @@ import type {
 } from '@earendil-works/pi-coding-agent'
 import picomatch from 'picomatch'
 import { FileVersionTracker } from '@struktoai/mirage-core/workspace/tools/file_version'
-import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { decode, refusalLine } from '@struktoai/mirage-core/workspace/tools/io_text'
 
 export { StaleMirageFileError } from '@struktoai/mirage-core/workspace/tools/file_version'

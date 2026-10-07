@@ -29,7 +29,7 @@ import type {
 import { DiskVFS } from '@struktoai/mirage-node'
 import type { MountEntry } from '@struktoai/mirage-core/workspace/mount/mount'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
-import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { Ops } from '@struktoai/mirage-core/ops/ops'
 import { FileType } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'

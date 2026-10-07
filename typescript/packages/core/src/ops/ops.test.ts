@@ -31,8 +31,7 @@ import {
   ReadPolicy,
 } from '../types.ts'
 import { eacces, enoent, enotdir } from '../errors/fs.ts'
-import { Session } from '../workspace/workspace/handle.ts'
-import { Workspace } from '../workspace/workspace/workspace.ts'
+import { Session, Workspace } from '../workspace/workspace/workspace.ts'
 import { rstripSlash } from '../utils/slash.ts'
 
 const DEC = new TextDecoder()

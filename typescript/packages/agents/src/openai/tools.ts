@@ -34,7 +34,7 @@ import {
   MirageToolOperations,
   type MirageToolOperationsOptions,
 } from '@struktoai/mirage-core/workspace/tools/tool_operations'
-import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 
 /**
  * Mirage's tool table as OpenAI Agents function tools: shell, read, write,

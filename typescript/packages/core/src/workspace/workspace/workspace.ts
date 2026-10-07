@@ -136,17 +136,23 @@ import { WorkspaceMeta } from './meta.ts'
 import { normalizeMounts, prepareAddedMount, unmountPrefix } from './mounts.ts'
 import { Router } from './routing.ts'
 import { Runtimes } from './runtimes.ts'
-import { Session } from './handle.ts'
+import { Explainer } from './explainer.ts'
 import { FileVersionTracker } from '../tools/file_version.ts'
 import { MirageToolOperations } from '../tools/tool_operations.ts'
-import type { ExecuteOptions, ExecuteResult, MountSpec, WorkspaceOptions } from './types.ts'
+import type {
+  ExecuteOptions,
+  ExecuteResult,
+  MountSpec,
+  SessionExecuteOptions,
+  WorkspaceOptions,
+} from './types.ts'
 import { Mount } from '../mount/spec.ts'
 import { WatchManager } from './watch.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { placementRefused } from './failure.ts'
 
 export { ExecuteResult } from './types.ts'
-export type { ExecuteOptions, MountSpec, WorkspaceOptions } from './types.ts'
+export type { ExecuteOptions, MountSpec, SessionExecuteOptions, WorkspaceOptions } from './types.ts'
 
 // The stop of the top-level line this context runs in, so a line that
 // cancels its own session does not wait on itself.
@@ -2109,5 +2115,102 @@ export class Workspace {
       // teardown that raises must still close the door behind it.
       this.closed = true
     }
+  }
+}
+
+/**
+ * One session's doors, bound together.
+ *
+ * `shell` runs a line as the session, `vfs` is the op facade run as it,
+ * `tools` the agent tools over both and `explain` the same doors as a dry
+ * run, so a host holds one object per agent and every door answers under the same profile: hides, mount
+ * modes, grants and standing decisions. Nothing is stored here; the session record stays with the
+ * session manager and `state` reads it. Obtained from
+ * `Workspace.session`, which creates the session or adopts it. A null id
+ * is the workspace's default session as it is when each call runs, the
+ * way `ws.vfs` and `ws.shell` follow it when a snapshot load or an attach
+ * re-keys it.
+ */
+export class Session {
+  private readonly ws: Workspace
+  private readonly id: string | null
+
+  constructor(ws: Workspace, sessionId: string | null) {
+    this.ws = ws
+    this.id = sessionId
+  }
+
+  get sessionId(): string {
+    return this.id ?? this.ws.defaultSessionId
+  }
+
+  /** The session record: cwd, env, modes, hides, decisions. */
+  get state(): SessionState {
+    return this.ws.getSession(this.sessionId)
+  }
+
+  /** The workspace's approval ledger, which this session's asked commands and ops are recorded in. */
+  get decisions(): Decisions {
+    return this.ws.decisions
+  }
+
+  /** The workspace's mounts, which the session's profile narrows. */
+  mounts(): readonly MountEntry[] {
+    return this.ws.mounts()
+  }
+
+  /** The op facade run as this session. */
+  get vfs(): Ops {
+    return this.id === null ? this.ws.vfs : this.ws.vfs.forSession(this.id)
+  }
+
+  /**
+   * This session's calls explained instead of run, under the same names:
+   * `explain.shell(line)`, `explain.vfs.<call>(...)`.
+   */
+  get explain(): Explainer {
+    return new Explainer((line, sessionId) => this.ws.explain(line, sessionId), this.id, this.vfs)
+  }
+
+  /** The agent tools run as this session: one table per session, shared by every caller in the process. */
+  get tools(): MirageToolOperations {
+    return this.ws.sessionTools(this.id)
+  }
+
+  /**
+   * Hydrate the workspace's sessions, so a stored one is known.
+   *
+   * @internal
+   */
+  loaded(): Promise<void> {
+    return this.ws.ensureSessionsLoaded()
+  }
+
+  /**
+   * The read history the session's agent tools share.
+   *
+   * @internal
+   */
+  reads(): Promise<FileVersionTracker> {
+    return this.ws.sessionReads(this.id)
+  }
+
+  /** Run a shell line as this session; `Workspace.shell` with the session fixed. */
+  shell(command: string, options: SessionExecuteOptions = {}): Promise<ExecuteResult> {
+    return this.ws.shell(command, this.id === null ? options : { ...options, sessionId: this.id })
+  }
+
+  /** The paths a pattern matches as this session; `Workspace.glob` with the session fixed. */
+  glob(pattern: string): Promise<string[]> {
+    return this.id === null ? this.ws.glob(pattern) : this.ws.glob(pattern, this.id)
+  }
+  /** Render this session's VFS Markdown, optionally at a virtual path. */
+  vfsMd(path?: string | PathSpec): Promise<string> {
+    return this.ws.vfsMd(path, { sessionId: this.sessionId })
+  }
+
+  /** Render this session's CLI skill, optionally at a virtual path. */
+  skillMd(path?: string | PathSpec): Promise<string> {
+    return this.ws.skillMd(path, { sessionId: this.sessionId })
   }
 }

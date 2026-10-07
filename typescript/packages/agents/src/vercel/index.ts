@@ -36,7 +36,7 @@ import {
   type MirageToolOperationsOptions,
   type ToolResult,
 } from '@struktoai/mirage-core/workspace/tools/tool_operations'
-import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 
 interface Answer {
   text: string

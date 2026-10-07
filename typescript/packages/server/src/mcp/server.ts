@@ -44,7 +44,7 @@ import {
 } from '@struktoai/mirage-core/workspace/tools/tool_operations'
 import type { ToolResult } from '@struktoai/mirage-core/workspace/tools/tool_operations'
 import type { JsonValue } from '@struktoai/mirage-core/types'
-import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { answered, checked, explanationToDict, failureToDict } from '../io_serde.ts'
 import { VFS_CALLS, schemaOf, type VfsCall } from '../vfs_calls.ts'
 

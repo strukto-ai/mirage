@@ -302,3 +302,6 @@ export interface ExecuteOptions {
    */
   jobTable?: JobTable
 }
+
+/** `ExecuteOptions` with the session already fixed. */
+export type SessionExecuteOptions = Omit<ExecuteOptions, 'sessionId'>

@@ -20,9 +20,8 @@ import { RAMSessionStore } from '../session/ram.ts'
 import { applyStateDict, toStateDict } from '../snapshot/state.ts'
 import { MountMode } from '../../types.ts'
 import { getTestParser, stdoutStr } from '../fixtures/workspace_fixture.ts'
-import { Session, type SessionExecuteOptions } from './handle.ts'
-import type { ExecuteOptions } from './types.ts'
-import { Workspace } from './workspace.ts'
+import type { ExecuteOptions, SessionExecuteOptions } from './types.ts'
+import { Session, Workspace } from './workspace.ts'
 
 const open: Workspace[] = []
 

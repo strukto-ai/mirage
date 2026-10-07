@@ -17,10 +17,9 @@ import { read as readObject } from '../../core/s3/read.ts'
 import { write as writeObject } from '../../core/s3/write.ts'
 import { PathSpec } from '../../types.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
-import type { Workspace } from '../workspace/workspace.ts'
 import { readFileBytes } from './fs.ts'
 import { splitManifestAndBlobs } from './manifest.ts'
-import { toStateDict } from './state.ts'
+import { toStateDict, type WorkspaceLike } from './state.ts'
 import { readSnapshotTar, readTar, writeSnapshotTar, writeTar } from './tar_io.ts'
 
 function keyPath(key: string): PathSpec {
@@ -35,7 +34,7 @@ function keyPath(key: string): PathSpec {
  * @returns The tar's bytes, or with a file target its size.
  */
 export async function snapshot(
-  ws: Workspace,
+  ws: WorkspaceLike,
   target?: string,
   options: { s3?: S3Config } = {},
 ): Promise<Uint8Array | number> {
