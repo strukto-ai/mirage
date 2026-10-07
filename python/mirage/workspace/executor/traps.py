@@ -20,30 +20,40 @@ from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, materialize
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
+from mirage.shell.console import Channel
+from mirage.shell.constants import ERR_TRAP_EXEMPT_TYPES
 from mirage.shell.errors import ExitSignal, ReturnSignal
-from mirage.workspace.executor.statement import record_status
+from mirage.shell.types import NodeType as NT
+from mirage.shell.types import TSNodeLike
+from mirage.workspace.executor.statement import Written, record_status
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 
-def inherit_exit_trap(session: SessionState) -> None:
+def inherit_traps(session: SessionState) -> None:
     """Start a child shell: ``( )``, a pipeline stage, a job, ``$( )``.
 
     The session's ``exit_trap`` is the ``trap ... EXIT`` action, "" for
     an ignored EXIT. A child shell keeps its parent's with
     ``exit_trap_inherited`` set: it lists it, as bash's ``trap -p`` does
-    there, and runs none of it until it registers its own. It is live
-    shell state, which a session store keeps none of.
+    there, and runs none of it until it registers its own. It keeps the
+    ERR action hidden unless ``set -E`` and the RETURN action unless
+    ``set -T``, and lists them all the same. It is live shell state,
+    which a session store keeps none of.
 
     Args:
         session (SessionState): the child's state.
     """
     session.exit_trap_inherited = session.exit_trap is not None
     session._trap_status = None
+    if not session.shell_options.get("errtrace"):
+        session.err_trap_hidden = True
+    if not session.shell_options.get("functrace"):
+        session.return_trap_hidden = True
 
 
-def clear_exit_trap(session: SessionState) -> None:
-    """Start a new shell (``bash -c``, a script): it has no EXIT action.
+def clear_traps(session: SessionState) -> None:
+    """Start a new shell (``bash -c``, a script): it has no actions.
 
     Args:
         session (SessionState): the new shell's state.
@@ -51,6 +61,205 @@ def clear_exit_trap(session: SessionState) -> None:
     session.exit_trap = None
     session.exit_trap_inherited = False
     session._trap_status = None
+    session.err_trap = session.return_trap = None
+    session.err_trap_hidden = session.return_trap_hidden = False
+
+
+def lift_function_traps(
+    session: SessionState,
+) -> tuple[str | None, str | None]:
+    """Take the caller's ERR and RETURN actions from a function's body
+    unless ``set -E`` / ``set -T``: the body neither runs nor lists them.
+
+    Args:
+        session (SessionState): the shell calling the function.
+
+    Returns:
+        tuple[str | None, str | None]: the ERR and RETURN actions taken,
+        for ``restore_function_traps``.
+    """
+    err_trap = return_trap = None
+    if (
+        session.err_trap
+        and not session.err_trap_hidden
+        and not session.shell_options.get("errtrace")
+    ):
+        err_trap, session.err_trap = session.err_trap, None
+    if (
+        session.return_trap
+        and not session.return_trap_hidden
+        and not session.shell_options.get("functrace")
+    ):
+        return_trap, session.return_trap = session.return_trap, None
+    return err_trap, return_trap
+
+
+def restore_function_traps(
+    session: SessionState, lifted: tuple[str | None, str | None]
+) -> None:
+    """Give the actions ``lift_function_traps`` took back as the function
+    returns, each unless the body set one of its own, as bash does.
+
+    Args:
+        session (SessionState): the shell the function returns to.
+        lifted (tuple[str | None, str | None]): what was taken.
+    """
+    err_trap, return_trap = lifted
+    if err_trap is not None and session.err_trap is None:
+        session.err_trap = err_trap
+    if return_trap is not None and session.return_trap is None:
+        session.return_trap = return_trap
+
+
+def err_trap_armed(session: SessionState) -> bool:
+    """Whether the ERR action is set and seen here, taken as a statement
+    starts: bash answers a failure only when the action was armed before
+    the command ran, so a function that sets one is not answered for.
+
+    Args:
+        session (SessionState): the shell about to run the statement.
+    """
+    return bool(session.err_trap) and not session.err_trap_hidden
+
+
+async def run_err_trap(
+    execute_fn: Callable[..., Any] | None,
+    node: TSNodeLike,
+    status: int,
+    session: SessionState,
+    armed: bool,
+    stdin: ByteSource | None = None,
+    call_stack: CallStack | None = None,
+) -> list[Written]:
+    """Run the ERR action after a statement finished with ``status``.
+
+    It runs where ``set -e`` would act: not in a test, the left of
+    ``&&``/``||`` or after ``!``, and not again for a group, ``if``, a
+    loop or ``case``, whose own failing command ran it already. ``$?``
+    is ``status`` while it runs and again after it, whatever the action
+    returns, and a failure inside it does not run it again. An ``exit``
+    in it ends the shell. Hidden in a function or a child shell unless
+    ``set -E``, as bash's is.
+
+    Args:
+        execute_fn (Callable[..., Any] | None): runs a line in the
+            caller's frames; None where nothing can run one.
+        node (TSNodeLike): the statement, its redirects included.
+        status (int): its status.
+        session (SessionState): the shell it ran in.
+        armed (bool): ``err_trap_armed`` as the statement started.
+        stdin (ByteSource | None): the shell's standard input.
+        call_stack (CallStack | None): the frames the action runs in.
+
+    Returns:
+        list[Written]: what the action wrote, for the caller to land;
+        empty when none runs.
+    """
+    action = session.err_trap
+    if node.type == NT.REDIRECTED_STATEMENT and node.children:
+        node = node.children[0]
+    if (
+        not armed
+        or status == 0
+        or execute_fn is None
+        or not action
+        or session.err_trap_hidden
+        or session.errexit_immune
+        or session.errexit_ignored
+        or (node.type in ERR_TRAP_EXEMPT_TYPES and not _arithmetic(node))
+    ):
+        return []
+    session.err_trap_hidden = True
+    try:
+        written = await _run_action(
+            execute_fn, action, session, stdin, call_stack
+        )
+    finally:
+        if session.err_trap == action:
+            session.err_trap_hidden = False
+    record_status(session, status)
+    return written
+
+
+def _arithmetic(node: TSNodeLike) -> bool:
+    """Whether a statement is ``(( ... ))``, which the grammar parses as a
+    compound statement but bash runs as a command of its own.
+
+    Args:
+        node (TSNodeLike): the statement.
+    """
+    return (
+        node.type == NT.COMPOUND_STATEMENT
+        and bool(node.children)
+        and node.children[0].type == "(("
+    )
+
+
+async def run_return_trap(
+    execute_fn: Callable[..., Any] | None,
+    session: SessionState,
+    stdin: ByteSource | None = None,
+    call_stack: CallStack | None = None,
+) -> list[Written]:
+    """Run the RETURN action as a function or a sourced file returns.
+
+    It runs in the frames of what is returning, with ``$?`` as the last
+    command left it; what returns keeps its own status. Hidden in a
+    function or a child shell unless ``set -T`` or it set its own.
+
+    Args:
+        execute_fn (Callable[..., Any] | None): runs a line in the
+            caller's frames; None where nothing can run one.
+        session (SessionState): the shell returning.
+        stdin (ByteSource | None): the shell's standard input.
+        call_stack (CallStack | None): the returning frames.
+
+    Returns:
+        list[Written]: what the action wrote, for the caller to land;
+        empty when none runs.
+    """
+    action = session.return_trap
+    if execute_fn is None or not action or session.return_trap_hidden:
+        return []
+    status = session.last_exit_code
+    written = await _run_action(execute_fn, action, session, stdin, call_stack)
+    record_status(session, status)
+    return written
+
+
+async def _run_action(
+    execute_fn: Callable[..., Any],
+    action: str,
+    session: SessionState,
+    stdin: ByteSource | None,
+    call_stack: CallStack | None,
+) -> list[Written]:
+    """Run a trap action as a line of the shell and collect its output.
+
+    Args:
+        execute_fn (Callable[..., Any]): runs a line in the caller's
+            frames.
+        action (str): the action's text.
+        session (SessionState): the shell running it.
+        stdin (ByteSource | None): the shell's standard input.
+        call_stack (CallStack | None): the frames it runs in.
+    """
+    io = await execute_fn(
+        action,
+        session_id=session.session_id,
+        stdin=stdin,
+        call_stack=call_stack if call_stack is not None else CallStack(),
+    )
+    stdout = await materialize(io.stdout) or b""
+    stderr = await materialize(io.stderr) or b""
+    return [
+        (channel, data, False)
+        for channel, data in (
+            (Channel.STDOUT, stdout),
+            (Channel.STDERR, stderr),
+        )
+        if data
+    ]
 
 
 async def run_exit_trap(

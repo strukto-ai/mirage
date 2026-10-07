@@ -62,7 +62,7 @@ from mirage.workspace.executor.statement import (
     record_status,
     snapshot_status,
 )
-from mirage.workspace.executor.traps import finish_shell, inherit_exit_trap
+from mirage.workspace.executor.traps import finish_shell, inherit_traps
 from mirage.workspace.node.admission import (
     admit_line,
     is_pending,
@@ -254,7 +254,7 @@ async def recurse(
     rest = session.job_output or session.tty.jobs
     if substitution:
         session.terminal_output = False
-        inherit_exit_trap(session)
+        inherit_traps(session)
         # bash runs a substitution without `set -e` unless
         # `shopt -s inherit_errexit` (or POSIX mode) passes it on.
         if not (

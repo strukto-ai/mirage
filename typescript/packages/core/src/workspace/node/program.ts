@@ -32,7 +32,7 @@ import { divertStatement } from '../executor/builtins/exec/index.ts'
 import { handleBackground } from '../executor/jobs.ts'
 import type { ExecuteNodeFn } from '../executor/command/types.ts'
 import { failedRead, land, statementOutput, type Written } from '../executor/statement.ts'
-import { runExitTrap } from '../executor/traps.ts'
+import { errTrapArmed, runErrTrap, runExitTrap } from '../executor/traps.ts'
 import type { ExecuteFn } from '../expand/node.ts'
 import { ENCLOSING, Recorder, type StreamOwner } from '../../shell/descriptors.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
@@ -194,6 +194,7 @@ async function runProgram(
 
     const next = children[i + 1]
     const isBg = next?.type === NT.BACKGROUND
+    const armed = errTrapArmed(session)
 
     let stdout: ByteSource | null
     let io: IOResult
@@ -353,6 +354,21 @@ async function runProgram(
     if (stdout !== null) allStdout.push(stdout)
     mergedIo = await mergedIo.merge(io)
 
+    if (!isBg) {
+      const trapped = await runErrTrap(
+        executeFn ?? null,
+        child,
+        io.exitCode,
+        session,
+        armed,
+        stdin,
+        callStack,
+      )
+      if (trapped.length > 0) {
+        mergedIo = await land(trapped, sink ?? null, allStdout, mergedIo)
+        mergedIo.exitCode = io.exitCode
+      }
+    }
     if (!isBg && errexitActs(child, io.exitCode, session)) {
       mergedIo.exitCode = io.exitCode
       if (!inline) {

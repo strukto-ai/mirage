@@ -46,7 +46,8 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
 import { handleBackground, pump } from './jobs.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
-import { endShell, inheritExitTrap, runExitTrap } from './traps.ts'
+import { endShell, errTrapArmed, inheritTraps, runErrTrap, runExitTrap } from './traps.ts'
+import type { ExecuteStringFn } from './builtins/types.ts'
 import type { ExecuteFn } from '../expand/node.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
@@ -101,7 +102,7 @@ export async function handlePipe(
     // Each segment is a child shell: bash forks one per stage.
     const childEvaluation = childContext(context)
     const child = childEvaluation.session
-    inheritExitTrap(child)
+    inheritTraps(child)
     child.terminalOutput = session.terminalOutput && i === commands.length - 1
     childEvaluation.frame.abortSignal =
       mergeSignals(context.frame.abortSignal, abort.signal) ?? abort.signal
@@ -370,12 +371,19 @@ export async function handleSubshell(
   executeFn: ExecuteFn | null = null,
 ): Promise<Result> {
   const session = context.session
-  inheritExitTrap(session)
+  inheritTraps(session)
   session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
   session.lineOpen = true
   // A child shell: `shift` or `set --` in it leaves the caller's
   // parameters alone, and it runs in none of the caller's loops.
   callStack = (callStack ?? new CallStack()).fork(false)
+  // The subshell's actions run as its own lines: their `wait` and `jobs`
+  // see the subshell's jobs, not the caller's.
+  const runAction: ExecuteStringFn | null =
+    executeFn === null
+      ? null
+      : (action, opts) =>
+          executeFn(action, { ...opts, session, ...(jobTable === null ? {} : { jobTable }) })
   const allStdout: (ByteSource | null)[] = []
   let mergedIo = new IOResult()
   let lastExec = new ExecutionNode({ command: '()', exitCode: 0 })
@@ -391,6 +399,7 @@ export async function handleSubshell(
     // while the option is on, so this loop simply runs a tail of
     // no-ops. The child owns the option, so it cannot leak to the parent.
     const isBg = body[i + 1]?.type === NT.BACKGROUND
+    const armed = errTrapArmed(session)
     if (isBg && jobTable !== null) {
       let launched: Result
       try {
@@ -478,23 +487,25 @@ export async function handleSubshell(
     mergedIo = await land(written, sink, allStdout, mergedIo)
     mergedIo = await mergedIo.merge(io)
     lastExec = childExec
+    const trapped = await runErrTrap(
+      runAction,
+      child,
+      io.exitCode,
+      session,
+      armed,
+      stdin,
+      callStack,
+    )
+    if (trapped.length > 0) {
+      mergedIo = await land(trapped, sink, allStdout, mergedIo)
+      mergedIo.exitCode = io.exitCode
+    }
     if (errexitActs(child, io.exitCode, session)) {
       mergedIo.exitCode = io.exitCode
       break
     }
   }
-  // The EXIT action is the subshell's: its `wait` and `jobs` see the
-  // subshell's jobs, not the caller's.
-  const cleanup = await runExitTrap(
-    executeFn === null
-      ? null
-      : (action, opts) =>
-          executeFn(action, { ...opts, session, ...(jobTable === null ? {} : { jobTable }) }),
-    session,
-    mergedIo.exitCode,
-    stdin,
-    callStack,
-  )
+  const cleanup = await runExitTrap(runAction, session, mergedIo.exitCode, stdin, callStack)
   if (cleanup !== null) {
     const written: Written[] = []
     const out = await cleanup.materializeStdout()

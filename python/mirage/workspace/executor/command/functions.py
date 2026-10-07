@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable
 from functools import partial
 from typing import Any
 
@@ -38,6 +39,14 @@ from mirage.workspace.executor.statement import (
     errexit_acts,
     fd0_binding,
     finish_statement,
+    land,
+)
+from mirage.workspace.executor.traps import (
+    err_trap_armed,
+    lift_function_traps,
+    restore_function_traps,
+    run_err_trap,
+    run_return_trap,
 )
 from mirage.workspace.session.state import restore_locals
 from mirage.workspace.types import ExecutionNode
@@ -55,13 +64,17 @@ async def run_shell_function(
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
     sink: JobConsole | None = None,
+    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a user-defined shell function's body statement by statement.
 
     Locals declared with ``local``/``declare`` shadow and restore on
     exit, ``return`` stops the body via :class:`ReturnSignal`, ``$?``
     tracks each inner statement, and ``set -e`` aborts the body on the
-    first failing statement exactly as it does at top level.
+    first failing statement exactly as it does at top level. The body
+    sees no inherited ERR or RETURN action unless ``set -E`` / ``set
+    -T``; one it sets itself it sees, and the RETURN action runs as it
+    returns.
 
     Args:
         execute_node (ExecuteNodeFn): the executor's statement runner.
@@ -79,6 +92,8 @@ async def run_shell_function(
         decisions (Decisions | None): ledger that holds those claims.
         sink (JobConsole | None): where each statement writes as it
             finishes, None to return the body's output.
+        execute_fn (Callable[..., Any] | None): runs a trap action as a
+            line of the shell; None where nothing can run one.
     """
     session = context.session
     scope = ParseScope()
@@ -95,6 +110,7 @@ async def run_shell_function(
     # Positional args carry the word as typed ($1 stays sub/a.txt).
     text_args = [word_text(p) for p in parts[1:]]
     cs.push(text_args, function_name=cmd_name)
+    lifted = lift_function_traps(session)
     outer_names = session.function_names
     if outer_names is not None:
         session.function_names = cs.function_names()
@@ -141,6 +157,7 @@ async def run_shell_function(
         last_exec = ExecutionNode(command=cmd_name, exit_code=0)
         bound = fd0_binding(session)
         for cmd in func_body:
+            armed = err_trap_armed(session)
             try:
                 stdout, io, last_exec = await run_statement(
                     execute_node,
@@ -175,9 +192,20 @@ async def run_shell_function(
             if stdout is not None:
                 all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)
+            trapped = await run_err_trap(
+                execute_fn, cmd, io.exit_code, session, armed, stdin, cs
+            )
+            if trapped:
+                merged_io = await land(trapped, sink, all_stdout, merged_io)
+                merged_io.exit_code = io.exit_code
             if errexit_acts(cmd, io.exit_code, session):
                 merged_io.exit_code = io.exit_code
                 break
+        status = merged_io.exit_code
+        returned = await run_return_trap(execute_fn, session, stdin, cs)
+        if returned:
+            merged_io = await land(returned, sink, all_stdout, merged_io)
+            merged_io.exit_code = status
         combined = async_chain(all_stdout) if all_stdout else None
         last_exec.exit_code = merged_io.exit_code
         return combined, merged_io, last_exec
@@ -190,6 +218,7 @@ async def run_shell_function(
         cs.pop()
         if session.function_names is not None:
             session.function_names = outer_names
+        restore_function_traps(session, lifted)
         restore_locals(session, saved_locals)
         session._local_frames.pop()
         session._local_vars = outer_locals

@@ -364,6 +364,15 @@ class SessionState:
     script_name: str | None = None
     exit_trap: str | None = None
     exit_trap_inherited: bool = False
+    # The `trap ... ERR` and `trap ... RETURN` actions, "" for an ignored
+    # one, and whether the running scope hides each: a function sees
+    # neither unless `set -E` / `set -T`, a child shell no ERR unless
+    # `set -E`, and a scope that sets one sees it. Live shell state, like
+    # the EXIT action.
+    err_trap: str | None = None
+    return_trap: str | None = None
+    err_trap_hidden: bool = False
+    return_trap_hidden: bool = False
     tty: Terminal = field(default_factory=Terminal, repr=False)
     job_output: JobOutput | None = field(default=None, repr=False)
     job_waits: JobWaits | None = field(default=None, repr=False)

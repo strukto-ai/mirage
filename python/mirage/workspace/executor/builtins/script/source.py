@@ -18,10 +18,11 @@ from typing import Any
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io import IOResult
+from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.call_stack import CallStack
-from mirage.shell.console import JobConsole
+from mirage.shell.console import Channel, JobConsole
 from mirage.shell.errors import ReturnSignal
 from mirage.types import PathSpec, word_text
 from mirage.workspace.executor.builtins.scope import _scope_path
@@ -31,6 +32,7 @@ from mirage.workspace.executor.builtins.script.script import (
     script_error,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
+from mirage.workspace.executor.traps import run_return_trap
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     positional_params,
@@ -105,19 +107,34 @@ async def handle_source(
     if outer_names is not None:
         session.function_names = cs.function_names()
     try:
-        io = await execute_fn(
-            script,
-            session_id=session.session_id,
-            stdin=stdin,
-            sink=sink,
-            call_stack=cs,
-        )
-    except ReturnSignal as sig:
-        io = IOResult(
-            stdout=sig.stdout,
-            stderr=sig.stderr or None,
-            exit_code=sig.exit_code,
-        )
+        try:
+            io = await execute_fn(
+                script,
+                session_id=session.session_id,
+                stdin=stdin,
+                sink=sink,
+                call_stack=cs,
+            )
+        except ReturnSignal as sig:
+            io = IOResult(
+                stdout=sig.stdout,
+                stderr=sig.stderr or None,
+                exit_code=sig.exit_code,
+            )
+        # The RETURN action runs as the file returns, in its frame.
+        returned = await run_return_trap(execute_fn, session, stdin, cs)
+        if returned:
+            out = b"".join(d for c, d, _ in returned if c == Channel.STDOUT)
+            err = b"".join(d for c, d, _ in returned if c == Channel.STDERR)
+            io = IOResult(
+                stdout=async_chain([io.stdout, out or None]),
+                stderr=(await io.materialize_stderr()) + err or None,
+                exit_code=io.exit_code,
+                reads=io.reads,
+                writes=io.writes,
+                cache=io.cache,
+                refusal=io.refusal,
+            )
     finally:
         frame = cs.pop()
         if session.function_names is not None:

@@ -21,7 +21,10 @@ import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import type { SessionState } from '../session/session.ts'
 import type { ExecutionNode } from '../types.ts'
-import { recordStatus } from './statement.ts'
+import { recordStatus, type Written } from './statement.ts'
+import { Channel } from '../../shell/console/index.ts'
+import { ERR_TRAP_EXEMPT_TYPES } from '../../shell/constants.ts'
+import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 
 /**
  * Start a child shell: `( )`, a pipeline stage, a job, `$( )`.
@@ -29,19 +32,175 @@ import { recordStatus } from './statement.ts'
  * The session's `exitTrap` is the `trap ... EXIT` action, '' for an
  * ignored EXIT. A child shell keeps its parent's with `exitTrapInherited`
  * set: it lists it, as bash's `trap -p` does there, and runs none of it
- * until it registers its own. It is live shell state, which a session
- * store keeps none of.
+ * until it registers its own. It keeps the ERR action hidden unless
+ * `set -E` and the RETURN action unless `set -T`, and lists them all the
+ * same. It is live shell state, which a session store keeps none of.
  */
-export function inheritExitTrap(session: SessionState): void {
+export function inheritTraps(session: SessionState): void {
   session.exitTrapInherited = session.exitTrap !== null
   session.trapStatus = null
+  if (session.shellOptions.errtrace !== true) session.errTrapHidden = true
+  if (session.shellOptions.functrace !== true) session.returnTrapHidden = true
 }
 
-/** Start a new shell (`bash -c`, a script): it has no EXIT action. */
-export function clearExitTrap(session: SessionState): void {
+/** Start a new shell (`bash -c`, a script): it has no actions. */
+export function clearTraps(session: SessionState): void {
   session.exitTrap = null
   session.exitTrapInherited = false
   session.trapStatus = null
+  session.errTrap = null
+  session.returnTrap = null
+  session.errTrapHidden = false
+  session.returnTrapHidden = false
+}
+
+/**
+ * Take the caller's ERR and RETURN actions from a function's body unless
+ * `set -E` / `set -T`: the body neither runs nor lists them. Returns the
+ * actions taken, for `restoreFunctionTraps`.
+ */
+export function liftFunctionTraps(session: SessionState): [string | null, string | null] {
+  let errTrap: string | null = null
+  let returnTrap: string | null = null
+  if (
+    session.errTrap !== null &&
+    session.errTrap !== '' &&
+    !session.errTrapHidden &&
+    session.shellOptions.errtrace !== true
+  ) {
+    errTrap = session.errTrap
+    session.errTrap = null
+  }
+  if (
+    session.returnTrap !== null &&
+    session.returnTrap !== '' &&
+    !session.returnTrapHidden &&
+    session.shellOptions.functrace !== true
+  ) {
+    returnTrap = session.returnTrap
+    session.returnTrap = null
+  }
+  return [errTrap, returnTrap]
+}
+
+/**
+ * Give the actions `liftFunctionTraps` took back as the function returns,
+ * each unless the body set one of its own, as bash does.
+ */
+export function restoreFunctionTraps(
+  session: SessionState,
+  lifted: readonly [string | null, string | null],
+): void {
+  const [errTrap, returnTrap] = lifted
+  if (errTrap !== null && session.errTrap === null) session.errTrap = errTrap
+  if (returnTrap !== null && session.returnTrap === null) session.returnTrap = returnTrap
+}
+
+/**
+ * Whether the ERR action is set and seen here, taken as a statement starts:
+ * bash answers a failure only when the action was armed before the command
+ * ran, so a function that sets one is not answered for.
+ */
+export function errTrapArmed(session: SessionState): boolean {
+  return session.errTrap !== null && session.errTrap !== '' && !session.errTrapHidden
+}
+
+/**
+ * Run the ERR action after a statement finished with `status`.
+ *
+ * It runs where `set -e` would act: not in a test, the left of `&&`/`||`
+ * or after `!`, and not again for a group, `if`, a loop or `case`, whose
+ * own failing command ran it already. `$?` is `status` while it runs and
+ * again after it, whatever the action returns, and a failure inside it
+ * does not run it again. An `exit` in it ends the shell. Hidden in a
+ * function or a child shell unless `set -E`, as bash's is. `armed` is
+ * `errTrapArmed` as the statement started. Returns what the action wrote,
+ * for the caller to land; empty when none runs. Mirrors Python.
+ */
+export async function runErrTrap(
+  executeFn: ExecuteStringFn | null,
+  node: TSNodeLike,
+  status: number,
+  session: SessionState,
+  armed: boolean,
+  stdin: ByteSource | null = null,
+  callStack: CallStack | null = null,
+): Promise<Written[]> {
+  const action = session.errTrap
+  const statement =
+    node.type === NT.REDIRECTED_STATEMENT && node.children[0] !== undefined
+      ? node.children[0]
+      : node
+  if (
+    !armed ||
+    status === 0 ||
+    executeFn === null ||
+    action === null ||
+    action === '' ||
+    session.errTrapHidden ||
+    session.errexitImmune ||
+    session.errexitIgnored ||
+    (ERR_TRAP_EXEMPT_TYPES.has(statement.type) && !arithmetic(statement))
+  )
+    return []
+  session.errTrapHidden = true
+  let written: Written[]
+  try {
+    written = await runAction(executeFn, action, session, stdin, callStack)
+  } finally {
+    if (session.errTrap === action) session.errTrapHidden = false
+  }
+  recordStatus(session, status)
+  return written
+}
+
+/** Whether a statement is `(( ... ))`, which the grammar parses as a
+ * compound statement but bash runs as a command of its own. */
+function arithmetic(node: TSNodeLike): boolean {
+  return node.type === NT.COMPOUND_STATEMENT && node.children[0]?.type === '(('
+}
+
+/**
+ * Run the RETURN action as a function or a sourced file returns. It runs in
+ * the frames of what is returning, with `$?` as the last command left it;
+ * what returns keeps its own status. Hidden in a function or a child shell
+ * unless `set -T` or it set its own. Returns what the action wrote, for the
+ * caller to land; empty when none runs. Mirrors Python.
+ */
+export async function runReturnTrap(
+  executeFn: ExecuteStringFn | null,
+  session: SessionState,
+  stdin: ByteSource | null = null,
+  callStack: CallStack | null = null,
+): Promise<Written[]> {
+  const action = session.returnTrap
+  if (executeFn === null || action === null || action === '' || session.returnTrapHidden) return []
+  const status = session.lastExitCode
+  const written = await runAction(executeFn, action, session, stdin, callStack)
+  recordStatus(session, status)
+  return written
+}
+
+/** Run a trap action as a line of the shell and collect its output. */
+async function runAction(
+  executeFn: ExecuteStringFn,
+  action: string,
+  session: SessionState,
+  stdin: ByteSource | null,
+  callStack: CallStack | null,
+): Promise<Written[]> {
+  const io = await executeFn(action, {
+    sessionId: session.sessionId,
+    session,
+    stdin,
+    callStack: callStack ?? new CallStack(),
+  })
+  const stdout = await materialize(io.stdout)
+  const stderr = await io.materializeStderr()
+  const written: Written[] = []
+  if (stdout.byteLength > 0) written.push([Channel.STDOUT, stdout, false])
+  if (stderr.byteLength > 0) written.push([Channel.STDERR, stderr, false])
+  return written
 }
 
 /**

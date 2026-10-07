@@ -29,6 +29,7 @@ import {
   fd0Binding,
   finishStatement,
   ignoringErrexit,
+  land,
   recordStatus,
 } from './statement.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
@@ -42,6 +43,8 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import { sessionView, visibleEnv } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { runStatement } from './jobs.ts'
+import { errTrapArmed, runErrTrap } from './traps.ts'
+import type { ExecuteStringFn } from './builtins/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
@@ -94,6 +97,7 @@ async function executeBody(
   agentId: string | null,
   handed: HandOff | null,
   decisions: Decisions | null,
+  executeFn: ExecuteStringFn | null = null,
 ): Promise<Result> {
   const session = context.session
   const allStdout: (ByteSource | null)[] = []
@@ -101,6 +105,7 @@ async function executeBody(
   let lastExec = new ExecutionNode({ command: '', exitCode: 0 })
   const bound = fd0Binding(session)
   for (const cmd of body) {
+    const armed = errTrapArmed(session)
     try {
       const [rawStdout, io, execNode] = await runStatement(
         executeNode,
@@ -118,6 +123,19 @@ async function executeBody(
       const stdout = await finishStatement(rawStdout, io, session, cmd)
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
+      const trapped = await runErrTrap(
+        executeFn,
+        cmd,
+        io.exitCode,
+        session,
+        armed,
+        stdin,
+        callStack,
+      )
+      if (trapped.length > 0) {
+        mergedIo = await land(trapped, null, allStdout, mergedIo)
+        mergedIo.exitCode = io.exitCode
+      }
       if (errexitActs(cmd, io.exitCode, session)) {
         mergedIo.exitCode = io.exitCode
         break
@@ -249,6 +267,7 @@ export async function handleIf(
   agentId: string | null = null,
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
+  executeFn: ExecuteStringFn | null = null,
 ): Promise<Result> {
   const session = context.session
   const bound = fd0Binding(session)
@@ -280,6 +299,7 @@ export async function handleIf(
         agentId,
         handed,
         decisions,
+        executeFn,
       )
     }
   }
@@ -294,6 +314,7 @@ export async function handleIf(
       agentId,
       handed,
       decisions,
+      executeFn,
     )
   }
   return [null, new IOResult(), new ExecutionNode({ exitCode: 0 })]
@@ -317,6 +338,7 @@ export async function handleFor(
   agentId: string | null = null,
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
+  executeFn: ExecuteStringFn | null = null,
 ): Promise<Result> {
   const session = context.session
   let mergedIo = new IOResult()
@@ -356,6 +378,7 @@ export async function handleFor(
         agentId,
         handed,
         decisions,
+        executeFn,
       )
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
@@ -385,6 +408,7 @@ async function conditionLoop(
   decisions: Decisions | null,
   label: string,
   breakOnZero: boolean,
+  executeFn: ExecuteStringFn | null = null,
 ): Promise<Result> {
   const session = context.session
   let mergedIo = new IOResult()
@@ -431,6 +455,7 @@ async function conditionLoop(
         agentId,
         handed,
         decisions,
+        executeFn,
       )
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
@@ -486,6 +511,7 @@ export async function handleCfor(
   agentId: string | null = null,
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
+  executeFn: ExecuteStringFn | null = null,
 ): Promise<Result> {
   const session = context.session
   let mergedIo = new IOResult()
@@ -513,6 +539,7 @@ export async function handleCfor(
           agentId,
           handed,
           decisions,
+          executeFn,
         )
         allStdout.push(stdout)
         mergedIo = await mergedIo.merge(io)
@@ -572,6 +599,7 @@ export function handleWhile(
   agentId: string | null = null,
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
+  executeFn: ExecuteStringFn | null = null,
 ): Promise<Result> {
   return conditionLoop(
     executeNode,
@@ -586,6 +614,7 @@ export function handleWhile(
     decisions,
     'while',
     false,
+    executeFn,
   )
 }
 
@@ -600,6 +629,7 @@ export function handleUntil(
   agentId: string | null = null,
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
+  executeFn: ExecuteStringFn | null = null,
 ): Promise<Result> {
   return conditionLoop(
     executeNode,
@@ -614,6 +644,7 @@ export function handleUntil(
     decisions,
     'until',
     true,
+    executeFn,
   )
 }
 
@@ -628,6 +659,7 @@ export async function handleCase(
   agentId: string | null = null,
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
+  executeFn: ExecuteStringFn | null = null,
 ): Promise<Result> {
   const session = context.session
   const allStdout: ByteSource[] = []
@@ -641,6 +673,7 @@ export async function handleCase(
     if (!(fallthrough || patterns.some((p) => fnmatch(word, p)))) continue
     ran = true
     for (const stmt of body) {
+      const armed = errTrapArmed(session)
       let result: Result
       try {
         result = await runStatement(
@@ -664,6 +697,19 @@ export async function handleCase(
       const stdout = await finishStatement(rawStdout, io, session, stmt)
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
+      const trapped = await runErrTrap(
+        executeFn,
+        stmt,
+        io.exitCode,
+        session,
+        armed,
+        stdin,
+        callStack,
+      )
+      if (trapped.length > 0) {
+        mergedIo = await land(trapped, null, allStdout, mergedIo)
+        mergedIo.exitCode = io.exitCode
+      }
       if (errexitActs(stmt, io.exitCode, session)) {
         mergedIo.exitCode = io.exitCode
         stopped = true
@@ -744,6 +790,7 @@ export async function handleSelect(
   decisions: Decisions | null = null,
   signal?: AbortSignal,
   sink?: JobConsole,
+  executeFn: ExecuteStringFn | null = null,
 ): Promise<Result> {
   const session = context.session
   let mergedIo = new IOResult()
@@ -800,6 +847,7 @@ export async function handleSelect(
         agentId,
         handed,
         decisions,
+        executeFn,
       )
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)

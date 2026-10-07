@@ -19,7 +19,7 @@ import type { ParseScope } from '../../../shell/parse/scope.ts'
 import type { ShellVar } from '../../../shell/variable.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult } from '../../../io/types.ts'
-import { errexitActs, fd0Binding, finishStatement } from '../statement.ts'
+import { errexitActs, fd0Binding, finishStatement, land } from '../statement.ts'
 import { CallStack } from '../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../shell/console/index.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -37,6 +37,14 @@ import type { HandOff } from '../../../policy/types.ts'
 import type { Decisions } from '../../../policy/decisions.ts'
 import { ReturnSignal } from '../../../shell/errors.ts'
 import { carried, isUnwinding } from '../control.ts'
+import {
+  errTrapArmed,
+  liftFunctionTraps,
+  restoreFunctionTraps,
+  runErrTrap,
+  runReturnTrap,
+} from '../traps.ts'
+import type { ExecuteStringFn } from '../builtins/types.ts'
 import { runAsShell } from '../../../context/session_context.ts'
 import type { Result } from './types.ts'
 
@@ -56,6 +64,8 @@ export async function executeShellFunction(
   // Where each statement writes as it finishes, undefined to return the
   // body's output.
   sink?: JobConsole,
+  // Runs a trap action as a line of the shell; null where nothing can.
+  executeFn: ExecuteStringFn | null = null,
 ): Promise<Result> {
   const session = context.session
   // The body's statements read the caller's stdin in turn.
@@ -72,6 +82,7 @@ export async function executeShellFunction(
   // Positional args carry the word as typed ($1 stays sub/a.txt).
   const textArgs = restParts.map(wordText)
   cs.push(textArgs, cmdName)
+  const lifted = liftFunctionTraps(session)
   const outerNames = session.functionNames
   if (outerNames !== null) session.functionNames = cs.functionNames()
   // One stack: a local shadows the whole record, so the caller's value
@@ -112,6 +123,7 @@ export async function executeShellFunction(
     // whatever `xargs` or `env` marked the line that called it.
     await runAsShell(async () => {
       for (const cmd of body) {
+        const armed = errTrapArmed(session)
         try {
           const cmdNode = cmd
           const [rawStdout, io, execNode] = await runStatement(
@@ -139,6 +151,19 @@ export async function executeShellFunction(
           if (stdout !== null) allStdout.push(stdout)
           mergedIo = await mergedIo.merge(io)
           lastExec = execNode
+          const trapped = await runErrTrap(
+            executeFn,
+            cmdNode,
+            io.exitCode,
+            session,
+            armed,
+            bodyStdin,
+            cs,
+          )
+          if (trapped.length > 0) {
+            mergedIo = await land(trapped, sink ?? null, allStdout, mergedIo)
+            mergedIo.exitCode = io.exitCode
+          }
           if (errexitActs(cmdNode, io.exitCode, session)) {
             mergedIo.exitCode = io.exitCode
             break
@@ -156,6 +181,12 @@ export async function executeShellFunction(
           throw await carried(err, allStdout.length > 0 ? asyncChain(allStdout) : null, mergedIo)
         }
       }
+      const status = mergedIo.exitCode
+      const returned = await runReturnTrap(executeFn, session, bodyStdin, cs)
+      if (returned.length > 0) {
+        mergedIo = await land(returned, sink ?? null, allStdout, mergedIo)
+        mergedIo.exitCode = status
+      }
     })
   } finally {
     ;[session.parseCurrent, session.parseRow] = outerParse
@@ -163,6 +194,7 @@ export async function executeShellFunction(
     scope.release()
     cs.pop()
     if (session.functionNames !== null) session.functionNames = outerNames
+    restoreFunctionTraps(session, lifted)
     restoreLocals(session, savedLocals)
     session.localFrames.pop()
     session.localVars = outerLocals

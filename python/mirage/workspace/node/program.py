@@ -46,7 +46,11 @@ from mirage.workspace.executor.statement import (
     statement_output,
     statement_stdin,
 )
-from mirage.workspace.executor.traps import run_exit_trap
+from mirage.workspace.executor.traps import (
+    err_trap_armed,
+    run_err_trap,
+    run_exit_trap,
+)
 from mirage.workspace.types import ExecutionNode
 
 
@@ -197,6 +201,7 @@ async def _run_program(
 
         # Check for background: named node followed by & token
         is_bg = i + 1 < len(children) and children[i + 1].type == NT.BACKGROUND
+        armed = err_trap_armed(session)
 
         if is_bg:
             try:
@@ -362,6 +367,19 @@ async def _run_program(
             all_stdout.append(stdout)
         merged_io = await merged_io.merge(io)
 
+        if not is_bg:
+            trapped = await run_err_trap(
+                execute_fn,
+                child,
+                io.exit_code,
+                session,
+                armed,
+                stdin,
+                call_stack,
+            )
+            if trapped:
+                merged_io = await land(trapped, sink, all_stdout, merged_io)
+                merged_io.exit_code = io.exit_code
         if not is_bg and errexit_acts(child, io.exit_code, session):
             merged_io.exit_code = io.exit_code
             if not inline:

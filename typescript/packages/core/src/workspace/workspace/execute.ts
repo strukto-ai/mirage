@@ -91,7 +91,7 @@ import { ExecutionNode } from '../types.ts'
 import { abortable, joinOrAbort } from '../abort.ts'
 import { failureResult, isControlFlowError, placementRefused } from './failure.ts'
 import { ended, isUnwinding } from '../executor/control.ts'
-import { finishShell, inheritExitTrap } from '../executor/traps.ts'
+import { finishShell, inheritTraps } from '../executor/traps.ts'
 import { expandingAliases } from '../executor/builtins/alias/index.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
 import { cliEnvNames, fillEnv, fillNames, guestBound, lineNodes } from './fill.ts'
@@ -615,7 +615,7 @@ async function runPreparedLine(
             const rest = session.jobOutput ?? session.tty.jobs
             if (substitution) {
               session.terminalOutput = false
-              inheritExitTrap(session)
+              inheritTraps(session)
               // bash runs a substitution without `set -e` unless
               // `shopt -s inherit_errexit` (or POSIX mode) passes it on.
               if (session.shopts.inherit_errexit !== true && session.shellOptions.posix !== true)

@@ -247,6 +247,7 @@ export async function handleCommand(
       handed,
       registry.decisions,
       sink,
+      executeFn ?? null,
     )
   }
 

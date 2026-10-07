@@ -267,6 +267,7 @@ async def handle_command(
             handed,
             registry.decisions,
             sink,
+            execute_fn,
         )
 
     # Installed CLIs: dispatch by name, never by operand path. Sits

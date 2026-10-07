@@ -1,0 +1,242 @@
+{
+  "cases": [
+    {
+      "id": "return_trap_runs_after_source",
+      "seq": 512080,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( trap 'echo R' RETURN; printf ':\\n' > /data/rt.sh; . /data/rt.sh; rm /data/rt.sh; echo end )",
+      "expect": {
+        "exit": 0,
+        "stdout": "R\nend\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "return_trap_hidden_in_functions",
+      "seq": 512081,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( trap 'echo R' RETURN; f() { trap -p RETURN; echo in; }; f; echo end )",
+      "expect": {
+        "exit": 0,
+        "stdout": "in\nend\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "return_trap_set_in_a_function",
+      "seq": 512082,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( f() { trap 'echo \"R $?\"' RETURN; return 3; }; f; echo \"end $?\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "R 0\nend 3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "return_trap_functrace",
+      "seq": 512083,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( set -T; trap 'echo \"R ${FUNCNAME[0]}\"' RETURN; f() { g; }; g() { :; }; f; echo end )",
+      "expect": {
+        "exit": 0,
+        "stdout": "R g\nR f\nend\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "return_trap_reset_in_a_function_gives_it_back",
+      "seq": 512084,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( trap 'echo R' RETURN; f() { trap - RETURN; }; f; printf ':\\n' > /data/rt.sh; . /data/rt.sh; rm /data/rt.sh; echo end )",
+      "expect": {
+        "exit": 0,
+        "stdout": "R\nend\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "return_trap_hidden_in_a_child_shell",
+      "seq": 512085,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( trap 'echo R' RETURN; ( printf ':\\n' > /data/rt.sh; . /data/rt.sh; rm /data/rt.sh; echo in ); echo out )",
+      "expect": {
+        "exit": 0,
+        "stdout": "in\nout\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "trap_lists_exit_err_and_return",
+      "seq": 512086,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( trap 'echo X' EXIT; trap 'echo E' ERR; trap 'echo R' RETURN; trap -p )",
+      "expect": {
+        "exit": 0,
+        "stdout": "trap -- 'echo X' EXIT\ntrap -- 'echo E' ERR\ntrap -- 'echo R' RETURN\nX\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

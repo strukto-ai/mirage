@@ -137,6 +137,19 @@ ERREXIT_EXEMPT_TYPES = frozenset(
     }
 )
 
+# Statements whose failure the ERR trap does not answer again: a group,
+# `if`, a loop and `case` ran it for their own failing command already.
+# A subshell and a function call are answered, since the trap is hidden
+# inside them unless `set -E` (pinned against bash 5.2.37).
+ERR_TRAP_EXEMPT_TYPES = ERREXIT_EXEMPT_TYPES | {
+    NodeType.COMPOUND_STATEMENT,
+    NodeType.IF_STATEMENT,
+    NodeType.WHILE_STATEMENT,
+    NodeType.FOR_STATEMENT,
+    NodeType.C_STYLE_FOR_STATEMENT,
+    NodeType.CASE_STATEMENT,
+}
+
 # Every letter bash's `set` accepts, mapped to the `-o` name it is a
 # synonym for. The full table is here rather than only the letters
 # mirage acts on, because a letter left out is silently dropped: `set -C`

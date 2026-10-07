@@ -13,7 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type ByteSource, IOResult } from '../../../../io/types.ts'
-import type { JobConsole } from '../../../../shell/console/index.ts'
+import { Channel, type JobConsole } from '../../../../shell/console/index.ts'
+import { concat } from '../../../../io/cachable_iterator.ts'
+import { asyncChain } from '../../../../io/stream.ts'
+import { runReturnTrap } from '../../traps.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { fsStrerror } from '../../../../errors/fs.ts'
 import { CallStack } from '../../../../shell/call_stack.ts'
@@ -69,19 +72,37 @@ export async function handleSource(
   if (outerNames !== null) session.functionNames = cs.functionNames()
   let io: IOResult
   try {
-    io = await executeFn(script, {
-      sessionId: session.sessionId,
-      stdin,
-      callStack: cs,
-      ...(sink === undefined ? {} : { sink }),
-    })
-  } catch (err) {
-    if (!(err instanceof ReturnSignal)) throw err
-    io = new IOResult({
-      stdout: err.stdout,
-      stderr: err.stderr.byteLength > 0 ? err.stderr : null,
-      exitCode: err.exitCode,
-    })
+    try {
+      io = await executeFn(script, {
+        sessionId: session.sessionId,
+        stdin,
+        callStack: cs,
+        ...(sink === undefined ? {} : { sink }),
+      })
+    } catch (err) {
+      if (!(err instanceof ReturnSignal)) throw err
+      io = new IOResult({
+        stdout: err.stdout,
+        stderr: err.stderr.byteLength > 0 ? err.stderr : null,
+        exitCode: err.exitCode,
+      })
+    }
+    // The RETURN action runs as the file returns, in its frame.
+    const returned = await runReturnTrap(executeFn, session, stdin, cs)
+    if (returned.length > 0) {
+      const out = concat(returned.filter(([c]) => c === Channel.STDOUT).map(([, d]) => d))
+      const err = concat(returned.filter(([c]) => c === Channel.STDERR).map(([, d]) => d))
+      const stderr = concat([await io.materializeStderr(), err])
+      io = new IOResult({
+        stdout: asyncChain([io.stdout, out]),
+        stderr: stderr.byteLength > 0 ? stderr : null,
+        exitCode: io.exitCode,
+        reads: io.reads,
+        writes: io.writes,
+        cache: io.cache,
+        refusal: io.refusal,
+      })
+    }
   } finally {
     const frame = cs.pop()
     if (session.functionNames !== null) session.functionNames = outerNames

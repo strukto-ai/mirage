@@ -29,7 +29,7 @@ import { BASH_LONG_OPTIONS, BASH_START_FLAGS } from './constants.ts'
 import { readScriptFile, scriptError } from './script.ts'
 import type { BashArgs } from './types.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
-import { clearExitTrap, finishShell } from '../../traps.ts'
+import { clearTraps, finishShell } from '../../traps.ts'
 import { decodeText } from '../../../../shell/bytes.ts'
 
 function bashArgs(partial: Partial<BashArgs>): BashArgs {
@@ -161,7 +161,7 @@ export async function handleBash(
   }
   context = childContext(context)
   session = context.session
-  clearExitTrap(session)
+  clearTraps(session)
   session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
   session.positionalArgs = positional
   session.scriptName = scriptName

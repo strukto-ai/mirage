@@ -67,7 +67,9 @@ from mirage.workspace.executor.statement import (
 )
 from mirage.workspace.executor.traps import (
     end_shell,
-    inherit_exit_trap,
+    err_trap_armed,
+    inherit_traps,
+    run_err_trap,
     run_exit_trap,
 )
 from mirage.workspace.types import ExecutionNode
@@ -106,7 +108,7 @@ async def handle_pipe(
     async def run_segment(i: int, cmd: TSNodeLike) -> int:
         child_evaluation = children[i]
         child = child_evaluation.session
-        inherit_exit_trap(child)
+        inherit_traps(child)
         child.terminal_output = (
             session.terminal_output and i == len(commands) - 1
         )
@@ -357,12 +359,16 @@ async def handle_subshell(
             EXIT action as it ends.
     """
     session = context.session
-    inherit_exit_trap(session)
+    inherit_traps(session)
     session.job_output = JobOutput(session.job_output or session.tty.jobs)
     session._line_open = True
     # A child shell: `shift` or `set --` in it leaves the caller's
     # parameters alone, and it runs in none of the caller's loops.
     call_stack = (call_stack or CallStack()).fork(loops=False)
+    # The subshell's actions run as its own lines: their `wait` and
+    # `jobs` see the subshell's jobs, not the caller's.
+    if execute_fn is not None and job_table is not None:
+        execute_fn = partial(execute_fn, job_table=job_table)
     all_stdout: list[Any] = []
     merged_io = IOResult()
     last_exec = ExecutionNode(command="()", exit_code=0)
@@ -379,6 +385,7 @@ async def handle_subshell(
         # tail of no-ops. The child owns the option, so it cannot
         # leak to the parent.
         is_bg = i + 1 < len(body) and body[i + 1].type == NT.BACKGROUND
+        armed = err_trap_armed(session)
         if is_bg and job_table is not None:
             try:
                 stdout, io, last_exec = await handle_background(
@@ -471,13 +478,21 @@ async def handle_subshell(
         )
         merged_io = await land(written, sink, all_stdout, merged_io)
         merged_io = await merged_io.merge(io)
+        trapped = await run_err_trap(
+            execute_fn,
+            child,
+            io.exit_code,
+            session,
+            armed,
+            stdin,
+            call_stack,
+        )
+        if trapped:
+            merged_io = await land(trapped, sink, all_stdout, merged_io)
+            merged_io.exit_code = io.exit_code
         if errexit_acts(child, io.exit_code, session):
             merged_io.exit_code = io.exit_code
             break
-    # The EXIT action is the subshell's: its `wait` and `jobs` see the
-    # subshell's jobs, not the caller's.
-    if execute_fn is not None and job_table is not None:
-        execute_fn = partial(execute_fn, job_table=job_table)
     cleanup = await run_exit_trap(
         execute_fn, session, merged_io.exit_code, stdin, call_stack
     )

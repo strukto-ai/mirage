@@ -46,8 +46,10 @@ from mirage.workspace.executor.statement import (
     fd0_binding,
     finish_statement,
     ignoring_errexit,
+    land,
     record_status,
 )
+from mirage.workspace.executor.traps import err_trap_armed, run_err_trap
 from mirage.workspace.session.state import session_view, visible_env
 from mirage.workspace.types import ExecutionNode
 
@@ -68,6 +70,7 @@ async def _execute_body(
     agent_id: str | None,
     handed: HandOff | None,
     decisions: Decisions | None,
+    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute a list of body commands sequentially.
 
@@ -81,6 +84,7 @@ async def _execute_body(
     last_exec = ExecutionNode(command="", exit_code=0)
     bound = fd0_binding(session)
     for cmd in body:
+        armed = err_trap_armed(session)
         try:
             stdout, io, last_exec = await run_statement(
                 execute_node,
@@ -104,6 +108,12 @@ async def _execute_body(
         stdout = await finish_statement(stdout, io, session, cmd)
         all_stdout.append(stdout)
         merged_io = await merged_io.merge(io)
+        trapped = await run_err_trap(
+            execute_fn, cmd, io.exit_code, session, armed, stdin, call_stack
+        )
+        if trapped:
+            merged_io = await land(trapped, None, all_stdout, merged_io)
+            merged_io.exit_code = io.exit_code
         if errexit_acts(cmd, io.exit_code, session):
             merged_io.exit_code = io.exit_code
             break
@@ -243,6 +253,7 @@ async def handle_if(
     agent_id: str | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
+    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     session = context.session
     bound = fd0_binding(session)
@@ -277,6 +288,7 @@ async def handle_if(
                 agent_id,
                 handed,
                 decisions,
+                execute_fn=execute_fn,
             )
     if else_body is not None:
         return await _execute_body(
@@ -289,6 +301,7 @@ async def handle_if(
             agent_id,
             handed,
             decisions,
+            execute_fn=execute_fn,
         )
     return None, IOResult(), ExecutionNode(exit_code=0)
 
@@ -311,6 +324,7 @@ async def handle_for(
     agent_id: str | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
+    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     session = context.session
     merged_io = IOResult()
@@ -353,6 +367,7 @@ async def handle_for(
                 agent_id,
                 handed,
                 decisions,
+                execute_fn=execute_fn,
             )
         except (BreakSignal, ContinueSignal) as sig:
             merged_io = await _absorbed(sig, all_stdout, merged_io)
@@ -380,6 +395,7 @@ async def _condition_loop(
     agent_id: str | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
+    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     session = context.session
     merged_io = IOResult()
@@ -426,6 +442,7 @@ async def _condition_loop(
                 agent_id,
                 handed,
                 decisions,
+                execute_fn=execute_fn,
             )
         except (BreakSignal, ContinueSignal) as sig:
             merged_io = await _absorbed(sig, all_stdout, merged_io)
@@ -459,6 +476,7 @@ async def handle_cfor(
     agent_id: str | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
+    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run bash's C-style for: ((init; cond; update)) around a body.
 
@@ -507,6 +525,7 @@ async def handle_cfor(
                     agent_id,
                     handed,
                     decisions,
+                    execute_fn=execute_fn,
                 )
             except (BreakSignal, ContinueSignal) as sig:
                 merged_io = await _absorbed(sig, all_stdout, merged_io)
@@ -556,6 +575,7 @@ async def handle_while(
     agent_id: str | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
+    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     return await _condition_loop(
         execute_node,
@@ -570,6 +590,7 @@ async def handle_while(
         agent_id=agent_id,
         handed=handed,
         decisions=decisions,
+        execute_fn=execute_fn,
     )
 
 
@@ -584,6 +605,7 @@ async def handle_until(
     agent_id: str | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
+    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     return await _condition_loop(
         execute_node,
@@ -598,6 +620,7 @@ async def handle_until(
         agent_id=agent_id,
         handed=handed,
         decisions=decisions,
+        execute_fn=execute_fn,
     )
 
 
@@ -612,9 +635,10 @@ async def handle_case(
     agent_id: str | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
+    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     session = context.session
-    all_stdout: list[ByteSource] = []
+    all_stdout: list[ByteSource | None] = []
     merged_io = IOResult()
     last_exec = ExecutionNode(command="case", exit_code=0)
     ran = False
@@ -626,6 +650,7 @@ async def handle_case(
             continue
         ran = True
         for stmt in body:
+            armed = err_trap_armed(session)
             try:
                 stdout, io, last_exec = await run_statement(
                     execute_node,
@@ -647,6 +672,18 @@ async def handle_case(
             if stdout is not None:
                 all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)
+            trapped = await run_err_trap(
+                execute_fn,
+                stmt,
+                io.exit_code,
+                session,
+                armed,
+                stdin,
+                call_stack,
+            )
+            if trapped:
+                merged_io = await land(trapped, None, all_stdout, merged_io)
+                merged_io.exit_code = io.exit_code
             if errexit_acts(stmt, io.exit_code, session):
                 merged_io.exit_code = io.exit_code
                 stopped = True
@@ -717,6 +754,7 @@ async def handle_select(
     agent_id: str | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
+    execute_fn: Callable[..., Any] | None = None,
     sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run bash's select loop: menu to stderr, choice read from stdin.
@@ -806,6 +844,7 @@ async def handle_select(
                 agent_id,
                 handed,
                 decisions,
+                execute_fn=execute_fn,
             )
         except (BreakSignal, ContinueSignal) as sig:
             merged_io = await _absorbed(sig, all_stdout, merged_io)

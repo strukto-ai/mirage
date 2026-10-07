@@ -404,6 +404,14 @@ export class SessionState {
   scriptName: string | null
   exitTrap: string | null = null
   exitTrapInherited = false
+  // The `trap ... ERR` and `trap ... RETURN` actions, '' for an ignored
+  // one, and whether the running scope hides each: a function sees neither
+  // unless `set -E` / `set -T`, a child shell no ERR unless `set -E`, and a
+  // scope that sets one sees it. Live shell state, like the EXIT action.
+  errTrap: string | null = null
+  returnTrap: string | null = null
+  errTrapHidden = false
+  returnTrapHidden = false
   trapStatus: number | null = null
   tty = new Terminal()
   jobOutput: JobOutput | null = null
@@ -604,6 +612,10 @@ export class SessionState {
     forked.functionNames = this.functionNames
     forked.exitTrap = this.exitTrap
     forked.exitTrapInherited = this.exitTrapInherited
+    forked.errTrap = this.errTrap
+    forked.returnTrap = this.returnTrap
+    forked.errTrapHidden = this.errTrapHidden
+    forked.returnTrapHidden = this.returnTrapHidden
     forked.tty = this.tty
     forked.jobOutput = this.jobOutput
     forked.jobWaits = this.jobWaits

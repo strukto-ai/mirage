@@ -44,7 +44,7 @@ import { scanOptions } from './builtins/getopt.ts'
 import { failedRead, statementStdin } from './statement.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
-import { inheritExitTrap } from './traps.ts'
+import { inheritTraps } from './traps.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { ExecuteNodeOpts, ExecuteNodeFn } from './command/types.ts'
 
@@ -177,7 +177,7 @@ export async function handleBackground(
   const releaseProgram = retainPrograms([left])
   const childEvaluation = childContext(context)
   const bgSession = childEvaluation.session
-  inheritExitTrap(bgSession)
+  inheritTraps(bgSession)
   const output = session.jobOutput ?? session.tty.jobs
   // A job is a shell of its own: what jobs it starts write into the
   // statement it runs, then where it writes.

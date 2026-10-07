@@ -39,6 +39,7 @@ import {
   fd0Binding,
   finishStatement,
   ignoringErrexit,
+  land,
   recordStatus,
 } from '../executor/statement.ts'
 import {
@@ -114,7 +115,7 @@ import {
 import type { JobConsole } from '../../shell/console/index.ts'
 import { drained, runStatement } from '../executor/jobs.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
-import { endShell } from '../executor/traps.ts'
+import { endShell, errTrapArmed, runErrTrap } from '../executor/traps.ts'
 import { concat } from '../../io/cachable_iterator.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
@@ -1338,6 +1339,7 @@ async function executeNodeBody(
     const bound = fd0Binding(session)
     for (const child of node.namedChildren) {
       if (child.type === NT.COMMENT) continue
+      const armed = errTrapArmed(session)
       let result: Result
       try {
         result = await runStatement(
@@ -1361,6 +1363,19 @@ async function executeNodeBody(
       const stdout = await finishStatement(rawStdout, io, session, child)
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
+      const trapped = await runErrTrap(
+        executeFn,
+        child,
+        io.exitCode,
+        session,
+        armed,
+        stdin,
+        callStack,
+      )
+      if (trapped.length > 0) {
+        mergedIo = await land(trapped, null, allStdout, mergedIo)
+        mergedIo.exitCode = io.exitCode
+      }
       if (errexitActs(child, io.exitCode, session)) {
         mergedIo.exitCode = io.exitCode
         break
@@ -1386,6 +1401,7 @@ async function executeNodeBody(
       agentId,
       deps.handed ?? null,
       registry.decisions,
+      executeFn,
     )
   }
 
@@ -1413,6 +1429,7 @@ async function executeNodeBody(
         agentId,
         deps.handed ?? null,
         registry.decisions,
+        executeFn,
       ),
     )
   }
@@ -1464,6 +1481,7 @@ async function executeNodeBody(
           registry.decisions,
           mergeSignals(deps.signal, context.frame.abortSignal),
           sink,
+          executeFn,
         ),
       )
     }
@@ -1481,6 +1499,7 @@ async function executeNodeBody(
         agentId,
         deps.handed ?? null,
         registry.decisions,
+        executeFn,
       ),
     )
   }
@@ -1500,6 +1519,7 @@ async function executeNodeBody(
           agentId,
           deps.handed ?? null,
           registry.decisions,
+          executeFn,
         ),
       )
     }
@@ -1515,6 +1535,7 @@ async function executeNodeBody(
         agentId,
         deps.handed ?? null,
         registry.decisions,
+        executeFn,
       ),
     )
   }
@@ -1555,6 +1576,7 @@ async function executeNodeBody(
       agentId,
       deps.handed ?? null,
       registry.decisions,
+      executeFn,
     )
   }
 

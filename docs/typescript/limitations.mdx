@@ -16,9 +16,11 @@ Most of Mirage's behavior is identical across Python and TypeScript. The two TS 
 
 `trap -p` lists the registration, `trap - EXIT` removes it and `trap '' EXIT` turns cleanup off. A subshell lists its parent's registration but runs only one it registers itself. `bash` and `sh` start with none.
 
+`trap 'commands' ERR` runs after a command fails where `set -e` would end the shell: not in an `if`/`while`/`until` test, on the left of `&&`/`||` or after `!`, and not again for the group, loop or `case` whose command already ran it. `$?` is the failed status while it runs and after it. `trap 'commands' RETURN` runs as a function or a sourced file returns. A function neither runs nor lists its caller's `ERR` and `RETURN` actions unless `set -E` / `set -T`, and gives them back when it returns unless it set its own; a child shell keeps listing them but runs neither.
+
 A workspace session persists across `shell()` calls, so a call that returns does not fire `EXIT`. Register the cleanup inside `bash -c` when it has to finish before the call returns. Registrations are live shell state: session stores do not keep them.
 
-Mirage has no OS signals. Cancellation, `kill`, timeouts and closing a workspace or session stop the work without running cleanup, and they interrupt cleanup that is already running (bash runs `EXIT` on a `SIGTERM`). `trap` refuses every other event (`INT`, `TERM`, `ERR`, `DEBUG`, `RETURN`, ...) with `mirage: trap: NAME: not supported`, and `trap -l` the same way.
+Mirage has no OS signals. Cancellation, `kill`, timeouts and closing a workspace or session stop the work without running cleanup, and they interrupt cleanup that is already running (bash runs `EXIT` on a `SIGTERM`). `trap` refuses every other event (`INT`, `TERM`, `DEBUG`, ...) with `mirage: trap: NAME: not supported`, and `trap -l` the same way.
 
 ## Background job output (Python, Node and Browser)
 

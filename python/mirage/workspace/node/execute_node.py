@@ -102,9 +102,14 @@ from mirage.workspace.executor.statement import (
     fd0_binding,
     finish_statement,
     ignoring_errexit,
+    land,
     record_status,
 )
-from mirage.workspace.executor.traps import end_shell
+from mirage.workspace.executor.traps import (
+    end_shell,
+    err_trap_armed,
+    run_err_trap,
+)
 from mirage.workspace.expand import (
     expand_and_classify,
     expand_node,
@@ -1394,6 +1399,7 @@ async def _execute_node(
         for child in node.named_children:
             if child.type == NT.COMMENT:
                 continue
+            armed = err_trap_armed(session)
             try:
                 stdout, io, last_exec = await run_statement(
                     stream,
@@ -1413,6 +1419,12 @@ async def _execute_node(
             if stdout is not None:
                 all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)
+            trapped = await run_err_trap(
+                execute_fn, child, io.exit_code, session, armed, stdin, cs
+            )
+            if trapped:
+                merged_io = await land(trapped, None, all_stdout, merged_io)
+                merged_io.exit_code = io.exit_code
             if errexit_acts(child, io.exit_code, session):
                 merged_io.exit_code = io.exit_code
                 break
@@ -1435,6 +1447,7 @@ async def _execute_node(
             agent_id=agent_id,
             handed=handed,
             decisions=registry.decisions,
+            execute_fn=execute_fn,
         )
 
     # ── C-style for (for ((init;cond;update))) ──
@@ -1460,6 +1473,7 @@ async def _execute_node(
                 agent_id=agent_id,
                 handed=handed,
                 decisions=registry.decisions,
+                execute_fn=execute_fn,
             )
 
     # ── for / select ────────────────────────────
@@ -1506,6 +1520,7 @@ async def _execute_node(
                     agent_id=agent_id,
                     handed=handed,
                     decisions=registry.decisions,
+                    execute_fn=execute_fn,
                     sink=sink,
                 )
         with cs.loop():
@@ -1522,6 +1537,7 @@ async def _execute_node(
                 agent_id=agent_id,
                 handed=handed,
                 decisions=registry.decisions,
+                execute_fn=execute_fn,
             )
 
     # ── while / until ───────────────────────────
@@ -1540,6 +1556,7 @@ async def _execute_node(
                     agent_id=agent_id,
                     handed=handed,
                     decisions=registry.decisions,
+                    execute_fn=execute_fn,
                 )
         with cs.loop():
             return await handle_while(
@@ -1553,6 +1570,7 @@ async def _execute_node(
                 agent_id=agent_id,
                 handed=handed,
                 decisions=registry.decisions,
+                execute_fn=execute_fn,
             )
 
     # ── case ────────────────────────────────────
@@ -1577,6 +1595,7 @@ async def _execute_node(
             agent_id=agent_id,
             handed=handed,
             decisions=registry.decisions,
+            execute_fn=execute_fn,
         )
 
     # ── function definition ─────────────────────
