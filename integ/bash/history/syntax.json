@@ -9,7 +9,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'if then'\n"
+        "stderr": "mirage: syntax error near 'then'\n"
       }
     },
     {
