@@ -260,12 +260,17 @@ describe('command channels', () => {
     expect((await exec(client, 'echo "$HOME $USER"')).stdout).toBe('/work demo\n')
   })
 
-  it('are recorded in history, the login line is not', async () => {
+  it('record history per channel without the login line', async () => {
     const client = await connect(await startHarness())
-    await exec(client, 'echo remembered')
-    const history = (await exec(client, 'cat /.bash_history')).stdout
-    expect(history).toContain('echo remembered')
+    const history = (
+      await collect(await shell(client, null), 'echo remembered\ncat /.bash_history\n')
+    ).stdout
+    expect(history.split('\n').filter((line) => line && !line.startsWith('#'))).toEqual([
+      'remembered',
+      'echo remembered',
+    ])
     expect(history).not.toContain('export HOME')
+    expect((await exec(client, 'cat /.bash_history')).stdout).toBe('')
   })
 
   it('refuse an unknown workspace by name', async () => {

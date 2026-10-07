@@ -18,6 +18,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.slack.grep import BUILDER
 from mirage.commands.builtin.slack.grep import grep as slack_grep
 from mirage.commands.builtin.slack.io import IO as SLACK_IO
 from mirage.types import ContentType, FileStat, FileType
@@ -38,7 +40,6 @@ async def test_slack_grep_glob_expanded_to_60_paths_reads_those_60_days():
     slack = SlackVFS(
         config=SlackConfig(token="xoxb-test", search_token="xoxp-test")
     )
-    ws = Workspace({"/slack": (slack, MountMode.READ)}, mode=MountMode.READ)
     expanded = " ".join(
         f"/slack/channels/general__C1/{day}/chat.jsonl" for day in DAYS
     )
@@ -51,9 +52,17 @@ async def test_slack_grep_glob_expanded_to_60_paths_reads_those_60_days():
             size=23,
         )
     )
+    commands = make_generic_commands(
+        "slack",
+        replace(SLACK_IO, read_bytes=read, stat=stat),
+        overrides={"grep": BUILDER},
+    )
+    with patch.dict(SlackVFS.commands.__globals__, {"COMMANDS": commands}):
+        ws = Workspace(
+            {"/slack": (slack, MountMode.READ)}, mode=MountMode.READ
+        )
     try:
         fake_search = AsyncMock()
-        replace(SLACK_IO, read_bytes=read, stat=stat)
         with patch.dict(
             slack_grep.__globals__,
             {

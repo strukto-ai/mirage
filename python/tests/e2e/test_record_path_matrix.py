@@ -98,8 +98,8 @@ _NATIVE_APPEND = [
     ("append", C),
 ]
 
-# s3 has no native append (read + write), serves cat and the cp source from
-# cache, and records its own copy, rename, unlink, rmdir and rm_r.
+# S3 append is read + write. Generic tee treats the append result as unknown,
+# so cat fills the cache, which later cp and gzip reads reuse.
 _S3 = [
     ("write", K),
     ("read", K),
@@ -108,6 +108,7 @@ _S3 = [
     ("write", K),
     ("write", NEW),
     ("truncate", NEW),
+    ("read", K),
     ("copy", "/m/m/k2.txt"),
     ("rename", NEW),
     ("rename", "/m/m/moved.txt"),
@@ -115,7 +116,7 @@ _S3 = [
     ("rmdir", "/m/m/e"),
     ("write", DF),
     ("rm_r", "/m/m/d"),
-    *_GENERIC_OUT,
+    *_GENERIC_OUT[1:],
     ("create", C),
     ("read", C),
     ("write", C),
@@ -130,7 +131,7 @@ _SSH = [
     ("write", NEW),
     ("truncate", NEW),
     ("write", DF),
-    *_GENERIC_OUT[:4],
+    *_GENERIC_OUT[1:4],
     *_GENERIC_OUT[5:],
     ("create", C),
     ("append", C),

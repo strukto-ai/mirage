@@ -12,12 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { checkSearch, searchScoped, visibleResults } from '../../../vfs/search.ts'
+import { checkSearch, resultVisible, searchScoped, visibleResults } from '../../../vfs/search.ts'
 import type { SearchResult } from '../../../vfs/types.ts'
 import type {
   ContentSearchOps,
   ReadOps,
   NativeReadOps,
+  NarrowPathsOp,
   WriteOps,
   SearchOps,
   ReadStreamOp,
@@ -965,6 +966,12 @@ export function withCommandGuards<A extends Accessor>(
     if (ops.search.searchMany !== undefined)
       guarded.search.searchMany = guardedSearch(ops.search.searchMany)
   }
+  if (ops.contentSearch !== undefined) {
+    guarded.contentSearch = {
+      ...ops.contentSearch,
+      narrowPaths: guardedNarrowPaths(ops.contentSearch.narrowPaths),
+    }
+  }
   return guarded
 }
 
@@ -976,6 +983,15 @@ function guardedSearch<Args extends unknown[]>(
     const vis = checkSearch(pathsOf(args))
     const result = await fn(...args)
     return result === null ? null : visibleResults(result, vis)
+  }
+}
+
+/** Filter candidate identities before a command reads their contents. */
+function guardedNarrowPaths<A extends Accessor>(fn: NarrowPathsOp<A>): NarrowPathsOp<A> {
+  return async (accessor, query, paths) => {
+    const vis = checkSearch(paths)
+    const result = await fn(accessor, query, paths)
+    return result === null ? null : result.filter((path) => resultVisible(path, vis))
   }
 }
 
@@ -1135,8 +1151,10 @@ export function scopedIo<A extends Accessor>(
   const result = { ...ops }
   delete result.find
   delete result.du
-  if (searchScoped(ns, paths)) delete result.search
-  delete result.contentSearch
+  if (searchScoped(ns, paths)) {
+    delete result.search
+    delete result.contentSearch
+  }
   delete result.copy
   delete result.dirCopy
   return result

@@ -123,18 +123,14 @@ export function withReadCache<A extends Accessor>(ops: CommandIO<A>): CommandIO<
 }
 
 // The builder tier's cache and slash wraps, chosen at registration from
-// the builder's read/write kind and applied per invocation on top of
-// the path guards (mirror Python's _read_wraps/_stat_wraps/_write_wraps).
+// the builder's read/write kind and applied per invocation below
+// the path guards (mirror Python's _read_wraps/_stat_wraps).
 function readWraps<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
   return withSlashGuard(withReadCache(ops))
 }
 
 function statWraps<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
   return withSlashGuard(withStatCache(ops))
-}
-
-function writeWraps<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
-  return withSlashGuard(ops)
 }
 
 export interface MakeGenericCommandsOptions<A extends Accessor = Accessor> {
@@ -191,7 +187,7 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
     // Path guards are applied per invocation, over the stamped adapter,
     // inside the command closure below. The raw adapter stays untouched
     // for the ops tables, whose door does its own enforcement.
-    const finish = b.read === true ? readWraps : b.write === true ? writeWraps : statWraps
+    const finish = b.read === true || b.write === true ? readWraps : statWraps
     // A per-command adapter with its own stat (dify's light ls) would
     // otherwise print the probe's full stat under fresh only.
     const answered =

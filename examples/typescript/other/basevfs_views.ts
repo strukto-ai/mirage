@@ -87,7 +87,7 @@ async function search(
   accessor: NotesAccessor,
   path: PathSpec,
   query: SearchQuery,
-): Promise<string[] | null> {
+): Promise<[PathSpec, string][] | null> {
   accessor.searchCalls += 1;
   const options = grepSearchOptions(query);
   if (
@@ -99,7 +99,9 @@ async function search(
   }
   const text = new TextDecoder().decode(pageBytes(accessor, path));
   if (text.includes("\0")) return null;
-  return splitLines(text).filter((line) => line.includes(query.query));
+  return splitLines(text)
+    .filter((line) => line.includes(query.query))
+    .map((line) => [path, line]);
 }
 
 /** A flat, read-only collection of UTF-8 pages. */

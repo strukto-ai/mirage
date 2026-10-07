@@ -150,6 +150,15 @@ including any multiline body. Shared command I/O and `searchResources` check
 inputs before querying and filter records by path before exposing text. Bare
 strings are refused because their visibility cannot be established.
 
+For discovery, use the existing `contentSearch.narrowPaths` callback, returning
+`Promise<PathSpec[] | null>`. Its Python twin, `ContentSearchOps.narrow_paths`,
+returns `list[PathSpec] | None`. These are candidate file identities, with no
+text payload. Prepared command IO checks input scopes and filters hidden
+candidates before grep/rg read the remaining files through guarded IO.
+Permission restrictions still fall back to the guarded walk. Native snippets
+and query-specific scores keep their separate payload; both result forms use
+the same PathSpec visibility predicate.
+
 Builtin backends use the same `VFSAdapter` groups. Operation types live in
 `vfs/types`; `CommandIO` extends them with command context. Wire compatible core
 functions directly, and wrap incompatible client functions to resolve `PathSpec`

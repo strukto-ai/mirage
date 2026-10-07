@@ -32,9 +32,9 @@ async def test_search_emits_canonical_path_with_score(accessor):
 @pytest.mark.asyncio
 async def test_search_body_is_source_text(accessor):
     out = await _search(accessor, "a small white dog", "/db/animals")
-    assert "a small white dog" in format_records([text for _, text in out])
-    assert "label:" not in format_records([text for _, text in out])
-    assert "score:" not in format_records([text for _, text in out])
+    assert "a small white dog" in out
+    assert "label:" not in out
+    assert "score:" not in out
 
 
 @pytest.mark.asyncio

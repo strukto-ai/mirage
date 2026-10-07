@@ -15,7 +15,9 @@
 import { concatAggregate } from '@struktoai/mirage-core/commands/builtin/aggregators'
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { Operand } from '@struktoai/mirage-core/commands/spec/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
+import { requireVisible, sessionVisibility } from '@struktoai/mirage-core/context/session_context'
+import { pathVisible } from '@struktoai/mirage-core/utils/hidden'
+import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { command, type RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import { specOf } from '@struktoai/mirage-core/commands/spec/builtins'
@@ -42,7 +44,7 @@ const GATE = {
 }
 
 export class CommandService extends RAMVFS {
-  private readonly calls: string[] = []
+  private readonly calls: [string, PathSpec][] = []
   constructor(private readonly metadataOnly = false) {
     super()
   }
@@ -51,55 +53,55 @@ export class CommandService extends RAMVFS {
     const handlers = super.commands().flatMap((original) => {
       if (this.metadataOnly && ['grep', 'rg', 'find', 'du'].includes(original.name)) return []
       if (!['grep', 'rg', 'rev'].includes(original.name)) return [original]
-      return command({
-        name: original.name,
-        vfs: 'ram',
-        spec: specOf(original.name),
-        fn: async (accessor, paths, texts, opts) => {
-          this.calls.push(...paths.map((p) => original.name + ' ' + p.virtual))
-          if (original.name === 'rev' && paths[0]!.virtual.endsWith('.gated')) {
-            GATE.ready ??= new Promise<void>((resolve) => {
-              GATE.release = resolve
-            })
-            GATE.started++
-            GATE.active++
-            GATE.peak = Math.max(GATE.peak, GATE.active)
-            if (GATE.started >= 4) GATE.release?.()
-            await GATE.ready
-            async function* gated(): AsyncGenerator<Uint8Array> {
-              try {
-                yield new TextEncoder().encode(paths[0]!.rawPath + '\n')
-              } finally {
-                GATE.active--
+      return [
+        original.withOverrides({
+          fn: async (accessor, paths, texts, opts) => {
+            for (const path of paths) requireVisible(sessionVisibility(), path)
+            this.calls.push(...paths.map((path): [string, PathSpec] => [original.name, path]))
+            if (original.name === 'rev' && paths[0]!.virtual.endsWith('.gated')) {
+              GATE.ready ??= new Promise<void>((resolve) => {
+                GATE.release = resolve
+              })
+              GATE.started++
+              GATE.active++
+              GATE.peak = Math.max(GATE.peak, GATE.active)
+              if (GATE.started >= 4) GATE.release?.()
+              await GATE.ready
+              async function* gated(): AsyncGenerator<Uint8Array> {
+                try {
+                  yield new TextEncoder().encode(paths[0]!.rawPath + '\n')
+                } finally {
+                  GATE.active--
+                }
               }
+              return [gated(), new IOResult()]
             }
-            return [gated(), new IOResult()]
-          }
-          if (original.name === 'rev' && paths[0]!.virtual.endsWith('.slow')) {
-            const calls = this.calls
-            async function* slow(): AsyncGenerator<Uint8Array> {
-              try {
-                yield new TextEncoder().encode(paths[0]!.rawPath + '\n')
-                await new Promise<void>((resolve) => {
-                  if (opts.signal?.aborted === true) resolve()
-                  else opts.signal?.addEventListener('abort', () => resolve(), { once: true })
-                })
-              } finally {
-                calls.push('closed ' + paths[0]!.virtual)
+            if (original.name === 'rev' && paths[0]!.virtual.endsWith('.slow')) {
+              const calls = this.calls
+              async function* slow(): AsyncGenerator<Uint8Array> {
+                try {
+                  yield new TextEncoder().encode(paths[0]!.rawPath + '\n')
+                  await new Promise<void>((resolve) => {
+                    if (opts.signal?.aborted === true) resolve()
+                    else opts.signal?.addEventListener('abort', () => resolve(), { once: true })
+                  })
+                } finally {
+                  calls.push(['closed', paths[0]!])
+                }
               }
+              return [slow(), new IOResult()]
             }
-            return [slow(), new IOResult()]
-          }
-          if (original.name === 'rev' && paths[0]!.virtual.endsWith('.broken')) {
-            async function* stream(): AsyncGenerator<Uint8Array> {
-              yield new TextEncoder().encode('partial\n')
-              throw eacces(paths[0]!)
+            if (original.name === 'rev' && paths[0]!.virtual.endsWith('.broken')) {
+              async function* stream(): AsyncGenerator<Uint8Array> {
+                yield new TextEncoder().encode('partial\n')
+                throw eacces(paths[0]!)
+              }
+              return [stream(), new IOResult()]
             }
-            return [stream(), new IOResult()]
-          }
-          return original.fn(accessor, paths, texts, opts)
-        },
-      })
+            return original.fn(accessor, paths, texts, opts)
+          },
+        }),
+      ]
     })
     return [
       ...handlers,
@@ -126,10 +128,15 @@ export class CommandService extends RAMVFS {
       }),
       ...command({
         name: 'calls',
+        pathGuarded: true,
         vfs: 'ram',
         spec: specOf('cat'),
         fn: async () => {
-          const body = this.calls.map((line) => line + '\n').join('')
+          const vis = sessionVisibility()
+          const body = this.calls
+            .filter(([, path]) => pathVisible(vis, path))
+            .map(([name, path]) => name + ' ' + path.virtual + '\n')
+            .join('')
           this.calls.length = 0
           return [new TextEncoder().encode(body), new IOResult()]
         },

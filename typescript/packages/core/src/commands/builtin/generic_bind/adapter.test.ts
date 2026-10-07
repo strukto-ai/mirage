@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { assert, describe, expect, it } from 'vitest'
 import type { SearchResult } from '../../../vfs/types.ts'
 import * as airtableHead from '../airtable/head.ts'
 import * as mongodbTail from '../mongodb/tail.ts'
@@ -1089,33 +1089,47 @@ it.each([
   },
 )
 
-it.each([false, true])('prepared search checks inputs and results (batch=%s)', async (batch) => {
-  const calls: number[] = []
-  const hidden = PathSpec.fromStrPath('/data/secret')
-  const shown = PathSpec.fromStrPath('/data/public')
-  const search = (): Promise<SearchResult[]> => {
-    calls.push(1)
-    return Promise.resolve([
-      [hidden, 'hidden\nbody'],
-      [shown, 'visible'],
-    ])
-  }
-  const ops = withCommandGuards({ ...capabilityOps(), search: { search, searchMany: search } })
-  const session = new SessionState({
-    sessionId: 'reader',
-    visibility: { paths: { paths: ['/data/secret'] } },
-  })
-  await runWithSession(session, async () => {
-    const scope = PathSpec.fromStrPath('/data')
-    const result = batch
-      ? await ops.search?.searchMany?.(accessor, [scope], { query: 'q' })
-      : await ops.search?.search(accessor, scope, { query: 'q' })
-    expect(result).toEqual([[shown, 'visible']])
-    await expect(
-      batch
-        ? ops.search?.searchMany?.(accessor, [scope, hidden], { query: 'q' })
-        : ops.search?.search(accessor, hidden, { query: 'q' }),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
-    expect(calls).toEqual([1])
-  })
-})
+it.each(['single', 'batch', 'paths'])(
+  'prepared search checks inputs and results (%s)',
+  async (kind) => {
+    const calls: number[] = []
+    const hidden = PathSpec.fromStrPath('/data/secret')
+    const shown = PathSpec.fromStrPath('/data/public')
+    const search = (): Promise<SearchResult[]> => {
+      calls.push(1)
+      return Promise.resolve([
+        [hidden, 'hidden\nbody'],
+        [shown, 'visible'],
+      ])
+    }
+    const ops = withCommandGuards({
+      ...capabilityOps(),
+      search: { search, searchMany: search },
+      contentSearch: {
+        narrowPaths: async () => (await search()).map(([path]) => path),
+        enabled: () => true,
+      },
+    })
+    const session = new SessionState({
+      sessionId: 'reader',
+      visibility: { paths: { paths: ['/data/secret'] } },
+    })
+    await runWithSession(session, async () => {
+      const call = (scopes: PathSpec[]) => {
+        assert(ops.contentSearch)
+        assert(ops.search?.searchMany)
+        const last = scopes.at(-1)
+        assert(last)
+        return kind === 'paths'
+          ? ops.contentSearch.narrowPaths(accessor, 'q', scopes)
+          : kind === 'batch'
+            ? ops.search.searchMany(accessor, scopes, { query: 'q' })
+            : ops.search.search(accessor, last, { query: 'q' })
+      }
+      const scope = PathSpec.fromStrPath('/data')
+      expect(await call([scope])).toEqual(kind === 'paths' ? [shown] : [[shown, 'visible']])
+      await expect(call([scope, hidden])).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(calls).toEqual([1])
+    })
+  },
+)

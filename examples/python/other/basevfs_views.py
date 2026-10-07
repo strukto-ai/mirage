@@ -86,7 +86,7 @@ async def search(
     path: PathSpec,
     query: SearchQuery,
     index: IndexCacheStore = NULL_INDEX,
-) -> list[str] | None:
+) -> list[tuple[PathSpec, str]] | None:
     """Search one page literally, declining requests that need a scan.
 
     Args:
@@ -106,7 +106,7 @@ async def search(
     text = page_bytes(accessor, path).decode("utf-8")
     if "\0" in text:
         return None
-    return [line for line in split_lines(text) if query.query in line]
+    return [(path, line) for line in split_lines(text) if query.query in line]
 
 
 class NotesVFS(BaseVFS):

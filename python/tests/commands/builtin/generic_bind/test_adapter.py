@@ -1282,8 +1282,8 @@ async def test_native_readers_admit_before_touching_the_accessor(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("batch", [False, True])
-async def test_prepared_search_checks_inputs_and_results(batch):
+@pytest.mark.parametrize("kind", ["single", "batch", "paths"])
+async def test_prepared_search_checks_inputs_and_results(kind):
     calls: list[int] = []
     hidden = PathSpec.from_str_path("/data/secret")
     shown = PathSpec.from_str_path("/data/public")
@@ -1292,8 +1292,16 @@ async def test_prepared_search_checks_inputs_and_results(batch):
         calls.append(1)
         return [(hidden, "hidden\nbody"), (shown, "visible")]
 
+    async def narrow(*args):
+        return [path for path, _ in await search(*args)]
+
     ops = with_command_guards(
-        make_io(search=SearchOps(search=search, search_many=search))
+        make_io(
+            search=SearchOps(search=search, search_many=search),
+            content_search=ContentSearchOps(
+                narrow_paths=narrow, enabled=lambda a: True
+            ),
+        )
     )
     token = set_current_session(
         SessionState(
@@ -1302,18 +1310,25 @@ async def test_prepared_search_checks_inputs_and_results(batch):
         )
     )
     try:
-        call = ops.search.search_many if batch else ops.search.search
-        scope = PathSpec.from_str_path("/data")
-        result = await call(
-            NOOPAccessor(), [scope] if batch else scope, SearchQuery("q")
-        )
-        assert result == [(shown, "visible")]
-        with pytest.raises(FileNotFoundError):
-            await call(
-                NOOPAccessor(),
-                [scope, hidden] if batch else hidden,
-                SearchQuery("q"),
+
+        async def call(scopes):
+            if kind == "paths":
+                return await ops.content_search.narrow_paths(
+                    NOOPAccessor(), "q", scopes
+                )
+            if kind == "batch":
+                return await ops.search.search_many(
+                    NOOPAccessor(), scopes, SearchQuery("q")
+                )
+            return await ops.search.search(
+                NOOPAccessor(), scopes[-1], SearchQuery("q")
             )
+
+        scope = PathSpec.from_str_path("/data")
+        result = await call([scope])
+        assert result == ([shown] if kind == "paths" else [(shown, "visible")])
+        with pytest.raises(FileNotFoundError):
+            await call([scope, hidden])
         assert calls == [1]
     finally:
         reset_current_session(token)

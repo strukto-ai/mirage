@@ -139,6 +139,68 @@
         "stdout": "/search/alpha.txt\n/search/beta.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "search_candidate_paths_warm_read",
+      "seq": 540011,
+      "targets": [
+        "box",
+        "dropbox"
+      ],
+      "command": "cat /search/alpha.txt /search/beta.txt > /dev/null",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "search_candidate_paths_filter_hidden_before_reads",
+      "seq": 540012,
+      "targets": [
+        "box",
+        "dropbox"
+      ],
+      "session": "candidate-hide",
+      "session_profiles": {
+        "candidate-hide": {
+          "paths": {
+            "hide": [
+              "/search/beta.txt"
+            ]
+          }
+        }
+      },
+      "command": "grep -rlw wombat /search; rg -lw wombat /search; grep -rw wombat /search; rg -w wombat /search",
+      "expect": {
+        "exit": 0,
+        "stdout": "/search/alpha.txt\n/search/alpha.txt\n/search/alpha.txt:wombat runs fast\n/search/alpha.txt:wombat runs fast\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "search_candidate_paths_refuse_hidden_input",
+      "seq": 540013,
+      "targets": [
+        "box",
+        "dropbox"
+      ],
+      "session": "candidate-hide",
+      "session_profiles": {
+        "candidate-hide": {
+          "paths": {
+            "hide": [
+              "/search/beta.txt"
+            ]
+          }
+        }
+      },
+      "command": "grep -w wombat /search/beta.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: /search/beta.txt: No such file or directory\n"
+      }
     }
   ]
 }

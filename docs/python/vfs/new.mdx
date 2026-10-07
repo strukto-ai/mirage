@@ -169,6 +169,8 @@ search helper check input visibility before querying and filter returned records
 by path before exposing their text. Bare strings are refused because their
 visibility cannot be established.
 
+For discovery, use the existing `ContentSearchOps.narrow_paths` callback, which returns `list[PathSpec] | None`. The TypeScript spelling is `contentSearch.narrowPaths`, returning `Promise<PathSpec[] | null>`. These are candidate file identities, with no text payload. Prepared command IO checks the input scopes and filters hidden candidates before grep/rg read the remaining files through guarded IO. Permission restrictions still fall back to the guarded walk. Native results with snippets or query-specific scores keep their separate text payload; both result forms use the same PathSpec visibility predicate.
+
 Neither regex support nor grep compatibility is required. Omitting `search`
 entirely also works: MIRAGE implements grep and rg by reading files.
 

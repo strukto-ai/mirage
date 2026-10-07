@@ -28,6 +28,14 @@ export function checkSearch(paths: readonly PathSpec[]): Visibility | null {
   return vis
 }
 
+/** Check a returned path independently of its optional payload. */
+export function resultVisible(path: PathSpec, vis: Visibility | null): boolean {
+  if (!(path instanceof PathSpec)) throw new Error('search: each result must carry a PathSpec')
+  if (path.virtual !== PathSpec.fromStrPath(path.virtual, undefined, '/').virtual)
+    throw new Error('search: result paths must be canonical absolute paths')
+  return pathVisible(vis, path)
+}
+
 /** Filter whole records by file path, including multiline bodies. */
 export function visibleResults(
   results: Iterable<SearchResult>,
@@ -43,9 +51,7 @@ export function visibleResults(
       typeof candidate[1] !== 'string'
     )
       throw new Error('search: each result must carry a PathSpec and text')
-    if (result[0].virtual !== PathSpec.fromStrPath(result[0].virtual, undefined, '/').virtual)
-      throw new Error('search: result paths must be canonical absolute paths')
-    if (pathVisible(vis, result[0])) visible.push(result)
+    if (resultVisible(result[0], vis)) visible.push(result)
   }
   return visible
 }

@@ -48,6 +48,22 @@ def check_search(paths: list[PathSpec]) -> Visibility | None:
     return vis
 
 
+def result_visible(path: PathSpec, vis: Visibility | None) -> bool:
+    """Check a returned path independently of its optional payload.
+
+    Args:
+        path (PathSpec): canonical workspace identity of the result.
+        vis (Visibility | None): the view captured before backend access.
+    """
+    if not isinstance(path, PathSpec):
+        raise ValueError("search: each result must carry a PathSpec")
+    if path.virtual != PathSpec.from_str_path(path.virtual, cwd="/").virtual:
+        raise ValueError(
+            "search: result paths must be canonical absolute paths"
+        )
+    return path_visible(vis, path)
+
+
 def visible_results(
     results: Iterable[SearchResult], vis: Visibility | None
 ) -> list[SearchResult]:
@@ -68,15 +84,7 @@ def visible_results(
             raise ValueError(
                 "search: each result must carry a PathSpec and text"
             )
-        path = result[0]
-        if (
-            path.virtual
-            != PathSpec.from_str_path(path.virtual, cwd="/").virtual
-        ):
-            raise ValueError(
-                "search: result paths must be canonical absolute paths"
-            )
-        if path_visible(vis, result[0]):
+        if result_visible(result[0], vis):
             visible.append(result)
     return visible
 

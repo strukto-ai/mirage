@@ -25,9 +25,11 @@ from mirage.commands.config import (
 )
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import Operand
+from mirage.context import require_visible, session_visibility
 from mirage.io.types import IOResult
 from mirage.ops.registry import RegisteredOp
 from mirage.types import PathSpec
+from mirage.utils.hidden import path_visible
 from mirage.vfs.ram import RAMVFS
 
 
@@ -57,7 +59,7 @@ GATE = Gate()
 class CommandService(RAMVFS):
     def __init__(self, metadata_only: bool = False) -> None:
         super().__init__()
-        calls: list[str] = []
+        calls: list[tuple[str, PathSpec]] = []
         handlers: list[RegisteredCommand] = []
         for original in super().commands():
             if metadata_only and original.name in ("grep", "rg", "find", "du"):
@@ -67,9 +69,14 @@ class CommandService(RAMVFS):
             else:
                 handlers.append(original)
 
-        @command("calls", vfs="ram", spec=SPECS["cat"])
+        @command("calls", vfs="ram", spec=SPECS["cat"], path_guarded=True)
         async def show_calls(accessor, paths, texts, opts):
-            body = "".join(line + "\n" for line in calls).encode()
+            vis = session_visibility()
+            body = "".join(
+                name + " " + path.virtual + "\n"
+                for name, path in calls
+                if path_visible(vis, path)
+            ).encode()
             calls.clear()
             return body, IOResult()
 
@@ -96,11 +103,12 @@ class CommandService(RAMVFS):
         )
 
     def _search(
-        self, original: RegisteredCommand, calls: list[str]
+        self, original: RegisteredCommand, calls: list[tuple[str, PathSpec]]
     ) -> list[RegisteredCommand]:
-        @command(original.name, vfs="ram", spec=SPECS[original.name])
         async def search(accessor, paths, texts, opts):
-            calls.extend(original.name + " " + p.virtual for p in paths)
+            for path in paths:
+                require_visible(session_visibility(), path)
+            calls.extend((original.name, path) for path in paths)
             if original.name == "rev" and paths[0].virtual.endswith(".gated"):
                 if GATE.ready is None:
                     GATE.ready = asyncio.Event()
@@ -125,7 +133,7 @@ class CommandService(RAMVFS):
                         yield (paths[0].raw_path + "\n").encode()
                         await asyncio.Event().wait()
                     finally:
-                        calls.append("closed " + paths[0].virtual)
+                        calls.append(("closed", paths[0]))
 
                 return slow(), IOResult()
             if original.name == "rev" and paths[0].virtual.endswith(".broken"):
@@ -139,7 +147,7 @@ class CommandService(RAMVFS):
                 return stream(), IOResult()
             return await original.fn(accessor, paths, texts, opts)
 
-        return registered_commands([search])
+        return [replace(original, fn=search)]
 
     def commands(self) -> list[RegisteredCommand]:
         return self._commands

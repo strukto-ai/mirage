@@ -63,11 +63,17 @@ from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
 from mirage.utils.hidden import hidden_under, move_reveals, path_visible
 from mirage.utils.path import norm, parent
 from mirage.utils.remnants import remove_remnants, visible_below
-from mirage.vfs.search import check_search, search_scoped, visible_results
+from mirage.vfs.search import (
+    check_search,
+    result_visible,
+    search_scoped,
+    visible_results,
+)
 from mirage.vfs.types import (
     ContentSearchOps,
     DuOps,
     IsMountedOp,
+    NarrowPathsOp,
     NativeReadOps,
     OperationFn,
     ReadOps,
@@ -652,6 +658,26 @@ async def _guarded_search(fn: OperationFn, *args: Any, **kwargs: Any) -> Any:
     vis = check_search(paths)
     result = await fn(*args, **kwargs)
     return None if result is None else visible_results(result, vis)
+
+
+async def _guarded_narrow_paths(
+    fn: NarrowPathsOp, accessor: Accessor, query: str, paths: list[PathSpec]
+) -> list[PathSpec] | None:
+    """Filter candidate identities before a command reads their contents.
+
+    Args:
+        fn (NarrowPathsOp): the backend's candidate lookup.
+        accessor (Accessor): backend handle.
+        query (str): literal query used to narrow the file set.
+        paths (list[PathSpec]): concrete input scopes.
+    """
+    vis = check_search(paths)
+    result = await fn(accessor, query, paths)
+    return (
+        None
+        if result is None
+        else [path for path in result if result_visible(path, vis)]
+    )
 
 
 def _move_would_reveal(src: PathSpec, dst: PathSpec) -> bool:
@@ -1313,6 +1339,13 @@ def with_command_guards(ops: CommandIO) -> CommandIO:
                 else None
             ),
         )
+    if ops.content_search is not None:
+        changes["content_search"] = replace(
+            ops.content_search,
+            narrow_paths=functools.partial(
+                _guarded_narrow_paths, ops.content_search.narrow_paths
+            ),
+        )
     return replace(ops, **changes)
 
 
@@ -1550,12 +1583,13 @@ def scoped_io(
     """
     if not paths_scoped(ns, paths, prefix):
         return ops
+    scoped = search_scoped(ns, paths)
     return replace(
         ops,
         find=None,
         du=None,
-        search=None if search_scoped(ns, paths) else ops.search,
-        content_search=None,
+        search=None if scoped else ops.search,
+        content_search=None if scoped else ops.content_search,
         copy=None,
         dir_copy=None,
     )

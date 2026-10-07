@@ -76,7 +76,7 @@ async def _cached_stat_result(
 def with_read_cache(ops: CommandIO) -> CommandIO:
     """Return ``ops`` whose byte reads serve cached bytes when warm.
 
-    The factory hands this to every ``read=True`` command so a warm read
+    The factory hands this to commands that read or write so a warm read
     is served from the file cache without the command knowing about it,
     mirroring how readdir/stat already serve the index cache inside the
     op. Content (read_stream/read_bytes) and the size a render-dependent
@@ -205,10 +205,6 @@ def _stat_wraps(ops: CommandIO) -> CommandIO:
     return with_slash_guard(with_stat_cache(ops))
 
 
-def _write_wraps(ops: CommandIO) -> CommandIO:
-    return with_slash_guard(ops)
-
-
 async def _run_with_namespace_globs(
     ops: CommandIO,
     finish: Callable[[CommandIO], CommandIO],
@@ -313,12 +309,10 @@ def make_generic_commands(
             raise ValueError(f"override {default.name!r} names {b.name!r}")
         raw = ops_over.get(b.name, ops)
         finish: Callable[[CommandIO], CommandIO]
-        if b.read:
+        if b.read or b.write:
             finish = _read_wraps
-        elif not b.write:
-            finish = _stat_wraps
         else:
-            finish = _write_wraps
+            finish = _stat_wraps
         # A per-command adapter with its own stat (dify's light ls) would
         # otherwise print the probe's full stat under fresh only.
         answered = (

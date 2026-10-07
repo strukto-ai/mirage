@@ -159,8 +159,8 @@ describe('record paths name the virtual path (node backends)', () => {
         secretAccessKey: 'fake',
         forcePathStyle: true,
       })
-      // cat and the cp sources are served from cache; tee -a and the op-door
-      // append are a read plus a write, since s3 has no native append.
+      // S3 append is read + write. Generic tee treats its result as unknown,
+      // so cat fills the cache, which later cp and gzip reads reuse.
       expect(await ledger(vfs, null)).toEqual([
         ['write', K],
         ['read', K],
@@ -169,6 +169,7 @@ describe('record paths name the virtual path (node backends)', () => {
         ['write', K],
         ['write', NEW],
         ['truncate', NEW],
+        ['read', K],
         ['copy', '/m/m/k2.txt'],
         ['rename', NEW],
         ['rename', '/m/m/moved.txt'],
@@ -176,7 +177,7 @@ describe('record paths name the virtual path (node backends)', () => {
         ['rmdir', '/m/m/e'],
         ['write', '/m/m/d/f'],
         ['rm_r', '/m/m/d'],
-        ...GENERIC_OUT,
+        ...GENERIC_OUT.slice(1),
         ['create', C],
         ['read', C],
         ['write', C],
