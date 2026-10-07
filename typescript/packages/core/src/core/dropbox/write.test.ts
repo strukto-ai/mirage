@@ -298,4 +298,14 @@ describe('dropbox write records the upload reply', () => {
     // reacts to the write.
     expect(H.order).toEqual(['record', 'invalidate'])
   })
+
+  it('a write whose reply fails still evicts the path', async () => {
+    // Dropbox may have stored the bytes before the reply broke off, so the
+    // cached copy is stale either way; nothing vouches for a write record.
+    vi.mocked(client.dropboxUpload).mockRejectedValue(new Error('reply cut off'))
+    await expect(
+      write(makeAccessor(), spec('/note.txt'), new TextEncoder().encode('hello')),
+    ).rejects.toThrow('reply cut off')
+    expect(H.order).toEqual(['invalidate'])
+  })
 })

@@ -14,6 +14,7 @@
 
 from unittest.mock import AsyncMock, patch
 
+import aiohttp
 import pytest
 
 from mirage.accessor.dropbox import DropboxAccessor
@@ -115,6 +116,41 @@ async def _write_recorded(reply):
         for r in scope.records
     ]
     return rows, order
+
+
+@pytest.mark.asyncio
+async def test_a_write_whose_reply_fails_still_evicts_the_path():
+    # Dropbox may have stored the bytes before the reply broke off, so the
+    # cached copy is stale either way; nothing vouches for a write record.
+    scope = RecordingScope()
+    evicted: list[str] = []
+
+    async def _spy(path):
+        evicted.append(path.virtual)
+
+    try:
+        with (
+            patch(
+                "mirage.core.dropbox.write.dropbox_upload",
+                new_callable=AsyncMock,
+                side_effect=aiohttp.ClientPayloadError("reply cut off"),
+            ),
+            patch(
+                "mirage.core.dropbox.write.invalidate_after_write", new=_spy
+            ),
+            patch(
+                "mirage.core.dropbox.write.invalidate_ancestors",
+                new_callable=AsyncMock,
+            ),
+            pytest.raises(aiohttp.ClientPayloadError),
+        ):
+            await write(
+                make_accessor(), PathSpec.from_str_path("/note.txt"), b"hello"
+            )
+    finally:
+        scope.close()
+    assert evicted == ["/note.txt"]
+    assert scope.records == []
 
 
 @pytest.mark.asyncio

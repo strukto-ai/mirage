@@ -13,12 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.cache.context import invalidate_after_write, invalidate_ancestors
+from mirage.cache.context import (
+    evict_after,
+    invalidate_after_write,
+    invalidate_ancestors,
+)
 from mirage.core.dropbox.client import dropbox_upload
 from mirage.core.dropbox.paths import dropbox_path_of
 from mirage.core.dropbox.stat import stat_from_entry
 from mirage.observe.context import record, start_op
-from mirage.types import PathSpec
+from mirage.types import JsonValue, PathSpec
 from mirage.utils.sizes import upload_receipt
 
 
@@ -28,18 +32,37 @@ async def write(
     """Upload in a single call; Dropbox caps it at ~150 MB (larger files
     need upload sessions, not supported here).
 
+    A failed upload still evicts the path: Dropbox may have stored the
+    bytes before its reply broke off, and nothing vouches for a record.
+
     Args:
         accessor (DropboxAccessor): Dropbox accessor.
         path (PathSpec): target path.
         data (bytes): file content.
     """
     timer = start_op()
-    entry = await dropbox_upload(
-        accessor.token_manager, dropbox_path_of(accessor, path), data
-    )
-    nbytes, token = upload_receipt(
-        entry, stat_from_entry, len(data), path.virtual
-    )
-    record("write", path.virtual, "dropbox", nbytes, timer, fingerprint=token)
-    await invalidate_after_write(path)
-    await invalidate_ancestors(path)
+
+    async def upload() -> tuple[JsonValue]:
+        return (
+            await dropbox_upload(
+                accessor.token_manager, dropbox_path_of(accessor, path), data
+            ),
+        )
+
+    async def settle(landed: tuple[JsonValue] | None) -> None:
+        if landed is not None:
+            nbytes, token = upload_receipt(
+                landed[0], stat_from_entry, len(data), path.virtual
+            )
+            record(
+                "write",
+                path.virtual,
+                "dropbox",
+                nbytes,
+                timer,
+                fingerprint=token,
+            )
+        await invalidate_after_write(path)
+        await invalidate_ancestors(path)
+
+    await evict_after(upload(), settle)
