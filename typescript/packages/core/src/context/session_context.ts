@@ -22,9 +22,8 @@ import { anchorDepth, isGlob, pathVisible, showHead, shownMode } from '../utils/
 import { eacces, enoent, erofs } from '../errors/fs.ts'
 import { parent } from '../utils/path.ts'
 import type { Decisions } from '../policy/decisions.ts'
-import type { Policies } from '../policy/policies.ts'
 import type { DryRun, HandOff, VfsExplanation } from '../policy/types.ts'
-import type { EntryGate, PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
+import type { PathSpec, Refusal, Visibility } from '../types.ts'
 import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
 
 /**
@@ -251,162 +250,6 @@ export function hiddenRefusal(vis: Visibility | null, virtual: string, create: b
   return enoent(virtual)
 }
 
-const admissionStorage = createAsyncContext<EntryGate>()
-
-/**
- * Bind the admitted command's entry gate for the duration of `fn`: the
- * run of that one command.
- *
- * Bound by the dispatcher once the gate let the command through, so a
- * nested line (`xargs`, `find -exec`, `eval`) binds its own and the outer
- * command gets its gate back when it returns, and a pipeline stage in
- * its own async context never sees a sibling's.
- */
-export function runWithAdmission<T>(gate: EntryGate, fn: () => Promise<T>): Promise<T> {
-  return Promise.resolve(admissionStorage.run(gate, fn))
-}
-
-/**
- * A shell invocation supplies its own IOContext. The ambient fallback
- * below is retained for direct callers without an evaluation context.
- *
- * The entry gate of the command running in this context, null when no
- * admitted command is bound (a command constructed outside the
- * dispatcher, or a line no gate judged).
- *
- * On an isolating runtime one gate is live and answers as bound. On
- * the fallback storage several commands' gates can be live at once
- * with nothing to say whose op is asking, so they merge toward
- * refusal: an entry must pass every live gate's `check`, `refuses` is
- * true when any live gate refuses, a rule counts as granted only when
- * every live gate carries it (a once-grant nodded for one line must not
- * authorize another's op door), and `scoped` and `scopes` are true when
- * any live gate scopes, keeping walks off the unfiltered native fast
- * paths.
- */
-export function getAdmission(context?: IOContext): EntryGate | null {
-  if (context !== undefined) return context.admission
-  const gates = admissionStorage.liveStores()
-  const first = gates[0]
-  if (first === undefined) return null
-  if (gates.every((gate) => gate === first)) return first
-  return {
-    scoped: gates.some((gate) => gate.scoped),
-    granted: first.granted.filter((rule) => gates.every((gate) => gate.granted.includes(rule))),
-    check(virtual: string): void {
-      for (const gate of gates) gate.check(virtual)
-    },
-    refuses(virtual: string): boolean {
-      return gates.some((gate) => gate.refuses(virtual))
-    },
-    scopes(virtual: string): boolean {
-      return gates.some((gate) => gate.scopes(virtual))
-    },
-  }
-}
-
-const opPoliciesStorage = createAsyncContext<Policies | null>()
-
-/**
- * Bind the workspace's admission policies for the duration of `fn`:
- * the run of one command.
- *
- * Bound by command dispatch around routing, the same window the
- * admission gate binds in, so the command tier's policy guard can fire
- * `preVfs` for the backend I/O a handler performs. Read at wrap or
- * call time by `withPolicyGuard`; unset outside a dispatched command
- * (a generic invoked directly in a test), where the guard is inert.
- */
-export function runWithOpPolicies<T>(policies: Policies, fn: () => Promise<T>): Promise<T> {
-  return Promise.resolve(opPoliciesStorage.run(policies, fn))
-}
-
-/**
- * A shell invocation supplies its own IOContext. The ambient fallback
- * below is retained for direct callers without an evaluation context.
- *
- * The policies bound to the running command, null outside one.
- *
- * The newest live armed set. On an isolating runtime the live set is
- * the innermost binding, so a suspension answers null exactly as
- * bound. On the fallback storage a suspension yields to any
- * concurrently armed frame, because disarming another command's op
- * doors is the worse failure: find's delegated `rm` then double-admits
- * its removal (an over-count, failing closed) instead of a concurrent
- * command's ops running unguarded.
- */
-export function getOpPolicies(context?: IOContext): Policies | null {
-  if (context !== undefined) return context.policies
-  let armed: Policies | null = null
-  for (const policies of opPoliciesStorage.liveStores()) {
-    if (policies !== null) armed = policies
-  }
-  return armed
-}
-
-const mountGateStorage = createAsyncContext<readonly [string, MountMode]>()
-
-/**
- * Bind the executing mount's prefix and configured mode for the
- * duration of `fn`: the run of one command.
- *
- * Bound by `Mount.executeCmd` around the handler, so the mode guard on
- * the command tier's I/O can resolve `effectivePathMode` for every path
- * a handler mutates: a path-guarded command is refused only at its
- * writes, the write-command gate admits any other when a shown subtree
- * grants writes, and this binding is how each individual write is then
- * held to its own region's mode.
- */
-export function runWithMountGate<T>(
-  prefix: string,
-  mode: MountMode,
-  fn: () => Promise<T>,
-): Promise<T> {
-  return Promise.resolve(mountGateStorage.run([prefix, mode], fn))
-}
-
-/**
- * A shell invocation supplies its own IOContext. The ambient fallback
- * below is retained for direct callers without an evaluation context.
- *
- * The gate of the mount serving `virtual`: its [prefix, configured
- * mode], null outside a mount's command (a generic invoked directly in
- * a test, or the scratch tier).
- *
- * The reader selects among every live gate by the path itself: the
- * longest prefix covering it wins, the way the mount table routes, and
- * two live gates at one prefix (two workspaces sharing a fallback
- * runtime) answer with the weaker mode, failing toward refusal. On an
- * isolating runtime one binding is live and every caller asks about a
- * path that mount serves; on the fallback storage (a browser with no
- * AsyncLocalStorage) overlapping commands on different mounts hold
- * gates concurrently, and the path is what keeps one from being judged
- * against the other's. A path no live gate covers answers null, the
- * same inert reading an unbound context gives.
- */
-export function mountGateFor(
-  virtual: string,
-  context?: IOContext,
-): readonly [string, MountMode] | null {
-  if (context !== undefined) return context.mountGate ?? null
-  const v = normPrefix(virtual)
-  let bestLen = -1
-  let bestPrefix: string | null = null
-  let bestMode: MountMode | null = null
-  for (const [rawPrefix, mode] of mountGateStorage.liveStores()) {
-    const prefix = normPrefix(rawPrefix)
-    if (prefix !== '/' && v !== prefix && !v.startsWith(prefix + '/')) continue
-    if (prefix.length > bestLen) {
-      bestLen = prefix.length
-      bestPrefix = prefix
-      bestMode = mode
-    } else if (prefix.length === bestLen && bestMode !== null) {
-      bestMode = weakerMode(bestMode, mode)
-    }
-  }
-  return bestPrefix === null || bestMode === null ? null : [bestPrefix, bestMode]
-}
-
 /** Where a refusal a door raises is noted for the line running it. */
 export type RefusalSink = (refusal: Refusal) => void
 
@@ -496,53 +339,6 @@ export function noteRefusal(refusal: Refusal): void {
   refusalSinkStorage.getStore()?.(refusal)
 }
 
-const walkProbeStorage = createAsyncContext<readonly [string, WalkProbe]>()
-
-/**
- * Bind what a command's dot walks read, for the duration of `fn`: the run
- * of one command.
- *
- * Bound by `Mount.executeCmd` around the handler, beside the mount gate: the
- * command tier reaches its backend without passing the dispatcher's door,
- * so the walk guard on its I/O proves an operand's `.` and `..` with the
- * door's stat and link follow through this binding. Mirrors Python's
- * set_walk_probe.
- */
-export function runWithWalkProbe<T>(
-  prefix: string,
-  probe: WalkProbe,
-  fn: () => Promise<T>,
-): Promise<T> {
-  return Promise.resolve(walkProbeStorage.run([prefix, probe], fn))
-}
-
-/**
- * A shell invocation supplies its own IOContext. The ambient fallback
- * below is retained for direct callers without an evaluation context.
- *
- * The walk probe bound to the command serving `virtual`, null outside a
- * mount's command (a generic invoked directly in a test).
- *
- * Selected by the path the way `mountGateFor` selects a gate, so on the
- * fallback storage a concurrent command on another mount cannot lend its
- * probe to this one. Mirrors Python's get_walk_probe.
- */
-export function walkProbeFor(virtual: string, context?: IOContext): WalkProbe | null {
-  if (context !== undefined) return context.walkProbe ?? null
-  const v = normPrefix(virtual)
-  let bestLen = -1
-  let best: WalkProbe | null = null
-  for (const [rawPrefix, probe] of walkProbeStorage.liveStores()) {
-    const prefix = normPrefix(rawPrefix)
-    if (prefix !== '/' && v !== prefix && !v.startsWith(prefix + '/')) continue
-    if (prefix.length > bestLen) {
-      bestLen = prefix.length
-      best = probe
-    }
-  }
-  return best
-}
-
 /**
  * Opens a statement's write targets as bash does before the command runs,
  * given the admitted command's name and arguments; false when one cannot be
@@ -593,10 +389,6 @@ export function captureSessionContext(
   return [
     sessionScope,
     ...(restoreExecution === undefined ? [] : [restoreExecution]),
-    admissionStorage.capture(),
-    opPoliciesStorage.capture(),
-    mountGateStorage.capture(),
-    walkProbeStorage.capture(),
     redirectStorage.capture(),
     programStorage.capture(),
   ]
@@ -892,16 +684,13 @@ export function requirePathsWritable(
  * while any shown subtree grants writes, but an id names no path a
  * per-path check could judge, so only the mount-wide grant counts and
  * a write-granting carve-out alone refuses, failing toward refusal.
- * Inert outside a mount's command. `mountPrefix` is the asking
- * command's own (`opts.mountPrefix`), which is what lets the fallback
- * storage select the right gate; the isolating runtimes answer from
- * the binding alone.
+ * Inert when the caller's context names no mount.
  */
-export function requireMountWritable(mountPrefix: string): void {
-  const gate = mountGateFor(mountPrefix)
+export function requireMountWritable(context: IOContext | undefined): void {
+  const gate = context?.mountGate ?? null
   if (gate === null) return
   const [prefix, mode] = gate
-  if (effectiveMountMode(prefix, mode) === MountMode.READ) {
+  if (effectiveMountMode(prefix, mode, context) === MountMode.READ) {
     throw erofs(prefix, `mount ${prefix} is read-only`)
   }
 }

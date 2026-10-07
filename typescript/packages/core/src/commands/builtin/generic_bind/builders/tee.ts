@@ -18,7 +18,7 @@ import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapt
 const tee: BuilderFn = async (ops, accessor, paths, texts, opts) => {
   const idx = opts.index ?? undefined
   const { append } = ops
-  const write = requireOp(ops.write, 'write')
+  const write = requireOp(ops, 'write')
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   // A backend that can append natively does; the rest fall back to the
   // read-modify-write inside the generic.

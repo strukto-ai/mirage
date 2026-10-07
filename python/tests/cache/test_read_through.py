@@ -24,12 +24,14 @@ from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.cache.read_through import (
+    cache_aware_bound_stream,
     cache_aware_read_bytes,
     cache_aware_read_stream,
 )
 from mirage.commands.builtin.utils.stream import stdin_stream
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.workspace.session.access import io_context
 
 
 class _CountingBackend:
@@ -285,3 +287,58 @@ async def test_failed_read_never_populates_cache():
     with pytest.raises(OSError, match="failed read"):
         await manager.read_through(_spec(), fetch)
     assert await manager.cached_bytes(_spec()) is None
+
+
+class _RefusingGate:
+    scoped = True
+    granted = ()
+
+    def check(self, virtual: str) -> None:
+        if self.refuses(virtual):
+            raise PermissionError(virtual)
+
+    def refuses(self, virtual: str) -> bool:
+        return virtual == "/s3/sealed.txt"
+
+    def scopes(self, virtual: str) -> bool:
+        return self.refuses(virtual)
+
+
+@pytest.mark.asyncio
+async def test_admission_refuses_warm_reads_before_the_freshness_probe():
+    cache = RAMFileCacheStore()
+    for name in ("sealed", "open"):
+        await cache.set(f"/s3/{name}.txt", b"warm")
+    asked = []
+
+    async def probe(key):
+        asked.append(key)
+        return True
+
+    gate = _RefusingGate()
+
+    async def raw(path):
+        gate.check(path.virtual)
+        yield b"backend"
+
+    manager = CacheManager(cache, None, "/s3/", True, may_serve_cached=probe)
+    reader = cache_aware_bound_stream(raw, io_context(None, gate))
+    previous = push_cache_manager(manager)
+    try:
+        with pytest.raises(PermissionError):
+            await _drain(reader(PathSpec.from_str_path("/s3/sealed.txt")))
+        assert asked == []
+        assert (
+            await _drain(reader(PathSpec.from_str_path("/s3/open.txt")))
+            == b"warm"
+        )
+        unrestricted = cache_aware_bound_stream(raw)
+        assert (
+            await _drain(
+                unrestricted(PathSpec.from_str_path("/s3/sealed.txt"))
+            )
+            == b"warm"
+        )
+    finally:
+        push_cache_manager(previous)
+    assert asked == ["/s3/open.txt", "/s3/sealed.txt"]

@@ -37,11 +37,7 @@ import {
   ReadPolicy,
 } from '../../types.ts'
 import { CLIRegistry } from '../cli/registry.ts'
-import {
-  effectivePathMode,
-  getAdmission,
-  strongestModeUnder,
-} from '../../context/session_context.ts'
+import { effectivePathMode, strongestModeUnder } from '../../context/session_context.ts'
 import { MountEntry, type MountInit } from './mount.ts'
 import type { IndexConfig } from '../../cache/index/config.ts'
 import { buildIndex } from '../../cache/index/factory.ts'
@@ -228,13 +224,7 @@ export class MountRegistry {
       m.prefix,
       m.vfs.cachesReads,
       (path) => !m.retiring && this.tryMountFor(path) === m,
-      // The cache is shared by every session: a warm entry the running
-      // command may not read goes cold to the guarded read, which refuses
-      // it, before any freshness probe.
-      (key) =>
-        getAdmission()?.refuses(key) === true
-          ? Promise.resolve(false)
-          : this.mayServeCached(m, key),
+      (key) => this.mayServeCached(m, key),
       m.read.ttl,
       // Read at call time, as the gate is; a retiring mount's leftovers go
       // with its teardown instead.

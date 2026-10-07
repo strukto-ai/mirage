@@ -82,7 +82,7 @@ const rmdir: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   const fl = new FlagView(opts.flags, specOf('rmdir'))
   const verbose = fl.asBool('verbose')
   const ignore = fl.asBool('ignore_fail_on_non_empty')
-  const rmdirOp = requireOp(ops.rmdir, 'rmdir')
+  const rmdirOp = requireOp(ops, 'rmdir')
   const lines: string[] = []
   const errors: string[] = []
   const links = opts.ns?.links ?? null

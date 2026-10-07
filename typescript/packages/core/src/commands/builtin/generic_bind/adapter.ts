@@ -30,17 +30,12 @@ import type { Accessor } from '../../../accessor/base.ts'
 import {
   requirePathsWritable,
   effectivePathMode,
-  getAdmission,
-  getCurrentSession,
-  getOpPolicies,
   hiddenRefusal,
-  mountGateFor,
   sessionVisibility,
-  walkProbeFor,
 } from '../../../context/session_context.ts'
 import { pathsScoped } from '../../../ops/namespace_view.ts'
 import { METADATA_OPS } from '../../../policy/constants.ts'
-import { preVfsGate, type Policies } from '../../../policy/policies.ts'
+import { preVfsGate } from '../../../policy/policies.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { hasAborted, makeAbortError } from '../../../workspace/abort.ts'
 import { hiddenUnder, moveReveals, pathVisible } from '../../../utils/hidden.ts'
@@ -759,7 +754,7 @@ function walkProbeOf(
   const specs = args.filter((a): a is PathSpec => a instanceof PathSpec && a.dotted !== null)
   const first = specs[0]
   if (first === undefined) return null
-  const probe = bound ?? walkProbeFor(first.virtual, context)
+  const probe = bound ?? context?.walkProbe ?? null
   return probe === null ? null : [probe, specs]
 }
 
@@ -887,11 +882,12 @@ export function withWriteGuards<A extends Accessor, R>(
 }
 
 /** Require a capability at call time, after the same guards as an available op. */
-export function requireOp<T extends (...args: never[]) => Promise<unknown>>(
-  op: T | undefined,
-  name: MutationSlot | 'exists',
-): T {
-  if (op !== undefined) return op
+export function requireOp<A extends Accessor, K extends MutationSlot | 'exists'>(
+  ops: CommandIO<A>,
+  name: K,
+): NonNullable<CommandIO<A>[K]> {
+  const op = ops[name]
+  if (op !== undefined) return op as NonNullable<CommandIO<A>[K]>
   const refuse = (...args: never[]): Promise<never> => {
     const specs = pathsOf(args)
     const named = mutationOf(name)?.firstSource ? specs[1] : specs[0]
@@ -903,7 +899,7 @@ export function requireOp<T extends (...args: never[]) => Promise<unknown>>(
       ),
     )
   }
-  return guardOperation(refuse, name) as unknown as T
+  return guardOperation(refuse, name, ops.ioContext) as NonNullable<CommandIO<A>[K]>
 }
 
 function checkCommandPaths(
@@ -914,14 +910,14 @@ function checkCommandPaths(
   context?: IOContext,
 ): void {
   const access = mutationOf(slot)
-  const admission = getAdmission(context)
+  const admission = context?.admission ?? null
   for (const [position, path] of paths.entries()) {
     if (checkHidden) refuseHidden(path, position > 0 || access?.create === true, context)
     if (slot !== 'stat' && slot !== 'exists') admission?.check(path.virtual)
   }
   if (access !== undefined && checkMode) {
     for (const path of access.firstSource ? paths.slice(1) : paths) {
-      const gate = mountGateFor(path.virtual, context)
+      const gate = context?.mountGate ?? null
       if (gate !== null) requirePathsWritable([path], ...gate, access.subtree, context)
     }
   }
@@ -939,17 +935,14 @@ function commandCall<T extends (...args: never[]) => unknown>(
   }) as T
 }
 
-export function withCommandGuards<A extends Accessor>(
-  ops: CommandIO<A>,
-  prefix?: string,
-): CommandIO<A> {
+export function withCommandGuards<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
   const context = ops.ioContext
-  const probe = prefix === undefined ? null : walkProbeFor(prefix, context)
+  const probe = context?.walkProbe ?? null
   const prepared = namespaceOps(ops)
   const mk = ops.mkdir
   if (mk !== undefined) {
     prepared.mkdir = (accessor, path, parents) => {
-      const gate = mountGateFor(path.virtual, context)
+      const gate = context?.mountGate ?? null
       if (
         gate !== null &&
         effectivePathMode(path.virtual, gate[0], gate[1], context) === MountMode.READ
@@ -1018,52 +1011,10 @@ export function withCommandGuards<A extends Accessor>(
  */
 export function withDispatchRuleGuard(dispatch: DispatchFn, context?: IOContext): DispatchFn {
   return async (op, path, args, options, report) => {
-    const gate = getAdmission(context)
+    const gate = context?.admission ?? null
     if (gate === null || METADATA_OPS.has(op)) return dispatch(op, path, args, options, report)
     return dispatch(op, path, args, { ...options, ruleGate: gate }, report)
   }
-}
-
-/** The policies to consult for one slot call, with the mount prefix
- * and session identity the call belongs to. */
-interface OpPolicyScope {
-  policies: Policies
-  /** The wrap site's mount prefix; null resolves per path at admit
-   * time (a registration-time wrap has no one mount). */
-  prefix: string | null
-  sessionId: string
-  context?: IOContext
-}
-
-/**
- * The scope to consult for this op call: null is the fast path (no
- * dispatched command bound policies, or none of them override preVfs).
- */
-function opPolicyScope(prefix: string | null, context?: IOContext): OpPolicyScope | null {
-  const policies = getOpPolicies(context)
-  if (!policies?.wants('preVfs')) return null
-  return {
-    policies,
-    prefix,
-    sessionId: context?.sessionId ?? getCurrentSession()?.sessionId ?? '',
-    ...(context === undefined ? {} : { context }),
-  }
-}
-
-/**
- * The wrap-time scope when it caught a bound command, else the
- * call-time context.
- *
- * The factory applies the guard inside the command's window, so its
- * wrap-time capture also covers a reader the output pipeline drains
- * after dispatch has reset the context (head/tail/wc bind lazy
- * readers), with the prefix and session identity the drained op
- * belongs to; a registration-time wrap (the object-store overrides,
- * the loose-write chain) has no window when applied and reads the
- * live context instead, which its eager handlers are inside.
- */
-function livePolicyScope(scope: OpPolicyScope | null, context?: IOContext): OpPolicyScope | null {
-  return context === undefined ? (scope ?? opPolicyScope(null)) : scope
 }
 
 /** Fire preVfs for one PathSpec of one slot call; the op is the slot
@@ -1073,26 +1024,35 @@ function livePolicyScope(scope: OpPolicyScope | null, context?: IOContext): OpPo
  * and the remnant cascade reaches below them on purpose to remove what
  * the session cannot see. */
 async function policyAdmit(
-  scope: OpPolicyScope,
+  context: IOContext,
   op: string,
   path: PathSpec,
   write: boolean,
 ): Promise<void> {
-  const prefix = scope.prefix ?? mountGateFor(path.virtual, scope.context)?.[0] ?? ''
-  await preVfsGate(scope.policies, op, path, write, prefix, scope.sessionId, undefined, {
-    checkHidden: false,
-    ...(scope.context === undefined ? {} : { io: scope.context }),
-  })
+  if (!context.policies?.wants('preVfs')) return
+  await preVfsGate(
+    context.policies,
+    op,
+    path,
+    write,
+    context.mountGate?.[0] ?? '',
+    context.sessionId,
+    undefined,
+    {
+      checkHidden: false,
+      io: context,
+    },
+  )
 }
 
 /** Drain `source` once the read is admitted, before any byte is
  * pulled; the inner iterable was built eagerly by the caller. */
 async function* policyStream(
-  scope: OpPolicyScope,
+  context: IOContext,
   path: PathSpec,
   source: AsyncIterable<Uint8Array>,
 ): AsyncIterable<Uint8Array> {
-  await policyAdmit(scope, 'read_stream', path, false)
+  await policyAdmit(context, 'read_stream', path, false)
   yield* source
 }
 
@@ -1108,52 +1068,45 @@ async function* policyStream(
  * facts, the mode-000 shape the path rules already take, so a denied
  * entry still lists and stats while the read of it is what fails;
  * `scopedIo` drops the native find/du slots, so the walk meets the
- * guarded readdir. Inert unless a dispatched command bound
- * policies overriding preVfs (`opPolicyScope`, with the mount prefix
- * and session identity captured at wrap time so a lazily drained
- * reader still answers as the command that bound it, see
- * `livePolicyScope`; `prefix` arrives from the wrap site because the
- * fallback mount-gate storage resolves by path, which a drained
- * reader no longer has a live gate for).
+ * guarded readdir. The adapter carries the invocation context for eager and
+ * deferred reads.
  */
-export function withPolicyGuard<A extends Accessor = Accessor>(
-  ops: CommandIO<A>,
-  prefix?: string,
-): CommandIO<A> {
-  const scope = opPolicyScope(prefix ?? null, ops.ioContext)
+export function withPolicyGuard<A extends Accessor = Accessor>(ops: CommandIO<A>): CommandIO<A> {
+  const context = ops.ioContext
   const guarded: CommandIO<A> = {
     ...ops,
     readStream: (accessor, path, index) => {
-      const p = livePolicyScope(scope, ops.ioContext)
       const inner = ops.readStream(accessor, path, index)
-      if (p === null) return inner
-      return policyStream(p, path, inner)
+      return context === undefined ? inner : policyStream(context, path, inner)
     },
   }
   for (const slot of ['readBytes', 'readRange', 'readdir', ...mutationSlots] as const) {
     const fn = ops[slot]
     if (fn !== undefined) {
       // All slots in this set return promises; readStream keeps its own wrapper.
-      Object.assign(guarded, { [slot]: policyCall(scope, fn, slot, ops.ioContext) })
+      Object.assign(guarded, { [slot]: policyCall(fn, slot, context) })
     }
   }
   return guarded
 }
 
 function policyCall<T extends (...args: never[]) => unknown>(
-  scope: OpPolicyScope | null,
   fn: T,
   slot: GuardedSlot,
   context?: IOContext,
 ): T {
   return (async (...args: never[]) => {
-    const p = livePolicyScope(scope, context)
-    if (p !== null) {
+    if (context !== undefined) {
       const access = mutationOf(slot)
       const paths = pathsOf(args)
       const name = slot.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
       for (const [i, path] of paths.entries()) {
-        await policyAdmit(p, name, path, access !== undefined && !(i === 0 && access.firstSource))
+        await policyAdmit(
+          context,
+          name,
+          path,
+          access !== undefined && !(i === 0 && access.firstSource),
+        )
       }
     }
     return fn(...args)

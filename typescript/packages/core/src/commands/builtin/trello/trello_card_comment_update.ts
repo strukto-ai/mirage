@@ -58,7 +58,7 @@ async function trelloCardCommentUpdate(
   })
   // A card write is addressed by id, not path, so only the mount-wide
   // grant can admit it (a write-granting carve-out names no card).
-  requireMountWritable(opts.mountPrefix ?? '')
+  requireMountWritable(opts.ioContext)
   await requireCard(accessor, cardId)
   const comment = await commentUpdate(accessor.transport, cardId, commentId, text)
   return [ENC.encode(JSON.stringify(normalizeComment(comment, cardId))), new IOResult()]

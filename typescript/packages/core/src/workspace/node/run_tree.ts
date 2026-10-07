@@ -12,8 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { EvaluationContext } from '../evaluation.ts'
-import { runWithAdmission } from '../../context/session_context.ts'
+import { bindDispatch } from '../dispatcher/context.ts'
+import { ioContext } from '../session/access.ts'
+import { EvaluationContext } from '../evaluation.ts'
+
 import { CommandTimeoutError } from '../../commands/errors.ts'
 import { isControlFlowError } from '../workspace/failure.ts'
 import { guardOutput } from '../../commands/builtin/utils/limit.ts'
@@ -99,17 +101,19 @@ export async function runCommandTree(
         }),
       ]
     } else {
-      result = await runWithAdmission(verdict, () =>
-        handleRedirect(
-          (inner, current, input, stack) => executeNode(deps, inner, current, input, stack),
+      context = new EvaluationContext(session, context.frame, context.parent, verdict)
+      result = await handleRedirect(
+        (inner, current, input, stack) => executeNode(deps, inner, current, input, stack),
+        bindDispatch(
           deps.dispatch,
-          null,
-          redirects,
-          context,
-          stdin,
-          null,
-          true,
+          ioContext(session, verdict, deps.registry.policies, context.frame.recorder),
         ),
+        null,
+        redirects,
+        context,
+        stdin,
+        null,
+        true,
       )
     }
   }

@@ -146,7 +146,7 @@ export function scanIo<A extends Accessor>(
   if (ioContext !== undefined) ops = withRecording({ ...ops, ioContext })
   const scoped = ns?.scoped
   if (!scoped?.(rstripSlash(prefix ?? '') || '/')) return [ops, false]
-  return [withCommandGuards(withPolicyGuard(withReadCache(ops), prefix), prefix), true]
+  return [withCommandGuards(withPolicyGuard(withReadCache(ops))), true]
 }
 
 // The builder tier's cache and slash wraps, chosen at registration from
@@ -259,8 +259,5 @@ export function invocationIo<A extends Accessor>(
       ? {}
       : { globTargetStat: (virtual: string) => links.targetStat(virtual) }),
   }
-  return withCommandGuards(
-    withPolicyGuard(finish(withRecording(stamped)), opts.mountPrefix),
-    opts.mountPrefix,
-  )
+  return withCommandGuards(withPolicyGuard(finish(withRecording(stamped))))
 }

@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
+
 import pytest
 
 from mirage.accessor.trello import TrelloAccessor
@@ -38,10 +40,10 @@ from mirage.commands.builtin.trello.trello_card_update import (
     trello_card_update,
 )
 from mirage.commands.config import CommandFn, CommandOpts
-from mirage.context import reset_mount_gate, set_mount_gate
 from mirage.errors.types import ReadOnlyError
 from mirage.types import MountMode
 from mirage.vfs.trello.config import TrelloConfig
+from mirage.workspace.session.access import io_context
 
 _ACCESSOR = TrelloAccessor(TrelloConfig(api_key="k", api_token="t"))
 
@@ -108,12 +110,13 @@ async def test_a_read_mount_refuses_an_id_addressed_write(
     refuse.
     """
     assert getattr(cmd, "_registered_commands")[0].write is True
-    token = set_mount_gate("/trello", MountMode.READ)
-    try:
-        with pytest.raises(ReadOnlyError):
-            await cmd(_ACCESSOR, [], [], CommandOpts(flags=flags))
-    finally:
-        reset_mount_gate(token)
+    context = dataclasses.replace(
+        io_context(None, policies=None), mount_gate=("/trello", MountMode.READ)
+    )
+    with pytest.raises(ReadOnlyError):
+        await cmd(
+            _ACCESSOR, [], [], CommandOpts(io_context=context, flags=flags)
+        )
 
 
 _SCOPED = TrelloAccessor(
@@ -149,11 +152,11 @@ async def test_a_card_write_refuses_an_id_outside_the_scope(
     monkeypatch.setattr(
         "mirage.commands.builtin.trello._scope.get_list", _on_board_out
     )
-    token = set_mount_gate("/trello", MountMode.WRITE)
-    try:
-        with pytest.raises(
-            ValueError, match=" is outside this mount's scope$"
-        ):
-            await cmd(_SCOPED, [], [], CommandOpts(flags=flags))
-    finally:
-        reset_mount_gate(token)
+    context = dataclasses.replace(
+        io_context(None, policies=None),
+        mount_gate=("/trello", MountMode.WRITE),
+    )
+    with pytest.raises(ValueError, match=" is outside this mount's scope$"):
+        await cmd(
+            _SCOPED, [], [], CommandOpts(io_context=context, flags=flags)
+        )

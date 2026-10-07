@@ -17,7 +17,7 @@ import { type Builder, dirAwareStat, requireOp, resolveGlobOf, type BuilderFn } 
 
 const patch: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
-  const write = requireOp(ops.write, 'write')
+  const write = requireOp(ops, 'write')
   const stat = dirAwareStat(ops, accessor, opts)
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   // Stat first, as GNU patch does: a directory is refused before it is

@@ -27,8 +27,8 @@ const touch: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
     throw new UsageError(`touch: missing file operand\n${usageHint('touch')}`, 1)
   }
   const idx = opts.index ?? undefined
-  const write = requireOp(ops.write, 'write')
-  const exists = requireOp(ops.exists, 'exists')
+  const write = requireOp(ops, 'write')
+  const exists = requireOp(ops, 'exists')
   const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
   const createOnly = new FlagView(opts.flags, specOf('touch')).asBool('no_create')
   const writes: Record<string, Uint8Array> = {}

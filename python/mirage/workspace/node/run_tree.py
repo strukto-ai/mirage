@@ -13,11 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from dataclasses import replace
 from functools import partial
 from typing import Any, Callable
 
 from mirage.commands.builtin.utils.limit import guard_output
-from mirage.context import reset_admission, set_admission
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.policy import (
@@ -35,6 +35,7 @@ from mirage.shell.console import JobConsole, Terminal
 from mirage.shell.helpers import input_substitution_redirect
 from mirage.shell.job_table import JobTable
 from mirage.types import PathSpec, Producer
+from mirage.workspace.dispatcher.context import bind_dispatch
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.scope import _to_scope
@@ -46,6 +47,7 @@ from mirage.workspace.node.admission import Refused, admit
 from mirage.workspace.node.execute_node import execute_node
 from mirage.workspace.node.occurrence import claimant_for
 from mirage.workspace.session import session_view
+from mirage.workspace.session.access import io_context
 from mirage.workspace.types import ExecutionNode
 
 
@@ -173,19 +175,24 @@ async def run_command_tree(
                 refused=True,
             )
         else:
-            token = set_admission(verdict)
-            try:
-                stdout, io, exec_node = await handle_redirect(
-                    run,
+            context = replace(context, admission=verdict)
+            stdout, io, exec_node = await handle_redirect(
+                run,
+                bind_dispatch(
                     dispatch,
-                    None,
-                    redirects,
-                    context,
-                    stdin,
-                    capture_input=True,
-                )
-            finally:
-                reset_admission(token)
+                    io_context(
+                        session,
+                        verdict,
+                        registry.policies,
+                        context.frame.recorder,
+                    ),
+                ),
+                None,
+                redirects,
+                context,
+                stdin,
+                capture_input=True,
+            )
     stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
     # A line written to a terminal (a typed line's, a substitution's)
     # is bounded as what reached it, its jobs' output included, and

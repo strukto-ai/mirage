@@ -22,7 +22,7 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
 
 const mv: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
-  const rename = requireOp(ops.rename, 'rename')
+  const rename = requireOp(ops, 'rename')
   const idx = opts.index ?? undefined
   const parsed = parseFlags(new FlagView(opts.flags, specOf('mv')))
   return mvGeneric(

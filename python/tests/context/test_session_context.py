@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
 import errno
 
 import pytest
@@ -27,11 +28,9 @@ from mirage.context import (
     readonly_below,
     require_mount_writable,
     reset_current_session,
-    reset_mount_gate,
     reset_program_invocation,
     session_visibility,
     set_current_session,
-    set_mount_gate,
     set_program_invocation,
     strongest_mode_under,
 )
@@ -46,6 +45,7 @@ from mirage.types import (
 )
 from mirage.utils.hidden import hidden_under, path_visible
 from mirage.workspace.session import SessionManager, SessionState
+from mirage.workspace.session.access import io_context
 
 
 @pytest.fixture
@@ -184,49 +184,6 @@ class _Gate:
 
     def refuses(self, virtual: str) -> bool:
         return virtual == self.refused
-
-
-def test_the_admission_binding_is_scoped_to_one_command():
-    from mirage.context import (
-        get_admission,
-        reset_admission,
-        set_admission,
-    )
-
-    assert get_admission() is None
-    outer = _Gate(scoped=True)
-    token = set_admission(outer)
-    try:
-        assert get_admission() is outer
-        # A nested line binds its own and hands the outer one back.
-        inner = _Gate(scoped=False)
-        inner_token = set_admission(inner)
-        try:
-            assert get_admission() is inner
-        finally:
-            reset_admission(inner_token)
-        assert get_admission() is outer
-    finally:
-        reset_admission(token)
-    assert get_admission() is None
-
-
-def test_the_op_policies_binding_is_scoped_to_one_command():
-    from mirage.context import (
-        get_op_policies,
-        reset_op_policies,
-        set_op_policies,
-    )
-    from mirage.policy.policies import Policies
-
-    assert get_op_policies() is None
-    policies = Policies([])
-    token = set_op_policies(policies)
-    try:
-        assert get_op_policies() is policies
-    finally:
-        reset_op_policies(token)
-    assert get_op_policies() is None
 
 
 def test_effective_path_mode_is_the_anchor_depth_rule():
@@ -381,24 +338,17 @@ def test_require_mount_writable_needs_the_broad_grant():
             )
         ),
     )
-    session_token = set_current_session(sess)
-    gate_token = set_mount_gate("/trello", MountMode.WRITE)
-    try:
-        # The carve-out admits the command, but an id-addressed write
-        # names no path, so only the mount-wide grant counts.
-        with pytest.raises(ReadOnlyError):
-            require_mount_writable()
-    finally:
-        reset_mount_gate(gate_token)
-        reset_current_session(session_token)
-    # Unrestricted (no session narrowing) writes pass, and with no
-    # mount bound the check is inert.
-    gate_token = set_mount_gate("/trello", MountMode.WRITE)
-    try:
-        require_mount_writable()
-    finally:
-        reset_mount_gate(gate_token)
-    require_mount_writable()
+    context = dataclasses.replace(
+        io_context(sess, policies=None),
+        mount_gate=("/trello", MountMode.WRITE),
+    )
+    with pytest.raises(ReadOnlyError):
+        require_mount_writable(context)
+    context = dataclasses.replace(
+        io_context(None), mount_gate=("/trello", MountMode.WRITE)
+    )
+    require_mount_writable(context)
+    require_mount_writable(None)
 
 
 def test_hidden_under_is_per_operand():

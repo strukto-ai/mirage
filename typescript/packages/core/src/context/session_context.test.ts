@@ -12,36 +12,30 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ioContext } from '../workspace/session/access.ts'
+import type { IOContext } from './types.ts'
 import { describe, expect, it } from 'vitest'
 import {
   effectiveMountMode,
   effectivePathMode,
-  getAdmission,
   getCurrentSession,
   getCurrentSessionFor,
   getCurrentSessionUnlessForeign,
-  getOpPolicies,
   hiddenRefusal,
   sessionVisibility,
   readonlyBelow,
   requireMountWritable,
-  runWithAdmission,
-  runWithMountGate,
-  runWithOpPolicies,
   runWithSession,
   strongestModeUnder,
 } from './session_context.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
-import { Policies } from '../policy/policies.ts'
 import { MountMode, weakerMode } from '../types.ts'
 import { SessionManager } from '../workspace/session/manager.ts'
 import { SessionState } from '../workspace/session/session.ts'
 import { hiddenUnder, pathVisible } from '../utils/hidden.ts'
-
 const visible = (virtual: string): boolean => pathVisible(sessionVisibility(), virtual)
 const refused = (virtual: string, create: boolean) =>
   hiddenRefusal(sessionVisibility(), virtual, create)
-
 function narrowedSession(): SessionState {
   return new SessionState({
     sessionId: 'agent',
@@ -52,7 +46,6 @@ function narrowedSession(): SessionState {
     ]),
   })
 }
-
 describe('weakerMode', () => {
   it('follows the READ < WRITE < EXEC lattice', () => {
     expect(weakerMode(MountMode.READ, MountMode.WRITE)).toBe(MountMode.READ)
@@ -61,19 +54,16 @@ describe('weakerMode', () => {
     expect(weakerMode(MountMode.EXEC, MountMode.EXEC)).toBe(MountMode.EXEC)
   })
 })
-
 describe('a profile narrows the mounts it names', () => {
   it('no bound session is unrestricted', () => {
     expect(effectiveMountMode('/anything', MountMode.WRITE)).toBe(MountMode.WRITE)
   })
-
   it('a profile naming no mount keeps every mode', async () => {
     await runWithSession(new SessionState({ sessionId: 'free' }), () => {
       expect(effectiveMountMode('/s3', MountMode.EXEC)).toBe(MountMode.EXEC)
       return Promise.resolve()
     })
   })
-
   it('narrows the mount mode', async () => {
     await runWithSession(narrowedSession(), () => {
       expect(effectiveMountMode('/ro', MountMode.WRITE)).toBe(MountMode.READ)
@@ -81,7 +71,6 @@ describe('a profile narrows the mounts it names', () => {
       return Promise.resolve()
     })
   })
-
   it('cannot widen the mount mode', async () => {
     await runWithSession(narrowedSession(), () => {
       expect(effectiveMountMode('/ex', MountMode.READ)).toBe(MountMode.READ)
@@ -89,14 +78,12 @@ describe('a profile narrows the mounts it names', () => {
       return Promise.resolve()
     })
   })
-
   it('normalizes prefixes before lookup', async () => {
     await runWithSession(narrowedSession(), () => {
       expect(effectiveMountMode('/ro/', MountMode.WRITE)).toBe(MountMode.READ)
       return Promise.resolve()
     })
   })
-
   it('a mount the profile does not name keeps its own mode', async () => {
     // Naming three mounts is not an allowlist: a fourth is reachable at
     // whatever the workspace gave it. A profile that must not touch a
@@ -109,7 +96,6 @@ describe('a profile narrows the mounts it names', () => {
     })
   })
 })
-
 describe('a binding belongs to the workspace that published it', () => {
   it('answers only its own manager', async () => {
     const mine = new SessionManager('default')
@@ -126,7 +112,6 @@ describe('a binding belongs to the workspace that published it', () => {
       mine,
     )
   })
-
   it('a nested bind keeps the owner', async () => {
     // A background job's fork is still the workspace's own session.
     const mine = new SessionManager('default')
@@ -142,7 +127,6 @@ describe('a binding belongs to the workspace that published it', () => {
       mine,
     )
   })
-
   it('an unowned bind answers nobody', async () => {
     // The op-dispatch binders name no owner, so no line adopts one.
     await runWithSession(new SessionState({ sessionId: 'default' }), () => {
@@ -150,7 +134,6 @@ describe('a binding belongs to the workspace that published it', () => {
       return Promise.resolve()
     })
   })
-
   it("the op door keeps any bind but another owner's", async () => {
     // A kernel mount and a guest runtime bind without an owner, and
     // the door keeps those; only a binding another workspace made is
@@ -173,7 +156,6 @@ describe('a binding belongs to the workspace that published it', () => {
       mine,
     )
   })
-
   it('node isolates concurrent tasks', () => {
     // What lets a background job bind its fork without the foreground
     // seeing it; the browser fallback storage cannot, and jobs.ts
@@ -181,7 +163,6 @@ describe('a binding belongs to the workspace that published it', () => {
     expect(asyncContextIsolatesTasks).toBe(true)
   })
 })
-
 describe('hides', () => {
   it("a profile's hides reach the predicate as paths and patterns", async () => {
     // One list per session, built by the compiler from the profile's own
@@ -205,7 +186,6 @@ describe('hides', () => {
       return Promise.resolve()
     })
   })
-
   it('the explicit-session predicate answers without a binding', async () => {
     // A door that holds the session (the admission gate) asks it
     // directly; the bound form is the same answer for the bound
@@ -225,7 +205,6 @@ describe('hides', () => {
       return Promise.resolve()
     })
   })
-
   it('a hidden create is refused by what its parent answers', async () => {
     // A create under a hidden directory is ENOENT, the answer every
     // read gives for that directory, so probing creates cannot map a
@@ -250,7 +229,6 @@ describe('hides', () => {
       return Promise.resolve()
     })
   })
-
   it('a hide activates the gate and a profile without one does not', async () => {
     const sess = new SessionState({
       sessionId: 'agent',
@@ -267,7 +245,6 @@ describe('hides', () => {
     })
   })
 })
-
 describe('the path axis modes', () => {
   it('effectivePathMode is the anchor-depth rule', async () => {
     const sess = new SessionState({
@@ -293,11 +270,9 @@ describe('the path axis modes', () => {
       return Promise.resolve()
     })
   })
-
   it("effectivePathMode without a session is the mount's own", () => {
     expect(effectivePathMode('/a/x', '/a', MountMode.WRITE)).toBe(MountMode.WRITE)
   })
-
   it('an equal-depth pair takes the weaker', async () => {
     const sess = new SessionState({
       sessionId: 'agent',
@@ -309,7 +284,6 @@ describe('the path axis modes', () => {
       return Promise.resolve()
     })
   })
-
   it('strongestModeUnder counts a show grant', async () => {
     const sess = new SessionState({
       sessionId: 'agent',
@@ -326,7 +300,6 @@ describe('the path axis modes', () => {
       return Promise.resolve()
     })
   })
-
   it('readonlyBelow blames the carved anchor', async () => {
     const sess = new SessionState({
       sessionId: 'agent',
@@ -352,7 +325,6 @@ describe('the path axis modes', () => {
     })
     expect(readonlyBelow('/repo/tree', '/repo', MountMode.WRITE)).toBeNull()
   })
-
   it('readonlyBelow blames the operand for a pattern', async () => {
     const sess = new SessionState({
       sessionId: 'agent',
@@ -366,33 +338,33 @@ describe('the path axis modes', () => {
       return Promise.resolve()
     })
   })
-
-  it('requireMountWritable needs the broad grant', async () => {
+  it('requireMountWritable needs the broad grant', () => {
     const sess = new SessionState({
       sessionId: 'agent',
       mountModes: new Map([['/trello', MountMode.READ]]),
       visibility: { shown: { entries: [{ path: '/trello/board', mode: MountMode.WRITE }] } },
     })
-    await runWithSession(sess, () =>
-      runWithMountGate('/trello', MountMode.WRITE, () => {
-        // The carve-out admits the command, but an id-addressed write
-        // names no path, so only the mount-wide grant counts.
-        expect(() => {
-          requireMountWritable('/trello')
-        }).toThrow(/read-only/)
-        return Promise.resolve()
-      }),
-    )
-    // Unrestricted (no session narrowing) writes pass, and with no
-    // mount bound the check is inert.
-    await runWithMountGate('/trello', MountMode.WRITE, () => {
-      requireMountWritable('/trello')
-      return Promise.resolve()
-    })
-    requireMountWritable('/trello')
+    {
+      const context: IOContext = {
+        ...ioContext(sess, null, null),
+        mountGate: ['/trello', MountMode.WRITE],
+      }
+      // The carve-out admits the command, but an id-addressed write
+      // names no path, so only the mount-wide grant counts.
+      expect(() => {
+        requireMountWritable(context)
+      }).toThrow(/read-only/)
+    }
+    {
+      const context: IOContext = {
+        ...ioContext(null, null, null),
+        mountGate: ['/trello', MountMode.WRITE],
+      }
+      requireMountWritable(context)
+    }
+    requireMountWritable(undefined)
   })
 })
-
 describe('the per-operand hide gate', () => {
   it('hiddenUnder answers per operand', async () => {
     const sess = new SessionState({
@@ -407,7 +379,6 @@ describe('the per-operand hide gate', () => {
     })
     expect(hiddenUnder(sessionVisibility(), '/repo')).toBe(false)
   })
-
   it('a show reaches the session predicate', () => {
     const sess = new SessionState({
       sessionId: 'agent',
@@ -419,42 +390,5 @@ describe('the per-operand hide gate', () => {
     expect(pathVisible(sess.visibility, '/repo/public/index.html')).toBe(true)
     expect(pathVisible(sess.visibility, '/repo')).toBe(true)
     expect(pathVisible(sess.visibility, '/repo/secrets')).toBe(false)
-  })
-})
-
-describe('the admission binding', () => {
-  it('is scoped to one command and hands the outer one back', async () => {
-    const gate = (scoped: boolean) => ({
-      scoped,
-      scopes: () => scoped,
-      granted: [],
-      check: () => undefined,
-      refuses: () => false,
-    })
-    expect(getAdmission()).toBeNull()
-    const outer = gate(true)
-    await runWithAdmission(outer, async () => {
-      expect(getAdmission()).toBe(outer)
-      // A nested line binds its own and hands the outer one back.
-      const inner = gate(false)
-      await runWithAdmission(inner, () => {
-        expect(getAdmission()).toBe(inner)
-        return Promise.resolve()
-      })
-      expect(getAdmission()).toBe(outer)
-    })
-    expect(getAdmission()).toBeNull()
-  })
-})
-
-describe('the op-policies binding', () => {
-  it('is scoped to one command', async () => {
-    expect(getOpPolicies()).toBeNull()
-    const policies = new Policies([])
-    await runWithOpPolicies(policies, () => {
-      expect(getOpPolicies()).toBe(policies)
-      return Promise.resolve()
-    })
-    expect(getOpPolicies()).toBeNull()
   })
 })

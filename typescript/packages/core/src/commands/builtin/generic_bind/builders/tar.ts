@@ -22,8 +22,8 @@ import { isDirOf, relayIsDirOf, walkOf } from '../archive_io.ts'
 
 const tar: BuilderFn = async (ops, accessor, paths, texts, opts) => {
   const idx = opts.index ?? undefined
-  const write = requireOp(ops.write, 'write')
-  const mkdir = requireOp(ops.mkdir, 'mkdir')
+  const write = requireOp(ops, 'write')
+  const mkdir = requireOp(ops, 'mkdir')
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   const stat = async (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, idx)
   const dispatch = opts.dispatch

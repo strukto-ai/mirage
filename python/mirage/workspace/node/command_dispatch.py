@@ -22,10 +22,6 @@ from mirage.context import (
     RedirectOpener,
     redirect_opener_for,
     redirect_paths_for,
-    reset_admission,
-    reset_op_policies,
-    set_admission,
-    set_op_policies,
 )
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
@@ -600,12 +596,6 @@ async def _run_argv(
         return None, IOResult(exit_code=1), ExecutionNode(exit_code=1)
 
     # ── run ────────────────────────────────────
-    # The admitted command's gate is bound for its run and reset after,
-    # so its own I/O can ask about the entries the gate did not see and
-    # a nested line binds its own (see ``Admitted``). The workspace's
-    # policies bind in the same window, whether or not a gate judged the
-    # line, so the command tier's policy guard can fire pre_vfs for the
-    # backend I/O a handler performs.
     context = dataclasses.replace(context, admission=admitted)
     dispatch = bind_dispatch(
         dispatch,
@@ -613,51 +603,24 @@ async def _run_argv(
             session, admitted, registry.policies, context.frame.recorder
         ),
     )
-    ptoken = set_op_policies(registry.policies)
-    try:
-        if admitted is None:
-            return await _route_argv(
-                recurse,
-                dispatch,
-                registry,
-                namespace,
-                execute_fn,
-                argv,
-                context,
-                stdin,
-                call_stack,
-                job_table,
-                cancel,
-                routing_decision,
-                row,
-                agent_id,
-                claimant.line if claimant is not None else None,
-                sink,
-            )
-        token = set_admission(admitted)
-        try:
-            return await _route_argv(
-                recurse,
-                dispatch,
-                registry,
-                namespace,
-                execute_fn,
-                argv,
-                context,
-                stdin,
-                call_stack,
-                job_table,
-                cancel,
-                routing_decision,
-                row,
-                agent_id,
-                claimant.line if claimant is not None else None,
-                sink,
-            )
-        finally:
-            reset_admission(token)
-    finally:
-        reset_op_policies(ptoken)
+    return await _route_argv(
+        recurse,
+        dispatch,
+        registry,
+        namespace,
+        execute_fn,
+        argv,
+        context,
+        stdin,
+        call_stack,
+        job_table,
+        cancel,
+        routing_decision,
+        row,
+        agent_id,
+        claimant.line if claimant is not None else None,
+        sink,
+    )
 
 
 def unsaid(lines: list[str], said: bytes) -> list[str]:

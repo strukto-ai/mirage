@@ -41,9 +41,9 @@ const rm: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   if (paths.length === 0) return rmWithoutOperands(force)
   const idx = opts.index ?? undefined
   const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
-  const rmR = requireOp(ops.rmR, 'rmR')
-  const rmdir = requireOp(ops.rmdir, 'rmdir')
-  const unlink = requireOp(ops.unlink, 'unlink')
+  const rmR = requireOp(ops, 'rmR')
+  const rmdir = requireOp(ops, 'rmdir')
+  const unlink = requireOp(ops, 'unlink')
   const lines: string[] = []
   const errors: string[] = []
   const links = opts.ns?.links ?? null

@@ -19,8 +19,8 @@ import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapt
 
 const unzip: BuilderFn = async (ops, accessor, paths, texts, opts) => {
   const idx = opts.index ?? undefined
-  const write = requireOp(ops.write, 'write')
-  const mkdir = requireOp(ops.mkdir, 'mkdir')
+  const write = requireOp(ops, 'write')
+  const mkdir = requireOp(ops, 'mkdir')
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   const dispatch = opts.dispatch
   if (dispatch !== undefined) {

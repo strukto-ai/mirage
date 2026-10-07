@@ -33,7 +33,7 @@ export function makeTee<A extends Accessor>(vfs: string, rawIo: CommandIO<A>): R
   ): Promise<CommandFnResult> {
     const io = invocationIo(rawIo, opts)
     const readStream = io.readStream
-    const writeBytes = requireOp(io.write, 'write')
+    const writeBytes = requireOp(io, 'write')
     const resolveGlob = resolveGlobOf(io)
 
     const resolved =

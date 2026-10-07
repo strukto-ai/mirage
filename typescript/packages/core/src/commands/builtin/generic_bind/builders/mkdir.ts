@@ -19,7 +19,7 @@ import { posixPhrase } from '../../../../errors/posix.ts'
 import { errorVirtualPath, fsStrerror, isFsError } from '../../../../errors/fs.ts'
 import { operandSpelling } from '../../../../errors/render.ts'
 import { DEFAULT_DIR_MODE, parseChmod } from '../../../../utils/mode.ts'
-import { DEFAULT_UMASK, sessionUmask, walkProbeFor } from '../../../../context/session_context.ts'
+import { DEFAULT_UMASK, sessionUmask } from '../../../../context/session_context.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { mkdirLinkRefusal } from '../../utils/slash_links.ts'
@@ -66,7 +66,7 @@ async function enterNode<A extends Accessor>(
     if (target === null) return posixPhrase('EEXIST')
     return target.type === FileType.DIRECTORY ? null : posixPhrase('ENOTDIR')
   }
-  const probe = walkProbeFor(path.virtual, context)
+  const probe = context?.walkProbe ?? null
   if (probe !== null) {
     const { exists, isDir } = await entryKind(probe.stat, PathSpec.fromStrPath(node))
     if (exists) return isDir ? null : posixPhrase('ENOTDIR')
@@ -134,7 +134,7 @@ export async function createdNames(
   links: LinkView | null = null,
   context?: IOContext,
 ): Promise<string[]> {
-  const probe = walkProbeFor(path.virtual, context)
+  const probe = context?.walkProbe ?? null
   if (!parents || probe === null) return [operandSpelling(path.virtual, path)]
   const named = PathSpec.fromStrPath(path.virtual)
   const names: string[] = []
@@ -219,7 +219,7 @@ const mkdir: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   if (paths.length === 0) throw missingOperandError('mkdir', null)
   const idx = opts.index ?? undefined
   const { setAttrs } = ops
-  const mkdirOp = requireOp(ops.mkdir, 'mkdir')
+  const mkdirOp = requireOp(ops, 'mkdir')
   let mode: number | null = null
   if (modeText !== null) {
     // Symbolic clauses build on what mirage renders for a new

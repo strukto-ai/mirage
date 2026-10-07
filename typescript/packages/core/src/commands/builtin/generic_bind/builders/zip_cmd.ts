@@ -19,7 +19,7 @@ import { walkOf } from '../archive_io.ts'
 
 const zipCmd: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
-  const write = requireOp(ops.write, 'write')
+  const write = requireOp(ops, 'write')
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   return zipGeneric(resolved, opts, {
     stream: (p) => ops.readStream(accessor, p, idx),

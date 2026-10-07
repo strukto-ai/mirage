@@ -30,7 +30,7 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import missing_operand_error
-from mirage.context import DEFAULT_UMASK, get_walk_probe, session_umask
+from mirage.context import DEFAULT_UMASK, session_umask
 from mirage.context.types import IOContext
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import error_path, fs_strerror
@@ -135,7 +135,7 @@ async def created_names(
         parents (bool): whether ``-p`` makes the missing ancestors.
         links (LinkView | None): the namespace's symlink facts.
     """
-    probe = get_walk_probe(context)
+    probe = context.walk_probe if context is not None else None
     if not parents or probe is None:
         return [operand_spelling(path.virtual, path)]
     named = PathSpec.from_str_path(path.virtual)
@@ -308,7 +308,7 @@ async def _enter_node(
         if target.type != FileType.DIRECTORY:
             return posix_phrase(FsCondition.ENOTDIR)
         return None
-    probe = get_walk_probe(context)
+    probe = context.walk_probe if context is not None else None
     if probe is not None:
         exists, is_dir = await entry_kind(
             probe.stat, PathSpec.from_str_path(node)

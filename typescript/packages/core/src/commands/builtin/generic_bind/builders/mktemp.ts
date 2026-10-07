@@ -24,8 +24,8 @@ const mktemp: BuilderFn = (ops, accessor, _paths, texts, opts) => {
   // dispatcher to whichever mount does. Only a generic run outside a
   // workspace, with no dispatcher and no other mount, writes through this
   // mount's own ops. Mirrors Python's builder.
-  const mkdir = requireOp(ops.mkdir, 'mkdir')
-  const write = requireOp(ops.write, 'write')
+  const mkdir = requireOp(ops, 'mkdir')
+  const write = requireOp(ops, 'write')
   const local = (p: PathSpec): PathSpec =>
     PathSpec.fromStrPath(p.virtual, mountKey(p.virtual, opts.mountPrefix ?? ''))
   return mktempGeneric(

@@ -11,7 +11,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import dataclasses
 import errno
 
@@ -21,14 +20,6 @@ import mirage.commands.builtin.generic_bind.adapter as adapter
 from mirage.accessor.base import NOOPAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.config import CommandOpts
-from mirage.context import (
-    reset_admission,
-    reset_current_session,
-    reset_mount_gate,
-    set_admission,
-    set_current_session,
-    set_mount_gate,
-)
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import OperationNotSupportedError
 from mirage.ops.types import NamespaceView
@@ -47,6 +38,7 @@ from mirage.types import (
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
 from mirage.vfs.types import ContentSearchOps
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.access import io_context
 
 from mirage.commands.builtin.generic_bind.adapter import (  # isort: skip
     CommandIO,
@@ -364,21 +356,16 @@ async def test_dispatch_rule_guard_marks_an_op_with_the_bound_gate():
 
     async def door(op, path, **kwargs):
         seen.append((op, kwargs.get("rule_gate")))
-        return None, None
+        return (None, None)
 
     dispatch = with_dispatch_rule_guard(door)
-    # No gate bound: the op goes to the door unmarked.
     await dispatch("read", _spec("/data/f"))
     gate = _Gate(refused="/data/locked/y")
-    token = set_admission(gate)
-    try:
-        await dispatch("read", _spec("/data/f"), dst=_spec("/data/g"))
-        # A metadata op is never judged: deny is present and refused.
-        await dispatch("stat", _spec("/data/f"))
-    finally:
-        reset_admission(token)
+    context = io_context(None, gate)
+    dispatch = with_dispatch_rule_guard(door, context)
+    await dispatch("read", _spec("/data/f"), dst=_spec("/data/g"))
+    await dispatch("stat", _spec("/data/f"))
     assert seen == [("read", None), ("read", gate), ("stat", None)]
-    # The wrapper judges nothing itself: the door does, on its own paths.
     assert gate.asked == []
 
 
@@ -439,12 +426,14 @@ async def _probe_chunks(calls: list[tuple[str, ...]], path: PathSpec):
 
 
 @pytest.mark.asyncio
-async def test_command_path_guard_admits_before_a_warm_serve(monkeypatch):
+async def test_command_path_guard_admits_before_a_warm_serve():
     gate = _Gate("/data/secret")
-    monkeypatch.setattr(adapter, "get_admission", lambda context=None: gate)
+    context = io_context(None, gate)
     calls: list[tuple[str, ...]] = []
     ops = with_command_guards(
-        dataclasses.replace(_policy_probe_ops(calls), read_bytes=_warm_read)
+        dataclasses.replace(
+            _policy_probe_ops(calls), read_bytes=_warm_read, io_context=context
+        )
     )
     with pytest.raises(PermissionError):
         await ops.read_bytes(NOOPAccessor(), _spec("/data/secret"))
@@ -974,47 +963,42 @@ async def test_capability_and_mode_share_path_guards(
     )
 
     async def regions(accessor, path, index=None):
-        # The regions stand as directories, so a mkdir of `f` inside
-        # one is a real create and answers the region's own refusal
-        # (a missing parent would be ENOENT, as GNU says).
         if path.virtual in ("/data/locked", "/data/hidden", "/data/build"):
             return FileStat(name=path.virtual, type=FileType.DIRECTORY)
         raise FileNotFoundError(path.virtual)
 
-    st = set_current_session(session)
-    mt = set_mount_gate("/data", MountMode.WRITE)
-    try:
-        ops = with_command_guards(
-            make_io(
-                stat=regions, **{operation.value: backend} if available else {}
-            )
+    context = dataclasses.replace(
+        io_context(session, policies=None),
+        mount_gate=("/data", MountMode.WRITE),
+    )
+    ops = with_command_guards(
+        make_io(
+            stat=regions,
+            **{operation.value: backend} if available else {},
+            io_context=context,
         )
-        path = _spec(f"/data/{region}/f")
-        args = [NOOPAccessor(), path]
-        if operation in (Operation.COPY, Operation.RENAME):
-            args = [NOOPAccessor(), _spec("/data/build/src"), path]
-        if available and region == "build":
+    )
+    path = _spec(f"/data/{region}/f")
+    args = [NOOPAccessor(), path]
+    if operation in (Operation.COPY, Operation.RENAME):
+        args = [NOOPAccessor(), _spec("/data/build/src"), path]
+    if available and region == "build":
+        await ops.require(operation)(*args)
+        assert len(calls) == 1
+    else:
+        with pytest.raises(OSError) as error:
             await ops.require(operation)(*args)
-            assert len(calls) == 1
-        else:
-            with pytest.raises(OSError) as error:
-                await ops.require(operation)(*args)
-            assert error.value.errno == expected
-            named = path
-            if operation == Operation.RENAME and region == "build":
-                named = args[1]
-            assert error.value.filename == named.virtual
-            if expected == errno.EROFS:
-                assert (
-                    format_fs_error("probe", error.value)
-                    == (
-                        f"probe: {path.virtual}: Read-only file system\n"
-                    ).encode()
-                )
-            assert calls == []
-    finally:
-        reset_mount_gate(mt)
-        reset_current_session(st)
+        assert error.value.errno == expected
+        named = path
+        if operation == Operation.RENAME and region == "build":
+            named = args[1]
+        assert error.value.filename == named.virtual
+        if expected == errno.EROFS:
+            assert (
+                format_fs_error("probe", error.value)
+                == f"probe: {path.virtual}: Read-only file system\n".encode()
+            )
+        assert calls == []
 
 
 @pytest.mark.asyncio
@@ -1038,47 +1022,42 @@ async def test_copy_reads_source_but_rename_mutates_source_and_subtrees(
             )
         ),
     )
-    st = set_current_session(session)
-    mt = set_mount_gate("/data", MountMode.WRITE)
-    try:
-        ops = with_command_guards(
-            make_io(
-                **{"copy": backend, "rename": backend} if available else {}
-            )
+    context = dataclasses.replace(
+        io_context(session, policies=None),
+        mount_gate=("/data", MountMode.WRITE),
+    )
+    ops = with_command_guards(
+        make_io(
+            **{"copy": backend, "rename": backend} if available else {},
+            io_context=context,
         )
-        src, dst = _spec("/data/src"), _spec("/data/dst")
-        if available:
+    )
+    src, dst = (_spec("/data/src"), _spec("/data/dst"))
+    if available:
+        await ops.require(Operation.COPY)(NOOPAccessor(), src, dst)
+    else:
+        with pytest.raises(OperationNotSupportedError) as error:
             await ops.require(Operation.COPY)(NOOPAccessor(), src, dst)
-        else:
-            with pytest.raises(OperationNotSupportedError) as error:
-                await ops.require(Operation.COPY)(NOOPAccessor(), src, dst)
-            assert error.value.filename == dst.virtual
-        for source, blame in [
-            (src, src.virtual),
-            (_spec("/data/tree"), "/data/tree/locked"),
-        ]:
-            with pytest.raises(OSError) as error:
-                await ops.require(Operation.RENAME)(
-                    NOOPAccessor(), source, dst
-                )
-            assert (error.value.errno, error.value.filename) == (
-                errno.EROFS,
-                blame,
-            )
-        assert len(calls) == int(available)
-    finally:
-        reset_mount_gate(mt)
-        reset_current_session(st)
+        assert error.value.filename == dst.virtual
+    for source, blame in [
+        (src, src.virtual),
+        (_spec("/data/tree"), "/data/tree/locked"),
+    ]:
+        with pytest.raises(OSError) as error:
+            await ops.require(Operation.RENAME)(NOOPAccessor(), source, dst)
+        assert (error.value.errno, error.value.filename) == (
+            errno.EROFS,
+            blame,
+        )
+    assert len(calls) == int(available)
 
 
 @pytest.mark.asyncio
-async def test_missing_copy_checks_command_paths_before_capability_failure(
-    monkeypatch,
-):
+async def test_missing_copy_checks_command_paths_before_capability_failure():
     gate = _Gate("/data/secret")
-    monkeypatch.setattr(adapter, "get_admission", lambda context=None: gate)
+    context = io_context(None, gate)
     with pytest.raises(PermissionError):
-        await make_io().require(Operation.COPY)(
+        await make_io(io_context=context).require(Operation.COPY)(
             NOOPAccessor(), _spec("/data/secret"), _spec("/data/dst")
         )
     assert gate.asked == ["/data/secret"]
@@ -1132,87 +1111,66 @@ async def test_mode_guard_refuses_a_taken_name_on_a_writable_mount(
     async def mkdir(accessor, path, parents=False):
         made.append(path.virtual)
 
-    ops = adapter.with_command_guards(make_io(stat=stat, mkdir=mkdir))
-    gtoken = set_mount_gate("/data", MountMode.WRITE)
-    try:
-        call = ops.mkdir(NOOPAccessor(), _spec("/data/d"), parents=parents)
-        if refused:
-            with pytest.raises(FileExistsError):
-                await call
-        else:
+    context = dataclasses.replace(
+        io_context(None, policies=None), mount_gate=("/data", MountMode.WRITE)
+    )
+    ops = adapter.with_command_guards(
+        make_io(stat=stat, mkdir=mkdir, io_context=context)
+    )
+    call = ops.mkdir(NOOPAccessor(), _spec("/data/d"), parents=parents)
+    if refused:
+        with pytest.raises(FileExistsError):
             await call
-    finally:
-        reset_mount_gate(gtoken)
+    else:
+        await call
     assert made == ([] if refused else ["/data/d"])
 
 
 @pytest.mark.asyncio
 async def test_policy_guard_admits_slots_and_leaves_stat_alone():
     from mirage.commands.builtin.generic_bind.adapter import with_policy_guard
-    from mirage.context import (
-        reset_mount_gate,
-        reset_op_policies,
-        set_mount_gate,
-        set_op_policies,
-    )
     from mirage.policy.policies import Policies
     from mirage.types import MountMode
 
     calls: list[tuple[str, ...]] = []
     raw = _policy_probe_ops(calls)
     acc = NOOPAccessor()
-    # No binding: every slot runs as is, and no hook fires.
     assert (
         await with_policy_guard(raw).read_bytes(acc, _spec("/data/secret"))
         == b"x"
     )
     calls.clear()
-
     policy = _SealedRead("/data/secret")
-    ptoken = set_op_policies(Policies([policy]))
-    gtoken = set_mount_gate("/data", MountMode.WRITE)
-    try:
-        ops = with_policy_guard(raw)
-        with pytest.raises(PermissionError) as excinfo:
-            await ops.read_bytes(acc, _spec("/data/secret"))
-        assert excinfo.value.errno == errno.EACCES
-        assert ("read", "/data/secret") not in calls
-        # The stream gates before its first chunk.
-        with pytest.raises(PermissionError):
-            async for _ in ops.read_stream(acc, _spec("/data/secret")):
-                pass
-        assert ("stream", "/data/secret") not in calls
-        # stat is not a guarded slot: deny is present and refused.
-        assert (await ops.stat(acc, _spec("/data/secret"))).size == 1
-        # readdir asks about the directory it lists.
-        assert await ops.readdir(acc, _spec("/data/dir")) == ["a"]
-        # A copy's source is a read; its destination is a write.
-        await ops.copy(acc, _spec("/data/src"), _spec("/data/dst"))
-        # A write slot asks with write=True.
-        await ops.unlink(acc, _spec("/data/gone"))
-    finally:
-        reset_mount_gate(gtoken)
-        reset_op_policies(ptoken)
+    policies = Policies([policy])
+    context = dataclasses.replace(
+        io_context(None, policies=policies),
+        mount_gate=("/data", MountMode.WRITE),
+    )
+    ops = with_policy_guard(dataclasses.replace(raw, io_context=context))
+    with pytest.raises(PermissionError) as excinfo:
+        await ops.read_bytes(acc, _spec("/data/secret"))
+    assert excinfo.value.errno == errno.EACCES
+    assert ("read", "/data/secret") not in calls
+    with pytest.raises(PermissionError):
+        async for _ in ops.read_stream(acc, _spec("/data/secret")):
+            pass
+    assert ("stream", "/data/secret") not in calls
+    assert (await ops.stat(acc, _spec("/data/secret"))).size == 1
+    assert await ops.readdir(acc, _spec("/data/dir")) == ["a"]
+    await ops.copy(acc, _spec("/data/src"), _spec("/data/dst"))
+    await ops.unlink(acc, _spec("/data/gone"))
     assert ("read_bytes", "/data/secret", False) in policy.asked
     assert ("read_stream", "/data/secret", False) in policy.asked
     assert ("readdir", "/data/dir", False) in policy.asked
     assert ("copy", "/data/src", False) in policy.asked
     assert ("copy", "/data/dst", True) in policy.asked
     assert ("unlink", "/data/gone", True) in policy.asked
-    assert not any(op == "stat" for op, _, _ in policy.asked)
+    assert not any((op == "stat" for op, _, _ in policy.asked))
 
 
 @pytest.mark.asyncio
 async def test_policy_guard_admits_before_a_warm_serve():
-    # The guard wraps outside the cache tier (`finish` in the factory),
-    # so a warm reader below it never answers a refused read.
     from mirage.commands.builtin.generic_bind.adapter import with_policy_guard
-    from mirage.context import (
-        reset_mount_gate,
-        reset_op_policies,
-        set_mount_gate,
-        set_op_policies,
-    )
     from mirage.policy.policies import Policies
     from mirage.types import MountMode
 
@@ -1220,30 +1178,20 @@ async def test_policy_guard_admits_before_a_warm_serve():
     warm = dataclasses.replace(_policy_probe_ops(calls), read_bytes=_warm_read)
     acc = NOOPAccessor()
     policy = _SealedRead("/data/secret")
-    ptoken = set_op_policies(Policies([policy]))
-    gtoken = set_mount_gate("/data", MountMode.WRITE)
-    try:
-        ops = with_policy_guard(warm)
-        with pytest.raises(PermissionError):
-            await ops.read_bytes(acc, _spec("/data/secret"))
-        assert await ops.read_bytes(acc, _spec("/data/open")) == b"warm"
-    finally:
-        reset_mount_gate(gtoken)
-        reset_op_policies(ptoken)
+    policies = Policies([policy])
+    context = dataclasses.replace(
+        io_context(None, policies=policies),
+        mount_gate=("/data", MountMode.WRITE),
+    )
+    ops = with_policy_guard(dataclasses.replace(warm, io_context=context))
+    with pytest.raises(PermissionError):
+        await ops.read_bytes(acc, _spec("/data/secret"))
+    assert await ops.read_bytes(acc, _spec("/data/open")) == b"warm"
 
 
 @pytest.mark.asyncio
 async def test_policy_guard_wrap_time_capture_covers_late_drains():
-    # head/tail/wc bind lazy readers the pipeline drains after dispatch
-    # has reset the context; the guard captured at wrap time still
-    # answers (_live_policy_scope).
     from mirage.commands.builtin.generic_bind.adapter import with_policy_guard
-    from mirage.context import (
-        reset_mount_gate,
-        reset_op_policies,
-        set_mount_gate,
-        set_op_policies,
-    )
     from mirage.policy.policies import Policies
     from mirage.types import MountMode
 
@@ -1251,14 +1199,12 @@ async def test_policy_guard_wrap_time_capture_covers_late_drains():
     raw = _policy_probe_ops(calls)
     acc = NOOPAccessor()
     policy = _SealedRead("/data/secret")
-    ptoken = set_op_policies(Policies([policy]))
-    gtoken = set_mount_gate("/data", MountMode.WRITE)
-    try:
-        ops = with_policy_guard(raw)
-    finally:
-        reset_mount_gate(gtoken)
-        reset_op_policies(ptoken)
-    # Both the slot call and the drain happen outside the window now.
+    policies = Policies([policy])
+    context = dataclasses.replace(
+        io_context(None, policies=policies),
+        mount_gate=("/data", MountMode.WRITE),
+    )
+    ops = with_policy_guard(dataclasses.replace(raw, io_context=context))
     with pytest.raises(PermissionError):
         async for _ in ops.read_stream(acc, _spec("/data/secret")):
             pass

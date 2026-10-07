@@ -21,12 +21,10 @@ from mirage.context.types import IOContext
 from mirage.errors.fs import eacces, enoent, erofs
 from mirage.types import (
     MOUNT_MODE_RANK,
-    EntryGate,
     MountMode,
     PathSpec,
     Refusal,
     Visibility,
-    WalkProbe,
     weaker_mode,
 )
 from mirage.utils.hidden import (
@@ -40,7 +38,6 @@ from mirage.utils.path import parent
 
 if TYPE_CHECKING:
     from mirage.policy.decisions import Decisions
-    from mirage.policy.policies import Policies
     from mirage.policy.types import DryRun, HandOff, VfsExplanation
     from mirage.workspace.session.manager import SessionManager
     from mirage.workspace.session.session import SessionState
@@ -252,119 +249,6 @@ def hidden_refusal(
     return enoent(virtual)
 
 
-_current_admission: ContextVar["EntryGate | None"] = ContextVar(
-    "mirage_current_admission",
-    default=None,
-)
-
-
-def set_admission(gate: "EntryGate") -> Token[Any]:
-    """Bind the admitted command's entry gate to the current async
-    context, for the run of that one command.
-
-    Set by the dispatcher once the gate let the command through and
-    reset when the command returns, so a nested line (``xargs``,
-    ``find -exec``, ``eval``) binds its own and the outer command gets
-    its gate back, and a pipeline stage in its own task never sees a
-    sibling's.
-
-    Args:
-        gate (EntryGate): the admitted command's gate.
-    """
-    return _current_admission.set(gate)
-
-
-def reset_admission(token: Token[Any]) -> None:
-    """Restore the previous admission binding."""
-    _current_admission.reset(token)
-
-
-def get_admission(context: IOContext | None = None) -> "EntryGate | None":
-    """The entry gate of the command running in this context, None
-    when no admitted command is bound (a command constructed outside
-    the dispatcher, or a line no gate judged)."""
-    if context is not None:
-        return context.admission
-    return _current_admission.get()
-
-
-_op_policies: ContextVar["Policies | None"] = ContextVar(
-    "mirage_op_policies",
-    default=None,
-)
-
-
-def set_op_policies(policies: "Policies") -> Token[Any]:
-    """Bind the workspace's admission policies to the current async
-    context, for the run of one command.
-
-    Set by command dispatch around routing, the same window the
-    admission gate binds in, so the command tier's policy guard can
-    fire ``pre_vfs`` for the backend I/O a handler performs. Read at
-    call time by ``with_policy_guard``; unset outside a dispatched
-    command (a generic invoked directly in a test), where the guard
-    is inert.
-
-    Args:
-        policies (Policies): the workspace's admission policies.
-    """
-    return _op_policies.set(policies)
-
-
-def reset_op_policies(token: Token[Any]) -> None:
-    """Restore the previous policies binding."""
-    _op_policies.reset(token)
-
-
-def get_op_policies(context: IOContext | None = None) -> "Policies | None":
-    """The policies bound to the running command, None outside one."""
-    if context is not None:
-        return context.policies
-    return _op_policies.get()
-
-
-_current_mount_gate: ContextVar[tuple[str, MountMode] | None] = ContextVar(
-    "mirage_current_mount_gate",
-    default=None,
-)
-
-
-def set_mount_gate(prefix: str, mode: MountMode) -> Token[Any]:
-    """Bind the executing mount's prefix and configured mode to the
-    current async context, for the run of one command.
-
-    Set by ``Mount.execute_cmd`` around the handler, so the mode guard
-    on the command tier's I/O can resolve ``effective_path_mode`` for
-    every path a handler mutates: a path-guarded command is refused only
-    at its writes, the write-command gate admits any other when a shown
-    subtree grants writes, and this binding is how each individual write
-    is then held to its own region's mode.
-
-    Args:
-        prefix (str): the mount's prefix.
-        mode (MountMode): the mount's configured mode.
-    """
-    return _current_mount_gate.set((prefix, mode))
-
-
-def reset_mount_gate(token: Token[Any]) -> None:
-    """Restore the previous mount binding."""
-    _current_mount_gate.reset(token)
-
-
-def get_mount_gate(
-    context: IOContext | None = None,
-) -> tuple[str, MountMode] | None:
-    """The executing mount's (prefix, configured mode), None outside a
-    mount's command (a generic invoked directly in a test, or the
-    scratch tier)."""
-    return (
-        context.mount_gate
-        if context is not None
-        else _current_mount_gate.get()
-    )
-
-
 # Where a refusal a door raises is noted for the line running it.
 RefusalSink = Callable[[Refusal], None]
 
@@ -484,45 +368,6 @@ def note_refusal(refusal: Refusal) -> None:
         sink(refusal)
 
 
-_current_walk_probe: ContextVar[WalkProbe | None] = ContextVar(
-    "mirage_current_walk_probe",
-    default=None,
-)
-
-
-def set_walk_probe(probe: WalkProbe) -> Token[Any]:
-    """Bind what a command's dot walks read, for the run of one command.
-
-    Set by ``Mount.execute_cmd`` around the handler, beside the mount
-    gate: the command tier reaches its backend without passing the
-    dispatcher's door, so the walk guard on its I/O proves an operand's
-    ``.`` and ``..`` with the door's stat and link follow through this
-    binding.
-
-    Args:
-        probe (WalkProbe): the door's stat and the namespace's follow.
-    """
-    return _current_walk_probe.set(probe)
-
-
-def reset_walk_probe(token: Token[Any]) -> None:
-    """Restore the previous walk-probe binding."""
-    _current_walk_probe.reset(token)
-
-
-def get_walk_probe(context: IOContext | None = None) -> WalkProbe | None:
-    """The walk probe bound to the running command, None outside a
-    mount's command (a generic invoked directly in a test)."""
-    return (
-        context.walk_probe
-        if context is not None
-        else _current_walk_probe.get()
-    )
-
-
-# Opens a statement's write targets as bash does before the command
-# runs, given the admitted command's name and arguments; False when one
-# cannot be opened.
 RedirectOpener = Callable[[str, tuple[str, ...]], Awaitable[bool]]
 
 _redirect_paths: ContextVar[
@@ -887,7 +732,7 @@ def require_paths_writable(
                 raise erofs(blame)
 
 
-def require_mount_writable() -> None:
+def require_mount_writable(context: IOContext | None) -> None:
     """Refuse a service-addressed write unless the whole mount's
     effective mode grants writes.
 
@@ -899,11 +744,11 @@ def require_mount_writable() -> None:
     toward refusal. Inert outside a mount's command.
 
     Args:
-        None
+        context (IOContext | None): the calling command's access facts.
     """
-    gate = get_mount_gate()
+    gate = context.mount_gate if context is not None else None
     if gate is None:
         return
     prefix, mode = gate
-    if effective_mount_mode(prefix, mode) == MountMode.READ:
+    if effective_mount_mode(prefix, mode, context) == MountMode.READ:
         raise erofs(prefix)

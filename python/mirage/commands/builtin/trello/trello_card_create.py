@@ -70,7 +70,7 @@ async def trello_card_create(
         )
     # A card write is addressed by id, not path, so only the mount-wide
     # grant can admit it (a write-granting carve-out names no card).
-    require_mount_writable()
+    require_mount_writable(opts.io_context)
     await require_list(accessor, list_id)
     card = await card_create(
         config,

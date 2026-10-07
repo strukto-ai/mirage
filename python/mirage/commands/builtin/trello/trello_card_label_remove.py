@@ -51,7 +51,7 @@ async def trello_card_label_remove(
         raise ValueError("--label_id is required")
     # A card write is addressed by id, not path, so only the mount-wide
     # grant can admit it (a write-granting carve-out names no card).
-    require_mount_writable()
+    require_mount_writable(opts.io_context)
     await require_card(accessor, card_id)
     card = await card_remove_label(
         config, card_id=card_id, label_id=label_id, session=accessor.pool

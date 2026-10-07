@@ -17,7 +17,7 @@ import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapt
 
 const xxd: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
-  const write = requireOp(ops.write, 'write')
+  const write = requireOp(ops, 'write')
   const pwrite = ops.pwrite
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   return xxdGeneric(

@@ -43,13 +43,14 @@ export const BUILDER: Builder = {
   write: true,
   fn: async (ops, accessor, paths, _texts, opts) => {
     const { dirCopy, find } = ops
+    const { mkdir: nativeMkdir, ...withoutMkdir } = ops
     // Without a file transfer capability, creating directories would
     // leave an uncopyable destination tree. Keep the refusal guarded.
     const mkdir =
       ops.copy === undefined && ops.write === undefined
-        ? requireOp<NonNullable<CommandIO['mkdir']>>(undefined, 'mkdir')
-        : ops.mkdir
-    const copy = requireOp(ops.copy, 'copy')
+        ? requireOp(withoutMkdir, 'mkdir')
+        : nativeMkdir
+    const copy = requireOp(ops, 'copy')
     const idx = opts.index ?? undefined
     const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
     // No native find op: fall back to a readdir walk (mirrors Python's
@@ -84,7 +85,7 @@ export const BUILDER: Builder = {
         ? {
             readBytes: (p: PathSpec) => ops.readBytes(accessor, p, idx),
             write: (p: PathSpec, data: Uint8Array) => write(accessor, p, data),
-            mkdir: (p: PathSpec) => requireOp(ops.mkdir, 'mkdir')(accessor, p),
+            mkdir: (p: PathSpec) => requireOp(ops, 'mkdir')(accessor, p),
             readdir: (p: PathSpec) => ops.readdir(accessor, p, idx),
           }
         : {

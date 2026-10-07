@@ -3,7 +3,7 @@ import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapt
 
 const truncate: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   const flags = parseFlags(opts.flags)
-  const truncateOp = requireOp(ops.truncate, 'truncate')
+  const truncateOp = requireOp(ops, 'truncate')
   const index = opts.index ?? undefined
   const resolved = await resolveGlobOf(ops)(accessor, paths, index)
   return truncateGeneric(

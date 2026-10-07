@@ -26,7 +26,6 @@ from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
 from mirage.context import (
     effective_path_mode,
-    get_admission,
     strongest_mode_under,
 )
 from mirage.context.types import IOContext
@@ -253,12 +252,6 @@ class MountRegistry:
 
     def _attach_manager(self, m: MountEntry) -> None:
         async def gate(key: str) -> bool:
-            # The cache is shared by every session: a warm entry the
-            # running command may not read goes cold to the guarded read,
-            # which refuses it, before any freshness probe.
-            admission = get_admission()
-            if admission is not None and admission.refuses(key):
-                return False
             return await self._may_serve_cached(m, key)
 
         async def listing_gate(folder: str, version: str | None) -> bool:

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
 from dataclasses import replace
 
 import pytest
@@ -20,14 +21,9 @@ from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.generic.rm_cmd import make_rm
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
-from mirage.context import (
-    reset_current_session,
-    reset_mount_gate,
-    set_current_session,
-    set_mount_gate,
-)
 from mirage.types import MountMode, PathSpec, ShowEntry, ShownPaths, Visibility
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.access import io_context
 
 
 class FakeAccessor:
@@ -99,9 +95,6 @@ async def test_rm_enoent_reports_and_continues_without_force():
 
 @pytest.mark.asyncio
 async def test_rm_holds_each_path_to_its_regions_mode():
-    # The bound unlink rides the same guard chain as the generic rm's
-    # slots: the command gate admits rm because one region grants
-    # writes, and each unlink still answers for its own path.
     files = {"/gdocs/plain.json", "/gdocs/build/a.json"}
     calls: list[tuple] = []
     rm = _make_rm(files, calls)
@@ -114,26 +107,23 @@ async def test_rm_holds_each_path_to_its_regions_mode():
             )
         ),
     )
-    session_token = set_current_session(sess)
-    gate_token = set_mount_gate("/gdocs", MountMode.WRITE)
-    try:
-        _, result = await rm(
-            FakeAccessor(),
-            [
-                PathSpec.from_str_path("/gdocs/plain.json"),
-                PathSpec.from_str_path("/gdocs/build/a.json"),
-            ],
-            [],
-            CommandOpts(),
-        )
-    finally:
-        reset_mount_gate(gate_token)
-        reset_current_session(session_token)
-    assert result.exit_code == 1
-    assert result.stderr == (
-        b"rm: cannot remove '/gdocs/plain.json': Read-only file system\n"
+    context = dataclasses.replace(
+        io_context(sess, policies=None), mount_gate=("/gdocs", MountMode.WRITE)
     )
-    # The refused path never reached the backend; the granted one did.
+    _, result = await rm(
+        FakeAccessor(),
+        [
+            PathSpec.from_str_path("/gdocs/plain.json"),
+            PathSpec.from_str_path("/gdocs/build/a.json"),
+        ],
+        [],
+        CommandOpts(io_context=context),
+    )
+    assert result.exit_code == 1
+    assert (
+        result.stderr
+        == b"rm: cannot remove '/gdocs/plain.json': Read-only file system\n"
+    )
     assert [c[1].virtual for c in calls] == ["/gdocs/build/a.json"]
     assert files == {"/gdocs/plain.json"}
 

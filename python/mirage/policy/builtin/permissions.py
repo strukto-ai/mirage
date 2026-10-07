@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.context.session_context import (
-    get_admission,
     line_running,
     redirect_target_judged,
 )
@@ -101,7 +100,7 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
         # is spent as the command is admitted, so by the time its own
         # walk reaches this door the session holds nothing and only the
         # bound gate still remembers the nod.
-        gate = get_admission(self._context)
+        gate = self._context.admission if self._context is not None else None
         granted = gate.granted if gate is not None else ()
         ruled = op_ruling(
             self._sessions.commands_of(ctx.session_id), ctx, granted

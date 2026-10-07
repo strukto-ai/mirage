@@ -31,7 +31,7 @@ const unlink: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   }
   const p = resolved[0]
   if (p === undefined) return [null, new IOResult()]
-  const unlinkOp = requireOp(ops.unlink, 'unlink')
+  const unlinkOp = requireOp(ops, 'unlink')
   const enc = new TextEncoder()
   const links = opts.ns?.links ?? null
   // unlink(2) never follows, so a trailing slash on a link operand is

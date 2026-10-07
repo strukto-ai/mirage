@@ -23,8 +23,6 @@ import {
   type RedirectOpener,
   redirectOpenerFor,
   redirectPathsFor,
-  runWithAdmission,
-  runWithOpPolicies,
 } from '../../context/session_context.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
@@ -603,41 +601,31 @@ async function runArgv(
     return [null, new IOResult({ exitCode: 1 }), new ExecutionNode({ exitCode: 1 })]
   }
 
-  // The admitted command's gate is bound for its run and handed back
-  // after, so its own I/O can ask about the entries the gate did not see
-  // and a nested line binds its own (see `Admitted`). The workspace's
-  // policies bind in the same window, whether or not a gate judged the
-  // line, so the command tier's policy guard can fire preVfs for the
-  // backend I/O a handler performs.
   context = new EvaluationContext(context.session, context.frame, context.parent, admitted)
   dispatch = bindDispatch(
     dispatch,
     ioContext(session, admitted, registry.policies, context.frame.recorder),
   )
-  const route = () =>
-    routeArgv(
-      recurse,
-      dispatch,
-      registry,
-      namespace,
-      executeFn,
-      argv,
-      context,
-      stdin,
-      callStack,
-      jobTable,
-      runtimeBindings,
-      routingDecision,
-      signal,
-      row,
-      agentId,
-      claimant?.line ?? null,
-      sink,
-      parser,
-    )
-  const gated = admitted
-  if (gated === null) return runWithOpPolicies(registry.policies, route)
-  return runWithOpPolicies(registry.policies, () => runWithAdmission(gated, route))
+  return routeArgv(
+    recurse,
+    dispatch,
+    registry,
+    namespace,
+    executeFn,
+    argv,
+    context,
+    stdin,
+    callStack,
+    jobTable,
+    runtimeBindings,
+    routingDecision,
+    signal,
+    row,
+    agentId,
+    claimant?.line ?? null,
+    sink,
+    parser,
+  )
 }
 
 // Drop the refusal lines the command tier already wrote.

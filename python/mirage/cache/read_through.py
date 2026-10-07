@@ -19,7 +19,6 @@ from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.cache.context import CacheInvalidator, active_cache_manager
-from mirage.context.session_context import get_admission
 from mirage.context.types import IOContext
 from mirage.types import (
     EntryGate,
@@ -121,7 +120,9 @@ def cache_aware_bound_stream(
         path: PathSpec, *args: Any, **kwargs: Any
     ) -> AsyncIterator[bytes]:
         manager = _serving(
-            active_cache_manager(), get_admission(context), path
+            active_cache_manager(),
+            (context.admission if context is not None else None),
+            path,
         )
         return _serve_stream(
             manager, partial(raw, path, *args, **kwargs), path
@@ -173,7 +174,9 @@ def cache_aware_bound_bytes(
 
     async def reader(path: PathSpec, *args: Any, **kwargs: Any) -> bytes:
         manager = _serving(
-            active_cache_manager(), get_admission(context), path
+            active_cache_manager(),
+            (context.admission if context is not None else None),
+            path,
         )
         if manager is not None:
             cached = await manager.cached_bytes(path)
@@ -212,7 +215,7 @@ def cache_aware_read(
         raw (PolymorphicReadFn): bound bytes / awaitable / stream reader.
     """
     bound = active_cache_manager()
-    gate = get_admission(context)
+    gate = context.admission if context is not None else None
 
     async def reader(
         path: PathSpec, *args: Any, **kwargs: Any

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
 from typing import cast
 
 import pytest
@@ -21,12 +22,6 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.object_store import make_object_store_commands
 from mirage.commands.config import CommandOpts
-from mirage.context import (
-    reset_current_session,
-    reset_mount_gate,
-    set_current_session,
-    set_mount_gate,
-)
 from mirage.types import (
     FileStat,
     FileType,
@@ -37,6 +32,7 @@ from mirage.types import (
     Visibility,
 )
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.access import io_context
 
 
 async def _readdir(
@@ -97,10 +93,6 @@ def _tee(writes: list[str]):
 
 @pytest.mark.asyncio
 async def test_tee_holds_each_path_to_its_regions_mode():
-    # The override rides the same guard chain as the generic it
-    # replaces: the command gate admits tee because one region grants
-    # writes, and the write below the read-only cap still refuses
-    # before the backend sees it.
     writes: list[str] = []
     tee = _tee(writes)
     sess = SessionState(
@@ -112,18 +104,15 @@ async def test_tee_holds_each_path_to_its_regions_mode():
             )
         ),
     )
-    session_token = set_current_session(sess)
-    gate_token = set_mount_gate("/s3", MountMode.WRITE)
-    try:
-        _, result = await tee(
-            cast(Accessor, object()),
-            [PathSpec.from_str_path("/s3/data.txt")],
-            [],
-            CommandOpts(index=NULL_INDEX),
-        )
-    finally:
-        reset_mount_gate(gate_token)
-        reset_current_session(session_token)
+    context = dataclasses.replace(
+        io_context(sess, policies=None), mount_gate=("/s3", MountMode.WRITE)
+    )
+    _, result = await tee(
+        cast(Accessor, object()),
+        [PathSpec.from_str_path("/s3/data.txt")],
+        [],
+        CommandOpts(io_context=context, index=NULL_INDEX),
+    )
     assert result.exit_code == 1
     assert b"Read-only file system" in (result.stderr or b"")
     assert writes == []
@@ -142,17 +131,14 @@ async def test_tee_writes_inside_the_granted_region():
             )
         ),
     )
-    session_token = set_current_session(sess)
-    gate_token = set_mount_gate("/s3", MountMode.WRITE)
-    try:
-        _, result = await tee(
-            cast(Accessor, object()),
-            [PathSpec.from_str_path("/s3/build/out.txt")],
-            [],
-            CommandOpts(index=NULL_INDEX),
-        )
-    finally:
-        reset_mount_gate(gate_token)
-        reset_current_session(session_token)
+    context = dataclasses.replace(
+        io_context(sess, policies=None), mount_gate=("/s3", MountMode.WRITE)
+    )
+    _, result = await tee(
+        cast(Accessor, object()),
+        [PathSpec.from_str_path("/s3/build/out.txt")],
+        [],
+        CommandOpts(io_context=context, index=NULL_INDEX),
+    )
     assert result.exit_code == 0, result.stderr
     assert writes == ["/s3/build/out.txt"]

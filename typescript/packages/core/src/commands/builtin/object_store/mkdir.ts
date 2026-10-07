@@ -41,7 +41,7 @@ export function makeMkdir<A extends Accessor>(
     opts: CommandOpts,
   ): Promise<CommandFnResult> {
     const io = invocationIo(rawIo, opts)
-    const mkdirImpl = requireOp(io.mkdir, 'mkdir')
+    const mkdirImpl = requireOp(io, 'mkdir')
     const resolveGlob = resolveGlobOf(io)
 
     if (paths.length === 0) throw missingOperandError('mkdir', null)

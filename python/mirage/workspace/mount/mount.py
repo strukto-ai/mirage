@@ -42,11 +42,8 @@ from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.context import (
     effective_mount_mode,
+    get_current_session,
     require_paths_writable,
-    reset_mount_gate,
-    reset_walk_probe,
-    set_mount_gate,
-    set_walk_probe,
     strongest_mode_under,
 )
 from mirage.context.types import IOContext
@@ -56,6 +53,7 @@ from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.observe.context import (
     Recorder,
+    active_recorder,
     push_mount_context,
     push_revisions,
     reset_active_recorder,
@@ -82,6 +80,7 @@ from mirage.utils.key_prefix import mount_key
 from mirage.vfs.base import BaseVFS
 from mirage.workspace.mount.activity import VFSActivity
 from mirage.workspace.mount.read_policy import coerce_read_policy
+from mirage.workspace.session.access import io_context
 
 logger = logging.getLogger(__name__)
 
@@ -719,6 +718,9 @@ class MountEntry:
                 is kept here.
         """
         async with self.use():
+            bound_io = context.io_context or io_context(
+                get_current_session(), recorder=active_recorder()
+            )
             stdin = context.stdin
             cwd = context.cwd
             stat_path = context.stat_path
@@ -812,11 +814,11 @@ class MountEntry:
             opts = CommandOpts(
                 io_context=(
                     dataclasses.replace(
-                        context.io_context,
+                        bound_io,
                         recorder=Recorder(
-                            context.io_context.recorder.sink, self.mount_id
+                            bound_io.recorder.sink, self.mount_id
                         )
-                        if context.io_context.recorder
+                        if bound_io.recorder
                         else None,
                         mount_gate=(self.prefix, self.mode),
                         walk_probe=(
@@ -832,8 +834,6 @@ class MountEntry:
                             else None
                         ),
                     )
-                    if context.io_context is not None
-                    else None
                 ),
                 command=cmd_name,
                 stdin=stdin,
@@ -866,25 +866,6 @@ class MountEntry:
             recording_token = push_mount_context(self.mount_id)
             revs_token = push_revisions(self.revisions or None)
             prev_manager = push_cache_manager(self.cache_manager)
-            # What the command tier's mode guard reads: each write the
-            # handler makes is held to its own region's mode.
-            gate_token = set_mount_gate(self.prefix, self.mode)
-            # What the command tier's walk guard proves an operand's `.`
-            # and `..` with: the handler reaches its backend past the
-            # door, so the door's stat and link follow are bound here.
-            links = context.ns.links if context.ns is not None else None
-            walk_token = (
-                set_walk_probe(
-                    WalkProbe(
-                        stat=functools.partial(
-                            dispatch_stat, context.dispatch
-                        ),
-                        follow=link_follow(links),
-                    )
-                )
-                if context.dispatch is not None
-                else None
-            )
             try:
                 for cmd in handlers:
                     # Only wrapper-owned responses bypass the write guard.
@@ -910,7 +891,7 @@ class MountEntry:
                         and not cmd.path_guarded
                         and not info_only
                         and strongest_mode_under(
-                            self.prefix, self.mode, context.io_context
+                            self.prefix, self.mode, bound_io
                         )
                         == MountMode.READ
                     ):
@@ -964,9 +945,6 @@ class MountEntry:
                         return stream, io
                 return None, IOResult()
             finally:
-                if walk_token is not None:
-                    reset_walk_probe(walk_token)
-                reset_mount_gate(gate_token)
                 reset_revisions(revs_token)
                 reset_active_recorder(recording_token)
                 push_cache_manager(prev_manager)

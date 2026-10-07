@@ -146,12 +146,12 @@ describe('makeGenericCommands', () => {
     // calls it; a copy names its destination.
     const src = PathSpec.fromStrPath('/a.txt')
     const dst = PathSpec.fromStrPath('/b.txt')
-    const write = requireOp<NonNullable<CommandIO['write']>>(undefined, 'write')
+    const write = requireOp(makeOps(), 'write')
     await expect(write(new FakeAccessor(), src, new Uint8Array())).rejects.toMatchObject({
       code: 'ENOTSUP',
       virtualPath: '/a.txt',
     })
-    const copy = requireOp<NonNullable<CommandIO['copy']>>(undefined, 'copy')
+    const copy = requireOp(makeOps(), 'copy')
     await expect(copy(new FakeAccessor(), src, dst)).rejects.toMatchObject({
       code: 'ENOTSUP',
       virtualPath: '/b.txt',

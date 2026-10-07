@@ -18,7 +18,6 @@ from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.config import command
 from mirage.commands.spec.types import CommandSpec
-from mirage.context import reset_admission, set_admission
 from mirage.errors.fs import ebusy
 from mirage.errors.types import NoMountError
 from mirage.io.types import IOResult
@@ -553,45 +552,6 @@ def _gated_registry(reconciler=None):
     if reconciler is not None:
         registry.set_reconciler(reconciler)
     return registry, mount
-
-
-class _RefusingGate:
-    """An EntryGate that refuses one path."""
-
-    scoped = True
-    granted = ()
-
-    def __init__(self, refused: str) -> None:
-        self.refused = refused
-
-    def check(self, virtual: str) -> None:
-        if virtual == self.refused:
-            raise PermissionError(virtual)
-
-    def refuses(self, virtual: str) -> bool:
-        return virtual == self.refused
-
-
-@pytest.mark.asyncio
-async def test_manager_gate_declines_what_the_running_command_refuses():
-    """A warm entry the running command may not read is not served.
-
-    The read then falls through to the guarded backend read, which
-    refuses it exactly as a cold read. The answer comes before the
-    reconciler is asked, so a refused path costs no freshness probe;
-    with no command bound the cache is trusted as before.
-    """
-    reconciler = _StubReconciler(answer=True)
-    registry, mount = _gated_registry(reconciler)
-    serve = mount.cache_manager._may_serve_cached
-    token = set_admission(_RefusingGate("/data/sealed.txt"))
-    try:
-        assert await serve("/data/sealed.txt") is False
-        assert await serve("/data/open.txt") is True
-    finally:
-        reset_admission(token)
-    assert await serve("/data/sealed.txt") is True
-    assert reconciler.asked == ["/data/open.txt", "/data/sealed.txt"]
 
 
 @pytest.mark.asyncio

@@ -23,7 +23,7 @@ import { MountMode, PathSpec } from '../../types.ts'
 import { isNoMount } from '../../errors/fs.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { runWithAdmission } from '../../context/session_context.ts'
+
 import type { MountEntry } from './mount.ts'
 import { MountCommandUnsupported, MountRegistry } from './registry.ts'
 
@@ -482,34 +482,6 @@ describe('MountRegistry read gate', () => {
       mayServeCached(m: MountEntry, k: string): Promise<boolean>
       mayServeListing(m: MountEntry, folder: string, version: string | null): Promise<boolean>
     }
-
-  // A warm entry the running command may not read is not served: the read
-  // falls through to the guarded backend read, which refuses it exactly as
-  // a cold read. The answer comes before the reconciler is asked, so a
-  // refused path costs no freshness probe; with no command bound the cache
-  // is trusted as before.
-  it('declines what the running command refuses before probing', async () => {
-    const rec = new StubReconciler(true)
-    const { mount } = gated(rec)
-    const manager = mount.cacheManager as unknown as {
-      mayServeCached(key: string): Promise<boolean>
-    }
-    const gate = {
-      scoped: true,
-      scopes: () => true,
-      granted: [],
-      check: (virtual: string): void => {
-        if (virtual === '/data/sealed.txt') throw new Error(`refused ${virtual}`)
-      },
-      refuses: (virtual: string): boolean => virtual === '/data/sealed.txt',
-    }
-    await runWithAdmission(gate, async () => {
-      expect(await manager.mayServeCached('/data/sealed.txt')).toBe(false)
-      expect(await manager.mayServeCached('/data/open.txt')).toBe(true)
-    })
-    expect(await manager.mayServeCached('/data/sealed.txt')).toBe(true)
-    expect(rec.asked).toEqual(['/data/open.txt', '/data/sealed.txt'])
-  })
 
   it('trusts the cache with no reconciler wired', async () => {
     // attachFileCache runs before setReconciler, so the closure reads the

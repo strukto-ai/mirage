@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ioContext } from '../workspace/session/access.ts'
 import { stdinStream } from '../commands/builtin/utils/stream.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
@@ -21,7 +22,12 @@ import { runWithCacheManager } from './context.ts'
 import { withCacheMutation } from './file/io.ts'
 import { RAMFileCacheStore } from './file/ram.ts'
 import { CacheManager } from './manager.ts'
-import { cacheAwareReadBytes, cacheAwareReadStream, cacheAwareStreamEager } from './read_through.ts'
+import {
+  cacheAwareReadBytes,
+  cacheAwareReadStream,
+  cacheAwareStreamEager,
+  cacheAwareStream,
+} from './read_through.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -264,4 +270,46 @@ it('does not cache failed reads', async () => {
     manager.readThrough(spec(), () => Promise.reject(new Error('failed read'))),
   ).rejects.toThrow('failed read')
   expect(await manager.cachedBytes(spec())).toBeNull()
+})
+
+it('admission refuses warm reads before the freshness probe', async () => {
+  const cache = new RAMFileCacheStore()
+  for (const name of ['sealed', 'open']) await cache.set(`/s3/${name}.txt`, ENC.encode('warm'))
+  const asked: string[] = []
+  const manager = new CacheManager(
+    cache,
+    null,
+    '/s3/',
+    true,
+    () => true,
+    (key) => {
+      asked.push(key)
+      return Promise.resolve(true)
+    },
+  )
+  const gate = {
+    scoped: true,
+    granted: [],
+    refuses: (virtual: string) => virtual === '/s3/sealed.txt',
+    scopes: (virtual: string) => virtual === '/s3/sealed.txt',
+    check(virtual: string) {
+      if (this.refuses(virtual)) throw new Error('sealed')
+    },
+  }
+  async function* raw(path: PathSpec) {
+    gate.check(path.virtual)
+    await Promise.resolve()
+    yield ENC.encode('backend')
+  }
+  const reader = cacheAwareStream(raw, ioContext(null, gate))
+  await runWithCacheManager(manager, async () => {
+    await expect(drain(reader(PathSpec.fromStrPath('/s3/sealed.txt')))).rejects.toThrow('sealed')
+    expect(asked).toEqual([])
+    expect(DEC.decode(await drain(reader(PathSpec.fromStrPath('/s3/open.txt'))))).toBe('warm')
+    const unrestricted = cacheAwareStream(raw)
+    expect(DEC.decode(await drain(unrestricted(PathSpec.fromStrPath('/s3/sealed.txt'))))).toBe(
+      'warm',
+    )
+  })
+  expect(asked).toEqual(['/s3/open.txt', '/s3/sealed.txt'])
 })

@@ -17,8 +17,8 @@ import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapt
 
 const gzip: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
-  const write = requireOp(ops.write, 'write')
-  const unlink = requireOp(ops.unlink, 'unlink')
+  const write = requireOp(ops, 'write')
+  const unlink = requireOp(ops, 'unlink')
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   return gzipGeneric(
     resolved,

@@ -12,9 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ioContext } from '../../../workspace/session/access.ts'
+import type { IOContext } from '../../../context/types.ts'
 import { describe, expect, it } from 'vitest'
 import { TrelloAccessor } from '../../../accessor/trello.ts'
-import { runWithMountGate } from '../../../context/session_context.ts'
+
 import type { TrelloTransport } from '../../../core/trello/client.ts'
 import { MountMode } from '../../../types.ts'
 import type { CommandOpts, RegisteredCommand } from '../../config.ts'
@@ -27,14 +29,12 @@ import { TRELLO_CARD_LABEL_ADD } from './trello_card_label_add.ts'
 import { TRELLO_CARD_LABEL_REMOVE } from './trello_card_label_remove.ts'
 import { TRELLO_CARD_MOVE } from './trello_card_move.ts'
 import { TRELLO_CARD_UPDATE } from './trello_card_update.ts'
-
 const transport: TrelloTransport = {
   call() {
     throw new Error('the transport was reached; the guard did not fire')
   },
 }
 const accessor = new TrelloAccessor(transport)
-
 // Every card write, with the flags that pass its own validation, so the
 // refusal below is the guard's and not a missing-flag error. The guard
 // fires before the client, so no case reaches the transport.
@@ -48,7 +48,6 @@ const CASES: readonly [readonly RegisteredCommand[], Record<string, FlagValue>][
   [TRELLO_CARD_MOVE, { card_id: 'c1', list_id: 'l2' }],
   [TRELLO_CARD_UPDATE, { card_id: 'c1', name: 'renamed' }],
 ]
-
 describe('trello card writes hold the mount-wide write grant', () => {
   for (const [cmds, flags] of CASES) {
     const rc = cmds[0]
@@ -66,13 +65,18 @@ describe('trello card writes hold the mount-wide write grant', () => {
         cwd: '/',
         mountPrefix: '/trello',
       }
-      await runWithMountGate('/trello', MountMode.READ, async () => {
-        await expect(Promise.resolve(rc.fn(accessor, [], [], opts))).rejects.toThrow(/read-only/)
-      })
+      {
+        const context: IOContext = {
+          ...ioContext(null, null, null),
+          mountGate: ['/trello', MountMode.READ],
+        }
+        await expect(
+          Promise.resolve(rc.fn(accessor, [], [], { ...opts, ioContext: context })),
+        ).rejects.toThrow(/read-only/)
+      }
     })
   }
 })
-
 // Mirrors python's test_a_card_write_refuses_an_id_outside_the_scope: the
 // write is addressed by id, so without the check a mount narrowed to one
 // board writes to any board the token can reach. The transport answers
@@ -101,11 +105,15 @@ describe('trello card writes hold the mount scope', () => {
         cwd: '/',
         mountPrefix: '/trello',
       }
-      await runWithMountGate('/trello', MountMode.WRITE, async () => {
-        await expect(Promise.resolve(rc.fn(scoped, [], [], opts))).rejects.toThrow(
-          / is outside this mount's scope$/,
-        )
-      })
+      {
+        const context: IOContext = {
+          ...ioContext(null, null, null),
+          mountGate: ['/trello', MountMode.WRITE],
+        }
+        await expect(
+          Promise.resolve(rc.fn(scoped, [], [], { ...opts, ioContext: context })),
+        ).rejects.toThrow(/ is outside this mount's scope$/)
+      }
     })
   }
 })

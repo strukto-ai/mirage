@@ -17,7 +17,7 @@ import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapt
 
 const split: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
-  const write = requireOp(ops.write, 'write')
+  const write = requireOp(ops, 'write')
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   // The pieces go to the prefix, or `x` in the working directory, which
   // need not be this mount, so a dispatcher routes each write to the mount

@@ -38,8 +38,8 @@ export function makeTouch<A extends Accessor>(
     opts: CommandOpts,
   ): Promise<CommandFnResult> {
     const io = invocationIo(rawIo, opts)
-    const exists = requireOp(io.exists, 'exists')
-    const writeBytes = requireOp(io.write, 'write')
+    const exists = requireOp(io, 'exists')
+    const writeBytes = requireOp(io, 'write')
     const resolveGlob = resolveGlobOf(io)
 
     if (paths.length === 0) {

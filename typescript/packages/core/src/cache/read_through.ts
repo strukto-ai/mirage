@@ -18,7 +18,6 @@ import type { Accessor } from '../accessor/base.ts'
 import { type EntryGate, PathSpec, type ReadBytesFn, type ReadStreamFn } from '../types.ts'
 import type { IndexCacheStore } from './index/store.ts'
 import { type CacheInvalidator, activeCacheManager } from './context.ts'
-import { getAdmission } from '../context/session_context.ts'
 
 type OpStream<A extends Accessor> = ReadStreamFn<
   [accessor: A, path: PathSpec, index?: IndexCacheStore]
@@ -100,7 +99,9 @@ function serving(
  */
 export function cacheAwareStream(raw: PathStream, context?: IOContext): PathStream {
   return (path) =>
-    serveStream(serving(activeCacheManager(), getAdmission(context), path), path, () => raw(path))
+    serveStream(serving(activeCacheManager(), context?.admission ?? null, path), path, () =>
+      raw(path),
+    )
 }
 
 /**
@@ -115,7 +116,7 @@ export function cacheAwareStream(raw: PathStream, context?: IOContext): PathStre
  */
 export function cacheAwareStreamEager(raw: PathStream, context?: IOContext): PathStream {
   const manager = activeCacheManager()
-  const gate = getAdmission(context)
+  const gate = context?.admission ?? null
   return (path) => serveStream(serving(manager, gate, path), path, () => raw(path))
 }
 

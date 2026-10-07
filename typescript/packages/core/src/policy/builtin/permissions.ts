@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IOContext } from '../../context/types.ts'
-import { getAdmission, lineRunning, redirectTargetJudged } from '../../context/session_context.ts'
+import { lineRunning, redirectTargetJudged } from '../../context/session_context.ts'
 import type { Policy } from '../base.ts'
 import { decide } from '../match/decide.ts'
 import { opRuling, posixLevel } from '../match/rule.ts'
@@ -99,7 +99,7 @@ export class PermissionsPolicy implements Policy, SessionScoped {
     // spent as the command is admitted, so by the time its own walk
     // reaches this door the session holds nothing and only the bound
     // gate still remembers the nod.
-    const gate = getAdmission(this.context)
+    const gate = this.context?.admission ?? null
     const ruled = opRuling(this.sessions.commandsOf(ctx.sessionId ?? ''), ctx, gate?.granted ?? [])
     if (ruled === null) return null
     const [rule, asks] = ruled

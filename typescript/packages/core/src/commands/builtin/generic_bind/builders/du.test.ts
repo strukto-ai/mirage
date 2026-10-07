@@ -12,32 +12,36 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ioContext } from '../../../../workspace/session/access.ts'
 import { BUILDER, WalkBudget } from './du.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { eacces, enoent } from '../../../../errors/fs.ts'
-import { runWithAdmission } from '../../../../context/session_context.ts'
+
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { EntryGate } from '../../../../types.ts'
 import { scopedIo, type CommandIO } from '../adapter.ts'
 import type { MountView, NamespaceView } from '../../../../ops/types.ts'
-
 const DEC = new TextDecoder()
-
-const TREE: Record<string, { dir: boolean; size?: number; children?: string[] }> = {
+const TREE: Record<
+  string,
+  {
+    dir: boolean
+    size?: number
+    children?: string[]
+  }
+> = {
   '/db': { dir: true, children: ['/db/a.txt', '/db/sub'] },
   '/db/a.txt': { dir: false, size: 3 },
   '/db/sub': { dir: true, children: ['/db/sub/b.txt'] },
   '/db/sub/b.txt': { dir: false, size: 2 },
 }
-
 // A CommandIO with no native du op, so the builder must use the walk fallback.
 // eslint-disable-next-line @typescript-eslint/require-await
 async function* emptyStream(): AsyncIterable<Uint8Array> {
   yield* []
 }
-
 const OPS: CommandIO = {
   readdir: (_a, p) => Promise.resolve(TREE[p.virtual]?.children ?? []),
   readBytes: () => Promise.resolve(new Uint8Array()),
@@ -57,9 +61,7 @@ const OPS: CommandIO = {
   },
   isMounted: () => true,
 }
-
 const ACCESSOR = {} as Accessor
-
 describe('du walk fallback (no native du op)', () => {
   it('stops the walk and exits 1 once the entry budget is spent', async () => {
     const bounded: CommandIO = { ...OPS, maxDuEntries: 1 }
@@ -70,11 +72,16 @@ describe('du walk fallback (no native du op)', () => {
       cwd: '/',
     })
     expect(result).not.toBeNull()
-    const [, io] = result as [unknown, { exitCode: number; stderr: Uint8Array | null }]
+    const [, io] = result as [
+      unknown,
+      {
+        exitCode: number
+        stderr: Uint8Array | null
+      },
+    ]
     expect(io.exitCode).toBe(1)
     expect(DEC.decode(io.stderr ?? new Uint8Array())).toContain('incomplete')
   })
-
   it('a backend failure propagates instead of reading as a missing operand', async () => {
     const failing: CommandIO = {
       ...OPS,
@@ -90,7 +97,6 @@ describe('du walk fallback (no native du op)', () => {
     ).rejects.toThrow('403 Forbidden')
   })
 })
-
 // A gate that scopes the line but refuses nothing, which is what a `du`
 // run under any path rule looks like: the gate is scoped, so `scopedIo`
 // sets the native du op aside and the builder walks through the guarded
@@ -102,14 +108,11 @@ const SCOPED_GATE: EntryGate = {
   check: () => undefined,
   refuses: () => false,
 }
-
 // The command's view as admission builds it for a scoped gate.
 const SCOPED_VIEW: NamespaceView = { scoped: () => true }
-
 const THROTTLED = Object.assign(new Error('Box GET /folders/9/items -> 429'), {
   status: 429,
 })
-
 // A native du op that would answer instantly, and wrongly: any total
 // coming from here proves the walk was skipped.
 const NATIVE: CommandIO = {
@@ -119,29 +122,44 @@ const NATIVE: CommandIO = {
     entries: () => Promise.resolve([[['/native', 999]] as [string, number][], 999]),
   },
 } as CommandIO
-
 async function runScoped(
   ops: CommandIO,
   paths: PathSpec[],
-): Promise<[Uint8Array, { exitCode: number; stderr: Uint8Array | null }]> {
-  const result = await runWithAdmission(SCOPED_GATE, async () =>
-    BUILDER.fn(scopedIo(ops, SCOPED_VIEW, paths, ''), ACCESSOR, paths, [], {
+): Promise<
+  [
+    Uint8Array,
+    {
+      exitCode: number
+      stderr: Uint8Array | null
+    },
+  ]
+> {
+  const result = await BUILDER.fn(
+    scopedIo({ ...ops, ioContext: ioContext(null, SCOPED_GATE) }, SCOPED_VIEW, paths, ''),
+    ACCESSOR,
+    paths,
+    [],
+    {
       stdin: null,
       flags: {},
       filetypeFns: null,
       cwd: '/',
       ns: SCOPED_VIEW,
-    }),
+    },
   )
-  return result as [Uint8Array, { exitCode: number; stderr: Uint8Array | null }]
+  return result as [
+    Uint8Array,
+    {
+      exitCode: number
+      stderr: Uint8Array | null
+    },
+  ]
 }
-
 describe('du walk fallback under a path rule', () => {
   it('sets the native du op aside, so every entry passes the gate', async () => {
     const [out] = await runScoped(NATIVE, [PathSpec.fromStrPath('/db')])
     expect(DEC.decode(out)).toBe('2\t/db/sub\n5\t/db\n')
   })
-
   it('propagates a throttled listing rather than reporting an undersized total', async () => {
     const throttled: CommandIO = {
       ...NATIVE,
@@ -154,7 +172,6 @@ describe('du walk fallback under a path rule', () => {
       status: 429,
     })
   })
-
   it('propagates a throttled stat below the operand too', async () => {
     const throttled: CommandIO = {
       ...NATIVE,
@@ -165,7 +182,6 @@ describe('du walk fallback under a path rule', () => {
       status: 429,
     })
   })
-
   it('still counts an entry that went away mid-walk as zero', async () => {
     const vanished: CommandIO = {
       ...NATIVE,
@@ -178,7 +194,6 @@ describe('du walk fallback under a path rule', () => {
     expect(DEC.decode(out)).toBe('0\t/db/sub\n3\t/db\n')
     expect(io.exitCode).toBe(0)
   })
-
   it('still skips a refused directory and names it, as GNU does', async () => {
     const refused: CommandIO = {
       ...NATIVE,
@@ -194,7 +209,6 @@ describe('du walk fallback under a path rule', () => {
       "du: cannot read directory '/db/sub': Permission denied\n",
     )
   })
-
   // The refusal can arrive from `stat` rather than from `readdir`: a rule
   // that denies the path outright refuses before the walk ever learns the
   // entry is a directory. Skipping it silently made the subtree vanish
@@ -214,7 +228,6 @@ describe('du walk fallback under a path rule', () => {
     )
   })
 })
-
 describe('du rows for directories no file points at', () => {
   // /db/sealed lists as refused and /db/walled refuses its stat, the two
   // doors a rule or the host can shut.
@@ -241,7 +254,6 @@ describe('du rows for directories no file points at', () => {
   const notes =
     "du: cannot read directory '/db/sealed': Permission denied\n" +
     "du: cannot read directory '/db/walled': Permission denied\n"
-
   async function run(flags: Record<string, boolean>): Promise<[string, number, string]> {
     const result = await BUILDER.fn(ops, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
       stdin: null,
@@ -259,7 +271,6 @@ describe('du rows for directories no file points at', () => {
           : await materialize(out as AsyncIterable<Uint8Array>)
     return [DEC.decode(bytes), io.exitCode, DEC.decode(io.stderr as Uint8Array)]
   }
-
   it('prints an empty and a refused directory, GNU-style, and names the refusals', async () => {
     expect(await run({})).toEqual(['0\t/db/empty\n0\t/db/sealed\n3\t/db\n', 1, notes])
     expect(await run({ a: true })).toEqual([
@@ -269,7 +280,6 @@ describe('du rows for directories no file points at', () => {
     ])
   })
 })
-
 describe('WalkBudget', () => {
   it('stops once spent', () => {
     const budget = new WalkBudget(2)
@@ -279,7 +289,6 @@ describe('WalkBudget', () => {
     expect(Array.from({ length: 100 }, () => unbounded.spend('/d')).every(Boolean)).toBe(true)
     expect(unbounded.hit).toBe(false)
   })
-
   it('with no cap of its own charges each mount its own', () => {
     const ownerOf = (p: string): string => (p.startsWith('/a/b') ? '/a/b/' : '/a/')
     const caps = new Map<string, number | null>([
