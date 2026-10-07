@@ -231,7 +231,7 @@ A command that moves or deletes several files is refused one file at a time, so 
 - **A directory `mv`** moves the unchanged files and leaves the changed one where it was.
 - **A file `mv`** whose copy landed before its source changed keeps the copy and reports `mv: cannot remove 'src': ...`, as GNU's `mv` does when its unlink fails.
 
-**Which version a write sends.** A `>>` append, a resize to a nonzero length, and a write at an offset read the file themselves first, so they send the version of the bytes they just read. Any other write sends, in order:
+**Which version a write sends.** A `>>` append, a resize to a nonzero length, and a write at an offset read the file themselves first, so they send the version of the bytes they just read. Finding the file gone, they are refused when the mount holds a version of it (it was removed since it was read) and create it otherwise. Any other write sends, in order:
 
 1. what the same line last read or wrote at that path (`cat f; echo x > f`, or two redirects in a row);
 2. the version the mount kept from an earlier line: the cached copy's, or, where the bytes were not kept (a `grep` or `head` of the file, the agent's own redirect or append, a file bigger than the cache), the version alone.
@@ -248,13 +248,13 @@ A mount is refused at load, naming the reason, when it cannot keep the promise.
 
 **The backend has no write conditions.** Today only the S3 family has them:
 - AWS S3 and SeaweedFS honour them on every write, delete and copy (measured).
-- MinIO, and `vfs: s3` on any endpoint other than AWS's, honour them on a write but not on a copy or delete. There mirage refuses what would copy or delete on that mount (such as a `cp` or `mv` within the mount, a `mv` out of it, `rm`, or `find -delete`) itself, before it changes anything (its lookups still run), with `Operation not supported`; a `cp` or `mv` into it from another mount is a write, and goes through.
+- MinIO, and `vfs: s3` on any endpoint other than AWS's, honour them on a write but not on a copy or delete. There mirage refuses what would copy or delete on that mount (such as a `cp` or `mv` within the mount, a `mv` out of it, `rm`, or `find -delete`) itself, before it changes anything (its lookups still run), with `Operation not supported`. A `mv` to another mount of a directory that holds such a mount is refused the same way. A `cp` or `mv` into it from another mount is a write, and goes through.
   - The endpoint is the one the client resolves: the config's `endpoint_url`, else `AWS_ENDPOINT_URL_S3` or `AWS_ENDPOINT_URL`, else the AWS profile's (its `services` s3 section first), unless `ignore_configured_endpoint_urls` is `true`. The profile is the one each host's SDK reads: on Python the mount's `aws_profile`, else `AWS_PROFILE`; on TypeScript always `AWS_PROFILE` (or `default`), as the AWS SDK for JavaScript ignores a client's `profile` here.
   - AWS's China regions count as AWS.
 - The other S3-compatible services (R2, GCS, OCI, Supabase, Ceph, Wasabi, Backblaze B2, DigitalOcean Spaces, Tencent COS, Alibaba OSS, Scaleway, QingStor) are assumed to behave like AWS S3. They are not measured per provider.
 - In the browser, an S3 mount that signs through presigned URLs is refused, since those carry no condition.
 
-**The mount is read-only, or a kernel mount exposes it.** `backend: fuse` or `fskit` has no place to carry a version. A FUSE mount that would expose a conditional mount is refused, and so is a conditional mount added where a live FUSE mount already exposes it, or added over one. An SFTP or `scp` session into a workspace that holds any conditional mount is refused at its first request.
+**The mount is read-only, or a kernel mount exposes it.** `backend: fuse` or `fskit` has no place to carry a version. A FUSE mount that would expose a conditional mount is refused, and so is a conditional mount added where a live FUSE mount already exposes it, or added over one. An SFTP or `scp` session is refused on every request while the workspace holds any conditional mount, including one added after the session opened; that covers closing a file opened before, whose unflushed writes are then not saved.
 
 **The mount caches no reads** (including a cache `limit` of 0), since the cache is where the version lives.
 

@@ -49,11 +49,11 @@ One check answers for a whole command: later listings of the same mount (or, on 
 
 ### Writes
 
-A command that writes a file and reports the bytes it wrote, such as a `>` redirect, `tee`, `sed -i`, `sort -o`, `uniq` or `xxd`, keeps those bytes in the file cache, so the next read needs no download. The cached copy carries the token the upload reply names: the ETag on an object store, the md5 (else the head revision) on Google Drive, the `sha1` on Box, the `content_hash` on Dropbox. That is the kind of token `stat` reports, so under `read: fresh` the next read checks it and downloads nothing.
+A command that writes a file and reports the bytes it wrote, such as `tee`, `sed -i`, `sort -o`, `uniq` or `xxd`, keeps those bytes in the file cache, so the next read needs no download. The cached copy carries the token the upload reply names: the ETag on an object store, the md5 (else the head revision) on Google Drive, the `sha1` on Box, the `content_hash` on Dropbox. That is the kind of token `stat` reports, so under `read: fresh` the next read checks it and downloads nothing.
 
 The bytes are kept only when that command made the last change to the file on the line. When something else changed it later on the same line (`sed -n 'w file'`, a script, a concurrent pipeline stage, `xargs -P`, a background job, `truncate`), nothing is cached and the next read downloads the file. In the browser, where concurrent commands cannot be told apart, a later write of the same size is not noticed.
 
-Under [`write: conditional`](/home/yaml#the-write-policy), that token is also the version the next write on the path is based on. On such a mount the line also keeps a path's version where it keeps no bytes (a `grep` or `head` of the file, an own `>>`, a file bigger than the cache) as an entry with no bytes, which reads treat as absent.
+Under [`write: conditional`](/home/yaml#the-write-policy), that token is also the version the next write on the path is based on. On such a mount the line also keeps a path's version where it keeps no bytes (a `grep` or `head` of the file, the agent's own `>` or `>>`, a file bigger than the cache) as an entry with no bytes, which reads treat as absent.
 
 Nothing bigger than the whole cache is kept, read or written: such a file would push every other entry out and then itself. A cache store that refuses a fill (Redis out of memory, or a value over its size limit) is logged as a warning and the line carries on; the read or write behind it already happened, so only the next read pays a fetch.
 
