@@ -37,15 +37,8 @@ import { eacces, eisdir, enoent } from '../../../errors/fs.ts'
 import { formatFsError } from '../../../errors/render.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { SessionState } from '../../../workspace/session/session.ts'
-import type { CommandOpts } from '../../config.ts'
-import {
-  dirAwareStat,
-  dirAwareStream,
-  resolveGlobOf,
-  scopedIo,
-  withDirGuard,
-  type CommandIO,
-} from './adapter.ts'
+import type { CommandOpts, CommandIO } from '../../config.ts'
+import { dirAwareStat, dirAwareStream, resolveGlobOf, scopedIo, withDirGuard } from './adapter.ts'
 import { makeResolveGlob } from '../../../utils/glob_walk.ts'
 
 const accessor = {} as never

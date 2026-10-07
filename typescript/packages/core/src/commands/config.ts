@@ -19,9 +19,33 @@ import { IOResult, type ByteSource } from '../io/types.ts'
 import type { Limit, PathSpec } from '../types.ts'
 import type { Runtime } from '../runtime/base.ts'
 import type { DispatchFn, ShellFn } from '../runtime/types.ts'
-import type { NamespaceView, ReaddirPath, SessionView, StatPath } from '../ops/types.ts'
+import type {
+  ChildMounts,
+  NamespaceView,
+  ReaddirPath,
+  SessionView,
+  StatPath,
+} from '../ops/types.ts'
+import type { TargetStat } from '../utils/glob_walk.ts'
+import type {
+  ContentSearchOps,
+  CopyOp,
+  DuOps,
+  ExistsOp,
+  FindOp,
+  MkdirOp,
+  PathOp,
+  PwriteOp,
+  ReadBytesOp,
+  ReaddirOp,
+  ReadStreamOp,
+  RenameOp,
+  RmdirOp,
+  SearchOps,
+  StatOp,
+  WriteOp,
+} from '../vfs/types.ts'
 import type { AggregateResult } from './builtin/aggregators.ts'
-import type { CommandIO } from './builtin/generic_bind/adapter.ts'
 import { isBuiltinGrammar, registeredSpec } from './spec/builtins.ts'
 import { OWN_OPTION_LOOP } from './spec/constants.ts'
 import { helpPage, versionLine } from './spec/standard.ts'
@@ -54,6 +78,61 @@ export interface ExecContext {
   limitOverride?: Limit | null
   shell?: ShellFn
   argv?: readonly string[]
+}
+
+/**
+ * The command tier's table: the mounted VFS's functions, each taking the
+ * accessor in front as a command calls it. A slot the VFS does not define
+ * is absent. Built per mount by `commandIo`; a command reaches its mount's
+ * table through `mountIo`.
+ */
+export interface CommandIO<A extends Accessor = Accessor> {
+  readdir: ReaddirOp<A>
+  readBytes: ReadBytesOp<A>
+  stat: StatOp<A>
+  readStream: ReadStreamOp<A>
+  readRange?: (
+    accessor: A,
+    path: PathSpec,
+    index: IndexCacheStore | undefined,
+    offset: number,
+    size: number | null,
+  ) => Promise<Uint8Array>
+  exists?: ExistsOp<A>
+  find?: FindOp<A>
+  du?: DuOps<A>
+  write?: WriteOp<A>
+  append?: WriteOp<A>
+  pwrite?: PwriteOp<A>
+  create?: PathOp<A>
+  mkdir?: MkdirOp<A>
+  unlink?: PathOp<A>
+  rmdir?: RmdirOp<A>
+  rmR?: PathOp<A>
+  rename?: RenameOp<A>
+  copy?: CopyOp<A>
+  dirCopy?: CopyOp<A>
+  /** noCreate requires an atomic existence precondition, or ENOTSUP before writing. */
+  truncate?: (accessor: A, path: PathSpec, length: number, noCreate?: boolean) => Promise<void>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setAttrs?: (...args: any[]) => unknown
+  isMounted: (accessor: A) => boolean
+  streamsBytes?: boolean
+  local?: boolean
+  maxGlobMatches?: number
+  maxDuEntries?: number | null
+  search?: SearchOps<A>
+  contentSearch?: ContentSearchOps<A>
+  // Child names the namespace owes a directory (nested mount roots and
+  // symlinks). Stamped per invocation from opts.childMounts by the
+  // factory, because it is session-scoped state while the adapter itself
+  // is built once per backend.
+  globChildren?: ChildMounts
+  // What an owed name points at, the namespace's own stat resolved
+  // through the workspace. Stamped beside globChildren from opts.ns.links,
+  // so a trailing-slash glob follows a link the way bash does instead of
+  // keeping every link it cannot see through.
+  globTargetStat?: TargetStat
 }
 
 /**

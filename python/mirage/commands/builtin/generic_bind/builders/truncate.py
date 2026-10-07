@@ -7,11 +7,11 @@ from mirage.commands.builtin.generic.truncate import (
 )
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
-    CommandIO,
     Operation,
     bound_op,
+    require_op,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -24,7 +24,7 @@ async def truncate(
     opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
     flags = parse_flags(opts.flags)
-    truncate_fn = ops.require(Operation.TRUNCATE)
+    truncate_fn = require_op(ops, Operation.TRUNCATE)
     paths = await ops.resolve_glob(accessor, paths, opts.index)
     return await generic_truncate(
         paths,

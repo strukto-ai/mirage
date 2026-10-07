@@ -17,12 +17,8 @@ from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.ls import ls_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
-    overlaid_stat,
-)
-from mirage.commands.config import CommandOpts
+from mirage.commands.builtin.generic_bind.adapter import Builder, overlaid_stat
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, PathSpec
 

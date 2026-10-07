@@ -19,7 +19,6 @@ from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.du import du_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    CommandIO,
     mount_io,
     with_command_guards,
     with_policy_guard,
@@ -30,7 +29,7 @@ from mirage.commands.builtin.generic_bind.builders.du import (
     walk_size,
 )
 from mirage.commands.builtin.github.pushdown import resolve_glob
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import CommandIO, CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.core.github.stat import stat
 from mirage.core.github.tree import ensure_tree

@@ -16,7 +16,8 @@ import { materialize } from '../../../io/types.ts'
 
 import { describe, expect, it } from 'vitest'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
-import { type CommandIO, requireOp } from './adapter.ts'
+import { requireOp } from './adapter.ts'
+import type { CommandIO } from '../../config.ts'
 import { BUILDERS } from './builders/index.ts'
 import {
   makeGenericCommands,

@@ -19,12 +19,11 @@ from typing import Any
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.stat import stat_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    CommandIO,
     bound_op,
     over_mount_io,
     overlaid_stat,
 )
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import CommandIO, CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.io.types import ByteSource, IOResult

@@ -50,11 +50,9 @@ import mirage.core.msgraph.drive as drive_ops
 import mirage.core.s3.read as s3_read
 import mirage.core.s3.stream as s3_stream
 from mirage.cache.index import IndexCacheStore, RAMIndexCacheStore
-from mirage.commands.builtin.generic_bind.adapter import (
-    CommandIO,
-    command_io,
-)
+from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
+from mirage.commands.config import CommandIO
 from mirage.core.hf_hub.client import etag_value
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import IOResult

@@ -17,10 +17,11 @@ from dataclasses import replace
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.aggregators import concat_aggregate
-from mirage.commands.builtin.generic_bind.adapter import CommandIO, command_io
+from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.builtin.ram import COMMANDS as RAM_COMMANDS
 from mirage.commands.cli.types import CLIInvocation, CLISpec
 from mirage.commands.config import (
+    CommandIO,
     RegisteredCommand,
     command,
     registered_commands,

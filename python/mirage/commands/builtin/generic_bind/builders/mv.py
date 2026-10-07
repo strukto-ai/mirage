@@ -20,13 +20,13 @@ from mirage.commands.builtin.generic.mv import mv_generic as generic_mv
 from mirage.commands.builtin.generic.mv import parse_flags
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
-    CommandIO,
     Operation,
     bound_op,
     refuse_reveal,
+    require_op,
 )
 from mirage.commands.builtin.generic_bind.builders.cp import overlayable_stat
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -49,7 +49,7 @@ async def mv(
     return await generic_mv(
         paths,
         strategy=NativeMove(
-            rename=partial(ops.require(Operation.RENAME), accessor)
+            rename=partial(require_op(ops, Operation.RENAME), accessor)
         ),
         stat=overlayable_stat(ops, accessor, opts.index, overlay),
         flags=parsed,

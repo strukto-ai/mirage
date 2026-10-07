@@ -19,8 +19,7 @@ import pytest
 
 from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.generic.rm_cmd import make_rm
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.context import (
     reset_current_session,

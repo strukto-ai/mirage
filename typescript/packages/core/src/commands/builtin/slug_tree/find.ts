@@ -26,6 +26,7 @@ import {
   type CommandFnResult,
   type CommandOpts,
   type RegisteredCommand,
+  type CommandIO,
 } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -38,7 +39,6 @@ import {
   resolveGlobOf,
   withCommandGuards,
   withPolicyGuard,
-  type CommandIO,
 } from '../generic_bind/adapter.ts'
 import { findWalk } from '../generic_bind/builders/find.ts'
 

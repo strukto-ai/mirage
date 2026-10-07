@@ -20,11 +20,11 @@ from dataclasses import replace
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
-    CommandIO,
     Operation,
+    require_op,
 )
 from mirage.commands.builtin.utils.output import format_optional_records
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -111,7 +111,7 @@ async def rmdir(
             "rmdir: missing operand\nTry 'rmdir --help' for more information.",
             1,
         )
-    rmdir_fn = ops.require(Operation.RMDIR)
+    rmdir_fn = require_op(ops, Operation.RMDIR)
     paths = await ops.resolve_glob(accessor, paths, opts.index)
     links = opts.ns.links if opts.ns is not None else None
     verbose_parts: list[str] = []

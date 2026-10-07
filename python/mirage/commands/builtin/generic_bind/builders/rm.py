@@ -19,9 +19,9 @@ from mirage.commands.builtin.generic.cp import walk
 from mirage.commands.builtin.generic.rm_cmd import rm_without_operands
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
-    CommandIO,
     Operation,
     bound_op,
+    require_op,
 )
 from mirage.commands.builtin.utils.operands import mount_points
 from mirage.commands.builtin.utils.output import format_optional_records
@@ -30,7 +30,7 @@ from mirage.commands.builtin.utils.slash_links import (
     rm_link_refusal,
 )
 from mirage.commands.builtin.utils.verbose import removal_lines
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
@@ -100,7 +100,7 @@ async def rm(
                             ),
                             p,
                         )
-                    await ops.require(Operation.RM_R)(accessor, p)
+                    await require_op(ops, Operation.RM_R)(accessor, p)
                     # A removal never crosses into a mount below, so it
                     # says so as GNU's --one-file-system does.
                     errors.extend(
@@ -118,7 +118,7 @@ async def rm(
                             "Directory not empty"
                         )
                         continue
-                    await ops.require(Operation.RMDIR)(
+                    await require_op(ops, Operation.RMDIR)(
                         accessor, p, index=opts.index
                     )
                     entry_lines = [f"removed directory '{p.raw_path}'"]
@@ -128,7 +128,7 @@ async def rm(
                     )
                     continue
             else:
-                await ops.require(Operation.UNLINK)(accessor, p)
+                await require_op(ops, Operation.UNLINK)(accessor, p)
                 entry_lines = [f"removed '{p.raw_path}'"]
         except FS_ERRORS as exc:
             # GNU rm names the entry it could not remove (the guard

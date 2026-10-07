@@ -17,8 +17,8 @@ from dataclasses import replace
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
-    CommandIO,
     Operation,
+    require_op,
 )
 from mirage.commands.builtin.utils.paths import (
     descendant_path,
@@ -26,7 +26,7 @@ from mirage.commands.builtin.utils.paths import (
     nearest_ancestor,
 )
 from mirage.commands.builtin.utils.slash_links import mkdir_link_refusal
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import missing_operand_error
@@ -80,7 +80,7 @@ async def mkdir(
         umask = session_umask()
         if umask != DEFAULT_UMASK:
             mode = 0o777 & ~umask
-    mkdir_fn = ops.require(Operation.MKDIR)
+    mkdir_fn = require_op(ops, Operation.MKDIR)
     paths = await ops.resolve_glob(accessor, paths, opts.index)
     lines: list[str] = []
     errors: list[str] = []

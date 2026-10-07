@@ -17,11 +17,11 @@ from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic_bind.adapter import (
-    CommandIO,
     Operation,
     over_mount_io,
+    require_op,
 )
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import CommandIO, CommandOpts, command
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -36,8 +36,8 @@ def _build(io: CommandIO) -> Callable[..., Any]:
     Args:
         io (CommandIO): the guarded table of the running mount.
     """
-    exists = io.require(Operation.EXISTS)
-    write_bytes = io.require(Operation.WRITE)
+    exists = require_op(io, Operation.EXISTS)
+    write_bytes = require_op(io, Operation.WRITE)
     resolve_glob = io.resolve_glob
 
     async def touch(

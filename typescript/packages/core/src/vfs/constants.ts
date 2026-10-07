@@ -12,14 +12,4 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export {
-  type Builder,
-  type BuilderFn,
-  commandIo,
-  mountIo,
-  overMountIo,
-  overlaidStat,
-  resolveGlobOf,
-} from './adapter.ts'
-export { type DuOps, type ResolveGlobOp } from '../../../vfs/types.ts'
-export { type MakeGenericCommandsOptions, makeGenericCommands, scanIo } from './factory.ts'
+export const DEFAULT_MAX_DU_ENTRIES = 10000

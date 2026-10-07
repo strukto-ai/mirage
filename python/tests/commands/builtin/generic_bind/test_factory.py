@@ -21,7 +21,6 @@ from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.cache.manager import CacheManager
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
 from mirage.commands.builtin.generic_bind.factory import (
     _run_with_namespace_globs,
@@ -31,7 +30,7 @@ from mirage.commands.builtin.generic_bind.factory import (
     with_read_cache,
     with_slash_guard,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.ops.types import LinkView, NamespaceView
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key

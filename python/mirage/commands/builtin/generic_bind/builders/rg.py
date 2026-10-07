@@ -21,18 +21,14 @@ from mirage.commands.builtin.generic.rg import (
     rg_generic,
     walk_filter,
 )
-from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
-    bound_op,
-)
+from mirage.commands.builtin.generic_bind.adapter import Builder, bound_op
 from mirage.commands.builtin.generic_bind.search import (
     narrow_scope,
     run_search,
 )
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.rg_scan import walk_candidates
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult

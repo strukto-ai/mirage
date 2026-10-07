@@ -16,12 +16,11 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.tac import tac_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
-    CommandIO,
     bound_op,
     dir_aware_stat,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 

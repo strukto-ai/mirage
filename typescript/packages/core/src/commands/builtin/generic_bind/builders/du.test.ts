@@ -20,7 +20,8 @@ import { eacces, enoent } from '../../../../errors/fs.ts'
 import { runWithAdmission } from '../../../../context/session_context.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { EntryGate } from '../../../../types.ts'
-import { scopedIo, type CommandIO } from '../adapter.ts'
+import { scopedIo } from '../adapter.ts'
+import type { CommandIO } from '../../../config.ts'
 import type { MountView, NamespaceView } from '../../../../ops/types.ts'
 
 const DEC = new TextDecoder()

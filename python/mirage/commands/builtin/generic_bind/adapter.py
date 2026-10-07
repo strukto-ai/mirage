@@ -22,10 +22,14 @@ from typing import Any, NoReturn, Protocol, overload
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.du import DEFAULT_MAX_DU_ENTRIES
 from mirage.commands.builtin.utils.paths import dot_refusal
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
-from mirage.commands.config import AggregateFn, CommandFnResult, CommandOpts
+from mirage.commands.config import (
+    AggregateFn,
+    CommandFnResult,
+    CommandIO,
+    CommandOpts,
+)
 from mirage.commands.resolve import get_extension
 from mirage.context import (
     effective_path_mode,
@@ -55,7 +59,6 @@ from mirage.io import IOResult
 from mirage.ops.namespace_view import paths_scoped
 from mirage.ops.types import (
     ChildMounts,
-    LinkTargetStat,
     NamespaceView,
     StatOverlay,
 )
@@ -63,7 +66,6 @@ from mirage.policy.constants import METADATA_OPS
 from mirage.policy.policies import Policies, pre_vfs_gate
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec, WalkProbe
-from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
 from mirage.utils.hidden import hidden_under, move_reveals, path_visible
 from mirage.utils.path import norm, parent
 from mirage.utils.remnants import remove_remnants, visible_below
@@ -71,24 +73,9 @@ from mirage.vfs.base import BaseVFS
 from mirage.vfs.types import (
     ContentSearchOps,
     DuOps,
-    ExistsOp,
-    IsMountedOp,
-    MkdirOp,
     OperationFn,
-    PairOp,
-    PathOp,
-    PwriteOp,
-    ReadBytesOp,
-    ReaddirOp,
-    ReadRangeOp,
-    ReadStreamOp,
-    ResolveGlobOp,
-    RmdirOp,
-    RmTreeOp,
     SearchOps,
     StatOp,
-    TruncateOp,
-    WriteOp,
 )
 
 logger = logging.getLogger(__name__)
@@ -186,93 +173,29 @@ class Builder:
     read: bool = False
 
 
-@dataclass(frozen=True, kw_only=True)
-class CommandIO:
-    """Backend capabilities consumed by command algorithms.
+def require_op(ops: CommandIO, op: Operation) -> OperationFn:
+    """Return a backend op, or one that refuses when the backend
+    omits it.
 
-    Built from a mount's VFS by ``command_io``: each slot is one of its
-    functions with the accessor commands still pass in front dropped,
-    and a function the VFS does not define is an absent slot. Command
-    admission guards these calls; POSIX policy hooks belong to the
-    filesystem dispatcher and are not part of this interface.
+    A backend without the write-side ops (github, notion, a
+    database) still runs every generic command, because only the
+    write itself knows whether a line writes: ``gzip -c``, ``tar
+    -t`` and ``split -n 1/2`` never call the op, and a line that
+    does is refused at that call with ENOTSUP for the path it
+    named, which the command renders in its own GNU voice, as a
+    filesystem that does not allow the operation would. Mirrors TS
+    ``requireOp``.
 
-    ``glob_children`` is the child names the namespace owes a directory
-    (nested mount roots and symlinks), and ``glob_target_stat`` what an
-    owed name points at, the namespace's own stat resolved through the
-    workspace. The factory stamps both per invocation from ``opts.ns``,
-    because they are session-scoped state and the adapter is built once
-    per backend; the target stat lets a trailing-slash glob follow a link
-    the way bash does instead of keeping every link it cannot see
-    through.
+    Args:
+        ops (CommandIO): The mount's table.
+        op (Operation): Required backend operation.
     """
-
-    readdir: ReaddirOp
-    read_bytes: ReadBytesOp
-    stat: StatOp
-    read_stream: ReadStreamOp
-    is_mounted: IsMountedOp
-    read_range: ReadRangeOp | None = None
-    exists: ExistsOp | None = None
-    find: OperationFn | None = None
-    du: DuOps | None = None
-    write: WriteOp | None = None
-    append: WriteOp | None = None
-    pwrite: PwriteOp | None = None
-    create: PathOp | None = None
-    mkdir: MkdirOp | None = None
-    unlink: PathOp | None = None
-    rmdir: RmdirOp | None = None
-    rm_r: RmTreeOp | None = None
-    rename: PairOp | None = None
-    copy: PairOp | None = None
-    dir_copy: PairOp | None = None
-    truncate: TruncateOp | None = None
-    set_attrs: OperationFn | None = None
-    streams_bytes: bool = False
-    local: bool = True
-    max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES
-    max_du_entries: int | None = DEFAULT_MAX_DU_ENTRIES
-    search: SearchOps | None = None
-    content_search: ContentSearchOps | None = None
-    glob_children: ChildMounts | None = None
-    glob_target_stat: LinkTargetStat | None = None
-
-    @property
-    def resolve_glob(self) -> ResolveGlobOp:
-        return make_resolve_glob(
-            self.readdir,
-            self.max_glob_matches,
-            self.glob_children,
-            self.stat,
-            self.glob_target_stat,
+    fn: OperationFn | None = getattr(ops, op.value)
+    if fn is None:
+        return _with_operation_guards(
+            functools.partial(_refuse_missing, op), op.value
         )
-
-    def operation(self, op: Operation) -> OperationFn | None:
-        fn: OperationFn | None = getattr(self, op.value)
-        return fn
-
-    def require(self, op: Operation) -> OperationFn:
-        """Return a backend op, or one that refuses when the backend
-        omits it.
-
-        A backend without the write-side ops (github, notion, a
-        database) still runs every generic command, because only the
-        write itself knows whether a line writes: ``gzip -c``, ``tar
-        -t`` and ``split -n 1/2`` never call the op, and a line that
-        does is refused at that call with ENOTSUP for the path it
-        named, which the command renders in its own GNU voice, as a
-        filesystem that does not allow the operation would. Mirrors TS
-        ``requireOp``.
-
-        Args:
-            op (Operation): Required backend operation.
-        """
-        fn = self.operation(op)
-        if fn is None:
-            return _with_operation_guards(
-                functools.partial(_refuse_missing, op), op.value
-            )
-        return fn
+    return fn
 
 
 def mount_io(opts: CommandOpts) -> CommandIO:

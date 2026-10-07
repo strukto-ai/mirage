@@ -18,9 +18,8 @@ import pytest
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.object_store import make_object_store_commands
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.context import (
     reset_current_session,
     reset_mount_gate,

@@ -19,11 +19,11 @@ from typing import Any
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.tee import tee_generic as generic_tee
 from mirage.commands.builtin.generic_bind.adapter import (
-    CommandIO,
     Operation,
     over_mount_io,
+    require_op,
 )
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import CommandIO, CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -36,7 +36,7 @@ def _build(io: CommandIO) -> Callable[..., Any]:
         io (CommandIO): the guarded table of the running mount.
     """
     read_stream = io.read_stream
-    write_bytes = io.require(Operation.WRITE)
+    write_bytes = require_op(io, Operation.WRITE)
     resolve_glob = io.resolve_glob
 
     async def tee(

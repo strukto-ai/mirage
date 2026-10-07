@@ -24,7 +24,6 @@ from mirage.cache.read_through import (
     cache_aware_read_stream,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
-    CommandIO,
     mount_io,
     scoped_io,
     with_command_guards,
@@ -33,7 +32,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
 )
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import CommandIO, CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.errors.fs import eisdir
 from mirage.ops.types import NamespaceView

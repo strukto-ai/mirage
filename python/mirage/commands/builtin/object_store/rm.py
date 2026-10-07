@@ -21,9 +21,9 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cp import walk
 from mirage.commands.builtin.generic.rm_cmd import rm_without_operands
 from mirage.commands.builtin.generic_bind.adapter import (
-    CommandIO,
     Operation,
     over_mount_io,
+    require_op,
 )
 from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.builtin.utils.slash_links import (
@@ -31,7 +31,7 @@ from mirage.commands.builtin.utils.slash_links import (
     rm_link_refusal,
 )
 from mirage.commands.builtin.utils.verbose import removal_lines
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import CommandIO, CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
@@ -49,8 +49,8 @@ def _build(io: CommandIO) -> Callable[..., Any]:
     stat = io.stat
     readdir = io.readdir
     resolve_glob = io.resolve_glob
-    unlink = io.require(Operation.UNLINK)
-    rmdir = io.require(Operation.RMDIR)
+    unlink = require_op(io, Operation.UNLINK)
+    rmdir = require_op(io, Operation.RMDIR)
     rm_r = io.rm_r
     if rm_r is None:
         raise NotImplementedError(

@@ -17,9 +17,9 @@ from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic_bind.adapter import (
-    CommandIO,
     Operation,
     over_mount_io,
+    require_op,
 )
 from mirage.commands.builtin.generic_bind.builders.mkdir import (
     created_lines,
@@ -27,7 +27,7 @@ from mirage.commands.builtin.generic_bind.builders.mkdir import (
     make_directory,
 )
 from mirage.commands.builtin.utils.slash_links import mkdir_link_refusal
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import CommandIO, CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import missing_operand_error
@@ -41,7 +41,7 @@ def _build(io: CommandIO) -> Callable[..., Any]:
     Args:
         io (CommandIO): the guarded table of the running mount.
     """
-    mkdir_impl = io.require(Operation.MKDIR)
+    mkdir_impl = require_op(io, Operation.MKDIR)
     resolve_glob = io.resolve_glob
 
     async def mkdir(

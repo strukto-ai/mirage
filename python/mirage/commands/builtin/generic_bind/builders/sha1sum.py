@@ -16,12 +16,11 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.sha1sum import sha1sum_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
-    CommandIO,
     dir_aware_stat,
     dir_aware_stream,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 

@@ -17,7 +17,8 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic_bind.adapter import CommandIO, command_io
+from mirage.commands.builtin.generic_bind.adapter import command_io
+from mirage.commands.config import CommandIO
 from mirage.types import PathSpec
 from mirage.vfs.base import BaseVFS
 from mirage.workspace.mount import MountEntry

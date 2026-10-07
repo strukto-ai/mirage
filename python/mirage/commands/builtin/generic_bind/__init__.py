@@ -16,7 +16,6 @@ import importlib
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from mirage.commands.builtin.generic_bind.adapter import CommandIO
     from mirage.commands.builtin.generic_bind.factory import (
         make_generic_commands,
         with_read_cache,
@@ -26,7 +25,6 @@ if TYPE_CHECKING:
     from mirage.vfs.types import DuOps
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
-    "mirage.commands.builtin.generic_bind.adapter": ("CommandIO",),
     "mirage.commands.builtin.generic_bind.factory": (
         "make_generic_commands",
         "with_read_cache",
@@ -40,7 +38,6 @@ _MODULE_OF = {
 }
 
 __all__ = [
-    "CommandIO",
     "DuOps",
     "make_generic_commands",
     "make_resolve_glob",

@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RegisteredCommand } from '../../config.ts'
-import type { CommandIO } from '../generic_bind/index.ts'
+import type { RegisteredCommand, CommandIO } from '../../config.ts'
 import { withCommandGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
 import { withProbeAnswers, withSlashGuard } from '../generic_bind/factory.ts'
 import { makeMkdir } from './mkdir.ts'

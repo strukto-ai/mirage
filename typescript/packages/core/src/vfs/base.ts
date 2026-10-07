@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DEFAULT_MAX_DU_ENTRIES } from '../commands/builtin/generic/du.ts'
 import { type Accessor, NOOPAccessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { PredNode } from '../commands/builtin/find_eval.ts'
@@ -23,6 +22,7 @@ import { CapacityState, ListingVersion } from '../types.ts'
 import { DEFAULT_MAX_GLOB_MATCHES } from '../utils/glob_walk.ts'
 import type { DeltaHook } from '../watch/base.ts'
 import { vfsCall } from './call.ts'
+import { DEFAULT_MAX_DU_ENTRIES } from './constants.ts'
 import { type DuEntries, Effect, type SearchQuery } from './types.ts'
 
 export interface FindOptions {

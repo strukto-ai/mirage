@@ -16,13 +16,9 @@ from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.zgrep import zgrep_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
-    bound_op,
-)
+from mirage.commands.builtin.generic_bind.adapter import Builder, bound_op
 from mirage.commands.builtin.utils.links import link_door
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import utf8_locale
 from mirage.types import PathSpec

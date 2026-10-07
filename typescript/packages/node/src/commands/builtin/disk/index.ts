@@ -12,11 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  type CommandIO,
-  makeGenericCommands,
-} from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
+import { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import type { RegisteredCommand, CommandIO } from '@struktoai/mirage-core/commands/config'
 import { VFSName } from '@struktoai/mirage-core/types'
 
 // Shell traversals need partial results and per-directory errors; the shared

@@ -15,11 +15,11 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import type { PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts, type CommandFn } from '../../config.ts'
-import type { RegisteredCommand } from '../../config.ts'
+import type { RegisteredCommand, CommandIO } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { teeGeneric } from '../generic/tee.ts'
 import { requireOp, overMountIo } from '../generic_bind/adapter.ts'
-import { resolveGlobOf, type CommandIO } from '../generic_bind/index.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
 
 /** Build the write-tracking tee override for one keyed store. */
 function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {

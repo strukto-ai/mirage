@@ -2,7 +2,8 @@ import { expect, it, vi } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import { withCommandGuards, type CommandIO } from '../generic_bind/adapter.ts'
+import { withCommandGuards } from '../generic_bind/adapter.ts'
+import type { CommandIO } from '../../config.ts'
 import { makeRm } from './rm.ts'
 
 it.each([

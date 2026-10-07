@@ -22,8 +22,8 @@ from mirage.commands.builtin.generic.du import (
     ComputeSize,
     du_generic,
 )
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
-from mirage.commands.config import CommandOpts
+from mirage.commands.builtin.generic_bind.adapter import Builder
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import MountView
 from mirage.types import FileType, PathSpec

@@ -3,12 +3,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.commands.builtin.generic_bind.adapter import (
-    CommandIO,
-    with_command_guards,
-)
+from mirage.commands.builtin.generic_bind.adapter import with_command_guards
 from mirage.commands.builtin.object_store.rm import make_rm
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.types import FileStat, FileType, PathSpec
 
 

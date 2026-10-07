@@ -22,11 +22,12 @@ import {
   type CommandFnResult,
   type CommandOpts,
   type RegisteredCommand,
+  type CommandIO,
 } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { mountIo, resolveGlobOf, withWriteGuards, type CommandIO } from '../generic_bind/adapter.ts'
+import { mountIo, resolveGlobOf, withWriteGuards } from '../generic_bind/adapter.ts'
 import { formatRecords } from '../utils/output.ts'
 
 const ENC = new TextEncoder()

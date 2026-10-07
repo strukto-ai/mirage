@@ -17,15 +17,12 @@ import { mountKey, mountPrefixOf, rekey } from '../../../../utils/key_prefix.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
-import {
-  DEFAULT_MAX_DU_ENTRIES,
-  type ComputeEntries,
-  type ComputeSize,
-  duGeneric,
-} from '../../generic/du.ts'
+import { type ComputeEntries, type ComputeSize, duGeneric } from '../../generic/du.ts'
+import { DEFAULT_MAX_DU_ENTRIES } from '../../../../vfs/constants.ts'
 import { type DuEntries } from '../../../../vfs/types.ts'
 import type { MountView } from '../../../../ops/types.ts'
-import { type Builder, type CommandIO, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import { type Builder, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import type { CommandIO } from '../../../config.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 /**

@@ -14,10 +14,8 @@
 
 from dataclasses import replace
 
-from mirage.commands.builtin.generic_bind import (
-    CommandIO,
-    make_generic_commands,
-)
+from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.config import CommandIO
 
 
 def _walked(io: CommandIO) -> CommandIO:

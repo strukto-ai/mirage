@@ -17,9 +17,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.github.du import du
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.io.stream import materialize
 from mirage.types import FileStat, FileType, PathSpec

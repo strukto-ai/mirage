@@ -21,10 +21,9 @@ import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
 import type { ChildMounts, LinkView, NamespaceView } from '../../../ops/types.ts'
-import { type CommandFn, type RegisteredCommand, command } from '../../config.ts'
+import { type CommandFn, type RegisteredCommand, command, type CommandIO } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import {
-  type CommandIO,
   mountIo,
   scopedIo,
   withAbortGuard,

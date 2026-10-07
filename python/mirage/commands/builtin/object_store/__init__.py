@@ -16,7 +16,6 @@ from collections.abc import Callable
 from typing import Any
 
 from mirage.commands.builtin.generic_bind.adapter import (
-    CommandIO,
     with_command_guards,
     with_policy_guard,
 )
@@ -29,6 +28,7 @@ from mirage.commands.builtin.object_store.rm import make_rm
 from mirage.commands.builtin.object_store.stat import make_stat
 from mirage.commands.builtin.object_store.tee import make_tee
 from mirage.commands.builtin.object_store.touch import make_touch
+from mirage.commands.config import CommandIO
 
 # Keyed-store behaviours kept as overrides of the generic commands: no
 # real directories (mkdir -p, rm not-empty), write-tracking (touch/tee),

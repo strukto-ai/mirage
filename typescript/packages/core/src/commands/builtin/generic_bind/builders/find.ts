@@ -19,8 +19,8 @@ import { walkFind } from '../../../../core/generic/find.ts'
 import { findGeneric } from '../../generic/find.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
-import type { CommandFnResult, CommandOpts } from '../../../config.ts'
-import { type Builder, type CommandIO, overlaidStat, resolveGlobOf } from '../adapter.ts'
+import type { CommandFnResult, CommandOpts, CommandIO } from '../../../config.ts'
+import { type Builder, overlaidStat, resolveGlobOf } from '../adapter.ts'
 
 export const BUILDER: Builder = {
   name: 'find',

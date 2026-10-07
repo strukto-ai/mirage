@@ -15,7 +15,7 @@
 import functools
 from collections.abc import Awaitable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, Callable, Protocol, TypeAlias, overload
+from typing import Any, Callable, Protocol, TypeAlias, overload
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
@@ -27,14 +27,42 @@ from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import NamespaceView, ReaddirPath, SessionView, StatPath
+from mirage.ops.types import (
+    ChildMounts,
+    LinkTargetStat,
+    NamespaceView,
+    ReaddirPath,
+    SessionView,
+    StatPath,
+)
 from mirage.process.types import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.types import DispatchFn, ExecPathFn, ShellFn
 from mirage.types import Limit, PathSpec
-
-if TYPE_CHECKING:
-    from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
+from mirage.vfs.constants import DEFAULT_MAX_DU_ENTRIES
+from mirage.vfs.types import (
+    ContentSearchOps,
+    DuOps,
+    ExistsOp,
+    IsMountedOp,
+    MkdirOp,
+    OperationFn,
+    PairOp,
+    PathOp,
+    PwriteOp,
+    ReadBytesOp,
+    ReaddirOp,
+    ReadRangeOp,
+    ReadStreamOp,
+    ResolveGlobOp,
+    RmdirOp,
+    RmTreeOp,
+    SearchOps,
+    StatOp,
+    TruncateOp,
+    WriteOp,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +99,68 @@ class ExecContext:
     processes: ProcessView | None = None
     shell: ShellFn | None = None
     argv: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, kw_only=True)
+class CommandIO:
+    """Backend capabilities consumed by command algorithms.
+
+    Built from a mount's VFS by ``command_io``: each slot is one of its
+    functions with the accessor commands still pass in front dropped,
+    and a function the VFS does not define is an absent slot. Command
+    admission guards these calls; POSIX policy hooks belong to the
+    filesystem dispatcher and are not part of this interface.
+
+    ``glob_children`` is the child names the namespace owes a directory
+    (nested mount roots and symlinks), and ``glob_target_stat`` what an
+    owed name points at, the namespace's own stat resolved through the
+    workspace. The factory stamps both per invocation from ``opts.ns``,
+    because they are session-scoped state and the adapter is built once
+    per backend; the target stat lets a trailing-slash glob follow a link
+    the way bash does instead of keeping every link it cannot see
+    through.
+    """
+
+    readdir: ReaddirOp
+    read_bytes: ReadBytesOp
+    stat: StatOp
+    read_stream: ReadStreamOp
+    is_mounted: IsMountedOp
+    read_range: ReadRangeOp | None = None
+    exists: ExistsOp | None = None
+    find: OperationFn | None = None
+    du: DuOps | None = None
+    write: WriteOp | None = None
+    append: WriteOp | None = None
+    pwrite: PwriteOp | None = None
+    create: PathOp | None = None
+    mkdir: MkdirOp | None = None
+    unlink: PathOp | None = None
+    rmdir: RmdirOp | None = None
+    rm_r: RmTreeOp | None = None
+    rename: PairOp | None = None
+    copy: PairOp | None = None
+    dir_copy: PairOp | None = None
+    truncate: TruncateOp | None = None
+    set_attrs: OperationFn | None = None
+    streams_bytes: bool = False
+    local: bool = True
+    max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES
+    max_du_entries: int | None = DEFAULT_MAX_DU_ENTRIES
+    search: SearchOps | None = None
+    content_search: ContentSearchOps | None = None
+    glob_children: ChildMounts | None = None
+    glob_target_stat: LinkTargetStat | None = None
+
+    @property
+    def resolve_glob(self) -> ResolveGlobOp:
+        return make_resolve_glob(
+            self.readdir,
+            self.max_glob_matches,
+            self.glob_children,
+            self.stat,
+            self.glob_target_stat,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,7 +221,7 @@ class CommandOpts:
     filetype_fns: Mapping[str, "CommandFn"] | None = None
     command: str | None = None
     index: IndexCacheStore = NULL_INDEX
-    io: "CommandIO | None" = None
+    io: CommandIO | None = None
     dispatch: DispatchFn | None = None
     session_id: str | None = None
     env: dict[str, str] | None = None

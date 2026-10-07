@@ -24,12 +24,12 @@ from mirage.commands.builtin.generic.csplit import (
 )
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
-    CommandIO,
     Operation,
     bound_op,
+    require_op,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -54,8 +54,8 @@ async def csplit(
         write_bytes = transfer_primitives(opts.dispatch)["write"]
         unlink = partial(relay, opts.dispatch, "unlink")
     else:
-        write_bytes = partial(ops.require(Operation.WRITE), accessor)
-        unlink = partial(ops.require(Operation.UNLINK), accessor)
+        write_bytes = partial(require_op(ops, Operation.WRITE), accessor)
+        unlink = partial(require_op(ops, Operation.UNLINK), accessor)
     return await generic_csplit(
         paths,
         texts,

@@ -3,11 +3,10 @@ from mirage.commands.builtin.generic.od import od_generic as generic_od
 from mirage.commands.builtin.generic.od import parse_count
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
-    CommandIO,
     bound_op,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult

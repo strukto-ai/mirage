@@ -17,11 +17,10 @@ from mirage.commands.builtin.generic.awk import awk_generic as generic_awk
 from mirage.commands.builtin.generic.awk import served_here
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
-    CommandIO,
     bound_op,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.core.awk.builtins import split_assignment
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec

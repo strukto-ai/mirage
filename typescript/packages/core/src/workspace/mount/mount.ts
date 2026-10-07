@@ -33,16 +33,13 @@ import type {
   CommandOpts,
   ExecContext,
   RegisteredCommand,
+  CommandIO,
 } from '../../commands/config.ts'
 import { STDIN_DASH_COMMANDS, STDIN_DASH_LEADING } from '../../commands/spec/constants.ts'
 import { hasInjectedVersion } from '../../commands/spec/standard.ts'
 import { ROOT_CWD } from '../../commands/constants.ts'
 import type { LinkView, OpKwargs } from '../../ops/types.ts'
-import {
-  type CommandIO,
-  commandIo,
-  resolveGlobOf,
-} from '../../commands/builtin/generic_bind/adapter.ts'
+import { commandIo, resolveGlobOf } from '../../commands/builtin/generic_bind/adapter.ts'
 import {
   appendByRewrite,
   expectOffset,

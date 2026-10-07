@@ -12,26 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type {
-  ContentSearchOps,
-  CopyOp,
-  DuOps,
-  ExistsOp,
-  FindOp,
-  MkdirOp,
-  PathOp,
-  PwriteOp,
-  ReadBytesOp,
-  ReaddirOp,
-  ReadStreamOp,
-  RenameOp,
-  ResolveGlobOp,
-  RmdirOp,
-  SearchOps,
-  SearchQuery,
-  StatOp,
-  WriteOp,
-} from '../../../vfs/types.ts'
+import type { MkdirOp, ReadBytesOp, ResolveGlobOp, SearchQuery, StatOp } from '../../../vfs/types.ts'
 import type { BaseVFS, FindOptions } from '../../../vfs/base.ts'
 import { getExtension } from '../../resolve.ts'
 import { streamFromBytes } from '../utils/wrap.ts'
@@ -82,67 +63,17 @@ import {
   walkRefusal,
 } from '../../../errors/fs.ts'
 import { dotRefusal } from '../utils/paths.ts'
-import type { ChildMounts } from '../../../ops/types.ts'
-import { makeResolveGlob, type TargetStat } from '../../../utils/glob_walk.ts'
+import { makeResolveGlob } from '../../../utils/glob_walk.ts'
 import { norm, parent } from '../../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 
-import type { AggregateFn, CommandFn, CommandFnResult, CommandOpts } from '../../config.ts'
-
-/**
- * The command tier's table: the mounted VFS's functions, each taking the
- * accessor in front as a command calls it. A slot the VFS does not define
- * is absent. Built per mount by {@link commandIo}; a command reaches its
- * mount's table through {@link mountIo}.
- */
-export interface CommandIO<A extends Accessor = Accessor> {
-  readdir: ReaddirOp<A>
-  readBytes: ReadBytesOp<A>
-  stat: StatOp<A>
-  readStream: ReadStreamOp<A>
-  readRange?: (
-    accessor: A,
-    path: PathSpec,
-    index: IndexCacheStore | undefined,
-    offset: number,
-    size: number | null,
-  ) => Promise<Uint8Array>
-  exists?: ExistsOp<A>
-  find?: FindOp<A>
-  du?: DuOps<A>
-  write?: WriteOp<A>
-  append?: WriteOp<A>
-  pwrite?: PwriteOp<A>
-  create?: PathOp<A>
-  mkdir?: MkdirOp<A>
-  unlink?: PathOp<A>
-  rmdir?: RmdirOp<A>
-  rmR?: PathOp<A>
-  rename?: RenameOp<A>
-  copy?: CopyOp<A>
-  dirCopy?: CopyOp<A>
-  /** noCreate requires an atomic existence precondition, or ENOTSUP before writing. */
-  truncate?: (accessor: A, path: PathSpec, length: number, noCreate?: boolean) => Promise<void>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  setAttrs?: (...args: any[]) => unknown
-  isMounted: (accessor: A) => boolean
-  streamsBytes?: boolean
-  local?: boolean
-  maxGlobMatches?: number
-  maxDuEntries?: number | null
-  search?: SearchOps<A>
-  contentSearch?: ContentSearchOps<A>
-  // Child names the namespace owes a directory (nested mount roots and
-  // symlinks). Stamped per invocation from opts.childMounts by the
-  // factory, because it is session-scoped state while the adapter itself
-  // is built once per backend.
-  globChildren?: ChildMounts
-  // What an owed name points at, the namespace's own stat resolved
-  // through the workspace. Stamped beside globChildren from opts.ns.links,
-  // so a trailing-slash glob follows a link the way bash does instead of
-  // keeping every link it cannot see through.
-  globTargetStat?: TargetStat
-}
+import type {
+  AggregateFn,
+  CommandFn,
+  CommandFnResult,
+  CommandIO,
+  CommandOpts,
+} from '../../config.ts'
 
 /**
  * The table of the mount a command runs on. Throws when the command ran

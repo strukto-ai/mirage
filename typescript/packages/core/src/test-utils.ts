@@ -18,7 +18,8 @@ import type { OpKwargs } from './ops/types.ts'
 import { type FileStat, MountMode, type PathSpec } from './types.ts'
 import { BaseVFS } from './vfs/base.ts'
 import type { Accessor } from './accessor/base.ts'
-import { type CommandIO, commandIo } from './commands/builtin/generic_bind/adapter.ts'
+import { commandIo } from './commands/builtin/generic_bind/adapter.ts'
+import type { CommandIO } from './commands/config.ts'
 import { MountEntry } from './workspace/mount/mount.ts'
 
 /**

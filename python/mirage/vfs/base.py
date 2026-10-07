@@ -20,7 +20,6 @@ from pydantic import BaseModel
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.du import DEFAULT_MAX_DU_ENTRIES
 from mirage.errors.fs import enotsup
 from mirage.types import (
     CapacityResult,
@@ -32,6 +31,7 @@ from mirage.types import (
 )
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
 from mirage.vfs.call import vfs_call
+from mirage.vfs.constants import DEFAULT_MAX_DU_ENTRIES
 from mirage.vfs.secrets import redacted_config_dump
 from mirage.vfs.types import DuEntries, Effect, SearchQuery
 from mirage.watch.base import DeltaHook

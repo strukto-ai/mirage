@@ -20,7 +20,16 @@ import pytest
 import mirage.commands.builtin.generic_bind.adapter as adapter
 from mirage.accessor.base import NOOPAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.config import CommandOpts
+from mirage.commands.builtin.generic_bind.adapter import (
+    Operation,
+    dir_aware_stat,
+    dir_aware_stream,
+    require_op,
+    resolve_or_empty,
+    with_command_guards,
+    with_dir_guard,
+)
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.context import (
     reset_admission,
     reset_current_session,
@@ -47,16 +56,6 @@ from mirage.types import (
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
 from mirage.vfs.types import ContentSearchOps
 from mirage.workspace.session import SessionState
-
-from mirage.commands.builtin.generic_bind.adapter import (  # isort: skip
-    CommandIO,
-    Operation,
-    dir_aware_stat,
-    dir_aware_stream,
-    resolve_or_empty,
-    with_command_guards,
-    with_dir_guard,
-)
 
 TREE = {
     "/notion/pages": [
@@ -127,15 +126,18 @@ async def test_command_io_require_missing_op():
     src = PathSpec.from_str_path("/a.txt")
     dst = PathSpec.from_str_path("/b.txt")
     with pytest.raises(OperationNotSupportedError) as write_exc:
-        await io.require(Operation.WRITE)(NOOPAccessor(), src, b"x")
+        await require_op(io, Operation.WRITE)(NOOPAccessor(), src, b"x")
     assert (write_exc.value.errno, write_exc.value.filename) == (
         errno.ENOTSUP,
         "/a.txt",
     )
     with pytest.raises(OperationNotSupportedError) as copy_exc:
-        await io.require(Operation.COPY)(NOOPAccessor(), src, dst)
+        await require_op(io, Operation.COPY)(NOOPAccessor(), src, dst)
     assert copy_exc.value.filename == "/b.txt"
-    assert make_io(write=fake_readdir).require(Operation.WRITE) is fake_readdir
+    assert (
+        require_op(make_io(write=fake_readdir), Operation.WRITE)
+        is fake_readdir
+    )
 
 
 def _probe_ops(
@@ -994,11 +996,11 @@ async def test_capability_and_mode_share_path_guards(
         if operation in (Operation.COPY, Operation.RENAME):
             args = [NOOPAccessor(), _spec("/data/build/src"), path]
         if available and region == "build":
-            await ops.require(operation)(*args)
+            await require_op(ops, operation)(*args)
             assert len(calls) == 1
         else:
             with pytest.raises(OSError) as error:
-                await ops.require(operation)(*args)
+                await require_op(ops, operation)(*args)
             assert error.value.errno == expected
             named = path
             if operation == Operation.RENAME and region == "build":
@@ -1048,17 +1050,17 @@ async def test_copy_reads_source_but_rename_mutates_source_and_subtrees(
         )
         src, dst = _spec("/data/src"), _spec("/data/dst")
         if available:
-            await ops.require(Operation.COPY)(NOOPAccessor(), src, dst)
+            await require_op(ops, Operation.COPY)(NOOPAccessor(), src, dst)
         else:
             with pytest.raises(OperationNotSupportedError) as error:
-                await ops.require(Operation.COPY)(NOOPAccessor(), src, dst)
+                await require_op(ops, Operation.COPY)(NOOPAccessor(), src, dst)
             assert error.value.filename == dst.virtual
         for source, blame in [
             (src, src.virtual),
             (_spec("/data/tree"), "/data/tree/locked"),
         ]:
             with pytest.raises(OSError) as error:
-                await ops.require(Operation.RENAME)(
+                await require_op(ops, Operation.RENAME)(
                     NOOPAccessor(), source, dst
                 )
             assert (error.value.errno, error.value.filename) == (
@@ -1078,7 +1080,7 @@ async def test_missing_copy_checks_command_paths_before_capability_failure(
     gate = _Gate("/data/secret")
     monkeypatch.setattr(adapter, "get_admission", lambda: gate)
     with pytest.raises(PermissionError):
-        await make_io().require(Operation.COPY)(
+        await require_op(make_io(), Operation.COPY)(
             NOOPAccessor(), _spec("/data/secret"), _spec("/data/dst")
         )
     assert gate.asked == ["/data/secret"]

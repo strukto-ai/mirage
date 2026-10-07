@@ -18,12 +18,12 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.iconv import iconv_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
-    CommandIO,
     Operation,
     bound_op,
+    require_op,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -41,7 +41,7 @@ async def iconv(
         list(texts),
         opts,
         bound_op(ops.read_bytes, accessor, opts.index),
-        partial(ops.require(Operation.WRITE), accessor),
+        partial(require_op(ops, Operation.WRITE), accessor),
     )
 
 

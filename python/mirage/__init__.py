@@ -25,10 +25,7 @@ from mirage.version import __version__ as __version__
 if TYPE_CHECKING:
     from mirage.accessor.base import Accessor
     from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexConfig
-    from mirage.commands.builtin.generic_bind import (
-        CommandIO,
-        make_generic_commands,
-    )
+    from mirage.commands.builtin.generic_bind import make_generic_commands
     from mirage.commands.builtin.utils.wrap import stream_from_bytes
     from mirage.commands.cli import (
         CLIDoors,
@@ -36,7 +33,7 @@ if TYPE_CHECKING:
         CLISpec,
         register_cli_spec,
     )
-    from mirage.commands.config import command
+    from mirage.commands.config import CommandIO, command
     from mirage.commands.errors import UsageError
     from mirage.commands.spec import (
         SPECS,
@@ -143,7 +140,7 @@ if TYPE_CHECKING:
 _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.vfs.disk": ("DiskVFS",),
     "mirage.vfs.ram": ("RAMVFS",),
-    "mirage.commands.config": ("command",),
+    "mirage.commands.config": ("CommandIO", "command"),
     "mirage.commands.cli": (
         "CLIInvocation",
         "CLISpec",
@@ -203,10 +200,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.utils.ids": ("new_session_id", "new_workspace_id", "uuid7"),
     "mirage.accessor.base": ("Accessor",),
     "mirage.cache.index": ("NULL_INDEX", "IndexCacheStore", "IndexConfig"),
-    "mirage.commands.builtin.generic_bind": (
-        "CommandIO",
-        "make_generic_commands",
-    ),
+    "mirage.commands.builtin.generic_bind": ("make_generic_commands",),
     "mirage.commands.builtin.utils.wrap": ("stream_from_bytes",),
     "mirage.commands.errors": ("UsageError",),
     "mirage.commands.spec.types": ("UsageStyle",),

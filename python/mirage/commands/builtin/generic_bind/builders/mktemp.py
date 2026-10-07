@@ -18,11 +18,11 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.mktemp import mktemp_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
-    CommandIO,
     Operation,
+    require_op,
 )
 from mirage.commands.builtin.utils.copy import path_exists
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -51,13 +51,13 @@ async def mktemp(
         if dispatch is not None:
             await dispatch("mkdir", path)
         else:
-            await ops.require(Operation.MKDIR)(accessor, local(path))
+            await require_op(ops, Operation.MKDIR)(accessor, local(path))
 
     async def write(path: PathSpec, data: bytes) -> None:
         if dispatch is not None:
             await dispatch("write", path, data=data)
         else:
-            await ops.require(Operation.WRITE)(accessor, local(path), data)
+            await require_op(ops, Operation.WRITE)(accessor, local(path), data)
 
     async def exists(path: PathSpec) -> bool:
         if opts.stat_path is not None:

@@ -15,8 +15,8 @@
 import type { RAMAccessor } from '../../../accessor/ram.ts'
 import { readStream } from '../../../core/dev/stream.ts'
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { type CommandIO, makeGenericCommands } from '../generic_bind/index.ts'
+import type { RegisteredCommand, CommandIO } from '../../config.ts'
+import { makeGenericCommands } from '../generic_bind/index.ts'
 
 function endless(io: CommandIO): CommandIO {
   return {

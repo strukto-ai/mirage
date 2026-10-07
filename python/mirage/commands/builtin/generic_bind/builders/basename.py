@@ -16,8 +16,8 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.basename import (
     basename as generic_basename,
 )
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
-from mirage.commands.config import CommandOpts
+from mirage.commands.builtin.generic_bind.adapter import Builder
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
