@@ -72,7 +72,13 @@ import { standardRequest } from '../../../commands/spec/standard.ts'
 import { dropsMountCaches, handleCli } from './cli.ts'
 import { pathStat } from '../../mount/namespace/probe.ts'
 import { namespaceViewOf } from '../../mount/namespace/view.ts'
-import { dropMountCaches, findStartPoints, runOnMount, type RunOnMountCtx } from './run.ts'
+import {
+  dropMountCaches,
+  findStartPoints,
+  runClaiming,
+  runOnMount,
+  type RunOnMountCtx,
+} from './run.ts'
 import type { NamespaceView, SessionView, StatPath } from '../../../ops/types.ts'
 import { applyFindActions } from '../find_action_dispatch.ts'
 import { sessionView } from '../../session/state.ts'
@@ -538,20 +544,23 @@ export async function handleCommand(
       mergeSignals(signal, context.frame.abortSignal),
       dispatch,
     )
-    const [csStdout0, csIo] = await handleCrossMount(
-      cmdName,
-      csScopes,
-      csTexts,
-      csFlags,
-      dispatch,
-      runOperand,
-      stdin,
-      makeStorageKey(registry),
-      csNs,
-      sessionView(session, registry.policies, context.frame.diagnostics),
-      session.cwd,
-      spelledWords(parts.slice(1)),
-      aggregateFor(cmdName, csScopes, registry),
+    // The relay's keys are already virtual, so no prefix.
+    const [csStdout0, csIo] = await runClaiming('', () =>
+      handleCrossMount(
+        cmdName,
+        csScopes,
+        csTexts,
+        csFlags,
+        dispatch,
+        runOperand,
+        stdin,
+        makeStorageKey(registry),
+        csNs,
+        sessionView(session, registry.policies, context.frame.diagnostics),
+        session.cwd,
+        spelledWords(parts.slice(1)),
+        aggregateFor(cmdName, csScopes, registry),
+      ),
     )
     const csExec = new ExecutionNode({
       command: cmdStr,

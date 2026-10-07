@@ -28,9 +28,9 @@ import type { ProcessHandle } from '../../process/handle.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import { concat } from '../../io/cachable_iterator.ts'
-import { runWithRecording } from '../../observe/context.ts'
+import { activeRecords, runWithRecording } from '../../observe/context.ts'
 import type { Observer } from '../../observe/observer.ts'
-import type { OpRecord } from '../../observe/record.ts'
+import { READ_FINGERPRINT_OPS, type OpRecord } from '../../observe/record.ts'
 import { Channel } from '../../shell/console/types.ts'
 import type { JobConsole } from '../../shell/console/job_console.ts'
 import { Terminal } from '../../shell/console/index.ts'
@@ -767,6 +767,12 @@ async function runParsedLine(
   // with record:false: no new recording scope, so their ops land in the
   // caller's recorder, and no command entry is logged for them.
   const isLine = options.record !== false
+  // A nested line collects no records of its own and hands only its
+  // streams back, so it applies against the records added to the enclosing
+  // line's since it began, copied at apply, reads left out: a concurrent
+  // sibling stage records into the same list, and its read token would label
+  // bytes this line read before the change.
+  const nestedStart = isLine ? 0 : (activeRecords()?.length ?? 0)
   // The session's kill channel folded in, as the dispatcher folds it
   // for the tree: a question put to a host has to answer to both, and
   // both admission passes below can put one.
@@ -1063,43 +1069,65 @@ async function runParsedLine(
   const callerError =
     executionFailure !== undefined &&
     (isControlFlowError(executionFailure.error) || killed?.aborted === true)
-  // The program loop stamped each statement; the line as a whole is a
-  // wrapper around them, like a group.
-  // A rejected invocation records its outcome without changing shell status.
-  if (rootNode.warnings)
-    io.stderr = concat([encodeText(rootNode.warnings), await io.materializeStderr()])
-  if (!callerError) recordStatus(targetSession, io.exitCode, true)
   let stdoutBytes: Uint8Array
+  let stderrBytes: Uint8Array
   try {
-    if (executionFailure === undefined) {
-      await abortable(env.dispatcher.applyIo(io, opRecords, cacheFacts), killed)
+    // The program loop stamped each statement; the line as a whole is a
+    // wrapper around them, like a group.
+    // A rejected invocation records its outcome without changing shell status.
+    if (rootNode.warnings)
+      io.stderr = concat([encodeText(rootNode.warnings), await io.materializeStderr()])
+    if (!callerError) recordStatus(targetSession, io.exitCode, true)
+    try {
+      if (executionFailure === undefined) {
+        const applied = isLine
+          ? opRecords
+          : activeRecords()
+              ?.slice(nestedStart)
+              .filter((r) => !READ_FINGERPRINT_OPS.has(r.op))
+        await abortable(env.dispatcher.applyIo(io, applied, cacheFacts), killed)
+      }
+      stdoutBytes =
+        materialized === null
+          ? new Uint8Array()
+          : await abortable(materialize(materialized), killed)
+    } catch (err) {
+      if (killed?.aborted === true) {
+        // The command finished; the abort landed on the cache fill or the drain.
+        // An aborted invocation is the caller's outcome, not the shell's.
+        if (isLine) restoreStatus(targetSession, statusBefore, lineStatusWriter(targetSession))
+        executionFailure = { error: makeAbortError(killed) }
+        io.exitCode = 130
+        stdoutBytes = new Uint8Array()
+      } else {
+        // Lazy reads can fail while draining (e.g. head/tail that open the
+        // stream mid-pipeline, or a backend size guard thrown on the first
+        // pull); surface that as a failed command, not a crash. The command
+        // name is the first token of the pipeline's failing stage; for a bare
+        // command it is simply the command.
+        const cmdName = commandName(command) || command
+        io.exitCode = 1
+        io.stderr = isFsError(err)
+          ? formatFsError(cmdName, err)
+          : encodeText(`${err instanceof Error ? err.message : String(err)}\n`)
+        recordStatus(targetSession, 1)
+        stdoutBytes = new Uint8Array()
+      }
     }
-    stdoutBytes =
-      materialized === null ? new Uint8Array() : await abortable(materialize(materialized), killed)
-  } catch (err) {
-    if (killed?.aborted === true) {
-      // The command finished; the abort landed on the cache fill or the drain.
-      // An aborted invocation is the caller's outcome, not the shell's.
-      if (isLine) restoreStatus(targetSession, statusBefore, lineStatusWriter(targetSession))
-      executionFailure = { error: makeAbortError(killed) }
-      io.exitCode = 130
-      stdoutBytes = new Uint8Array()
-    } else {
-      // Lazy reads can fail while draining (e.g. head/tail that open the
-      // stream mid-pipeline, or a backend size guard thrown on the first
-      // pull); surface that as a failed command, not a crash. The command
-      // name is the first token of the pipeline's failing stage; for a bare
-      // command it is simply the command.
-      const cmdName = commandName(command) || command
-      io.exitCode = 1
-      io.stderr = isFsError(err)
-        ? formatFsError(cmdName, err)
-        : encodeText(`${err instanceof Error ? err.message : String(err)}\n`)
-      recordStatus(targetSession, 1)
-      stdoutBytes = new Uint8Array()
+    stderrBytes = await materialize(io.stderr)
+  } finally {
+    // The marks were only for this line's applyIo, so they go however it
+    // ends, after the line's last await, so a background job cannot mark
+    // a record between the seal and the persist below; the seal stops a
+    // background command that returns later from marking a record
+    // persisted here, which nothing outside FUSE ever trims. A line whose
+    // recording scope threw returned no records: they are neither applied
+    // nor persisted.
+    for (const rec of opRecords) {
+      rec.claimed = null
+      rec.sealed = true
     }
   }
-  const stderrBytes = await materialize(io.stderr)
 
   // One rule on every path: an op that happened is always accounted, in
   // byte accounting (which feeds snapshot fingerprints/drift) and as

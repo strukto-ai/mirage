@@ -128,11 +128,13 @@ const H = vi.hoisted(() => ({
   captured: [] as OpRecord[],
   gridfs: new Map<string, GridFSDoc>(),
   opened: 0,
+  uploads: 0,
   // A Drive folder tree keyed by id, served through the mocked Drive calls
   // below; the counters are what the rows assert a warm read avoids.
   gdrive: new Map<string, GDriveItem>(),
   gdriveDownloads: 0,
   gdriveRenders: 0,
+  gdriveUploads: 0,
   reach: [] as string[],
   // Replaces the token a read records, to stage a backend stamping a token of
   // another kind than its stat's.
@@ -217,6 +219,29 @@ vi.mock('../core/gridfs/client.ts', async () => {
           if (doc === undefined) throw new Error(`no file ${id.toString()}`)
           return Readable.from(chunked(doc.data))
         },
+        // A new revision is a new doc with a new _id, dated after every
+        // seeded one, so it is what latestFile answers next.
+        openUploadStream: (key: string) => {
+          H.uploads += 1
+          const oid = `b${String(H.uploads).padStart(23, '0')}`
+          const listeners: Record<string, (() => void)[]> = {}
+          return {
+            id: { toString: () => oid },
+            on: (event: string, fn: () => void) => {
+              ;(listeners[event] ??= []).push(fn)
+            },
+            end: (data: Uint8Array) => {
+              H.gridfs.set(key, {
+                _id: { toString: () => oid },
+                filename: key,
+                length: data.byteLength,
+                uploadDate: new Date(Date.UTC(2030, 0, 2)),
+                data,
+              })
+              for (const fn of listeners.finish ?? []) fn()
+            },
+          }
+        },
       }),
     iterLatest: refuse('iterLatest'),
     filesColl: refuse('filesColl'),
@@ -287,6 +312,29 @@ vi.mock('@struktoai/mirage-core/core/google/drive', async (importOriginal) => {
     downloadFile: (_tm: unknown, id: string) => {
       H.gdriveDownloads += 1
       return Promise.resolve(item(id).content)
+    },
+    // A write's reply is the uploaded file resource, rendered through
+    // gdriveResource like a listing entry, so the token a write records and
+    // the token a later probe lists cannot disagree.
+    uploadFile: async (_tm: unknown, name: string, parentId: string, data: Uint8Array) => {
+      H.gdriveUploads += 1
+      const created: GDriveItem = {
+        id: `u${String(H.gdriveUploads)}`,
+        name,
+        mimeType: 'application/octet-stream',
+        parents: [parentId],
+        modifiedTime: `2026-04-17T00:00:${String(H.gdriveUploads).padStart(2, '0')}Z`,
+        content: data,
+      }
+      H.gdrive.set(created.id, created)
+      return gdriveResource(created)
+    },
+    updateFileContent: async (_tm: unknown, id: string, data: Uint8Array) => {
+      H.gdriveUploads += 1
+      const found = item(id)
+      found.content = data
+      found.modifiedTime = `2026-04-17T00:00:${String(H.gdriveUploads).padStart(2, '0')}Z`
+      return gdriveResource(found)
     },
   }
 })
@@ -589,13 +637,22 @@ const FAMILY_ROWS: Partial<Record<Family, Row[]>> = {
 // live from source the same way. Imported by URL: the scripts package sits
 // outside this package's rootDir.
 const FACTS = resolve(fileURLToPath(import.meta.url), '../../../../../scripts/vfs_facts.ts')
-const { registryCapabilities } = (await import(pathToFileURL(FACTS).href)) as {
+const { registryCapabilities, commandIoFacts } = (await import(pathToFileURL(FACTS).href)) as {
   registryCapabilities: (
     root: string,
     pkgs: readonly string[],
   ) => Record<string, { read_revalidatable?: unknown } | null>
+  commandIoFacts: (
+    root: string,
+    pkgs: readonly string[],
+    defaults: { maxGlobMatches: number; maxDuEntries: number },
+  ) => Record<string, { slots: string[] } | undefined>
 }
 const CAPABILITIES = registryCapabilities(resolve(FACTS, '../../packages'), ['core', 'node'])
+const COMMAND_IO = commandIoFacts(resolve(FACTS, '../../packages'), ['core', 'node'], {
+  maxGlobMatches: 0,
+  maxDuEntries: 0,
+})
 
 interface Fake {
   vfs: BaseVFS
@@ -1089,6 +1146,52 @@ const CHANGED_CASES: { name: string; shape: Shape }[] = [
 ]
 const B_CASES = cases(['bytes', 'stream'])
 
+// The command packages the aliases share: every s3 alias is wired through
+// s3's, every hf repo type through hf_hub's. Any other name keys itself, so a
+// new declarer with no package of its own reads as having no slots.
+const IO_KEYS: Record<string, string> = {
+  ...Object.fromEntries(S3_FAMILY.map((name) => [name, 's3'])),
+  ...Object.fromEntries(Object.keys(HF_FAMILY).map((name) => [name, 'hf_hub'])),
+}
+
+// Derived from the live roster and each backend's wired write slot (the
+// facts the spec generator reads), not listed: a declarer that gains a write
+// op joins the write rows.
+function writableNames(): Set<string> {
+  const known = new Set(knownVfsNames())
+  const out = new Set<string>()
+  for (const [name, caps] of Object.entries(CAPABILITIES)) {
+    if (caps?.read_revalidatable !== true || !known.has(name)) continue
+    const slots = COMMAND_IO[IO_KEYS[name] ?? name]?.slots ?? []
+    if (slots.includes('write')) out.add(name)
+  }
+  return out
+}
+
+function writeFamilies(): Set<Family> {
+  const out = new Set<Family>()
+  for (const name of writableNames()) {
+    const family = HARNESSES[name]
+    if (family !== undefined) out.add(family)
+  }
+  return out
+}
+
+// hf_buckets, onedrive and sharepoint record no write token, as on main, so
+// the next fresh read downloads once.
+const WRITE_EXCEPTIONS: Partial<Record<Family, number>> = {
+  hf_buckets: 1,
+  onedrive: 1,
+  sharepoint: 1,
+}
+const WRITE_TARGETS = { new: 'w.txt', seeded: KEYS.root } as const
+const WRITE_CASES = [...writeFamilies()].sort().flatMap((family) =>
+  (Object.keys(WRITE_TARGETS) as (keyof typeof WRITE_TARGETS)[]).map((target) => ({
+    family,
+    target,
+  })),
+)
+
 function specFor(virtual: string, key: string): PathSpec {
   return new PathSpec({
     virtual,
@@ -1206,6 +1309,8 @@ describe('the read-token contract', () => {
     H.gdrive.clear()
     H.gdriveDownloads = 0
     H.gdriveRenders = 0
+    H.gdriveUploads = 0
+    H.uploads = 0
     H.reach.length = 0
     H.stampOverride = null
   })
@@ -1278,7 +1383,58 @@ describe('the read-token contract', () => {
     )
     const whole = ['github', 'gdrive', 'gdocs', 'gsheets', 'gslides']
     expect(cases(['drain']).some((c) => whole.includes(c.name))).toBe(false)
+    const expectedWrite = new Set<string>()
+    for (const family of [
+      's3',
+      'gridfs',
+      'hf_buckets',
+      'onedrive',
+      'sharepoint',
+      'gdrive',
+      'box',
+      'dropbox',
+    ])
+      for (const target of ['new', 'seeded']) expectedWrite.add(`${family}-write-${target}`)
+    expect(new Set(WRITE_CASES.map((c) => `${c.family}-write-${c.target}`))).toEqual(expectedWrite)
   })
+
+  it('every writable family has a write harness or an exception', () => {
+    // The write rows run each family's own harness through makeFake, so a
+    // writable family is covered exactly when it has a harness; the
+    // exception table may name only writable families.
+    const names = writableNames()
+    expect(names.size).toBeGreaterThan(0)
+    for (const name of names) expect(HARNESSES[name], name).toBeDefined()
+    const families = writeFamilies()
+    for (const family of Object.keys(WRITE_EXCEPTIONS))
+      expect(families.has(family as Family)).toBe(true)
+  })
+
+  for (const { family, target } of WRITE_CASES) {
+    it(`a written file is served without a download: ${family}-write-${target}`, async () => {
+      // The new target takes the create path (box/gdrive new upload, Graph
+      // create), the seeded one the update path (version, update by id).
+      // H.unrecorded stays false, so record() reaches the real recorder.
+      expect(H.unrecorded).toBe(false)
+      const fake = await makeFake(family, 'root', SEED)
+      const virtual = `/m/${WRITE_TARGETS[target]}`
+      const ws = freshWorkspace(fake.vfs)
+      try {
+        await line(ws, `echo new | tee ${virtual}`)
+        const written = [...H.reach]
+        const before = fake.fetches()
+        expect(new TextDecoder().decode(await line(ws, `cat ${virtual}`))).toBe('new\n')
+        expect(fake.fetches() - before).toBe(WRITE_EXCEPTIONS[family] ?? 0)
+        // A new gridfs key's stat miss asks filesColl whether the key names a
+        // folder, a door the read rows refuse; the read itself reaches nothing.
+        const statMiss = family === 'gridfs' && target === 'new'
+        expect(written).toEqual(statMiss ? ['filesColl'] : [])
+        expect(H.reach).toEqual(written)
+      } finally {
+        await ws.close()
+      }
+    })
+  }
 
   it('a native gdoc under fresh renders once until it changes', async () => {
     // A native file has no md5 and no head revision; its token is the
@@ -1669,6 +1825,17 @@ describe('the read-token contract', () => {
         expect(await line(ws, `cat /m/${DEEP}`)).toEqual(SEED)
         expect(box.log.slice(before)).toEqual([`info:${box.idOf(root + DEEP)}`])
       }, root)
+    })
+
+    it('a fresh box read after a tee probes once without a download', async () => {
+      await boxCase(async (ws, box) => {
+        await line(ws, `echo new | tee /m/${DEEP}`)
+        const before = box.log.length
+        expect(new TextDecoder().decode(await line(ws, `cat /m/${DEEP}`))).toBe('new\n')
+        const log = box.log.slice(before)
+        // The probe after a write is one parent walk, not an info by id.
+        expect(log).toEqual(walk(box))
+      })
     })
 
     it('a direct warm fresh box read is one request by id', async () => {

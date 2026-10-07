@@ -208,8 +208,9 @@ def test_a_rewrite_after_a_retraction_pins_the_new_token():
 
 
 def test_a_tokenless_write_retracts_the_pin_it_cannot_describe():
-    """gdrive's shape: it stamps a read fingerprint but records a
-    tokenless write, so the pre-write token must not survive."""
+    """The shape of a backend whose upload reply carries no token: it
+    stamps a read fingerprint but records a tokenless write, so the
+    pre-write token must not survive."""
     entries = capture_fingerprints(
         _ws([_rec("read", "/s3/a", "fp-read"), _rec("write", "/s3/a")])
     )

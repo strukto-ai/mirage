@@ -27,7 +27,7 @@ import { readdir as coreReaddir } from './readdir.ts'
 import { enoent, isEnoent } from '../../errors/fs.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 
-function statFromEntry(entry: DropboxEntry): FileStat {
+export function statFromEntry(entry: DropboxEntry): FileStat {
   const modified = entry.server_modified ?? entry.client_modified ?? ''
   if (entry['.tag'] === 'folder') {
     return new FileStat({

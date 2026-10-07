@@ -14,6 +14,8 @@
 
 from dataclasses import dataclass, field
 
+from mirage.io.types import ByteSource
+
 # Ops whose record carries a token describing the bytes it moved, split
 # by direction: the file cache stores bytes from either `IOResult.reads`
 # or `IOResult.writes` and must ask about the side it took, since one
@@ -31,7 +33,7 @@ from dataclasses import dataclass, field
 # backends that record one stamp no token.
 # `truncate` would also need its record's `bytes` corrected before it
 # could join: it reports 0 while its token describes `length` bytes, so
-# the byte-identity guard in `latest_fingerprint` would refuse every one.
+# the size check in `written_verdict` would refuse every one.
 READ_FINGERPRINT_OPS = frozenset({"read"})
 WRITE_FINGERPRINT_OPS = frozenset({"write"})
 
@@ -74,9 +76,10 @@ class OpRecord:
         bytes (int): Bytes transferred (0 for metadata ops).
         timestamp (int): UTC epoch milliseconds.
         duration_ms (int): Wall-clock duration.
-        fingerprint (str | None): On a read, and on an object store's
-            write, create and truncate, the content-derived identifier
-            the backend returned (e.g. S3 ``ETag``, md5). Used to detect
+        fingerprint (str | None): On a read, on an object store's
+            write, create and truncate, and on a Box, Dropbox or Google
+            Drive write, the content-derived identifier the backend
+            returned (e.g. S3 ``ETag``, md5, Box ``sha1``). Used to detect
             drift at replay time. Captured as the op completes, so it
             describes the bytes that op moved. None for metadata ops and
             backends that return no token.
@@ -89,6 +92,12 @@ class OpRecord:
             backends that can guarantee revision durability.
         mount_id (str | None): In-process mount identity for snapshot
             ownership checks; never used as a persisted backend revision.
+        claimed (ByteSource | None): The exact value the command that
+            made this ``write`` put in ``IOResult.writes`` for a path it
+            claims, set by the executor and cleared when the line ends.
+            Internal: out of equality, ``repr`` and ``to_dict``.
+        sealed (bool): Set when the line that persisted this record has
+            ended, so a command returning later cannot mark it.
     """
 
     op: str
@@ -100,6 +109,8 @@ class OpRecord:
     fingerprint: str | None = field(default=None)
     revision: str | None = field(default=None)
     mount_id: str | None = field(default=None, repr=False, compare=False)
+    claimed: ByteSource | None = field(default=None, repr=False, compare=False)
+    sealed: bool = field(default=False, repr=False, compare=False)
 
     @property
     def is_cache(self) -> bool:

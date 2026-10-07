@@ -228,7 +228,7 @@ _FALLBACK_CASES = [
 async def test_stat_entry_field_fallbacks(
     dropbox_accessor, entry, dropbox_id, size, modified, fingerprint
 ):
-    # _stat_from_entry's fallbacks: server_modified→client_modified→"",
+    # stat_from_entry's fallbacks: server_modified→client_modified→"",
     # id→path_display→name, no content_hash is no token, and a
     # non-int/absent size renders as None
     # (the unknown-size machinery, never a fabricated number).

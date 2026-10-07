@@ -275,14 +275,14 @@ export async function uploadNewFile(
   parentId: string,
   name: string,
   data: Uint8Array,
-): Promise<BoxItem> {
-  return (await boxUploadMultipart(
+): Promise<unknown> {
+  return boxUploadMultipart(
     tm,
     `${tm.uploadBase}/files/content`,
     { name, parent: { id: parentId } },
     name,
     data,
-  )) as BoxItem
+  )
 }
 
 export async function uploadFileVersion(
@@ -290,14 +290,8 @@ export async function uploadFileVersion(
   fileId: string,
   name: string,
   data: Uint8Array,
-): Promise<BoxItem> {
-  return (await boxUploadMultipart(
-    tm,
-    `${tm.uploadBase}/files/${fileId}/content`,
-    { name },
-    name,
-    data,
-  )) as BoxItem
+): Promise<unknown> {
+  return boxUploadMultipart(tm, `${tm.uploadBase}/files/${fileId}/content`, { name }, name, data)
 }
 
 export async function createFolder(

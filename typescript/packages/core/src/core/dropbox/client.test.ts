@@ -18,6 +18,7 @@ import {
   dropboxDownload,
   dropboxDownloadStream,
   dropboxRpc,
+  dropboxUpload,
 } from './client.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
 
@@ -139,5 +140,27 @@ describe('dropboxRpc', () => {
       status: 409,
       summary: '',
     })
+  })
+})
+
+describe('dropboxUpload', () => {
+  async function upload(body: string, contentType: string): Promise<unknown> {
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve(
+        new Response(body, { status: 200, headers: { 'Content-Type': contentType } }),
+      ),
+    )
+    return dropboxUpload(tokenManager(), '/a.txt', new TextEncoder().encode('hello'))
+  }
+
+  it('hands back the stored file metadata', async () => {
+    const entry = { '.tag': 'file', name: 'a.txt', size: 5, content_hash: 'h5' }
+    expect(await upload(JSON.stringify(entry), 'application/json')).toEqual(entry)
+  })
+
+  it('hands a non-JSON body back unchecked, without raising', async () => {
+    // The upload has landed; an unreadable reply must not raise. The
+    // writer's uploadToken reads it as no metadata.
+    expect(await upload('not json', 'text/plain')).toBe('not json')
   })
 })
