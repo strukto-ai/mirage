@@ -413,6 +413,11 @@ export class SessionState {
   // came from a short-circuited &&/|| branch or a `!`-negated command,
   // which bash exempts from errexit. Reset on every node execution.
   errexitImmune: boolean
+  // Whether the running command is in a context where bash ignores `set -e`:
+  // an `if`/`while`/`until` test, the left of `&&`/`||`, or after `!`.
+  // Everything run there, a function or a subshell included, ignores it
+  // (`ignoringErrexit`); a child shell keeps the context.
+  errexitIgnored = false
   // Variables shadowed by `local` / `declare` in the running function; a
   // null value means the caller had no variable of that name. One stack,
   // not one per container: a local shadows the whole record, so its
@@ -603,6 +608,7 @@ export class SessionState {
     forked.jobOutput = this.jobOutput
     forked.jobWaits = this.jobWaits
     forked.getoptsPos = this.getoptsPos
+    forked.errexitIgnored = this.errexitIgnored
     forked.getoptsOptind = this.getoptsOptind
     forked.shopts = { ...this.shopts }
     forked.aliases = { ...this.aliases }

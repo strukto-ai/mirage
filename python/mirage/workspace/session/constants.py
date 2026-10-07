@@ -72,6 +72,7 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "exec_stdin_identity",
     "_getopts_pos",
     "_getopts_optind",
+    "errexit_ignored",
     "_parse_seq",
     "_alias_marks",
     "_function_sites",

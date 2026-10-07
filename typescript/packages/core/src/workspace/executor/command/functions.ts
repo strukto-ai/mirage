@@ -19,10 +19,9 @@ import type { ParseScope } from '../../../shell/parse/scope.ts'
 import type { ShellVar } from '../../../shell/variable.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult } from '../../../io/types.ts'
-import { fd0Binding, finishStatement } from '../statement.ts'
+import { errexitActs, fd0Binding, finishStatement } from '../statement.ts'
 import { CallStack } from '../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../shell/console/index.ts'
-import { ERREXIT_EXEMPT_TYPES } from '../../../shell/constants.ts'
 import type { PathSpec } from '../../../types.ts'
 import { wordText } from '../../../types.ts'
 
@@ -140,12 +139,7 @@ export async function executeShellFunction(
           if (stdout !== null) allStdout.push(stdout)
           mergedIo = await mergedIo.merge(io)
           lastExec = execNode
-          if (
-            io.exitCode !== 0 &&
-            session.shellOptions.errexit === true &&
-            !ERREXIT_EXEMPT_TYPES.has(cmdNode.type) &&
-            !session.errexitImmune
-          ) {
+          if (errexitActs(cmdNode, io.exitCode, session)) {
             mergedIo.exitCode = io.exitCode
             break
           }

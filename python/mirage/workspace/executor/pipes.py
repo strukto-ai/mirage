@@ -36,7 +36,6 @@ from mirage.shell.console import JobConsole, JobOutput
 from mirage.shell.console.pipe import PipeConsole
 from mirage.shell.console.types import Channel
 from mirage.shell.constants import (
-    ERREXIT_EXEMPT_TYPES,
     FORK_FAILED,
     FORK_FAILED_STATUS,
 )
@@ -57,8 +56,10 @@ from mirage.workspace.executor.control import UNWINDING, carried, ended
 from mirage.workspace.executor.jobs import handle_background, pump
 from mirage.workspace.executor.statement import (
     carry_status,
+    errexit_acts,
     fd0_binding,
     finish_statement,
+    ignoring_errexit,
     land,
     record_status,
     statement_output,
@@ -274,9 +275,10 @@ async def handle_connection(
     """Handle &&, ||"""
     session = context.session
     bound = fd0_binding(session)
-    left_stdout, left_io, left_exec = await execute_node(
-        left, context, stdin, call_stack
-    )
+    with ignoring_errexit(session):
+        left_stdout, left_io, left_exec = await execute_node(
+            left, context, stdin, call_stack
+        )
     children = [left_exec]
 
     left_bytes = await finish_statement(left_stdout, left_io, session, left)
@@ -469,12 +471,7 @@ async def handle_subshell(
         )
         merged_io = await land(written, sink, all_stdout, merged_io)
         merged_io = await merged_io.merge(io)
-        if (
-            io.exit_code != 0
-            and session.shell_options.get("errexit")
-            and child.type not in ERREXIT_EXEMPT_TYPES
-            and not session.errexit_immune
-        ):
+        if errexit_acts(child, io.exit_code, session):
             merged_io.exit_code = io.exit_code
             break
     # The EXIT action is the subshell's: its `wait` and `jobs` see the

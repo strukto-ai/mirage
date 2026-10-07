@@ -27,7 +27,6 @@ from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
-from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
 from mirage.shell.errors import (
     ArithError,
     ExitSignal,
@@ -43,8 +42,10 @@ from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.read.read import read_reply
 from mirage.workspace.executor.jobs import run_statement
 from mirage.workspace.executor.statement import (
+    errexit_acts,
     fd0_binding,
     finish_statement,
+    ignoring_errexit,
     record_status,
 )
 from mirage.workspace.session.state import session_view, visible_env
@@ -103,12 +104,7 @@ async def _execute_body(
         stdout = await finish_statement(stdout, io, session, cmd)
         all_stdout.append(stdout)
         merged_io = await merged_io.merge(io)
-        if (
-            io.exit_code != 0
-            and session.shell_options.get("errexit")
-            and cmd.type not in ERREXIT_EXEMPT_TYPES
-            and not session.errexit_immune
-        ):
+        if errexit_acts(cmd, io.exit_code, session):
             merged_io.exit_code = io.exit_code
             break
     return _chain_streams(all_stdout), merged_io, last_exec
@@ -251,18 +247,19 @@ async def handle_if(
     session = context.session
     bound = fd0_binding(session)
     for condition, body in branches:
-        cond_stdout, cond_io, _ = await run_statement(
-            execute_node,
-            condition,
-            context,
-            stdin,
-            bound,
-            call_stack,
-            job_table,
-            agent_id,
-            handed,
-            decisions,
-        )
+        with ignoring_errexit(session):
+            cond_stdout, cond_io, _ = await run_statement(
+                execute_node,
+                condition,
+                context,
+                stdin,
+                bound,
+                call_stack,
+                job_table,
+                agent_id,
+                handed,
+                decisions,
+            )
         await apply_barrier(cond_stdout, cond_io, BarrierPolicy.STATUS)
         record_status(
             session,
@@ -393,18 +390,19 @@ async def _condition_loop(
         if session.shell_options.get("noexec"):
             hit_limit = False
             break
-        cond_stdout, cond_io, _ = await run_statement(
-            execute_node,
-            condition,
-            context,
-            stdin,
-            bound,
-            call_stack,
-            job_table,
-            agent_id,
-            handed,
-            decisions,
-        )
+        with ignoring_errexit(session):
+            cond_stdout, cond_io, _ = await run_statement(
+                execute_node,
+                condition,
+                context,
+                stdin,
+                bound,
+                call_stack,
+                job_table,
+                agent_id,
+                handed,
+                decisions,
+            )
         await apply_barrier(cond_stdout, cond_io, BarrierPolicy.STATUS)
         record_status(
             session,
@@ -622,6 +620,7 @@ async def handle_case(
     ran = False
     fallthrough = False
     bound = fd0_binding(session)
+    stopped = False
     for patterns, body, terminator in items:
         if not (fallthrough or any(fnmatch(word, p) for p in patterns)):
             continue
@@ -648,6 +647,12 @@ async def handle_case(
             if stdout is not None:
                 all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)
+            if errexit_acts(stmt, io.exit_code, session):
+                merged_io.exit_code = io.exit_code
+                stopped = True
+                break
+        if stopped:
+            break
         if terminator == ";&":
             # Fall through: run the next arm's body without testing it.
             fallthrough = True

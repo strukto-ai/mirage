@@ -30,9 +30,36 @@ import {
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { concat } from '../../io/cachable_iterator.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
+import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { abortedLine, lineStatusWriter, makeAbortError, type StatusWriter } from '../abort.ts'
+
+/**
+ * Run a test, the left of `&&`/`||` or a negated command where bash ignores
+ * `set -e`: nothing it runs exits for a failure, a function body or a
+ * subshell included. Mirrors Python's ignoring_errexit.
+ */
+export async function ignoringErrexit<T>(session: SessionState, fn: () => Promise<T>): Promise<T> {
+  const saved = session.errexitIgnored
+  session.errexitIgnored = true
+  try {
+    return await fn()
+  } finally {
+    session.errexitIgnored = saved
+  }
+}
+
+/** Whether `set -e` ends the shell after this statement. */
+export function errexitActs(node: TSNodeLike, status: number, session: SessionState): boolean {
+  return (
+    status !== 0 &&
+    session.shellOptions.errexit === true &&
+    !ERREXIT_EXEMPT_TYPES.has(node.type) &&
+    !session.errexitImmune &&
+    !session.errexitIgnored
+  )
+}
 
 /**
  * Record a finished statement's exit status: `$?` and `${PIPESTATUS[@]}`

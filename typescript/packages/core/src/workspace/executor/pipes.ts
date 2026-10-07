@@ -25,8 +25,10 @@ import type { DispatchFn } from '../../runtime/types.ts'
 import { divertStatement } from './builtins/exec/index.ts'
 import {
   carryStatus,
+  errexitActs,
   fd0Binding,
   finishStatement,
+  ignoringErrexit,
   land,
   recordStatus,
   statementOutput,
@@ -36,7 +38,7 @@ import {
 import { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal, PipeClosed, ReturnSignal } from '../../shell/errors.ts'
 import { carried, ended, isUnwinding } from './control.ts'
-import { ERREXIT_EXEMPT_TYPES, FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
+import { FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
 
@@ -298,7 +300,9 @@ export async function handleConnection(
 ): Promise<Result> {
   const session = context.session
   const bound = fd0Binding(session)
-  const [leftStdout, leftIo, leftExec] = await executeNode(left, context, stdin, callStack)
+  const [leftStdout, leftIo, leftExec] = await ignoringErrexit(session, () =>
+    executeNode(left, context, stdin, callStack),
+  )
   const children = [leftExec]
 
   const leftBytes = await finishStatement(leftStdout, leftIo, session, left)
@@ -474,12 +478,7 @@ export async function handleSubshell(
     mergedIo = await land(written, sink, allStdout, mergedIo)
     mergedIo = await mergedIo.merge(io)
     lastExec = childExec
-    if (
-      io.exitCode !== 0 &&
-      session.shellOptions.errexit === true &&
-      !ERREXIT_EXEMPT_TYPES.has(child.type) &&
-      !session.errexitImmune
-    ) {
+    if (errexitActs(child, io.exitCode, session)) {
       mergedIo.exitCode = io.exitCode
       break
     }

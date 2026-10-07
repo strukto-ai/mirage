@@ -23,7 +23,6 @@ from mirage.policy.types import HandOff
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
-from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
 from mirage.shell.descriptors import ENCLOSING, Recorder, StreamOwner
 from mirage.shell.errors import DiscardSignal, ExitSignal
 from mirage.shell.helpers import get_text
@@ -39,6 +38,7 @@ from mirage.workspace.executor.control import (
 )
 from mirage.workspace.executor.jobs import handle_background
 from mirage.workspace.executor.statement import (
+    errexit_acts,
     failed_read,
     fd0_binding,
     land,
@@ -362,13 +362,7 @@ async def _run_program(
             all_stdout.append(stdout)
         merged_io = await merged_io.merge(io)
 
-        if (
-            io.exit_code != 0
-            and session.shell_options.get("errexit")
-            and not is_bg
-            and child.type not in ERREXIT_EXEMPT_TYPES
-            and not session.errexit_immune
-        ):
+        if not is_bg and errexit_acts(child, io.exit_code, session):
             merged_io.exit_code = io.exit_code
             if not inline:
                 merged_io = await _exit_shell(

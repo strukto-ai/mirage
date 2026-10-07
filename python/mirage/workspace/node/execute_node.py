@@ -14,6 +14,7 @@
 
 import asyncio
 import time
+from contextlib import nullcontext
 from dataclasses import replace
 from functools import partial
 from typing import Any, Callable
@@ -39,7 +40,6 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.constants import (
-    ERREXIT_EXEMPT_TYPES,
     FORK_FAILED,
     FORK_FAILED_STATUS,
 )
@@ -98,8 +98,10 @@ from mirage.workspace.executor.pipes import (
 from mirage.workspace.executor.redirect import handle_redirect
 from mirage.workspace.executor.statement import (
     assignment_status,
+    errexit_acts,
     fd0_binding,
     finish_statement,
+    ignoring_errexit,
     record_status,
 )
 from mirage.workspace.executor.traps import end_shell
@@ -477,16 +479,17 @@ async def _run_pipeline(
         targets,
         processes,
     )
-    stdout, io, exec_node = await handle_pipe(
-        pipe_recurse,
-        commands,
-        stderr_flags,
-        context,
-        stdin,
-        call_stack,
-        processes,
-        execute_fn,
-    )
+    with ignoring_errexit(session) if stages.negated else nullcontext():
+        stdout, io, exec_node = await handle_pipe(
+            pipe_recurse,
+            commands,
+            stderr_flags,
+            context,
+            stdin,
+            call_stack,
+            processes,
+            execute_fn,
+        )
     if stages.negated:
         io = IOResult(
             exit_code=0 if io.exit_code != 0 else 1,
@@ -667,20 +670,21 @@ async def _run_redirected(
         # redirect is the command's: bash negates what `cmd < f` returns,
         # a redirect that failed to open included.
         inner = get_negated_command(command)
-        stdout, io, exec_node = await _run_redirected(
-            recurse,
-            dispatch,
-            execute_fn,
-            registry,
-            view,
-            inner,
-            redirects,
-            processes,
-            context,
-            stdin,
-            call_stack,
-            sink=sink,
-        )
+        with ignoring_errexit(session):
+            stdout, io, exec_node = await _run_redirected(
+                recurse,
+                dispatch,
+                execute_fn,
+                registry,
+                view,
+                inner,
+                redirects,
+                processes,
+                context,
+                stdin,
+                call_stack,
+                sink=sink,
+            )
         return await _negated(stdout, io, exec_node, context, inner)
     expanded_redirects, pipe_node = await expand_redirects(
         redirects,
@@ -1409,12 +1413,7 @@ async def _execute_node(
             if stdout is not None:
                 all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)
-            if (
-                io.exit_code != 0
-                and session.shell_options.get("errexit")
-                and child.type not in ERREXIT_EXEMPT_TYPES
-                and not session.errexit_immune
-            ):
+            if errexit_acts(child, io.exit_code, session):
                 merged_io.exit_code = io.exit_code
                 break
         if len(all_stdout) == 1:
@@ -1648,7 +1647,8 @@ async def _execute_node(
     # ── negated command ─────────────────────────
     if kind == NodeKind.NEGATED:
         inner = get_negated_command(node)
-        stdout, io, exec_node = await stream(inner, context, stdin, cs)
+        with ignoring_errexit(session):
+            stdout, io, exec_node = await stream(inner, context, stdin, cs)
         return await _negated(stdout, io, exec_node, context, inner)
 
     # ── variable assignment at top level ────────

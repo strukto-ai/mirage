@@ -616,6 +616,10 @@ async function runPreparedLine(
             if (substitution) {
               session.terminalOutput = false
               inheritExitTrap(session)
+              // bash runs a substitution without `set -e` unless
+              // `shopt -s inherit_errexit` (or POSIX mode) passes it on.
+              if (session.shopts.inherit_errexit !== true && session.shellOptions.posix !== true)
+                session.shellOptions.errexit = false
               // A substitution reads its pipe until every writer has closed
               // it, so what a job it started writes is part of its value,
               // and it ends when its jobs do. They are its own jobs.

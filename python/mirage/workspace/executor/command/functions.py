@@ -24,7 +24,6 @@ from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
-from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
 from mirage.shell.errors import ReturnSignal
 from mirage.shell.helpers import parse_function
 from mirage.shell.job_table import JobTable
@@ -35,7 +34,11 @@ from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.command.types import ExecuteNodeFn
 from mirage.workspace.executor.control import UNWINDING, carried
 from mirage.workspace.executor.jobs import run_statement
-from mirage.workspace.executor.statement import fd0_binding, finish_statement
+from mirage.workspace.executor.statement import (
+    errexit_acts,
+    fd0_binding,
+    finish_statement,
+)
 from mirage.workspace.session.state import restore_locals
 from mirage.workspace.types import ExecutionNode
 
@@ -172,12 +175,7 @@ async def run_shell_function(
             if stdout is not None:
                 all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)
-            if (
-                io.exit_code != 0
-                and session.shell_options.get("errexit")
-                and cmd.type not in ERREXIT_EXEMPT_TYPES
-                and not session.errexit_immune
-            ):
+            if errexit_acts(cmd, io.exit_code, session):
                 merged_io.exit_code = io.exit_code
                 break
         combined = async_chain(all_stdout) if all_stdout else None

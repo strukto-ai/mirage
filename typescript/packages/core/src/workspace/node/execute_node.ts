@@ -35,8 +35,10 @@ import { BASH_BUILTINS } from '../lookup/constants.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import {
   assignmentStatus,
+  errexitActs,
   fd0Binding,
   finishStatement,
+  ignoringErrexit,
   recordStatus,
 } from '../executor/statement.ts'
 import {
@@ -58,7 +60,7 @@ import {
   getWhileParts,
 } from '../../shell/helpers.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
-import { ERREXIT_EXEMPT_TYPES, FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
+import { FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
 import { NodeType as NT, type PipelineStages, Redirect, RedirectKind } from '../../shell/types.ts'
 import { NodeKind, nodeKind, pipelineTransparent } from '../../shell/node_kind.ts'
 import { expandRedirects } from '../expand/redirects.ts'
@@ -420,17 +422,21 @@ async function runPipeline(
     signal,
     processes,
   )
-  const [stdout, io, execNode] = await handlePipe(
-    pipeRecurse,
-    stages.commands,
-    stages.stderrFlags,
-    context,
-    stdin,
-    callStack,
-    signal,
-    processes,
-    executeFn,
-  )
+  const piped = (): Promise<Result> =>
+    handlePipe(
+      pipeRecurse,
+      stages.commands,
+      stages.stderrFlags,
+      context,
+      stdin,
+      callStack,
+      signal,
+      processes,
+      executeFn,
+    )
+  const [stdout, io, execNode] = stages.negated
+    ? await ignoringErrexit(context.session, piped)
+    : await piped()
   if (!stages.negated) return [stdout, io, execNode]
   const flipped = new IOResult({
     exitCode: io.exitCode !== 0 ? 0 : 1,
@@ -552,19 +558,21 @@ async function runRedirected(
     // redirect is the command's: bash negates what `cmd < f` returns, a
     // redirect that failed to open included.
     const inner = getNegatedCommand(command)
-    const [stdout, io, execNode] = await runRedirected(
-      recurse,
-      dispatch,
-      executeFn,
-      registry,
-      inner,
-      redirects,
-      signal,
-      processes,
-      sink,
-      context,
-      stdin,
-      callStack,
+    const [stdout, io, execNode] = await ignoringErrexit(context.session, () =>
+      runRedirected(
+        recurse,
+        dispatch,
+        executeFn,
+        registry,
+        inner,
+        redirects,
+        signal,
+        processes,
+        sink,
+        context,
+        stdin,
+        callStack,
+      ),
     )
     return negated(stdout, io, execNode, context, inner)
   }
@@ -1353,13 +1361,7 @@ async function executeNodeBody(
       const stdout = await finishStatement(rawStdout, io, session, child)
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
-      if (
-        io.exitCode !== 0 &&
-        session.shellOptions.errexit === true &&
-        !ERREXIT_EXEMPT_TYPES.has(child.type) &&
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- recurse() mutates it
-        !session.errexitImmune
-      ) {
+      if (errexitActs(child, io.exitCode, session)) {
         mergedIo.exitCode = io.exitCode
         break
       }
@@ -1639,7 +1641,9 @@ async function executeNodeBody(
 
   if (kind === NodeKind.NEGATED) {
     const inner = getNegatedCommand(node)
-    const [stdout, io, execNode] = await stream(inner, context, stdin, callStack)
+    const [stdout, io, execNode] = await ignoringErrexit(context.session, () =>
+      stream(inner, context, stdin, callStack),
+    )
     return negated(stdout, io, execNode, context, inner)
   }
 

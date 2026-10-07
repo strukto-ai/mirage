@@ -22,10 +22,9 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import { DiscardSignal, ExitSignal } from '../../shell/errors.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import { getText } from '../../shell/helpers.ts'
-import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
 import { NodeType as NT } from '../../shell/types.ts'
-import { fd0Binding, recordStatus, statementStdin } from '../executor/statement.ts'
+import { errexitActs, fd0Binding, recordStatus, statementStdin } from '../executor/statement.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { isFsError } from '../../errors/fs.ts'
 import { BreakSignal, ContinueSignal, carried, isUnwinding } from '../executor/control.ts'
@@ -354,13 +353,7 @@ async function runProgram(
     if (stdout !== null) allStdout.push(stdout)
     mergedIo = await mergedIo.merge(io)
 
-    if (
-      io.exitCode !== 0 &&
-      session.shellOptions.errexit === true &&
-      !isBg &&
-      !ERREXIT_EXEMPT_TYPES.has(child.type) &&
-      !session.errexitImmune
-    ) {
+    if (!isBg && errexitActs(child, io.exitCode, session)) {
       mergedIo.exitCode = io.exitCode
       if (!inline) {
         mergedIo = await exitShell(

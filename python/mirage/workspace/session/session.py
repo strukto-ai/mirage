@@ -371,6 +371,11 @@ class SessionState:
     # came from a short-circuited &&/|| branch or a `!`-negated command,
     # which bash exempts from errexit. Reset on every node execution.
     errexit_immune: bool = field(default=False, repr=False)
+    # Whether the running command is in a context where bash ignores
+    # `set -e`: an `if`/`while`/`until` test, the left of `&&`/`||`, or
+    # after `!`. Everything run there, a function or a subshell included,
+    # ignores it (`ignoring_errexit`); a child shell keeps the context.
+    errexit_ignored: bool = field(default=False, repr=False)
     # Variables shadowed by `local` / `declare` in the running function;
     # a None value means the caller had no variable of that name. One
     # stack, not one per container: a local shadows the whole record, so

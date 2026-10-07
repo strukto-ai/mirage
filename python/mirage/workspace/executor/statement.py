@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from mirage.commands.spec.usage import read_fail_exit_code
@@ -21,6 +23,7 @@ from mirage.io.async_line_iterator import SharedInput
 from mirage.io.types import ByteSource, materialize
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.console import Channel, JobConsole
+from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
 from mirage.shell.descriptors import (
     Inherited,
     Recorder,
@@ -158,6 +161,40 @@ def carry_status(session: SessionState) -> None:
         session (SessionState): shell session carrying the status.
     """
     session._pipe_status_pending = session.pipe_status
+
+
+@contextmanager
+def ignoring_errexit(session: SessionState) -> Iterator[None]:
+    """Run a test, the left of ``&&``/``||`` or a negated command where
+    bash ignores ``set -e``: nothing it runs exits for a failure, a
+    function body or a subshell included.
+
+    Args:
+        session (SessionState): the shell running it.
+    """
+    saved = session.errexit_ignored
+    session.errexit_ignored = True
+    try:
+        yield
+    finally:
+        session.errexit_ignored = saved
+
+
+def errexit_acts(node: TSNodeLike, status: int, session: SessionState) -> bool:
+    """Whether ``set -e`` ends the shell after this statement.
+
+    Args:
+        node (TSNodeLike): the statement that finished.
+        status (int): its status.
+        session (SessionState): the shell it ran in.
+    """
+    return (
+        status != 0
+        and bool(session.shell_options.get("errexit"))
+        and node.type not in ERREXIT_EXEMPT_TYPES
+        and not session.errexit_immune
+        and not session.errexit_ignored
+    )
 
 
 async def finish_statement(

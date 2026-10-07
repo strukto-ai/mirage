@@ -24,10 +24,15 @@ import { PolicyDenied } from '../../policy/errors.ts'
 import { type Policies } from '../../policy/index.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { ArithError, ExitSignal, ReadonlyError, ReturnSignal } from '../../shell/errors.ts'
-import { fd0Binding, finishStatement, recordStatus } from './statement.ts'
+import {
+  errexitActs,
+  fd0Binding,
+  finishStatement,
+  ignoringErrexit,
+  recordStatus,
+} from './statement.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
-import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { readReply } from './builtins/read/index.ts'
 import type { PathSpec } from '../../types.ts'
@@ -113,12 +118,7 @@ async function executeBody(
       const stdout = await finishStatement(rawStdout, io, session, cmd)
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
-      if (
-        io.exitCode !== 0 &&
-        session.shellOptions.errexit === true &&
-        !ERREXIT_EXEMPT_TYPES.has(cmd.type) &&
-        !session.errexitImmune
-      ) {
+      if (errexitActs(cmd, io.exitCode, session)) {
         mergedIo.exitCode = io.exitCode
         break
       }
@@ -253,17 +253,19 @@ export async function handleIf(
   const session = context.session
   const bound = fd0Binding(session)
   for (const [condition, body] of branches) {
-    const [condStdout, condIo] = await runStatement(
-      executeNode,
-      condition,
-      context,
-      stdin,
-      bound,
-      callStack,
-      jobTable,
-      agentId,
-      handed,
-      decisions,
+    const [condStdout, condIo] = await ignoringErrexit(session, () =>
+      runStatement(
+        executeNode,
+        condition,
+        context,
+        stdin,
+        bound,
+        callStack,
+        jobTable,
+        agentId,
+        handed,
+        decisions,
+      ),
     )
     await applyBarrier(condStdout, condIo, BarrierPolicy.STATUS)
     recordStatus(session, condIo.exitCode, pipelineTransparent(condition))
@@ -394,17 +396,19 @@ async function conditionLoop(
       hitLimit = false
       break
     }
-    const [condStdout, condIo] = await runStatement(
-      executeNode,
-      condition,
-      context,
-      stdin,
-      bound,
-      callStack,
-      jobTable,
-      agentId,
-      handed,
-      decisions,
+    const [condStdout, condIo] = await ignoringErrexit(session, () =>
+      runStatement(
+        executeNode,
+        condition,
+        context,
+        stdin,
+        bound,
+        callStack,
+        jobTable,
+        agentId,
+        handed,
+        decisions,
+      ),
     )
     await applyBarrier(condStdout, condIo, BarrierPolicy.STATUS)
     recordStatus(session, condIo.exitCode, pipelineTransparent(condition))
@@ -632,6 +636,7 @@ export async function handleCase(
   let ran = false
   let fallthrough = false
   const bound = fd0Binding(session)
+  let stopped = false
   for (const [patterns, body, terminator] of items) {
     if (!(fallthrough || patterns.some((p) => fnmatch(word, p)))) continue
     ran = true
@@ -659,7 +664,13 @@ export async function handleCase(
       const stdout = await finishStatement(rawStdout, io, session, stmt)
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
+      if (errexitActs(stmt, io.exitCode, session)) {
+        mergedIo.exitCode = io.exitCode
+        stopped = true
+        break
+      }
     }
+    if (stopped) break
     if (terminator === ';&') {
       // Fall through: run the next arm's body without testing it.
       fallthrough = true
