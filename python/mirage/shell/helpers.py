@@ -1045,6 +1045,27 @@ def get_function_redirects(node: TSNodeLike) -> list[TSNodeLike]:
     return redirects
 
 
+def _syntax_end(node: TSNodeLike, offsets: Sequence[int]) -> int:
+    """Where a node's own words end in the original source.
+
+    A heredoc redirect ends at its delimiter word: the lowering folds the
+    body into the redirect's span, and the body sits after whatever else
+    the line goes on to say.
+
+    Args:
+        node (TSNodeLike): a node of the lowered tree.
+        offsets (Sequence[int]): lowered byte to original byte.
+    """
+    doc = getattr(node, "heredoc", None)
+    if doc is not None:
+        return cast(int, doc.word_end)
+    if node.children:
+        return max(_syntax_end(child, offsets) for child in node.children)
+    if node.end_byte > node.start_byte:
+        return offsets[node.end_byte - 1] + 1
+    return offsets[node.start_byte]
+
+
 def get_function_source(node: TSNodeLike) -> str:
     """The definition's source, including redirects and heredoc bodies.
 
@@ -1064,7 +1085,7 @@ def get_function_source(node: TSNodeLike) -> str:
         original = getattr(root, "source_text", root.text) or b""
         offsets = getattr(root, "offsets", tuple(range(len(original) + 1)))
     start = offsets[node.start_byte]
-    end = offsets[node.end_byte - 1] + 1
+    end = _syntax_end(node, offsets)
     source = original[start:end]
     # A heredoc can follow the definition's closing brace and other commands.
     # Append only its body and delimiter, never those neighboring commands.

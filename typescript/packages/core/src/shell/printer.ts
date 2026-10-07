@@ -113,7 +113,14 @@ class Printer {
           : this.command(body, inner)
     const keyword = indent !== '' || RESERVED.has(name)
     const head = `${keyword ? 'function ' : ''}${name} () \n`
-    return `${head}${indent}{ \n${inner}${text}\n${indent}}${this.redirects(getFunctionRedirects(node))}`
+    let out = `${head}${indent}{ \n${inner}${text}\n${indent}}${this.redirects(getFunctionRedirects(node))}`
+    // The definition's own heredocs follow its line, as bash prints them;
+    // a nested definition's wait for the statement it ends.
+    if (indent === '' && this.deferred.length > 0) {
+      out += '\n' + this.deferred.join('')
+      this.deferred = []
+    }
+    return out
   }
 
   /**

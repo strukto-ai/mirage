@@ -103,7 +103,7 @@ class _Printer:
             text = self.command(body, inner) if body is not None else ""
         keyword = indent or name in _RESERVED
         head = ("function " if keyword else "") + f"{name} () \n"
-        return (
+        out = (
             head
             + indent
             + "{ \n"
@@ -114,6 +114,12 @@ class _Printer:
             + "}"
             + self.redirects(get_function_redirects(node))
         )
+        # The definition's own heredocs follow its line, as bash prints
+        # them; a nested definition's wait for the statement it ends.
+        if not indent and self.deferred:
+            out += "\n" + "".join(self.deferred)
+            self.deferred = []
+        return out
 
     def statements(
         self, children: Sequence[TSNodeLike], indent: str, trailing: bool

@@ -169,6 +169,40 @@
         "stdout": "eval\nsource\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "cmd_function_keeps_its_heredoc_after_other_commands",
+      "seq": 940116,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "f() { cat; } <<EOF; echo unrelated\nhi\nEOF\nf\ndeclare -f f\nunset -f f",
+      "expect": {
+        "exit": 0,
+        "stdout": "unrelated\nhi\nf () \n{ \n    cat\n} <<EOF\nhi\nEOF\n\n",
+        "stderr": ""
+      }
     }
   ]
 }

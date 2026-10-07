@@ -966,6 +966,25 @@ export function getFunctionRedirects(node: TSNodeLike): TSNodeLike[] {
   return redirects
 }
 
+/**
+ * Where a node's own words end in the original source. A heredoc redirect
+ * ends at its delimiter word: the lowering folds the body into the
+ * redirect's span, and the body sits after whatever else the line goes on
+ * to say.
+ */
+function syntaxEnd(node: TSNodeLike, offsets: readonly number[] | undefined): number {
+  if (node.heredoc !== undefined) return node.heredoc.wordEnd
+  if (node.children.length > 0) {
+    let end = 0
+    for (const child of node.children) end = Math.max(end, syntaxEnd(child, offsets))
+    return end
+  }
+  const startIndex = node.startIndex ?? 0
+  const endIndex = node.endIndex ?? startIndex
+  if (endIndex > startIndex) return (offsets?.[endIndex - 1] ?? endIndex - 1) + 1
+  return offsets?.[startIndex] ?? startIndex
+}
+
 /** The definition's source, including redirects and heredoc bodies. */
 export function getFunctionSource(node: TSNodeLike): string {
   const source = node.parent?.type === NT.REDIRECTED_STATEMENT ? node.parent : node
@@ -982,7 +1001,7 @@ export function getFunctionSource(node: TSNodeLike): string {
         ? root.offsets
         : undefined
   const start = offsets?.[source.startIndex] ?? source.startIndex
-  const end = (offsets?.[source.endIndex - 1] ?? source.endIndex - 1) + 1
+  const end = syntaxEnd(source, offsets)
   let text = original.slice(start, end)
   // A heredoc can follow the closing brace and other commands; copy only its body and delimiter.
   const documents = new Map<number, number>()

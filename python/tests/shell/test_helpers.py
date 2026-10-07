@@ -1227,6 +1227,14 @@ def test_source_parts_yields_the_text_no_child_owns(cmd, parts):
             "f() { cat <<EOF\ninside\nEOF\n}; echo unrelated",
             "f() { cat <<EOF\ninside\nEOF\n}",
         ),
+        (
+            "f() { cat; } <<EOF; echo unrelated\nhi\nEOF",
+            "f() { cat; } <<EOF\nhi\nEOF",
+        ),
+        (
+            "f() { cat; } <<A >/dev/null <<B; echo u\na\nA\nb\nB",
+            "f() { cat; } <<A >/dev/null <<B\na\nA\nb\nB",
+        ),
     ],
 )
 def test_function_source_copies_only_its_own_source(line, expected):

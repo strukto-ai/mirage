@@ -667,6 +667,11 @@ it.each([
     'f() { cat <<A; cat <<B; }\nfirst\nA\nsecond\nB',
   ],
   ['f() { cat <<EOF\ninside\nEOF\n}; echo unrelated', 'f() { cat <<EOF\ninside\nEOF\n}'],
+  ['f() { cat; } <<EOF; echo unrelated\nhi\nEOF', 'f() { cat; } <<EOF\nhi\nEOF'],
+  [
+    'f() { cat; } <<A >/dev/null <<B; echo u\na\nA\nb\nB',
+    'f() { cat; } <<A >/dev/null <<B\na\nA\nb\nB',
+  ],
 ])('copies only the function source: %s', async (line, expected) => {
   const program = (await getTestParser()).parseProgram(line)
   try {
