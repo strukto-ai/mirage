@@ -187,7 +187,9 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
     // Path guards are applied per invocation, over the stamped adapter,
     // inside the command closure below. The raw adapter stays untouched
     // for the ops tables, whose door does its own enforcement.
-    const finish = b.read === true || b.write === true ? readWraps : statWraps
+    // Mutation sources bypass bounded cache entries: a guarded copy must
+    // copy current backend bytes without replacing the read view.
+    const finish = b.read === true ? readWraps : b.write === true ? withSlashGuard : statWraps
     // A per-command adapter with its own stat (dify's light ls) would
     // otherwise print the probe's full stat under fresh only.
     const answered =

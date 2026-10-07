@@ -76,7 +76,7 @@ async def _cached_stat_result(
 def with_read_cache(ops: CommandIO) -> CommandIO:
     """Return ``ops`` whose byte reads serve cached bytes when warm.
 
-    The factory hands this to commands that read or write so a warm read
+    The factory hands this to every ``read=True`` command so a warm read
     is served from the file cache without the command knowing about it,
     mirroring how readdir/stat already serve the index cache inside the
     op. Content (read_stream/read_bytes) and the size a render-dependent
@@ -309,8 +309,12 @@ def make_generic_commands(
             raise ValueError(f"override {default.name!r} names {b.name!r}")
         raw = ops_over.get(b.name, ops)
         finish: Callable[[CommandIO], CommandIO]
-        if b.read or b.write:
+        if b.read:
             finish = _read_wraps
+        elif b.write:
+            # Mutation sources bypass bounded cache entries: a guarded copy
+            # must copy current backend bytes without replacing the read view.
+            finish = with_slash_guard
         else:
             finish = _stat_wraps
         # A per-command adapter with its own stat (dify's light ls) would
