@@ -269,7 +269,7 @@ _current_admission: ContextVar["EntryGate | None"] = ContextVar(
 )
 
 
-def set_admission(gate: "EntryGate") -> Token[Any]:
+def set_admission(gate: "EntryGate | None") -> Token[Any]:
     """Bind the admitted command's entry gate to the current async
     context, for the run of that one command.
 
@@ -280,7 +280,8 @@ def set_admission(gate: "EntryGate") -> Token[Any]:
     sibling's.
 
     Args:
-        gate (EntryGate): the admitted command's gate.
+        gate (EntryGate | None): the admitted command's gate, or None
+            while a policy reads independently of the command it judges.
     """
     return _current_admission.set(gate)
 

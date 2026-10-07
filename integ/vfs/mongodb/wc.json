@@ -77,6 +77,75 @@
         "stdout": "5 /mongo-limited/mirage_integ/collections/books/documents.jsonl\n3 /mongodb/mirage_integ/collections/authors/documents.jsonl\n8 total\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "mdb_wc_l_hidden_first",
+      "seq": 620026,
+      "targets": [
+        "mongodb"
+      ],
+      "session": "count-visible",
+      "session_profiles": {
+        "count-visible": {
+          "paths": {
+            "hide": [
+              "/mongodb/mirage_integ/collections/books/documents.jsonl"
+            ]
+          }
+        }
+      },
+      "command": "wc -l /mongodb/mirage_integ/collections/books/documents.jsonl /mongodb/mirage_integ/collections/authors/documents.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "3 /mongodb/mirage_integ/collections/authors/documents.jsonl\n3 total\n",
+        "stderr": "wc: /mongodb/mirage_integ/collections/books/documents.jsonl: No such file or directory\n"
+      }
+    },
+    {
+      "id": "mdb_wc_l_hidden_last",
+      "seq": 620027,
+      "targets": [
+        "mongodb"
+      ],
+      "session": "count-visible",
+      "session_profiles": {
+        "count-visible": {
+          "paths": {
+            "hide": [
+              "/mongodb/mirage_integ/collections/books/documents.jsonl"
+            ]
+          }
+        }
+      },
+      "command": "wc -l /mongodb/mirage_integ/collections/authors/documents.jsonl /mongodb/mirage_integ/collections/books/documents.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "3 /mongodb/mirage_integ/collections/authors/documents.jsonl\n3 total\n",
+        "stderr": "wc: /mongodb/mirage_integ/collections/books/documents.jsonl: No such file or directory\n"
+      }
+    },
+    {
+      "id": "mdb_wc_l_all_hidden",
+      "seq": 620028,
+      "targets": [
+        "mongodb"
+      ],
+      "session": "count-visible",
+      "session_profiles": {
+        "count-visible": {
+          "paths": {
+            "hide": [
+              "/mongodb/mirage_integ/collections/books/documents.jsonl"
+            ]
+          }
+        }
+      },
+      "command": "wc -l /mongodb/mirage_integ/collections/books/documents.jsonl /mongodb/mirage_integ/collections/books/documents.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "0 total\n",
+        "stderr": "wc: /mongodb/mirage_integ/collections/books/documents.jsonl: No such file or directory\nwc: /mongodb/mirage_integ/collections/books/documents.jsonl: No such file or directory\n"
+      }
     }
   ]
 }

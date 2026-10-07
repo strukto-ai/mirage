@@ -37,7 +37,7 @@ def _io(
     resolve = slots.pop("resolve_glob", None)
     if resolve is not None:
         monkeypatch.setattr(CommandIO, "resolve_glob", staticmethod(resolve))
-    return replace(DISCORD_IO, **slots)
+    return replace(DISCORD_IO, stat=AsyncMock(), **slots)
 
 
 def _path(path: str) -> PathSpec:

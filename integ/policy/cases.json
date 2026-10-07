@@ -637,6 +637,38 @@
         }
       }
     ]
+  },
+  {
+   "id": "history_matches_exact_session_ids_with_slashes",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "alice", "profile": {}},
+    {"op": "session", "id": "team/alice", "profile": {}},
+    {"op": "session", "id": "org/team/alice", "profile": {}},
+    {"op": "exec", "session": "alice", "command": "echo alice-only", "expect": {"value": {"exit_code": 0, "stdout": "alice-only\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "team/alice", "command": "echo team-only", "expect": {"value": {"exit_code": 0, "stdout": "team-only\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "org/team/alice", "command": "echo org-only", "expect": {"value": {"exit_code": 0, "stdout": "org-only\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "alice", "command": "grep '^echo ' /.bash_history", "expect": {"value": {"exit_code": 0, "stdout": "echo alice-only\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "team/alice", "command": "grep '^echo ' /.bash_history", "expect": {"value": {"exit_code": 0, "stdout": "echo team-only\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "team/alice", "command": "history -d 1; history -c", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "alice", "command": "history | grep -q 'echo alice-only'; echo $?", "expect": {"value": {"exit_code": 0, "stdout": "0\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "alice", "command": "grep '^echo ' /.bash_history", "expect": {"value": {"exit_code": 0, "stdout": "echo alice-only\n", "stderr": "", "refusal": null}}}
+   ]
+  },
+  {
+   "id": "policy_reads_keep_filesystem_rules_without_the_callers_command_gate",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}, "/policy": {"vfs": "ram", "config": {}}}, "runtimes": ["monty", "workspace"]},
+   "steps": [
+    {"op": "exec", "command": "echo public > /data/public; echo allow > /policy/private", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "session", "id": "reader", "profile": {"commands": {"deny": [{"reason": "not a command operand", "commands": {"cat": ["/policy/private"]}}]}, "policy": {"script": {"source": "def pre_vfs(ctx):\n    if ctx['op']['path'] == '/data/public':\n        try:\n            allowed = open('/policy/private').read() == 'allow\\n'\n        except OSError:\n            return {'deny': 'policy file unavailable'}\n        if not allowed:\n            return {'deny': 'policy file refused'}\n    return None\n", "language": "python"}, "runtime": "monty"}}},
+    {"op": "exec", "session": "reader", "command": "cat /data/public", "expect": {"value": {"exit_code": 0, "stdout": "public\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "reader", "command": "cat /policy/private", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cat: /policy/private: Permission denied\n", "refusal": "not a command operand"}}},
+    {"op": "exec", "session": "reader", "command": "cat /data/public", "expect": {"value": {"exit_code": 0, "stdout": "public\n", "stderr": "", "refusal": null}}},
+    {"op": "session", "id": "hidden", "profile": {"commands": {"deny": [{"reason": "not a command operand", "commands": {"cat": ["/policy/private"]}}]}, "policy": {"script": {"source": "def pre_vfs(ctx):\n    if ctx['op']['path'] == '/data/public':\n        try:\n            allowed = open('/policy/private').read() == 'allow\\n'\n        except OSError:\n            return {'deny': 'policy file unavailable'}\n        if not allowed:\n            return {'deny': 'policy file refused'}\n    return None\n", "language": "python"}, "runtime": "monty"}, "paths": {"hide": ["/policy/private"]}}},
+    {"op": "exec", "session": "hidden", "command": "cat /data/public", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cat: /data/public: Permission denied\n", "refusal": "policy file unavailable"}}},
+    {"op": "session", "id": "denied", "profile": {"commands": {"deny": [{"reason": "not a command operand", "commands": {"cat": ["/policy/private"]}}, {"reason": "sealed", "paths": ["/policy/private"]}]}, "policy": {"script": {"source": "def pre_vfs(ctx):\n    if ctx['op']['path'] == '/data/public':\n        try:\n            allowed = open('/policy/private').read() == 'allow\\n'\n        except OSError:\n            return {'deny': 'policy file unavailable'}\n        if not allowed:\n            return {'deny': 'policy file refused'}\n    return None\n", "language": "python"}, "runtime": "monty"}}},
+    {"op": "exec", "session": "denied", "command": "cat /data/public", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cat: /data/public: Permission denied\n", "refusal": "policy file unavailable"}}}
+   ]
   }
  ]
 }

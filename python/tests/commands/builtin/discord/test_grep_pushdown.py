@@ -20,7 +20,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.commands.builtin.discord.grep import grep
-from mirage.commands.builtin.discord.io import IO as BACKEND_IO
 from mirage.commands.builtin.discord.io import IO as DISCORD_IO
 from mirage.commands.builtin.discord.rg import rg
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
@@ -51,9 +50,8 @@ def _channel_path(name: str = "general__ch_456") -> PathSpec:
 
 
 @pytest.mark.asyncio
-async def test_discord_grep_resolves_ids_without_index():
-    """The ids ride in the ``name__id`` dirnames, so a cold cache must not
-    degrade the push-down or emit a spurious fallback warning."""
+async def test_discord_grep_searches_a_listed_channel():
+    """A listed channel's IDs scope the query without a fallback warning."""
     accessor = AsyncMock()
     accessor.time_range = TimeRange()
     accessor.config = AsyncMock()
@@ -72,7 +70,7 @@ async def test_discord_grep_resolves_ids_without_index():
         },
     ):
         out, io = await grep(
-            BACKEND_IO,
+            replace(DISCORD_IO, stat=AsyncMock()),
             accessor,
             paths,
             ["hello"],
@@ -108,7 +106,7 @@ async def test_discord_rg_channel_dir_uses_native_search():
         },
     ):
         out, io = await rg(
-            BACKEND_IO,
+            replace(DISCORD_IO, stat=AsyncMock()),
             accessor,
             [_channel_path()],
             ["hello"],

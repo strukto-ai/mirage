@@ -1,0 +1,31 @@
+---
+title: Visibility
+description: Decide which paths and variables an agent can see.
+icon: eye
+---
+
+## Hide
+
+`paths.hide` makes files and directories appear absent from filesystem reads,
+listings, walks, and path-addressed search results, and blocks changes.
+Use exact paths, subtrees, or patterns. `vars.hide` makes matching environment
+variables read as unset and blocks writes to them.
+
+## Show
+
+`paths.show` reveals a deeper subtree inside a hidden path, optionally with
+read-only access. A hide wins at equal depth; a show never exceeds mount access
+or overrides a denial. Parent directories stay visible to reach shown paths.
+
+```yaml
+paths:
+  hide: [/vault, "*.env"]
+  show:
+    /vault/public: read
+vars:
+  hide: ["*_TOKEN"]
+```
+
+This controls Mirage filesystem access, including cached reads.
+Direct service calls inside custom tools need their own controls.
+Use `commands.allow` to control visible commands.

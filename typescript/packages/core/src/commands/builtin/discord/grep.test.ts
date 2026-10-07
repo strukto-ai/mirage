@@ -55,6 +55,8 @@ async function runGrep(
 describe('discord grep', () => {
   it('uses native search for a channel directory path', async () => {
     const transport = new FakeDiscordTransport((_method, endpoint) => {
+      if (endpoint === '/users/@me/guilds') return [{ id: 'G1', name: 'My Server' }]
+      if (endpoint === '/guilds/G1/channels') return [{ id: 'C1', name: 'general', type: 0 }]
       if (endpoint === '/guilds/G1/messages/search') {
         return {
           total_results: 1,
@@ -86,9 +88,9 @@ describe('discord grep', () => {
       { w: true },
       { transport },
     )
-    expect(transport.calls[0]?.endpoint).toBe('/guilds/G1/messages/search')
-    expect(transport.calls[0]?.params?.content).toBe('hello')
-    expect(transport.calls[0]?.params?.channel_id).toBe('C1')
+    const search = transport.calls.find((call) => call.endpoint.endsWith('/messages/search'))
+    expect(search?.params?.content).toBe('hello')
+    expect(search?.params?.channel_id).toBe('C1')
     const lines = out.stdout.split('\n').filter((l) => l !== '')
     expect(lines.length).toBe(1)
     expect(lines[0]).toContain('hello world')

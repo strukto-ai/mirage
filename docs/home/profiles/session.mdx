@@ -1,0 +1,24 @@
+---
+title: Session & History
+description: Each agent session keeps its own working state and command history.
+icon: clock-rotate-left
+---
+
+## Starting context
+
+`cwd` and `env` set the initial directory and environment.
+Sessions keep their own state even when they use the same profile.
+
+## Processes
+
+`processes` controls whose processes a session can list or stop;
+the default is its own session.
+
+## Bash history
+
+`history` shows the session's editable command list.
+`/.bash_history` exposes that session's command recording.
+`history -c` and `history -d` edit the list, not the recording.
+
+Hide `/.bash_history` with `paths.hide`; control the `history` command
+separately through `commands`. Shared profiles do not share history.

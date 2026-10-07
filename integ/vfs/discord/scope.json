@@ -269,6 +269,50 @@
         "stderr": ""
       },
       "seq": 990065
+    },
+    {
+      "id": "discord_native_search_rejects_unlisted_guild_label",
+      "targets": [
+        "discord"
+      ],
+      "session": "alias-search",
+      "session_profiles": {
+        "alias-search": {
+          "paths": {
+            "hide": [
+              "/discord/Mirage HQ__100000000000000001/channels/releases__200000000000000002/2026-06-01"
+            ]
+          }
+        }
+      },
+      "command": "grep -w released '/discord/Other__100000000000000001' 2>/dev/null; echo grep=$?; rg -w released '/discord/Other__100000000000000001' 2>/dev/null; echo rg=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grep=2\nrg=2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "discord_native_search_rejects_unlisted_channel_label",
+      "targets": [
+        "discord"
+      ],
+      "session": "alias-search",
+      "session_profiles": {
+        "alias-search": {
+          "paths": {
+            "hide": [
+              "/discord/Mirage HQ__100000000000000001/channels/releases__200000000000000002/2026-06-01"
+            ]
+          }
+        }
+      },
+      "command": "grep -w released '/discord/Mirage HQ__100000000000000001/channels/other__200000000000000002' 2>/dev/null; echo grep=$?; rg -w released '/discord/Mirage HQ__100000000000000001/channels/other__200000000000000002' 2>/dev/null; echo rg=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grep=2\nrg=2\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -1,0 +1,26 @@
+---
+title: Commands & Permissions
+description: Give an agent the tools and access it needs.
+icon: shield-halved
+---
+
+## Commands
+
+`commands.allow` selects available commands, including shell builtins.
+Unlisted commands appear unavailable. `deny` refuses actions; `ask` requires
+host approval. Rules can target commands, paths, or both.
+
+## Mounts
+
+`mounts` narrows read/write access and adds rules for a particular mount.
+
+## Limits
+
+`command_limits` caps command output and execution time.
+
+## Policy
+
+`policy` loads a script for restrictions that need context.
+
+See the [configuration reference](/home/permissions),
+[command limits](/home/yaml#command-limits), and [Explain](/home/policy/explain).

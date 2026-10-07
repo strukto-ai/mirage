@@ -122,6 +122,29 @@ def test_command_events_all_sessions_timestamp_order():
     assert all(e["type"] == "command" for e in events)
 
 
+def test_history_filters_exact_session_before_applying_edits():
+    obs = Observer()
+    _log_command(obs, "own", "alice", 1.0)
+    _log_command(obs, "foreign", "team/alice", 2.0)
+    asyncio.run(obs.log_delete(session="team/alice", offset=1, agent="a"))
+    asyncio.run(obs.log_clear(session="team/alice", agent="a"))
+    _log_command(obs, "foreign after clear", "team/alice", 3.0)
+
+    assert [
+        e["command"] for e in asyncio.run(obs.command_events("alice"))
+    ] == ["own"]
+    assert [
+        e["command"] for e in asyncio.run(obs.session_command_events("alice"))
+    ] == ["own"]
+    assert [
+        e["command"] for e in asyncio.run(obs.command_events("team/alice"))
+    ] == ["foreign", "foreign after clear"]
+    assert [
+        e["command"]
+        for e in asyncio.run(obs.session_command_events("team/alice"))
+    ] == ["foreign after clear"]
+
+
 def test_session_same_timestamp_keeps_append_order():
     obs = Observer()
     _log_command(obs, "first", "s1", 1.0)

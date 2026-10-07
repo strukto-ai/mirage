@@ -84,6 +84,15 @@
             ]
           },
           {
+            "group": "Agent Profiles",
+            "pages": [
+              "home/profiles/overview",
+              "home/profiles/visibility",
+              "home/profiles/commands",
+              "home/profiles/session"
+            ]
+          },
+          {
             "group": "Policy",
             "pages": [
               "home/policy/overview",

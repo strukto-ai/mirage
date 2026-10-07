@@ -39,6 +39,7 @@ from mirage.core.discord.channels import list_channels
 from mirage.core.discord.entry import channel_dirname
 from mirage.core.discord.scope import NATIVE_KINDS, detect_scope
 from mirage.core.discord.search import format_grep_results, search_guild
+from mirage.errors.constants import FS_ERRORS
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.namespace_view import paths_scoped
 from mirage.types import PathSpec
@@ -82,6 +83,9 @@ async def rg(
             guild_id = match.slots["guild_id"]
             vis = check_search([operand])
             try:
+                # Prove the listed name, not just its embedded ID, before
+                # using this path to check native results against hides.
+                await ops.stat(accessor, operand, index=opts.index)
                 msgs = await search_guild(
                     accessor.config,
                     guild_id,
@@ -113,6 +117,8 @@ async def rg(
                     if not lines:
                         return b"", IOResult(exit_code=1)
                     return format_records(lines), IOResult()
+            except FS_ERRORS as exc:
+                logger.debug("discord search operand refused: %s", exc)
             except Exception as exc:
                 msg = str(exc)
                 pushdown_warnings.append(

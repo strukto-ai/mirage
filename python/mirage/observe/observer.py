@@ -210,6 +210,14 @@ class Observer:
         out.sort(key=lambda e: e.get("timestamp", 0))
         return out
 
+    async def _session_events(self, session: str) -> list[dict[str, Any]]:
+        # Filenames only narrow the read: IDs like alice and team/alice share
+        # a suffix. Both history views must match the recorded session exactly.
+        entries = _parse_files(
+            await self._store.read_matching(f"/{session}.jsonl")
+        )
+        return [entry for entry in entries if entry.get("session") == session]
+
     async def command_events(
         self, session: str | None = None
     ) -> list[dict[str, Any]]:
@@ -224,9 +232,7 @@ class Observer:
         entries = (
             await self.events()
             if session is None
-            else _parse_files(
-                await self._store.read_matching(f"/{session}.jsonl")
-            )
+            else await self._session_events(session)
         )
         return [e for e in entries if e.get("type") == EVENT_COMMAND]
 
@@ -246,8 +252,7 @@ class Observer:
         Returns:
             list[dict]: Events with type == EVENT_COMMAND.
         """
-        files = await self._store.read_matching(f"/{session}.jsonl")
-        entries = _parse_files(files)
+        entries = await self._session_events(session)
         last_clear = -1
         for i, e in enumerate(entries):
             if e.get("type") == EVENT_CLEAR:

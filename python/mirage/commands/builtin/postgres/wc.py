@@ -30,6 +30,8 @@ from mirage.commands.config import CommandOpts
 from mirage.core.postgres import client
 from mirage.core.postgres.readdir import entity_exists
 from mirage.core.postgres.scope import detect_scope
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.render import fs_error_line
 from mirage.io.types import ByteSource, CountedRun, IOResult
 from mirage.types import PathSpec
 
@@ -70,9 +72,14 @@ async def wc(
     ):
         rows: list[tuple[WCCounts, str | None]] = []
         total = 0
+        stderr = b""
         count = guard_operation(_count, "read_bytes")
         for p in resolved:
-            n = await count(accessor, p)
+            try:
+                n = await count(accessor, p)
+            except FS_ERRORS as exc:
+                stderr += fs_error_line("wc", p, exc).encode()
+                continue
             if n is None:
                 break
             rows.append((WCCounts(lines=n), p.raw_path))
@@ -83,7 +90,9 @@ async def wc(
             ]
             return format_count_rows(
                 rows, WCCounts(lines=total), len(resolved), parsed
-            ), IOResult(counted_runs=runs)
+            ), IOResult(
+                exit_code=1 if stderr else 0, stderr=stderr, counted_runs=runs
+            )
     return await wc_generic(
         resolved,
         list(texts),

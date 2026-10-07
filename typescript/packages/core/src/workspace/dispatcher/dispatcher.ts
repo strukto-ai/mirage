@@ -351,7 +351,11 @@ export class Dispatcher {
     // once both walks have answered for hidden space: here for an op on the
     // name itself, below the follow for the rest.
     const noFollow = NO_FOLLOW_OPS.has(opName) || kwargs?.nofollow === true
-    if (noFollow) OpBoundary.check(opName, typed, path, typedDst, dstArg)
+    // Policy-origin reads keep the session and filesystem restrictions,
+    // but are not operands of the command whose admission they decide.
+    // Use the existing issuer token: browser async storage cannot suspend
+    // one command gate without also affecting concurrent commands.
+    if (issuer === undefined && noFollow) OpBoundary.check(opName, typed, path, typedDst, dstArg)
     if (opName === 'rename' && dstArg instanceof PathSpec) {
       // A rename re-anchors everything below its source while the hides
       // stay where they are written, so hidden content would land at
@@ -399,7 +403,7 @@ export class Dispatcher {
         requireVisible(vis, p, HIDDEN_CREATE_OPS.has(opName))
       }
     }
-    if (!noFollow) OpBoundary.check(opName, typed, path, p)
+    if (issuer === undefined && !noFollow) OpBoundary.check(opName, typed, path, p)
     if (XATTR_OPS.has(opName)) {
       return [await this.xattrOp(opName, p, kwargs ?? {}, report, issuer), new IOResult()]
     }

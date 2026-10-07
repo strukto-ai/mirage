@@ -59,7 +59,7 @@ import { ContextScope } from '../utils/context_scope.ts'
 import { pathVisible } from '../utils/hidden.ts'
 import { MountRegistry } from '../workspace/mount/registry.ts'
 import { namespaceViewOf } from '../workspace/mount/namespace/view.ts'
-import type { DispatchFn } from '../runtime/types.ts'
+import { type DispatchFn, ScriptSource } from '../runtime/types.ts'
 
 // The browser-runtime branch under node's test runner: the mock forces
 // the real FallbackStorage (no task isolation, one frame stack per
@@ -494,7 +494,46 @@ describe('a named facade session on the fallback storage', () => {
   })
 })
 
-describe('dry runs on the fallback storage', () => {
+describe('policy operations on the fallback storage', () => {
+  it('keeps policy reads separate from the command they judge', async () => {
+    const ws = new Workspace(
+      { '/data': [new RAMVFS(), MountMode.WRITE] as const },
+      {
+        mode: MountMode.WRITE,
+        shellParser: await getTestParser(),
+        runtimes: ['monty', 'workspace'],
+      },
+    )
+    try {
+      await ws.vfs.write('/data/public', 'public\n')
+      await ws.vfs.write('/data/private', 'allow\n')
+      const state = ws.createSession('reader', {
+        profile: parseSessionProfile({
+          commands: { deny: [{ commands: { cat: ['/data/private'] } }] },
+          policy: {
+            runtime: 'monty',
+            script: new ScriptSource(
+              `def pre_vfs(ctx):
+    if ctx['op']['path'] == '/data/public':
+        if open('/data/private').read() != 'allow\\n':
+            return {'deny': 'policy file refused'}
+    return None
+`,
+              'python',
+            ),
+          },
+        }),
+      })
+      const session = new Session(ws, state.sessionId)
+      const allowed = await session.shell('cat /data/public')
+      expect(allowed.exitCode).toBe(0)
+      expect(new TextDecoder().decode(allowed.stdout)).toBe('public\n')
+      expect((await session.shell('cat /data/private')).exitCode).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('refuse explain.vfs and leave a concurrent write alone', async () => {
     // Without task isolation a dry run's binding would sit on top of the
     // frame stack for every concurrent task: a real op would be stopped

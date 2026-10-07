@@ -1264,10 +1264,10 @@ async def test_native_readers_admit_before_touching_the_accessor(
         resolved=True,
     )
     policy = _SealedRead(path.virtual)
-    with pytest.raises(PermissionError, match="Permission denied"):
+    try:
         token = set_op_policies(Policies([policy]))
         try:
-            out, _ = await builder.fn(
+            out, io = await builder.fn(
                 _policy_probe_ops([]),
                 NOOPAccessor(),
                 [path],
@@ -1277,7 +1277,11 @@ async def test_native_readers_admit_before_touching_the_accessor(
         finally:
             reset_op_policies(token)
         # Lazy readers retain the policy after the command binding ends.
-        await materialize(out)
+        assert await materialize(out) == b""
+        assert io.exit_code == 1
+        assert b"Permission denied" in await materialize(io.stderr)
+    except PermissionError as exc:
+        assert "Permission denied" in str(exc)
     assert policy.asked == [("read_bytes", path.virtual, False)]
 
 

@@ -18,6 +18,7 @@ from collections.abc import Callable, Mapping, Sequence
 from contextvars import ContextVar
 from typing import Any
 
+from mirage.context.session_context import reset_admission, set_admission
 from mirage.io import IOResult, OpReport
 from mirage.policy.base import Policy
 from mirage.policy.constants import (
@@ -534,9 +535,13 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         """
         assert self._dispatch is not None
         token = _POLICY_READ.set(True)
+        # Policy reads keep the session and filesystem restrictions, but
+        # are not operands of the command whose admission they decide.
+        admission = set_admission(None)
         try:
             return await self._dispatch(op, path, report=report, **kwargs)
         finally:
+            reset_admission(admission)
             _POLICY_READ.reset(token)
 
     def _failed(self, entry: ProfileScript, detail: str) -> Deny:

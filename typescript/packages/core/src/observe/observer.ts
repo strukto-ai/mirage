@@ -150,12 +150,16 @@ export class Observer {
     return out
   }
 
+  private async sessionEvents(session: string): Promise<EventDict[]> {
+    // Filenames only narrow the read: IDs like alice and team/alice share
+    // a suffix. Both history views must match the recorded session exactly.
+    const entries = parseFiles(await this._store.readMatching(`/${session}.jsonl`))
+    return entries.filter((entry) => entry.session === session)
+  }
+
   /** Recorded commands, optionally restricted to one session. All sessions for host queries. */
   async commandEvents(session: string | null = null): Promise<EventDict[]> {
-    const entries =
-      session === null
-        ? await this.events()
-        : parseFiles(await this._store.readMatching(`/${session}.jsonl`))
+    const entries = session === null ? await this.events() : await this.sessionEvents(session)
     return entries.filter((e) => e.type === EVENT_COMMAND)
   }
 
@@ -166,7 +170,7 @@ export class Observer {
    * renumbers subsequent entries, GNU behavior).
    */
   async sessionCommandEvents(session: string): Promise<EventDict[]> {
-    const entries = parseFiles(await this._store.readMatching(`/${session}.jsonl`))
+    const entries = await this.sessionEvents(session)
     let lastClear = -1
     entries.forEach((e, i) => {
       if (e.type === EVENT_CLEAR) lastClear = i

@@ -19,6 +19,7 @@ import { listChannels } from '../../../core/discord/channels.ts'
 import { DiscordApiError } from '../../../core/discord/client.ts'
 import { detectScope, NATIVE_KINDS } from '../../../core/discord/scope.ts'
 import { formatGrepResults, searchGuild } from '../../../core/discord/search.ts'
+import { isFsError } from '../../../errors/fs.ts'
 import { IOResult } from '../../../io/types.ts'
 import { type FileStat, PathSpec } from '../../../types.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
@@ -58,6 +59,9 @@ async function rg(
       const channelId = match.slots.channel_id
       const vis = checkSearch([operand])
       try {
+        // Prove the listed name, not just its embedded ID, before
+        // using this path to check native results against hides.
+        await ops.stat(accessor, operand, opts.index ?? undefined)
         const count = SEARCH_MAX_RESULTS
         const raw = await searchGuild(accessor, guildId, pattern, channelId, count)
         const channelMap = new Map<string, string>()
@@ -92,23 +96,25 @@ async function rg(
           return [ENC.encode(lines.join('\n') + '\n'), new IOResult()]
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        pushdownWarnings.push(
-          `discord: native search push-down failed (${msg}); falling back to per-file ops`,
-        )
-        const status = err instanceof DiscordApiError ? err.status : null
-        const lower = msg.toLowerCase()
-        if (
-          status === 403 ||
-          lower.includes('forbidden') ||
-          lower.includes('missing permissions') ||
-          lower.includes('missing access')
-        ) {
+        if (!isFsError(err)) {
+          const msg = err instanceof Error ? err.message : String(err)
           pushdownWarnings.push(
-            'discord: hint - ensure the bot has the READ_MESSAGE_HISTORY ' +
-              'permission for this guild and the MESSAGE CONTENT privileged ' +
-              'intent enabled',
+            `discord: native search push-down failed (${msg}); falling back to per-file ops`,
           )
+          const status = err instanceof DiscordApiError ? err.status : null
+          const lower = msg.toLowerCase()
+          if (
+            status === 403 ||
+            lower.includes('forbidden') ||
+            lower.includes('missing permissions') ||
+            lower.includes('missing access')
+          ) {
+            pushdownWarnings.push(
+              'discord: hint - ensure the bot has the READ_MESSAGE_HISTORY ' +
+                'permission for this guild and the MESSAGE CONTENT privileged ' +
+                'intent enabled',
+            )
+          }
         }
       }
     }

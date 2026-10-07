@@ -90,6 +90,75 @@
         "stdout": "  5   5 323 /pg/public/tables/books/rows.jsonl\n  3   3  97 /pg-limited/public/tables/authors/rows.jsonl\n  8   8 420 total\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "pg_wc_l_hidden_first",
+      "seq": 610027,
+      "targets": [
+        "postgres"
+      ],
+      "session": "count-visible",
+      "session_profiles": {
+        "count-visible": {
+          "paths": {
+            "hide": [
+              "/pg/public/tables/books/rows.jsonl"
+            ]
+          }
+        }
+      },
+      "command": "wc -l /pg/public/tables/books/rows.jsonl /pg/public/tables/authors/rows.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "3 /pg/public/tables/authors/rows.jsonl\n3 total\n",
+        "stderr": "wc: /pg/public/tables/books/rows.jsonl: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pg_wc_l_hidden_last",
+      "seq": 610028,
+      "targets": [
+        "postgres"
+      ],
+      "session": "count-visible",
+      "session_profiles": {
+        "count-visible": {
+          "paths": {
+            "hide": [
+              "/pg/public/tables/books/rows.jsonl"
+            ]
+          }
+        }
+      },
+      "command": "wc -l /pg/public/tables/authors/rows.jsonl /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "3 /pg/public/tables/authors/rows.jsonl\n3 total\n",
+        "stderr": "wc: /pg/public/tables/books/rows.jsonl: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pg_wc_l_all_hidden",
+      "seq": 610029,
+      "targets": [
+        "postgres"
+      ],
+      "session": "count-visible",
+      "session_profiles": {
+        "count-visible": {
+          "paths": {
+            "hide": [
+              "/pg/public/tables/books/rows.jsonl"
+            ]
+          }
+        }
+      },
+      "command": "wc -l /pg/public/tables/books/rows.jsonl /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "0 total\n",
+        "stderr": "wc: /pg/public/tables/books/rows.jsonl: No such file or directory\nwc: /pg/public/tables/books/rows.jsonl: No such file or directory\n"
+      }
     }
   ]
 }

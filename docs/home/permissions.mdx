@@ -98,12 +98,13 @@ A rule also covers what a command reaches on its own: every entry of a
 walk (`grep -r`, `tar`, `cp -r`, `find -delete`), files a command opens
 (`awk print >`, `sed w`) and cached bytes. A `grep` or `rg` that a
 backend answers with its own search (Slack, Gmail, Postgres, GitHub, ...)
-walks instead when a hide or a rule covers anything it would search. Only
-rules with paths and no command reach the VFS-only doors (FUSE, `ws.vfs`,
-SFTP).
+filters path-addressed results through the same visibility check, or
+walks when the backend cannot supply complete, trustworthy paths. Guarded
+CLI and runtime file access uses the dispatcher too. Only rules with paths
+and no command reach the VFS-only doors (FUSE, `ws.vfs`, SFTP).
 
-Not covered yet: file access inside a CLI or interpreter (`git`,
-`python3`) and in `getfattr`, `setfattr`, `ln`, `readlink`.
+These controls apply to MIRAGE filesystem access. A custom CLI or command
+that calls a service directly must enforce its own access rules.
 
 ### `paths` and `vars`
 

@@ -16,6 +16,8 @@ import type { PostgresAccessor } from '../../../accessor/postgres.ts'
 import { countRows } from '../../../core/postgres/client.ts'
 import { entityExists } from '../../../core/postgres/readdir.ts'
 import { detectScope } from '../../../core/postgres/scope.ts'
+import { isFsError } from '../../../errors/fs.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -54,17 +56,33 @@ export async function wc(
   ) {
     const rows: WcRow[] = []
     let total = 0
+    let stderr = ''
+    let complete = true
     const counted = guardOperation(count, 'readBytes')
     for (const p of resolved) {
-      const n = await counted(accessor, p)
-      if (n === null) break
+      let n: number | null
+      try {
+        n = await counted(accessor, p)
+      } catch (error) {
+        if (!isFsError(error)) throw error
+        stderr += fsErrorLine('wc', p, error)
+        continue
+      }
+      if (n === null) {
+        complete = false
+        break
+      }
       rows.push({ values: [n], label: p.rawPath })
       total += n
     }
-    if (rows.length === resolved.length) {
+    if (complete) {
       return [
         formatCountRows(rows, [total], resolved.length, parsed.total),
-        new IOResult({ countedRuns: rows }),
+        new IOResult({
+          exitCode: stderr ? 1 : 0,
+          stderr: new TextEncoder().encode(stderr),
+          countedRuns: rows,
+        }),
       ]
     }
   }

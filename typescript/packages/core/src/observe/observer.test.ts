@@ -131,6 +131,24 @@ describe('Observer', () => {
     expect(events.every((e) => e.type === 'command')).toBe(true)
   })
 
+  it('filters exact session before applying history edits', async () => {
+    const o = new Observer()
+    await logCommand(o, 'own', 'alice', 1.0)
+    await logCommand(o, 'foreign', 'team/alice', 2.0)
+    await o.logDelete('team/alice', 1, 'a')
+    await o.logClear('team/alice', 'a')
+    await logCommand(o, 'foreign after clear', 'team/alice', 3.0)
+    expect((await o.commandEvents('alice')).map((e) => e.command)).toEqual(['own'])
+    expect((await o.sessionCommandEvents('alice')).map((e) => e.command)).toEqual(['own'])
+    expect((await o.commandEvents('team/alice')).map((e) => e.command)).toEqual([
+      'foreign',
+      'foreign after clear',
+    ])
+    expect((await o.sessionCommandEvents('team/alice')).map((e) => e.command)).toEqual([
+      'foreign after clear',
+    ])
+  })
+
   it('same-timestamp entries keep append order', async () => {
     const o = new Observer()
     await logCommand(o, 'first', 's1', 1.0)

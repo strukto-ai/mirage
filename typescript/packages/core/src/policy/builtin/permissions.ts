@@ -86,7 +86,7 @@ export class PermissionsPolicy implements Policy, SessionScoped {
     // spent as the command is admitted, so by the time its own walk
     // reaches this door the session holds nothing and only the bound
     // gate still remembers the nod.
-    const gate = getAdmission()
+    const gate = ctx.issuer === undefined ? getAdmission() : null
     const ruled = opRuling(this.sessions.commandsOf(ctx.sessionId ?? ''), ctx, gate?.granted ?? [])
     if (ruled === null) return null
     const [rule, asks] = ruled
