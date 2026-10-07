@@ -15,6 +15,7 @@
 export {
   aliasCommandText,
   aliasValue,
+  aliasView,
   expandingAliases,
   handleAlias,
   handleUnalias,

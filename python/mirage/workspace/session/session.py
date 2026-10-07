@@ -460,6 +460,9 @@ class SessionState:
         default_factory=dict, repr=False
     )
     _alias_stack: list[str] = field(default_factory=list, repr=False)
+    # The aliases a running function's body expands, as its definition
+    # saw them (``FunctionSite.aliases``); None reads the live table.
+    _alias_view: dict[str, str] | None = field(default=None, repr=False)
     # Where each function was defined (``FunctionSite``), so its body
     # expands the aliases of that place and its approvals stand under
     # it; a function loaded from a stored session has none and runs as a

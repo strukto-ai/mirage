@@ -15,6 +15,7 @@
 from mirage.workspace.executor.builtins.alias.alias import (
     alias_command_text,
     alias_value,
+    alias_view,
     expanding_aliases,
     handle_alias,
     handle_unalias,
@@ -25,6 +26,7 @@ __all__ = [
     "AliasMark",
     "alias_command_text",
     "alias_value",
+    "alias_view",
     "expanding_aliases",
     "handle_alias",
     "handle_unalias",

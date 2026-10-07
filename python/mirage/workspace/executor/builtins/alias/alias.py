@@ -150,13 +150,19 @@ def alias_value(
     is off, bash's default outside an interactive shell), when the word
     is not an alias, when it is the alias being expanded (bash does not
     expand a word identical to an alias being expanded a second time),
-    or when it was defined on the very parse and row that uses it.
+    or when it was defined on the very parse and row that uses it. In a
+    function's body the aliases are the ones its definition saw
+    (``alias_view``).
 
     Args:
         session (SessionState): shell session state.
         name (str): the command word.
         mark (AliasMark): the parse and row of the use.
     """
+    view = session._alias_view
+    if view is not None:
+        value = view.get(name)
+        return None if name in session._alias_stack else value
     if not session.shopts.get(
         "expand_aliases", SHOPT_DEFAULTS["expand_aliases"]
     ):
@@ -179,11 +185,41 @@ def expanding_aliases(session: SessionState) -> frozenset[str]:
     Args:
         session (SessionState): shell session state.
     """
+    view = session._alias_view
+    if view is not None:
+        return frozenset(view) - frozenset(session._alias_stack)
     if not session.shopts.get(
         "expand_aliases", SHOPT_DEFAULTS["expand_aliases"]
     ):
         return frozenset()
     return frozenset(session.aliases) - frozenset(session._alias_stack)
+
+
+def alias_view(session: SessionState, mark: AliasMark) -> dict[str, str]:
+    """The aliases a function defined at ``mark`` keeps for its body.
+
+    bash expands a function's aliases as it reads the definition, so the
+    body runs them as they were then, whatever is defined or removed
+    later: the aliases a use at ``mark`` would expand, none while
+    ``expand_aliases`` is off, and inside another function's body that
+    body's own. What is read later (``eval``, ``source``, a trap action,
+    ``$( )``) reads the aliases as they are then.
+
+    Args:
+        session (SessionState): shell session state.
+        mark (AliasMark): the parse and row of the definition.
+    """
+    if session._alias_view is not None:
+        return dict(session._alias_view)
+    if not session.shopts.get(
+        "expand_aliases", SHOPT_DEFAULTS["expand_aliases"]
+    ):
+        return {}
+    return {
+        name: value
+        for name, value in session.aliases.items()
+        if session._alias_marks.get(name) != mark
+    }
 
 
 def alias_command_text(

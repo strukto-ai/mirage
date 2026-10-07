@@ -108,9 +108,10 @@ async def run_shell_function(
     # whatever `xargs` or `env` marked the line that called it.
     marked = clear_program_invocation()
     # The body is parsed again from its source, so its rows restart at
-    # 0; it reads aliases at its definition, or as a parse of its own
-    # when it came from a stored session.
+    # 0; it expands the aliases its definition saw, or reads them as a
+    # parse of its own when it came from a stored session.
     outer_parse = (session._parse_current, session._parse_row)
+    outer_view = session._alias_view
     site = session._function_sites.get(cmd_name)
     if site is not None and site.source != session.functions[cmd_name]:
         site = None
@@ -120,6 +121,11 @@ async def run_shell_function(
     else:
         mark = site.mark
     session._parse_current, session._parse_row = mark
+    session._alias_view = (
+        dict(site.aliases)
+        if site is not None and site.aliases is not None
+        else None
+    )
     # Its commands stand under the definition's place, on a hand-off of
     # their own as every re-parse does, so two definitions of one text
     # each need a nod and a second call runs on the first's.
@@ -185,6 +191,7 @@ async def run_shell_function(
         return combined, merged_io, last_exec
     finally:
         session._parse_current, session._parse_row = outer_parse
+        session._alias_view = outer_view
         if nested is not None and decisions is not None:
             decisions.hand_up(session.session_id, nested)
         scope.release()

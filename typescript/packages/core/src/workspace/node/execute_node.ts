@@ -84,6 +84,7 @@ import {
 } from '../executor/control.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { handleTest, handleUnset } from '../executor/builtins/index.ts'
+import { aliasView } from '../executor/builtins/alias/index.ts'
 import { isValidName } from '../executor/builtins/shared.ts'
 import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.ts'
 import { handleRedirect } from '../executor/redirect.ts'
@@ -1571,10 +1572,15 @@ async function executeNodeBody(
     }
     const source = getFunctionSource(node)
     session.functions[name] = source
+    const mark: [number, number] = [
+      session.parseCurrent,
+      session.parseRow + (node.startPosition?.row ?? 0),
+    ]
     session.functionSites.set(name, {
       source,
-      mark: [session.parseCurrent, session.parseRow + (node.startPosition?.row ?? 0)],
+      mark,
       origin: definedAt(node, deps.handed ?? null),
+      aliases: aliasView(session, mark),
     })
     return [null, new IOResult(), new ExecutionNode({ command: `function ${name}`, exitCode: 0 })]
   }

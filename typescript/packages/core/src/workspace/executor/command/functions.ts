@@ -89,9 +89,10 @@ export async function executeShellFunction(
   let lastExec = new ExecutionNode({ command: cmdName, exitCode: 0 })
   const bound = fd0Binding(session)
   // The body is parsed again from its source, so its rows restart at 0;
-  // it reads aliases at its definition, or as a parse of its own when it
-  // came from a stored session.
+  // it expands the aliases its definition saw, or reads them as a parse of
+  // its own when it came from a stored session.
   const outerParse: [number, number] = [session.parseCurrent, session.parseRow]
+  const outerView = session.aliasView
   let site = session.functionSites.get(cmdName)
   if (site !== undefined && site.source !== source) site = undefined
   if (site === undefined) {
@@ -100,6 +101,7 @@ export async function executeShellFunction(
   } else {
     ;[session.parseCurrent, session.parseRow] = site.mark
   }
+  session.aliasView = site?.aliases ?? null
   // Its commands stand under the definition's place, on a hand-off of
   // their own as every re-parse does, so two definitions of one text each
   // need a nod and a second call runs on the first's.
@@ -165,6 +167,7 @@ export async function executeShellFunction(
     })
   } finally {
     ;[session.parseCurrent, session.parseRow] = outerParse
+    session.aliasView = outerView
     if (nested !== null && decisions !== null) decisions.handUp(session.sessionId, nested)
     scope.release()
     cs.pop()

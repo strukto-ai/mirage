@@ -166,7 +166,7 @@ async def execute_command(
     # through the same executor with the same call stack, so `$1`
     # inside a function still means the function's argument.
     if (
-        session.aliases
+        (session.aliases or session._alias_view)
         and parts
         and parts[0].type == NT.COMMAND_NAME
         and parts[0].named_children

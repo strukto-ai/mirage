@@ -433,6 +433,9 @@ export class SessionState {
   aliases: Record<string, string> = {}
   aliasMarks = new Map<string, [number, number]>()
   aliasStack: string[] = []
+  // The aliases a running function's body expands, as its definition saw
+  // them (`FunctionSite.aliases`); null reads the live table.
+  aliasView: Readonly<Record<string, string>> | null = null
   parseSeq = 0
   parseCurrent = 0
   // The row the running parse starts on in the text that spelled it: 0
@@ -608,6 +611,7 @@ export class SessionState {
     forked.aliases = { ...this.aliases }
     forked.parseSeq = this.parseSeq
     forked.aliasMarks = new Map(this.aliasMarks)
+    forked.aliasView = this.aliasView
     forked.functionSites = new Map(this.functionSites)
     forked.umask = this.umask
     forked.descriptors = new Map(this.descriptors)

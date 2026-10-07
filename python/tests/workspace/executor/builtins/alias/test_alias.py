@@ -37,6 +37,17 @@ async def _run(ws: Workspace, cmd: str) -> tuple[str, int]:
 
 
 @pytest.mark.asyncio
+async def test_a_function_keeps_the_aliases_its_definition_saw():
+    ws = _ws()
+    await _run(ws, "shopt -s expand_aliases; alias a='echo 1'")
+    await _run(ws, 'f() { a; }; g() { x=$(a); echo "[$x]"; }')
+    await _run(ws, "alias a='echo 2'")
+    assert await _run(ws, "f; g") == ("1\n[2]\n", 0)
+    assert await _run(ws, "unalias a; f") == ("1\n", 0)
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_no_expansion_without_shopt():
     ws = _ws()
     out, code = await _run(ws, "alias x='echo hi'\nx")

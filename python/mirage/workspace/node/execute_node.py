@@ -76,6 +76,7 @@ from mirage.workspace.evaluation import (
 )
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins import handle_test, handle_unset
+from mirage.workspace.executor.builtins.alias import alias_view
 from mirage.workspace.executor.builtins.exec import install_exec_redirects
 from mirage.workspace.executor.builtins.shared import is_valid_name
 from mirage.workspace.executor.control import (
@@ -1597,10 +1598,12 @@ async def _execute_node(
             )
         source = get_function_source(node)
         session.functions[name] = source
+        mark = (
+            session._parse_current,
+            session._parse_row + node.start_point[0],
+        )
         session._function_sites[name] = FunctionSite(
-            source,
-            (session._parse_current, session._parse_row + node.start_point[0]),
-            defined_at(node, handed),
+            source, mark, defined_at(node, handed), alias_view(session, mark)
         )
         return (
             None,

@@ -171,7 +171,7 @@ export async function executeCommand(
   const headNode = nonPrefixParts[0]
   if (
     parser !== undefined &&
-    Object.keys(session.aliases).length > 0 &&
+    Object.keys(session.aliasView ?? session.aliases).length > 0 &&
     headNode?.type === NT.COMMAND_NAME &&
     headNode.namedChildren[0]?.type === NT.WORD
   ) {

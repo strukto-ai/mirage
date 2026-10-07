@@ -129,12 +129,41 @@ function aliasesOn(session: SessionState): boolean {
  * `fi` or `do`. Mirrors Python's expanding_aliases.
  */
 export function expandingAliases(session: SessionState): ReadonlySet<string> {
+  const view = session.aliasView
+  if (view !== null)
+    return new Set(Object.keys(view).filter((name) => !session.aliasStack.includes(name)))
   if (!aliasesOn(session)) return new Set()
   return new Set(Object.keys(session.aliases).filter((name) => !session.aliasStack.includes(name)))
 }
 
-/** The alias text a command word expands to, or null. */
+/**
+ * The aliases a function defined at `mark` keeps for its body. bash expands
+ * a function's aliases as it reads the definition, so the body runs them as
+ * they were then, whatever is defined or removed later: the aliases a use
+ * at `mark` would expand, none while `expand_aliases` is off, and inside
+ * another function's body that body's own. What is read later (`eval`,
+ * `source`, a trap action, `$( )`) reads the aliases as they are then.
+ * Mirrors Python.
+ */
+export function aliasView(session: SessionState, mark: AliasMark): Record<string, string> {
+  if (session.aliasView !== null) return { ...session.aliasView }
+  if (!aliasesOn(session)) return {}
+  const view: Record<string, string> = {}
+  for (const [name, value] of Object.entries(session.aliases)) {
+    const seen = session.aliasMarks.get(name)
+    if (seen?.[0] !== mark[0] || seen[1] !== mark[1]) view[name] = value
+  }
+  return view
+}
+
+/** The alias text a command word expands to, or null. In a function's body
+ * the aliases are the ones its definition saw (`aliasView`). */
 export function aliasValue(session: SessionState, name: string, mark: AliasMark): string | null {
+  const view = session.aliasView
+  if (view !== null) {
+    const value = sessionEntry(view, name)
+    return value === undefined || session.aliasStack.includes(name) ? null : value
+  }
   if (!aliasesOn(session)) return null
   const value = sessionEntry(session.aliases, name)
   if (value === undefined || session.aliasStack.includes(name)) return null
