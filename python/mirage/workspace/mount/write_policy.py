@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 from weakref import WeakKeyDictionary
 
 from mirage.types import KERNEL_BACKENDS, MountBackend, MountMode, WritePolicy
+from mirage.utils.path import norm_dir
 from mirage.vfs.base import BaseVFS
 
 _ALL = frozenset({"put", "create", "copy", "delete"})
@@ -80,11 +81,6 @@ def conditional_overlap(
     return None
 
 
-def _as_dir(prefix: str) -> str:
-    stripped = prefix.strip("/")
-    return "/" + stripped + "/" if stripped else "/"
-
-
 def exposure_overlaps(mount_prefix: str, exposed: str) -> bool:
     """Whether exposing ``exposed`` reaches the mount at ``mount_prefix``.
 
@@ -95,7 +91,7 @@ def exposure_overlaps(mount_prefix: str, exposed: str) -> bool:
         mount_prefix (str): the mount's prefix.
         exposed (str): the subtree exposed.
     """
-    mount, out = _as_dir(mount_prefix), _as_dir(exposed)
+    mount, out = norm_dir(mount_prefix), norm_dir(exposed)
     return mount.startswith(out) or out.startswith(mount)
 
 
@@ -107,7 +103,7 @@ def kernel_refusal(prefix: str, backend: str | MountBackend) -> str:
         backend (str | MountBackend): fuse or fskit.
     """
     return (
-        f"mount {_as_dir(prefix)!r}: write: conditional cannot be exposed "
+        f"mount {norm_dir(prefix)!r}: write: conditional cannot be exposed "
         f"through backend {MountBackend(backend).value}, which has no place "
         "to carry the version"
     )

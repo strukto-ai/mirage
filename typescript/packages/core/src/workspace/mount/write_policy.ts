@@ -15,6 +15,7 @@
 import type { MountBackend } from '../../types.ts'
 import { KERNEL_BACKENDS, MountMode, WritePolicy } from '../../types.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
+import { normDir } from '../../utils/slash.ts'
 
 const ALL: readonly string[] = Object.freeze(['put', 'create', 'copy', 'delete'])
 
@@ -136,26 +137,21 @@ export function conditionalOverlap(mounts: Iterable<PolicyMount>, prefix: string
   return null
 }
 
-function asDir(prefix: string): string {
-  const stripped = prefix.replace(/^\/+|\/+$/g, '')
-  return stripped === '' ? '/' : `/${stripped}/`
-}
-
 /**
  * Whether exposing `exposed` reaches the mount at `mountPrefix`: it does when
  * it covers the mount (`/` covers `/s3/`) or sits inside it (`/s3/sub` is
  * inside `/s3/`). Mirrors python's `exposure_overlaps`.
  */
 export function exposureOverlaps(mountPrefix: string, exposed: string): boolean {
-  const mount = asDir(mountPrefix)
-  const out = asDir(exposed)
+  const mount = normDir(mountPrefix)
+  const out = normDir(exposed)
   return mount.startsWith(out) || out.startsWith(mount)
 }
 
 /** The refusal for a conditional mount a kernel mount would expose. Mirrors python's `kernel_refusal`. */
 export function kernelRefusal(prefix: string, backend: MountBackend): string {
   return (
-    `mount '${asDir(prefix)}': write: conditional cannot be exposed through backend ${backend}, ` +
+    `mount '${normDir(prefix)}': write: conditional cannot be exposed through backend ${backend}, ` +
     'which has no place to carry the version'
   )
 }
