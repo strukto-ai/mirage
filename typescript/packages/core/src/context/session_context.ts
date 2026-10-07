@@ -69,9 +69,22 @@ export function getCurrentSession(): SessionState | null {
   return sessionStorage.getStore()?.session ?? null
 }
 
-/** The evaluation bound with the current session, null outside one. */
+/**
+ * The evaluation bound with the current session, null outside one.
+ *
+ * On an isolating runtime that is the task's own binding. On the fallback
+ * storage it is the newest live binding that carries one: a bind for
+ * another session without an evaluation (a held op door's) may be the
+ * newest frame, and must not answer a running line with none, which would
+ * skip that line's abort checks. Mirrors Python's bound_evaluation.
+ */
 export function boundEvaluation(): EvaluationContext | null {
-  return sessionStorage.getStore()?.evaluation ?? null
+  const bindings = sessionStorage.liveStores()
+  for (let at = bindings.length - 1; at >= 0; at--) {
+    const evaluation = bindings[at]?.evaluation
+    if (evaluation !== undefined && evaluation !== null) return evaluation
+  }
+  return null
 }
 
 /**
