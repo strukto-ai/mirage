@@ -39,7 +39,7 @@ const OCTAL_PINS: [string, string, string][] = [
 ]
 
 // bash 5.2.37 under LC_ALL=C.UTF-8 through `od -An -tx1`: the format and
-// a %b argument write \u and \U through u32toutf8, so a surrogate half
+// a %b argument UTF-8-encode \u and \U values, so a surrogate half
 // and a value past Unicode come out UTF-8-shaped, and 0x80000000 and
 // past come out as nothing.
 const UNICODE_PINS: [string, string][] = [
@@ -139,7 +139,7 @@ describe('runPrintf', () => {
   )
 
   it.each(UNICODE_PINS)(
-    'writes %s through u32toutf8 in the format and in a %b argument',
+    'UTF-8-encodes %s in the format and in a %b argument',
     (escape, expected) => {
       const [fmtOut, fmtMessages, fmtFailed] = runPrintf(escape, [])
       const [bOut, bMessages, bFailed] = runPrintf('%b', [escape])

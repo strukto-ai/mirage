@@ -1136,7 +1136,7 @@ async function runParsedLine(
   // an empty opRecords here: their ops were accounted by the line above.
   env.records.push(...opRecords)
   // bash adds a line to history only when it is non-empty
-  // (`shell_input_line[0]`): a blank line is skipped, while a
+  // (anything before its newline): a blank line is skipped, while a
   // whitespace-only or comment-only line is kept.
   if (isLine && command.replaceAll('\n', '') !== '') {
     io.stdout = stdoutBytes

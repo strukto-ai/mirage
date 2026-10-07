@@ -92,7 +92,7 @@ class ExitSignal(Exception):
 
 
 class DiscardSignal(ExitSignal):
-    """An error that discards the rest of the line: bash's ``DISCARD``.
+    """An error after which bash discards the rest of the line.
 
     A bad substitution, an arithmetic or assignment error, a write the
     shell refuses: the command never runs, and neither do the statements

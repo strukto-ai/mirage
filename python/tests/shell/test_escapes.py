@@ -110,8 +110,8 @@ def test_high_bytes_ride_the_surrogate_escape():
 
 
 def test_surrogate_halves_encode_like_a_utf8_locale():
-    # bash 5.2 (docker, LC_ALL=C.UTF-8 at startup) writes \u/\U through
-    # u32toutf8, so a surrogate half comes out as its raw three-byte
+    # bash 5.2 (docker, LC_ALL=C.UTF-8 at startup) UTF-8-encodes \u/\U
+    # values, so a surrogate half comes out as its raw three-byte
     # form; U+E000, one past the range, is an ordinary character.
     assert encode_text(decode_ansi_c(r"\uD800")) == b"\xed\xa0\x80"
     assert encode_text(decode_ansi_c(r"\udbff")) == b"\xed\xaf\xbf"
@@ -120,7 +120,7 @@ def test_surrogate_halves_encode_like_a_utf8_locale():
 
 
 def test_values_past_unicode_encode_or_vanish():
-    # u32toutf8 keeps the old-style four- to six-byte forms alive past
+    # bash keeps the old-style four- to six-byte forms alive past
     # Unicode, and 0x80000000 and past produce nothing - without
     # truncating the rest of the segment the way NUL does.
     assert encode_text(decode_ansi_c(r"\U00110000")) == b"\xf4\x90\x80\x80"
@@ -145,7 +145,7 @@ def test_values_past_unicode_encode_or_vanish():
         (0x80000000, b""),
     ],
 )
-def test_code_point_text_writes_through_u32toutf8(value: int, expected: bytes):
+def test_code_point_text_utf8_encodes_like_bash(value: int, expected: bytes):
     # $'...', echo -e and printf all write \u and \U through this; only
     # $'...' cuts at NUL, before it gets here.
     assert encode_text(code_point_text(value)) == expected

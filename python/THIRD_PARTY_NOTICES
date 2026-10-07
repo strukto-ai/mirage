@@ -1,3 +1,12 @@
+Third-party notices for mirage-ai, the Python package.
+
+The package includes the third-party code each section below names.
+Every section is a copy of licenses/third_party/<name>.txt in
+https://github.com/strukto-ai/mirage and reproduces the notice that
+code came with.
+
+------------------------------------------------------------------------
+
 The JSON parser in python/mirage/core/jq/parse.py and
 typescript/packages/core/src/core/jq/parse.ts follows src/jv_parse.c of jq
 1.8.2 (https://github.com/jqlang/jq), and the input reader in
