@@ -1,51 +1,39 @@
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 
-from mirage.shell.bytes import decode_text, encode_text
-from mirage.shell.parse.syntax import (
-    find_syntax_issue,
-    find_unterminated_backtick,
-    syntax_error_message,
-)
-from mirage.shell.parse.types import SourceSpan, SyntaxDiagnostic, SyntaxIssue
+from mirage.shell.parse.syntax import check_syntax, find_syntax_issue
+from mirage.shell.parse.types import SourceSpan, SyntaxDiagnostic
 from mirage.shell.types import TSNodeLike
 
 
 def diagnose(
+    command: str,
     root: TSNodeLike,
     offsets: Sequence[int],
-    parse_fn: Callable[[str], TSNodeLike] | None = None,
     aliases: frozenset[str] = frozenset(),
 ) -> tuple[SyntaxDiagnostic, ...]:
-    """The line's syntax errors, each span mapped back into the line.
+    """The line's syntax errors, each span in the line as typed.
 
     Args:
-        root (TSNodeLike): the parsed line.
+        command (str): the line.
+        root (TSNodeLike): its parse, for an error only the grammar finds.
         offsets (Sequence[int]): ``source_offsets`` of that parse.
-        parse_fn (Callable[[str], TSNodeLike] | None): parses a ``$(...)``
-            body so its own syntax is judged.
         aliases (frozenset[str]): alias names the shell would expand.
     """
-    found = find_syntax_issue(root, parse_fn, aliases)
-    unclosed = find_unterminated_backtick(decode_text(root.text or b""))
-    if found is None and unclosed is not None:
-        found = SyntaxIssue(
-            unclosed,
-            SourceSpan(
-                root.end_byte - len(encode_text(unclosed)), root.end_byte
-            ),
-        )
-    if found is None:
+    found = check_syntax(command, aliases)
+    if found is not None:
+        return (found,)
+    issue = find_syntax_issue(root)
+    if issue is None:
         return ()
-    start, end = found.span.start, found.span.end
+    start, end = issue.span.start, issue.span.end
     return (
         SyntaxDiagnostic(
-            found.offending,
+            issue.offending,
             SourceSpan(
                 offsets[start] if start < len(offsets) else start,
                 offsets[end] if end < len(offsets) else end,
             ),
-            syntax_error_message(
-                found.offending, root, issue_end=found.span.end
-            ),
+            issue.message,
+            issue.status,
         ),
     )

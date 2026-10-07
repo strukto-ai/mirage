@@ -15,15 +15,10 @@ import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { assert, beforeAll, describe, expect, it } from 'vitest'
 import { decodeText } from '../bytes.ts'
-import {
-  createShellParser,
-  findSyntaxError,
-  findUnterminatedBacktick,
-  type ShellParser,
-} from './index.ts'
-import { endsInsideConstruct, failsInArray, syntaxErrorResult } from './syntax.ts'
+import { checkSyntax, createShellParser, syntaxErrorResult, type ShellParser } from './index.ts'
+import { findSyntaxIssue } from './syntax.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -35,131 +30,59 @@ beforeAll(async () => {
   parser = await createShellParser({ engineWasm, grammarWasm })
 })
 
-describe('endsInsideConstruct', () => {
+const CORPUS = (
+  JSON.parse(
+    readFileSync(
+      new URL('../../../../../../integ/fixtures/shell/bash_syntax.json', import.meta.url),
+      'utf8',
+    ),
+  ) as { lines: { line: string; status: number; stderr: string }[] }
+).lines
+
+const encode = (text: string): number[] => [...new TextEncoder().encode(text)]
+
+describe('checkSyntax', () => {
+  it('reads every line as bash reads it', () => {
+    // integ/fixtures/shell/bash_syntax.json is pinned against bash by
+    // scripts/pin_bash_syntax.py, which also fuzzes the reader against it;
+    // the python suite (tests/shell/parse/test_syntax.py) reads the same rows.
+    const differ = CORPUS.filter((row) => {
+      const found = checkSyntax(row.line)
+      return found === null
+        ? row.status !== 0
+        : found.status !== row.status || found.message !== row.stderr
+    })
+    expect(differ.map((row) => row.line)).toEqual([])
+  })
+
   it.each([
-    ['if true', true],
-    ['case x', true],
-    ['if }', false],
-    ['( then', false],
-    ['for i in 1; do ;', false],
-    [') ; if true; then', false],
-    ['; if true; then', false],
-    ['echo a ) ; if true; then', false],
-    ['echo a | ; if true; then', false],
-    ['f() ; if true; then', false],
-    ['echo a\n; while true; do', false],
-    ['case x in a', false],
-  ])('%s: %s', (line, unfinished) => {
-    expect(endsInsideConstruct(parser.parse(line))).toBe(unfinished)
+    [
+      [...encode('echo ('), 0xff],
+      [...encode("mirage: syntax error near '"), 0xff, ...encode("'\n")],
+    ],
+    [
+      [...encode("[[ '"), 0xff, ...encode("'")],
+      [
+        ...encode(
+          "mirage: unexpected token `newline', conditional binary operator expected\n" +
+            "mirage: syntax error near ''",
+        ),
+        0xff,
+        ...encode("''\n"),
+      ],
+    ],
+  ])('keeps an invalid byte as typed in %j', async (raw, stderr) => {
+    const line = decodeText(new Uint8Array(raw))
+    const found = checkSyntax(line)
+    assert(found)
+    expect(line.slice(found.span.start, found.span.end)).toBe(found.offending)
+    expect(Array.from(await syntaxErrorResult(found).materializeStderr())).toEqual(stderr)
   })
-})
 
-describe('failsInArray', () => {
-  it.each([
-    ['x=(1 $(echo', true],
-    ['x=(1 2) ; y=(', true],
-    ['x=(1 (2', true],
-    ['x=((1 2', true],
-    ['echo $(echo', false],
-  ])('%s: %s', (line, inside) => {
-    const root = parser.parse(line)
-    expect(failsInArray(root)).toBe(inside)
-    if (inside) expect(syntaxErrorResult(line, root).exitCode).toBe(1)
-  })
-})
-
-describe('syntaxErrorResult', () => {
-  it('keeps an invalid byte in the span as typed', async () => {
-    const line = decodeText(new Uint8Array([0x5b, 0x5b, 0x20, 0x27, 0xff, 0x27]))
-    const io = syntaxErrorResult(line, parser.parse(line))
-    expect(io.exitCode).toBe(2)
-    expect(Array.from(await io.materializeStderr())).toEqual([
-      ...new TextEncoder().encode("mirage: syntax error near '[[ '"),
-      0xff,
-      ...new TextEncoder().encode("''\n"),
-    ])
-  })
-})
-
-describe('findSyntaxError', () => {
-  it('reports syntax errors after deeply nested command substitutions', () => {
+  it('refuses a line deeper than the reader through the tree', () => {
     const depth = 4096
-    const root = parser.parse(`echo ${'$(echo '.repeat(depth)}x${')'.repeat(depth)} (`)
-    expect(findSyntaxError(root)).toBe('(')
-  })
-
-  it.each([
-    'if then fi',
-    'echo (',
-    'for x do done',
-    'for',
-    'if',
-    'if; fi',
-    'echo "unterm',
-    ';s',
-    '| s',
-    '&& s',
-    '& s',
-    'echo a ; ; echo b',
-    'echo bg &; echo fg',
-    'true;;s',
-    'echo a ;& echo b',
-  ])('flags structural syntax error in %j', (cmd) => {
-    const root = parser.parse(cmd)
-    expect(findSyntaxError(root)).not.toBeNull()
-  })
-
-  it.each([
-    'echo hi',
-    'for x in a b; do echo $x; done',
-    'if true; then echo y; fi',
-    'cat /tmp/x | sort',
-    "cat <<EN'D'\n$v\nEND",
-    'echo bg & echo fg',
-    'echo a &',
-    'echo a;',
-    'case x in a) echo a;; esac',
-    'case x in a) echo a;& b) echo b;;& c) echo c;; esac',
-    'for x in; do echo $x; done',
-  ])('returns null for valid / recoverable %j', (cmd) => {
-    const root = parser.parse(cmd)
-    expect(findSyntaxError(root)).toBeNull()
-  })
-})
-
-describe('a reserved word where a command starts', () => {
-  // Pinned against bash 5.2.37, which refuses the line at the word.
-  it.each([
-    ['echo hi; fi', 'fi'],
-    ['done', 'done'],
-    ['then', 'then'],
-    ['esac', 'esac'],
-    ['}', '}'],
-    [']]', ']]'],
-    ['in', 'in'],
-    ['! fi', 'fi'],
-    ['fi >/dev/null', 'fi'],
-    ['echo a | fi', 'fi'],
-    ['echo a && fi', 'fi'],
-    ['fi; done', 'fi'],
-    ['fi; for a in b; do done', 'fi'],
-    ['if x; then fi; for a in b; do done', 'fi'],
-  ])('names %j a syntax error at %j', (cmd, word) => {
-    expect(findSyntaxError(parser.parse(cmd))).toBe(word)
-  })
-
-  it.each([
-    '"fi"',
-    '\\fi',
-    'x=1 fi',
-    '>/dev/null fi',
-    'echo fi done then',
-    'if true; then echo y; fi',
-    'for x in a; do echo $x; done',
-    '{ echo a; }',
-    'case a in a) echo m;; esac',
-  ])('reads the word in %j as a word', (cmd) => {
-    expect(findSyntaxError(parser.parse(cmd))).toBeNull()
+    const line = `echo ${'$(echo '.repeat(depth)}x${')'.repeat(depth)} (`
+    expect((checkSyntax(line) ?? findSyntaxIssue(parser.parse(line)))?.offending).toBe('(')
   })
 
   // Pinned against bash 5.2.37, which takes the reserved word first inside
@@ -173,8 +96,7 @@ describe('a reserved word where a command starts', () => {
     ['echo $( (fi) )', 'fi', 'fi'],
     ['echo <(fi)', 'fi', 'fi'],
   ])('reads %j with an alias %j as %j', (cmd, alias, word) => {
-    const parse = (source: string) => parser.parse(source)
-    expect(findSyntaxError(parser.parse(cmd), parse, new Set([alias]))).toBe(word)
+    expect(checkSyntax(cmd, new Set([alias]))?.offending ?? null).toBe(word)
   })
 
   // Pinned against bash 5.2.37: a name stays reserved only inside the text its
@@ -203,33 +125,7 @@ describe('a reserved word where a command starts', () => {
   ]
   it.each(OWN)('reads %j with alias text %j as %j', (line, spans, word) => {
     const own = new Map(spans.map(([name, start, end]) => [name, [start, end] as const]))
-    const root = parser.parse(line)
-    const offsets = parser.sourceOffsets(line, root)
-    expect(findSyntaxError(root, undefined, new Set(own.keys()), own, offsets)).toBe(word)
-  })
-})
-
-describe('findUnterminatedBacktick', () => {
-  it.each(['echo `echo a', 'echo "`echo \'`\'`"', 'echo a`', '`'])(
-    'flags the open region in %j',
-    (command) => {
-      expect(findUnterminatedBacktick(command)).not.toBeNull()
-    },
-  )
-
-  it.each([
-    'echo `echo a`',
-    'echo `echo a` `echo b`',
-    // Single quotes protect a backtick, double quotes do not.
-    "echo '`'",
-    'echo "`echo a`"',
-    'echo "\\`"',
-    // Only a backslash escapes inside the region.
-    'echo `echo \\`nested\\``',
-    'echo a',
-    'cat <<EOF\nplain\nEOF',
-  ])('accepts balanced %j', (command) => {
-    expect(findUnterminatedBacktick(command)).toBeNull()
+    expect(checkSyntax(line, new Set(own.keys()), own)?.offending ?? null).toBe(word)
   })
 })
 

@@ -104,12 +104,7 @@ export async function createShellParser(config: ShellParserConfig): Promise<Shel
           },
           () => {
             if (disposed) throw new Error('shell parser is disposed')
-            const nested = new ParseTrees(parser)
-            try {
-              return diagnose(root, offsets, (source) => parseRoot(nested, source))
-            } finally {
-              nested.release()
-            }
+            return diagnose(command, root, offsets)
           },
         )
       } finally {

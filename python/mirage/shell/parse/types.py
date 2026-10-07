@@ -18,3 +18,4 @@ class SyntaxIssue:
 @dataclass(frozen=True)
 class SyntaxDiagnostic(SyntaxIssue):
     message: str
+    status: int = 2

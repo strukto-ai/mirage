@@ -160,5 +160,5 @@ def parse_program(command: str) -> ParsedProgram:
     root = parse(command)
     offsets = source_offsets(command, root)
     return ParsedProgram(
-        command, root, offsets, partial(diagnose, root, offsets, parse)
+        command, root, offsets, partial(diagnose, command, root, offsets)
     )

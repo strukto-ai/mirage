@@ -9,4 +9,5 @@ export interface SyntaxIssue {
 }
 export interface SyntaxDiagnostic extends SyntaxIssue {
   readonly message: string
+  readonly status: number
 }

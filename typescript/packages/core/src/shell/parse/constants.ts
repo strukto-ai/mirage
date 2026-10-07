@@ -64,109 +64,168 @@ export const STRUCTURAL_TOKENS: ReadonlySet<string> = new Set([
   '>(',
 ])
 
-// Each expansion or substitution opener: the token that closes it and the
-// character bash's end-of-input diagnostic names for it.
-export const OPENER_CLOSERS: ReadonlyMap<string, readonly [string, string]> = new Map([
-  ['$(', [')', ')']],
-  ['$((', ['))', ')']],
-  ['<(', [')', ')']],
-  ['>(', [')', ')']],
-  ['${', ['}', '}']],
-  ['$[', [']', ']']],
-])
-
-export const CLOSING_TOKENS: ReadonlySet<string> = new Set([')', '))', '}', ']'])
-
-/** The operators of an assignment; a `(` right after one opens an array. */
-export const ASSIGNMENT_OPERATORS: ReadonlySet<string> = new Set(['=', '+='])
-
-// The quotes an input can end inside; bash reads on looking for the match.
-export const QUOTE_TOKENS: ReadonlySet<string> = new Set(["'", '"', '`'])
-
-// The characters bash builds its operators from: a token made of nothing
-// else is an operator, never a word.
-export const OPERATOR_CHARS: ReadonlySet<string> = new Set(';&|()<>')
-
-// What each token opening a nested construct waits for while bash reads an
-// array's words. A substitution (closed by `)`) reads a command list of its
-// own; inside the others (quotes, expansions, arithmetic) no operator cuts
-// anything.
-export const NESTED_CLOSERS: ReadonlyMap<string, string> = new Map([
-  ['$(', ')'],
-  ['<(', ')'],
-  ['>(', ')'],
-  ['$((', '))'],
-  ['((', '))'],
-  ['${', '}'],
-  ['$[', ']'],
-  ['"', '"'],
-  ['`', '`'],
-])
-
-// The compound commands an ERROR can leave open, by the token closing
-// each. Input ending inside one is bash's `syntax error: unexpected end
-// of file`, not an unexpected token. A `(` after a command's words opens
-// nothing: it is unexpected (`echo x (`) unless `()` defines a function.
-export const COMPOUND_CLOSERS: ReadonlyMap<string, string> = new Map([
-  ['{', '}'],
-  ['(', ')'],
-  ['if', 'fi'],
-  ['case', 'esac'],
-  ['while', 'done'],
-  ['until', 'done'],
-  ['for', 'done'],
-  ['select', 'done'],
-])
-
-// A construct the grammar leaves with a missing closer, by the character
-// bash names when the input ends inside it. A subshell is absent: bash
-// reports an unexpected end of file there instead.
-export const CONSTRUCT_CLOSERS: ReadonlyMap<string, string> = new Map([
-  ['command_substitution', ')'],
-  ['process_substitution', ')'],
-  ['arithmetic_expansion', ')'],
-  ['expansion', '}'],
-  ['array', ')'],
-])
-
 // Statement separators. One that lands inside an ERROR node has nothing
-// to separate (a line starting with `;`, `| s`, `a ; ; b`, `a &; b`), and
-// bash refuses every such line with `syntax error near unexpected token`.
+// to separate (a line starting with `;`, `| s`, `a ; ; b`, `a &; b`).
 export const SEPARATOR_TOKENS: ReadonlySet<string> = new Set([';', '&', '|', '&&', '||'])
 
-// The case-item terminators. The grammar also accepts them as plain
-// statement separators, so `true;;s` parses without an ERROR node; bash
-// only accepts them inside a case item.
+// The case-item terminators: a list ends at one only inside a case item.
 export const CASE_TERMINATORS: ReadonlySet<string> = new Set([';;', ';&', ';;&'])
 
-// Every list operator. Where a command or a word must come, one is the
-// token bash reports as unexpected.
-export const LIST_OPERATORS: ReadonlySet<string> = new Set([
-  ...SEPARATOR_TOKENS,
-  ...CASE_TERMINATORS,
-  '|&',
-])
+// The characters that end an unquoted word.
+export const WORD_BREAKS: ReadonlySet<string> = new Set(' \t\n;&|()<>')
 
-// The tokens a command must follow (a keyword or operator that opens
-// one) and those a word must follow (the subject of `case`, the name of
-// `for`, `select` and `function`).
-export const COMMAND_FOLLOWS: ReadonlySet<string> = new Set([
-  'if',
-  'elif',
-  'while',
-  'until',
-  'then',
-  'do',
-  'else',
-  '{',
-  '(',
-  '!',
-  '|',
-  '|&',
+// Every operator bash reads, longest first, so the first one a line
+// starts with is its token.
+export const OPERATORS: readonly string[] = [
+  ';;&',
+  '&>>',
+  '<<<',
+  '<<-',
+  ';;',
+  ';&',
   '&&',
   '||',
+  '|&',
+  '&>',
+  '<<',
+  '>>',
+  '<&',
+  '>&',
+  '<>',
+  '>|',
+  ';',
+  '&',
+  '|',
+  '<',
+  '>',
+  '(',
+  ')',
+]
+
+// The characters operators are spelled with (the `-` of `<<-`).
+export const OPERATOR_CHARS: ReadonlySet<string> = new Set(';&|<>()-')
+
+export const REDIRECTIONS: ReadonlySet<string> = new Set([
+  '<',
+  '>',
+  '>>',
+  '<&',
+  '>&',
+  '<>',
+  '>|',
+  '&>',
+  '&>>',
+  '<<<',
+  '<<',
+  '<<-',
 ])
-export const NAME_FOLLOWS: ReadonlySet<string> = new Set(['case', 'for', 'select', 'function'])
+
+// The reserved words that close or continue a compound command. Spelled
+// by an alias, one is a command where a command starts, except inside
+// that alias's own text, where its name stays reserved.
+export const CLOSING_WORDS: ReadonlySet<string> = new Set([
+  'then',
+  'else',
+  'elif',
+  'fi',
+  'do',
+  'done',
+  'esac',
+  '}',
+  'in',
+  ']]',
+])
+
+// Every reserved word. bash takes one as such only where a command starts
+// (and after a compound command), never after a command's own words.
+export const RESERVED_WORDS: ReadonlySet<string> = new Set([
+  ...CLOSING_WORDS,
+  'if',
+  'case',
+  'for',
+  'select',
+  'while',
+  'until',
+  'function',
+  'time',
+  '{',
+  '!',
+  '[[',
+  'coproc',
+])
+
+// The reserved words opening a compound command: what a function body or
+// a named coproc must start with.
+export const COMPOUND_OPENERS: ReadonlySet<string> = new Set([
+  '{',
+  'if',
+  'while',
+  'until',
+  'for',
+  'select',
+  'case',
+  '[[',
+])
+
+// The builtins whose arguments read `name=(` as an array, as an
+// assignment before a command does.
+export const ARRAY_BUILTINS: ReadonlySet<string> = new Set([
+  'alias',
+  'declare',
+  'eval',
+  'export',
+  'let',
+  'local',
+  'readonly',
+  'typeset',
+])
+
+// The `[[ ]]` operators taking one operand, and those taking two (with
+// `<` and `>`, which are operator tokens).
+export const UNARY_TESTS: ReadonlySet<string> = new Set(
+  '-a -b -c -d -e -f -g -h -k -p -r -s -t -u -w -x -G -L -N -O -S -z -n -o -v -R'.split(' '),
+)
+export const BINARY_TESTS: ReadonlySet<string> = new Set(
+  '== = != =~ -eq -ne -lt -le -gt -ge -nt -ot -ef'.split(' '),
+)
+
+// The characters a shell name is spelled with; it cannot start with a
+// digit.
+export const NAME_START: ReadonlySet<string> = new Set(
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_',
+)
+export const NAME_CHARS: ReadonlySet<string> = new Set(
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_0123456789',
+)
+
+// The characters that open an extended pattern before `(`, which the
+// right side of `==`, `=` and `!=` in `[[ ]]` reads with extglob on.
+export const EXTGLOB_OPENERS: ReadonlySet<string> = new Set('@!+*?')
+
+// bash's `syntax error near `X'` without "unexpected token" quotes the
+// line back from where its reader stopped: to a blank, or to one of these,
+// which it keeps.
+export const NEAR_TEXT_STOPS: ReadonlySet<string> = new Set(';&|')
+
+// How the syntax reader takes the next token: whether `name=(` opens an
+// array, `name[` reads a subscript up to its `]` across blanks, `((`
+// opens arithmetic (and, where a command starts, is read again as two
+// subshells when it does not close on its line), a leading `[` opens an
+// array element's subscript, digits before `<` or `>` stay a word inside
+// `[[ ]]`, an array in a function body reads reserved words as such, and
+// the first array after a redirection reads an element's `name[` as a
+// subscript.
+export const READ_ARRAYS = 1
+export const READ_SUBSCRIPTS = 2
+export const READ_ARITH = 4
+export const READ_START = 8
+export const READ_ELEMENT = 16
+export const READ_TEST = 32
+export const READ_BODY = 64
+export const READ_KEYS = 128
+export const READ_PREFIX = READ_ARRAYS | READ_SUBSCRIPTS
+export const READ_FOLLOW = READ_PREFIX | READ_ARITH
+export const READ_COMMAND = READ_FOLLOW | READ_START
 
 // Where a `variable_name` node is a write target rather than a read:
 // the assignment's name and the for loop's variable. Everything else --

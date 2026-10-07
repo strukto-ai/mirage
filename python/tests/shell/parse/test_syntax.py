@@ -17,156 +17,104 @@ from pathlib import Path
 
 import pytest
 
-from mirage.shell.bytes import decode_text
-from mirage.shell.parse import (
-    find_syntax_error,
-    find_unterminated_backtick,
-    parse,
-    source_offsets,
-)
-from mirage.shell.parse.syntax import (
-    ends_inside_construct,
-    fails_in_array,
-    syntax_error_result,
-)
+from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.parse import check_syntax, parse, syntax_error_result
+from mirage.shell.parse.syntax import find_syntax_issue
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
-
-@pytest.mark.parametrize(
-    ("line", "unfinished"),
-    [
-        ("if true", True),
-        ("case x", True),
-        ("if }", False),
-        ("( then", False),
-        ("for i in 1; do ;", False),
-        (") ; if true; then", False),
-        ("; if true; then", False),
-        ("echo a ) ; if true; then", False),
-        ("echo a | ; if true; then", False),
-        ("f() ; if true; then", False),
-        ("echo a\n; while true; do", False),
-        ("case x in a", False),
-    ],
-)
-def test_only_input_bash_took_whole_ends_inside_a_construct(line, unfinished):
-    assert ends_inside_construct(parse(line)) is unfinished
+ROOT = Path(__file__).resolve().parents[4]
+CORPUS = json.loads(
+    (ROOT / "integ/fixtures/shell/bash_syntax.json").read_text()
+)["lines"]
 
 
-@pytest.mark.parametrize(
-    ("line", "inside"),
-    [
-        ("x=(1 $(echo", True),
-        ("x=(1 2) ; y=(", True),
-        ("x=(1 (2", True),
-        ("x=((1 2", True),
-        ("echo $(echo", False),
-    ],
-)
-def test_an_unfinished_array_is_the_outermost_construct(line, inside):
-    root = parse(line)
-    assert fails_in_array(root) is inside
-    if inside:
-        assert syntax_error_result(line, root).exit_code == 1
+def read(line: str) -> tuple[int, str]:
+    found = check_syntax(line)
+    return (0, "") if found is None else (found.status, found.message)
 
 
-def test_a_syntax_error_span_keeps_an_invalid_byte_as_typed():
-    line = decode_text(b"[[ '\xff'")
-    io = syntax_error_result(line, parse(line))
-    assert io.exit_code == 2
-    assert io.stderr == b"mirage: syntax error near '[[ '\xff''\n"
-
-
-def test_syntax_error_after_deep_command_substitution():
-    depth = 4096
-    root = parse("echo " + "$(echo " * depth + "x" + ")" * depth + " (")
-    assert find_syntax_error(root) == "("
+def test_every_line_reads_as_bash_reads_it():
+    # integ/fixtures/shell/bash_syntax.json is pinned against bash by
+    # scripts/pin_bash_syntax.py, which also fuzzes the reader against it;
+    # the TypeScript suite (packages/core/src/shell/parse/syntax.test.ts)
+    # reads the same rows.
+    assert [
+        row["line"]
+        for row in CORPUS
+        if read(row["line"]) != (row["status"], row["stderr"])
+    ] == []
 
 
 @pytest.mark.parametrize(
-    "command",
+    ("raw", "stderr"),
     [
-        "echo `echo a",
-        "echo \"`echo '`'`\"",
-        "echo a`",
-        "`",
+        (b"echo (\xff", b"mirage: syntax error near '\xff'\n"),
+        (
+            b"[[ '\xff'",
+            b"mirage: unexpected token `newline', conditional binary "
+            b"operator expected\nmirage: syntax error near ''\xff''\n",
+        ),
     ],
 )
-def test_find_unterminated_backtick_flags_open_region(command):
-    assert find_unterminated_backtick(command) is not None
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        "echo `echo a`",
-        "echo `echo a` `echo b`",
-        # Single quotes protect a backtick, double quotes do not.
-        "echo '`'",
-        'echo "`echo a`"',
-        'echo "\\`"',
-        # Only a backslash escapes inside the region.
-        "echo `echo \\`nested\\``",
-        "echo a",
-        "cat <<EOF\nplain\nEOF",
-    ],
-)
-def test_find_unterminated_backtick_accepts_balanced(command):
-    assert find_unterminated_backtick(command) is None
-
-
-@pytest.mark.parametrize(
-    "bad_cmd",
-    [
-        "if then fi",
-        "echo (",
-        "for x do done",
-        "for",
-        "if",
-        "if; fi",
-        'echo "unterm',
-        ";s",
-        "| s",
-        "&& s",
-        "& s",
-        "echo a ; ; echo b",
-        "echo bg &; echo fg",
-        "true;;s",
-        "echo a ;& echo b",
-    ],
-)
-def test_find_syntax_error_detects_error_nodes(bad_cmd):
-    ast = parse(bad_cmd)
-    snippet = find_syntax_error(ast)
-    assert snippet is not None, (
-        f"expected syntax error for {bad_cmd!r}, got None"
+def test_a_diagnostic_keeps_an_invalid_byte_as_typed(raw, stderr):
+    found = check_syntax(decode_text(raw))
+    assert found is not None
+    assert raw[found.span.start : found.span.end] == encode_text(
+        found.offending
     )
+    assert syntax_error_result(found).stderr == stderr
+
+
+def test_a_line_deeper_than_the_reader_refuses_through_the_tree():
+    depth = 4096
+    line = "echo " + "$(echo " * depth + "x" + ")" * depth + " ("
+    found = check_syntax(line) or find_syntax_issue(parse(line))
+    assert found is not None and found.offending == "("
 
 
 @pytest.mark.parametrize(
-    "good_cmd",
+    ("command", "alias", "word"),
     [
-        "echo hi",
-        "for x in a b; do echo $x; done",
-        "cat <<EN'D'\n$v\nEND",
-        "if true; then echo y; fi",
-        "cat /tmp/x | sort",
-        "echo bg & echo fg",
-        "echo a &",
-        "echo a;",
-        "case x in a) echo a;; esac",
-        "case x in a) echo a;& b) echo b;;& c) echo c;; esac",
+        ("fi", "fi", None),
+        ("fi", "done", "fi"),
+        ("( fi )", "fi", None),
+        ("echo `fi`", "fi", None),
+        ('echo "$(fi)"', "fi", "fi"),
+        ("echo $( (fi) )", "fi", "fi"),
+        ("echo <(fi)", "fi", "fi"),
     ],
 )
-def test_find_syntax_error_returns_none_for_valid(good_cmd):
-    assert find_syntax_error(parse(good_cmd)) is None
+def test_a_reserved_word_the_shell_expands_as_an_alias_is_a_command(
+    command, alias, word
+):
+    # Pinned against bash 5.2.37, which takes the reserved word first
+    # inside `$(...)` and a process substitution.
+    found = check_syntax(command, frozenset({alias}))
+    assert (found and found.offending) == word
+
+
+@pytest.mark.parametrize(
+    ("line", "own", "word"),
+    [
+        ("echo F; fi", {"fi": (0, 10)}, "fi"),
+        ("echo F; fi", {"fi": (0, 7)}, None),
+        ("echo C; fi echo F", {"c": (0, 11), "fi": (11, 17)}, None),
+        ("echo C; echo F; fi", {"c": (0, 8), "fi": (8, 18)}, "fi"),
+        ("echo F \\\n; fi", {"fi": (0, 13)}, "fi"),
+        ("echo F \\\n; fi", {"fi": (0, 10)}, None),
+    ],
+)
+def test_an_alias_name_is_reserved_inside_its_own_text(line, own, word):
+    # Pinned against bash 5.2.37: a name stays reserved only inside the
+    # text its alias put there, a trailing blank's chained one included.
+    # Spans are in the line as typed, which a continuation shifts.
+    found = check_syntax(line, frozenset(own), own)
+    assert (found and found.offending) == word
 
 
 MISSING_QUOTE_CASES = json.loads(
-    (
-        Path(__file__).resolve().parents[4] / "integ/bash/syntax/quoting.json"
-    ).read_text()
+    (ROOT / "integ/bash/syntax/quoting.json").read_text()
 )["cases"]
 
 
@@ -212,87 +160,3 @@ async def test_literal_quotes_are_not_reported_as_unclosed(command, expected):
         assert await io.stderr_str() == ""
     finally:
         await ws.close()
-
-
-@pytest.mark.parametrize(
-    "command, word",
-    [
-        ("echo hi; fi", "fi"),
-        ("done", "done"),
-        ("then", "then"),
-        ("esac", "esac"),
-        ("}", "}"),
-        ("]]", "]]"),
-        ("in", "in"),
-        ("! fi", "fi"),
-        ("fi >/dev/null", "fi"),
-        ("echo a | fi", "fi"),
-        ("echo a && fi", "fi"),
-        ("fi; done", "fi"),
-        ("fi; for a in b; do done", "fi"),
-        ("if x; then fi; for a in b; do done", "fi"),
-    ],
-)
-def test_a_reserved_word_where_a_command_starts_is_a_syntax_error(
-    command, word
-):
-    # Pinned against bash 5.2.37, which refuses the line at the word.
-    assert find_syntax_error(parse(command)) == word
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        '"fi"',
-        "\\fi",
-        "x=1 fi",
-        ">/dev/null fi",
-        "echo fi done then",
-        "if true; then echo y; fi",
-        "for x in a; do echo $x; done",
-        "{ echo a; }",
-        "case a in a) echo m;; esac",
-    ],
-)
-def test_a_reserved_word_bash_reads_as_a_word_is_no_syntax_error(command):
-    assert find_syntax_error(parse(command)) is None
-
-
-@pytest.mark.parametrize(
-    "command, alias, word",
-    [
-        ("fi", "fi", None),
-        ("fi", "done", "fi"),
-        ("( fi )", "fi", None),
-        ("echo `fi`", "fi", None),
-        ('echo "$(fi)"', "fi", "fi"),
-        ("echo $( (fi) )", "fi", "fi"),
-        ("echo <(fi)", "fi", "fi"),
-    ],
-)
-def test_a_reserved_word_the_shell_expands_as_an_alias_is_a_command(
-    command, alias, word
-):
-    # Pinned against bash 5.2.37, which takes the reserved word first
-    # inside `$(...)` and a process substitution.
-    assert find_syntax_error(parse(command), parse, frozenset({alias})) == word
-
-
-@pytest.mark.parametrize(
-    "line, own, word",
-    [
-        ("echo F; fi", {"fi": (0, 10)}, "fi"),
-        ("echo F; fi", {"fi": (0, 7)}, None),
-        ("echo C; fi echo F", {"c": (0, 11), "fi": (11, 17)}, None),
-        ("echo C; echo F; fi", {"c": (0, 8), "fi": (8, 18)}, "fi"),
-        ("echo F \\\n; fi", {"fi": (0, 13)}, "fi"),
-        ("echo F \\\n; fi", {"fi": (0, 10)}, None),
-    ],
-)
-def test_an_alias_name_is_reserved_inside_its_own_text(line, own, word):
-    # Pinned against bash 5.2.37: a name stays reserved only inside the
-    # text its alias put there, a trailing blank's chained one included.
-    # Spans are in the line as typed, which a continuation shifts.
-    root = parse(line)
-    offsets = source_offsets(line, root)
-    assert find_syntax_error(root, None, frozenset(own), own, offsets) == word

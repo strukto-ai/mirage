@@ -45,10 +45,7 @@ from mirage.shell.helpers import (
     get_text,
     split_env_prefix,
 )
-from mirage.shell.parse import (
-    source_offsets,
-    syntax_error_result,
-)
+from mirage.shell.parse import check_syntax, syntax_error_result
 from mirage.shell.parse.scope import ParseScope
 from mirage.shell.parse.syntax import find_syntax_issue
 from mirage.shell.types import NodeType as NT
@@ -184,29 +181,21 @@ async def execute_command(
         rewrite = alias_command_text(session, head, rest, mark)
         if rewrite is not None:
             rewritten, texts = rewrite
-            at = head_node.start_byte - base
-            line = decode_text(source[:at]) + rewritten
+            lead = decode_text(source[: head_node.start_byte - base])
+            line = lead + rewritten
             scope = ParseScope()
             try:
                 ast = scope.parse(line)
                 own: dict[str, tuple[int, int]] = {}
+                at = len(lead)
                 for alias, text in texts:
-                    own[alias] = (at, at + len(encode_text(text)))
+                    own[alias] = (at, at + len(text))
                     at = own[alias][1]
-                aliases = expanding_aliases(session)
-                offsets = source_offsets(line, ast)
-                issue = find_syntax_issue(
-                    ast, scope.parse, aliases, own, offsets
-                )
-                if issue is not None:
-                    io = syntax_error_result(
-                        issue.offending,
-                        ast,
-                        aliases,
-                        own,
-                        offsets,
-                        issue.span.end,
-                    )
+                found = check_syntax(
+                    line, expanding_aliases(session), own
+                ) or find_syntax_issue(ast)
+                if found is not None:
+                    io = syntax_error_result(found)
                     bad = io.stderr if isinstance(io.stderr, bytes) else b""
                     return (
                         None,
