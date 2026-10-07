@@ -251,10 +251,13 @@ def _builtin_inner(args: Sequence[Word]) -> list[InnerLine]:
 
 
 def _shell_inner(args: Sequence[Word]) -> list[InnerLine]:
-    """``sh``/``bash``: ``-c`` names the program; a script file or a
-    program read from stdin is a line the gate cannot read."""
+    """``sh``/``bash``: ``-c`` names the program and ``--help`` or
+    ``--version`` runs nothing; a script file, a program read from stdin
+    and a line mirage's parse refuses are lines the gate cannot read,
+    since a real bash takes options mirage does not (``--restricted``,
+    ``-O extglob``) and still runs the program."""
     parsed = parse_bash_args([w.value for w in args])
-    if parsed.invalid is not None or parsed.needs_value is not None:
+    if parsed.help or parsed.version:
         return []
     if parsed.script is not None:
         return [InnerLine(line=parsed.script)]

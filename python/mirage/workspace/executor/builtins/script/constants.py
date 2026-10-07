@@ -12,6 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.spec import SPECS
+from mirage.shell.constants import SET_OPTION_NAMES
+from mirage.workspace.executor.builtins.script.types import BashLongOption
+
 # GNU prints the refusal and the usage line together, both under the
 # builtin's own name as typed (`source` or `.`), and exits 2 without
 # ending the script.
@@ -27,17 +31,32 @@ SOURCE_USAGE = (
 # spellings cannot drift.
 BASH_START_FLAGS = frozenset({"c", "s", "l", "i"})
 
-# bash's long options, mapped to whether the option takes the next word.
-# A flat set of names to ignore cannot say that `--rcfile FILE` swallows
-# FILE, and read `bash --rcfile run.sh` as "run run.sh". Anything absent
-# is refused rather than mistaken for a script operand, which is what
-# made `bash --version` report a missing file.
-BASH_LONG_OPTIONS: dict[str, bool] = {
-    "--login": False,
-    "--noediting": False,
-    "--noprofile": False,
-    "--norc": False,
-    "--posix": False,
-    "--init-file": True,
-    "--rcfile": True,
+# bash 5.2's long options (`long_args` in shell.c, the list `bash --help`
+# prints), by name. bash reads them only before the first short option, a
+# word at a time, with one dash or two: `bash -norc` is `bash --norc`. The
+# ones the spec lists come from it, so the help page and the parser cannot
+# drift: a value option swallows the next word, so `bash --rcfile run.sh`
+# is not "run run.sh", and one named like a `set -o` option sets it. The
+# ones that change what bash does to its input (restricted mode, the
+# string dumps, pretty-printing, the debugger) are refused rather than
+# silently ignored.
+BASH_LONG_OPTIONS: dict[str, BashLongOption] = {
+    **{
+        option.long[2:]: (
+            BashLongOption.VALUE
+            if option.type == "str"
+            else BashLongOption.SETTING
+            if option.long[2:] in SET_OPTION_NAMES
+            else BashLongOption.IGNORE
+        )
+        for option in SPECS["bash"].options
+        if option.long
+    },
+    "debugger": BashLongOption.UNSUPPORTED,
+    "dump-po-strings": BashLongOption.UNSUPPORTED,
+    "dump-strings": BashLongOption.UNSUPPORTED,
+    "help": BashLongOption.HELP,
+    "pretty-print": BashLongOption.UNSUPPORTED,
+    "restricted": BashLongOption.UNSUPPORTED,
+    "version": BashLongOption.VERSION,
 }

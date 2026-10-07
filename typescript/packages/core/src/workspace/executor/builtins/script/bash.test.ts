@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { parseBashArgs } from './bash.ts'
+import type { BashArgs } from './types.ts'
 
 describe('parseBashArgs', () => {
   it('ends option parsing at a script file operand', () => {
@@ -86,4 +87,22 @@ describe('parseBashArgs', () => {
   it('reports -c with no value', () => {
     expect(parseBashArgs(['-c']).needsValue).toBe('-c')
   })
+
+  // bash 5.2.37 on debian:stable-slim: long options lead, then short.
+  it.each([
+    [['--version', '--help'], 'help', true],
+    [
+      ['--posix', '--verbose', '-c', ':'],
+      'settings',
+      [
+        ['posix', true],
+        ['verbose', true],
+      ],
+    ],
+  ] as [string[], keyof BashArgs, unknown][])(
+    'reads %j long options first',
+    (args, field, expected) => {
+      expect(parseBashArgs(args)[field]).toEqual(expected)
+    },
+  )
 })

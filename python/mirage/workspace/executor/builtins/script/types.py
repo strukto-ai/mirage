@@ -13,6 +13,25 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass, field
+from enum import Enum
+
+
+class BashLongOption(Enum):
+    """What one of bash's long options does in a nested shell.
+
+    ``IGNORE`` configures nothing an embedded shell has (no rc file, no
+    profile, no line editor); ``VALUE`` is the same and also takes the
+    next word; ``SETTING`` turns on the shell option of the same name;
+    ``HELP`` and ``VERSION`` answer and exit; ``UNSUPPORTED`` is an
+    option bash has and mirage refuses.
+    """
+
+    IGNORE = "ignore"
+    VALUE = "value"
+    SETTING = "setting"
+    HELP = "help"
+    VERSION = "version"
+    UNSUPPORTED = "unsupported"
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,8 +50,12 @@ class BashArgs:
             ``-c`` form and all positional for the other two.
         settings (tuple[tuple[str, bool], ...]): shell options the
             startup flags turn on or off, in the order written.
-        invalid (str | None): the option word the shell does not have.
+        invalid (str | None): the option the shell refuses, as bash
+            names it.
         needs_value (str | None): the option given no argument.
+        help (bool): ``--help`` was given; bash answers it before
+            ``--version`` and before reading anything else.
+        version (bool): ``--version`` was given.
     """
 
     script: str | None = None
@@ -41,3 +64,5 @@ class BashArgs:
     settings: tuple[tuple[str, bool], ...] = ()
     invalid: str | None = None
     needs_value: str | None = None
+    help: bool = False
+    version: bool = False

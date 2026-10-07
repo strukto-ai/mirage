@@ -64,18 +64,20 @@ describe('innerLines', () => {
         ['argv', ['cat', '{}'], true],
       ],
     ],
-    // Lines the gate cannot read: a file, a program from stdin.
+    // Lines the gate cannot read: a file, a program from stdin, an option
+    // mirage refuses and a real bash takes.
     ['source', ['f.sh'], [['none', null, false]]],
     ['.', ['f.sh'], [['none', null, false]]],
     ['sh', ['f.sh'], [['none', null, false]]],
     ['bash', [], [['none', null, false]]],
+    ['bash', ['--restricted', '-c', 'rm /x'], [['none', null, false]]],
     ['./run.sh', ['a'], [['none', null, false]]],
-    // Nothing runs: a probe, a bare word, a usage error.
+    // Nothing runs: a probe, a bare word, a usage error, an answer.
     ['command', ['-v', 'rm'], []],
     ['eval', [], []],
     ['env', ['A=1'], []],
     ['timeout', ['5'], []],
-    ['bash', ['--bogus'], []],
+    ['bash', ['--version', '-c', 'rm /x'], []],
     ['cat', ['/x'], []],
   ])('reads the words that run other words: %s %j', (head, args, expected) => {
     expect(shapes(head, args)).toEqual(expected)

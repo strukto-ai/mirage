@@ -222,11 +222,14 @@ function builtinInner(args: readonly Word[]): InnerLine[] {
   return asArgv(first !== undefined && wordValue(first) === '--' ? args.slice(1) : args)
 }
 
-// `sh`/`bash`: `-c` names the program; a script file or a program read
-// from stdin is a line the gate cannot read.
+// `sh`/`bash`: `-c` names the program and `--help` or `--version` runs
+// nothing; a script file, a program read from stdin and a line mirage's
+// parse refuses are lines the gate cannot read, since a real bash takes
+// options mirage does not (`--restricted`, `-O extglob`) and still runs the
+// program.
 function shellInner(args: readonly Word[]): InnerLine[] {
   const parsed = parseBashArgs(args.map(wordValue))
-  if (parsed.invalid !== null || parsed.needsValue !== null) return []
+  if (parsed.help || parsed.version) return []
   if (parsed.script !== null) return [asLine(parsed.script)]
   return [UNREADABLE]
 }

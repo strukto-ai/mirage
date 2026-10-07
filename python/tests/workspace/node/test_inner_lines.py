@@ -62,18 +62,20 @@ def _argv(inner: InnerLine) -> list[str]:
             ["/r", "-exec", "rm", "{}", ";", "-ok", "cat", "{}", "+"],
             [("argv", ["rm", "{}"], True), ("argv", ["cat", "{}"], True)],
         ),
-        # Lines the gate cannot read: a file, a program from stdin.
+        # Lines the gate cannot read: a file, a program from stdin, an
+        # option mirage refuses and a real bash takes.
         ("source", ["f.sh"], [("none", None, False)]),
         (".", ["f.sh"], [("none", None, False)]),
         ("sh", ["f.sh"], [("none", None, False)]),
         ("bash", [], [("none", None, False)]),
+        ("bash", ["--restricted", "-c", "rm /x"], [("none", None, False)]),
         ("./run.sh", ["a"], [("none", None, False)]),
-        # Nothing runs: a probe, a bare word, a usage error.
+        # Nothing runs: a probe, a bare word, a usage error, an answer.
         ("command", ["-v", "rm"], []),
         ("eval", [], []),
         ("env", ["A=1"], []),
         ("timeout", ["5"], []),
-        ("bash", ["--bogus"], []),
+        ("bash", ["--version", "-c", "rm /x"], []),
         ("cat", ["/x"], []),
     ],
 )

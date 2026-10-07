@@ -1,3 +1,5 @@
+import pytest
+
 from mirage.workspace.executor.builtins.script import parse_bash_args
 
 
@@ -69,3 +71,19 @@ def test_parse_bash_args_unsupported_long_option():
 
 def test_parse_bash_args_dash_c_needs_a_value():
     assert parse_bash_args(["-c"]).needs_value == "-c"
+
+
+@pytest.mark.parametrize(
+    "args,field,expected",
+    [
+        (["--version", "--help"], "help", True),
+        (
+            ["--posix", "--verbose", "-c", ":"],
+            "settings",
+            (("posix", True), ("verbose", True)),
+        ),
+    ],
+)
+def test_parse_bash_args_reads_long_options_first(args, field, expected):
+    """bash 5.2.37 on debian:stable-slim: long options lead, then short."""
+    assert getattr(parse_bash_args(args), field) == expected

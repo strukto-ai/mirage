@@ -42,7 +42,7 @@
     },
     {
       "id": "whole_line_literal_words",
-      "note": "A whole-line runtime expands the line itself, so the gate reads it as typed: a word only the runtime could expand is refused where a rule in force would have read it (the command name under any rule, an argument where a rule reads that command's arguments), the lines a word runs (eval, sh -c, xargs, timeout) are admitted in turn, and a line the gate cannot see into (a sourced file) is refused. Literal words, and dynamic ones no rule reads, reach the runtime.",
+      "note": "A whole-line runtime expands the line itself, so the gate reads it as typed: a word only the runtime could expand is refused where a rule in force would have read it (the command name under any rule, an argument where a rule reads that command's arguments), the lines a word runs (eval, sh -c, xargs, timeout) are admitted in turn, and a line the gate cannot see into (a sourced file, a bash option mirage does not read) is refused, while bash --version runs nothing. Literal words, and dynamic ones no rule reads, reach the runtime.",
       "world": {
         "runtimes": [
           {
@@ -150,6 +150,20 @@
           "expect": {
             "exit": 126,
             "stderr": "source: Permission denied\n"
+          }
+        },
+        {
+          "command": "bash --restricted -c 'rm /ram/x'",
+          "expect": {
+            "exit": 126,
+            "stderr": "bash: Permission denied\n"
+          }
+        },
+        {
+          "command": "bash --version",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:bash --version\n"
           }
         },
         {
