@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
-from mirage.observe.record import STAMP_FINGERPRINT_OPS, OpRecord
+from mirage.observe.record import STAMP_FINGERPRINT_OPS, OpRecord, RecordIndex
 
 
 @dataclass
@@ -76,11 +76,14 @@ class Recorder:
     Args:
         sink (list[OpRecord]): Where new records are appended.
         mount_id (str | None): Identity of the mounted instance serving reads.
+        lost (LostPaths | None): The line's lost paths.
+        index (RecordIndex | None): The line's version index over ``sink``.
     """
 
     sink: list[OpRecord] = field(default_factory=list)
     mount_id: str | None = None
     lost: LostPaths | None = None
+    index: RecordIndex | None = None
 
 
 _recorder: ContextVar[Recorder | None] = ContextVar("_recorder", default=None)
@@ -106,7 +109,9 @@ class RecordingScope:
         self._token = None
         if active:
             sink: list[OpRecord] = []
-            rec = Recorder(sink=sink, lost=LostPaths(sink))
+            rec = Recorder(
+                sink=sink, lost=LostPaths(sink), index=RecordIndex(sink)
+            )
             self.records = rec.sink
             self._token = _recorder.set(rec)
 
@@ -207,7 +212,9 @@ def push_mount_context(mount_id: str | None):
     return _recorder.set(
         None
         if rec is None
-        else Recorder(sink=rec.sink, mount_id=mount_id, lost=rec.lost)
+        else Recorder(
+            sink=rec.sink, mount_id=mount_id, lost=rec.lost, index=rec.index
+        )
     )
 
 

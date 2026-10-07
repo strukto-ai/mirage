@@ -40,6 +40,7 @@ export class KernelMounts {
   private readonly mountpointsMap = new Map<string, string>()
   private readonly managers = new Map<string, FuseManager>()
   private readonly exposures = new Map<string, [string, MountBackend]>()
+  private readonly settling = new Map<string, Promise<string>>()
 
   constructor(workspace: Workspace) {
     this.workspace = workspace
@@ -57,14 +58,33 @@ export class KernelMounts {
    * @param sessionId session whose grants scope the ops
    * @param backend fuse or fskit
    */
-  async add(
+  add(
     prefix: string,
     mountpoint?: string,
     sessionId?: string,
     backend?: MountBackend,
   ): Promise<string> {
-    const session = sessionId !== undefined ? this.workspace.getSession(sessionId) : undefined
     const key = sessionId === undefined ? prefix : `${prefix}@${sessionId}`
+    // One setup per key at a time: a failed one puts back only settled records.
+    const previous = this.settling.get(key)
+    const setUp = (): Promise<string> => this.setUp(key, prefix, mountpoint, sessionId, backend)
+    const run = previous === undefined ? setUp() : previous.then(setUp, setUp)
+    this.settling.set(key, run)
+    const settled = (): void => {
+      if (this.settling.get(key) === run) this.settling.delete(key)
+    }
+    run.then(settled, settled)
+    return run
+  }
+
+  private async setUp(
+    key: string,
+    prefix: string,
+    mountpoint: string | undefined,
+    sessionId: string | undefined,
+    backend: MountBackend | undefined,
+  ): Promise<string> {
+    const session = sessionId !== undefined ? this.workspace.getSession(sessionId) : undefined
     const priorManager = this.managers.get(key)
     const priorMountpoint = this.mountpointsMap.get(key)
     const priorExposure = this.exposures.get(key)
@@ -102,6 +122,7 @@ export class KernelMounts {
    */
   async remove(prefix: string, sessionId?: string): Promise<void> {
     const key = sessionId === undefined ? prefix : `${prefix}@${sessionId}`
+    if (this.settling.has(key)) await this.settled(key)
     const manager = this.managers.get(key)
     if (manager !== undefined) {
       await manager.unmount()
@@ -112,6 +133,16 @@ export class KernelMounts {
     this.exposures.delete(key)
   }
 
+  /** Wait for every setup queued on `key` to settle, whatever its outcome. */
+  private async settled(key: string): Promise<void> {
+    for (let run = this.settling.get(key); run !== undefined; run = this.settling.get(key)) {
+      await run.then(
+        () => undefined,
+        () => undefined,
+      )
+    }
+  }
+
   /** Each exposed prefix with the backend exposing it. */
   exposed(): [string, MountBackend][] {
     return [...this.exposures.values()]
@@ -119,6 +150,7 @@ export class KernelMounts {
 
   /** Unmount everything this workspace exposed. */
   async close(): Promise<void> {
+    if (this.settling.size > 0) await Promise.allSettled([...this.settling.values()])
     for (const manager of this.managers.values()) await manager.unmount()
     this.managers.clear()
     this.mountpointsMap.clear()

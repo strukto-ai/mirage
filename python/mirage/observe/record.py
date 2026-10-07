@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Collection
 from dataclasses import dataclass, field
 
 from mirage.io.types import ByteSource
@@ -139,25 +138,31 @@ class OpRecord:
 
 
 class RecordIndex:
-    """A line's records indexed once, for many per-path version lookups.
+    """A line's records indexed as they arrive, for per-path version lookups.
+
+    Each lookup first takes in the records appended since the last one, so
+    a record added while a caller awaits is seen, and no record is read
+    twice.
 
     Args:
-        records (list[OpRecord]): the line's records, oldest first.
-        keys (Collection[str] | None): the only paths that will be asked
-            about, or None for any.
+        records (list[OpRecord]): the line's records, oldest first; only
+            ever appended to.
     """
 
-    def __init__(
-        self, records: list[OpRecord], keys: Collection[str] | None = None
-    ) -> None:
+    def __init__(self, records: list[OpRecord]) -> None:
         self._records = records
+        self._seen = 0
         self._at: dict[str, int] = {}
         self._subtree: list[int] = []
-        for i, rec in enumerate(records):
-            if rec.op in VERSION_OPS and (keys is None or rec.path in keys):
+
+    def _absorb(self) -> None:
+        for i in range(self._seen, len(self._records)):
+            rec = self._records[i]
+            if rec.op in VERSION_OPS:
                 self._at[rec.path] = i
             if rec.op in SUBTREE_RETRACT_OPS:
                 self._subtree.append(i)
+        self._seen = len(self._records)
 
     def newest_version(self, key: str) -> OpRecord | None:
         """The newest record that says which version of ``key`` the line knows.
@@ -169,6 +174,7 @@ class RecordIndex:
         Args:
             key (str): the virtual path asked about.
         """
+        self._absorb()
         at = self._at.get(key, -1)
         for i in reversed(self._subtree):
             if i <= at:

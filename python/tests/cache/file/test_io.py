@@ -815,3 +815,35 @@ async def test_apply_io_indexes_the_line_once(monkeypatch):
         records,
     )
     assert built == [len(records)]
+
+
+class _RemovingStore(RAMFileCacheStore):
+    def __init__(self, records: list[OpRecord], path: str) -> None:
+        super().__init__()
+        self._records = records
+        self._path: str | None = path
+
+    async def set(self, key: str, data: bytes, **kwargs) -> None:
+        await super().set(key, data, **kwargs)
+        if self._path is not None:
+            self._records.append(_record("unlink", self._path, None))
+            self._path = None
+
+
+@pytest.mark.asyncio
+async def test_apply_io_sees_a_removal_recorded_while_it_runs():
+    # A background job shares the line's records; an rm it finishes while
+    # the cache is being filled must keep the removed file out of the cache.
+    records = [_record("read", "/s3/a", "va"), _record("read", "/s3/b", "vb")]
+    cache = _RemovingStore(records, "/s3/b")
+    io = IOResult(
+        reads={"/s3/a": b"a", "/s3/b": b"b"}, cache=["/s3/a", "/s3/b"]
+    )
+    await cache_io.apply_io(
+        cache,
+        io,
+        lambda _p: CacheFacts(cacheable=True, ttl=60, versions=True),
+        records,
+    )
+    assert await cache.exists("/s3/a")
+    assert not await cache.exists("/s3/b")

@@ -575,14 +575,14 @@ class CacheManager:
         """
         out: list[str | None] = [None] * len(paths)
         pending: list[tuple[int, str]] = []
-        keys = [self._cache_key(path) for path in paths]
         recorder = active_recorder()
         index = (
-            RecordIndex(recorder.sink, set(keys))
-            if recorder is not None
-            else None
+            None
+            if recorder is None
+            else recorder.index or RecordIndex(recorder.sink)
         )
-        for i, key in enumerate(keys):
+        for i, path in enumerate(paths):
+            key = self._cache_key(path)
             if recorder is not None and index is not None:
                 if recorder.lost is not None and recorder.lost.holds(key):
                     continue

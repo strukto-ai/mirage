@@ -195,8 +195,26 @@ def _op(op: str, path: str) -> OpRecord:
         "nothing for the path",
     ],
 )
-@pytest.mark.parametrize("asked", [False, True])
-def test_the_index_finds_the_newest_version_record(ops, key, newest, asked):
+def test_the_index_finds_the_newest_version_record(ops, key, newest):
     records = [_op(op, path) for op, path in ops]
-    found = RecordIndex(records, {key} if asked else None).newest_version(key)
+    found = RecordIndex(records).newest_version(key)
     assert found is (records[newest] if newest is not None else None)
+
+
+def test_the_index_takes_in_records_appended_after_a_lookup():
+    # A background job appends to the line's records while a caller awaits.
+    records = [_op("read", "/a")]
+    index = RecordIndex(records)
+    assert index.newest_version("/a") is records[0]
+    records.append(_op("unlink", "/a"))
+    assert index.newest_version("/a") is records[1]
+
+
+def test_the_index_reads_each_record_once():
+    # Records are only appended to, so one already taken in is not read
+    # again: a lookup costs the records since the last one.
+    records = [_op("read", "/a")]
+    index = RecordIndex(records)
+    index.newest_version("/a")
+    records[0] = _op("read", "/b")
+    assert index.newest_version("/b") is None

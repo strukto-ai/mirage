@@ -14,7 +14,7 @@
 
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { ContextCall } from '../utils/async_context.ts'
-import { OpRecord, STAMP_FINGERPRINT_OPS } from './record.ts'
+import { OpRecord, RecordIndex, STAMP_FINGERPRINT_OPS } from './record.ts'
 
 interface RecordingState {
   records: OpRecord[]
@@ -90,6 +90,17 @@ export class LostPaths {
 }
 
 const lostByLine = new WeakMap<readonly OpRecord[], LostPaths>()
+const indexByLine = new WeakMap<readonly OpRecord[], RecordIndex>()
+
+/** The version index of the line whose records these are; one per line. */
+export function recordIndex(records: readonly OpRecord[]): RecordIndex {
+  let index = indexByLine.get(records)
+  if (index === undefined) {
+    index = new RecordIndex(records)
+    indexByLine.set(records, index)
+  }
+  return index
+}
 
 /** The lost paths of the line whose records these are, null outside a line. */
 export function lostPaths(records: readonly OpRecord[] | undefined): LostPaths | null {

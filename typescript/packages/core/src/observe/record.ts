@@ -87,20 +87,29 @@ export const VERSION_OPS: ReadonlySet<string> = new Set([
 export const SUBTREE_RETRACT_OPS: ReadonlySet<string> = new Set(['rm_r', 'rename_prefix'])
 
 /**
- * A line's records indexed once, for many per-path version lookups; `keys`
- * names the only paths that will be asked about, or null for any.
+ * A line's records indexed as they arrive, for per-path version lookups.
+ * Each lookup first takes in the records appended since the last one, so a
+ * record added while a caller awaits is seen, and no record is read twice.
+ * The records are only ever appended to. Mirrors python's `RecordIndex`.
  */
 export class RecordIndex {
   private readonly records: readonly OpRecord[]
+  private seen = 0
   private readonly at = new Map<string, number>()
   private readonly subtree: number[] = []
 
-  constructor(records: readonly OpRecord[], keys: ReadonlySet<string> | null = null) {
+  constructor(records: readonly OpRecord[]) {
     this.records = records
-    records.forEach((rec, i) => {
-      if (VERSION_OPS.has(rec.op) && (keys === null || keys.has(rec.path))) this.at.set(rec.path, i)
+  }
+
+  private absorb(): void {
+    for (let i = this.seen; i < this.records.length; i++) {
+      const rec = this.records[i]
+      if (rec === undefined) continue
+      if (VERSION_OPS.has(rec.op)) this.at.set(rec.path, i)
       if (SUBTREE_RETRACT_OPS.has(rec.op)) this.subtree.push(i)
-    })
+    }
+    this.seen = this.records.length
   }
 
   /**
@@ -110,6 +119,7 @@ export class RecordIndex {
    * python's `RecordIndex.newest_version`.
    */
   newestVersion(key: string): OpRecord | null {
+    this.absorb()
     const at = this.at.get(key) ?? -1
     for (let j = this.subtree.length - 1; j >= 0; j--) {
       const i = this.subtree[j] ?? -1

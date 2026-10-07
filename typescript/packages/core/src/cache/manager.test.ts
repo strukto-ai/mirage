@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { activeRecords } from '../observe/context.ts'
+import { activeRecords, runWithRecording } from '../observe/context.ts'
+import { OpRecord } from '../observe/record.ts'
+import type * as RecordModule from '../observe/record.ts'
 import { publishRead } from './context.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -29,6 +31,18 @@ import { IndexView } from './index/view.ts'
 import { CacheManager } from './manager.ts'
 import { RefusingStore, shiftPerformanceNow } from './_test_util.ts'
 import { enoent } from '../errors/fs.ts'
+
+const built = vi.hoisted((): number[] => [])
+vi.mock('../observe/record.ts', async (importOriginal) => {
+  const real = await importOriginal<typeof RecordModule>()
+  class CountedIndex extends real.RecordIndex {
+    constructor(records: readonly OpRecord[]) {
+      built.push(records.length)
+      super(records)
+    }
+  }
+  return { ...real, RecordIndex: CountedIndex }
+})
 
 async function seeded(): Promise<[RAMFileCacheStore, RAMIndexCacheStore]> {
   const cache = new RAMFileCacheStore()
@@ -935,5 +949,34 @@ describe('a cold read bigger than the cache', () => {
       directory: '/data/',
     })
     expect(await manager.fill(spec, () => Promise.resolve(hello))).toEqual(hello)
+  })
+})
+
+describe('version lookups in one line', () => {
+  it('index the line a bounded number of times, not once per write', async () => {
+    // Each write looks its version up in the line's one index, absorbing
+    // only the records since the last lookup; building one per write made
+    // a loop over one file quadratic.
+    const manager = new CacheManager(new RAMFileCacheStore(), null, '/data/', true)
+    const path = PathSpec.fromStrPath('/data/f')
+    built.length = 0
+    await runWithRecording(async () => {
+      const records = activeRecords() as OpRecord[]
+      for (let i = 0; i < 50; i++) {
+        records.push(
+          new OpRecord({
+            op: 'write',
+            path: '/data/f',
+            source: 's3',
+            bytes: 1,
+            timestamp: 0,
+            durationMs: 0,
+            fingerprint: `v${String(i)}`,
+          }),
+        )
+        expect(await manager.readVersions([path])).toEqual([`v${String(i)}`])
+      }
+    })
+    expect(built.length).toBeLessThan(3)
   })
 })

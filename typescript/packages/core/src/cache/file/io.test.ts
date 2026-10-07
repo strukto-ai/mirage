@@ -27,9 +27,9 @@ const built = vi.hoisted((): number[] => [])
 vi.mock('../../observe/record.ts', async (importOriginal) => {
   const real = await importOriginal<typeof RecordModule>()
   class CountedIndex extends real.RecordIndex {
-    constructor(records: readonly OpRecord[], keys: ReadonlySet<string> | null = null) {
+    constructor(records: readonly OpRecord[]) {
       built.push(records.length)
-      super(records, keys)
+      super(records)
     }
   }
   return { ...real, RecordIndex: CountedIndex }
@@ -729,5 +729,42 @@ describe('version lookups', () => {
       records,
     )
     expect(built).toEqual([records.length])
+  })
+})
+
+class RemovingStore extends RAMFileCacheStore {
+  constructor(
+    private readonly records: OpRecord[],
+    private path: string | null,
+  ) {
+    super()
+  }
+
+  override async set(
+    key: string,
+    data: Uint8Array,
+    options: { fingerprint?: string | null; ttl?: number | null } = {},
+  ): Promise<void> {
+    await super.set(key, data, options)
+    if (this.path !== null) {
+      this.records.push(opRecord('unlink', this.path, null))
+      this.path = null
+    }
+  }
+}
+
+describe('records appended while applying', () => {
+  it('keeps a file removed while the cache fills out of the cache', async () => {
+    // A background job shares the line's records; an rm it finishes while
+    // the cache is being filled must keep the removed file out of the cache.
+    const records = [readRecord('/s3/a', 'va'), readRecord('/s3/b', 'vb')]
+    const cache = new RemovingStore(records, '/s3/b')
+    const io = new IOResult({
+      reads: { '/s3/a': ENC.encode('a'), '/s3/b': ENC.encode('b') },
+      cache: ['/s3/a', '/s3/b'],
+    })
+    await applyIo(cache, io, () => ({ cacheable: true, ttl: 60, versions: true }), records)
+    expect(await cache.exists('/s3/a')).toBe(true)
+    expect(await cache.exists('/s3/b')).toBe(false)
   })
 })

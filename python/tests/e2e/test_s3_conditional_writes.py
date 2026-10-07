@@ -18,6 +18,7 @@ import pytest
 
 from mirage import Mount, MountMode, Workspace, WritePolicy
 from mirage.errors.types import StaleWriteError
+from mirage.observe.record import RecordIndex
 from mirage.vfs.minio import MinIOConfig, MinIOVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
@@ -602,6 +603,30 @@ async def test_the_ops_api_writes_back_with_its_own_read(fake, call):
         assert _mutations(fake) == [
             ("put_object", {"IfMatch": etag(SEED["g"])})
         ]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_write_loop_indexes_its_line_a_few_times(fake, monkeypatch):
+    # Each write looks its version up in the line's one index, absorbing
+    # only the records since the last lookup; building one per write made
+    # a loop over one file quadratic.
+    built: list[int] = []
+    real = RecordIndex.__init__
+
+    def counted(self, records):
+        built.append(len(records))
+        real(self, records)
+
+    monkeypatch.setattr(RecordIndex, "__init__", counted)
+    ws = _workspace()
+    try:
+        await _run(ws, "cat /s3/f")
+        built.clear()
+        line = "for i in $(seq 50); do echo $i > /s3/f; done"
+        assert (await _run(ws, line))[0] == 0
+        assert len(built) < 10, built
     finally:
         await ws.close()
 

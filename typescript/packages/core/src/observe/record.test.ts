@@ -206,8 +206,27 @@ describe('RecordIndex.newestVersion', () => {
     ['nothing for the path', [['read', '/b']], '/a', null],
   ] as const)('%s', (_name, ops, key, newest) => {
     const records = ops.map(([name, path]) => op(name, path))
-    const want = newest === null ? null : records[newest]
-    expect(new RecordIndex(records).newestVersion(key)).toBe(want)
-    expect(new RecordIndex(records, new Set([key])).newestVersion(key)).toBe(want)
+    expect(new RecordIndex(records).newestVersion(key)).toBe(
+      newest === null ? null : records[newest],
+    )
+  })
+
+  it('takes in records appended after a lookup', () => {
+    // A background job appends to the line's records while a caller awaits.
+    const records = [op('read', '/a')]
+    const index = new RecordIndex(records)
+    expect(index.newestVersion('/a')).toBe(records[0])
+    records.push(op('unlink', '/a'))
+    expect(index.newestVersion('/a')).toBe(records[1])
+  })
+
+  it('reads each record once', () => {
+    // Records are only appended to, so one already taken in is not read
+    // again: a lookup costs the records since the last one.
+    const records = [op('read', '/a')]
+    const index = new RecordIndex(records)
+    index.newestVersion('/a')
+    records[0] = op('read', '/b')
+    expect(index.newestVersion('/b')).toBeNull()
   })
 })

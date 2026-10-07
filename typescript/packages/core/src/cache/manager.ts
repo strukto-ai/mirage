@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { captureRead } from './context.ts'
-import { activeRecords, lostPaths } from '../observe/context.ts'
-import { RecordIndex, STAMP_FINGERPRINT_OPS } from '../observe/record.ts'
+import { activeRecords, lostPaths, recordIndex } from '../observe/context.ts'
+import { STAMP_FINGERPRINT_OPS } from '../observe/record.ts'
 import { DEFAULT_READ_TTL, type FileStat, PathSpec } from '../types.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
@@ -465,9 +465,9 @@ export class CacheManager {
     const pending: [number, string][] = []
     const records = activeRecords()
     const lost = lostPaths(records)
-    const keys = paths.map((path) => this.cacheKey(path))
-    const index = records !== undefined ? new RecordIndex(records, new Set(keys)) : undefined
-    keys.forEach((key, i) => {
+    const index = records !== undefined ? recordIndex(records) : undefined
+    paths.forEach((path, i) => {
+      const key = this.cacheKey(path)
       if (index !== undefined) {
         if (lost?.holds(key) === true) return
         const rec = index.newestVersion(key)
