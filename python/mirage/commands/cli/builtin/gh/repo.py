@@ -634,7 +634,7 @@ async def clone_cmd(
     url = f"{web_origin(inv.config)}/{ref.owner}/{ref.repo}.git"
     target = names[1] if len(names) > 1 else ref.repo
     leaf, _ = find_node(GIT, ["clone"]) or (GIT, ())
-    cwd = inv.env.get("PWD", "/")
+    cwd = inv.cwd.virtual
     words = [*gitflags, url, target]
     parsed = parse_command(
         leaf, words, cwd, "git clone", inv.env, unknown_is_operand=True
@@ -648,6 +648,7 @@ async def clone_cmd(
         flags=flags,
         stdin=inv.stdin,
         env=inv.env,
+        cwd=inv.cwd,
         doors=inv.doors,
         spec=leaf,
     )

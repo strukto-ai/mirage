@@ -204,7 +204,7 @@ async def read_cli_file(
         if inv.stdin is None:
             raise ValueError(f"{option} needs standard input")
         return await materialize(inv.stdin)
-    spec = PathSpec.from_str_path(raw, cwd=inv.env.get("PWD", "/"))
+    spec = PathSpec.from_str_path(raw, cwd=inv.cwd)
     if inv.doors is None or inv.doors.dispatch is None:
         raise ValueError(f"{option} needs a workspace to read files from")
     try:

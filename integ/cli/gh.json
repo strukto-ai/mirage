@@ -1267,10 +1267,10 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "cd /scratch/cli-files && echo '{}' > request.json && gh api repos/integ/repo-cli --method GET --input ./request.json --jq .full_name && gh api repos/integ/repo-cli --method GET --input=./request.json --jq .full_name && gh api repos/integ/repo-cli --method GET -F body=@./body.md --jq .full_name",
+      "command": "cd /scratch/cli-files && echo '{}' > request.json && gh api repos/integ/repo-cli --method GET --input ./request.json --jq .full_name && gh api repos/integ/repo-cli --method GET --input=./request.json --jq .full_name && gh api repos/integ/repo-cli --method GET -F body=@./body.md --jq .full_name && (unset PWD; gh api repos/integ/repo-cli --method GET -F body=@body.md --jq .full_name)",
       "expect": {
         "exit": 0,
-        "stdout": "integ/repo-cli\ninteg/repo-cli\ninteg/repo-cli\n",
+        "stdout": "integ/repo-cli\ninteg/repo-cli\ninteg/repo-cli\ninteg/repo-cli\n",
         "stderr": ""
       }
     },
