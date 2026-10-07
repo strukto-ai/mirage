@@ -441,6 +441,11 @@ class SessionState:
     exec_stdin_identity: str | None = None
     _parse_seq: int = field(default=0, repr=False)
     _parse_current: int = field(default=0, repr=False)
+    # The row the running parse starts on in the text that spelled it: 0
+    # for a line, a function's definition row for its body, which is
+    # parsed again from its own source but reads aliases where it was
+    # written.
+    _parse_row: int = field(default=0, repr=False)
     # The owner of this session's terminal streams, which an `exec` copy
     # of one names (`exec 3>&1`), and whether a line of the session is
     # running, whose outermost program routes what was written to them.
@@ -452,6 +457,12 @@ class SessionState:
         default_factory=dict, repr=False
     )
     _alias_stack: list[str] = field(default_factory=list, repr=False)
+    # Where each function was defined, as an alias mark, so its body
+    # expands the aliases of that place; a function loaded from a
+    # stored session has none and runs as a parse of its own.
+    _function_marks: dict[str, tuple[int, int]] = field(
+        default_factory=dict, repr=False
+    )
 
     def to_dict(self) -> dict[str, Any]:
         # A managed name serializes as its pointer, never its value: a
@@ -814,7 +825,9 @@ class SessionState:
         child = self.fork()
         child._parse_seq = self._parse_seq
         child._parse_current = self._parse_current
+        child._parse_row = self._parse_row
         child._alias_marks = dict(self._alias_marks)
+        child._function_marks = dict(self._function_marks)
         child._alias_stack = list(self._alias_stack)
         child._local_vars = (
             None if self._local_vars is None else copy_locals(self._local_vars)

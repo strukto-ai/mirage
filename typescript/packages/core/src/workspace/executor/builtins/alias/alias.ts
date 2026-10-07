@@ -183,7 +183,7 @@ export function aliasBuiltin(call: BuiltinCall): Promise<Result> {
   return Promise.resolve(
     handleAlias([...call.argv.args], call.context.session, [
       call.context.session.parseCurrent,
-      call.row,
+      call.context.session.parseRow + call.row,
     ]),
   )
 }

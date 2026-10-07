@@ -1569,6 +1569,10 @@ async function executeNodeBody(
       ]
     }
     session.functions[name] = getFunctionSource(node)
+    session.functionMarks.set(name, [
+      session.parseCurrent,
+      session.parseRow + (node.startPosition?.row ?? 0),
+    ])
     return [null, new IOResult(), new ExecutionNode({ command: `function ${name}`, exitCode: 0 })]
   }
 

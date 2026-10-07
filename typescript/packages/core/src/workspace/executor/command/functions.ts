@@ -88,6 +88,16 @@ export async function executeShellFunction(
   let mergedIo = new IOResult()
   let lastExec = new ExecutionNode({ command: cmdName, exitCode: 0 })
   const bound = fd0Binding(session)
+  // The body is parsed again from its source, so its rows restart at 0;
+  // it reads aliases at its definition, or as a parse of its own when it
+  // came from a stored session.
+  const outerParse: [number, number] = [session.parseCurrent, session.parseRow]
+  let defined = session.functionMarks.get(cmdName)
+  if (defined === undefined) {
+    session.parseSeq += 1
+    defined = [session.parseSeq, 0]
+  }
+  ;[session.parseCurrent, session.parseRow] = defined
 
   try {
     // The body is shell code: the builtins it runs are the shell's,
@@ -140,6 +150,7 @@ export async function executeShellFunction(
       }
     })
   } finally {
+    ;[session.parseCurrent, session.parseRow] = outerParse
     scope.release()
     cs.pop()
     if (session.functionNames !== null) session.functionNames = outerNames

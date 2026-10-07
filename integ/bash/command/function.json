@@ -203,6 +203,74 @@
         "stdout": "unrelated\nhi\nf () \n{ \n    cat\n} <<EOF\nhi\nEOF\n\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "cmd_function_expands_aliases_from_its_definition",
+      "seq": 940117,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "shopt -s expand_aliases\nalias fa='echo works'\nf() { fa; }\nf\nunset -f f; unalias fa; shopt -u expand_aliases",
+      "expect": {
+        "exit": 0,
+        "stdout": "works\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cmd_function_leaves_an_alias_from_its_own_row",
+      "seq": 940118,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "shopt -s expand_aliases\nalias fb='echo x'; f() { fb; }; f; echo rc=$?\nunset -f f; unalias fb; shopt -u expand_aliases",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=127\n",
+        "stderr": "fb: command not found\n"
+      }
     }
   ]
 }

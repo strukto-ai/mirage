@@ -435,6 +435,14 @@ export class SessionState {
   aliasStack: string[] = []
   parseSeq = 0
   parseCurrent = 0
+  // The row the running parse starts on in the text that spelled it: 0
+  // for a line, a function's definition row for its body, which is parsed
+  // again from its own source but reads aliases where it was written.
+  parseRow = 0
+  // Where each function was defined, as an alias mark, so its body expands
+  // the aliases of that place; a function loaded from a stored session
+  // has none and runs as a parse of its own.
+  functionMarks = new Map<string, [number, number]>()
   // The owner of this session's terminal streams, which an `exec` copy of
   // one names (`exec 3>&1`), and whether a line of the session is running,
   // whose outermost program routes what was written to them. Each fork gets
@@ -624,7 +632,9 @@ export class SessionState {
     const child = this.fork()
     child.parseSeq = this.parseSeq
     child.parseCurrent = this.parseCurrent
+    child.parseRow = this.parseRow
     child.aliasMarks = new Map(this.aliasMarks)
+    child.functionMarks = new Map(this.functionMarks)
     child.aliasStack = [...this.aliasStack]
     child.localVars = this.localVars === null ? null : copyLocals(this.localVars)
     child.localFrames = this.localFrames.map((frame) =>

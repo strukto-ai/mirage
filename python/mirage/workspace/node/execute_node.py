@@ -1594,6 +1594,10 @@ async def _execute_node(
                 ),
             )
         session.functions[name] = get_function_source(node)
+        session._function_marks[name] = (
+            session._parse_current,
+            session._parse_row + node.start_point[0],
+        )
         return (
             None,
             IOResult(),

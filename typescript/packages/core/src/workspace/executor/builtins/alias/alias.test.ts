@@ -52,4 +52,22 @@ describe('alias', () => {
     const io = await ws.shell('X=☕ e arg')
     expect([stdoutStr(io), io.exitCode]).toEqual(['E arg\n', 0])
   })
+
+  // Pinned against bash 5.2.37: the body is read when the function is
+  // defined, so an alias from the same row stays a plain word.
+  it.each([
+    [["alias a='echo works'\nf() { a; }\nf"], 'works\n', 0],
+    [["alias a='echo x'; f() { a; }; f"], '', 127],
+    [["alias a='echo x'; f() { a; }", 'f'], '', 127],
+    [["alias a='echo nested'\ng() { a; }\nf() { g; }\nf"], 'nested\n', 0],
+  ])('reads aliases where a function was defined: %j', async (lines, out, code) => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    await ws.shell('shopt -s expand_aliases')
+    let io = await ws.shell(':')
+    for (const line of lines) io = await ws.shell(line)
+    expect([stdoutStr(io), io.exitCode]).toEqual([out, code])
+  })
 })

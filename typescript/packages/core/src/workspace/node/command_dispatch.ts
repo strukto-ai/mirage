@@ -176,7 +176,10 @@ export async function executeCommand(
     headNode.namedChildren[0]?.type === NT.WORD
   ) {
     const head = getText(headNode)
-    const mark: AliasMark = [session.parseCurrent, node.startPosition?.row ?? 0]
+    const mark: AliasMark = [
+      session.parseCurrent,
+      session.parseRow + (node.startPosition?.row ?? 0),
+    ]
     const source = getText(node)
     const base = node.startIndex ?? 0
     const rest = source.slice((headNode.endIndex ?? 0) - base)

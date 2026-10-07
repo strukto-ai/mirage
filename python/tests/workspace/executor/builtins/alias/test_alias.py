@@ -151,3 +151,24 @@ async def test_an_alias_after_a_non_ascii_assignment_keeps_its_arguments():
     await _run(ws, "shopt -s expand_aliases; alias e='echo E'")
     assert await _run(ws, "X=☕ e arg") == ("E arg\n", 0)
     await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "lines, out, code",
+    [
+        (["alias a='echo works'\nf() { a; }\nf"], "works\n", 0),
+        (["alias a='echo x'; f() { a; }; f"], "", 127),
+        (["alias a='echo x'; f() { a; }", "f"], "", 127),
+        (["alias a='echo nested'\ng() { a; }\nf() { g; }\nf"], "nested\n", 0),
+    ],
+)
+async def test_a_function_reads_aliases_where_it_was_defined(lines, out, code):
+    # Pinned against bash 5.2.37: the body is read when the function is
+    # defined, so an alias from the same row stays a plain word.
+    ws = _ws()
+    await ws.shell("shopt -s expand_aliases")
+    for line in lines:
+        result = await _run(ws, line)
+    assert result == (out, code)
+    await ws.close()
