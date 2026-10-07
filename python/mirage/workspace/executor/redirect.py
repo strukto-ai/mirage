@@ -65,7 +65,12 @@ from mirage.workspace.executor.builtins.exec.constants import (
     TO_STDIN,
     TO_STDOUT,
 )
-from mirage.workspace.executor.control import UNWINDING, carried, take_stderr
+from mirage.workspace.executor.control import (
+    UNWINDING,
+    carried,
+    take_stderr,
+    take_stdout,
+)
 from mirage.workspace.executor.create import create_file, write_description
 from mirage.workspace.executor.jobs import drained, pump
 from mirage.workspace.types import ExecutionNode
@@ -560,6 +565,9 @@ async def handle_redirect(
         unwound, io = sig, IOResult()
         # What the command wrote on its way out goes where it writes; an
         # error expanding its own words came before its redirects.
+        output = take_stdout(sig)
+        if output:
+            await recorder.emit(Channel.STDOUT, output)
         if not (
             isinstance(sig, ExitSignal)
             and command is not None

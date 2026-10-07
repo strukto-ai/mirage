@@ -13,9 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from collections.abc import Callable
 from itertools import groupby
 from operator import itemgetter
+from typing import Any
 
+from mirage.context import reset_program_invocation, set_program_invocation
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io import IOResult
@@ -40,13 +43,16 @@ from mirage.shell.descriptors import (
     bad_descriptor_line,
     unsupported_descriptor,
 )
+from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_redirects
+from mirage.shell.join import shell_join
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind, TSNodeLike
 from mirage.types import PathSpec
 from mirage.workspace.executor.builtins.exec.constants import (
     CLOSED,
     EXEC_STREAM_FIELDS,
+    EXEC_USAGE,
     OPEN_FOR_READ_WRITE,
     OPEN_FOR_READING,
     TO_STDERR,
@@ -54,9 +60,13 @@ from mirage.workspace.executor.builtins.exec.constants import (
     TO_STDOUT,
 )
 from mirage.workspace.executor.builtins.scope import _to_scope
+from mirage.workspace.executor.builtins.shared import builtin_error
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.create import create_file, write_description
+from mirage.workspace.executor.find_action_dispatch import program_head
 from mirage.workspace.executor.statement import Written, record_status
+from mirage.workspace.executor.traps import clear_traps
+from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
@@ -66,32 +76,80 @@ logger = logging.getLogger(__name__)
 async def handle_exec_command(
     args: list[str],
     session: SessionState,
+    execute_fn: Callable[..., Any] | None = None,
+    registry: MountRegistry | None = None,
+    stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """The `exec` builtin without redirects.
 
-    Bare `exec` is a no-op that succeeds. `exec CMD ...` asks the shell
-    to replace itself with a program, which has no referent here (the
-    in-process shell is an async executor, not an OS process: no PID,
-    no `execve`), so it is refused loudly rather than run-then-exit,
-    which would look like success while meaning something else. The
-    redirect-only form (`exec > file`) never reaches here: it is a
-    redirected statement, handled where redirects are applied.
+    Bare `exec` is a no-op that succeeds. `exec CMD ...` runs CMD as a
+    program and ends the shell with its status, as bash replaces the
+    shell with it: the rest of the scope (the line at top level, a
+    subshell, a substitution, a nested shell) does not run, and the
+    replaced shell's actions go with it, EXIT included. A head no
+    program answers to (a builtin of the shell's own, a function,
+    nothing) is `exec: NAME: not found`, which ends the shell with 127
+    and runs its EXIT action, as bash's does. `-c` runs CMD with an empty
+    environment; `-a` and `-l` name an argv[0] that mirage's programs do
+    not read, and are refused. The redirect-only form (`exec > file`)
+    never reaches here: it is a redirected statement, handled where
+    redirects are applied.
 
     Args:
         args (list[str]): the words after `exec`.
         session (SessionState): shell session state.
+        execute_fn (Callable[..., Any] | None): runs CMD as a line of
+            the shell; None where nothing can run one.
+        registry (MountRegistry | None): where the head is looked up.
+        stdin (ByteSource | None): the shell's standard input, CMD's.
     """
-    if not args:
+    words = list(args)
+    clear = False
+    while words and words[0].startswith("-") and words[0] != "-":
+        word = words.pop(0)
+        if word == "--":
+            break
+        for flag in word[1:]:
+            if flag == "c":
+                clear = True
+                continue
+            err = (
+                encode_text(f"mirage: exec: -{flag}: not supported\n")
+                if flag in ("a", "l")
+                else builtin_error("exec", f"-{flag}: invalid option")
+                + encode_text(EXEC_USAGE)
+            )
+            return (
+                None,
+                IOResult(exit_code=2, stderr=err),
+                ExecutionNode(command="exec", exit_code=2, stderr=err),
+            )
+    if not words or execute_fn is None or registry is None:
         return None, IOResult(), ExecutionNode(command="exec", exit_code=0)
-    err = encode_text(
-        f"mirage: exec: {args[0]}: process replacement is not supported "
-        "(no OS process to replace)\n"
+    head = words[0]
+    missing, shadowed = await program_head(
+        head, session, registry, session.cwd, None
     )
-    return (
-        None,
-        IOResult(exit_code=2, stderr=err),
-        ExecutionNode(command="exec", exit_code=2, stderr=err),
-    )
+    if missing:
+        raise ExitSignal(
+            127, stderr=builtin_error("exec", f"{head}: not found")
+        )
+    line = ("command " if shadowed else "") + shell_join(words)
+    token = set_program_invocation(session)
+    try:
+        io = await execute_fn(
+            ("env -i " if clear else "") + line,
+            session_id=session.session_id,
+            stdin=stdin,
+        )
+    finally:
+        reset_program_invocation(token)
+    stdout = await materialize(io.stdout) or b""
+    stderr = await materialize(io.stderr) or b""
+    clear_traps(session)
+    replaced = ExitSignal(io.exit_code, stderr=stderr, stdout=stdout)
+    replaced.under_redirects = True
+    raise replaced
 
 
 async def install_exec_redirects(
@@ -632,11 +690,15 @@ async def exec_builtin(call: BuiltinCall) -> Result:
 
     The redirect-only form is intercepted where redirects are applied;
     a bare ``exec`` reaching here has no redirects, and ``exec cmd`` is
-    the process-replacement form this refuses.
+    the form that runs the command and ends the shell.
 
     Args:
         call (BuiltinCall): the invocation.
     """
     return await handle_exec_command(
-        list(call.argv.args), call.context.session
+        list(call.argv.args),
+        call.context.session,
+        call.execute_fn,
+        call.registry,
+        call.stdin,
     )

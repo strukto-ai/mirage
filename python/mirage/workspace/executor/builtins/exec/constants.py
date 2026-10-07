@@ -52,3 +52,9 @@ EXEC_STREAM_FIELDS = (
     "exec_stdin_unreadable",
     "exec_stdin_identity",
 )
+
+# bash's usage line for `exec`, printed after an invalid option.
+EXEC_USAGE = (
+    "exec: usage: exec [-cl] [-a name] [command [argument ...]] "
+    "[redirection ...]\n"
+)

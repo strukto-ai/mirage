@@ -48,6 +48,7 @@ from mirage.workspace.lookup.constants import SHELL_ONLY_BUILTINS
 from mirage.workspace.lookup.lookup import lookup_all
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecuteLine
 
 
@@ -74,11 +75,16 @@ def exec_words(action: ExecAction, paths: list[str]) -> list[str]:
     return words
 
 
-async def _head_state(
-    head: str, registry: MountRegistry, cwd: str, stat_path: StatPath | None
+async def program_head(
+    head: str,
+    session: SessionState | None,
+    registry: MountRegistry,
+    cwd: str,
+    stat_path: StatPath | None,
 ) -> tuple[bool, bool]:
-    """Whether ``execvp`` would fail to find an ``-exec`` head word, and
-    whether a shell function shadows the program it would find.
+    """Whether ``execvp`` would fail to find a head word (``find
+    -exec``, ``exec``), and whether a shell function shadows the program
+    it would find.
 
     A head carrying a slash is a file the loader runs, which no
     builtin, function or CLI can claim, so it is statted where the
@@ -97,6 +103,8 @@ async def _head_state(
 
     Args:
         head (str): the first word of the action.
+        session (SessionState | None): the shell looking it up, None
+            outside one.
         registry (MountRegistry): where a name is looked up.
         cwd (str): the session's working directory.
         stat_path (StatPath | None): dispatcher stat, None outside a
@@ -107,7 +115,7 @@ async def _head_state(
             stat_path is not None
             and await stat_path(resolve_path(head, cwd)) is None
         ), False
-    sess = get_current_session()
+    sess = session
     if sess is None:
         return False, False
     layers = lookup_all(head, sess, registry)
@@ -162,7 +170,9 @@ async def _run_exec(
     # `-exec {} \;` runs each match itself.
     words = exec_words(action, paths)
     head = words[0] if words else action.argv[0]
-    missing, shadowed = await _head_state(head, registry, cwd, stat_path)
+    missing, shadowed = await program_head(
+        head, get_current_session(), registry, cwd, stat_path
+    )
     if missing:
         errors.append(
             encode_text(f"find: '{head}': No such file or directory\n")

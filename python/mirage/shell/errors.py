@@ -72,7 +72,10 @@ class ExitSignal(Exception):
     expanded when it was raised. bash expands a simple command's words
     before it applies the command's redirects, so that diagnostic goes
     around them; any other goes through the redirects it was written
-    under.
+    under. ``under_redirects`` marks ``stdout`` as an ``exec``'d
+    command's, written under the redirects the signal unwinds through;
+    an EXIT action's goes around them, as bash runs it once the shell
+    has unwound.
     """
 
     def __init__(
@@ -89,6 +92,7 @@ class ExitSignal(Exception):
             contained_code if contained_code is not None else exit_code
         )
         self.expanding: int | None = None
+        self.under_redirects = False
 
 
 class DiscardSignal(ExitSignal):

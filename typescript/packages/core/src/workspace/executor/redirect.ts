@@ -61,7 +61,7 @@ import {
 } from './builtins/exec/constants.ts'
 import { drained, pump } from './jobs.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
-import { carried, isUnwinding, takeStderr, type Unwinding } from './control.ts'
+import { carried, isUnwinding, takeStderr, takeStdout, type Unwinding } from './control.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import { Channel, JobOutput, type OwnedStream } from '../../shell/console/index.ts'
 import { concat } from '../../io/cachable_iterator.ts'
@@ -442,6 +442,8 @@ export async function handleRedirect(
     unwound = error
     // What the command wrote on its way out goes where it writes; an error
     // expanding its own words came before its redirects.
+    const output = takeStdout(error)
+    if (output.byteLength > 0) await recorder.emit(Channel.STDOUT, output)
     const own =
       error instanceof ExitSignal && error.expanding !== null && error.expanding === command?.id
     if (!own) {

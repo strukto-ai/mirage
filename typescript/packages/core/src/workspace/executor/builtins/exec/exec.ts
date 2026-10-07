@@ -47,21 +47,72 @@ import {
 import type { BuiltinCall, Result } from '../types.ts'
 import { concat } from '../../../../io/cachable_iterator.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { runAsProgram } from '../../../../context/session_context.ts'
+import { ExitSignal } from '../../../../shell/errors.ts'
+import { shellJoin } from '../../../../shell/join.ts'
+import type { ExecuteFn } from '../../../expand/node.ts'
+import type { MountRegistry } from '../../../mount/registry.ts'
+import { programHead } from '../../find_action_dispatch.ts'
+import { clearTraps } from '../../traps.ts'
+import { builtinError } from '../shared.ts'
+import { EXEC_USAGE } from './constants.ts'
 
-/** The `exec` builtin without redirects: bare `exec` is a no-op that
- * succeeds; `exec CMD` has no OS-process referent and is refused. */
-export function handleExecCommand(args: string[], _session: SessionState): Result {
-  if (args.length === 0)
+/**
+ * The `exec` builtin without redirects. Bare `exec` is a no-op that
+ * succeeds. `exec CMD ...` runs CMD as a program and ends the shell with its
+ * status, as bash replaces the shell with it: the rest of the scope (the
+ * line at top level, a subshell, a substitution, a nested shell) does not
+ * run, and the replaced shell's actions go with it, EXIT included. A head no
+ * program answers to (a builtin of the shell's own, a function, nothing) is
+ * `exec: NAME: not found`, which ends the shell with 127 and runs its EXIT
+ * action, as bash's does. `-c` runs CMD with an empty environment; `-a` and
+ * `-l` name an argv[0] that mirage's programs do not read, and are refused.
+ * The redirect-only form (`exec > file`) never reaches here: it is a
+ * redirected statement, handled where redirects are applied. Mirrors Python.
+ */
+export async function handleExecCommand(
+  args: string[],
+  session: SessionState,
+  executeFn: ExecuteFn | null = null,
+  registry: MountRegistry | null = null,
+  stdin: ByteSource | null = null,
+): Promise<Result> {
+  const words = [...args]
+  let clear = false
+  for (let word = words[0]; word?.startsWith('-') === true && word !== '-'; word = words[0]) {
+    words.shift()
+    if (word === '--') break
+    for (const flag of word.slice(1)) {
+      if (flag === 'c') {
+        clear = true
+        continue
+      }
+      const err =
+        flag === 'a' || flag === 'l'
+          ? encodeText(`mirage: exec: -${flag}: not supported\n`)
+          : concat([builtinError('exec', `-${flag}: invalid option`), encodeText(EXEC_USAGE)])
+      return [
+        null,
+        new IOResult({ exitCode: 2, stderr: err }),
+        new ExecutionNode({ command: 'exec', exitCode: 2, stderr: err }),
+      ]
+    }
+  }
+  const head = words[0]
+  if (head === undefined || executeFn === null || registry === null)
     return [null, new IOResult(), new ExecutionNode({ command: 'exec', exitCode: 0 })]
-  const err = encodeText(
-    `mirage: exec: ${args[0] ?? ''}: process replacement is not supported ` +
-      '(no OS process to replace)\n',
+  const [missing, shadowed] = await programHead(head, session, registry, session.cwd, null)
+  if (missing) throw new ExitSignal(127, builtinError('exec', `${head}: not found`))
+  const line = (clear ? 'env -i ' : '') + (shadowed ? 'command ' : '') + shellJoin(words)
+  const io = await runAsProgram(session, () =>
+    executeFn(line, { sessionId: session.sessionId, stdin }),
   )
-  return [
-    null,
-    new IOResult({ exitCode: 2, stderr: err }),
-    new ExecutionNode({ command: 'exec', exitCode: 2, stderr: err }),
-  ]
+  const stdout = await materialize(io.stdout)
+  const stderr = await io.materializeStderr()
+  clearTraps(session)
+  const replaced = new ExitSignal(io.exitCode, stderr, stdout)
+  replaced.underRedirects = true
+  throw replaced
 }
 
 /** bash's line for a redirect target it could not open. */
@@ -472,5 +523,11 @@ async function appendTo(
  * process-replacement form this refuses.
  */
 export function execBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(handleExecCommand([...call.argv.args], call.context.session))
+  return handleExecCommand(
+    [...call.argv.args],
+    call.context.session,
+    call.executeFn,
+    call.registry,
+    call.stdin,
+  )
 }

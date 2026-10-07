@@ -193,6 +193,20 @@ def ended(sig: Exception) -> IOResult:
     )
 
 
+def take_stdout(sig: Exception) -> bytes:
+    """Take what an ``exec``'d command wrote, for the redirects it ran
+    under to route. An EXIT action's output goes around them, and what
+    the other unwinding signals carry went through them already.
+
+    Args:
+        sig (Exception): one of ``UNWINDING``.
+    """
+    if not isinstance(sig, ExitSignal) or not sig.under_redirects:
+        return b""
+    output, sig.stdout = sig.stdout or b"", None
+    return output
+
+
 async def take_stderr(sig: Exception) -> bytes:
     """Take the diagnostic one of ``UNWINDING`` carries, for the
     redirects it was written under to route.

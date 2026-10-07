@@ -213,6 +213,19 @@ export function ended(sig: Unwinding): IOResult {
 }
 
 /**
+ * Take what an `exec`'d command wrote, for the redirects it ran under to
+ * route. An EXIT action's output goes around them, and what the other
+ * unwinding signals carry went through them already. Mirrors Python's
+ * take_stdout.
+ */
+export function takeStdout(sig: Unwinding): Uint8Array {
+  if (!(sig instanceof ExitSignal) || !sig.underRedirects) return new Uint8Array()
+  const output = sig.stdout ?? new Uint8Array()
+  sig.stdout = null
+  return output
+}
+
+/**
  * Take the diagnostic an `Unwinding` carries, for the redirects it was
  * written under to route. Mirrors Python's take_stderr.
  */

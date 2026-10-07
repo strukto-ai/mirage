@@ -61,6 +61,10 @@ export class ExitSignal extends Error {
   // command's redirects, so that diagnostic goes around them; any other
   // goes through the redirects it was written under.
   expanding: number | null = null
+  // stdout is an `exec`'d command's, written under the redirects the signal
+  // unwinds through; an EXIT action's goes around them, as bash runs it once
+  // the shell has unwound.
+  underRedirects = false
 
   constructor(
     exitCode = 0,

@@ -51,3 +51,7 @@ export const EXEC_STREAM_FIELDS = [
   'execStdinUnreadable',
   'execStdinIdentity',
 ] as const
+
+// bash's usage line for `exec`, printed after an invalid option.
+export const EXEC_USAGE =
+  'exec: usage: exec [-cl] [-a name] [command [argument ...]] [redirection ...]\n'
