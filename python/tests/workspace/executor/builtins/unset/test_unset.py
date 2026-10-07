@@ -2,6 +2,7 @@ import pytest
 
 from mirage.shell.variable import VarAttr
 from mirage.workspace.executor.builtins.unset import handle_unset
+from mirage.workspace.session.functions import FunctionSite
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import seed_var, session_view, set_attr
 
@@ -14,9 +15,11 @@ def make_session() -> SessionState:
 async def test_unset_f_removes_function_only():
     session = make_session()
     session.functions["fn"] = "fn() { :; }"
+    session._function_sites["fn"] = FunctionSite("fn() { :; }", (1, 0), None)
     seed_var(session, "fn", "keepvar")
     await handle_unset(["-f", "fn"], session, state=session_view(session))
     assert "fn" not in session.functions
+    assert "fn" not in session._function_sites
     assert session.env["fn"] == "keepvar"
 
 
@@ -41,8 +44,10 @@ async def test_unset_bare_prefers_variable_then_function():
     assert "a" in session.functions
     # No variable of this name: the function is removed instead.
     session.functions["b"] = "b() { :; }"
+    session._function_sites["b"] = FunctionSite("b() { :; }", (1, 0), None)
     await handle_unset(["b"], session, state=session_view(session))
     assert "b" not in session.functions
+    assert "b" not in session._function_sites
 
 
 @pytest.mark.asyncio

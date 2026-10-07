@@ -819,7 +819,7 @@ class SessionState:
 
         ``fork`` copies what a session keeps; a child shell (a command
         substitution, a subshell, a nested ``bash``) also inherits the
-        reader's position, the alias bookkeeping and the local frames,
+        reader's position, the aliases being expanded and the local frames,
         and reseeds ``$RANDOM`` on its first draw instead of replaying
         this session's seed.
 
@@ -827,11 +827,8 @@ class SessionState:
             None
         """
         child = self.fork()
-        child._parse_seq = self._parse_seq
         child._parse_current = self._parse_current
         child._parse_row = self._parse_row
-        child._alias_marks = dict(self._alias_marks)
-        child._function_sites = dict(self._function_sites)
         child._alias_stack = list(self._alias_stack)
         child._local_vars = (
             None if self._local_vars is None else copy_locals(self._local_vars)

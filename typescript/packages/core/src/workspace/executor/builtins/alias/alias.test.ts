@@ -72,19 +72,22 @@ describe('alias', () => {
     expect([stdoutStr(io), io.exitCode]).toEqual([out, code])
   })
 
-  // A call with overrides runs on a fork, which starts its alias marks
-  // fresh along with its parse count, so no new parse can match an old
-  // mark.
-  it('reads the same aliases in a call with its own env or cwd', async () => {
+  // A call with overrides runs on a fork, which carries the parse count,
+  // the alias marks and where each function was defined, so it reads the
+  // aliases a plain call reads.
+  it.each([
+    [["alias a='echo works'", 'f() { a; }'], 'works\n', 0],
+    [["alias a='echo x'; f() { a; }"], '', 127],
+  ])('reads the same aliases in a call with its own env or cwd: %j', async (lines, out, code) => {
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       { mode: MountMode.WRITE, shellParser: await getTestParser() },
     )
-    for (const line of ['shopt -s expand_aliases', "alias a='echo works'", 'f() { a; }'])
-      await ws.shell(line)
+    await ws.shell('shopt -s expand_aliases')
+    for (const line of lines) await ws.shell(line)
     for (const opts of [{}, { env: {} }, { cwd: '/data' }]) {
       const io = await ws.shell('f', opts)
-      expect([stdoutStr(io), io.exitCode]).toEqual(['works\n', 0])
+      expect([stdoutStr(io), io.exitCode]).toEqual([out, code])
     }
   })
 

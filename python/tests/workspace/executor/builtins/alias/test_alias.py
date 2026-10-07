@@ -176,20 +176,26 @@ async def test_a_function_reads_aliases_where_it_was_defined(lines, out, code):
 
 
 @pytest.mark.asyncio
-async def test_a_call_with_its_own_env_or_cwd_reads_the_same_aliases():
-    # A call with overrides runs on a fork, which starts its alias marks
-    # fresh along with its parse count, so no new parse can match an old
-    # mark.
+@pytest.mark.parametrize(
+    "lines, out, code",
+    [
+        (["alias a='echo works'", "f() { a; }"], "works\n", 0),
+        (["alias a='echo x'; f() { a; }"], "", 127),
+    ],
+)
+async def test_a_call_with_its_own_env_or_cwd_reads_the_same_aliases(
+    lines, out, code
+):
+    # A call with overrides runs on a fork, which carries the parse
+    # count, the alias marks and where each function was defined, so it
+    # reads the aliases a plain call reads.
     ws = _ws()
-    for line in (
-        "shopt -s expand_aliases",
-        "alias a='echo works'",
-        "f() { a; }",
-    ):
+    await ws.shell("shopt -s expand_aliases")
+    for line in lines:
         await ws.shell(line)
     for kwargs in ({}, {"env": {}}, {"cwd": "/data"}):
         io = await ws.shell("f", **kwargs)
-        assert ((await io.stdout_str()), io.exit_code) == ("works\n", 0)
+        assert ((await io.stdout_str()), io.exit_code) == (out, code)
     await ws.close()
 
 

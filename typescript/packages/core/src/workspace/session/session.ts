@@ -606,6 +606,9 @@ export class SessionState {
     forked.getoptsOptind = this.getoptsOptind
     forked.shopts = { ...this.shopts }
     forked.aliases = { ...this.aliases }
+    forked.parseSeq = this.parseSeq
+    forked.aliasMarks = new Map(this.aliasMarks)
+    forked.functionSites = new Map(this.functionSites)
     forked.umask = this.umask
     forked.descriptors = new Map(this.descriptors)
     forked.execStdout = this.execStdout
@@ -624,16 +627,13 @@ export class SessionState {
    * A child shell of this session: a fork that reads on from here. `fork`
    * copies what a session keeps; a child shell (a command substitution, a
    * subshell, a nested `bash`) also inherits the reader's position, the
-   * alias bookkeeping and the local frames, and reseeds `$RANDOM` on its
+   * aliases being expanded and the local frames, and reseeds `$RANDOM` on its
    * first draw instead of replaying this session's seed. Mirrors Python.
    */
   subshell(): SessionState {
     const child = this.fork()
-    child.parseSeq = this.parseSeq
     child.parseCurrent = this.parseCurrent
     child.parseRow = this.parseRow
-    child.aliasMarks = new Map(this.aliasMarks)
-    child.functionSites = new Map(this.functionSites)
     child.aliasStack = [...this.aliasStack]
     child.localVars = this.localVars === null ? null : copyLocals(this.localVars)
     child.localFrames = this.localFrames.map((frame) =>

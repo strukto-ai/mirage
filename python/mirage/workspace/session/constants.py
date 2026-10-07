@@ -72,6 +72,9 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "exec_stdin_identity",
     "_getopts_pos",
     "_getopts_optind",
+    "_parse_seq",
+    "_alias_marks",
+    "_function_sites",
 )
 
 # State that belongs to the line being executed, not to the shell, so a
@@ -87,13 +90,10 @@ TRANSIENT_FIELDS: tuple[str, ...] = (
     "_random_state",
     "_random_seed",
     "_random_last",
-    "_parse_seq",
     "_parse_current",
     "_parse_row",
-    "_function_sites",
     "_line_open",
     "terminal",
-    "_alias_marks",
     "_alias_stack",
     "status_writer",
 )

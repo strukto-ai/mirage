@@ -253,8 +253,10 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
   it('unset -f removes a function but not a same-named variable', async () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ fn: 'v' }) })
     s.functions.fn = 'fn() { :; }'
+    s.functionSites.set('fn', { source: 'fn() { :; }', mark: [1, 0], origin: null })
     await handleUnset(['-f', 'fn'], s, sessionView(s))
     expect('fn' in s.functions).toBe(false)
+    expect(s.functionSites.has('fn')).toBe(false)
     expect(s.env.fn).toBe('v')
   })
 
@@ -273,8 +275,10 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     expect('a' in s.env).toBe(false)
     expect('a' in s.functions).toBe(true)
     s.functions.b = 'b() { :; }'
+    s.functionSites.set('b', { source: 'b() { :; }', mark: [1, 0], origin: null })
     await handleUnset(['b'], s, sessionView(s))
     expect('b' in s.functions).toBe(false)
+    expect(s.functionSites.has('b')).toBe(false)
   })
 
   it('unset removes a whole array and a single element', async () => {
