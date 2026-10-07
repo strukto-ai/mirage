@@ -27,5 +27,5 @@ export const LANGFUSE_GREP = command({
   vfs: VFSName.LANGFUSE,
   spec: specOf('grep'),
   fn: (accessor: LangfuseAccessor, paths, texts, opts) =>
-    runSearch(scanIo(IO, opts.ns, paths)[0], 'grep', accessor, paths, texts, opts),
+    runSearch(scanIo(IO, opts.ns, opts.mountPrefix)[0], 'grep', accessor, paths, texts, opts),
 })

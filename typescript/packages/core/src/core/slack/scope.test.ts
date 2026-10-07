@@ -63,7 +63,7 @@ describe('detectScope', () => {
     const match = detectScope('/channels/general__C001/2024-04-10')
     expect(match.kind).toBe('day')
     expect(match.slots.day).toBe('2024-04-10')
-    expect(NATIVE_KINDS.has('day')).toBe(true)
+    expect(NATIVE_KINDS.has('day')).toBe(false)
   })
 
   it('refuses a non-date under a channel', () => {

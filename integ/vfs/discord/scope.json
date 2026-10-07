@@ -233,6 +233,19 @@
           }
         }
       }
+    },
+    {
+      "id": "discord_search_on_a_day_reports_that_day_only",
+      "seq": 690216,
+      "targets": [
+        "discord"
+      ],
+      "command": "grep -rw released '/discord/Mirage HQ__100000000000000001/channels/releases__200000000000000002/2026-06-01' | cut -d: -f1 | uniq",
+      "expect": {
+        "exit": 0,
+        "stdout": "/discord/Mirage HQ__100000000000000001/channels/releases__200000000000000002/2026-06-01/chat.jsonl\n",
+        "stderr": ""
+      }
     }
   ]
 }

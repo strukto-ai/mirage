@@ -81,7 +81,7 @@ async def grep(
     # push-down waits for it too; every other reason to defer is the shared
     # gate's. A scope that names no folder falls through to the generic scan
     # rather than answering, which is what the mount root does.
-    scan, scoped = scan_io(IO, opts.ns, paths)
+    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
     operand = (
         None
         if scoped

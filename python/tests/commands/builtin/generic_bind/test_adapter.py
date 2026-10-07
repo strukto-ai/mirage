@@ -354,18 +354,17 @@ def test_scoped_io_sets_a_content_index_aside():
     assert scoped.content_search is None
 
 
-def test_scan_io_guards_only_a_judged_command():
-    # A bespoke search scans the raw adapter when nothing under its
-    # operands is hidden or refused, and the guarded one when anything is,
-    # where it must not hand the service's own search the answer either.
+def test_scan_io_guards_only_a_judged_mount():
+    # A bespoke search scans the raw adapter when nothing on its mount is
+    # hidden or refused, and the guarded one when anything is, since the
+    # service's own search can answer for more than the operand.
     io = make_io()
-    roots = [_spec("/data")]
     free = NamespaceView(scoped=lambda _virtual: False)
     judged = NamespaceView(scoped=lambda virtual: virtual == "/data")
     for ns in (free, None):
-        scan, scoped = adapter.scan_io(io, ns, roots)
+        scan, scoped = adapter.scan_io(io, ns, "/data/")
         assert scan is io and not scoped
-    scan, scoped = adapter.scan_io(io, judged, roots)
+    scan, scoped = adapter.scan_io(io, judged, "/data/")
     assert scan is not io and scoped
 
 

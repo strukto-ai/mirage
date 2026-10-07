@@ -26,5 +26,5 @@ export const LANGFUSE_RG = command({
   vfs: VFSName.LANGFUSE,
   spec: specOf('rg'),
   fn: (accessor: LangfuseAccessor, paths, texts, opts) =>
-    runSearch(scanIo(IO, opts.ns, paths)[0], 'rg', accessor, paths, texts, opts),
+    runSearch(scanIo(IO, opts.ns, opts.mountPrefix)[0], 'rg', accessor, paths, texts, opts),
 })

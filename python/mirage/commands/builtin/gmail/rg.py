@@ -52,7 +52,7 @@ async def rg(
     refuse_missing_pattern(pattern_str, fl, parse_flags(fl))
     # Same gate as gmail grep, from the same table: only a lone concrete
     # operand with no reshaping flag may be answered by the search API.
-    scan, scoped = scan_io(IO, opts.ns, paths)
+    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
     operand = (
         None
         if scoped

@@ -48,7 +48,8 @@ export const SCOPES: readonly Scope[] = [
 
 export const detectScope = makeDetectScope(SCOPES)
 
-// Kinds the Gmail search push-down may answer for: the whole account, one
-// label, or one label's day. A message file or an attachment names one
-// node, which a query over the account cannot stand in for.
-export const NATIVE_KINDS: ReadonlySet<string> = new Set([ROOT, 'label', 'day'])
+// Kinds the Gmail search push-down may answer for: the whole account or one
+// label. A day is absent because its query has no upper bound, so it would
+// report the later days' messages too; a message file or an attachment
+// names one node, which a query over the account cannot stand in for.
+export const NATIVE_KINDS: ReadonlySet<string> = new Set([ROOT, 'label'])

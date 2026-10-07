@@ -31,7 +31,7 @@ export const POSTGRES_GREP = command({
   spec: specOf('grep'),
   fn: (accessor: PostgresAccessor, paths, texts, opts) =>
     runSearch<PostgresAccessor>(
-      scanIo(IO, opts.ns, paths)[0],
+      scanIo(IO, opts.ns, opts.mountPrefix)[0],
       'grep',
       accessor,
       paths,

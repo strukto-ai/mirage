@@ -62,7 +62,7 @@ async function rg(
 
   // Same gate as email grep, from the same table, and it reads the scope the
   // same way: a line the push-down cannot answer takes the generic scan.
-  const [scan, scoped] = scanIo(IO, opts.ns, paths)
+  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
   const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, RG_SEARCH_HONORED)
   // The server is asked for the literal every match must contain, never
   // the regex's own spelling: IMAP TEXT is a substring search.

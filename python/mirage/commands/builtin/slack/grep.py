@@ -79,7 +79,7 @@ async def grep(
 
     # Output-shaping flags, a glob operand and a multi-operand line all need
     # the per-message scan; see SEARCH_HONORED above.
-    scan, scoped = scan_io(IO, opts.ns, paths)
+    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
     operand = (
         None
         if scoped

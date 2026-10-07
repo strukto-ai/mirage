@@ -84,7 +84,7 @@ async function grep(
   // waits for it too; every other reason to defer is the shared gate's. A
   // scope that names no folder falls through to the generic scan rather than
   // answering, which is what the mount root does.
-  const [scan, scoped] = scanIo(IO, opts.ns, paths)
+  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
   const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
   // IMAP TEXT is a case-insensitive substring search, not a regex engine,
   // so the server is asked for the literal every match must contain and

@@ -27,5 +27,12 @@ export const POSTGRES_RG = command({
   vfs: VFSName.POSTGRES,
   spec: specOf('rg'),
   fn: (accessor: PostgresAccessor, paths, texts, opts) =>
-    runSearch<PostgresAccessor>(scanIo(IO, opts.ns, paths)[0], 'rg', accessor, paths, texts, opts),
+    runSearch<PostgresAccessor>(
+      scanIo(IO, opts.ns, opts.mountPrefix)[0],
+      'rg',
+      accessor,
+      paths,
+      texts,
+      opts,
+    ),
 })

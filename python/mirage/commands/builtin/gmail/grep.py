@@ -56,7 +56,7 @@ async def grep(
     pattern = pattern_arg(texts, fl)
     # Output-shaping flags, a glob operand and a multi-operand line all need
     # the generic grep over rendered files; see SEARCH_HONORED above.
-    scan, scoped = scan_io(IO, opts.ns, paths)
+    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
     operand = (
         None
         if scoped

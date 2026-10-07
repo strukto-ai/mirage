@@ -31,5 +31,12 @@ export const MONGODB_GREP = command({
   vfs: VFSName.MONGODB,
   spec: specOf('grep'),
   fn: (accessor: MongoDBAccessor, paths, texts, opts) =>
-    runSearch<MongoDBAccessor>(scanIo(IO, opts.ns, paths)[0], 'grep', accessor, paths, texts, opts),
+    runSearch<MongoDBAccessor>(
+      scanIo(IO, opts.ns, opts.mountPrefix)[0],
+      'grep',
+      accessor,
+      paths,
+      texts,
+      opts,
+    ),
 })

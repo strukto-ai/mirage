@@ -72,11 +72,11 @@ SCOPES = (
 detect_scope = make_detect_scope(SCOPES)
 
 # Kinds the workspace search push-down may answer for. Slack search is
-# workspace-wide, so the root qualifies; a chat.jsonl or blob operand
-# names one day's file, which a channel-wide search cannot stand in for,
-# and the files directory is excluded because search.files has no
-# per-day filter either.
-NATIVE_KINDS = frozenset({ROOT, "channels_root", "dms_root", "channel", "day"})
+# workspace-wide, so the root qualifies; a day, its chat.jsonl or a blob
+# names one day, which a channel-wide search cannot stand in for, and the
+# files directory is excluded because search.files has no per-day filter
+# either.
+NATIVE_KINDS = frozenset({ROOT, "channels_root", "dms_root", "channel"})
 
 
 @dataclass(frozen=True, slots=True)

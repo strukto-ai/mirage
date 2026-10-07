@@ -27,5 +27,12 @@ export const MONGODB_RG = command({
   vfs: VFSName.MONGODB,
   spec: specOf('rg'),
   fn: (accessor: MongoDBAccessor, paths, texts, opts) =>
-    runSearch<MongoDBAccessor>(scanIo(IO, opts.ns, paths)[0], 'rg', accessor, paths, texts, opts),
+    runSearch<MongoDBAccessor>(
+      scanIo(IO, opts.ns, opts.mountPrefix)[0],
+      'rg',
+      accessor,
+      paths,
+      texts,
+      opts,
+    ),
 })

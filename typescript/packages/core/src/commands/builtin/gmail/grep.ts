@@ -49,7 +49,7 @@ async function grep(
   const fl = new FlagView(opts.flags, specOf('grep'))
   // Output-shaping flags, a glob operand and a multi-operand line all need
   // the generic grep over rendered files; see SEARCH_HONORED above.
-  const [scan, scoped] = scanIo(IO, opts.ns, paths)
+  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
   const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
   if (pattern !== null && operand !== null && fl.asBool('w')) {
     const match = detectScope(operand)

@@ -36,7 +36,7 @@ async function find(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const idx = opts.index ?? undefined
-  const [scan, scoped] = scanIo(IO, opts.ns, paths)
+  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
   const resolved = await resolveGlobOf(scan)(accessor, paths, idx)
   // Under a hide or a rule the walk is the generic builder's, which names
   // an entry it cannot open where GNU find does.

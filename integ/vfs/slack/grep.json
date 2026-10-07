@@ -154,6 +154,42 @@
           }
         }
       }
+    },
+    {
+      "id": "slack_search_on_a_day_reports_that_day_only",
+      "seq": 520034,
+      "targets": [
+        "slack"
+      ],
+      "command": "grep -rw canary /slack/channels/engineering__C3/2025-11-06 | cut -d: -f1 | uniq",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/engineering__C3/2025-11-06/chat.jsonl\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_search_keeps_a_hidden_dm_out_of_the_channels",
+      "seq": 520035,
+      "targets": [
+        "slack"
+      ],
+      "command": "grep -rw commit /slack/channels; echo grepw=$?; rg -w commit /slack/channels; echo rgw=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grepw=1\nrgw=1\n",
+        "stderr": ""
+      },
+      "session": "slack-hide-dm",
+      "session_profiles": {
+        "slack-hide-dm": {
+          "paths": {
+            "hide": [
+              "/slack/dms/marcus__D1"
+            ]
+          }
+        }
+      }
     }
   ]
 }

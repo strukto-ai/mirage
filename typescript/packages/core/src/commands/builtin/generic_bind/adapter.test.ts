@@ -477,17 +477,16 @@ describe('scopedIo', () => {
 })
 
 describe('scanIo', () => {
-  it('guards only a judged command', () => {
-    // A bespoke search scans the raw adapter when nothing under its
-    // operands is hidden or refused, and the guarded one when anything is,
-    // where it must not hand the service's own search the answer either.
+  it('guards only a judged mount', () => {
+    // A bespoke search scans the raw adapter when nothing on its mount is
+    // hidden or refused, and the guarded one when anything is, since the
+    // service's own search can answer for more than the operand.
     const io: CommandIO = dirOps([])
-    const roots = [PathSpec.fromStrPath('/data')]
     const free = { scoped: () => false }
     const judged = { scoped: (virtual: string) => virtual === '/data' }
-    expect(scanIo(io, free, roots)).toEqual([io, false])
-    expect(scanIo(io, undefined, roots)).toEqual([io, false])
-    const [scan, scoped] = scanIo(io, judged, roots)
+    expect(scanIo(io, free, '/data/')).toEqual([io, false])
+    expect(scanIo(io, undefined, '/data/')).toEqual([io, false])
+    const [scan, scoped] = scanIo(io, judged, '/data/')
     expect(scan).not.toBe(io)
     expect(scoped).toBe(true)
   })

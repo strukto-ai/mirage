@@ -888,6 +888,19 @@
           }
         }
       }
+    },
+    {
+      "id": "email_search_on_a_day_reports_that_day_only",
+      "seq": 540225,
+      "targets": [
+        "email"
+      ],
+      "command": "grep -rw Budget /mail/INBOX/2026-01-07; echo grepw=$?; rg -w Budget /mail/INBOX/2026-01-07; echo rgw=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grepw=1\nrgw=1\n",
+        "stderr": ""
+      }
     }
   ]
 }

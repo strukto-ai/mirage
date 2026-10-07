@@ -720,6 +720,19 @@
           }
         }
       }
+    },
+    {
+      "id": "gmail_search_on_a_day_reports_that_day_only",
+      "seq": 530211,
+      "targets": [
+        "gmail"
+      ],
+      "command": "grep -rw disk /mail/INBOX/2026-01-05; echo grepw=$?; rg -w disk /mail/INBOX/2026-01-05; echo rgw=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grepw=1\nrgw=1\n",
+        "stderr": ""
+      }
     }
   ]
 }
