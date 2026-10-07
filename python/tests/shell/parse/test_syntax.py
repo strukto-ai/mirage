@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.bytes import decode_text
 from mirage.shell.parse import check_syntax, syntax_error_result
 from mirage.shell.parse.constants import MAX_NESTING
 from mirage.vfs.ram import RAMVFS
@@ -60,9 +60,6 @@ def test_every_line_reads_as_bash_reads_it():
 def test_a_diagnostic_keeps_an_invalid_byte_as_typed(raw, stderr):
     found = check_syntax(decode_text(raw))
     assert found is not None
-    assert raw[found.span.start : found.span.end] == encode_text(
-        found.offending
-    )
     assert syntax_error_result(found).stderr == stderr
 
 

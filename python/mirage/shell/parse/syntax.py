@@ -54,7 +54,7 @@ from mirage.shell.parse.heredoc.delimiter import (
     clean_delimiter,
     delimiter_quoted,
 )
-from mirage.shell.parse.types import SourceSpan, SyntaxDiagnostic
+from mirage.shell.parse.types import SyntaxDiagnostic
 from mirage.shell.types import TSNodeLike
 
 logger = logging.getLogger(__name__)
@@ -151,8 +151,8 @@ def check_syntax(
             text covers, inside which its name stays reserved.
 
     Returns:
-        SyntaxDiagnostic | None: what bash prints and its status, the span
-        in UTF-8 bytes; None when bash reads the line.
+        SyntaxDiagnostic | None: the text bash names, what it prints and
+        its status; None when bash reads the line.
     """
     try:
         found = _LineReader(command, aliases, own or {}).refusals()
@@ -163,17 +163,12 @@ def check_syntax(
         ]
     if not found:
         return None
-    first = found[0]
     message = "".join(
         f"{_mirage_wording(line)}\n"
         for refusal in found
         for line in refusal.lines
     )
-    start = len(encode_text(command[: first.start]))
-    span = SourceSpan(
-        start, start + len(encode_text(command[first.start : first.end]))
-    )
-    return SyntaxDiagnostic(first.offending, span, message, found[-1].status)
+    return SyntaxDiagnostic(found[0].offending, message, found[-1].status)
 
 
 def syntax_error_result(found: SyntaxDiagnostic) -> IOResult:
@@ -257,9 +252,7 @@ def _issue(node: TSNodeLike) -> SyntaxDiagnostic:
         if snippet
         else "mirage: syntax error in command\n"
     )
-    return SyntaxDiagnostic(
-        text, SourceSpan(node.start_byte, node.end_byte), message
-    )
+    return SyntaxDiagnostic(text, message)
 
 
 def _is_structural_error(node: TSNodeLike) -> bool:

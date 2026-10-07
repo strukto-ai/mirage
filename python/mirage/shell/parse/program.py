@@ -1,7 +1,6 @@
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from mirage.shell.parse.types import SyntaxDiagnostic
 from mirage.shell.types import TSNodeLike
 
 
@@ -17,32 +16,16 @@ class ParsedProgram:
         original (str): the line as typed.
         root (TSNodeLike): the parsed tree.
         offsets (tuple[int, ...]): ``source_offsets(original, root)``.
-        diagnose (Callable[[], tuple[SyntaxDiagnostic, ...]]): finds the
-            line's syntax errors, run once on the first read.
     """
 
     def __init__(
-        self,
-        original: str,
-        root: TSNodeLike,
-        offsets: tuple[int, ...],
-        diagnose: Callable[[], tuple[SyntaxDiagnostic, ...]] = tuple,
+        self, original: str, root: TSNodeLike, offsets: tuple[int, ...]
     ) -> None:
-        self._diagnose = diagnose
-        self._diagnostics: tuple[SyntaxDiagnostic, ...] | None = None
         self.original = original
         self.offsets = offsets
         self.references = 1
         self._released = False
         self.root = ProgramNode(root, self)
-
-    @property
-    def diagnostics(self) -> tuple[SyntaxDiagnostic, ...]:
-        """The line's syntax errors, found when first read."""
-        self.check()
-        if self._diagnostics is None:
-            self._diagnostics = self._diagnose()
-        return self._diagnostics
 
     def check(self) -> None:
         if self.references == 0:

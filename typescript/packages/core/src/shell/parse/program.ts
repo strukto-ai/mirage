@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { SyntaxDiagnostic } from './types.ts'
-
 import type { ShellNode, TSNodeLike } from '../types.ts'
 
 interface Resource {
@@ -40,14 +38,12 @@ export class ParsedProgram {
   readonly root: ProgramNode
   private readonly resource: Resource
   private released = false
-  private diagnosed: readonly SyntaxDiagnostic[] | null = null
 
   constructor(
     readonly original: string,
     root: ShellNode,
     readonly offsets: readonly number[],
     dispose: () => void,
-    private readonly diagnose: () => readonly SyntaxDiagnostic[] = () => [],
   ) {
     this.resource = { references: 1, dispose }
     this.root = new ProgramNode(root, this)
@@ -56,13 +52,6 @@ export class ParsedProgram {
 
   get references(): number {
     return this.resource.references
-  }
-
-  /** The line's syntax errors, found when first read. */
-  get diagnostics(): readonly SyntaxDiagnostic[] {
-    this.check()
-    this.diagnosed ??= this.diagnose()
-    return this.diagnosed
   }
 
   check(): void {

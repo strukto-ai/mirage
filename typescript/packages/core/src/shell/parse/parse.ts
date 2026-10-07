@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { diagnose } from './diagnostics.ts'
 import { repairAssignments } from './assignment.ts'
 
 import { ParseTrees, type NativeParser } from './engine.ts'
@@ -95,18 +94,9 @@ export async function createShellParser(config: ShellParserConfig): Promise<Shel
         const root = parseRoot(trees, command)
         const offsets = sourceOffsets(trees, command, root)
         const tree = trees.take(root)
-        return new ParsedProgram(
-          command,
-          root,
-          offsets,
-          () => {
-            tree.delete()
-          },
-          () => {
-            if (disposed) throw new Error('shell parser is disposed')
-            return diagnose(command, root, offsets)
-          },
-        )
+        return new ParsedProgram(command, root, offsets, () => {
+          tree.delete()
+        })
       } finally {
         trees.release()
       }

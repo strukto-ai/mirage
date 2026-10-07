@@ -75,7 +75,6 @@ describe('checkSyntax', () => {
     const line = decodeText(new Uint8Array(raw))
     const found = checkSyntax(line)
     assert(found)
-    expect(line.slice(found.span.start, found.span.end)).toBe(found.offending)
     expect(Array.from(await syntaxErrorResult(found).materializeStderr())).toEqual(stderr)
   })
 

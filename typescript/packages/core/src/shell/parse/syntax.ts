@@ -147,12 +147,7 @@ export function checkSyntax(
     .flatMap((refusal) => refusal.lines)
     .map((line) => `${mirageWording(line)}\n`)
     .join('')
-  return {
-    offending: first.offending,
-    span: { start: first.start, end: first.end },
-    message,
-    status: last.status,
-  }
+  return { offending: first.offending, message, status: last.status }
 }
 
 /** The result of a line that cannot run: its diagnostic and status. */
@@ -210,7 +205,6 @@ function issue(node: TSNodeLike): SyntaxDiagnostic {
   const snippet = node.text.trim()
   return {
     offending: node.text,
-    span: { start: node.startIndex ?? 0, end: node.endIndex ?? node.text.length },
     message:
       snippet.length > 0
         ? `mirage: syntax error near '${snippet}'\n`

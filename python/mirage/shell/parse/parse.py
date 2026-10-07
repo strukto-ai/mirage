@@ -12,11 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
 
 from mirage.shell.bytes import encode_text
 from mirage.shell.parse.assignment import repair_assignments
-from mirage.shell.parse.diagnostics import diagnose
 from mirage.shell.parse.engine import TS_PARSER
 from mirage.shell.parse.heredoc import heredoc_operators
 from mirage.shell.parse.heredoc.lower import (
@@ -158,7 +156,4 @@ def parse_program(command: str) -> ParsedProgram:
         command (str): shell source to parse.
     """
     root = parse(command)
-    offsets = source_offsets(command, root)
-    return ParsedProgram(
-        command, root, offsets, partial(diagnose, command, root, offsets)
-    )
+    return ParsedProgram(command, root, source_offsets(command, root))
