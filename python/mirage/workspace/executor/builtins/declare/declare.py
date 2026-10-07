@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
+from collections.abc import Iterable
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
@@ -425,41 +426,98 @@ async def handle_declare_print(
     )
 
 
+def function_flags(session: SessionState, name: str) -> str:
+    """The letters ``declare`` prints a function with: ``f``, then ``r``
+    when ``readonly -f`` froze it and ``x`` when ``export -f`` marked it.
+
+    Args:
+        session (SessionState): shell session state.
+        name (str): the function's name.
+    """
+    readonly = "r" if name in session.readonly_functions else ""
+    exported = "x" if name in session.exported_functions else ""
+    return f"f{readonly}{exported}"
+
+
+def function_lines(
+    session: SessionState, names: Iterable[str], bodies: bool, marks: bool
+) -> list[str]:
+    """Print functions as ``declare`` lists them.
+
+    A body prints as bash renders it (``stored_function_text``), followed
+    with ``marks`` by a ``declare -fx NAME`` line when the function has
+    an attribute; without bodies each function is its ``declare`` line,
+    or its bare name.
+
+    Args:
+        session (SessionState): shell session state.
+        names (Iterable[str]): defined function names, in order.
+        bodies (bool): print each body (``-f``) rather than a line.
+        marks (bool): print the attribute line (``-p``, a listing).
+    """
+    lines: list[str] = []
+    for name in names:
+        flags = function_flags(session, name)
+        if bodies:
+            lines.append(stored_function_text(name, session.functions[name]))
+            if marks and flags != "f":
+                lines.append(f"declare -{flags} {name}")
+        else:
+            lines.append(f"declare -{flags} {name}" if marks else name)
+    return lines
+
+
 def handle_declare_functions(
     cmd: str,
     session: SessionState,
     flags: set[str],
     names: list[str],
+    plus: frozenset[str] = frozenset(),
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Run the function half of ``declare``: ``-f`` / ``-F`` / ``-rf``.
+    """Run the function half of ``declare``: ``-f`` / ``-F``.
 
-    ``-F NAME`` prints the name; ``-f NAME`` prints the body as bash
-    renders it (``function_text``). A missing name is exit 1 with no
-    message. With ``-r`` the named functions freeze, as ``readonly -f``
-    does. With no names, ``-F`` lists every function as
-    ``declare -f NAME`` and ``-f`` prints every body.
+    ``-r`` freezes the named functions as ``readonly -f`` does, ``-x``
+    marks them for export and ``+x`` takes the mark off, printing
+    nothing. Otherwise ``-F NAME`` prints the name and ``-f NAME`` the
+    body, ``-p`` adding the attribute line (``function_lines``). A
+    missing name is exit 1 with no message. With no names every function
+    lists with its attribute line, as ``declare -f NAME`` under ``-F``
+    and as its body otherwise; ``-r`` or ``-x`` narrows the list to the
+    functions holding either attribute.
 
     Args:
         cmd (str): the builtin's own name for a diagnostic.
         session (SessionState): shell session state.
         flags (set[str]): the declaration's collected flag letters.
         names (list[str]): the function names, empty to list all.
+        plus (frozenset[str]): the attribute letters given with ``+``.
     """
-    if "r" in flags:
-        return readonly_functions(session, names)
-    targets = names or sorted(session.functions)
-    lines: list[str] = []
-    missing = False
-    for name in targets:
-        if name not in session.functions:
-            missing = True
-            continue
-        if "F" in flags:
-            lines.append(name if names else f"declare -f {name}")
-        else:
-            lines.append(stored_function_text(name, session.functions[name]))
+    wanted = (flags | plus) & {"r", "x"}
+    present = [name for name in names if name in session.functions]
+    code = 1 if len(present) < len(names) else 0
+    if names and wanted:
+        for name in present:
+            if "r" in flags:
+                session.readonly_functions.add(name)
+            if "x" in flags:
+                session.exported_functions.add(name)
+            elif "x" in plus:
+                session.exported_functions.discard(name)
+        return (
+            None,
+            IOResult(exit_code=code),
+            ExecutionNode(command=cmd, exit_code=code),
+        )
+    if not names:
+        present = [
+            name
+            for name in sorted(session.functions)
+            if not wanted or wanted & set(function_flags(session, name))
+        ]
+    lines = function_lines(
+        session, present, "F" not in flags, "p" in flags or not names
+    )
     out = encode_text(("\n".join(lines) + "\n") if lines else "")
-    code = 1 if missing else 0
     return (
         out,
         IOResult(exit_code=code),
@@ -467,37 +525,48 @@ def handle_declare_functions(
     )
 
 
-def readonly_functions(
-    session: SessionState, names: list[str]
+def mark_functions(
+    cmd: str,
+    session: SessionState,
+    marked: set[str],
+    names: list[str],
+    on: bool,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Run ``readonly -f``: freeze the named functions, or list the frozen.
+    """Run ``readonly -f`` or ``export -f``: mark functions, or list them.
+
+    A name that is not a function is ``not a function``, exit 1, and the
+    other operands are still marked (or, with ``on`` False, unmarked).
+    With no names the marked functions print as bodies, each followed by
+    its ``declare`` line.
 
     Args:
+        cmd (str): the builtin's own name for a diagnostic.
         session (SessionState): shell session state.
+        marked (set[str]): the session's set of marked functions.
         names (list[str]): the function names, empty to list.
+        on (bool): set the mark rather than clear it.
     """
     if not names:
-        lines = [
-            f"declare -fr {name}"
-            for name in sorted(session.readonly_functions)
-            if name in session.functions
-        ]
+        listed = sorted(name for name in marked if name in session.functions)
+        lines = function_lines(session, listed, True, True)
         out = encode_text(("\n".join(lines) + "\n") if lines else "")
-        return out, IOResult(), ExecutionNode(command="readonly", exit_code=0)
+        return out, IOResult(), ExecutionNode(command=cmd, exit_code=0)
     errors: list[str] = []
     for name in names:
         if name not in session.functions:
-            errors.append(f"bash: readonly: {name}: not a function")
-            continue
-        session.readonly_functions.add(name)
+            errors.append(f"bash: {cmd}: {name}: not a function")
+        elif on:
+            marked.add(name)
+        else:
+            marked.discard(name)
     if errors:
         err = encode_text("\n".join(errors) + "\n")
         return (
             None,
             IOResult(exit_code=1, stderr=err),
-            ExecutionNode(command="readonly", exit_code=1, stderr=err),
+            ExecutionNode(command=cmd, exit_code=1, stderr=err),
         )
-    return None, IOResult(), ExecutionNode(command="readonly", exit_code=0)
+    return None, IOResult(), ExecutionNode(command=cmd, exit_code=0)
 
 
 def note_local_array(session: SessionState, name: str) -> bool:

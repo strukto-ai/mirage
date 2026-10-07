@@ -418,10 +418,10 @@ export async function executeDeclaration(
     (flagChars.has('f') || flagChars.has('F')) &&
     (keyword === NT.LOCAL || keyword === 'declare' || keyword === 'typeset')
   ) {
-    // `-f`/`-F` select functions, not variables: `-rf` freezes, `-f
-    // NAME` prints the body, `-F NAME` prints the name, and a missing
-    // name is exit 1 without a word.
-    return handleDeclareFunctions(cmdWord, session, flagChars, assignments, parser)
+    // `-f`/`-F` select functions, not variables: `-rf` freezes, `-xf`
+    // exports, `-f NAME` prints the body, `-F NAME` prints the name, and
+    // a missing name is exit 1 without a word.
+    return handleDeclareFunctions(cmdWord, session, flagChars, assignments, plusChars, parser)
   }
   const isReadonly = keyword === 'readonly' || flagChars.has('r')
   // `-l` and `-u` cannot both hold; a cluster naming both sets neither
@@ -497,6 +497,7 @@ export async function executeDeclaration(
             stored,
             flagChars.has('A'),
             shaping,
+            parser,
           )
         : await handleReadonly(
             assignments,
@@ -568,6 +569,7 @@ export async function executeDeclaration(
     session,
     sessionView(session, registry.policies, context.frame.diagnostics),
     staged,
+    parser,
   )
   return mergeConversionErrors(exportResult, conversionErrors)
 }

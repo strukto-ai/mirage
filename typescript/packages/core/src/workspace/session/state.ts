@@ -67,6 +67,11 @@ import type { SessionState } from './session.ts'
  * `export Y=world` is present. An unset name carrying the attribute
  * (`export Z`) is absent too, which falls out of the value check
  * rather than needing its own arm.
+ *
+ * Diverges from bash on one point: bash also carries each function
+ * `export -f` marked, as a `BASH_FUNC_NAME%%` entry. mirage hands those to
+ * a nested shell directly (`SessionState.newShell`), so neither `env` nor a
+ * runtime lists them.
  */
 export function envSnapshot(session: SessionState): Record<string, string> {
   const out = ownRecord<string>()

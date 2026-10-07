@@ -28,8 +28,8 @@ from mirage.workspace.executor.builtins.declare.declare import (
     bash_declare_quote,
     identifier_failure,
     identifier_refusal,
+    mark_functions,
     premark,
-    readonly_functions,
     split_decl_flags,
     store_staged_arrays,
 )
@@ -112,12 +112,9 @@ async def handle_readonly(
     (or ``declare -ar`` for arrays). Invalid options fail with status 2.
 
     ``-f`` freezes *functions*: a frozen one refuses redefinition and
-    ``unset -f`` with its own message, exit 1, and the old body stays.
-    A name that is not a function is ``not a function``, exit 1, and
-    the other operands still freeze. With no names, ``-f`` lists the
-    frozen functions as ``declare -fr NAME``; GNU prints each body first
-    through its own pretty-printer, which mirage does not carry, so the
-    body line is the one deliberate omission.
+    ``unset -f`` with its own message, exit 1, and the old body stays
+    (``mark_functions``). With no names, ``-f`` lists the frozen
+    functions, each body followed by its ``declare -fr NAME`` line.
     """
     flags, names, bad = split_decl_flags(assignments, READONLY_FLAGS)
     if bad is not None:
@@ -130,7 +127,9 @@ async def handle_readonly(
             ExecutionNode(command="readonly", exit_code=2, stderr=err),
         )
     if "f" in flags:
-        return readonly_functions(session, names)
+        return mark_functions(
+            "readonly", session, session.readonly_functions, names, on=True
+        )
     if not names and not arrays:
         lines = _readonly_lines(session, flags)
         out = encode_text(("\n".join(lines) + "\n") if lines else "")

@@ -16,10 +16,12 @@ async def test_unset_f_removes_function_only():
     session = make_session()
     session.functions["fn"] = "fn() { :; }"
     session._function_sites["fn"] = FunctionSite("fn() { :; }", (1, 0), None)
+    session.exported_functions.add("fn")
     seed_var(session, "fn", "keepvar")
     await handle_unset(["-f", "fn"], session, state=session_view(session))
     assert "fn" not in session.functions
     assert "fn" not in session._function_sites
+    assert "fn" not in session.exported_functions
     assert session.env["fn"] == "keepvar"
 
 
@@ -45,9 +47,11 @@ async def test_unset_bare_prefers_variable_then_function():
     # No variable of this name: the function is removed instead.
     session.functions["b"] = "b() { :; }"
     session._function_sites["b"] = FunctionSite("b() { :; }", (1, 0), None)
+    session.exported_functions.add("b")
     await handle_unset(["b"], session, state=session_view(session))
     assert "b" not in session.functions
     assert "b" not in session._function_sites
+    assert "b" not in session.exported_functions
 
 
 @pytest.mark.asyncio

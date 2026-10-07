@@ -180,6 +180,7 @@ async def test_manager_hydrates_from_store():
             "mount_modes": {"/data": "read"},
             "functions": {"f": "f() { echo persisted; }"},
             "readonly_functions": ["f"],
+            "exported_functions": ["f"],
         },
     )
     mgr = SessionManager("default", store=store)
@@ -190,6 +191,7 @@ async def test_manager_hydrates_from_store():
     assert s.mount_modes == {"/data": MountMode.READ}
     assert s.functions == {"f": "f() { echo persisted; }"}
     assert s.readonly_functions == {"f"}
+    assert s.exported_functions == {"f"}
 
 
 @pytest.mark.asyncio
@@ -214,12 +216,14 @@ async def test_manager_default_adopts_stored_fields():
             "env": {"A": "1"},
             "functions": {"f": "f() { :; }"},
             "readonly_functions": ["f"],
+            "exported_functions": ["f"],
         },
     )
     mgr = SessionManager("default", store=store)
     await mgr.ensure_loaded()
     assert mgr.get("default").functions == {"f": "f() { :; }"}
     assert mgr.get("default").readonly_functions == {"f"}
+    assert mgr.get("default").exported_functions == {"f"}
     assert mgr.cwd == "/w"
     assert mgr.env == {
         "A": "1",

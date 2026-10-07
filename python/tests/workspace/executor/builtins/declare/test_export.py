@@ -163,3 +163,23 @@ async def test_export_p_terminator_via_workspace():
     io = await ws.shell("export ZEP5=v5; export -p -- | grep ZEP5")
     assert io.exit_code == 0
     assert (io.stdout or b"") == b'declare -x ZEP5="v5"\n'
+
+
+@pytest.mark.asyncio
+async def test_export_f_marks_lists_and_refuses_functions():
+    session = SessionState(
+        session_id="s1", functions={"f": "f() { :; }", "g": "g() { :; }"}
+    )
+    _, io, _ = await handle_export(["-f", "f", "nosuch", "x=1"], session)
+    assert io.exit_code == 1
+    assert io.stderr == (
+        b"bash: export: nosuch: not a function\n"
+        b"bash: export: x=1: not a function\n"
+    )
+    assert session.exported_functions == {"f"}
+    assert "f" not in session.vars and "x" not in session.vars
+    out, io, _ = await handle_export(["-f"], session)
+    assert await materialize(out) == b"f () \n{ \n    :\n}\ndeclare -fx f\n"
+    _, io, _ = await handle_export(["-nf", "f"], session)
+    assert io.exit_code == 0
+    assert session.exported_functions == set()

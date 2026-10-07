@@ -23,14 +23,13 @@ from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
 from mirage.shell.console import JobConsole, JobOutput
-from mirage.shell.constants import IFS_DEFAULT
 from mirage.shell.job_table import JobTable
 from mirage.shell.options import parse_option_word
 from mirage.workspace.evaluation import (
     EvaluationContext,
-    child_context,
     reset_current_evaluation,
     set_current_evaluation,
+    shell_context,
 )
 from mirage.workspace.executor.builtins.script.constants import (
     BASH_LONG_OPTIONS,
@@ -43,7 +42,6 @@ from mirage.workspace.executor.builtins.script.script import (
 from mirage.workspace.executor.builtins.script.types import BashArgs
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.traps import clear_exit_trap, finish_shell
-from mirage.workspace.session.state import seed_var
 from mirage.workspace.types import ExecutionNode
 
 
@@ -115,12 +113,13 @@ async def handle_bash(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a nested shell: inline text from ``-c``, or a script file.
 
-    A nested shell is a child shell, so it runs on a subshell of the
-    session and leaves the caller's state alone: ``bash -c 'cd /x'``
-    leaves the caller where it was, as it does in bash, where the nested
-    shell is a separate process. `source` is the opposite case and
-    deliberately runs on the caller's session, because a sourced file is
-    the caller.
+    A nested shell is a program of its own, so it runs on a new shell
+    started from the session's environment (``SessionState.new_shell``)
+    and leaves the caller's state alone: ``bash -c 'cd /x'`` leaves the
+    caller where it was, and ``x=1; bash -c 'echo $x'`` prints an empty
+    line, as in bash, where the nested shell is a separate process.
+    `source` is the opposite case and deliberately runs on the caller's
+    session, because a sourced file is the caller.
 
     Args:
         dispatch (DispatchFn): op dispatcher, used to read a script file.
@@ -168,22 +167,13 @@ async def handle_bash(
             stdin = None
     if script is None:
         return None, IOResult(), ExecutionNode(command=name, exit_code=0)
-    context = child_context(context)
+    context = shell_context(context)
     session = context.session
     child_token = set_current_evaluation(context)
     clear_exit_trap(session)
     session.job_output = JobOutput(session.job_output or session.tty.jobs)
     session.positional_args = positional
     session.script_name = script_name
-    # bash starts every shell with the default IFS and never reads one
-    # from its environment, so `IFS=, bash -c ...` splits on blanks.
-    seed_var(session, "IFS", IFS_DEFAULT)
-    # A child shell is outside every function and `source` its caller is
-    # inside: it runs on a call stack of its own, and `FUNCNAME` is empty.
-    session.function_names = ()
-    session._local_vars = None
-    session._local_frames = []
-    session._local_random = []
     for option, enable in parsed.settings:
         session.shell_options[option] = enable
     # A nested shell is a program of its own: the builtins it runs are

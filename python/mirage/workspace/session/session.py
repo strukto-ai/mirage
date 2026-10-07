@@ -287,6 +287,10 @@ class SessionState:
     # two different frozen things in bash, and each refuses in its own
     # voice.
     readonly_functions: set[str] = field(default_factory=set)
+    # The functions `export -f` marked, which a nested shell inherits
+    # (`new_shell`). A redefinition keeps the mark and an unset drops it,
+    # as bash's does.
+    exported_functions: set[str] = field(default_factory=set)
     last_exit_code: int = 0
     # `${PIPESTATUS[@]}`: the exit status of every segment of the last
     # pipeline, where a simple command is a one-segment pipeline. Written
@@ -517,6 +521,8 @@ class SessionState:
             data["functions"] = dict(self.functions)
         if self.readonly_functions:
             data["readonly_functions"] = sorted(self.readonly_functions)
+        if self.exported_functions:
+            data["exported_functions"] = sorted(self.exported_functions)
         if self.mount_modes is not None:
             data["mount_modes"] = {
                 prefix: mode.value for prefix, mode in self.mount_modes.items()
@@ -600,11 +606,9 @@ class SessionState:
                     ),
                 )
             data["vars"] = out_vars
-        if "readonly_functions" in data:
-            data = {
-                **data,
-                "readonly_functions": set(data["readonly_functions"]),
-            }
+        for marks in ("readonly_functions", "exported_functions"):
+            if marks in data:
+                data = {**data, marks: set(data[marks])}
         modes = data.get("mount_modes")
         paths = data.get("hidden_paths")
         shown = data.get("shown_paths")
@@ -818,10 +822,10 @@ class SessionState:
         """A child shell of this session: a fork that reads on from here.
 
         ``fork`` copies what a session keeps; a child shell (a command
-        substitution, a subshell, a nested ``bash``) also inherits the
-        reader's position, the aliases being expanded and the local frames,
-        and reseeds ``$RANDOM`` on its first draw instead of replaying
-        this session's seed.
+        substitution, a subshell) also inherits the reader's position, the
+        aliases being expanded and the local frames, and reseeds
+        ``$RANDOM`` on its first draw instead of replaying this session's
+        seed.
 
         Args:
             None
@@ -848,3 +852,66 @@ class SessionState:
                 else None
             )
         return child
+
+    def new_shell(self) -> "SessionState":
+        """A new shell started from this session, as a nested ``bash`` is.
+
+        bash runs a nested shell as a program of its own, which inherits
+        the working directory, the umask, the open files and the
+        environment: the exported variables, as plain exported strings
+        (no array, no other attribute), and the functions ``export -f``
+        marked. The rest starts as a fresh shell's does: the other
+        variables and functions, the aliases, the ``set`` and ``shopt``
+        options, ``$?``, ``$!``, ``$RANDOM``, the call stack and the
+        startup variables, IFS included, which bash never reads from its
+        environment. A managed variable not yet fetched crosses as its
+        pointer, which the nested shell fetches through.
+
+        Args:
+            None
+        """
+        functions = {
+            name: source
+            for name, source in self.functions.items()
+            if name in self.exported_functions
+        }
+        child = self.fork(
+            vars={
+                name: ShellVar(
+                    var.value, frozenset({VarAttr.EXPORT}), var.managed
+                )
+                for name, var in self.vars.items()
+                if VarAttr.EXPORT in var.attrs
+                and name != "IFS"
+                and (isinstance(var.value, str) or var.managed is not None)
+            },
+            functions=functions,
+            exported_functions=set(functions),
+            readonly_functions=set(),
+            _function_sites={
+                name: site
+                for name, site in self._function_sites.items()
+                if name in functions
+            },
+            aliases={},
+            _alias_marks={},
+            shell_options={},
+            shopts={},
+            last_exit_code=0,
+            pipe_status=(),
+            last_bg_job_id=None,
+            function_names=(),
+            _random_state=None,
+        )
+        child._random_seed = None
+        return child
+
+    def remove_function(self, name: str) -> None:
+        """Remove a function with its definition site and export mark.
+
+        Args:
+            name (str): the function's name.
+        """
+        self.functions.pop(name, None)
+        self._function_sites.pop(name, None)
+        self.exported_functions.discard(name)

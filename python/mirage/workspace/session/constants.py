@@ -30,6 +30,7 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "created_at",
     "functions",
     "readonly_functions",
+    "exported_functions",
     "last_exit_code",
     "pipe_status",
     "function_names",

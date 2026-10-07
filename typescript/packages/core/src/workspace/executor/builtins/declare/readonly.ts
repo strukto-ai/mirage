@@ -30,13 +30,14 @@ import {
   bashDeclareQuote,
   identifierFailure,
   identifierRefusal,
+  markFunctions,
   premark,
-  readonlyFunctions,
   splitDeclFlags,
   storeStagedArrays,
 } from './declare.ts'
 import type { Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import type { ParseScope } from '../../../../shell/parse/scope.ts'
 
 function readonlyLines(session: SessionState, flags: Set<string>): string[] {
   // -a narrows to indexed arrays and -A to associative ones, as bash
@@ -82,7 +83,8 @@ function readonlyLines(session: SessionState, flags: Set<string>): string[] {
  * Mark names readonly, or print them (`readonly -p` / bare `readonly`).
  *
  * With no name operands, prints every readonly name as `declare -r` (or
- * `declare -ar` for arrays). Invalid options fail with status 2.
+ * `declare -ar` for arrays). Invalid options fail with status 2. `-f`
+ * freezes functions instead, or lists the frozen (`markFunctions`).
  */
 export async function handleReadonly(
   assignments: string[],
@@ -92,6 +94,7 @@ export async function handleReadonly(
   stored: string[] | null = null,
   assoc = false,
   shaping: ReadonlySet<VarAttr> = new Set(),
+  parser?: ParseScope,
 ): Promise<Result> {
   const { flags, names, bad } = splitDeclFlags(assignments, READONLY_FLAGS)
   if (bad !== null) {
@@ -102,7 +105,8 @@ export async function handleReadonly(
       new ExecutionNode({ command: 'readonly', exitCode: 2, stderr: err }),
     ]
   }
-  if (flags.has('f')) return readonlyFunctions(session, names)
+  if (flags.has('f'))
+    return markFunctions('readonly', session, session.readonlyFunctions, names, true, parser)
   if (names.length === 0 && (arrays === null || arrays.length === 0)) {
     const lines = readonlyLines(session, flags)
     const out = encodeText(lines.length > 0 ? `${lines.join('\n')}\n` : '')

@@ -619,6 +619,7 @@ async function restoreSessions(
     session.vars = fields.vars
     session.functions = fields.functions
     session.readonlyFunctions = fields.readonlyFunctions
+    session.exportedFunctions = fields.exportedFunctions
     session.mountModes = fields.mountModes
     restored.push(session)
   }

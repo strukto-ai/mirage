@@ -26,18 +26,18 @@ import {
   declareLine,
   identifierFailure,
   identifierRefusal,
+  markFunctions,
   splitDeclFlags,
   storeStagedArrays,
 } from './declare.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { sessionView } from '../../../session/state.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import type { ParseScope } from '../../../../shell/parse/scope.ts'
 
-function exportLines(session: SessionState, flags: Set<string>): string[] {
+function exportLines(session: SessionState): string[] {
   // The exported set, not every shell variable: `X=hello` is absent and
-  // `export Y=world` is present, which is what bash prints. -f selects
-  // shell functions; mirage tracks no export attribute on functions, so
-  // that form lists nothing, as bash does with none exported.
+  // `export Y=world` is present, which is what bash prints.
   //
   // Rendering is `declareLine`'s, not a second spelling of it: GNU's
   // `export -p` prints the *whole* cluster, so a readonly exported
@@ -45,17 +45,21 @@ function exportLines(session: SessionState, flags: Set<string>): string[] {
   // `declare -ax AR=([0]="a")`. Writing `declare -x` here by hand
   // printed neither, and rendered an exported array as a bare
   // `declare -x AR` because it looked the value up among the scalars.
-  if (flags.has('f')) return []
   return exportedNames(session)
     .map((name) => declareLine(session, name))
     .filter((line): line is string => line !== null)
 }
 
+/**
+ * Export names, or print them (`export -p` / bare `export`). `-f` marks
+ * functions instead, for a nested shell to inherit (`markFunctions`).
+ */
 export async function handleExport(
   assignments: string[],
   session: SessionState,
   state: SessionView | null = null,
   arrays: { name: string; append: boolean; items: string[] }[] | null = null,
+  parser?: ParseScope,
 ): Promise<Result> {
   const { flags, names, bad } = splitDeclFlags(assignments, EXPORT_FLAGS)
   if (bad !== null) {
@@ -66,16 +70,17 @@ export async function handleExport(
       new ExecutionNode({ command: 'export', exitCode: 2, stderr: err }),
     ]
   }
+  // -n is the off direction, and applies to every spelling, since
+  // `export -n K=v` assigns and unexports.
+  const on = !flags.has('n')
+  if (flags.has('f'))
+    return markFunctions('export', session, session.exportedFunctions, names, on, parser)
   if (names.length === 0 && (arrays === null || arrays.length === 0)) {
-    const lines = exportLines(session, flags)
+    const lines = exportLines(session)
     const out = encodeText(lines.length > 0 ? `${lines.join('\n')}\n` : '')
     return [out, new IOResult(), new ExecutionNode({ command: 'export', exitCode: 0 })]
   }
-  // -f is accepted and marks nothing: mirage carries no export attribute
-  // on functions. -n is the off direction, and applies to both spellings,
-  // since `export -n K=v` assigns and unexports.
   const view = requireView(state)
-  const on = !flags.has('n')
   if (arrays !== null && arrays.length > 0) {
     // `export ARR=(a b)` marks the array as surely as it marks a scalar:
     // GNU prints `declare -ax ARR=([0]="a" [1]="b")`.
@@ -135,5 +140,7 @@ export async function exportBuiltin(call: BuiltinCall): Promise<Result> {
     [...call.argv.args],
     call.context.session,
     sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
+    null,
+    call.parser,
   )
 }

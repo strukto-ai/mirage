@@ -358,80 +358,133 @@ export function readonlyFunctionUnset(name: string): Result {
 }
 
 /**
- * Run `readonly -f`: freeze the named functions, or list the frozen.
- *
- * A frozen function refuses redefinition and `unset -f` with its own
- * message, exit 1, and the old body stays. A name that is not a
- * function is `not a function`, exit 1, and the other operands still
- * freeze. With no names, lists the frozen functions as `declare -fr
- * NAME`; GNU prints each body first through its own pretty-printer,
- * which mirage does not carry, so the body line is the one deliberate
- * omission.
+ * The letters `declare` prints a function with: `f`, then `r` when
+ * `readonly -f` froze it and `x` when `export -f` marked it.
  */
-export function readonlyFunctions(session: SessionState, names: readonly string[]): Result {
-  if (names.length === 0) {
-    const lines = [...session.readonlyFunctions]
-      .filter((name) => name in session.functions)
-      .sort(compareCodePoints)
-      .map((name) => `declare -fr ${name}`)
-    const out = encodeText(lines.length > 0 ? `${lines.join('\n')}\n` : '')
-    return [out, new IOResult(), new ExecutionNode({ command: 'readonly', exitCode: 0 })]
-  }
-  const errors: string[] = []
-  for (const name of names) {
-    const source = session.functions[name]
-    if (source === undefined) {
-      errors.push(`bash: readonly: ${name}: not a function`)
-      continue
-    }
-    session.readonlyFunctions.add(name)
-  }
-  if (errors.length > 0) {
-    const err = encodeText(`${errors.join('\n')}\n`)
-    return [
-      null,
-      new IOResult({ exitCode: 1, stderr: err }),
-      new ExecutionNode({ command: 'readonly', exitCode: 1, stderr: err }),
-    ]
-  }
-  return [null, new IOResult(), new ExecutionNode({ command: 'readonly', exitCode: 0 })]
+export function functionFlags(session: SessionState, name: string): string {
+  const readonly = session.readonlyFunctions.has(name) ? 'r' : ''
+  const exported = session.exportedFunctions.has(name) ? 'x' : ''
+  return `f${readonly}${exported}`
 }
 
 /**
- * Run the function half of `declare`: `-f` / `-F` / `-rf`.
+ * Print functions as `declare` lists them. A body prints as bash renders it
+ * (`storedFunctionText`), followed with `marks` by a `declare -fx NAME` line
+ * when the function has an attribute; without bodies each function is its
+ * `declare` line, or its bare name.
+ */
+export function functionLines(
+  session: SessionState,
+  names: readonly string[],
+  bodies: boolean,
+  marks: boolean,
+  parser?: ParseScope,
+): string[] {
+  const lines: string[] = []
+  for (const name of names) {
+    const flags = functionFlags(session, name)
+    if (bodies) {
+      lines.push(storedFunctionText(name, session.functions[name] ?? '', parser))
+      if (marks && flags !== 'f') lines.push(`declare -${flags} ${name}`)
+    } else {
+      lines.push(marks ? `declare -${flags} ${name}` : name)
+    }
+  }
+  return lines
+}
+
+/**
+ * Run the function half of `declare`: `-f` / `-F`.
  *
- * `-F NAME` prints the name; `-f NAME` prints the body as bash renders it
- * (`functionText`). A missing name is exit 1 with no message. With `-r` the
- * named functions freeze, as `readonly -f` does. With no names, `-F` lists
- * every function as `declare -f NAME` and `-f` prints every body.
+ * `-r` freezes the named functions as `readonly -f` does, `-x` marks them
+ * for export and `+x` takes the mark off, printing nothing. Otherwise `-F
+ * NAME` prints the name and `-f NAME` the body, `-p` adding the attribute
+ * line (`functionLines`). A missing name is exit 1 with no message. With
+ * no names every function lists with its attribute line, as `declare -f
+ * NAME` under `-F` and as its body otherwise; `-r` or `-x` narrows the list
+ * to the functions holding either attribute.
  */
 export function handleDeclareFunctions(
   cmd: string,
   session: SessionState,
   flags: ReadonlySet<string>,
   names: readonly string[],
+  plus: ReadonlySet<string> = new Set(),
   parser?: ParseScope,
 ): Result {
-  if (flags.has('r')) return readonlyFunctions(session, names)
-  const targets = names.length > 0 ? names : Object.keys(session.functions).sort(compareCodePoints)
-  const lines: string[] = []
-  let missing = false
-  for (const name of targets) {
-    const source = session.functions[name]
-    if (source === undefined) {
-      missing = true
-      continue
+  const wanted = ['r', 'x'].filter((c) => flags.has(c) || plus.has(c))
+  let present = names.filter((name) => name in session.functions)
+  const code = present.length < names.length ? 1 : 0
+  if (names.length > 0 && wanted.length > 0) {
+    for (const name of present) {
+      if (flags.has('r')) session.readonlyFunctions.add(name)
+      if (flags.has('x')) session.exportedFunctions.add(name)
+      else if (plus.has('x')) session.exportedFunctions.delete(name)
     }
-    if (flags.has('F')) lines.push(names.length > 0 ? name : `declare -f ${name}`)
-    else lines.push(storedFunctionText(name, source, parser))
+    return [
+      null,
+      new IOResult({ exitCode: code }),
+      new ExecutionNode({ command: cmd, exitCode: code }),
+    ]
   }
+  if (names.length === 0) {
+    present = Object.keys(session.functions)
+      .sort(compareCodePoints)
+      .filter(
+        (name) =>
+          wanted.length === 0 || wanted.some((c) => functionFlags(session, name).includes(c)),
+      )
+  }
+  const lines = functionLines(
+    session,
+    present,
+    !flags.has('F'),
+    flags.has('p') || names.length === 0,
+    parser,
+  )
   const out = encodeText(lines.length > 0 ? `${lines.join('\n')}\n` : '')
-  const code = missing ? 1 : 0
   return [
     out,
     new IOResult({ exitCode: code }),
     new ExecutionNode({ command: cmd, exitCode: code }),
   ]
+}
+
+/**
+ * Run `readonly -f` or `export -f`: mark functions, or list them. A name
+ * that is not a function is `not a function`, exit 1, and the other operands
+ * are still marked (or, with `on` false, unmarked). With no names the marked
+ * functions print as bodies, each followed by its `declare` line.
+ */
+export function markFunctions(
+  cmd: string,
+  session: SessionState,
+  marked: Set<string>,
+  names: readonly string[],
+  on: boolean,
+  parser?: ParseScope,
+): Result {
+  if (names.length === 0) {
+    const listed = [...marked].filter((name) => name in session.functions).sort(compareCodePoints)
+    const lines = functionLines(session, listed, true, true, parser)
+    const out = encodeText(lines.length > 0 ? `${lines.join('\n')}\n` : '')
+    return [out, new IOResult(), new ExecutionNode({ command: cmd, exitCode: 0 })]
+  }
+  const errors: string[] = []
+  for (const name of names) {
+    if (!(name in session.functions)) errors.push(`bash: ${cmd}: ${name}: not a function`)
+    else if (on) marked.add(name)
+    else marked.delete(name)
+  }
+  if (errors.length > 0) {
+    const err = encodeText(`${errors.join('\n')}\n`)
+    return [
+      null,
+      new IOResult({ exitCode: 1, stderr: err }),
+      new ExecutionNode({ command: cmd, exitCode: 1, stderr: err }),
+    ]
+  }
+  return [null, new IOResult(), new ExecutionNode({ command: cmd, exitCode: 0 })]
 }
 
 /**

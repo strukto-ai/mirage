@@ -85,3 +85,15 @@ def child_context(context: EvaluationContext) -> EvaluationContext:
     return EvaluationContext(
         context.session.subshell(), context.frame.fork(), context
     )
+
+
+def shell_context(context: EvaluationContext) -> EvaluationContext:
+    """A nested shell's evaluation: a new shell on the session's
+    environment and a new frame.
+
+    Args:
+        context (EvaluationContext): the calling shell's evaluation.
+    """
+    return EvaluationContext(
+        context.session.new_shell(), context.frame.fork(), context
+    )

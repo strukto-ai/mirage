@@ -199,8 +199,7 @@ async def handle_unset(
                     IOResult(exit_code=1, stderr=err),
                     ExecutionNode(command="unset", exit_code=1, stderr=err),
                 )
-            session.functions.pop(name, None)
-            session._function_sites.pop(name, None)
+            session.remove_function(name)
             continue
         target = TARGET_RE.match(name)
         subscript = target.group(2) if target is not None else None
@@ -263,8 +262,7 @@ async def handle_unset(
                     IOResult(exit_code=1, stderr=err),
                     ExecutionNode(command="unset", exit_code=1, stderr=err),
                 )
-            session.functions.pop(name, None)
-            session._function_sites.pop(name, None)
+            session.remove_function(name)
     return None, IOResult(), ExecutionNode(command="unset", exit_code=0)
 
 

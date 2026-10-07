@@ -44,3 +44,8 @@ export function getCurrentEvaluation(): EvaluationContext | null {
 export function childContext(context: EvaluationContext): EvaluationContext {
   return new EvaluationContext(context.session.subshell(), context.frame.fork(), context)
 }
+
+/** A nested shell's evaluation: a new shell on the session's environment and a new frame. */
+export function shellContext(context: EvaluationContext): EvaluationContext {
+  return new EvaluationContext(context.session.newShell(), context.frame.fork(), context)
+}

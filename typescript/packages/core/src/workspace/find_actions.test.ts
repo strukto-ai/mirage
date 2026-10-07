@@ -385,7 +385,7 @@ describe('find -exec isolation', () => {
         // The mutating programs are `sh -c` lines: GNU's -exec sees no
         // shell function, so a function head would not run at all.
         await ws.shell(
-          'mkdir -p /w/d; touch /w/d/a.txt /w/d/b.txt; cd /w; KEEP=parent; set -- original',
+          'mkdir -p /w/d; touch /w/d/a.txt /w/d/b.txt; cd /w; export KEEP=parent; set -- original',
         )
         const io = await ws.shell(
           `find d -name '*.txt' -exec ${action} ${terminator}; ` +

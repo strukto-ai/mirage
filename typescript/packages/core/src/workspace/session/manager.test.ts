@@ -131,6 +131,7 @@ describe('SessionManager with a SessionStore', () => {
       mount_modes: { '/data': 'read' },
       functions: { f: 'f() { echo persisted; }' },
       readonly_functions: ['f'],
+      exported_functions: ['f'],
     })
     const m = new SessionManager('def', store)
     await m.ensureLoaded()
@@ -140,6 +141,7 @@ describe('SessionManager with a SessionStore', () => {
     expect(s.mountModes?.get('/data')).toBe(MountMode.READ)
     expect(s.functions).toEqual({ f: 'f() { echo persisted; }' })
     expect(s.readonlyFunctions).toEqual(new Set(['f']))
+    expect(s.exportedFunctions).toEqual(new Set(['f']))
   })
 
   it('locally created sessions win a hydration conflict', async () => {
@@ -160,11 +162,13 @@ describe('SessionManager with a SessionStore', () => {
       env: { A: '1' },
       functions: { f: 'f() { :; }' },
       readonly_functions: ['f'],
+      exported_functions: ['f'],
     })
     const m = new SessionManager('def', store)
     await m.ensureLoaded()
     expect(m.get('def').functions).toEqual({ f: 'f() { :; }' })
     expect(m.get('def').readonlyFunctions).toEqual(new Set(['f']))
+    expect(m.get('def').exportedFunctions).toEqual(new Set(['f']))
     expect(m.cwd).toBe('/w')
     expect(m.env).toEqual({ A: '1', PWD: '/w', PATH: '/usr/bin', IFS: ' \t\n' })
   })

@@ -12,17 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type EvaluationContext, childContext } from '../../../evaluation.ts'
+import { type EvaluationContext, shellContext } from '../../../evaluation.ts'
 
 import { runAsShell } from '../../../../context/session_context.ts'
 import { materialize, IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { type JobConsole, JobOutput } from '../../../../shell/console/index.ts'
-import { IFS_DEFAULT } from '../../../../shell/constants.ts'
 import type { JobTable } from '../../../../shell/job_table/index.ts'
 import { parseOptionWord } from '../../../../shell/options.ts'
 
-import { seedVar } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { BASH_LONG_OPTIONS, BASH_START_FLAGS } from './constants.ts'
@@ -111,11 +109,13 @@ export function parseBashArgs(args: string[]): BashArgs {
  * `name` is the head word (`bash` or `sh`). bash reports itself by
  * `argv[0]`, so the diagnostics follow the spelling the caller used.
  *
- * A nested shell is a child shell, so it runs on a subshell of the session
- * and leaves the caller's state alone: `bash -c 'cd /x'` leaves the caller
- * where it was, as it does in bash, where the nested shell is a separate
- * process. `handleSource` is the opposite case and deliberately runs on the
- * caller's session, because a sourced file is the caller.
+ * A nested shell is a program of its own, so it runs on a new shell started
+ * from the session's environment (`SessionState.newShell`) and leaves the
+ * caller's state alone: `bash -c 'cd /x'` leaves the caller where it was,
+ * and `x=1; bash -c 'echo $x'` prints an empty line, as in bash, where the
+ * nested shell is a separate process. `handleSource` is the opposite case
+ * and deliberately runs on the caller's session, because a sourced file is
+ * the caller.
  */
 export async function handleBash(
   dispatch: DispatchFn,
@@ -159,21 +159,12 @@ export async function handleBash(
   if (script === null) {
     return [null, new IOResult(), new ExecutionNode({ command: name, exitCode: 0 })]
   }
-  context = childContext(context)
+  context = shellContext(context)
   session = context.session
   clearExitTrap(session)
   session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
   session.positionalArgs = positional
   session.scriptName = scriptName
-  // bash starts every shell with the default IFS and never reads one from
-  // its environment, so `IFS=, bash -c ...` splits on blanks.
-  seedVar(session, 'IFS', IFS_DEFAULT)
-  // A child shell is outside every function and `source` its caller is
-  // inside: it runs on a call stack of its own, and `FUNCNAME` is empty.
-  session.functionNames = []
-  session.localVars = null
-  session.localFrames = []
-  session.localRandom = []
   for (const [option, enable] of parsed.settings) session.shellOptions[option] = enable
   // A nested shell is its own process, with its own jobs: its `jobs` and
   // `wait` see only them, its EXIT action's included, and they are not its

@@ -463,10 +463,10 @@ async def execute_declaration(
         "typeset",
     ):
         # `-f`/`-F` select functions, not variables: `-rf` freezes,
-        # `-f NAME` prints the body, `-F NAME` prints the name, and
-        # a missing name is exit 1 without a word.
+        # `-xf` exports, `-f NAME` prints the body, `-F NAME` prints the
+        # name, and a missing name is exit 1 without a word.
         return handle_declare_functions(
-            cmd_word, session, flag_chars, assignments
+            cmd_word, session, flag_chars, assignments, frozenset(plus_chars)
         )
     is_readonly = keyword == "readonly" or "r" in flag_chars
     # `-l` and `-u` cannot both hold; a cluster naming both sets

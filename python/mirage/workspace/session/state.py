@@ -74,6 +74,11 @@ def env_snapshot(session: SessionState) -> dict[str, str]:
     name carrying the attribute (``export Z``) is absent too, which
     falls out of the value check rather than needing its own arm.
 
+    Diverges from bash on one point: bash also carries each function
+    ``export -f`` marked, as a ``BASH_FUNC_NAME%%`` entry. mirage hands
+    those to a nested shell directly (``SessionState.new_shell``), so
+    neither ``env`` nor a runtime lists them.
+
     Args:
         session (SessionState): the session whose env to copy.
     """

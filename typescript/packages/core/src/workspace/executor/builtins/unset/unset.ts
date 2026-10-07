@@ -170,9 +170,7 @@ export async function handleUnset(
     }
     if (mode === 'f') {
       if (session.readonlyFunctions.has(name)) return readonlyFunctionUnset(name)
-      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-      delete session.functions[name]
-      session.functionSites.delete(name)
+      session.removeFunction(name)
       continue
     }
     const match = TARGET_RE.exec(name)
@@ -225,9 +223,7 @@ export async function handleUnset(
     }
     if (mode === 'auto' && !existed && name in session.functions) {
       if (session.readonlyFunctions.has(name)) return readonlyFunctionUnset(name)
-      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-      delete session.functions[name]
-      session.functionSites.delete(name)
+      session.removeFunction(name)
     }
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'unset', exitCode: 0 })]

@@ -812,7 +812,7 @@
       "command": "readonly -f qcbnothere; echo rc=$?; qcbf(){ :; }; readonly -f qcbf; readonly -f | grep qcbf",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\ndeclare -fr qcbf\n",
+        "stdout": "rc=1\nqcbf () \ndeclare -fr qcbf\n",
         "stderr": "bash: readonly: qcbnothere: not a function\n"
       }
     },

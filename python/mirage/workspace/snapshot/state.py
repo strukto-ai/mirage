@@ -683,6 +683,7 @@ async def _restore_sessions(
         session.vars = fields.vars
         session.functions = fields.functions
         session.readonly_functions = fields.readonly_functions
+        session.exported_functions = fields.exported_functions
         session.mount_modes = fields.mount_modes
         restored.append(session)
     # The snapshot's session table wins over prior store contents,

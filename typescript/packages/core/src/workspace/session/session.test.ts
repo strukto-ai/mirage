@@ -224,6 +224,63 @@ describe('SessionState.fork', () => {
     expect('NEW' in original.env).toBe(false)
     expect(original.arrays.A).toEqual(['1'])
   })
+
+  it('round-trips function marks and keeps each fork its own', () => {
+    const parent = new SessionState({
+      sessionId: 's',
+      functions: { f: 'f() { echo a; }' },
+      readonlyFunctions: new Set(['f']),
+      exportedFunctions: new Set(['f']),
+    })
+    const restored = SessionState.fromJSON(
+      parent.toJSON() as Parameters<typeof SessionState.fromJSON>[0],
+    )
+    expect(restored.readonlyFunctions).toEqual(new Set(['f']))
+    expect(restored.exportedFunctions).toEqual(new Set(['f']))
+    restored.fork().exportedFunctions.clear()
+    expect(restored.exportedFunctions).toEqual(new Set(['f']))
+  })
+})
+
+describe('SessionState.newShell', () => {
+  it('starts from the environment', () => {
+    const exported = new Set([VarAttr.Export])
+    const token = { source: 'env', ref: '', key: 'TOKEN', eager: false }
+    const parent = new SessionState({
+      sessionId: 's',
+      cwd: '/w',
+      vars: {
+        PLAIN: makeVar('p'),
+        OUT: makeVar('o', new Set([VarAttr.Export, VarAttr.Readonly])),
+        ARR: makeVar(['a'], exported),
+        UNSET: makeVar(null, exported),
+        IFS: makeVar(',', exported),
+        TOKEN: { value: null, attrs: exported, managed: token },
+      },
+      functions: { f: 'f() { :; }', g: 'g() { :; }' },
+      exportedFunctions: new Set(['f']),
+      readonlyFunctions: new Set(['f']),
+      shellOptions: { errexit: true },
+      lastExitCode: 1,
+    })
+    parent.aliases = { a: 'echo' }
+    parent.umask = 0o077
+    const child = parent.newShell()
+    expect(child.vars).toEqual({
+      OUT: makeVar('o', exported),
+      TOKEN: { value: null, attrs: exported, managed: token },
+      PWD: makeVar('/w', exported),
+      PATH: makeVar('/usr/bin'),
+      IFS: makeVar(' \t\n'),
+    })
+    expect(child.functions).toEqual({ f: 'f() { :; }' })
+    expect(child.exportedFunctions).toEqual(new Set(['f']))
+    expect(child.readonlyFunctions).toEqual(new Set())
+    expect([child.aliases, child.shellOptions]).toEqual([{}, {}])
+    expect([child.lastExitCode, child.cwd, child.umask]).toEqual([0, '/w', 0o077])
+    expect(Object.keys(parent.functions)).toEqual(['f', 'g'])
+    expect(parent.vars.PLAIN).toEqual(makeVar('p'))
+  })
 })
 
 describe('ownRecord', () => {

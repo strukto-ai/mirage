@@ -586,13 +586,58 @@ def test_session_profile_round_trips_and_is_omitted_when_none():
 def test_function_sources_and_readonly_metadata_round_trip_without_tree_ownership():
     source = "f() { echo a; }"
     parent = SessionState(
-        session_id="s", functions={"f": source}, readonly_functions={"f"}
+        session_id="s",
+        functions={"f": source},
+        readonly_functions={"f"},
+        exported_functions={"f"},
     )
     restored = SessionState.from_dict(parent.to_dict())
     assert restored.functions == {"f": source}
     assert restored.readonly_functions == {"f"}
+    assert restored.exported_functions == {"f"}
     child = restored.fork()
     child.functions.clear()
     child.readonly_functions.clear()
+    child.exported_functions.clear()
     assert restored.functions == parent.functions
     assert restored.readonly_functions == {"f"}
+    assert restored.exported_functions == {"f"}
+
+
+def test_new_shell_starts_from_the_environment():
+    exported = frozenset({VarAttr.EXPORT})
+    token = ManagedRef("env", "", "TOKEN")
+    parent = SessionState(
+        session_id="s",
+        cwd="/w",
+        vars={
+            "PLAIN": ShellVar("p"),
+            "OUT": ShellVar("o", exported | {VarAttr.READONLY}),
+            "ARR": ShellVar(["a"], exported),
+            "UNSET": ShellVar(None, exported),
+            "IFS": ShellVar(",", exported),
+            "TOKEN": ShellVar(None, exported, token),
+        },
+        functions={"f": "f() { :; }", "g": "g() { :; }"},
+        exported_functions={"f"},
+        readonly_functions={"f"},
+        aliases={"a": "echo"},
+        shell_options={"errexit": True},
+        last_exit_code=1,
+        umask=0o077,
+    )
+    child = parent.new_shell()
+    assert child.vars == {
+        "OUT": ShellVar("o", exported),
+        "TOKEN": ShellVar(None, exported, token),
+        "PWD": ShellVar("/w", exported),
+        "PATH": ShellVar("/usr/bin"),
+        "IFS": ShellVar(" \t\n"),
+    }
+    assert child.functions == {"f": "f() { :; }"}
+    assert child.exported_functions == {"f"}
+    assert child.readonly_functions == set()
+    assert (child.aliases, child.shell_options) == ({}, {})
+    assert (child.last_exit_code, child.cwd, child.umask) == (0, "/w", 0o077)
+    assert set(parent.functions) == {"f", "g"}
+    assert parent.vars["PLAIN"] == ShellVar("p")

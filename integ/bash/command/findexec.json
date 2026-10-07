@@ -545,7 +545,7 @@
       "command": "mkdir -p /data/fe/d; touch /data/fe/d/a /data/fe/d/b; cd /data/fe; KEEP=parent; find d -type f -exec sh -c 'echo \"$KEEP:$PWD\"; KEEP=child; cd /' \\; ; echo \"$KEEP:$PWD\"; cd /; rm -r /data/fe",
       "expect": {
         "exit": 0,
-        "stdout": "parent:/data/fe\nparent:/data/fe\nparent:/data/fe\n",
+        "stdout": ":/data/fe\n:/data/fe\nparent:/data/fe\n",
         "stderr": ""
       },
       "note": "The mutating program is an `sh -c` line: GNU's -exec sees no shell function."

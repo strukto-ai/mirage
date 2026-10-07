@@ -100,6 +100,7 @@ export interface SessionInit {
   createdAt?: number
   functions?: Record<string, string>
   readonlyFunctions?: Set<string>
+  exportedFunctions?: Set<string>
   lastExitCode?: number
   positionalArgs?: string[]
   scriptName?: string | null
@@ -366,6 +367,10 @@ export class SessionState {
   // *variable* set: `readonly -f f` and `readonly f` are two different
   // frozen things in bash, and each refuses in its own voice.
   readonlyFunctions: Set<string>
+  // The functions `export -f` marked, which a nested shell inherits
+  // (`newShell`). A redefinition keeps the mark and an unset drops it, as
+  // bash's does.
+  exportedFunctions: Set<string>
   lastExitCode: number
   // `${PIPESTATUS[@]}`: the exit status of every segment of the last
   // pipeline, where a simple command is a one-segment pipeline. Written
@@ -505,6 +510,7 @@ export class SessionState {
     this.createdAt = init.createdAt ?? Date.now() / 1000
     this.functions = functionSources(init.functions)
     this.readonlyFunctions = new Set(init.readonlyFunctions ?? [])
+    this.exportedFunctions = new Set(init.exportedFunctions ?? [])
     this.lastExitCode = init.lastExitCode ?? 0
     this.positionalArgs = init.positionalArgs ?? []
     this.scriptName = init.scriptName ?? null
@@ -573,6 +579,7 @@ export class SessionState {
       createdAt: overrides.createdAt ?? this.createdAt,
       functions: overrides.functions ?? { ...this.functions },
       readonlyFunctions: overrides.readonlyFunctions ?? new Set(this.readonlyFunctions),
+      exportedFunctions: overrides.exportedFunctions ?? new Set(this.exportedFunctions),
       lastExitCode: overrides.lastExitCode ?? this.lastExitCode,
       positionalArgs: overrides.positionalArgs ?? [...this.positionalArgs],
       scriptName: overrides.scriptName ?? this.scriptName,
@@ -626,9 +633,9 @@ export class SessionState {
   /**
    * A child shell of this session: a fork that reads on from here. `fork`
    * copies what a session keeps; a child shell (a command substitution, a
-   * subshell, a nested `bash`) also inherits the reader's position, the
-   * aliases being expanded and the local frames, and reseeds `$RANDOM` on its
-   * first draw instead of replaying this session's seed. Mirrors Python.
+   * subshell) also inherits the reader's position, the aliases being
+   * expanded and the local frames, and reseeds `$RANDOM` on its first draw
+   * instead of replaying this session's seed. Mirrors Python.
    */
   subshell(): SessionState {
     const child = this.fork()
@@ -645,6 +652,61 @@ export class SessionState {
       child.randomSeed = typeof word === 'string' ? word : null
     }
     return child
+  }
+
+  /**
+   * A new shell started from this session, as a nested `bash` is. bash runs
+   * a nested shell as a program of its own, which inherits the working
+   * directory, the umask, the open files and the environment: the exported
+   * variables, as plain exported strings (no array, no other attribute), and
+   * the functions `export -f` marked. The rest starts as a fresh shell's
+   * does: the other variables and functions, the aliases, the `set` and
+   * `shopt` options, `$?`, `$!`, `$RANDOM`, the call stack and the startup
+   * variables, IFS included, which bash never reads from its environment. A
+   * managed variable not yet fetched crosses as its pointer, which the
+   * nested shell fetches through. Mirrors Python.
+   */
+  newShell(): SessionState {
+    const vars = ownRecord<ShellVar>()
+    for (const [name, v] of Object.entries(this.vars)) {
+      if (!v.attrs.has(VarAttr.Export) || name === 'IFS') continue
+      if (typeof v.value !== 'string' && v.managed === undefined) continue
+      vars[name] = {
+        value: v.value,
+        attrs: new Set([VarAttr.Export]),
+        ...(v.managed === undefined ? {} : { managed: v.managed }),
+      }
+    }
+    const functions = Object.fromEntries(
+      Object.entries(this.functions).filter(([name]) => this.exportedFunctions.has(name)),
+    )
+    const child = this.fork({
+      vars,
+      functions,
+      exportedFunctions: new Set(Object.keys(functions)),
+      readonlyFunctions: new Set(),
+      shellOptions: {},
+      lastExitCode: 0,
+    })
+    child.functionSites = new Map(
+      [...this.functionSites].filter(([name]) => name in child.functions),
+    )
+    child.aliases = {}
+    child.aliasMarks = new Map()
+    child.shopts = {}
+    child.pipeStatus = []
+    child.lastBgJobId = null
+    child.functionNames = []
+    child.randomSeed = null
+    return child
+  }
+
+  /** Remove a function with its definition site and export mark. */
+  removeFunction(name: string): void {
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete this.functions[name]
+    this.functionSites.delete(name)
+    this.exportedFunctions.delete(name)
   }
 
   /**
@@ -763,6 +825,8 @@ export class SessionState {
     if (Object.keys(this.functions).length > 0) data.functions = { ...this.functions }
     if (this.readonlyFunctions.size > 0)
       data.readonly_functions = [...this.readonlyFunctions].sort(compareCodePoints)
+    if (this.exportedFunctions.size > 0)
+      data.exported_functions = [...this.exportedFunctions].sort(compareCodePoints)
     if (this.mountModes !== null) {
       data.mount_modes = Object.fromEntries(this.mountModes)
     }
@@ -824,6 +888,7 @@ export class SessionState {
     generation?: number
     functions?: Record<string, string>
     readonly_functions?: string[]
+    exported_functions?: string[]
   }): SessionState {
     const commands = data.commands != null ? commandsFromJSON(data.commands) : null
     const processes = parseProcessPermissions(data.processes ?? DEFAULT_PROCESS_PERMISSIONS)
@@ -831,6 +896,7 @@ export class SessionState {
       sessionId: data.session_id,
       ...(data.functions === undefined ? {} : { functions: data.functions }),
       readonlyFunctions: new Set(data.readonly_functions ?? []),
+      exportedFunctions: new Set(data.exported_functions ?? []),
       ...(data.cwd !== undefined ? { cwd: data.cwd } : {}),
       // No `var_attrs` at all means the payload is a bare process
       // environment -- an embedder's record, or one another writer

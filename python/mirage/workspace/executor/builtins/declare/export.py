@@ -26,6 +26,7 @@ from mirage.workspace.executor.builtins.declare.declare import (
     declare_line,
     identifier_failure,
     identifier_refusal,
+    mark_functions,
     split_decl_flags,
     store_staged_arrays,
 )
@@ -45,14 +46,11 @@ from mirage.workspace.session.state import (
 from mirage.workspace.types import ExecutionNode
 
 
-def _export_lines(session: SessionState, flags: set[str]) -> list[str]:
+def _export_lines(session: SessionState) -> list[str]:
     """Build sorted declaration lines for every exported name.
 
     The exported set, not every shell variable: ``X=hello`` is absent
-    and ``export Y=world`` is present, which is what bash prints. ``-f``
-    selects shell functions instead of variables; mirage tracks no
-    export attribute on functions, so that form lists nothing, as bash
-    does with none exported.
+    and ``export Y=world`` is present, which is what bash prints.
 
     Rendering is ``declare_line``'s, not a second spelling of it: GNU's
     ``export -p`` prints the *whole* cluster, so a readonly exported
@@ -63,13 +61,10 @@ def _export_lines(session: SessionState, flags: set[str]) -> list[str]:
 
     Args:
         session (SessionState): shell session state.
-        flags (set[str]): option letters the caller supplied.
 
     Returns:
         list[str]: one declaration line per exported name.
     """
-    if "f" in flags:
-        return []
     lines = [declare_line(session, name) for name in exported_names(session)]
     return [line for line in lines if line is not None]
 
@@ -86,7 +81,8 @@ async def handle_export(
     ``declare -x NAME="value"`` (bash's ``-p`` form). Invalid option
     characters fail with status 2 and the GNU usage line. Writes go
     through the session view, so readonly refusal and the pre_session
-    policy gate fire here exactly as for any other writer.
+    policy gate fire here exactly as for any other writer. ``-f`` marks
+    functions instead, for a nested shell to inherit (``mark_functions``).
     """
     flags, names, bad = split_decl_flags(assignments, EXPORT_FLAGS)
     if bad is not None:
@@ -98,16 +94,19 @@ async def handle_export(
             IOResult(exit_code=2, stderr=err),
             ExecutionNode(command="export", exit_code=2, stderr=err),
         )
+    # -n is the off direction, and applies to every spelling, since
+    # `export -n K=v` assigns and unexports.
+    on = "n" not in flags
+    if "f" in flags:
+        return mark_functions(
+            "export", session, session.exported_functions, names, on
+        )
     # -p with names is ignored for display; bare / -p alone print.
     if not names and not arrays:
-        lines = _export_lines(session, flags)
+        lines = _export_lines(session)
         out = encode_text(("\n".join(lines) + "\n") if lines else "")
         return out, IOResult(), ExecutionNode(command="export", exit_code=0)
-    # -f is accepted and marks nothing: mirage carries no export
-    # attribute on functions. -n is the off direction, and applies to
-    # both spellings, since `export -n K=v` assigns and unexports.
     view = require_view(state)
-    on = "n" not in flags
     if arrays:
         # `export ARR=(a b)` marks the array as surely as it marks a
         # scalar: GNU prints `declare -ax ARR=([0]="a" [1]="b")`.
