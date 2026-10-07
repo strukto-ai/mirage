@@ -32,7 +32,7 @@
           "command": "cat /data/wp1.txt"
         }
       ],
-      "note": "The shadow is a second mirage writer under the same policy: it reads, then writes B. The read side's If-Match carries the version its cat saw, the store refuses it (moto 5 in Python, MinIO in TypeScript, both enforce PUT If-Match), and the refused write drops the cached copy so the next cat prints B.",
+      "note": "The shadow is a second mirage writer under the same policy: it reads, then writes B. The read side's If-Match carries the version its cat saw, the store refuses it (moto enforces PUT If-Match; both hosts run on it in CI), and the refused write drops the cached copy so the next cat prints B.",
       "expect": {
         "exit": 0,
         "stdout": "v1\n1\nB\n",
@@ -293,6 +293,400 @@
         "exit": 2,
         "stdout": "v1\n1\nv1\n",
         "stderr": "mv: cannot move '/data/wp9.txt' to '/data/wp9b.txt': Operation not supported\nls: cannot access '/data/wp9b.txt': No such file or directory\n"
+      }
+    },
+    {
+      "id": "write_conditional_rm_refuses_a_stale_delete",
+      "seq": 310079,
+      "targets": [
+        "object-storage-prefix"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/seaweedfs/n1.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "cat /seaweedfs/n1.txt"
+        },
+        {
+          "mutate": {
+            "command": "cat /seaweedfs/n1.txt > /dev/null; echo B > /seaweedfs/n1.txt"
+          }
+        },
+        {
+          "command": "rm /seaweedfs/n1.txt; echo $?"
+        },
+        {
+          "command": "cat /seaweedfs/n1.txt"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "v1\n1\nB\n",
+        "stderr": "rm: cannot remove '/seaweedfs/n1.txt': changed since it was read; read it again before writing\n"
+      }
+    },
+    {
+      "id": "write_conditional_refuses_a_file_deleted_since_read",
+      "seq": 310080,
+      "targets": [
+        "object-storage-prefix"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/seaweedfs/n3.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "cat /seaweedfs/n3.txt"
+        },
+        {
+          "mutate": {
+            "command": "rm /seaweedfs/n3.txt"
+          }
+        },
+        {
+          "command": "echo A > /seaweedfs/n3.txt; echo $?"
+        },
+        {
+          "command": "echo C > /seaweedfs/n3.txt; echo $?; cat /seaweedfs/n3.txt"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "v1\n1\n0\nC\n",
+        "stderr": "/seaweedfs/n3.txt: changed since it was read; read it again before writing\n"
+      }
+    },
+    {
+      "id": "write_conditional_lost_path_is_not_recached",
+      "seq": 310081,
+      "targets": [
+        "s3",
+        "s3-prefix"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/data/n10.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "cat /data/n10.txt"
+        },
+        {
+          "mutate": {
+            "command": "cat /data/n10.txt > /dev/null; echo B > /data/n10.txt"
+          }
+        },
+        {
+          "command": "cat /data/n10.txt > /dev/null; echo A > /data/n10.txt; echo $?"
+        },
+        {
+          "command": "cat /data/n10.txt"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "v1\n1\nB\n",
+        "stderr": "/data/n10.txt: changed since it was read; read it again before writing\n"
+      }
+    },
+    {
+      "id": "write_conditional_minio_refuses_walks",
+      "seq": 310082,
+      "targets": [
+        "object-storage-prefix"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/minio/n8.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "mutate": {
+            "path": "/minio/d/a.txt",
+            "content": "a\n"
+          }
+        },
+        {
+          "command": "find /minio -name n8.txt -delete; echo $?"
+        },
+        {
+          "command": "rm -r /minio/d; echo $?"
+        },
+        {
+          "command": "mv /minio/d /minio/e; echo $?"
+        },
+        {
+          "command": "ls /minio /minio/d"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n1\n1\n/minio:\nd\nn8.txt\n\n/minio/d:\na.txt\n",
+        "stderr": "find: cannot delete '/minio/n8.txt': Operation not supported\nrm: cannot remove '/minio/d': Operation not supported\nmv: cannot move '/minio/d' to '/minio/e': Operation not supported\n"
+      }
+    },
+    {
+      "id": "write_conditional_custom_endpoint_refuses_rm_and_mv_out",
+      "seq": 310083,
+      "targets": [
+        "s3",
+        "s3-prefix"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/data/n13.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "cat /data/n13.txt; rm /data/n13.txt; echo $?; mv /data/n13.txt /data2/n13.txt; echo $?; ls /data2/n13.txt"
+        },
+        {
+          "command": "cat /data/n13.txt"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "v1\n1\n1\nv1\n",
+        "stderr": "rm: cannot remove '/data/n13.txt': Operation not supported\nmv: cannot move '/data/n13.txt' to '/data2/n13.txt': Operation not supported\nls: cannot access '/data2/n13.txt': No such file or directory\n"
+      }
+    },
+    {
+      "id": "write_conditional_minio_refuses_mv_out_takes_cp_in",
+      "seq": 310084,
+      "targets": [
+        "object-storage-prefix"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/minio/n7.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "cat /minio/n7.txt; mv /minio/n7.txt /raw/n7.txt; echo $?; ls /raw/n7.txt"
+        },
+        {
+          "command": "echo y > /raw/n7y.txt; cp /raw/n7y.txt /minio/n7z.txt; echo $?; cat /minio/n7z.txt"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "v1\n1\n0\ny\n",
+        "stderr": "mv: cannot move '/minio/n7.txt' to '/raw/n7.txt': Operation not supported\nls: cannot access '/raw/n7.txt': No such file or directory\n"
+      }
+    },
+    {
+      "id": "write_conditional_cp_from_another_mount_refused_when_stale",
+      "seq": 310085,
+      "targets": [
+        "s3",
+        "s3-prefix"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/data/n5.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "cat /data/n5.txt"
+        },
+        {
+          "mutate": {
+            "command": "cat /data/n5.txt > /dev/null; echo B > /data/n5.txt"
+          }
+        },
+        {
+          "command": "echo r > /data2/n5r.txt; cp /data2/n5r.txt /data/n5.txt; echo $?"
+        },
+        {
+          "command": "cat /data/n5.txt"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "v1\n1\nB\n",
+        "stderr": "cp: cannot create regular file '/data/n5.txt': changed since it was read; read it again before writing\n"
+      }
+    },
+    {
+      "id": "write_conditional_refusal_lifts_after_a_reread",
+      "seq": 310086,
+      "targets": [
+        "s3",
+        "s3-prefix"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/data/n11.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "cat /data/n11.txt"
+        },
+        {
+          "mutate": {
+            "command": "cat /data/n11.txt > /dev/null; echo B > /data/n11.txt"
+          }
+        },
+        {
+          "command": "echo A > /data/n11.txt; cat /data/n11.txt; echo C > /data/n11.txt; echo $?"
+        },
+        {
+          "command": "cat /data/n11.txt"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "v1\nB\n0\nC\n",
+        "stderr": "/data/n11.txt: changed since it was read; read it again before writing\n"
+      }
+    },
+    {
+      "id": "write_conditional_tee_refusal",
+      "seq": 310087,
+      "targets": [
+        "s3",
+        "s3-prefix"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/data/n6.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "cat /data/n6.txt"
+        },
+        {
+          "mutate": {
+            "command": "cat /data/n6.txt > /dev/null; echo B > /data/n6.txt"
+          }
+        },
+        {
+          "command": "echo x | tee /data/n6.txt; echo $?"
+        },
+        {
+          "command": "cat /data/n6.txt"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "v1\nx\n1\nB\n",
+        "stderr": "tee: /data/n6.txt: changed since it was read; read it again before writing\n"
+      }
+    },
+    {
+      "id": "write_conditional_full_row_moves_and_removes",
+      "seq": 310088,
+      "targets": [
+        "object-storage-prefix"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/seaweedfs/d/a.txt",
+            "content": "a\n"
+          }
+        },
+        {
+          "mutate": {
+            "path": "/seaweedfs/d/b.txt",
+            "content": "b\n"
+          }
+        },
+        {
+          "command": "cat /seaweedfs/d/a.txt; mv /seaweedfs/d /seaweedfs/e; echo $?; ls /seaweedfs/e; rm -r /seaweedfs/e; echo $?; ls /seaweedfs"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n0\na.txt\nb.txt\n0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "write_conditional_own_read_ops_need_no_prior_read",
+      "seq": 310089,
+      "targets": [
+        "s3",
+        "s3-prefix"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "write": "conditional",
+      "scenario": [
+        {
+          "mutate": {
+            "path": "/data/n18.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "truncate -s 1 /data/n18.txt; echo $?; wc -c < /data/n18.txt"
+        },
+        {
+          "mutate": {
+            "path": "/data/n18b.txt",
+            "content": "v1\n"
+          }
+        },
+        {
+          "command": "echo x >> /data/n18b.txt; echo $?; cat /data/n18b.txt"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n1\n0\nv1\nx\n",
+        "stderr": ""
       }
     }
   ]

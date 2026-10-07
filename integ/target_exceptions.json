@@ -1018,6 +1018,26 @@
     "integ/unix/write/conditional.json :: write_conditional_minio_refuses_copy_and_delete": {
       "s3": "The case asks how the minio VFS row answers a conditional copy and delete, so it needs a mount whose VFS is minio, and only object-storage-prefix declares one (/minio). s3 and s3-prefix mount type s3; the rest of the file runs on them, and their own copy and delete conditions are unit-tested against the extended fake on both hosts, since MinIO ignores both and moto ignores the copy one.",
       "s3-prefix": "The case asks how the minio VFS row answers a conditional copy and delete, so it needs a mount whose VFS is minio, and only object-storage-prefix declares one (/minio). s3 and s3-prefix mount type s3; the rest of the file runs on them, and their own copy and delete conditions are unit-tested against the extended fake on both hosts, since MinIO ignores both and moto ignores the copy one."
+    },
+    "integ/unix/write/conditional.json :: write_conditional_rm_refuses_a_stale_delete": {
+      "s3": "The case asks for a mount that gets every write condition (an S3 alias such as /seaweedfs) or the minio row, and only object-storage-prefix declares those; s3 and s3-prefix mount `vfs: s3` on a local endpoint, which gets the custom-endpoint row, and the rest of the file runs on them.",
+      "s3-prefix": "The case asks for a mount that gets every write condition (an S3 alias such as /seaweedfs) or the minio row, and only object-storage-prefix declares those; s3 and s3-prefix mount `vfs: s3` on a local endpoint, which gets the custom-endpoint row, and the rest of the file runs on them."
+    },
+    "integ/unix/write/conditional.json :: write_conditional_refuses_a_file_deleted_since_read": {
+      "s3": "The case asks for a mount that gets every write condition (an S3 alias such as /seaweedfs) or the minio row, and only object-storage-prefix declares those; s3 and s3-prefix mount `vfs: s3` on a local endpoint, which gets the custom-endpoint row, and the rest of the file runs on them.",
+      "s3-prefix": "The case asks for a mount that gets every write condition (an S3 alias such as /seaweedfs) or the minio row, and only object-storage-prefix declares those; s3 and s3-prefix mount `vfs: s3` on a local endpoint, which gets the custom-endpoint row, and the rest of the file runs on them."
+    },
+    "integ/unix/write/conditional.json :: write_conditional_minio_refuses_walks": {
+      "s3": "The case asks for a mount that gets every write condition (an S3 alias such as /seaweedfs) or the minio row, and only object-storage-prefix declares those; s3 and s3-prefix mount `vfs: s3` on a local endpoint, which gets the custom-endpoint row, and the rest of the file runs on them.",
+      "s3-prefix": "The case asks for a mount that gets every write condition (an S3 alias such as /seaweedfs) or the minio row, and only object-storage-prefix declares those; s3 and s3-prefix mount `vfs: s3` on a local endpoint, which gets the custom-endpoint row, and the rest of the file runs on them."
+    },
+    "integ/unix/write/conditional.json :: write_conditional_minio_refuses_mv_out_takes_cp_in": {
+      "s3": "The case asks for a mount that gets every write condition (an S3 alias such as /seaweedfs) or the minio row, and only object-storage-prefix declares those; s3 and s3-prefix mount `vfs: s3` on a local endpoint, which gets the custom-endpoint row, and the rest of the file runs on them.",
+      "s3-prefix": "The case asks for a mount that gets every write condition (an S3 alias such as /seaweedfs) or the minio row, and only object-storage-prefix declares those; s3 and s3-prefix mount `vfs: s3` on a local endpoint, which gets the custom-endpoint row, and the rest of the file runs on them."
+    },
+    "integ/unix/write/conditional.json :: write_conditional_full_row_moves_and_removes": {
+      "s3": "The case asks for a mount that gets every write condition (an S3 alias such as /seaweedfs) or the minio row, and only object-storage-prefix declares those; s3 and s3-prefix mount `vfs: s3` on a local endpoint, which gets the custom-endpoint row, and the rest of the file runs on them.",
+      "s3-prefix": "The case asks for a mount that gets every write condition (an S3 alias such as /seaweedfs) or the minio row, and only object-storage-prefix declares those; s3 and s3-prefix mount `vfs: s3` on a local endpoint, which gets the custom-endpoint row, and the rest of the file runs on them."
     }
   }
 }
