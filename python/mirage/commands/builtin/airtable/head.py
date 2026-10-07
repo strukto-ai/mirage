@@ -15,21 +15,22 @@
 from functools import partial
 
 from mirage.accessor.airtable import AirtableAccessor
-from mirage.commands.builtin.airtable.io import IO
 from mirage.commands.builtin.generic.head import head_generic, parse_flags
 from mirage.commands.builtin.generic_bind.adapter import (
+    Builder,
+    CommandIO,
     bound_op,
+    guard_operation,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandOpts, command
-from mirage.commands.spec import SPECS
+from mirage.commands.config import CommandOpts
 from mirage.core.airtable.read import read as airtable_read
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("head", vfs="airtable", spec=SPECS["head"])
 async def head(
+    ops: CommandIO,
     accessor: AirtableAccessor,
     paths: list[PathSpec],
     texts: list[str],
@@ -44,14 +45,19 @@ async def head(
     # instead of paging the whole table. Files that are not record
     # lists ignore the limit.
     n_eff = parsed.lines if parsed.lines is not None else 10
-    read_fn = airtable_read
+    read_fn = ops.read_bytes
     if parsed.bytes_ is None and n_eff > 0 and not parsed.zero_terminated:
-        read_fn = partial(airtable_read, limit=n_eff)
-    resolved = await resolve_or_empty(IO, accessor, paths, opts.index)
+        read_fn = partial(
+            guard_operation(airtable_read, "read_bytes"), limit=n_eff
+        )
+    resolved = await resolve_or_empty(ops, accessor, paths, opts.index)
     return await head_generic(
         resolved,
         list(texts),
         opts,
-        bound_op(IO.stat, accessor, opts.index),
+        bound_op(ops.stat, accessor, opts.index),
         bound_op(read_fn, accessor, opts.index),
     )
+
+
+BUILDER = Builder("head", head, read=True)

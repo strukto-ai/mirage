@@ -20,7 +20,7 @@ COMMANDS = [
     *make_generic_commands(
         "gcal",
         _IO,
-        overrides={"rm"},
+        overrides={"rm": None},
     ),
     rm,
 ]

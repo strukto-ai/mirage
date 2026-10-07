@@ -18,6 +18,7 @@ import pytest
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.commands.builtin.mongodb.io import IO as BACKEND_IO
 from mirage.commands.builtin.mongodb.tail import tail
 from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
@@ -39,12 +40,13 @@ async def test_tail_does_not_query_a_collection_it_cannot_see(monkeypatch):
         AsyncMock(return_value=False),
     )
     queried = AsyncMock(side_effect=AssertionError("queried the collection"))
-    monkeypatch.setitem(tail.__wrapped__.__globals__, "read_tail", queried)
-    monkeypatch.setitem(tail.__wrapped__.__globals__, "watch_stream", queried)
+    monkeypatch.setitem(tail.__globals__, "read_tail", queried)
+    monkeypatch.setitem(tail.__globals__, "watch_stream", queried)
     accessor = MongoDBAccessor(
         config=MongoDBConfig(uri="mongodb://localhost:27017")
     )
     out, io = await tail(
+        BACKEND_IO,
         accessor,
         [_path("/db1/collections/missing/documents.jsonl")],
         [],

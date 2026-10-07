@@ -150,9 +150,13 @@ export class Observer {
     return out
   }
 
-  /** Command events across all sessions, in append order. */
-  async commandEvents(): Promise<EventDict[]> {
-    return (await this.events()).filter((e) => e.type === EVENT_COMMAND)
+  /** Recorded commands, optionally restricted to one session. All sessions for host queries. */
+  async commandEvents(session: string | null = null): Promise<EventDict[]> {
+    const entries =
+      session === null
+        ? await this.events()
+        : parseFiles(await this._store.readMatching(`/${session}.jsonl`))
+    return entries.filter((e) => e.type === EVENT_COMMAND)
   }
 
   /**

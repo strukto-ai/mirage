@@ -16,16 +16,18 @@ import logging
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.commands.builtin.generic.grep import grep_generic
-from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.generic_bind.factory import scan_io
+from mirage.commands.builtin.generic_bind.adapter import (
+    Builder,
+    CommandIO,
+    bound_op,
+)
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import (
     pushdown_operand,
     text_search_results,
 )
-from mirage.commands.builtin.slack.io import IO
 from mirage.commands.builtin.utils.output import format_records
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.slack.formatters import (
@@ -40,6 +42,7 @@ from mirage.core.slack.search import (
     search_messages,
 )
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.namespace_view import paths_scoped
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
@@ -65,8 +68,8 @@ RG_SEARCH_HONORED = ("word_regexp",)
 SEARCH_MAX_RESULTS = 100
 
 
-@command("grep", vfs="slack", spec=SPECS["grep"])
 async def grep(
+    ops: CommandIO,
     accessor: SlackAccessor,
     paths: list[PathSpec],
     texts: list[str],
@@ -76,8 +79,10 @@ async def grep(
     pattern = pattern_arg(texts, fl)
 
     # Output-shaping flags, a glob operand and a multi-operand line all need
-    # the per-message scan; see SEARCH_HONORED above.
-    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
+    # the per-message ops; see SEARCH_HONORED above.
+    scoped = paths_scoped(
+        opts.ns, [PathSpec.from_str_path(opts.mount_prefix or "/")]
+    )
     operand = (
         None
         if scoped
@@ -129,20 +134,23 @@ async def grep(
             if err is not None:
                 logger.warning(
                     "slack search push-down failed (%s); "
-                    "falling back to per-file scan",
+                    "falling back to per-file ops",
                     err,
                 )
 
     resolved = (
-        await scan.resolve_glob(accessor, paths, opts.index) if paths else []
+        await ops.resolve_glob(accessor, paths, opts.index) if paths else []
     )
     return await grep_generic(
         resolved,
         texts,
         opts,
-        readdir=bound_op(scan.readdir, accessor, opts.index),
-        stat=bound_op(scan.stat, accessor, opts.index),
-        read_bytes=bound_op(scan.read_bytes, accessor, opts.index),
+        readdir=bound_op(ops.readdir, accessor, opts.index),
+        stat=bound_op(ops.stat, accessor, opts.index),
+        read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
         read_stream=None,
         stdin=opts.stdin,
     )
+
+
+BUILDER = Builder("grep", grep, read=True)

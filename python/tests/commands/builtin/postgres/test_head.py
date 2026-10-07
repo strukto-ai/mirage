@@ -20,6 +20,7 @@ import pytest
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.postgres.head import head
+from mirage.commands.builtin.postgres.io import IO as BACKEND_IO
 from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
@@ -82,6 +83,7 @@ async def _head(
 ) -> tuple[bytes, int, bytes]:
     path = PathSpec(virtual=ROWS, directory=ROWS, vfs_path=ROWS.strip("/"))
     out, io = await head(
+        BACKEND_IO,
         accessor,
         [path],
         [],

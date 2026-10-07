@@ -12,14 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { DiscordApiError, type DiscordTransport } from '../../../core/discord/client.ts'
 import { PathSpec } from '../../../types.ts'
-import { DISCORD_GREP } from './grep.ts'
-import { DISCORD_RG } from './rg.ts'
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { makeFakeVfs, seedChannel, seedGuild } from './_test_util.ts'
+import {
+  DISCORD_COMMANDS as DISCORD_GREP_COMMANDS,
+  DISCORD_COMMANDS as DISCORD_RG_COMMANDS,
+} from './index.ts'
+const DISCORD_GREP = DISCORD_GREP_COMMANDS.filter((cmd) => cmd.name === 'grep')
+const DISCORD_RG = DISCORD_RG_COMMANDS.filter((cmd) => cmd.name === 'rg')
 
 const DEC = new TextDecoder()
 

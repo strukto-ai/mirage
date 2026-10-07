@@ -31,7 +31,7 @@ import type { MountEntry } from '@struktoai/mirage-core/workspace/mount/mount'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 import type { Ops } from '@struktoai/mirage-core/ops/ops'
-import { FileType } from '@struktoai/mirage-core/types'
+import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
 import { pathVisible } from '@struktoai/mirage-core/utils/hidden'
@@ -251,7 +251,7 @@ export class MirageFileSystem extends FileSystem {
    * visible target it points at), and never listed.
    */
   private visible(path: string): boolean {
-    return pathVisible(this.session().visibility, path)
+    return pathVisible(this.session().visibility, PathSpec.fromStrPath(path))
   }
 
   /**

@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type * as BindModule from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
-import type * as SearchModule from '../../../core/email/search.ts'
 import type * as RgModule from '@struktoai/mirage-core/commands/builtin/generic/rg'
+import type * as BindModule from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as SearchModule from '../../../core/email/search.ts'
 
 vi.mock('../../../core/email/search.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof SearchModule>()),
@@ -36,7 +36,8 @@ import { IOResult } from '@struktoai/mirage-core/io/types'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { searchAndFormat } from '../../../core/email/search.ts'
-import { EMAIL_RG } from './rg.ts'
+import { EMAIL_COMMANDS as EMAIL_RG_COMMANDS } from './index.ts'
+const EMAIL_RG = EMAIL_RG_COMMANDS.filter((cmd) => cmd.name === 'rg')
 
 const search = vi.mocked(searchAndFormat)
 const generic = vi.mocked(rgGeneric)

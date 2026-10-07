@@ -12,20 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { byteView, utf8Locale } from '../../../shell/bytes.ts'
-import { isStdin, operandLabel } from '../utils/stream.ts'
-import { stdinStream, stdinStat } from '../utils/stream.ts'
-import { guardInput } from '../utils/limit.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { FlagView } from '../../spec/flag_view.ts'
 import { fsStrerror, isWalkError, walkRefusal } from '../../../errors/fs.ts'
+import { IOResult } from '../../../io/types.ts'
+import { byteView, utf8Locale } from '../../../shell/bytes.ts'
+import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { respellOne } from '../../../utils/path.ts'
-import { cacheAwareStream } from '../../../cache/read_through.ts'
-import { mountParentReaddir, mountParentStat } from '../utils/wrap.ts'
-import { IOResult } from '../../../io/types.ts'
-import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { UsageError } from '../../errors.ts'
+import { getExtension } from '../../resolve.ts'
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/flag_view.ts'
+import { SYNOPSES } from '../../spec/synopsis.ts'
+import { usageHint } from '../../spec/usage.ts'
+import { BINARY_EXTENSIONS } from '../constants.ts'
+import { grepInput, type FlagSet } from '../grep_binary.ts'
 import {
   NEVER_MATCH,
   compilePattern,
@@ -33,14 +34,10 @@ import {
   patternWarnings,
   resolvePattern,
 } from '../grep_pattern.ts'
-import { BINARY_EXTENSIONS } from '../constants.ts'
-import { getExtension } from '../../resolve.ts'
-import { grepInput, type FlagSet } from '../grep_binary.ts'
-import { fileAdmitted, dirAdmitted, parseFileGlobs } from '../grep_select.ts'
-import { resolveSource } from '../utils/stream.ts'
-import { UsageError } from '../../errors.ts'
-import { SYNOPSES } from '../../spec/synopsis.ts'
-import { usageHint } from '../../spec/usage.ts'
+import { dirAdmitted, fileAdmitted, parseFileGlobs } from '../grep_select.ts'
+import { guardInput } from '../utils/limit.ts'
+import { isStdin, operandLabel, resolveSource, stdinStat, stdinStream } from '../utils/stream.ts'
+import { mountParentReaddir, mountParentStat } from '../utils/wrap.ts'
 
 const ENC = new TextEncoder()
 // GNU grep with no pattern prints its synopsis and the help hint, exit 2
@@ -190,8 +187,8 @@ export async function grepGeneric(
   stream: Stream,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
-  const cachedStream = stdinStream(cacheAwareStream(stream), opts.stdin)
-  stream = (path) => guardInput(cachedStream(path), opts)
+  const operandStream = stdinStream(stream, opts.stdin)
+  stream = (path) => guardInput(operandStream(path), opts)
   const fl = new FlagView(opts.flags, specOf('grep'))
   const resolution = await resolvePattern(name, texts, opts.flags, paths, opts.mountPrefix, stream)
   if (resolution.error !== null || resolution.pattern === null)

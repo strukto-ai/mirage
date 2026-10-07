@@ -78,7 +78,12 @@ function makeIO(overrides: Partial<CommandIO<FakeAccessor>> = {}): CommandIO<Fak
 }
 
 const roomSearcher: Searcher<FakeAccessor> = (_accessor, match, query) =>
-  Promise.resolve([`rooms/${match.slots.room ?? ''}:${query.query}`])
+  Promise.resolve([
+    [
+      PathSpec.fromStrPath(`/rooms/${match.slots.room ?? ''}`),
+      `rooms/${match.slots.room ?? ''}:${query.query}`,
+    ],
+  ])
 
 const emptySearcher: Searcher<FakeAccessor> = () => Promise.resolve([])
 
@@ -125,7 +130,7 @@ describe('adapter search on a - operand', () => {
     // it, a search that answers any operand said "no match" and the pipe was
     // never read.
     const asked: string[] = []
-    const answerEverything = (_accessor: FakeAccessor, operand: PathSpec): Promise<string[]> => {
+    const answerEverything = (_accessor: FakeAccessor, operand: PathSpec): Promise<[]> => {
       asked.push(operand.rawPath)
       return Promise.resolve([])
     }
@@ -255,7 +260,7 @@ describe('adapter search', () => {
     const seen: SearchQuery[] = []
     const recorder: Searcher<FakeAccessor> = (_accessor, _match, query) => {
       seen.push(query)
-      return Promise.resolve(['line'])
+      return Promise.resolve([[PathSpec.fromStrPath('/rooms/red'), 'line']])
     }
     const search = searchCommand({ room: recorder }, makeIO(), {})
     await search(new FakeAccessor(), [spec('/rooms/red')], ['ada'], opts({ i: true }))

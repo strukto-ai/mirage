@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { SearchQuery } from '../../vfs/types.ts'
+import type { SearchQuery, SearchResult } from '../../vfs/types.ts'
 import { validateOptions, intOption, floatOption, textOption } from '../../vfs/search.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
-import type { PathSpec } from '../../types.ts'
+import { PathSpec } from '../../types.ts'
 import { readdir } from './readdir.ts'
 import { makeResolveGlob } from '../../utils/glob_walk.ts'
 import { detectScope } from './scope.ts'
@@ -25,8 +25,6 @@ import type { Mem0Accessor } from '../../accessor/mem0.ts'
 import { formatScore } from '../../utils/score.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { searchMemories } from './client.ts'
-
-const ENCODER = new TextEncoder()
 
 function validate(query: string, topK: number, threshold: number): void {
   if (query === '') throw new Error('search: query is required')
@@ -41,25 +39,28 @@ function validate(query: string, topK: number, threshold: number): void {
  *
  * `memoryIds` is an optional result id allowlist.
  */
-export async function searchMemoriesRendered(
+export async function searchResults(
   accessor: Mem0Accessor,
   query: string,
   mountPrefix: string,
   topK: number,
   threshold: number,
   memoryIds?: ReadonlySet<string>,
-): Promise<Uint8Array> {
+): Promise<SearchResult[]> {
   validate(query, topK, threshold)
-  const lines: string[] = []
+  const lines: SearchResult[] = []
   for (const result of await searchMemories(accessor, query, topK, threshold)) {
     const id = String(result.id)
     if (memoryIds !== undefined && !memoryIds.has(id)) continue
     const path = `${rstripSlash(mountPrefix)}/${id}.json`
     const score = formatScore(result.score)
     const memory = typeof result.memory === 'string' ? result.memory : ''
-    lines.push(`${score === null ? path : `${path}:${score}`}\n${memory}`)
+    lines.push([
+      PathSpec.fromStrPath(path, `${id}.json`),
+      `${score === null ? path : `${path}:${score}`}\n${memory}`,
+    ])
   }
-  return ENCODER.encode(lines.length === 0 ? '' : `${lines.join('\n')}\n`)
+  return lines
 }
 
 export async function searchMany(
@@ -67,7 +68,7 @@ export async function searchMany(
   paths: PathSpec[],
   query: SearchQuery,
   index?: IndexCacheStore,
-): Promise<string[]> {
+): Promise<SearchResult[]> {
   validateOptions(query, ['top_k', 'threshold', 'method'])
   const topK = intOption(query, 'top_k', accessor.config.defaultSearchLimit)
   const first = paths[0]
@@ -84,8 +85,7 @@ export async function searchMany(
     if (match.kind !== 'memory') throw enoent(path)
     ids?.add(match.slots.memory_id ?? '')
   }
-  const output = await searchMemoriesRendered(accessor, query.query, prefix, topK, threshold, ids)
-  return output.length === 0 ? [] : new TextDecoder().decode(output).replace(/\n$/, '').split('\n')
+  return searchResults(accessor, query.query, prefix, topK, threshold, ids)
 }
 
 export function searchResource(
@@ -93,6 +93,6 @@ export function searchResource(
   path: PathSpec,
   query: SearchQuery,
   index?: IndexCacheStore,
-): Promise<string[]> {
+): Promise<SearchResult[]> {
   return searchMany(accessor, [path], query, index)
 }

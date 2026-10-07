@@ -47,14 +47,18 @@ import { PolicyError } from '../../policy/errors.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { normDir, ownerPrefix, rstripSlash } from '../../utils/slash.ts'
 import { CycleError, norm, parent, posixNormpath } from '../../utils/path.ts'
-import type { EntryGate } from '../../types.ts'
 import { record, runWithMountContext, runWithRevisions, startOp } from '../../observe/context.ts'
 import { wrapOpStream } from '../mount/mount.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import type { OpsRegistry } from '../../ops/registry.ts'
 import { type OpKwargs } from '../../ops/registry.ts'
 import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../../ops/config.ts'
-import { mergeReaddir, namespaceListing, namespaceStat } from '../../ops/namespace_view.ts'
+import {
+  mergeReaddir,
+  namespaceListing,
+  namespaceStat,
+  visibleEntries,
+} from '../../ops/namespace_view.ts'
 import { ebusy, isMissingPath } from '../../errors/fs.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import {
@@ -93,7 +97,7 @@ import {
   effectivePathMode,
   explaining,
   getCurrentSession,
-  hiddenRefusal,
+  requireVisible,
   sessionVisibility,
 } from '../../context/session_context.ts'
 import { hiddenUnder, moveReveals, pathVisible } from '../../utils/hidden.ts'
@@ -108,23 +112,6 @@ import { encodeText } from '../../shell/bytes.ts'
 function appendsNothing(opName: string, args: readonly unknown[]): boolean {
   const data = args[0]
   return opName === 'append' && data instanceof Uint8Array && data.byteLength === 0
-}
-
-/**
- * Drop listing entries the bound session hides.
- *
- * Entry shapes vary by backend (bare names, trailing-slash names, full
- * paths), so each is keyed by its final segment against the listed
- * directory, the same normalization `mergeReaddir` dedups by.
- */
-function visibleEntries(entries: string[], parent: string): string[] {
-  const base = rstripSlash(parent)
-  const vis = sessionVisibility()
-  return entries.filter((e) => {
-    const trimmed = rstripSlash(e)
-    const name = trimmed.slice(trimmed.lastIndexOf('/') + 1)
-    return pathVisible(vis, `${base}/${name}`)
-  })
 }
 
 /**
@@ -164,12 +151,6 @@ function takeIssuer(
   const rest = { ...kwargs }
   delete rest.issuer
   return [issuer, rest]
-}
-
-/** Ask a command's gate once about each distinct path an op reaches. */
-function judge(gate: EntryGate, ...paths: readonly unknown[]): void {
-  const specs = paths.filter((p): p is PathSpec => p instanceof PathSpec)
-  for (const virtual of new Set(specs.map((p) => p.virtual))) gate.check(virtual)
 }
 
 /** The byte window a read asked for, whole file when it asked none. */
@@ -303,9 +284,7 @@ export class Dispatcher {
     // The caller's own mark on the op, lifted before any gate fires so
     // each one is told whose op it judges.
     const [issuer, stripped] = takeIssuer(kwargs)
-    // withDispatchRuleGuard's mark, never forwarded to an op.
-    const { ruleGate, ...unmarked } = (stripped ?? {}) as { ruleGate?: EntryGate | null }
-    kwargs = ruleGate === undefined ? stripped : unmarked
+    kwargs = stripped
     await this.namespace.ensureLoaded()
     // Pending fingerprint checks from a strict snapshot restore run
     // before the op can touch a mount, whichever surface called: FUSE
@@ -329,13 +308,9 @@ export class Dispatcher {
     // it, the followed path is re-checked so a visible link cannot
     // lead in, and a rename destination is a create.
     const vis = sessionVisibility()
-    if (!pathVisible(vis, path.virtual)) {
-      throw hiddenRefusal(vis, path.virtual, HIDDEN_CREATE_OPS.has(opName))
-    }
+    requireVisible(vis, path, HIDDEN_CREATE_OPS.has(opName))
     let dstArg = args?.[0]
-    if (opName === 'rename' && dstArg instanceof PathSpec && !pathVisible(vis, dstArg.virtual)) {
-      throw hiddenRefusal(vis, dstArg.virtual, true)
-    }
+    if (opName === 'rename' && dstArg instanceof PathSpec) requireVisible(vis, dstArg, true)
     // An operand the walk already refused (the empty name, a link loop)
     // names nothing an op can reach, whatever `virtual` says.
     for (const walkedArg of [path, dstArg]) {
@@ -376,7 +351,7 @@ export class Dispatcher {
     // once both walks have answered for hidden space: here for an op on the
     // name itself, below the follow for the rest.
     const noFollow = NO_FOLLOW_OPS.has(opName) || kwargs?.nofollow === true
-    if (ruleGate != null && noFollow) judge(ruleGate, typed, path, typedDst, dstArg)
+    if (noFollow) OpBoundary.check(opName, typed, path, typedDst, dstArg)
     if (opName === 'rename' && dstArg instanceof PathSpec) {
       // A rename re-anchors everything below its source while the hides
       // stay where they are written, so hidden content would land at
@@ -384,10 +359,7 @@ export class Dispatcher {
       // (rmR, the remnant rmdir below); relocating it into view is
       // refused. Only a directory has anything below it to re-anchor,
       // so a file source passes.
-      if (
-        moveReveals(vis, path.virtual, dstArg.virtual) &&
-        (await this.movedSourceIsDir(path, issuer))
-      ) {
+      if (moveReveals(vis, path, dstArg) && (await this.movedSourceIsDir(path, issuer))) {
         throw eacces(path.virtual)
       }
     }
@@ -424,12 +396,10 @@ export class Dispatcher {
       const followed = followOrLoop(this.namespace, path, true)
       if (followed !== path.virtual) {
         p = PathSpec.fromStrPath(followed)
-        if (!pathVisible(vis, p.virtual)) {
-          throw hiddenRefusal(vis, p.virtual, HIDDEN_CREATE_OPS.has(opName))
-        }
+        requireVisible(vis, p, HIDDEN_CREATE_OPS.has(opName))
       }
     }
-    if (ruleGate != null && !noFollow) judge(ruleGate, typed, path, p)
+    if (!noFollow) OpBoundary.check(opName, typed, path, p)
     if (XATTR_OPS.has(opName)) {
       return [await this.xattrOp(opName, p, kwargs ?? {}, report, issuer), new IOResult()]
     }
@@ -516,7 +486,7 @@ export class Dispatcher {
       let fallback = eligible ? this.namespaceResult(opName, p.virtual) : null
       if (fallback === null) throw err
       if (opName === 'readdir' && Array.isArray(fallback)) {
-        fallback = visibleEntries(fallback, p.virtual)
+        fallback = visibleEntries(fallback, p, sessionVisibility())
       }
       const fallbackWrite = POLICY_WRITE_OPS.has(opName)
       await bare.admit(opName, p, fallbackWrite, {}, issuer)
@@ -537,7 +507,9 @@ export class Dispatcher {
     const mountPrefix = mount.prefix
     if (
       opName === 'rmdir' &&
-      this.namespace.linkStatsBelow(p.virtual).some(([link]) => pathVisible(vis, link))
+      this.namespace
+        .linkStatsBelow(p.virtual)
+        .some(([link]) => pathVisible(vis, PathSpec.fromStrPath(link)))
     ) {
       throw enotempty(p.virtual)
     }
@@ -718,7 +690,8 @@ export class Dispatcher {
     if (opName === 'readdir' && Array.isArray(result)) {
       result = visibleEntries(
         mergeReaddir(vis, result, this.namespace.mountPrefixes(), this.namespace, p.virtual),
-        p.virtual,
+        p,
+        vis,
       )
     }
     if (DISPATCH_WRITE_OPS.has(opName) && !SERIAL_WRITE_OPS.has(opName)) {
@@ -856,7 +829,7 @@ export class Dispatcher {
         const arrived = new Set<string>()
         const vis = sessionVisibility()
         for (const [link] of this.namespace.linkStatsBelow(p.virtual)) {
-          if (pathVisible(vis, link)) arrived.add(link)
+          if (pathVisible(vis, PathSpec.fromStrPath(link))) arrived.add(link)
         }
         await this.namespace.purgeUnder(p.virtual, arrived)
       }
@@ -1085,7 +1058,7 @@ export class Dispatcher {
     issuer?: symbol,
   ): Promise<void> {
     const vis = sessionVisibility()
-    if (!hiddenUnder(vis, path.virtual)) throw refusal
+    if (!hiddenUnder(vis, path)) throw refusal
     let entries: unknown
     try {
       entries = await this.fencedCall(vfs, mountPrefix, mode, 'readdir', path, issuer)
@@ -1103,8 +1076,8 @@ export class Dispatcher {
       this.namespace,
       path.virtual,
     )
-    const visible = (virtual: string): boolean => pathVisible(vis, virtual)
-    if (names.length === 0 || visibleBelow(path.virtual, merged, visible)) throw refusal
+    const visible = (path: PathSpec): boolean => pathVisible(vis, path)
+    if (names.length === 0 || visibleBelow(path, merged, visible)) throw refusal
     const channel: RemnantChannel = {
       readdir: async (at) => {
         const listed = await this.fencedCall(vfs, mountPrefix, mode, 'readdir', at, issuer)
@@ -1136,7 +1109,7 @@ export class Dispatcher {
     // destroyed, as `rm` does.
     const base = rstripSlash(path.virtual) + '/'
     for (const link of this.namespace.symlinkTargets().keys()) {
-      if (link.startsWith(base) && pathVisible(vis, link)) throw refusal
+      if (link.startsWith(base) && pathVisible(vis, PathSpec.fromStrPath(link))) throw refusal
     }
     await this.namespace.purgeUnder(path.virtual)
   }
@@ -1156,8 +1129,9 @@ export class Dispatcher {
     if (spelled !== path.virtual) walked = posixNormpath(walked)
     if (walked === path.virtual) return path
     const vis = sessionVisibility()
-    if (!pathVisible(vis, walked)) throw hiddenRefusal(vis, walked, create)
-    return PathSpec.fromStrPath(walked)
+    const result = PathSpec.fromStrPath(walked)
+    requireVisible(vis, result, create)
+    return result
   }
 
   private tableAnswers(

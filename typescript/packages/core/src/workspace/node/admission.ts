@@ -12,8 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { pathVisible } from '../../utils/hidden.ts'
+import type { ValueType } from '../../commands/spec/types.ts'
 import type { ByteSource } from '../../io/types.ts'
+import type {
+  AdmissionRules,
+  Ask,
+  Claimant,
+  CommandContext,
+  CommandRule,
+  Deny,
+  HandOff,
+} from '../../policy/index.ts'
 import {
   Outcome,
   PermissionsPolicy,
@@ -24,19 +33,10 @@ import {
   renderDeny,
   renderPending,
 } from '../../policy/index.ts'
-import type {
-  Ask,
-  Claimant,
-  CommandContext,
-  CommandRule,
-  AdmissionRules,
-  Deny,
-  HandOff,
-} from '../../policy/index.ts'
-import { ioReach, ioRefusal } from '../../policy/match/rule.ts'
 import { hasRules, readsArgs, scopesPaths } from '../../policy/match/reads.ts'
-import type { ValueType } from '../../commands/spec/types.ts'
+import { ioReach, ioRefusal } from '../../policy/match/rule.ts'
 import { commandNodes } from '../../runtime/routing/index.ts'
+import { encodeText } from '../../shell/bytes.ts'
 import {
   getParts,
   getRedirects,
@@ -44,15 +44,16 @@ import {
   literalWord,
   splitEnvPrefix,
 } from '../../shell/helpers.ts'
-import { NodeType, RedirectKind } from '../../shell/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import { PathSpec, type Refusal } from '../../types.ts'
+import { NodeType, RedirectKind } from '../../shell/types.ts'
 import type { EntryGate } from '../../types.ts'
-import { isGlob } from '../../utils/hidden.ts'
+import { PathSpec, type Refusal } from '../../types.ts'
+import { isGlob, pathVisible } from '../../utils/hidden.ts'
 import { resolvePath } from '../../utils/path.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { makeAbortError } from '../abort.ts'
-import { toScope } from '../executor/builtins/scope.ts'
 import { followPaths } from '../executor/builtins/links/links.ts'
+import { toScope } from '../executor/builtins/scope.ts'
 import {
   CWD_DEFAULT_RAW,
   defaultCwdOperand,
@@ -63,8 +64,6 @@ import {
 import { classifyParts } from '../expand/classify/parts.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
 import { specForCommand, specWordBases, specWordKinds } from '../expand/spec_hints.ts'
-import type { Namespace } from '../mount/namespace/namespace.ts'
-import type { MountRegistry } from '../mount/registry.ts'
 import { INTERPRETER_NAMES } from '../lookup/constants.ts'
 import {
   Consumer,
@@ -73,24 +72,24 @@ import {
   followsLastComponent,
   isTool,
   listed,
-  readsSubtrees,
   lookup,
+  readsSubtrees,
   walksMounts,
   wordPolicy,
 } from '../lookup/index.ts'
+import type { Namespace } from '../mount/namespace/namespace.ts'
+import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { innerLines, innerReadable, wordValue, type Word } from './inner_lines.ts'
 import {
   argvFrame,
-  type Frame,
   lineFrame,
   occurrenceIn,
   rootFrame,
   wholeOccurrence,
+  type Frame,
 } from './occurrence.ts'
-import { rstripSlash } from '../../utils/slash.ts'
-import { encodeText } from '../../shell/bytes.ts'
 
 /**
  * What the command plane prints when a line does not get to run: 127
@@ -158,7 +157,6 @@ export class Admitted implements EntryGate {
   readonly tokens: readonly string[]
   readonly judged: ReadonlySet<string>
   readonly granted: readonly CommandRule[]
-  readonly scoped: boolean
   readonly opsJudged: boolean
 
   constructor(init: {
@@ -166,15 +164,17 @@ export class Admitted implements EntryGate {
     tokens: readonly string[]
     judged: ReadonlySet<string>
     granted: readonly CommandRule[]
-    scoped: boolean
     opsJudged?: boolean
   }) {
     this.rules = init.rules
     this.tokens = init.tokens
     this.judged = init.judged
     this.granted = init.granted
-    this.scoped = init.scoped
     this.opsJudged = init.opsJudged ?? false
+  }
+
+  get scoped(): boolean {
+    return this.opsJudged || scopesPaths(this.rules, this.tokens[0] ?? '')
   }
 
   // Throw `PolicyDenied` when a rule in force refuses this entry for the
@@ -298,7 +298,7 @@ function seen(
   specs: readonly PathSpec[],
   unread: ReadonlySet<string> = new Set(),
 ): PathSpec[] {
-  return specs.filter((p) => !unread.has(p.virtual) && pathVisible(session.visibility, p.virtual))
+  return specs.filter((p) => !unread.has(p.virtual) && pathVisible(session.visibility, p))
 }
 
 /**
@@ -494,7 +494,6 @@ export async function admit(
       tokens: ctx.tokens ?? [],
       judged: new Set(ctx.paths.map((p) => norm(p.virtual))),
       granted,
-      scoped: scopesPaths(rules, name) || judged,
       opsJudged: judged,
     })
   }

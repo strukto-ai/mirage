@@ -22,28 +22,24 @@ from mirage.commands.builtin.generic.rg import (
     walk_filter,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
+    Builder,
+    CommandIO,
     bound_op,
-    with_command_guards,
-    with_policy_guard,
 )
-from mirage.commands.builtin.github.io import IO
 from mirage.commands.builtin.github.pushdown import narrow_scope, scope_refusal
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.rg_scan import walk_candidates
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.github.constants import SCOPE_ERROR
-from mirage.core.github.read import read as github_read
-from mirage.core.github.readdir import readdir as _readdir
-from mirage.core.github.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.namespace_view import paths_scoped
 from mirage.types import PathSpec
 
 
-@command("rg", vfs="github", spec=SPECS["rg"])
 async def rg(
+    ops: CommandIO,
     accessor: GitHubAccessor,
     paths: list[PathSpec],
     texts: list[str],
@@ -53,8 +49,8 @@ async def rg(
     pattern_str = pattern_arg(texts, fl, "regexp")
     f = parse_flags(fl)
     refuse_missing_pattern(pattern_str, fl, f)
-    # Code search and the core ops answer from the raw repository, so
-    # under a hide or a path rule the scan sets search aside and reads
+    # Code search and the core scan answer from the raw repository, so
+    # under a hide or a path rule the handler sets search aside and reads
     # through the command guards, which report a refused directory where
     # ripgrep does and never open a sealed file.
     scoped = paths_scoped(opts.ns, paths)
@@ -90,22 +86,16 @@ async def rg(
             return b"", IOResult(exit_code=1, stderr=msg.encode())
         paths = narrowed
 
-    io = with_command_guards(with_policy_guard(IO)) if scoped else None
     return await rg_generic(
         paths,
         texts,
         run_opts,
-        readdir=bound_op(
-            io.readdir if io is not None else _readdir, accessor, opts.index
-        ),
-        stat=bound_op(
-            io.stat if io is not None else _stat, accessor, opts.index
-        ),
-        read_bytes=bound_op(
-            io.read_bytes if io is not None else github_read,
-            accessor,
-            opts.index,
-        ),
+        readdir=bound_op(ops.readdir, accessor, opts.index),
+        stat=bound_op(ops.stat, accessor, opts.index),
+        read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
         read_stream=None,
         stdin=opts.stdin,
     )
+
+
+BUILDER = Builder("rg", rg, read=True)

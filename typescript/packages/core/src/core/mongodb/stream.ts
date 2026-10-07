@@ -16,7 +16,8 @@ import { stripSlash } from '../../utils/slash.ts'
 import { EJSON } from 'bson'
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { PathSpec } from '../../types.ts'
-import { iterDocuments, iterInserts } from './client.ts'
+import { countDocuments, findDocuments, iterDocuments, iterInserts } from './client.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { entityGuard } from './readdir.ts'
 import { detectScope } from './scope.ts'
 import { PRIMARY_KEY } from './types.ts'
@@ -123,6 +124,34 @@ export async function* readStream(
     const final = elide.size > 0 ? applyElision(doc, elide) : doc
     yield encodeLine(final)
   }
+}
+
+/** Read only the last n documents, returning whether the configured ceiling cut it short. */
+export async function readTail(
+  accessor: MongoDBAccessor,
+  path: PathSpec,
+  n: number,
+  _index?: IndexCacheStore,
+): Promise<[Uint8Array, boolean]> {
+  const scope = detectScope(path)
+  if (scope.kind !== 'documents') throw enoent(path.virtual)
+  await entityGuard(accessor, scope, path.virtual)
+  const database = scope.slots.database ?? '',
+    name = scope.slots.name ?? ''
+  const cap = accessor.config.maxDocLimit
+  const limit = Math.min(n, cap)
+  const stopped = n > cap && (await countDocuments(accessor, database, name)) > cap
+  const docs = await findDocuments(
+    accessor,
+    database,
+    name,
+    {},
+    { limit, sort: { [PRIMARY_KEY]: -1 } },
+  )
+  docs.reverse()
+  const elide = elisionPaths(accessor, database, name)
+  const lines = docs.map((doc) => stringifyDoc(elide.size > 0 ? applyElision(doc, elide) : doc))
+  return [new TextEncoder().encode(lines.length > 0 ? lines.join('\n') + '\n' : ''), stopped]
 }
 
 export async function* watchStream(

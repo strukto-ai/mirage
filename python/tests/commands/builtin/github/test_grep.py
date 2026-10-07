@@ -14,8 +14,14 @@
 
 import pytest
 
+from mirage.cache.context import push_cache_manager
+from mirage.cache.file.ram import RAMFileCacheStore
+from mirage.cache.manager import CacheManager
+from mirage.commands.builtin.github import COMMANDS
 from mirage.commands.builtin.github.grep import grep
-from mirage.commands.config import CommandOpts
+from mirage.commands.builtin.github.io import IO as BACKEND_IO
+from mirage.commands.builtin.github.rg import rg
+from mirage.commands.config import CommandOpts, registered_commands
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
 from tests.fixtures.github_mock import MOCK_BLOBS
@@ -43,7 +49,11 @@ def _scope(path: str, resolved: bool = True) -> PathSpec:
 async def _run(accessor, index, paths, pattern, **kwargs):
     scopes = [_scope(p, resolved=("." in p.split("/")[-1])) for p in paths]
     stdout, io = await grep(
-        accessor, scopes, [pattern], CommandOpts(index=index, flags={**kwargs})
+        BACKEND_IO,
+        accessor,
+        scopes,
+        [pattern],
+        CommandOpts(index=index, flags={**kwargs}),
     )
     data = await materialize(stdout)
     return data.decode(errors="replace"), io
@@ -59,6 +69,32 @@ async def test_single_file_grep(mock_github_api, github_env):
     assert "import os" in lines[0]
     assert "import sys" in lines[1]
     assert "import helper" in lines[2]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", [grep, rg])
+async def test_search_reads_warm_bytes_through_its_adapter(
+    mock_github_api, github_env, command
+):
+    accessor, index = github_env
+    cache = RAMFileCacheStore()
+    await cache.set("/src/main.py", b"cached match\n")
+    prev = push_cache_manager(CacheManager(cache, None, "/", True))
+    try:
+        stdout, io = await next(
+            c.fn
+            for c in registered_commands(COMMANDS)
+            if c.name == command.__name__
+        )(
+            accessor,
+            [_scope("src/main.py")],
+            ["cached"],
+            CommandOpts(index=index),
+        )
+        assert await materialize(stdout) == b"cached match\n"
+        assert io.exit_code == 0
+    finally:
+        push_cache_manager(prev)
 
 
 @pytest.mark.asyncio

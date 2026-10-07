@@ -30,9 +30,10 @@ import { PathSpec } from '../../../types.ts'
 import { hiddenUnder } from '../../../utils/hidden.ts'
 import { SessionState } from '../../../workspace/session/session.ts'
 import type { CommandOpts } from '../../config.ts'
-import { findGeneric } from '../generic/find.ts'
 import type * as findModule from '../generic/find.ts'
-import { GITHUB_FIND } from './find.ts'
+import { findGeneric } from '../generic/find.ts'
+import { GITHUB_COMMANDS as GITHUB_FIND_COMMANDS } from './index.ts'
+const GITHUB_FIND = GITHUB_FIND_COMMANDS.filter((cmd) => cmd.name === 'find')
 
 const generic = vi.mocked(findGeneric)
 
@@ -113,7 +114,7 @@ describe('github find', () => {
       filetypeFns: null,
       cwd: '/',
       index,
-      ns: { visibility: vis, scoped: (virtual: string) => hiddenUnder(vis, virtual) },
+      ns: { visibility: vis, scoped: (path: PathSpec) => hiddenUnder(vis, path) },
     }
     const listed = await runWithSession(sess, async () => {
       await cmd.fn(makeAccessor(), [src], [], opts)

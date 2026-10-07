@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DEFAULT_MAX_DU_ENTRIES } from '../commands/builtin/generic/du.ts'
 import { type Accessor, NOOPAccessor } from '../accessor/base.ts'
 import type { PredNode } from '../commands/builtin/find_eval.ts'
+import { DEFAULT_MAX_DU_ENTRIES } from '../commands/builtin/generic/du.ts'
+import type { Builder } from '../commands/builtin/generic_bind/adapter.ts'
 import { type CommandIO, makeGenericCommands } from '../commands/builtin/generic_bind/index.ts'
 import type { RegisteredCommand } from '../commands/config.ts'
 import { makeGenericOps } from '../ops/generic/factory.ts'
@@ -103,10 +104,10 @@ export interface VFSOptions<A extends Accessor = Accessor> {
   /** Appended to `prompt` when the mount is writable. */
   writePrompt?: string
   /**
-   * Generic command names the backend replaces. Pass the replacements
-   * through `commands`.
+   * Replacement builders receive the factory's prepared IO.
+   * A null value omits the generic command.
    */
-  overrides?: ReadonlySet<string>
+  overrides?: Record<string, Builder<A> | null>
   /**
    * Extra commands, from `command({...})`: bespoke verbs, or the
    * replacements for whatever `overrides` suppressed.

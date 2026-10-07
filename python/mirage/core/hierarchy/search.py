@@ -22,7 +22,8 @@ from mirage.core.hierarchy.probe import A
 from mirage.core.hierarchy.scope import ROOT, DetectFn, ScopeMatch
 from mirage.shell.bytes import byte_view
 from mirage.types import PathSpec
-from mirage.vfs.types import SearchOp, SearchQuery, StatOp
+from mirage.utils.key_prefix import mount_prefix_of
+from mirage.vfs.types import SearchOp, SearchQuery, SearchResult, StatOp
 
 LineMatcher = Callable[[str], bool]
 
@@ -55,7 +56,9 @@ def query_matcher(query: SearchQuery) -> LineMatcher:
     return lambda line: pattern.search(byte_view(line, utf8)) is not None
 
 
-Searcher = Callable[[A, ScopeMatch, SearchQuery], Awaitable[list[str]]]
+Searcher = Callable[
+    [A, ScopeMatch, SearchQuery], Awaitable[list[SearchResult]]
+]
 
 
 def make_search_op(
@@ -76,13 +79,22 @@ def make_search_op(
         path: PathSpec,
         query: SearchQuery,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> list[str] | None:
+    ) -> list[SearchResult] | None:
         match = detect(path)
         searcher = searchers.get(match.kind)
         if searcher is None:
             return None
         if stat is not None and match.kind != ROOT:
             await stat(accessor, path, index)
-        return await searcher(accessor, match, query)
+        prefix = mount_prefix_of(path.virtual, path.vfs_path).rstrip("/")
+        return [
+            (
+                PathSpec.from_str_path(
+                    f"{prefix}/{hit.vfs_path.lstrip('/')}", hit.vfs_path
+                ),
+                text,
+            )
+            for hit, text in await searcher(accessor, match, query)
+        ]
 
     return search

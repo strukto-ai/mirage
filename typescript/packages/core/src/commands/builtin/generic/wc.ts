@@ -12,24 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isStdin, stdinStream } from '../utils/stream.ts'
-import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
-import { guardInput } from '../utils/limit.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { fsErrorLine } from '../../../errors/render.ts'
 import { isEisdir, isFsError } from '../../../errors/fs.ts'
-import { resolveSource } from '../utils/stream.ts'
-import { formatRecords } from '../utils/output.ts'
-import { argmatchError } from '../../spec/usage.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { encodeText } from '../../../shell/bytes.ts'
+import type { PathSpec } from '../../../types.ts'
+import { shellQuote } from '../../../utils/quote.ts'
+import { advanceColumn, isSpace } from '../../../utils/width.ts'
+import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { argmatch } from '../../spec/argmatch.ts'
+import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { advanceColumn, isSpace } from '../../../utils/width.ts'
-import { shellQuote } from '../../../utils/quote.ts'
-import { encodeText } from '../../../shell/bytes.ts'
+import { argmatchError } from '../../spec/usage.ts'
+import { guardInput } from '../utils/limit.ts'
+import { formatRecords } from '../utils/output.ts'
+import { isStdin, resolveSource, stdinStream } from '../utils/stream.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
@@ -249,7 +247,7 @@ export async function wcGeneric(
   opts: CommandOpts,
   stream: Stream,
 ): Promise<CommandFnResult> {
-  stream = stdinStream(cacheAwareStreamEager(stream), opts.stdin)
+  stream = stdinStream(stream, opts.stdin)
   const parsed = parseFlags(opts.flags)
   if (typeof parsed === 'string') {
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]

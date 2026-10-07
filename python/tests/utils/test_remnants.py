@@ -100,7 +100,9 @@ async def test_a_visible_entry_aborts_before_it_is_touched():
         dirs={"/d", "/d/sec"}, files={"/d/sec/k", "/d/sec/new.txt"}
     )
     with pytest.raises(VisibleRemnant) as exc:
-        await remove_remnants(ch, lambda v: v == "/d/sec/new.txt", _spec("/d"))
+        await remove_remnants(
+            ch, lambda p: p.virtual == "/d/sec/new.txt", _spec("/d")
+        )
     assert exc.value.errno == errno.ENOTEMPTY
     assert "/d/sec/new.txt" in ch.files
     assert "/d" in ch.dirs and "/d/sec" in ch.dirs
@@ -136,13 +138,15 @@ async def test_a_channel_refusal_propagates_to_the_caller():
 def test_visible_below_normalizes_slashes_and_paths():
     seen: list[str] = []
 
-    def probe(virtual: str) -> bool:
-        seen.append(virtual)
-        return virtual == "/d/pub"
+    def probe(path: PathSpec) -> bool:
+        seen.append(path.virtual)
+        return path.virtual == "/d/pub"
 
-    assert visible_below("/d/", ["sec/", "/d/pub"], probe)
+    assert visible_below(_spec("/d/"), ["sec/", "/d/pub"], probe)
     assert seen == ["/d/sec", "/d/pub"]
-    assert not visible_below("/d", ["sec", "hidden.txt"], _nothing_visible)
+    assert not visible_below(
+        _spec("/d"), ["sec", "hidden.txt"], _nothing_visible
+    )
 
 
 def test_entry_name_takes_the_last_component():

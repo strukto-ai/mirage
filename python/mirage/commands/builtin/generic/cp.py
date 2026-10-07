@@ -481,7 +481,9 @@ async def copy_tree_links(
     shown_dst = target.raw_path.rstrip("/") or target.raw_path
     below = sorted(copies.links.subtree(base), key=lambda row: row[0])
     for virtual, row in below:
-        if not path_visible(copies.visibility, virtual):
+        if not path_visible(
+            copies.visibility, PathSpec.from_str_path(virtual)
+        ):
             continue
         rel = virtual[len(base.rstrip("/")) + 1 :]
         landing = f"{dst_base}/{rel}"

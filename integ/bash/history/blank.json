@@ -3,7 +3,9 @@
     {
       "id": "history_blank_line_runs",
       "seq": 310051,
-      "targets": ["ram-history"],
+      "targets": [
+        "ram-history"
+      ],
       "session": "s2",
       "command": "",
       "expect": {
@@ -15,7 +17,9 @@
     {
       "id": "history_whitespace_line_runs",
       "seq": 310052,
-      "targets": ["ram-history"],
+      "targets": [
+        "ram-history"
+      ],
       "session": "s2",
       "command": "   ",
       "expect": {
@@ -27,7 +31,9 @@
     {
       "id": "history_comment_line_runs",
       "seq": 310053,
-      "targets": ["ram-history"],
+      "targets": [
+        "ram-history"
+      ],
       "session": "s2",
       "command": "# marker-comment",
       "expect": {
@@ -39,25 +45,30 @@
     {
       "id": "history_skips_only_the_blank_line",
       "seq": 310054,
-      "targets": ["ram-history"],
+      "targets": [
+        "ram-history"
+      ],
       "session": "s2",
       "command": "history 3",
       "expect": {
         "exit": 0,
-        "stdout": "6  history 3\n7     \n8  # marker-comment\n",
+        "stdout": " 8  grep -c 'synthetic entry one' /.bash_history\n 9     \n10  # marker-comment\n",
         "stderr": ""
       }
     },
     {
       "id": "bash_history_has_no_empty_command_line",
       "seq": 310055,
-      "targets": ["ram-history"],
+      "targets": [
+        "ram-history"
+      ],
       "command": "grep -c '^ *$' /.bash_history",
       "expect": {
         "exit": 0,
         "stdout": "1\n",
         "stderr": ""
-      }
+      },
+      "session": "s2"
     }
   ]
 }

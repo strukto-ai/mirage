@@ -23,6 +23,7 @@ from mirage.accessor.base import Accessor
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic_bind import CommandIO
+from mirage.commands.builtin.generic_bind.builders import BUILDERS
 from mirage.commands.builtin.ram.io import IO as RAM_IO
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.cli import CLISpec
@@ -53,6 +54,55 @@ PAGES = {
     },
     "notes.md": "agents speak bash\n",
 }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "head /wiki/notes.md",
+        "tail /wiki/notes.md",
+        "wc -c /wiki/notes.md",
+        "find /wiki",
+        "du -a /wiki",
+    ],
+)
+async def test_overrides_observe_hidden_paths_even_after_a_warm_read(line):
+    original = next(b for b in BUILDERS if b.name == line.split()[0])
+    calls = 0
+
+    async def customized(ops, accessor, paths, texts, opts):
+        nonlocal calls
+        calls += 1
+        return await original.fn(ops, accessor, paths, texts, opts)
+
+    replacement = replace(original, fn=customized)
+    vfs = make_vfs(overrides={original.name: replacement}, caches_reads=True)
+    absent = BaseVFS(
+        name="wiki",
+        accessor=WikiAccessor({"guides": PAGES["guides"]}),
+        io=make_io(),
+        overrides={original.name: replacement},
+        caches_reads=True,
+    )
+    ws = Workspace({"/wiki": vfs})
+    missing = Workspace({"/wiki": absent})
+    try:
+        await ws.shell("cat /wiki/notes.md > /dev/null")
+        ws.create_session(
+            "agent", profile={"paths": {"hide": ["/wiki/notes.md"]}}
+        )
+        actual = await ws.shell(line, session_id="agent")
+        expected = await missing.shell(line)
+        assert (
+            actual.exit_code,
+            actual.stdout,
+            await actual.stderr_str(),
+        ) == (expected.exit_code, expected.stdout, await expected.stderr_str())
+        assert calls == 2
+    finally:
+        await ws.close()
+        await missing.close()
 
 
 class ClosingAccessor(Accessor):
@@ -234,7 +284,7 @@ def test_write_commands_register_without_write_op():
 
 
 def test_overrides_suppress_generic():
-    names = command_names(make_vfs(overrides={"grep"}))
+    names = command_names(make_vfs(overrides={"grep": None}))
     assert "grep" not in names
     assert "rg" in names
 

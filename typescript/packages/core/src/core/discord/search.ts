@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../types.ts'
+import type { SearchResult } from '../../vfs/types.ts'
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import { channelDirname, guildDirname } from './entry.ts'
 import { offsetPages } from './paginate.ts'
@@ -89,13 +91,13 @@ export function formatGrepResults(
   scope: SearchScope,
   prefix: string,
   channelNames: ReadonlyMap<string, string> = new Map(),
-): string[] {
+): SearchResult[] {
   const guildId = scope.guildId
   const guildVfs = guildDirname({
     id: guildId,
     ...(scope.guildName !== undefined ? { name: scope.guildName } : {}),
   })
-  const lines: string[] = []
+  const lines: SearchResult[] = []
   for (const msg of messages) {
     let ts = asString(msg.timestamp).slice(0, 10)
     if (ts === '') {
@@ -113,7 +115,10 @@ export function formatGrepResults(
       ts !== ''
         ? `${prefix}/${guildVfs}/channels/${chVfs}/${ts}/chat.jsonl`
         : `${prefix}/${guildVfs}/channels/${chVfs}`
-    lines.push(`${path}:[${author}] ${content}`)
+    lines.push([
+      PathSpec.fromStrPath(path, path.slice(prefix.length).replace(/^\//, '')),
+      `${path}:[${author}] ${content}`,
+    ])
   }
   return lines
 }

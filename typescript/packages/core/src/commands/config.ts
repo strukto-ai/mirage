@@ -143,6 +143,7 @@ export interface RegisteredCommandInit {
   aggregate?: AggregateFn | null
   write?: boolean
   limit?: Limit | null
+  /** The handler checks visibility and mount restrictions for every path, including results. */
   pathGuarded?: boolean
 }
 
@@ -249,6 +250,7 @@ export interface CommandOptions<A extends Accessor = Accessor> {
   aggregate?: AggregateFn | null
   write?: boolean
   limit?: Limit | null
+  /** The handler checks visibility and mount restrictions for every path, including results. */
   pathGuarded?: boolean
 }
 

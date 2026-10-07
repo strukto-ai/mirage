@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Callable
-from types import SimpleNamespace
+from dataclasses import replace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -22,6 +22,7 @@ import pytest
 from mirage.commands.builtin.discord.grep import grep
 from mirage.commands.builtin.discord.io import IO as DISCORD_IO
 from mirage.commands.builtin.discord.rg import rg
+from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.config import CommandOpts
 from mirage.core.time_range import TimeRange
 from mirage.io.types import IOResult
@@ -29,14 +30,14 @@ from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
 
-def _io(**slots: Callable[..., Any]) -> SimpleNamespace:
-    """The command's IO with the given slots faked; the rest stay real."""
-    real = {
-        "readdir": DISCORD_IO.readdir,
-        "stat": DISCORD_IO.stat,
-        "read_bytes": DISCORD_IO.read_bytes,
-    }
-    return SimpleNamespace(**{**real, **slots})
+def _io(
+    monkeypatch: pytest.MonkeyPatch, **slots: Callable[..., Any]
+) -> CommandIO:
+    """Replace backend slots while retaining the checked adapter contract."""
+    resolve = slots.pop("resolve_glob", None)
+    if resolve is not None:
+        monkeypatch.setattr(CommandIO, "resolve_glob", staticmethod(resolve))
+    return replace(DISCORD_IO, **slots)
 
 
 def _path(path: str) -> PathSpec:
@@ -46,25 +47,29 @@ def _path(path: str) -> PathSpec:
 
 
 @pytest.mark.asyncio
-async def test_grep_emits_token_hint_on_forbidden():
+async def test_grep_emits_token_hint_on_forbidden(monkeypatch):
     accessor = AsyncMock()
     accessor.time_range = TimeRange()
     accessor.config = AsyncMock()
     paths = [_path("/discord/myguild__G1/channels/general__C1")]
+    ops = _io(monkeypatch, resolve_glob=AsyncMock(return_value=paths))
     with patch.dict(
-        grep.__wrapped__.__globals__,
+        grep.__globals__,
         {
             "search_guild": AsyncMock(
                 side_effect=RuntimeError("403 Forbidden")
             ),
-            "IO": _io(resolve_glob=AsyncMock(return_value=paths)),
             "grep_generic": AsyncMock(
                 return_value=(b"", IOResult(exit_code=1))
             ),
         },
     ):
         _out, io = await grep(
-            accessor, paths, ["hi"], CommandOpts(flags={"w": True, "r": True})
+            ops,
+            accessor,
+            paths,
+            ["hi"],
+            CommandOpts(flags={"w": True, "r": True}),
         )
     stderr = (io.stderr or b"").decode()
     assert "push-down failed" in stderr
@@ -72,23 +77,27 @@ async def test_grep_emits_token_hint_on_forbidden():
 
 
 @pytest.mark.asyncio
-async def test_rg_emits_warning_on_rate_limit():
+async def test_rg_emits_warning_on_rate_limit(monkeypatch):
     accessor = AsyncMock()
     accessor.time_range = TimeRange()
     accessor.config = AsyncMock()
     paths = [_path("/discord/myguild__G1/channels/general__C1")]
+    ops = _io(monkeypatch, resolve_glob=AsyncMock(return_value=paths))
     with patch.dict(
-        rg.__wrapped__.__globals__,
+        rg.__globals__,
         {
             "search_guild": AsyncMock(
                 side_effect=RuntimeError("rate limited 429")
             ),
-            "IO": _io(resolve_glob=AsyncMock(return_value=paths)),
             "rg_generic": AsyncMock(return_value=(b"", IOResult(exit_code=1))),
         },
     ):
         _out, io = await rg(
-            accessor, paths, ["hi"], CommandOpts(flags={"word_regexp": True})
+            ops,
+            accessor,
+            paths,
+            ["hi"],
+            CommandOpts(flags={"word_regexp": True}),
         )
     stderr = (io.stderr or b"").decode()
     assert "push-down failed" in stderr

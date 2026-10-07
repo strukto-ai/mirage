@@ -12,19 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// Every read-content command funnels its file read through one of these
-// shared consumers, which wrap the injected reader with cacheAware* at the
-// choke point. A backend can therefore pass a RAW reader and warm reads
-// still serve from cache. These tests pin that guarantee: with a warm
-// manager active, the consumer must NOT call the backend reader.
-
-import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { runWithCacheManager } from '../../cache/context.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import { CacheManager } from '../../cache/manager.ts'
+import { eacces } from '../../errors/fs.ts'
 import { materialize } from '../../io/types.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
 import type { CommandFnResult, CommandOpts } from '../config.ts'
 import { grepGeneric } from './generic/grep.ts'
 import { headGeneric } from './generic/head.ts'
@@ -75,6 +70,10 @@ function readdirOf(_p: PathSpec): Promise<string[]> {
   return Promise.resolve([])
 }
 
+async function* refusedStream(path: PathSpec): AsyncIterable<Uint8Array> {
+  yield await Promise.reject(eacces(path.virtual))
+}
+
 function opts(flags: Record<string, string | boolean | number | string[]> = {}): CommandOpts {
   return {
     stdin: null,
@@ -91,8 +90,26 @@ async function out(result: CommandFnResult): Promise<string> {
   return new TextDecoder().decode(await materialize(source))
 }
 
-describe('warm reads serve cache uniformly across shared consumers', () => {
-  it('headGeneric serves cache without the backend (built in-scope, drained after)', async () => {
+describe('readers under a warm cache', () => {
+  it.each(['grep', 'rg'])('%s cannot skip a refused reader with a warm cache', async (name) => {
+    const manager = await warmManager()
+    const result = await runWithCacheManager(manager, () =>
+      name === 'grep'
+        ? grepGeneric('grep', [spec()], ['alpha'], opts(), statOf, readdirOf, refusedStream)
+        : rgGeneric([spec()], ['alpha'], opts(), statOf, readdirOf, refusedStream),
+    )
+    if (name === 'grep') {
+      await expect(out(result)).rejects.toMatchObject({ code: 'EACCES' })
+      return
+    }
+    expect(await out(result)).toBe('')
+    expect(result?.[1].exitCode).toBe(2)
+    expect(new TextDecoder().decode(await materialize(result?.[1].stderr ?? null))).toContain(
+      'Permission denied',
+    )
+  })
+
+  it('headGeneric uses its injected reader with a warm cache (built in-scope, drained after)', async () => {
     const reader = new CountingStream()
     const manager = await warmManager()
     // Build in scope, drain outside: also pins eager capture in the multi path.
@@ -100,46 +117,46 @@ describe('warm reads serve cache uniformly across shared consumers', () => {
       headGeneric([spec()], [], opts({ lines: '1' }), statOf, reader.stream),
     )
     expect(await out(result)).toBe('alpha\n')
-    expect(reader.calls).toBe(0)
+    expect(reader.calls).toBe(1)
   })
 
-  it('tailGeneric serves cache without the backend', async () => {
+  it('tailGeneric uses its injected reader with a warm cache', async () => {
     const reader = new CountingStream()
     const manager = await warmManager()
     const result = await runWithCacheManager(manager, () =>
       tailGeneric([spec()], [], opts({ n: '1' }), reader.stream, statOf),
     )
     expect(await out(result)).toBe('beta\n')
-    expect(reader.calls).toBe(0)
+    expect(reader.calls).toBe(1)
   })
 
-  it('wcGeneric serves cache without the backend', async () => {
+  it('wcGeneric uses its injected reader with a warm cache', async () => {
     const reader = new CountingStream()
     const manager = await warmManager()
     const result = await runWithCacheManager(manager, () =>
       wcGeneric([spec()], [], opts({ args_l: true }), reader.stream),
     )
     expect(await out(result)).toContain('2')
-    expect(reader.calls).toBe(0)
+    expect(reader.calls).toBe(1)
   })
 
-  it('grepGeneric serves cache without the backend', async () => {
+  it('grepGeneric uses its injected reader with a warm cache', async () => {
     const reader = new CountingStream()
     const manager = await warmManager()
     const result = await runWithCacheManager(manager, () =>
       grepGeneric('grep', [spec()], ['alpha'], opts(), statOf, readdirOf, reader.stream),
     )
     expect(await out(result)).toContain('alpha')
-    expect(reader.calls).toBe(0)
+    expect(reader.calls).toBe(1)
   })
 
-  it('rgGeneric serves cache without the backend', async () => {
+  it('rgGeneric uses its injected reader with a warm cache', async () => {
     const reader = new CountingStream()
     const manager = await warmManager()
     const result = await runWithCacheManager(manager, () =>
       rgGeneric([spec()], ['alpha'], opts(), statOf, readdirOf, reader.stream),
     )
     expect(await out(result)).toContain('alpha')
-    expect(reader.calls).toBe(0)
+    expect(reader.calls).toBe(1)
   })
 })

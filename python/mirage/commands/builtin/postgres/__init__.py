@@ -13,24 +13,19 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.commands.builtin.postgres.grep import grep
-from mirage.commands.builtin.postgres.head import head
+from mirage.commands.builtin.postgres import grep, head, rg, tail, wc
 from mirage.commands.builtin.postgres.io import IO as _IO
-from mirage.commands.builtin.postgres.rg import rg
-from mirage.commands.builtin.postgres.tail import tail
-from mirage.commands.builtin.postgres.wc import wc
-
-_POSTGRES_OVERRIDES = {"grep", "head", "rg", "tail", "wc"}
 
 COMMANDS = [
     *make_generic_commands(
         "postgres",
         _IO,
-        overrides=_POSTGRES_OVERRIDES,
+        overrides={
+            "head": head.BUILDER,
+            "wc": wc.BUILDER,
+            "rg": rg.BUILDER,
+            "grep": grep.BUILDER,
+            "tail": tail.BUILDER,
+        },
     ),
-    grep,
-    head,
-    rg,
-    tail,
-    wc,
 ]

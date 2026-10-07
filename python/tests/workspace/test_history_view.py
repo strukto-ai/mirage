@@ -79,7 +79,7 @@ def test_history_builtin_wins_over_mount_command():
     assert "ls /data" in out
 
 
-def test_cat_bash_history_all_sessions():
+def test_cat_bash_history_per_session():
     ws = _ws()
     ws.create_session("s2")
     _exec(ws, "ls /data")
@@ -88,8 +88,11 @@ def test_cat_bash_history_all_sessions():
     assert io.exit_code == 0
     out = _stdout(io)
     assert "ls /data" in out
-    assert "pwd" in out
-    assert out.count("#") >= 2
+    assert "pwd" not in out
+    assert out.count("#") == 1
+    other = _stdout(_exec(ws, "cat /.bash_history", session_id="s2"))
+    assert "pwd" in other
+    assert "ls /data" not in other
 
 
 def test_grep_and_tail_bash_history():

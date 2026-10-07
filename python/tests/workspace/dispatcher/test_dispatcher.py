@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from mirage.context import reset_current_session, set_current_session
+from mirage.context.session_context import reset_admission, set_admission
 from mirage.errors import FsCondition, posix_errno
 from mirage.errors.types import ReadOnlyError
 from mirage.ops.registry import op as register_op
@@ -1329,10 +1330,10 @@ async def _text(ws: Workspace, virtual: str) -> bytes:
 
 
 @pytest.mark.asyncio
-async def test_a_marked_op_is_judged_on_every_path_it_reaches():
+async def test_an_op_inherits_the_gate_on_every_path_it_reaches():
     # Each spelling once, in the order the door meets it: as handed in,
-    # walked, then followed. A refused op leaves the bytes alone; an
-    # unmarked one is the door's alone.
+    # walked, then followed. A refused op leaves the bytes alone; a
+    # call outside the command has no inherited gate.
     ws = await _linked_ws()
     await ws.shell(
         "echo new > /data/real/other && echo o > /data/other && "
@@ -1355,7 +1356,11 @@ async def test_a_marked_op_is_judged_on_every_path_it_reaches():
             ),
         ):
             with pytest.raises(PermissionError):
-                await ws.dispatch(op, _path(virtual), rule_gate=gate, **kwargs)
+                admission_token = set_admission(gate)
+                try:
+                    await ws.dispatch(op, _path(virtual), **kwargs)
+                finally:
+                    reset_admission(admission_token)
         assert gate.asked == [
             "/data/alias/secret",
             "/data/real/secret",
@@ -1370,10 +1375,12 @@ async def test_a_marked_op_is_judged_on_every_path_it_reaches():
         assert await _text(ws, "/data/real/secret") == b"s\n"
         assert await _text(ws, "/data/real/other") == b"new\n"
         walked = _RefusingGate("/data/real/flink2")
-        with pytest.raises(PermissionError):
-            await ws.dispatch(
-                "read", _path("/data/alias/flink2"), rule_gate=walked
-            )
+        admission_token = set_admission(walked)
+        try:
+            with pytest.raises(PermissionError):
+                await ws.dispatch("read", _path("/data/alias/flink2"))
+        finally:
+            reset_admission(admission_token)
         assert walked.asked == ["/data/alias/flink2", "/data/real/flink2"]
         await ws.dispatch("unlink", _path("/data/alias/secret"))
         with pytest.raises(FileNotFoundError):
@@ -1383,19 +1390,23 @@ async def test_a_marked_op_is_judged_on_every_path_it_reaches():
 
 
 @pytest.mark.asyncio
-async def test_a_marked_unlink_of_a_link_is_judged_on_the_link_entry():
+async def test_unlink_inherits_the_gate_on_the_link_entry():
     # The link table answers unlink of a link: a rule on the link name
     # holds before that answer, and one on the referent is never asked.
     ws = await _linked_ws()
     try:
-        with pytest.raises(PermissionError):
-            await ws.dispatch(
-                "unlink",
-                _path("/data/flink"),
-                rule_gate=_RefusingGate("/data/flink"),
-            )
+        admission_token = set_admission(_RefusingGate("/data/flink"))
+        try:
+            with pytest.raises(PermissionError):
+                await ws.dispatch("unlink", _path("/data/flink"))
+        finally:
+            reset_admission(admission_token)
         referent = _RefusingGate("/data/real/secret")
-        await ws.dispatch("unlink", _path("/data/flink"), rule_gate=referent)
+        admission_token = set_admission(referent)
+        try:
+            await ws.dispatch("unlink", _path("/data/flink"))
+        finally:
+            reset_admission(admission_token)
         assert referent.asked == ["/data/flink"]
         assert await _text(ws, "/data/real/secret") == b"s\n"
     finally:
@@ -1403,7 +1414,7 @@ async def test_a_marked_unlink_of_a_link_is_judged_on_the_link_entry():
 
 
 @pytest.mark.asyncio
-async def test_hidden_space_answers_a_marked_op_before_any_rule():
+async def test_hidden_space_answers_before_the_command_gate():
     # A write into hidden space, a link there, a hidden rename endpoint
     # and one behind a linked parent are missing, and the command's gate
     # is never asked.
@@ -1428,7 +1439,11 @@ async def test_hidden_space_answers_a_marked_op_before_any_rule():
             ("rename", "/data/real/secret", {"dst": _path("/data/halias/x")}),
         ):
             with pytest.raises(FileNotFoundError):
-                await ws.dispatch(op, _path(virtual), rule_gate=gate, **kwargs)
+                admission_token = set_admission(gate)
+                try:
+                    await ws.dispatch(op, _path(virtual), **kwargs)
+                finally:
+                    reset_admission(admission_token)
         assert gate.asked == []
     finally:
         reset_current_session(token)
@@ -1436,24 +1451,19 @@ async def test_hidden_space_answers_a_marked_op_before_any_rule():
 
 
 @pytest.mark.asyncio
-async def test_the_mark_never_reaches_the_op(monkeypatch):
-    # The door lifts the mark at entry: the mount's op sees only its own
-    # arguments, whatever the command's dispatcher carried.
+async def test_metadata_keeps_its_exemption_from_the_command_gate():
     ws = await _linked_ws()
-    seen: list[dict] = []
-    real = MountEntry.execute_op
-
-    async def spy(self, op, *args, **kwargs):
-        seen.append(dict(kwargs))
-        return await real(self, op, *args, **kwargs)
-
-    monkeypatch.setattr(MountEntry, "execute_op", spy)
+    gate = _RefusingGate("/data/real/secret")
+    admission_token = set_admission(gate)
     try:
-        gate = _RefusingGate("/nothing")
-        await ws.dispatch("read", _path("/data/real/secret"), rule_gate=gate)
-        assert seen and all("rule_gate" not in kw for kw in seen)
+        stat, _ = await ws.dispatch("stat", _path("/data/real/secret"))
+        assert stat.type is FileType.FILE
+        assert gate.asked == []
+        with pytest.raises(PermissionError):
+            await _text(ws, "/data/real/secret")
         assert gate.asked == ["/data/real/secret"]
     finally:
+        reset_admission(admission_token)
         await ws.close()
 
 

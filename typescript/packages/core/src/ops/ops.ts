@@ -205,7 +205,8 @@ export class Ops {
     let seen: string | null = null
     const run = (): Promise<[unknown, IOResult]> => {
       seen = getCurrentSession()?.sessionId ?? null
-      if (links !== null && pathVisible(sessionVisibility(), path)) followed = links.follow(path)
+      if (links !== null && pathVisible(sessionVisibility(), PathSpec.fromStrPath(path)))
+        followed = links.follow(path)
       const spec = PathSpec.fromStrPath(followed)
       const typed = new PathSpec({
         virtual: spec.virtual,

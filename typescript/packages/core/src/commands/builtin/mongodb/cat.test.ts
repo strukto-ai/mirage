@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { mountKey } from '../../../utils/key_prefix.ts'
 
 vi.mock('../../../core/mongodb/stat.ts', () => ({
   stat: vi.fn(),
@@ -22,9 +22,10 @@ vi.mock('../../../core/mongodb/stat.ts', () => ({
 import { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import { stubMongoDriver } from '../../../core/mongodb/_test_util.ts'
 import * as statModule from '../../../core/mongodb/stat.ts'
-import { resolveMongoDBConfig } from '../../../vfs/mongodb/config.ts'
 import { PathSpec } from '../../../types.ts'
-import { MONGODB_CAT } from './cat.ts'
+import { resolveMongoDBConfig } from '../../../vfs/mongodb/config.ts'
+import { MONGODB_COMMANDS as MONGODB_CAT_COMMANDS } from './index.ts'
+const MONGODB_CAT = MONGODB_CAT_COMMANDS.filter((cmd) => cmd.name === 'cat')
 
 const STUB_DRIVER = stubMongoDriver()
 

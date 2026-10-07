@@ -19,7 +19,7 @@ from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.types import FileStat, FileType, PathSpec
 
-Allowed = Callable[[str], bool]
+Allowed = Callable[[PathSpec], bool]
 
 
 class VisibleRemnant(OSError):
@@ -78,7 +78,9 @@ def entry_name(entry: str) -> str:
     return entry.rstrip("/").rsplit("/", 1)[-1]
 
 
-def visible_below(base: str, names: Iterable[str], allowed: Allowed) -> bool:
+def visible_below(
+    base: PathSpec, names: Iterable[str], allowed: Allowed
+) -> bool:
     """Whether any listed name is visible as a child of ``base``.
 
     The one emptiness predicate every remnant arm judges with, fed
@@ -87,12 +89,11 @@ def visible_below(base: str, names: Iterable[str], allowed: Allowed) -> bool:
     "visibly empty" cannot mean different things at different doors.
 
     Args:
-        base (str): absolute virtual path of the directory.
+        base (PathSpec): the listed directory.
         names (Iterable[str]): child names to test.
         allowed (Allowed): the session's visibility predicate.
     """
-    root = base.rstrip("/")
-    return any(allowed(f"{root}/{entry_name(n)}") for n in names)
+    return any(allowed(child_spec(base, entry_name(n))) for n in names)
 
 
 def child_spec(spec: PathSpec, name: str) -> PathSpec:
@@ -140,7 +141,7 @@ async def remove_remnants(
     for entry in entries:
         name = entry_name(str(entry))
         child = child_spec(spec, name)
-        if allowed(child.virtual):
+        if allowed(child):
             raise VisibleRemnant(child.virtual)
         try:
             row = await channel.stat(child)

@@ -40,7 +40,7 @@ import * as streamModule from '../../../core/mongodb/stream.ts'
 import { resolveMongoDBConfig } from '../../../vfs/mongodb/config.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { MONGODB_TAIL } from './tail.ts'
+import { MONGODB_COMMANDS } from './index.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -78,7 +78,7 @@ async function run(
   signal?: AbortSignal,
   accessor: MongoDBAccessor = makeAccessor(),
 ): Promise<AsyncIterable<Uint8Array> | Uint8Array | null> {
-  const cmd = MONGODB_TAIL[0]
+  const cmd = MONGODB_COMMANDS.find((cmd) => cmd.name === 'tail')
   if (cmd === undefined) throw new Error('tail not registered')
   const result = await cmd.fn(accessor, paths, [], {
     stdin: null,

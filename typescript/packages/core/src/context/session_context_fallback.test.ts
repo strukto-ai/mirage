@@ -178,13 +178,13 @@ describe('session predicates on the fallback storage', () => {
     const short = runWithSession(other, () => {
       // The hider's frame is not the newest, but its hide must still
       // count: every live session is folded, most restrictive first.
-      allowedBesideHider = pathVisible(sessionVisibility(), '/repo/.env')
+      allowedBesideHider = pathVisible(sessionVisibility(), PathSpec.fromStrPath('/repo/.env'))
       release()
       return Promise.resolve()
     })
     await Promise.all([long, short])
     expect(allowedBesideHider).toBe(false)
-    expect(pathVisible(sessionVisibility(), '/repo/.env')).toBe(true)
+    expect(pathVisible(sessionVisibility(), PathSpec.fromStrPath('/repo/.env'))).toBe(true)
   })
 
   it('folds every live visibility toward the narrower view', async () => {
@@ -252,7 +252,7 @@ describe('session predicates on the fallback storage', () => {
     })
     const short = runWithSession(other, () => {
       const vis = namespaceViewOf(registry, null, dispatch, other).visibility ?? null
-      folded = pathVisible(vis, '/data/x')
+      folded = pathVisible(vis, PathSpec.fromStrPath('/data/x'))
       release()
       return Promise.resolve()
     })
@@ -260,7 +260,7 @@ describe('session predicates on the fallback storage', () => {
     expect(folded).toBe(false)
     // A session named outside any line keeps its own view.
     const own = namespaceViewOf(registry, null, dispatch, other).visibility ?? null
-    expect(pathVisible(own, '/data/x')).toBe(true)
+    expect(pathVisible(own, PathSpec.fromStrPath('/data/x'))).toBe(true)
   })
 
   it('a settle out of order cannot wipe a live hide into visibility', async () => {
@@ -281,7 +281,7 @@ describe('session predicates on the fallback storage', () => {
     const second = runWithSession(hider, async () => {
       release()
       await first
-      seen = pathVisible(sessionVisibility(), '/repo/.env')
+      seen = pathVisible(sessionVisibility(), PathSpec.fromStrPath('/repo/.env'))
     })
     await second
     expect(seen).toBe(false)

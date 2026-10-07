@@ -13,11 +13,30 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { normDir, rstripSlash } from '../utils/slash.ts'
-import { FileStat, FileType, type PathSpec, type Visibility } from '../types.ts'
+import { FileStat, FileType, PathSpec, type Visibility } from '../types.ts'
 import { pathVisible } from '../utils/hidden.ts'
 import type { NamespaceLinks } from './config.ts'
 import type { NamespaceView } from './types.ts'
 import { compareCodePoints } from '../utils/sort.ts'
+
+/**
+ * Drop listing entries the reader's view hides.
+ *
+ * Entry shapes vary by backend (bare names, trailing-slash names, full
+ * paths), so each is keyed by its final segment against the listed
+ * directory, the same normalization `mergeReaddir` dedups by.
+ */
+export function visibleEntries(
+  entries: string[],
+  parent: PathSpec,
+  vis: Visibility | null,
+): string[] {
+  return entries.filter((e) => {
+    const trimmed = rstripSlash(e)
+    const name = trimmed.slice(trimmed.lastIndexOf('/') + 1)
+    return pathVisible(vis, parent.join(name))
+  })
+}
 
 /**
  * The child segments of `parent` that some allowed path runs through.
@@ -47,7 +66,7 @@ export function visibleChildSegments(
   for (const path of paths) {
     if (!path.startsWith(norm)) continue
     const name = path.slice(norm.length).split('/', 1)[0] ?? ''
-    if (name === '' || out.has(name) || !pathVisible(vis, path)) continue
+    if (name === '' || out.has(name) || !pathVisible(vis, PathSpec.fromStrPath(path))) continue
     out.add(name)
   }
   return [...out].sort(compareCodePoints)
@@ -204,6 +223,6 @@ export function pathsScoped(
   const scoped = ns?.scoped
   return (
     scoped !== undefined &&
-    paths.some((path) => scoped(path.pattern !== null ? prefix || '/' : path.virtual))
+    paths.some((path) => scoped(path.pattern !== null ? PathSpec.fromStrPath(prefix || '/') : path))
   )
 }

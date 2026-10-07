@@ -119,7 +119,7 @@ operation, and mount mode still controls whether a supported mutation may run. S
 filesystem ops. Builtins compile `VFSAdapter` into this table; advanced integrations can also
 supply `CommandIO` directly. The escape hatches remain:
 
-- `overrides` drops a generic command you replace, and `commands` supplies the replacement (or any bespoke verb) from `command({...})`.
+- `overrides: { find: builder }` replaces a generic command with an existing `Builder` definition. Its callback receives `(ops, accessor, paths, texts, opts)`, with namespace handling, path guards, policy and caching already applied to `ops`. A `null` value omits that command. `commands` adds bespoke verbs from `command({...})`.
 - `ops` layers an irregular VFS/FUSE handler over the derived set; one carrying no `filetype` shadows the derived op of the same name. `autoOps: false` opts out of deriving any. A verb the op table does not carry is not served: the mount answers `Operation not supported` for it, so a backend can be partial.
 - `sizesAlwaysKnown` declares that `stat` sizes every file without fetching it, which is also what makes the mount legal on FSKit. `supportsSnapshot` declares that `stat` fills `FileStat.fingerprint`; setting it without that is not drift detection.
 
@@ -145,6 +145,11 @@ operations report `Operation not supported`.
 
 ### Native search and backend-specific core functions
 
+Search results pair a canonical `PathSpec` with one complete text record,
+including any multiline body. Shared command I/O and `searchResources` check
+inputs before querying and filter records by path before exposing text. Bare
+strings are refused because their visibility cannot be established.
+
 Builtin backends use the same `VFSAdapter` groups. Operation types live in
 `vfs/types`; `CommandIO` extends them with command context. Wire compatible core
 functions directly, and wrap incompatible client functions to resolve `PathSpec`
@@ -158,7 +163,7 @@ declare function search(
   accessor: JiraAccessor,
   path: PathSpec,
   query: SearchQuery,
-): Promise<string[] | null>
+): Promise<[PathSpec, string][] | null>
 
 const searchOps: SearchOps<JiraAccessor> = { search }
 const adapter = new VFSAdapter({ read, search: searchOps })
@@ -321,9 +326,11 @@ Write an op by hand only for an irregular handler, and pass its name through `ov
 
 Build the standard set with `makeGenericCommands(VFSName.X, X_IO, { overrides })` over the same table; the generic command owns flag interpretation, so a backend wrapper is wiring only. `overrides` names the builders a bespoke command replaces, and a name no builder has is refused. Export the result as `<NAME>_COMMANDS` from `commands/builtin/<name>/index.ts`.
 
+Visibility is evaluated on `PathSpec` using the current session/profile view. The dispatcher and prepared command IO check inputs before backend or cache access; listings and other path-bearing results apply the same predicate before rendering. Custom CLIs inherit these checks through their VFS doors. Keep visibility decisions out of `PathSpec` and shared caches: the same path can be visible to one session and hidden from another.
+
 - Declare native text search in `new VFSAdapter({ read, search })`. Generic grep/rg builders consume it only when `search.meta.grep` opts in; semantic search does not opt in. The hierarchy kit supplies `makeSearchOp` for scope-based core functions; unsupported requests fall back to scanning. Existing wrappers may call `runSearch(X_IO, name, ...)` when preserving a custom registration.
 - A verb (`trello card create`) declares its own `new CommandSpec({...})` with every id as a flag, reads flags through `new FlagView(opts.flags, SPEC)` (never `flags.get(...)`), registers `write: true` for a mutation, and calls `requireMountWritable(...)` before the client. Specs declared inline are dumped to `.cache/spec/typescript/<node|browser>/vfs_commands/` and compared with Python's, and a prompt that teaches the verbs is pinned against their specs (`vfs/trello/prompt.test.ts`).
-- A handler that reads its `accessor` directly is trusted host code. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands.
+- Opaque mount commands are refused when the mount contains hidden paths. Only mark a handler `path_guarded`/`pathGuarded` when it enforces visibility and mount restrictions on every input and returned path. Prefer the shared builders and path-addressed search callbacks. Raw backend callbacks remain trusted host code.
 
 ## 5. VFS Class
 

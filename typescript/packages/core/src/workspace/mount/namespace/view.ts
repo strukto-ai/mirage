@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../../types.ts'
 import type { FileStat, Visibility } from '../../../types.ts'
 import type { LinkView, MountView, NamespaceView, StatOverlay } from '../../../ops/types.ts'
 import { namespaceNames } from '../../../ops/namespace_view.ts'
@@ -74,7 +75,9 @@ function mountView(registry: MountRegistry, vis: Visibility | null): MountView {
     // produced above every backend, and each one hands back a name the
     // session's hides were meant to withhold.
     visibleDescendants: (path: string) =>
-      mountRootsBelow(registry, path).filter((root) => pathVisible(vis, root)),
+      mountRootsBelow(registry, path).filter((root) =>
+        pathVisible(vis, PathSpec.fromStrPath(root)),
+      ),
     isRoot: (path: string) => registry.isMountRoot(path),
     rootOf: (path: string) => mountRootOf(registry, path),
     maxDuEntries: (path: string) => mountMaxDuEntries(registry, path),
@@ -147,6 +150,6 @@ export function namespaceViewOf(
       namespaceNames(vis, registry.mountPrefixes(), namespace, parent),
     ...(namespace !== null && namespace.user !== null ? { user: namespace.user } : {}),
     ...(vis !== null ? { visibility: vis } : {}),
-    scoped: (virtual: string) => hiddenUnder(vis, virtual) || (gate?.scopes(virtual) ?? false),
+    scoped: (path: PathSpec) => hiddenUnder(vis, path) || (gate?.scopes(path.virtual) ?? false),
   }
 }

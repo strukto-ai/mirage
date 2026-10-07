@@ -3,7 +3,7 @@ import { materialize } from '../../../io/types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { withCommandGuards, type CommandIO } from '../generic_bind/adapter.ts'
-import { makeRm } from './rm.ts'
+import { rm } from './rm.ts'
 
 it.each([
   [
@@ -31,8 +31,6 @@ it.each([
       rmR: unlink,
       isMounted: () => true,
     }
-    const command = makeRm('s3', withCommandGuards(io))[0]
-    if (command === undefined) throw new Error('rm was not registered')
     const refused = new PathSpec({
       virtual: '/data',
       directory: '/',
@@ -41,7 +39,7 @@ it.each([
       walkError: refusal,
     })
     const valid = PathSpec.fromStrPath('/data/ok')
-    const result = await command.fn({} as Accessor, [refused, valid], [], {
+    const result = await rm(withCommandGuards(io), {} as Accessor, [refused, valid], [], {
       flags: { f: force },
       stdin: null,
       filetypeFns: null,

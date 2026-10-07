@@ -25,10 +25,10 @@ export class HiddenPathsPolicy {
   /** Hide the op's path when the bound session cannot see it. */
   preVfs(ctx: VfsContext): Promise<Hide | null> {
     const vis = sessionVisibility()
-    if (pathVisible(vis, ctx.path.virtual)) return Promise.resolve(null)
+    if (pathVisible(vis, ctx.path)) return Promise.resolve(null)
     return Promise.resolve({
       kind: 'hide',
-      error: hiddenRefusal(vis, ctx.path.virtual, ctx.create === true),
+      error: hiddenRefusal(vis, ctx.path, ctx.create === true),
     })
   }
 }

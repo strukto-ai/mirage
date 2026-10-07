@@ -35,7 +35,7 @@
       "command": "history 2",
       "expect": {
         "exit": 0,
-        "stdout": "19  echo view > /data/ht.txt && ln -s /data/ht.txt /data/hlink\n20  cat /data/hlink\n",
+        "stdout": "17  echo view > /data/ht.txt && ln -s /data/ht.txt /data/hlink\n18  cat /data/hlink\n",
         "stderr": ""
       }
     },

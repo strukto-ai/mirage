@@ -21,12 +21,14 @@ from mirage.accessor.ram import RAMAccessor
 from mirage.commands.config import command
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.types import Option
+from mirage.context import reset_current_session, set_current_session
 from mirage.errors.types import OperationNotSupportedError, ReadOnlyError
 from mirage.io.types import IOResult, materialize
-from mirage.types import MountMode, PathSpec
+from mirage.types import HiddenPaths, MountMode, PathSpec, Visibility
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
+from mirage.workspace.session import SessionState
 
 
 def _run(coro):
@@ -332,3 +334,38 @@ async def test_a_path_guarded_command_is_still_held_at_its_write():
         b"\ngzip: /ram/a.gz: Read-only file system\n",
     )
     assert vfs._store.files == {"/a": b"original"}
+
+
+@pytest.mark.asyncio
+async def test_opaque_command_is_refused_before_backend_access_under_hides():
+    mount = MountEntry("/ram/", RAMVFS(), MountMode.WRITE)
+    calls: list[int] = []
+
+    @command("opaque", vfs="ram", spec=CommandSpec())
+    async def opaque(accessor, paths, texts, opts):
+        calls.append(len(paths))
+        return b"ran\n", IOResult()
+
+    mount.register_fns([opaque])
+    token = set_current_session(
+        SessionState(
+            session_id="reader",
+            visibility=Visibility(paths=HiddenPaths(paths=("/ram/secret",))),
+        )
+    )
+    try:
+        stdout, io = await mount.execute_cmd("opaque", [], [], {})
+        assert io.exit_code == 1
+        assert (
+            io.stderr == b"opaque: command requires path visibility checks\n"
+        )
+        assert not calls
+        _, help_io = await mount.execute_cmd("opaque", [], [], {"help": True})
+        assert help_io.exit_code == 0
+        assert not calls
+    finally:
+        reset_current_session(token)
+    stdout, io = await mount.execute_cmd("opaque", [], [], {})
+    assert io.exit_code == 0
+    assert await materialize(stdout) == b"ran\n"
+    assert calls == [0]

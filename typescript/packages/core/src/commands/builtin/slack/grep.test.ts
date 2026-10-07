@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../../utils/key_prefix.ts'
-import { SlackAccessor } from '../../../accessor/slack.ts'
 import { describe, expect, it } from 'vitest'
+import { SlackAccessor } from '../../../accessor/slack.ts'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { PathSpec } from '../../../types.ts'
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { FakeSlackTransport, seedChannel } from './_test_util.ts'
-import { SLACK_GREP } from './grep.ts'
+import { SLACK_COMMANDS as SLACK_GREP_COMMANDS } from './index.ts'
+const SLACK_GREP = SLACK_GREP_COMMANDS.filter((cmd) => cmd.name === 'grep')
 
 describe('slack grep on a time-scoped mount', () => {
   it('scans instead of searching, so a bare directory is EISDIR', async () => {

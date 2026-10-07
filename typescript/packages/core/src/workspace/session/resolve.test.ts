@@ -425,8 +425,8 @@ describe('the path axis through resolve', () => {
       ],
     })
     // The axis reads them together: the show reopens its subtree.
-    expect(pathVisible(out.visibility, '/repo/public/a')).toBe(true)
-    expect(pathVisible(out.visibility, '/repo/x')).toBe(false)
+    expect(pathVisible(out.visibility, PathSpec.fromStrPath('/repo/public/a'))).toBe(true)
+    expect(pathVisible(out.visibility, PathSpec.fromStrPath('/repo/x'))).toBe(false)
   })
 
   it("compileProfile anchors a mount section's reasons", () => {

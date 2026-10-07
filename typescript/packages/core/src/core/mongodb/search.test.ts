@@ -61,7 +61,7 @@ async function search(
   const match = detectScope(path)
   const searcher = SEARCHERS[match.kind]
   if (searcher === undefined) throw new Error(`no searcher for ${match.kind}`)
-  return searcher(acc, match, {
+  const results = await searcher(acc, match, {
     query: pattern,
     options: {
       grep: {
@@ -72,6 +72,7 @@ async function search(
       },
     },
   })
+  return results.map(([, text]) => text)
 }
 
 describe('mongodb directory search', () => {

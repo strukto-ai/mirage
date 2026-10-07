@@ -151,7 +151,7 @@ export function visiblePath(location: RepoLocation, relative: string): boolean {
   const ns = location.ns
   if (ns?.visibility === undefined) return true
   const path = location.worktree.join(relative)
-  if (!pathVisible(ns.visibility, path.virtual)) return false
+  if (!pathVisible(ns.visibility, path)) return false
   let parent: string
   try {
     parent = ns.links?.resolve(path.directory) ?? path.directory
@@ -163,7 +163,7 @@ export function visiblePath(location: RepoLocation, relative: string): boolean {
   const followed = PathSpec.fromStrPath(parent, undefined, '/').join(
     path.virtual.slice(path.virtual.lastIndexOf('/') + 1),
   )
-  return pathVisible(ns.visibility, followed.virtual)
+  return pathVisible(ns.visibility, followed)
 }
 
 /** A session view of Git entries; the persistent mapping stays intact. */

@@ -35,7 +35,6 @@ from mirage.utils.hidden import (
     show_head,
     shown_mode,
 )
-from mirage.utils.path import parent
 
 if TYPE_CHECKING:
     from mirage.policy.decisions import Decisions
@@ -102,6 +101,12 @@ def get_current_session() -> "SessionState | None":
     """Return the session bound to the current async context, if any."""
     binding = _current_session.get()
     return binding.session if binding is not None else None
+
+
+def live_sessions() -> "list[SessionState]":
+    """Sessions live in this context; ContextVar isolates Python callers."""
+    session = get_current_session()
+    return [] if session is None else [session]
 
 
 def get_current_session_for(owner: "SessionManager") -> "SessionState | None":
@@ -207,10 +212,9 @@ def dotglob_active() -> bool:
 def session_visibility() -> Visibility | None:
     """The bound session's visibility, None when no session is bound.
 
-    For the op boundary, which runs under the session it serves and
-    answers a hidden path as absent. A command reads the visibility off
-    its namespace view (``opts.ns.visibility``) instead, so nothing past
-    the boundary consults the session about what exists.
+    Capture this view before backend or cache access and use it for both
+    input checks and returned-path filtering. PathSpecs carry identity;
+    the view belongs to the caller and is never cached on a path.
 
     Args:
         None
@@ -220,7 +224,7 @@ def session_visibility() -> Visibility | None:
 
 
 def hidden_refusal(
-    vis: Visibility | None, virtual: str, create: bool
+    vis: Visibility | None, path: PathSpec, create: bool
 ) -> OSError:
     """The error a hidden path answers, in POSIX's own terms.
 
@@ -236,13 +240,27 @@ def hidden_refusal(
 
     Args:
         vis (Visibility | None): the session's visibility.
-        virtual (str): the hidden virtual path.
+        path (PathSpec): the hidden workspace path.
         create (bool): whether the op creates the path it names; a
             rename or copy destination is one.
     """
-    if create and path_visible(vis, parent(virtual.rstrip("/") or "/")):
-        return eacces(virtual)
-    return enoent(virtual)
+    if create and path_visible(vis, path.parent):
+        return eacces(path)
+    return enoent(path)
+
+
+def require_visible(
+    vis: Visibility | None, path: PathSpec, create: bool = False
+) -> None:
+    """Enforce the same visibility before every filesystem or command access.
+
+    Args:
+        vis (Visibility | None): the view captured for this operation.
+        path (PathSpec): input or resolved target being accessed.
+        create (bool): whether this access creates the named entry.
+    """
+    if not path_visible(vis, path):
+        raise hidden_refusal(vis, path, create)
 
 
 _current_admission: ContextVar["EntryGate | None"] = ContextVar(
@@ -686,7 +704,9 @@ def effective_path_mode(
     )
     best_depth = anchor_depth(prefix) if cap is not None else None
     best_mode = cap
-    deepest = shown_mode(sess.visibility.shown, virtual)
+    deepest = shown_mode(
+        sess.visibility.shown, PathSpec.from_str_path(virtual)
+    )
     if deepest is not None:
         depth, mode = deepest
         if best_depth is None or depth > best_depth:

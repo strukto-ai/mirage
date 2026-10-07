@@ -5,7 +5,6 @@ from collections.abc import AsyncIterator, Awaitable, Mapping
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from mirage.cache.read_through import cache_aware_read
 from mirage.commands.builtin.tail_counts import (
     TailCounts,
     number_flag_error,
@@ -238,50 +237,7 @@ async def tail(
         yield line
 
 
-def tail_multi(
-    paths: list[PathSpec],
-    *,
-    read: Callable[..., Any],
-    n: int | None = None,
-    c: int | None = None,
-    from_line: int | None = None,
-    from_byte: int | None = None,
-    show_headers: bool = False,
-    unread: frozenset[str] = frozenset(),
-) -> AsyncIterator[bytes]:
-    """Run tail over multiple already-resolved paths.
-
-    Globs are expanded by the caller, so ``paths`` is a flat list of concrete
-    entries. When ``show_headers`` is set a ``==> path <==`` banner is emitted
-    before each file (POSIX/GNU tail with multiple files), separated by a blank
-    line between files. The per-file source is produced lazily by ``read``.
-
-    This is a plain ``def`` returning the async generator: the cache-aware
-    wrap captures the active manager now, when the command calls
-    ``tail_multi`` inside the mount's cache-manager scope, not when the
-    returned stream is drained later (after that scope is gone).
-
-    Args:
-        paths (list[PathSpec]): Resolved paths; only ``.virtual`` is read.
-        read (Callable[..., Any]): Bound reader called as ``read(path)``;
-            returns bytes, an awaitable of bytes, or an async byte iterator.
-        unread (frozenset[str]): operands that opened but do not read (a
-            directory): each prints its header and nothing else.
-    """
-    cached = cache_aware_read(read)
-    return _tail_multi(
-        paths,
-        read=lambda p: read(p) if is_stdin(p) else cached(p),
-        n=n,
-        c=c,
-        from_line=from_line,
-        from_byte=from_byte,
-        show_headers=show_headers,
-        unread=unread,
-    )
-
-
-async def _tail_multi(
+async def tail_multi(
     paths: list[PathSpec],
     *,
     read: Callable[..., Any],

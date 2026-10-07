@@ -145,7 +145,7 @@ def test_format_grep_results_uses_vfs_channel_dirname():
         guild_dirname=guild_dirname(guild),
         channel_names={chan["id"]: channel_dirname(chan)},
     )
-    assert lines == [
+    assert [text for _, text in lines] == [
         "/discord/MyGuild__G1/channels/general__C1/"
         "2024-04-10/chat.jsonl:[alice] hello"
     ]
@@ -161,7 +161,7 @@ def test_format_grep_results_falls_back_to_channel_id():
         }
     ]
     lines = format_grep_results(msgs, "/discord", "G__G1", channel_names={})
-    assert lines == [
+    assert [text for _, text in lines] == [
         "/discord/G__G1/channels/C2/2024-04-10/chat.jsonl:[bob] x"
     ]
 
@@ -182,7 +182,7 @@ def test_format_grep_results_path_matches_vfs_layout():
         "/discord",
         guild_dirname(guild),
         {chan["id"]: channel_dirname(chan)},
-    )[0]
+    )[0][1]
     expected_path = (
         f"/discord/{guild_dirname(guild)}/channels/"
         f"{channel_dirname(chan)}/2024-04-10/chat.jsonl"
@@ -200,7 +200,7 @@ def test_format_grep_results_replaces_newlines():
         }
     ]
     lines = format_grep_results(msgs, "/discord", "G__G1", channel_names={})
-    assert lines == [
+    assert [text for _, text in lines] == [
         "/discord/G__G1/channels/C/2024-01-02/chat.jsonl:[u] line1 line2"
     ]
 
@@ -218,7 +218,7 @@ def test_format_grep_results_derives_date_from_snowflake():
         }
     ]
     lines = format_grep_results(msgs, "/discord", "G__G1", channel_names={})
-    assert lines == [
+    assert [text for _, text in lines] == [
         "/discord/G__G1/channels/C1/2026-06-01/chat.jsonl:[alice] hello"
     ]
 
@@ -234,4 +234,6 @@ def test_format_grep_results_dateless_hit_points_at_channel_dir():
         }
     ]
     lines = format_grep_results(msgs, "/discord", "G__G1", channel_names={})
-    assert lines == ["/discord/G__G1/channels/C1:[alice] hello"]
+    assert [text for _, text in lines] == [
+        "/discord/G__G1/channels/C1:[alice] hello"
+    ]

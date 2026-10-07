@@ -374,7 +374,7 @@ def test_format_grep_results():
             ("public", "views", "v1", ['{"x":9}']),
         ]
     )
-    assert lines == [
+    assert [text for _, text in lines] == [
         'public/tables/users/rows.jsonl:{"id":1,"name":"a"}',
         'public/views/v1/rows.jsonl:{"x":9}',
     ]

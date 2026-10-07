@@ -13,30 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
+import type { Builder } from '../generic_bind/adapter.ts'
 
-import { VFSName } from '../../../types.ts'
-import { command } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { scanIo } from '../generic_bind/index.ts'
 import { runSearch } from '../generic_bind/search.ts'
-
-import { IO } from './io.ts'
 
 // The $regex push-down prints each matching document as a whole line;
 // pushdownOperand defers shaping flags and multi-operand lines to the
 // generic scan, which streams documents rather than reading whole
 // collections.
-export const MONGODB_GREP = command({
+export const BUILDER: Builder<MongoDBAccessor> = {
   name: 'grep',
-  vfs: VFSName.MONGODB,
-  spec: specOf('grep'),
-  fn: (accessor: MongoDBAccessor, paths, texts, opts) =>
-    runSearch<MongoDBAccessor>(
-      scanIo(IO, opts.ns, opts.mountPrefix)[0],
-      'grep',
-      accessor,
-      paths,
-      texts,
-      opts,
-    ),
-})
+  read: true,
+  fn: (ops, accessor: MongoDBAccessor, paths, texts, opts) =>
+    runSearch<MongoDBAccessor>(ops, 'grep', accessor, paths, texts, opts),
+}

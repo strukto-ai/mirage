@@ -13,21 +13,21 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.commands.builtin.generic_bind.factory import scan_io
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.search import run_search
-from mirage.commands.builtin.mongodb.io import IO
-from mirage.commands.config import CommandOpts, command
-from mirage.commands.spec import SPECS
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("rg", vfs="mongodb", spec=SPECS["rg"])
 async def rg(
+    ops: CommandIO,
     accessor: MongoDBAccessor,
     paths: list[PathSpec],
     texts: list[str],
     opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
-    scan, _ = scan_io(IO, opts.ns, opts.mount_prefix)
-    return await run_search(scan, "rg", accessor, paths, texts, opts)
+    return await run_search(ops, "rg", accessor, paths, texts, opts)
+
+
+BUILDER = Builder("rg", rg, read=True)

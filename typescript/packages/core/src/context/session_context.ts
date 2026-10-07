@@ -16,14 +16,19 @@ import { createAsyncContext } from '../utils/async_context.ts'
 import type { ContextCall } from '../utils/async_context.ts'
 import type { SessionManager } from '../workspace/session/manager.ts'
 import type { SessionState } from '../workspace/session/session.ts'
-import { rstripSlash, stripSlash } from '../utils/slash.ts'
+import { stripSlash } from '../utils/slash.ts'
 import { anchorDepth, isGlob, pathVisible, showHead, shownMode } from '../utils/hidden.ts'
 import { eacces, enoent, erofs } from '../errors/fs.ts'
-import { parent } from '../utils/path.ts'
 import type { Decisions } from '../policy/decisions.ts'
 import type { Policies } from '../policy/policies.ts'
 import type { DryRun, HandOff, VfsExplanation } from '../policy/types.ts'
-import type { EntryGate, PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
+import {
+  type EntryGate,
+  PathSpec,
+  type Refusal,
+  type Visibility,
+  type WalkProbe,
+} from '../types.ts'
 import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
 
 /**
@@ -183,10 +188,9 @@ export function dotglobActive(): boolean {
 /**
  * The bound session's visibility, null when no session is bound.
  *
- * For the op boundary, which runs under the session it serves and
- * answers a hidden path as absent. A command reads the visibility off
- * its namespace view (`opts.ns.visibility`) instead, so nothing past
- * the boundary consults the session about what exists. On the fallback
+ * Capture this view before backend or cache access and use it for input
+ * checks and returned-path filtering. PathSpecs carry identity; the view
+ * belongs to the caller and is never cached on a path. On the fallback
  * storage several sessions can be live at once, and the answer merges
  * toward hiding: every live session's hides, re-opened only by a show
  * every hiding session states (by path: the mode gates read each
@@ -233,9 +237,14 @@ export function sessionVisibility(): Visibility | null {
  * ENOENT. `create` is whether the op creates the path it names; a
  * rename or copy destination is one.
  */
-export function hiddenRefusal(vis: Visibility | null, virtual: string, create: boolean): Error {
-  if (create && pathVisible(vis, parent(rstripSlash(virtual) || '/'))) return eacces(virtual)
-  return enoent(virtual)
+export function hiddenRefusal(vis: Visibility | null, path: PathSpec, create: boolean): Error {
+  if (create && pathVisible(vis, path.parent)) return eacces(path)
+  return enoent(path)
+}
+
+/** Enforce the same visibility before filesystem or command access. */
+export function requireVisible(vis: Visibility | null, path: PathSpec, create = false): void {
+  if (!pathVisible(vis, path)) throw hiddenRefusal(vis, path, create)
 }
 
 const admissionStorage = createAsyncContext<EntryGate>()
@@ -683,7 +692,7 @@ function pathModeUnder(
   const cap = sess.mountModes?.get(prefix) ?? null
   let bestDepth = cap != null ? anchorDepth(prefix) : null
   let bestMode: MountMode | null = cap
-  const deepest = shownMode(sess.visibility.shown, virtual)
+  const deepest = shownMode(sess.visibility.shown, PathSpec.fromStrPath(virtual))
   if (deepest != null) {
     const [depth, mode] = deepest
     if (bestDepth === null || depth > bestDepth) {

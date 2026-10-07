@@ -11,39 +11,50 @@ from mirage.core.langfuse.client import (
     fetch_traces,
 )
 from mirage.core.langfuse.scope import SEARCH_KINDS
-from mirage.vfs.types import SearchQuery
+from mirage.types import PathSpec
+from mirage.vfs.types import SearchQuery, SearchResult
 
 
 def _filter_traces(
     traces: list[dict[str, Any]], matcher: LineMatcher
-) -> list[str]:
-    lines: list[str] = []
+) -> list[SearchResult]:
+    lines: list[SearchResult] = []
     for t in traces:
         trace_id = t.get("id", "")
         line_json = json.dumps(t, ensure_ascii=False, separators=(",", ":"))
         if not matcher(line_json):
             continue
-        lines.append(f"traces/{trace_id}.json:{line_json}")
+        lines.append(
+            (
+                PathSpec.from_str_path(f"/traces/{trace_id}.json"),
+                f"traces/{trace_id}.json:{line_json}",
+            )
+        )
     return lines
 
 
 def _filter_sessions(
     sessions: list[dict[str, Any]], matcher: LineMatcher
-) -> list[str]:
-    lines: list[str] = []
+) -> list[SearchResult]:
+    lines: list[SearchResult] = []
     for s in sessions:
         session_id = s.get("id", "")
         if not matcher(session_id):
             continue
         line_json = json.dumps(s, ensure_ascii=False, separators=(",", ":"))
-        lines.append(f"sessions/{session_id}:{line_json}")
+        lines.append(
+            (
+                PathSpec.from_str_path(f"/sessions/{session_id}"),
+                f"sessions/{session_id}:{line_json}",
+            )
+        )
     return lines
 
 
 def _filter_prompts(
     prompts: list[dict[str, Any]], matcher: LineMatcher
-) -> list[str]:
-    lines: list[str] = []
+) -> list[SearchResult]:
+    lines: list[SearchResult] = []
     seen: set[str] = set()
     for p in prompts:
         prompt_name = p.get("name", "")
@@ -53,20 +64,30 @@ def _filter_prompts(
             continue
         seen.add(prompt_name)
         line_json = json.dumps(p, ensure_ascii=False, separators=(",", ":"))
-        lines.append(f"prompts/{prompt_name}:{line_json}")
+        lines.append(
+            (
+                PathSpec.from_str_path(f"/prompts/{prompt_name}"),
+                f"prompts/{prompt_name}:{line_json}",
+            )
+        )
     return lines
 
 
 def _filter_datasets(
     datasets: list[dict[str, Any]], matcher: LineMatcher
-) -> list[str]:
-    lines: list[str] = []
+) -> list[SearchResult]:
+    lines: list[SearchResult] = []
     for d in datasets:
         dataset_name = d.get("name", "")
         if not matcher(dataset_name):
             continue
         line_json = json.dumps(d, ensure_ascii=False, separators=(",", ":"))
-        lines.append(f"datasets/{dataset_name}:{line_json}")
+        lines.append(
+            (
+                PathSpec.from_str_path(f"/datasets/{dataset_name}"),
+                f"datasets/{dataset_name}:{line_json}",
+            )
+        )
     return lines
 
 
@@ -75,7 +96,7 @@ def _filter_datasets(
 # only occurs in a trace's observation bodies needs a file read to match.
 async def _traces_searcher(
     accessor: LangfuseAccessor, match: ScopeMatch, query: SearchQuery
-) -> list[str]:
+) -> list[SearchResult]:
     traces = await fetch_traces(
         accessor.api, limit=accessor.config.default_search_limit
     )
@@ -84,7 +105,7 @@ async def _traces_searcher(
 
 async def _sessions_searcher(
     accessor: LangfuseAccessor, match: ScopeMatch, query: SearchQuery
-) -> list[str]:
+) -> list[SearchResult]:
     sessions = await fetch_sessions(
         accessor.api, limit=accessor.config.default_search_limit
     )
@@ -93,7 +114,7 @@ async def _sessions_searcher(
 
 async def _prompts_searcher(
     accessor: LangfuseAccessor, match: ScopeMatch, query: SearchQuery
-) -> list[str]:
+) -> list[SearchResult]:
     return _filter_prompts(
         await fetch_prompts(accessor.api), query_matcher(query)
     )
@@ -101,7 +122,7 @@ async def _prompts_searcher(
 
 async def _datasets_searcher(
     accessor: LangfuseAccessor, match: ScopeMatch, query: SearchQuery
-) -> list[str]:
+) -> list[SearchResult]:
     return _filter_datasets(
         await fetch_datasets(accessor.api), query_matcher(query)
     )

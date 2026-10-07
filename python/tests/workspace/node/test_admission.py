@@ -611,7 +611,6 @@ def test_the_admitted_gate_judges_what_the_line_did_not_name():
         tokens=("grep", "-r", "x", "/data"),
         judged=frozenset({"/data"}),
         granted=(),
-        scoped=True,
     )
     gate.check("/data")
     gate.check("/data/open/o")
@@ -633,7 +632,6 @@ def test_the_admitted_gate_judges_what_the_line_did_not_name():
         tokens=("grep", "x", "/data/asked/a"),
         judged=frozenset({"/data/asked/a"}),
         granted=(),
-        scoped=True,
     )
     judged.check("/data/asked/a")
     granted = Admitted(
@@ -641,7 +639,6 @@ def test_the_admitted_gate_judges_what_the_line_did_not_name():
         tokens=("grep", "-r", "x", "/data/asked"),
         judged=frozenset({"/data/asked"}),
         granted=(ask,),
-        scoped=True,
     )
     granted.check("/data/asked/a")
     # refuses answers exactly where check raises, without raising.
@@ -664,7 +661,6 @@ def test_the_admitted_gate_scopes_each_start_point_on_its_own():
         tokens=("find", "/data", "/other"),
         judged=frozenset({"/data", "/other"}),
         granted=(),
-        scoped=True,
     )
     assert gate.scopes("/data")
     assert gate.scopes("/data/sealed/s")
@@ -675,7 +671,6 @@ def test_the_admitted_gate_scopes_each_start_point_on_its_own():
         tokens=("find", "/other"),
         judged=frozenset({"/other"}),
         granted=(),
-        scoped=True,
         ops_judged=True,
     )
     assert judged.scopes("/other")

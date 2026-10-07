@@ -18,13 +18,14 @@ from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.head import head_generic, parse_flags
 from mirage.commands.builtin.generic_bind.adapter import (
+    Builder,
+    CommandIO,
     bound_op,
+    guard_operation,
     resolve_or_empty,
 )
-from mirage.commands.builtin.postgres.io import IO
 from mirage.commands.builtin.utils.limit import note_after, row_cap_notice
-from mirage.commands.config import CommandOpts, command
-from mirage.commands.spec import SPECS
+from mirage.commands.config import CommandOpts
 from mirage.core.postgres.read import read as postgres_read
 from mirage.core.postgres.scope import detect_scope
 from mirage.io.types import ByteSource, IOResult
@@ -68,8 +69,8 @@ async def _head_rows(
     return b"\n".join(lines[:cap]) + b"\n"
 
 
-@command("head", vfs="postgres", spec=SPECS["head"])
 async def head(
+    ops: CommandIO,
     accessor: PostgresAccessor,
     paths: list[PathSpec],
     texts: list[str],
@@ -82,18 +83,23 @@ async def head(
     # Row reads push LIMIT into the query instead of fetching the whole
     # relation; non-row scopes ignore the limit kwarg.
     n_eff = parsed.lines if parsed.lines is not None else 10
-    read_fn = postgres_read
+    read_fn = ops.read_bytes
     notices: list[bytes] = []
     if parsed.bytes_ is None and n_eff > 0 and not parsed.zero_terminated:
-        read_fn = partial(_head_rows, n=n_eff, notices=notices)
-    resolved = await resolve_or_empty(IO, accessor, paths, opts.index)
+        read_fn = partial(
+            guard_operation(_head_rows, "read_bytes"), n=n_eff, notices=notices
+        )
+    resolved = await resolve_or_empty(ops, accessor, paths, opts.index)
     out, io = await head_generic(
         resolved,
         list(texts),
         opts,
-        bound_op(IO.stat, accessor, opts.index),
+        bound_op(ops.stat, accessor, opts.index),
         bound_op(read_fn, accessor, opts.index),
     )
     if out is None:
         return out, io
     return note_after(out, io, notices), io
+
+
+BUILDER = Builder("head", head, read=True)

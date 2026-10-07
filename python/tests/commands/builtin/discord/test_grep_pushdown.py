@@ -13,15 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Callable
-from types import SimpleNamespace
+from dataclasses import replace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from mirage.commands.builtin.discord.grep import grep
+from mirage.commands.builtin.discord.io import IO as BACKEND_IO
 from mirage.commands.builtin.discord.io import IO as DISCORD_IO
 from mirage.commands.builtin.discord.rg import rg
+from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.config import CommandOpts
 from mirage.core.time_range import TimeRange
 from mirage.io.types import IOResult
@@ -29,14 +31,14 @@ from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
 
-def _io(**slots: Callable[..., Any]) -> SimpleNamespace:
-    """The command's IO with the given slots faked; the rest stay real."""
-    real = {
-        "readdir": DISCORD_IO.readdir,
-        "stat": DISCORD_IO.stat,
-        "read_bytes": DISCORD_IO.read_bytes,
-    }
-    return SimpleNamespace(**{**real, **slots})
+def _io(
+    monkeypatch: pytest.MonkeyPatch, **slots: Callable[..., Any]
+) -> CommandIO:
+    """Replace backend slots while retaining the checked adapter contract."""
+    resolve = slots.pop("resolve_glob", None)
+    if resolve is not None:
+        monkeypatch.setattr(CommandIO, "resolve_glob", staticmethod(resolve))
+    return replace(DISCORD_IO, **slots)
 
 
 def _channel_path(name: str = "general__ch_456") -> PathSpec:
@@ -63,14 +65,18 @@ async def test_discord_grep_resolves_ids_without_index():
     ]
     fake_search = AsyncMock(return_value=[])
     with patch.dict(
-        grep.__wrapped__.__globals__,
+        grep.__globals__,
         {
             "search_guild": fake_search,
             "list_channels": AsyncMock(return_value=[]),
         },
     ):
         out, io = await grep(
-            accessor, paths, ["hello"], CommandOpts(flags={"w": True})
+            BACKEND_IO,
+            accessor,
+            paths,
+            ["hello"],
+            CommandOpts(flags={"w": True}),
         )
     assert fake_search.await_count == 1
     assert fake_search.await_args.args[1] == "g_123"
@@ -95,13 +101,14 @@ async def test_discord_rg_channel_dir_uses_native_search():
     fake_channels = [{"id": "ch_456", "name": "general"}]
     fake_search = AsyncMock(return_value=fake_msgs)
     with patch.dict(
-        rg.__wrapped__.__globals__,
+        rg.__globals__,
         {
             "search_guild": fake_search,
             "list_channels": AsyncMock(return_value=fake_channels),
         },
     ):
         out, io = await rg(
+            BACKEND_IO,
             accessor,
             [_channel_path()],
             ["hello"],
@@ -118,7 +125,9 @@ async def test_discord_rg_channel_dir_uses_native_search():
 
 
 @pytest.mark.asyncio
-async def test_discord_grep_on_a_time_scoped_mount_skips_native_search():
+async def test_discord_grep_on_a_time_scoped_mount_skips_native_search(
+    monkeypatch,
+):
     """Discord search cannot honor the mount's time bounds, so a scoped
     mount answers from the per-file scan of the in-scope days."""
     accessor = AsyncMock()
@@ -127,15 +136,16 @@ async def test_discord_grep_on_a_time_scoped_mount_skips_native_search():
     paths = [_channel_path()]
     fake_search = AsyncMock(return_value=[])
     fake_scan = AsyncMock(return_value=(b"", IOResult(exit_code=1)))
+    ops = _io(monkeypatch, resolve_glob=AsyncMock(return_value=paths))
     with patch.dict(
-        grep.__wrapped__.__globals__,
+        grep.__globals__,
         {
             "search_guild": fake_search,
-            "IO": _io(resolve_glob=AsyncMock(return_value=paths)),
             "grep_generic": fake_scan,
         },
     ):
         await grep(
+            ops,
             accessor,
             paths,
             ["hello"],

@@ -18,7 +18,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from typing import Any, NoReturn, Protocol, overload
+from typing import Any, NoReturn, ParamSpec, Protocol, TypeVar, cast, overload
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
@@ -27,12 +27,11 @@ from mirage.commands.builtin.utils.paths import dot_refusal
 from mirage.commands.config import AggregateFn, CommandFnResult, CommandOpts
 from mirage.context import (
     effective_path_mode,
-    get_admission,
     get_current_session,
     get_mount_gate,
     get_op_policies,
     get_walk_probe,
-    hidden_refusal,
+    require_visible,
     session_visibility,
 )
 from mirage.context.session_context import require_paths_writable
@@ -48,9 +47,9 @@ from mirage.errors.fs import (
     walk_refusal,
 )
 from mirage.errors.types import DotWalkError
-from mirage.io import IOResult
+from mirage.ops.boundary import OpBoundary
 from mirage.ops.generic.factory import refuse_taken
-from mirage.ops.namespace_view import paths_scoped
+from mirage.ops.namespace_view import paths_scoped, visible_entries
 from mirage.ops.types import (
     ChildMounts,
     LinkTargetStat,
@@ -58,13 +57,13 @@ from mirage.ops.types import (
     StatOverlay,
 )
 from mirage.policy.constants import METADATA_OPS
-from mirage.policy.policies import Policies, pre_vfs_gate
-from mirage.runtime.types import DispatchFn
+from mirage.policy.policies import Policies
 from mirage.types import FileStat, FileType, MountMode, PathSpec, WalkProbe
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
 from mirage.utils.hidden import hidden_under, move_reveals, path_visible
 from mirage.utils.path import norm, parent
 from mirage.utils.remnants import remove_remnants, visible_below
+from mirage.vfs.search import check_search, search_scoped, visible_results
 from mirage.vfs.types import (
     ContentSearchOps,
     DuOps,
@@ -80,6 +79,8 @@ from mirage.vfs.types import (
 )
 
 logger = logging.getLogger(__name__)
+Args = ParamSpec("Args")
+R = TypeVar("R")
 
 
 class BuilderFn(Protocol):
@@ -116,7 +117,7 @@ async def overlaid_stat(
     """
     if path.walk_error is not None:
         raise walk_refusal(path)
-    _refuse_hidden(path, create=False)
+    require_visible(session_visibility(), path, create=False)
     return overlay(path.virtual, await stat(path, index))
 
 
@@ -234,7 +235,7 @@ class CommandIO(ReadOps, NativeReadOps, WriteOps):
         """
         fn = self.operation(op)
         if fn is None:
-            return _with_operation_guards(
+            return guard_operation(
                 functools.partial(_refuse_missing, op), op.value
             )
         return fn
@@ -616,25 +617,6 @@ async def resolve_or_empty(
     return []
 
 
-def _refuse_hidden(path: PathSpec, create: bool) -> None:
-    """Refuse a hidden path the way nonexistence would.
-
-    ENOENT for anything acting on the path; a create answers as
-    :func:`hidden_refusal` says, EACCES only when the directory it
-    lands in is visible. Raised at the command guard so each command
-    renders the refusal through its own missing-file wording,
-    indistinguishable from a real miss.
-
-    Args:
-        path (PathSpec): the operand being guarded.
-        create (bool): whether the op creates the path it names.
-    """
-    vis = session_visibility()
-    if path_visible(vis, path.virtual):
-        return
-    raise hidden_refusal(vis, path.virtual, create)
-
-
 async def _guarded_readdir(
     fn: OperationFn, *args: Any, **kwargs: Any
 ) -> list[str]:
@@ -647,15 +629,29 @@ async def _guarded_readdir(
         **kwargs: forwarded untouched.
     """
     parent = next(a for a in args if isinstance(a, PathSpec))
-    _refuse_hidden(parent, create=False)
-    entries = await fn(*args, **kwargs)
-    base = parent.virtual.rstrip("/")
+    require_visible(session_visibility(), parent, create=False)
     vis = session_visibility()
-    return [
-        e
-        for e in entries
-        if path_visible(vis, f"{base}/{e.rstrip('/').rsplit('/', 1)[-1]}")
+    entries = await fn(*args, **kwargs)
+    return visible_entries(entries, parent, vis)
+
+
+async def _guarded_search(fn: OperationFn, *args: Any, **kwargs: Any) -> Any:
+    """Check search inputs and filter returned records in the same view.
+
+    Args:
+        fn (OperationFn): single-scope or batch search callback.
+        *args: backend arguments, including PathSpecs or a list of them.
+        **kwargs: forwarded backend options.
+    """
+    paths = [
+        path
+        for arg in args
+        for path in (arg if isinstance(arg, (list, tuple)) else (arg,))
+        if isinstance(path, PathSpec)
     ]
+    vis = check_search(paths)
+    result = await fn(*args, **kwargs)
+    return None if result is None else visible_results(result, vis)
 
 
 def _move_would_reveal(src: PathSpec, dst: PathSpec) -> bool:
@@ -665,7 +661,7 @@ def _move_would_reveal(src: PathSpec, dst: PathSpec) -> bool:
         src (PathSpec): the subtree being moved or copied.
         dst (PathSpec): where it would land.
     """
-    return move_reveals(session_visibility(), src.virtual, dst.virtual)
+    return move_reveals(session_visibility(), src, dst)
 
 
 def refuse_reveal(src: PathSpec, dst: PathSpec) -> None:
@@ -728,7 +724,7 @@ async def _guarded_pair(
     """
     specs = [arg for arg in args if isinstance(arg, PathSpec)]
     for position, spec in enumerate(specs):
-        _refuse_hidden(spec, create=position > 0)
+        require_visible(session_visibility(), spec, create=position > 0)
     reveal = len(specs) >= 2 and _move_would_reveal(specs[0], specs[1])
     if reveal and (
         assume_dir or await _pair_src_is_dir(stat, args[0], specs[0])
@@ -827,7 +823,7 @@ async def _guarded_rmdir(
     target: PathSpec | None = None
     for arg in args:
         if isinstance(arg, PathSpec):
-            _refuse_hidden(arg, create=False)
+            require_visible(session_visibility(), arg, create=False)
             if target is None:
                 target = arg
     try:
@@ -838,7 +834,7 @@ async def _guarded_rmdir(
             target is None
             or unlink is None
             or exc.errno not in (errno.ENOTEMPTY, errno.EEXIST)
-            or not hidden_under(vis, target.virtual)
+            or not hidden_under(vis, target)
         ):
             raise
         lead: list[Any] = []
@@ -859,7 +855,7 @@ async def _guarded_rmdir(
         if children is not None:
             merged.extend(children(target.virtual))
         visible = functools.partial(path_visible, vis)
-        if not entries or visible_below(target.virtual, merged, visible):
+        if not entries or visible_below(target, merged, visible):
             raise
         channel = _SlotChannel(tuple(lead), index, readdir, stat, unlink, fn)
         try:
@@ -878,7 +874,7 @@ async def _guarded_exists(fn: OperationFn, *args: Any, **kwargs: Any) -> bool:
         **kwargs: forwarded untouched.
     """
     probed = next(a for a in args if isinstance(a, PathSpec))
-    if not path_visible(session_visibility(), probed.virtual):
+    if not path_visible(session_visibility(), probed):
         return False
     return bool(await fn(*args, **kwargs))
 
@@ -921,14 +917,14 @@ def _check_command_paths(
         check_hidden (bool): false only for private remnant deletion.
     """
     access = _MUTATIONS.get(slot)
-    admission = get_admission()
     for position, path in enumerate(paths):
         if check_hidden:
-            _refuse_hidden(
-                path, create=position > 0 or bool(access and access.create)
+            require_visible(
+                session_visibility(),
+                path,
+                create=position > 0 or bool(access and access.create),
             )
-        if admission is not None and slot not in ("stat", "exists"):
-            admission.check(path.virtual)
+        OpBoundary.check(slot, path)
     mount = get_mount_gate()
     if access is not None and check_mode and mount is not None:
         require_paths_writable(
@@ -955,7 +951,7 @@ def _command_call(
     return fn(*args, **kwargs)
 
 
-def _with_operation_guards(fn: OperationFn, slot: str) -> OperationFn:
+def guard_operation(fn: Callable[Args, R], slot: str) -> Callable[Args, R]:
     access = _MUTATIONS.get(slot)
     policed = functools.partial(
         _policy_call,
@@ -965,9 +961,14 @@ def _with_operation_guards(fn: OperationFn, slot: str) -> OperationFn:
         access is not None,
         access.first_source if access else False,
     )
-    guarded = functools.partial(_command_call, policed, slot)
-    return functools.partial(
-        _walked_call, get_walk_probe(), slot == "mkdir", guarded
+    guarded = functools.partial(
+        _command_call, fn if slot in METADATA_OPS else policed, slot
+    )
+    return cast(
+        Callable[Args, R],
+        functools.partial(
+            _walked_call, get_walk_probe(), slot == "mkdir", guarded
+        ),
     )
 
 
@@ -1231,7 +1232,7 @@ def with_write_guards(fn: OperationFn) -> OperationFn:
     Args:
         fn (OperationFn): the raw backend write.
     """
-    return _with_operation_guards(fn, "unlink")
+    return guard_operation(fn, "unlink")
 
 
 def with_command_guards(ops: CommandIO) -> CommandIO:
@@ -1305,33 +1306,14 @@ def with_command_guards(ops: CommandIO) -> CommandIO:
     if ops.search is not None:
         changes["search"] = replace(
             ops.search,
-            search=functools.partial(
-                _command_call, ops.search.search, "search"
+            search=functools.partial(_guarded_search, ops.search.search),
+            search_many=(
+                functools.partial(_guarded_search, ops.search.search_many)
+                if ops.search.search_many is not None
+                else None
             ),
         )
     return replace(ops, **changes)
-
-
-def with_dispatch_rule_guard(dispatch: DispatchFn) -> DispatchFn:
-    """Return ``dispatch`` marking each op with the admitted command's
-    gate as ``rule_gate``, which the door judges on the paths the op
-    reaches: the command's dispatcher skips its guarded slots, and the
-    door cannot tell which command issued an op. A metadata op passes
-    unmarked, as ``with_command_guards`` lets ``stat`` pass.
-
-    Args:
-        dispatch (DispatchFn): the workspace op dispatcher.
-    """
-
-    async def guarded(
-        op: str, path: PathSpec, **options: Any
-    ) -> tuple[Any, IOResult]:
-        gate = get_admission()
-        if gate is not None and op not in METADATA_OPS:
-            options = {**options, "rule_gate": gate}
-        return await dispatch(op, path, **options)
-
-    return guarded
 
 
 # (policies, mount prefix, session id); the unbound spelling for a
@@ -1368,8 +1350,8 @@ def _live_policy_scope(scope: _PolicyScope) -> _PolicyScope:
     wrap-time capture also covers a reader the output pipeline drains
     after dispatch has reset the context (head/tail/wc bind lazy
     readers), with the prefix and session identity the drained op
-    belongs to; a registration-time wrap (the object-store overrides,
-    the loose-write chain) has no window when applied and reads the
+    belongs to; a registration-time wrap (the loose-write chain)
+    has no window when applied and reads the
     live context instead, which its eager handlers are inside.
 
     Args:
@@ -1409,14 +1391,8 @@ async def _policy_admit(
     for arg in args:
         if isinstance(arg, PathSpec):
             mutates = write and not (first and first_source)
-            await pre_vfs_gate(
-                policies,
-                op,
-                arg,
-                mutates,
-                prefix,
-                session_id,
-                check_hidden=False,
+            await OpBoundary(policies, prefix, session_id=session_id).admit(
+                op, arg, mutates, check_hidden=False
             )
             first = False
 
@@ -1453,34 +1429,6 @@ async def _policy_call(
             policies, prefix, session_id, op, write, first_source, args
         )
     return await fn(*args, **kwargs)
-
-
-async def _policy_readdir(
-    scope: _PolicyScope, fn: OperationFn, *args: Any, **kwargs: Any
-) -> list[str]:
-    """Readdir admitted through pre_vfs for the directory it lists.
-
-    Args:
-        scope (_PolicyScope): the wrap-time capture.
-        fn (OperationFn): the guarded backend readdir.
-        *args: the call's positionals; the first PathSpec is the
-            directory being listed.
-        **kwargs: forwarded untouched.
-    """
-    policies, prefix, session_id = _live_policy_scope(scope)
-    if policies is not None:
-        parent_spec = next(a for a in args if isinstance(a, PathSpec))
-        await pre_vfs_gate(
-            policies,
-            "readdir",
-            parent_spec,
-            False,
-            prefix,
-            session_id,
-            check_hidden=False,
-        )
-    entries: list[str] = await fn(*args, **kwargs)
-    return entries
 
 
 def _policy_stream(
@@ -1527,14 +1475,8 @@ async def _policy_stream_drain(
         source (AsyncIterator[bytes]): the not-yet-started inner stream.
     """
     try:
-        await pre_vfs_gate(
-            policies,
-            "read_stream",
-            path,
-            False,
-            prefix,
-            session_id,
-            check_hidden=False,
+        await OpBoundary(policies, prefix, session_id=session_id).admit(
+            "read_stream", path, False, check_hidden=False
         )
     except BaseException:
         close = getattr(source, "aclose", None)
@@ -1569,7 +1511,9 @@ def with_policy_guard(ops: CommandIO) -> CommandIO:
     """
     scope = _op_policy_scope()
     changes: dict[str, Any] = {
-        "readdir": functools.partial(_policy_readdir, scope, ops.readdir),
+        "readdir": functools.partial(
+            _policy_call, scope, ops.readdir, "readdir", False, False
+        ),
         "read_stream": functools.partial(
             _policy_stream, scope, ops.read_stream
         ),
@@ -1610,7 +1554,7 @@ def scoped_io(
         ops,
         find=None,
         du=None,
-        search=None,
+        search=None if search_scoped(ns, paths) else ops.search,
         content_search=None,
         copy=None,
         dir_copy=None,

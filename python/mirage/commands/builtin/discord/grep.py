@@ -15,17 +15,19 @@
 import logging
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.commands.builtin.discord.io import IO
 from mirage.commands.builtin.generic.grep import grep_generic
-from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.generic_bind.factory import scan_io
+from mirage.commands.builtin.generic_bind.adapter import (
+    Builder,
+    CommandIO,
+    bound_op,
+)
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import (
     pushdown_operand,
     text_search_results,
 )
 from mirage.commands.builtin.utils.output import format_records
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.discord.channels import list_channels
@@ -33,8 +35,10 @@ from mirage.core.discord.entry import channel_dirname
 from mirage.core.discord.scope import NATIVE_KINDS, detect_scope
 from mirage.core.discord.search import format_grep_results, search_guild
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.ops.namespace_view import paths_scoped
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
+from mirage.vfs.search import check_search, search_scoped, visible_results
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +60,8 @@ RG_SEARCH_HONORED = ("word_regexp",)
 SEARCH_MAX_RESULTS = 100
 
 
-@command("grep", vfs="discord", spec=SPECS["grep"])
 async def grep(
+    ops: CommandIO,
     accessor: DiscordAccessor,
     paths: list[PathSpec],
     texts: list[str],
@@ -69,7 +73,9 @@ async def grep(
     pushdown_warnings: list[str] = []
     # Output-shaping flags, a glob operand and a multi-operand line all need
     # the generic scan; see SEARCH_HONORED above.
-    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
+    scoped = search_scoped(
+        opts.ns, [PathSpec.from_str_path(opts.mount_prefix or "/")]
+    )
     operand = (
         None
         if scoped
@@ -79,6 +85,7 @@ async def grep(
         match = detect_scope(operand)
         if not accessor.time_range.bounded and match.kind in NATIVE_KINDS:
             guild_id = match.slots["guild_id"]
+            vis = check_search([operand])
             try:
                 msgs = await search_guild(
                     accessor.config,
@@ -96,18 +103,27 @@ async def grep(
                     accessor.config, guild_id, session=accessor.pool
                 )
                 channel_map = {c["id"]: channel_dirname(c) for c in channels}
-                lines = format_grep_results(
-                    msgs, file_prefix, vfs_first, channel_map
+                # Incomplete or unaddressable hits need the guarded walk; a
+                # guessed path cannot establish visibility.
+                complete = len(msgs) < SEARCH_MAX_RESULTS and all(
+                    msg.get("channel_id") in channel_map
+                    and msg.get("timestamp")
+                    for msg in msgs
                 )
-                if not lines:
-                    return b"", IOResult(exit_code=1)
-                if text_search_results(lines):
-                    return format_records(lines), IOResult()
+                if not paths_scoped(opts.ns, [operand]) or complete:
+                    results = format_grep_results(
+                        msgs, file_prefix, vfs_first, channel_map
+                    )
+                    lines = [text for _, text in visible_results(results, vis)]
+                    if not lines:
+                        return b"", IOResult(exit_code=1)
+                    if text_search_results(lines):
+                        return format_records(lines), IOResult()
             except Exception as exc:
                 msg = str(exc)
                 pushdown_warnings.append(
                     f"discord: native search push-down failed ({msg}); "
-                    f"falling back to per-file scan"
+                    f"falling back to per-file ops"
                 )
                 if (
                     "403" in msg
@@ -121,12 +137,12 @@ async def grep(
                     )
                 logger.warning(
                     "discord search push-down failed (%s); "
-                    "falling back to per-file scan",
+                    "falling back to per-file ops",
                     exc,
                 )
 
     resolved = (
-        await scan.resolve_glob(accessor, paths, index=opts.index)
+        await ops.resolve_glob(accessor, paths, index=opts.index)
         if paths
         else []
     )
@@ -134,9 +150,9 @@ async def grep(
         resolved,
         texts,
         opts,
-        readdir=bound_op(scan.readdir, accessor, opts.index),
-        stat=bound_op(scan.stat, accessor, opts.index),
-        read_bytes=bound_op(scan.read_bytes, accessor, opts.index),
+        readdir=bound_op(ops.readdir, accessor, opts.index),
+        stat=bound_op(ops.stat, accessor, opts.index),
+        read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
         read_stream=None,
         stdin=opts.stdin,
     )
@@ -144,3 +160,6 @@ async def grep(
         extra = ("\n".join(pushdown_warnings) + "\n").encode()
         io.stderr = extra + await materialize(io.stderr)
     return out, io
+
+
+BUILDER = Builder("grep", grep, read=True)

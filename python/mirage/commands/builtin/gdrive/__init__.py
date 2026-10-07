@@ -15,8 +15,6 @@
 from mirage.commands.builtin.gdrive.io import IO as _IO
 from mirage.commands.builtin.generic_bind import make_generic_commands
 
-_GDRIVE_OVERRIDES: set[str] = set()
-
 # Drive/docs/sheets/slides verbs and API passthroughs live in the gws
 # CLI (mirage.commands.cli.builtin.gws), installed by name; the mount
 # only serves the filesystem surface.
@@ -24,6 +22,5 @@ COMMANDS = [
     *make_generic_commands(
         "gdrive",
         _IO,
-        overrides=_GDRIVE_OVERRIDES,
     ),
 ]

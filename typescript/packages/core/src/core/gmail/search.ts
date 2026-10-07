@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../types.ts'
+import type { SearchResult } from '../../vfs/types.ts'
 import type { TokenManager } from '../google/client.ts'
 import { decodeBody, extractHeader, getMessageRaw, listMessages } from './messages.ts'
 import { msgFilename } from './readdir.ts'
@@ -108,8 +110,8 @@ export function formatGrepResults(
   labelName: string | null,
   prefix: string,
   pattern = '',
-): string[] {
-  const lines: string[] = []
+): SearchResult[] {
+  const lines: SearchResult[] = []
   for (const row of rows) {
     const label = row.label !== '' ? row.label : (labelName ?? 'INBOX')
     const date = row.date
@@ -125,7 +127,10 @@ export function formatGrepResults(
     if (excerpt === '') excerpt = row.snippet.replace(/\n/g, ' ')
     const path =
       date !== '' ? `${prefix}/${label}/${date}/${filename}` : `${prefix}/${label}/${filename}`
-    lines.push(`${path}:[${sender}] ${excerpt}`)
+    lines.push([
+      PathSpec.fromStrPath(path, path.slice(prefix.length).replace(/^\//, '')),
+      `${path}:[${sender}] ${excerpt}`,
+    ])
   }
   return lines
 }

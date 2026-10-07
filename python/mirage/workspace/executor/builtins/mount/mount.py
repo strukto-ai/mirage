@@ -102,7 +102,10 @@ async def handle_mount(
         f"{m.vfs.name} on {m.prefix.rstrip('/') or '/'} type {m.vfs.name} "
         f"({MODE_OPTIONS[m.effective_mode()]})\n"
         for m in sorted(registry.visible_mounts(), key=lambda m: m.prefix)
-        if path_visible(session.visibility, m.prefix.rstrip("/") or "/")
+        if path_visible(
+            session.visibility,
+            PathSpec.from_str_path(m.prefix.rstrip("/") or "/"),
+        )
         and (types is None or match_type(m.vfs.name, types))
     ]
     return ok("mount", encode_text("".join(lines)) if lines else None)

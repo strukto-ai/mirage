@@ -20,6 +20,7 @@ from bson import ObjectId
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.mongodb.grep import grep
+from mirage.commands.builtin.mongodb.io import IO as BACKEND_IO
 from mirage.commands.config import CommandOpts
 from mirage.types import PathSpec
 from mirage.vfs.mongodb.config import MongoDBConfig
@@ -78,6 +79,7 @@ async def test_grep_m1_short_circuits_after_first_match(accessor, _stat_reads):
 
     with patch("mirage.core.mongodb.stream.iter_documents", new=_fake):
         source, _ = await grep(
+            BACKEND_IO,
             accessor,
             [_path()],
             ["FOUND"],

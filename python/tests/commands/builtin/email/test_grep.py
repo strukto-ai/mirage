@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.commands.builtin.email.io import IO as BACKEND_IO
 from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
@@ -70,6 +71,7 @@ async def test_grep_regex_narrows_on_its_required_literal():
         "mirage.commands.builtin.email.grep.search_and_format", new=search
     ):
         stdout, io = await grep(
+            BACKEND_IO,
             accessor,
             [_folder()],
             ['budget[^"<]*'],

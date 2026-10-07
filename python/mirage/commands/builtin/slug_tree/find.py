@@ -15,7 +15,6 @@
 from collections.abc import Callable
 from dataclasses import replace
 from functools import partial
-from typing import Any, cast
 
 from mirage.commands.builtin.find_eval import tree_has_mtime
 from mirage.commands.builtin.find_parse import FindExpr, parse_find_expression
@@ -24,13 +23,13 @@ from mirage.commands.builtin.generic.find import (
     find_walk_generic,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
+    Builder,
     CommandIO,
-    with_command_guards,
-    with_policy_guard,
+    guard_operation,
 )
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import default_paths
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.generic.find import make_search_backed_find
@@ -120,43 +119,28 @@ async def _normalize_find_output(
 
 
 def make_find(
-    vfs: str,
-    io: CommandIO,
     tree: SlugTree[A],
-    stat: StatOp,
     stat_light: StatOp,
     needs_full: Callable[[FindExpr], bool],
-) -> Callable[..., Any]:
-    """Build ``find`` for a slug-tree backend, filtered over one tree walk.
+) -> Builder:
+    """Build a find override using the factory's prepared operations.
 
     Args:
-        vfs (str): the backend the command registers for.
-        io (CommandIO): the backend's command IO.
-        tree (SlugTree[A]): the backend's tree.
-        stat (StatOp): the full stat.
-        stat_light (StatOp): the index-only stat, used unless the
-            expression tests a field it lacks.
-        needs_full (Callable[[FindExpr], bool]): whether an expression
-            tests a field ``stat_light`` lacks: ``reads_sizes`` where the
-            size costs a content scan, ``reads_times`` where the listing
-            carries no modified time.
+        tree (SlugTree[A]): backend tree for unrestricted native traversal.
+        stat_light (StatOp): cheaper stat for expressions not needing full metadata.
+        needs_full (Callable[[FindExpr], bool]): whether the expression needs full stat.
     """
-    find_full = make_search_backed_find(tree.resolve, stat, tree.walk)
-    find_light = make_search_backed_find(tree.resolve, stat_light, tree.walk)
-    walk_full = with_command_guards(with_policy_guard(io))
-    walk_light = with_command_guards(
-        with_policy_guard(replace(io, stat=stat_light))
-    )
 
-    @command("find", vfs=vfs, spec=SPECS["find"])
     async def find(
+        ops: CommandIO,
         accessor: A,
         paths: list[PathSpec],
         texts: list[str],
         opts: CommandOpts,
     ) -> tuple[ByteSource | None, IOResult]:
+        light = guard_operation(stat_light, "stat")
         paths = default_paths(paths, opts.cwd)
-        paths = await io.resolve_glob(accessor, paths, opts.index)
+        paths = await ops.resolve_glob(accessor, paths, opts.index)
         search_path = paths[0]
 
         fl = FlagView(opts.flags, spec=SPECS["find"])
@@ -177,7 +161,7 @@ def make_find(
         # session cannot see; the walk classifies through the guarded
         # readdir/stat, the same fork the factory builder takes (rung 0).
         if paths_scoped(opts.ns, paths):
-            walk_io = walk_full if full else walk_light
+            walk_io = ops if full else replace(ops, stat=light)
             stdout, result = await find_walk_generic(
                 paths,
                 words,
@@ -191,12 +175,16 @@ def make_find(
             words,
             replace(opts, flags=bag),
             find_core=partial(
-                find_full if full else find_light, accessor, index=opts.index
+                make_search_backed_find(
+                    tree.resolve, ops.stat if full else light, tree.walk
+                ),
+                accessor,
+                index=opts.index,
             ),
             stat=partial(
-                stat if full else stat_light, accessor, index=opts.index
+                ops.stat if full else light, accessor, index=opts.index
             ),
         )
         return await _normalize_find_output(stdout, search_path), result
 
-    return cast(Callable[..., Any], find)
+    return Builder("find", find)

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from pydantic import BaseModel
@@ -23,6 +23,7 @@ from mirage.commands.builtin.generic_bind import (
     CommandIO,
     make_generic_commands,
 )
+from mirage.commands.builtin.generic_bind.adapter import Builder
 from mirage.commands.config import RegisteredCommand, registered_commands
 from mirage.ops.generic import make_generic_ops
 from mirage.ops.registry import RegisteredOp
@@ -170,7 +171,7 @@ class BaseVFS:
         io: CommandIO | VFSAdapter | None = None,
         prompt: str | None = None,
         write_prompt: str | None = None,
-        overrides: set[str] | None = None,
+        overrides: Mapping[str, Builder | None] | None = None,
         commands: list[Callable[..., Any]] | None = None,
         ops: list[Callable[..., Any]] | None = None,
         auto_ops: bool = True,
@@ -200,8 +201,8 @@ class BaseVFS:
                 capabilities, or a prebuilt IO table.
             prompt (str | None): LLM-facing description of the layout.
             write_prompt (str | None): appended when mounted writable.
-            overrides (set[str] | None): generic command names the
-                backend replaces (pass the replacements via ``commands``).
+            overrides (Mapping[str, Builder | None] | None): replacement builders
+                that receive the factory's prepared IO; None omits a command.
             commands (list[Callable] | None): extra ``@command``
                 functions (bespoke verbs or override replacements).
             ops (list[Callable] | None): ``@op`` functions or

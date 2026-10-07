@@ -12,23 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { operandLabel } from '../utils/stream.ts'
-import { stdinStream, stdinStat } from '../utils/stream.ts'
-import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
+import { concat } from '../../../io/cachable_iterator.ts'
+import { asyncChain } from '../../../io/stream.ts'
 import { IOResult } from '../../../io/types.ts'
+import { encodeText } from '../../../shell/bytes.ts'
 import { FileType, Limit, type FileStat, type PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { numberFlagError, parseByteCount } from '../tail_counts.ts'
-import { CHAR_DEVICE_MAX_BYTES, STDIN_HEADER_NAME } from '../utils/constants.ts'
-import { asyncChain } from '../../../io/stream.ts'
-import { truncateStream } from '../utils/limit.ts'
-import { splitOpened } from '../utils/operands.ts'
-import { resolveSource } from '../utils/stream.ts'
+import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { concat } from '../../../io/cachable_iterator.ts'
-import { encodeText } from '../../../shell/bytes.ts'
+import { numberFlagError, parseByteCount } from '../tail_counts.ts'
+import { CHAR_DEVICE_MAX_BYTES, STDIN_HEADER_NAME } from '../utils/constants.ts'
+import { truncateStream } from '../utils/limit.ts'
+import { splitOpened } from '../utils/operands.ts'
+import { operandLabel, resolveSource, stdinStat, stdinStream } from '../utils/stream.ts'
 
 const NL = 0x0a
 
@@ -40,7 +37,7 @@ interface HeadFlags {
   zeroTerminated: boolean
 }
 
-function parseFlags(bag: Record<string, FlagValue>): HeadFlags | string {
+export function parseFlags(bag: Record<string, FlagValue>): HeadFlags | string {
   const fl = new FlagView(bag, specOf('head'))
   const nRaw = fl.asStr('lines') ?? null
   const cRaw = fl.asStr('bytes') ?? null
@@ -177,7 +174,7 @@ export async function headGeneric(
   stream: Stream,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
-  stream = stdinStream(cacheAwareStreamEager(stream), opts.stdin)
+  stream = stdinStream(stream, opts.stdin)
   const parsed = parseFlags(opts.flags)
   if (typeof parsed === 'string') {
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]

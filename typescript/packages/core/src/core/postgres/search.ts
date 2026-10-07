@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../types.ts'
 import { grepSearchOptions } from '../../commands/builtin/grep_pushdown.ts'
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { queryMatcher, type Searcher } from '../hierarchy/search.ts'
-import { type SearchQuery } from '../../vfs/types.ts'
+import { type SearchQuery, type SearchResult } from '../../vfs/types.ts'
 import {
   fetchBoundedQuery,
   fetchColumns,
@@ -186,17 +187,21 @@ export async function searchEntityMetadata(
   kind: string,
   entity: string,
   query: SearchQuery,
-): Promise<string[]> {
+): Promise<SearchResult[]> {
   const entityKind = kind === 'tables' ? 'table' : 'view'
   const matcher = queryMatcher(query)
   const docs: [string, unknown][] = [
     ['schema.json', await buildEntitySchemaJson(accessor, schema, entity, entityKind)],
     ['semantic.json', await buildEntitySemanticJson(accessor, schema, entity, entityKind)],
   ]
-  const lines: string[] = []
+  const lines: SearchResult[] = []
   for (const [name, doc] of docs) {
     for (const line of jsonText(doc).split('\n')) {
-      if (matcher(line)) lines.push(`${schema}/${kind}/${entity}/${name}:${line}`)
+      if (matcher(line))
+        lines.push([
+          PathSpec.fromStrPath(`/${schema}/${kind}/${entity}/${name}`),
+          `${schema}/${kind}/${entity}/${name}:${line}`,
+        ])
     }
   }
   return lines
@@ -207,8 +212,8 @@ export async function searchKindMetadata(
   schema: string,
   kind: string,
   query: SearchQuery,
-): Promise<string[]> {
-  const lines: string[] = []
+): Promise<SearchResult[]> {
+  const lines: SearchResult[] = []
   for (const n of await entityNames(accessor, schema, kind)) {
     lines.push(...(await searchEntityMetadata(accessor, schema, kind, n, query)))
   }
@@ -219,8 +224,8 @@ export async function searchSchemaMetadata(
   accessor: PostgresAccessor,
   schema: string,
   query: SearchQuery,
-): Promise<string[]> {
-  const lines: string[] = []
+): Promise<SearchResult[]> {
+  const lines: SearchResult[] = []
   for (const kind of ['tables', 'views'] as const) {
     lines.push(...(await searchKindMetadata(accessor, schema, kind, query)))
   }
@@ -230,8 +235,8 @@ export async function searchSchemaMetadata(
 export async function searchDatabaseMetadata(
   accessor: PostgresAccessor,
   query: SearchQuery,
-): Promise<string[]> {
-  const lines: string[] = []
+): Promise<SearchResult[]> {
+  const lines: SearchResult[] = []
   for (const s of await listSchemas(accessor, accessor.config.schemas)) {
     lines.push(...(await searchSchemaMetadata(accessor, s, query)))
   }
@@ -275,10 +280,14 @@ export async function searchDatabase(
   return out
 }
 
-export function formatGrepResults(results: readonly EntityMatches[]): string[] {
-  const lines: string[] = []
+export function formatGrepResults(results: readonly EntityMatches[]): SearchResult[] {
+  const lines: SearchResult[] = []
   for (const { schema, kind, entity, lines: found } of results) {
-    for (const line of found) lines.push(`${schema}/${kind}/${entity}/rows.jsonl:${line}`)
+    for (const line of found)
+      lines.push([
+        PathSpec.fromStrPath(`/${schema}/${kind}/${entity}/rows.jsonl`),
+        `${schema}/${kind}/${entity}/rows.jsonl:${line}`,
+      ])
   }
   return lines
 }
@@ -314,7 +323,7 @@ async function entityLines(
   match: ScopeMatch,
   query: SearchQuery,
   metadata: boolean,
-): Promise<string[]> {
+): Promise<SearchResult[]> {
   const schema = match.slots.schema ?? ''
   const kind = match.slots.kind ?? ''
   const entity = match.slots.entity ?? ''

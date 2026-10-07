@@ -15,18 +15,16 @@
 import type { Where } from 'chromadb'
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import { PathSpec } from '../../types.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { scoreFromDistance } from '../../utils/score.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { intOption, validateOptions } from '../../vfs/search.ts'
-import type { SearchQuery } from '../../vfs/types.ts'
+import type { SearchQuery, SearchResult } from '../../vfs/types.ts'
 import { scalarString } from '../slug_tree/rows.ts'
-import { hitLines, searchScope, targetEntries, validateQuery } from '../slug_tree/search.ts'
+import { searchScope, targetEntries, validateQuery } from '../slug_tree/search.ts'
 import { CHROMA_TREE } from './tree.ts'
-
-const ENC = new TextEncoder()
 
 export async function searchSegments(
   accessor: ChromaAccessor,
@@ -35,7 +33,7 @@ export async function searchSegments(
   index?: IndexCacheStore,
   topK = 10,
   mountPrefix = '',
-): Promise<Uint8Array> {
+): Promise<SearchResult[]> {
   validateQuery(query, topK)
   if (mountPrefix === '' && paths.length > 0) {
     mountPrefix =
@@ -45,7 +43,7 @@ export async function searchSegments(
   let where: Where | undefined
   if (paths.length > 0) {
     scopedSlugs = new Set((await targetEntries(CHROMA_TREE, accessor, paths, index)).keys())
-    if (scopedSlugs.size === 0) return new Uint8Array(0)
+    if (scopedSlugs.size === 0) return []
     where = {
       [accessor.config.slugField]: { $in: [...scopedSlugs].sort(compareCodePoints) },
     } as Where
@@ -57,7 +55,7 @@ export async function searchSegments(
     include: ['documents', 'metadatas', 'distances'],
     ...(where !== undefined ? { where } : {}),
   })
-  return queryResultToBytes(response, accessor.config.slugField, mountPrefix, scopedSlugs)
+  return queryResults(response, accessor.config.slugField, mountPrefix, scopedSlugs)
 }
 
 interface ChromaQueryResponse {
@@ -66,16 +64,16 @@ interface ChromaQueryResponse {
   distances?: unknown
 }
 
-function queryResultToBytes(
+function queryResults(
   response: ChromaQueryResponse,
   slugField: string,
   mountPrefix: string,
   scopedSlugs: ReadonlySet<string> | null = null,
-): Uint8Array {
+): SearchResult[] {
   const documents = firstResultList(response.documents)
   const metadatas = firstResultList(response.metadatas)
   const distances = firstResultList(response.distances)
-  const contents: string[] = []
+  const contents: SearchResult[] = []
   for (let i = 0; i < documents.length; i++) {
     const document = documents[i]
     const metadata = metadatas[i]
@@ -89,10 +87,9 @@ function queryResultToBytes(
     const prefix = rstripSlash(mountPrefix)
     if (prefix !== '') path = prefix + path
     const content = typeof document === 'string' ? document : ''
-    contents.push(`${path}:${score}\n${content}`)
+    contents.push([PathSpec.fromStrPath(path, slugValue), `${path}:${score}\n${content}`])
   }
-  if (contents.length === 0) return new Uint8Array(0)
-  return ENC.encode(contents.join('\n') + '\n')
+  return contents
 }
 
 function firstResultList(value: unknown): unknown[] {
@@ -106,11 +103,11 @@ export async function searchMany(
   paths: PathSpec[],
   query: SearchQuery,
   index?: IndexCacheStore,
-): Promise<string[]> {
+): Promise<SearchResult[]> {
   validateOptions(query, ['top_k'])
   const topK = intOption(query, 'top_k', 10)
   const [targets, prefix] = await searchScope(CHROMA_TREE, accessor, paths, index)
-  return hitLines(await searchSegments(accessor, query.query, targets, index, topK, prefix))
+  return searchSegments(accessor, query.query, targets, index, topK, prefix)
 }
 
 export function searchResource(
@@ -118,6 +115,6 @@ export function searchResource(
   path: PathSpec,
   query: SearchQuery,
   index?: IndexCacheStore,
-): Promise<string[]> {
+): Promise<SearchResult[]> {
   return searchMany(accessor, [path], query, index)
 }

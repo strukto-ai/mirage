@@ -16,11 +16,10 @@ import { describe, expect, it } from 'vitest'
 
 import { Accessor } from '../../accessor/base.ts'
 import { PathSpec } from '../../types.ts'
-import { makeSearch, searchRowsOutput } from './search.ts'
+import { makeSearch, searchResults } from './search.ts'
 import type { Row, VectorTree } from './types.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder()
 
 const ROWS: Row[] = [
   { id: '1', label: 'cat', _score: 0.9, _distance: 0.9 },
@@ -58,24 +57,18 @@ function ps(path: string): PathSpec {
 }
 
 async function headers(t: VectorTree<Accessor>, path: string, topK = 10, threshold = 0) {
-  const out = await searchRowsOutput(t, new Accessor(), 'q', [ps(path)], topK, threshold, '/db')
-  return DEC.decode(out)
+  const out = await searchResults(t, new Accessor(), 'q', [ps(path)], topK, threshold, '/db')
+  return (out.map(([, text]) => text).join('\n') + (out.length ? '\n' : ''))
     .split('\n')
     .filter((line) => line.includes(':'))
 }
 
 describe('vector search', () => {
   it('spells a hit under its table with its rank', async () => {
-    const out = await searchRowsOutput(
-      tree(),
-      new Accessor(),
-      'q',
-      [ps('/db/animals')],
-      1,
-      0,
-      '/db',
+    const out = await searchResults(tree(), new Accessor(), 'q', [ps('/db/animals')], 1, 0, '/db')
+    expect(out.map(([, text]) => text).join('\n') + (out.length ? '\n' : '')).toBe(
+      '/db/animals/cat/1.txt:0.9000\ncat\n',
     )
-    expect(DEC.decode(out)).toBe('/db/animals/cat/1.txt:0.9000\ncat\n')
   })
 
   it('leaves a pinned table out of the path', async () => {
@@ -95,7 +88,7 @@ describe('vector search', () => {
     ['q', 2, '/db', 'search: no table to search'],
   ])('refuses %j top %i at %s', async (query, topK, path, message) => {
     await expect(
-      searchRowsOutput(tree(), new Accessor(), query, [ps(path)], topK, 0, '/db'),
+      searchResults(tree(), new Accessor(), query, [ps(path)], topK, 0, '/db'),
     ).rejects.toThrow(message)
   })
 
@@ -103,7 +96,12 @@ describe('vector search', () => {
     const ops = makeSearch(tree())
     await expect(
       ops.search(new Accessor(), ps('/db/animals'), { query: 'q', options: { top_k: 1 } }),
-    ).resolves.toEqual(['/db/animals/cat/1.txt:0.9000', 'cat'])
+    ).resolves.toEqual([
+      [
+        PathSpec.fromStrPath('/db/animals/cat/1.txt', 'animals/cat/1.txt'),
+        '/db/animals/cat/1.txt:0.9000\ncat',
+      ],
+    ])
   })
 
   it.each([

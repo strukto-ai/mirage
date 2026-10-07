@@ -50,9 +50,10 @@
       "command": "grep -c marker-s2 /.bash_history",
       "expect": {
         "exit": 0,
-        "stdout": "2\n",
+        "stdout": "1\n",
         "stderr": ""
-      }
+      },
+      "session": "s2"
     }
   ]
 }

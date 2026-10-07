@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.email.find import find
+from mirage.commands.builtin.email.io import IO as BACKEND_IO
 from mirage.commands.config import CommandOpts
 from mirage.core.email.config import EmailConfig
 from mirage.types import PathSpec
@@ -71,6 +72,7 @@ async def test_type_f_lists_attachments():
         ),
     ):
         stdout, _io = await find(
+            BACKEND_IO,
             _accessor(),
             [_spec("/")],
             [],
@@ -89,6 +91,7 @@ async def test_name_only_folder_level_pushes_down_to_imap_search():
     search = AsyncMock(return_value=[])
     with patch("mirage.commands.builtin.email.find.search_messages", search):
         stdout, _io = await find(
+            BACKEND_IO,
             _accessor(),
             [_spec("/INBOX")],
             [],
@@ -119,6 +122,7 @@ async def test_name_with_size_falls_through_to_walk():
         ),
     ):
         stdout, _io = await find(
+            BACKEND_IO,
             _accessor(),
             [_spec("/INBOX")],
             [],

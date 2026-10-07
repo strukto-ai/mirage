@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.commands.builtin.github.grep import grep
+from mirage.commands.builtin.github.io import IO as BACKEND_IO
 from mirage.commands.builtin.github.pushdown import narrow_scope
 from mirage.commands.builtin.github.rg import rg
 from mirage.commands.config import CommandOpts
@@ -63,6 +64,7 @@ async def test_subdir_narrows_and_fetches_fewer(
     accessor, index = github_env
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     stdout, _ = await grep(
+        BACKEND_IO,
         accessor,
         [_subdir()],
         ["import"],
@@ -83,6 +85,7 @@ async def test_regex_scans_every_file(
     accessor, index = github_env
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     stdout, _ = await grep(
+        BACKEND_IO,
         accessor,
         [_root()],
         ["import.*os"],
@@ -100,6 +103,7 @@ async def test_grep_small_tree_skips_search(
     spy = AsyncMock(return_value=[])
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
     stdout, _ = await grep(
+        BACKEND_IO,
         accessor,
         [_root()],
         ["import"],
@@ -150,7 +154,11 @@ def _hit(path, sha, full_name=_OWN):
 
 async def _grep_files(accessor, index, pattern, flags):
     stdout, io = await grep(
-        accessor, [_root()], [pattern], CommandOpts(index=index, flags=flags)
+        BACKEND_IO,
+        accessor,
+        [_root()],
+        [pattern],
+        CommandOpts(index=index, flags=flags),
     )
     body = (await materialize(stdout)).decode()
     files = sorted({line.split(":", 1)[0] for line in body.splitlines()})
@@ -222,6 +230,7 @@ async def test_rg_falls_back_on_a_foreign_answer_too(
         [_hit("src/main.py", "bbb222", "test-owner/test-repo-fork")],
     )
     stdout, _ = await rg(
+        BACKEND_IO,
         accessor,
         [_root()],
         ["import"],
@@ -302,10 +311,14 @@ async def test_a_scope_too_large_to_scan_names_why_it_was_not_narrowed(
     # and its answer could not be trusted.
     accessor, index = github_env
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
-    monkeypatch.setitem(command.__wrapped__.__globals__, "SCOPE_ERROR", 5)
+    monkeypatch.setitem(command.__globals__, "SCOPE_ERROR", 5)
     _answer(monkeypatch, [_hit("src/main.py", "bbb222")], total=7)
     _, io = await command(
-        accessor, [_root()], ["import"], CommandOpts(index=index, flags=flags)
+        BACKEND_IO,
+        accessor,
+        [_root()],
+        ["import"],
+        CommandOpts(index=index, flags=flags),
     )
     assert io.exit_code == 1
     assert io.stderr == stderr.encode()
@@ -397,6 +410,7 @@ async def test_a_named_file_is_always_read(
         resolved=False,
     )
     stdout, _ = await grep(
+        BACKEND_IO,
         accessor,
         [_subdir(), named],
         ["import"],
@@ -435,6 +449,7 @@ async def test_a_narrowing_left_empty_matches_nothing_and_never_reads_stdin(
     monkeypatch.setattr("mirage.core.github.tree.fetch_tree", _fetch_tree)
     _answer(monkeypatch, [])
     stdout, io = await command(
+        BACKEND_IO,
         accessor,
         [_root()],
         ["import"],
@@ -474,7 +489,11 @@ async def test_an_answer_that_depends_on_every_file_is_never_narrowed(
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     calls = _answer(monkeypatch, [_hit("src/main.py", "bbb222")])
     stdout, _ = await command(
-        accessor, [_root()], ["import"], CommandOpts(index=index, flags=flags)
+        BACKEND_IO,
+        accessor,
+        [_root()],
+        ["import"],
+        CommandOpts(index=index, flags=flags),
     )
     await materialize(stdout)
     assert calls == []

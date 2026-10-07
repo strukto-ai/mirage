@@ -211,6 +211,13 @@ Declare file operands and options with `type: 'path'`. The handler receives
 and directory walk needed for profile checks; converting back to a string
 before filesystem access discards that information.
 
+The dispatcher inherits the active command's path rules, including for paths
+discovered inside a handler and filesystem calls from an embedded runtime.
+Path hiding and policy checks run before cached content or a backend is read.
+Custom CLIs need no separate policy wrapper; use the workspace doors for VFS
+access. Direct calls to an account client remain subject to command admission,
+but do not pass through filesystem policy.
+
 If a CLI and a Mirage VFS back the same service, neither names the other.
 A write verb on a CLI with a config model expires every mount's cached reads
 after it runs, and a write that throws may already have reached the service, so

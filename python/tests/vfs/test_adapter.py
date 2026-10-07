@@ -157,7 +157,11 @@ async def test_write_capability_obeys_mount_mode(accessor, mode):
 async def test_search_capability_distinguishes_decline_from_no_matches(
     accessor, command, answer
 ):
-    search = AsyncMock(return_value=answer)
+    search = AsyncMock(
+        return_value=None
+        if answer is None
+        else [(PATH, text) for text in answer]
+    )
     read = AsyncMock(wraps=IO.read_bytes)
     adapter = VFSAdapter(
         read=replace(READ, read_bytes=read),

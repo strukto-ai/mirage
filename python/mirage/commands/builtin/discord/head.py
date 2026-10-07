@@ -13,31 +13,33 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.commands.builtin.discord.io import IO
 from mirage.commands.builtin.generic.head import head_generic
 from mirage.commands.builtin.generic_bind.adapter import (
+    Builder,
+    CommandIO,
     bound_op,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandOpts, command
-from mirage.commands.spec import SPECS
-from mirage.core.discord.read import read as discord_read
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("head", vfs="discord", spec=SPECS["head"])
 async def head(
+    ops: CommandIO,
     accessor: DiscordAccessor,
     paths: list[PathSpec],
     texts: list[str],
     opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
-    resolved = await resolve_or_empty(IO, accessor, paths, opts.index)
+    resolved = await resolve_or_empty(ops, accessor, paths, opts.index)
     return await head_generic(
         resolved,
         list(texts),
         opts,
-        bound_op(IO.stat, accessor, opts.index),
-        bound_op(discord_read, accessor, opts.index),
+        bound_op(ops.stat, accessor, opts.index),
+        bound_op(ops.read_bytes, accessor, opts.index),
     )
+
+
+BUILDER = Builder("head", head, read=True)

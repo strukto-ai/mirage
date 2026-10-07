@@ -229,7 +229,9 @@ async def _fan_out_traversal(
             prefixes.update(
                 m.prefix
                 for m in registry.descendant_mounts(path.virtual)
-                if path_visible(vis, "/" + m.prefix.strip("/"))
+                if path_visible(
+                    vis, PathSpec.from_str_path("/" + m.prefix.strip("/"))
+                )
             )
     io.producer = Producer(command=cmd_name, prefixes=tuple(sorted(prefixes)))
     return (

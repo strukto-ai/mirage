@@ -147,7 +147,13 @@ it.each(['grep', 'rg'])(
   async (command) => {
     for (const answer of [['native match'], [], null]) {
       const accessor = await makeAccessor()
-      const search = vi.fn(() => Promise.resolve(answer))
+      const search = vi.fn(() =>
+        Promise.resolve(
+          answer === null
+            ? null
+            : answer.map((text) => [PathSpec.fromStrPath('/nested/data/a.txt'), text] as const),
+        ),
+      )
       const readBytes = vi.fn(READ.readBytes)
       const adapter = new VFSAdapter({
         read: { ...READ, readBytes },
@@ -261,14 +267,14 @@ it('scans through guarded reads when the subtree contains hidden paths', async (
 
 it('passes resource options through and scans without grep opt-in', async () => {
   const accessor = await makeAccessor()
-  const search = vi.fn(() => Promise.resolve(['deployment 42']))
+  const search = vi.fn(() => Promise.resolve([[PATH, 'deployment 42'] as const]))
   const adapter = new VFSAdapter({ read: READ, search: { search, meta: { ranking: 'relevance' } } })
   const query = {
     query: 'recent deployments',
     options: { limit: 20, filters: { project: 'backend' } },
   }
   const capability = adapter.toCommandIO().search
-  expect(await capability?.search(accessor, PATH, query)).toEqual(['deployment 42'])
+  expect(await capability?.search(accessor, PATH, query)).toEqual([[PATH, 'deployment 42']])
   expect(search).toHaveBeenCalledWith(accessor, PATH, query)
   search.mockClear()
   const ws = new Workspace(

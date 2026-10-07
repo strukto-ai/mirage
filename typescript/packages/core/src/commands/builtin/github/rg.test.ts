@@ -29,14 +29,18 @@ vi.mock('../generic/rg.ts', async () => {
 })
 
 import { GitHubAccessor } from '../../../accessor/github.ts'
+import { runWithCacheManager } from '../../../cache/context.ts'
+import { RAMFileCacheStore } from '../../../cache/file/ram.ts'
+import { CacheManager } from '../../../cache/manager.ts'
 import type { GitHubTransport } from '../../../core/github/client.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { rgGeneric } from '../generic/rg.ts'
+import { GITHUB_COMMANDS as GITHUB_RG_COMMANDS } from './index.ts'
 import type * as PushdownModule from './pushdown.ts'
 import { narrowScope } from './pushdown.ts'
-import { GITHUB_RG } from './rg.ts'
+const GITHUB_RG = GITHUB_RG_COMMANDS.filter((cmd) => cmd.name === 'rg')
 
 const narrow = vi.mocked(narrowScope)
 const generic = vi.mocked(rgGeneric)
@@ -102,6 +106,21 @@ beforeEach(() => {
 })
 
 describe('github rg push-down', () => {
+  it('supplies a cached reader to the generic scan', async () => {
+    const path = spec('/src/a.py')
+    const cache = new RAMFileCacheStore()
+    const payload = new TextEncoder().encode('cached match\n')
+    await cache.set(path.virtual, payload)
+    narrow.mockResolvedValue({ resolved: [path], fileCount: 1, usedSearch: false })
+    generic.mockImplementationOnce((_paths, _texts, _opts, _stat, _readdir, stream) =>
+      Promise.resolve([stream(path), new IOResult()]),
+    )
+    const result = await runWithCacheManager(new CacheManager(cache, null, '/', true), () =>
+      runRg({}),
+    )
+    expect(await materialize(result?.[0] ?? null)).toEqual(payload)
+  })
+
   it('keeps -I suppression instead of forcing labels', async () => {
     narrow.mockResolvedValue({ resolved: [spec('/src/a.py')], fileCount: 1, usedSearch: true })
     await runRg({ word_regexp: true, no_filename: true })

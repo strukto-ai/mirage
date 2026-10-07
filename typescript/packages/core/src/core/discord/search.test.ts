@@ -134,7 +134,7 @@ describe('formatGrepResults', () => {
       '/discord',
       new Map([['C1', 'general']]),
     )
-    expect(lines).toEqual([
+    expect(lines.map(([, text]) => text)).toEqual([
       '/discord/My Server__G1/channels/general__C1/2026-04-25/chat.jsonl:[alice] hello world',
     ])
   })
@@ -153,7 +153,7 @@ describe('formatGrepResults', () => {
       scope,
       '/discord',
     )
-    expect(lines).toEqual([
+    expect(lines.map(([, text]) => text)).toEqual([
       '/discord/My Server__G1/channels/unknown__C2/2026-04-25/chat.jsonl:[bob] hi',
     ])
   })
@@ -172,7 +172,7 @@ describe('formatGrepResults', () => {
       { ...scope, channelName: 'eng' },
       '/discord',
     )
-    expect(lines).toEqual([
+    expect(lines.map(([, text]) => text)).toEqual([
       '/discord/My Server__G1/channels/eng__C3/2026-04-25/chat.jsonl:[carol] msg',
     ])
   })
@@ -194,7 +194,7 @@ describe('formatGrepResults', () => {
       '/discord',
       new Map([['C1', 'general']]),
     )
-    expect(lines).toEqual([
+    expect(lines.map(([, text]) => text)).toEqual([
       '/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl:[alice] hello',
     ])
   })
@@ -212,6 +212,8 @@ describe('formatGrepResults', () => {
       '/discord',
       new Map([['C1', 'general']]),
     )
-    expect(lines).toEqual(['/discord/My Server__G1/channels/general__C1:[alice] hello'])
+    expect(lines.map(([, text]) => text)).toEqual([
+      '/discord/My Server__G1/channels/general__C1:[alice] hello',
+    ])
   })
 })

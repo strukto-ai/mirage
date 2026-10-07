@@ -12,18 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import inspect
 from collections.abc import AsyncIterator, Callable
 from functools import partial
 from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.cache.context import CacheInvalidator, active_cache_manager
-from mirage.context.session_context import get_admission
 from mirage.types import (
-    EntryGate,
     PathSpec,
-    PolymorphicReadFn,
     ReadBytesFn,
     ReadStreamFn,
 )
@@ -50,76 +46,32 @@ async def _serve_stream(
             await close()
 
 
-def _serving(
-    manager: CacheInvalidator | None, gate: EntryGate | None, path: PathSpec
-) -> CacheInvalidator | None:
-    """The manager a generic's own read may serve a warm copy from.
-
-    None where anything could refuse the path for the running command
-    (a rule in force, or a coded or scripted pre_vfs policy, which only
-    the guarded reader asks): that reader answers instead, and the
-    factory's cache beneath its guards serves the copy once the path is
-    admitted.
-
-    Args:
-        manager (CacheInvalidator | None): the mount's cache manager.
-        gate (EntryGate | None): the running command's admission gate.
-        path (PathSpec): the path being read.
-    """
-    if gate is not None and gate.scopes(path.virtual):
-        return None
-    return manager
-
-
 def cache_aware_read_stream(raw: ReadStreamFn) -> ReadStreamFn:
     """Wrap a backend ``read_stream`` so warm reads serve cached bytes.
 
     The returned reader keeps the backend's ``(accessor, path, ...)``
     signature, so it is a drop-in for the raw op on ``CommandIO`` (the
-    factory wraps it there once per backend). On a warm hit it yields
+    factory wraps it there per invocation). On a warm hit it yields
     the whole cached blob as one chunk; otherwise it streams from the
     backend. ``cached_bytes`` is a no-op (returns None) for local or
     non-caching mounts, so this is safe to apply uniformly.
 
-    The wrapper is a ``def`` (not an ``async def``) that captures the
-    active cache manager eagerly and returns the async generator: the
-    manager must be read when the command calls the reader (inside the
-    mount's cache-manager scope), not lazily when the stream drains, by
-    which time that scope is gone.
+    Capture the active cache manager when binding the reader, falling
+    back to its invocation scope when bound outside a command. Lazy
+    consumers keep that manager after the command scope has returned.
 
     Args:
         raw (ReadStreamFn): the backend ``read_stream`` op.
     """
 
+    bound = active_cache_manager()
+
     def reader(
         accessor: Accessor | None, path: PathSpec, *args: Any, **kwargs: Any
     ) -> AsyncIterator[bytes]:
-        manager = active_cache_manager()
+        manager = bound or active_cache_manager()
         return _serve_stream(
             manager, partial(raw, accessor, path, *args, **kwargs), path
-        )
-
-    return reader
-
-
-def cache_aware_bound_stream(raw: ReadStreamFn) -> ReadStreamFn:
-    """Path-first twin of :func:`cache_aware_read_stream`.
-
-    For readers injected into the generics, which arrive with accessor
-    and index already bound (``bound_op``) and are called as
-    ``read(path)``. These readers may be guarded, so a path the running
-    command could be refused is left to them (``_serving``).
-
-    Args:
-        raw (ReadStreamFn): a bound ``read_stream`` reader.
-    """
-
-    def reader(
-        path: PathSpec, *args: Any, **kwargs: Any
-    ) -> AsyncIterator[bytes]:
-        manager = _serving(active_cache_manager(), get_admission(), path)
-        return _serve_stream(
-            manager, partial(raw, path, *args, **kwargs), path
         )
 
     return reader
@@ -148,72 +100,5 @@ def cache_aware_read_bytes(raw: ReadBytesFn) -> ReadBytesFn:
                 path, partial(raw, accessor, path, *args, **kwargs)
             )
         return await raw(accessor, path, *args, **kwargs)
-
-    return reader
-
-
-def cache_aware_bound_bytes(raw: ReadBytesFn) -> ReadBytesFn:
-    """Path-first twin of :func:`cache_aware_read_bytes`.
-
-    For readers injected into the generics, which arrive with accessor
-    and index already bound (``bound_op``) and are called as
-    ``read(path)``. These readers may be guarded, so a path the running
-    command could be refused is left to them (``_serving``).
-
-    Args:
-        raw (ReadBytesFn): a bound ``read_bytes`` reader.
-    """
-
-    async def reader(path: PathSpec, *args: Any, **kwargs: Any) -> bytes:
-        manager = _serving(active_cache_manager(), get_admission(), path)
-        if manager is not None:
-            cached = await manager.cached_bytes(path)
-            if cached is not None:
-                return cached
-        return await raw(path, *args, **kwargs)
-
-    return reader
-
-
-def cache_aware_read(raw: PolymorphicReadFn) -> PolymorphicReadFn:
-    """Wrap a polymorphic bound reader so warm reads serve cached bytes.
-
-    For the ``read`` contract used by ``head_multi`` / ``tail_multi`` /
-    wc ``format_multi``: the reader arrives with accessor and index
-    already bound, is called as ``read(path)``, and may return bytes, an
-    awaitable of bytes, or an async byte iterator. On a warm hit the
-    wrapped reader returns the cached bytes; otherwise it calls the raw
-    reader and returns whatever it produced unchanged, so the consumer's
-    own ``isawaitable`` / ``ensure_stream`` normalization still applies.
-    No-op for local or non-caching mounts.
-
-    The active cache manager is captured **eagerly**, when this wrapper
-    is applied, not when the wrapped reader is later called: a consumer
-    that yields lazily (``head_multi``) is drained after the mount's
-    cache-manager scope is gone, so reading the contextvar at drain time
-    would always miss. Apply this wrapper inside the command's scope
-    (which the consumers do) so the captured manager travels with the
-    stream, mirroring :func:`cache_aware_read_stream`. The admission
-    gate is captured with it, and a path the running command could be
-    refused is left to the reader, which may be guarded (``_serving``).
-
-    Args:
-        raw (PolymorphicReadFn): bound bytes / awaitable / stream reader.
-    """
-    bound = active_cache_manager()
-    gate = get_admission()
-
-    async def reader(
-        path: PathSpec, *args: Any, **kwargs: Any
-    ) -> bytes | AsyncIterator[bytes]:
-        manager = _serving(bound, gate, path)
-        if manager is not None:
-            cached = await manager.cached_bytes(path)
-            if cached is not None:
-                return cached
-        result = raw(path, *args, **kwargs)
-        if inspect.isawaitable(result):
-            return await result
-        return result
 
     return reader

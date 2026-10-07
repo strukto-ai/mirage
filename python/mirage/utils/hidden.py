@@ -18,6 +18,7 @@ from mirage.types import (
     HiddenPaths,
     HiddenVars,
     MountMode,
+    PathSpec,
     ShowEntry,
     ShownPaths,
     Visibility,
@@ -246,7 +247,7 @@ def show_depth(shown: ShownPaths | None, virtual: str) -> int | None:
     return best
 
 
-def path_visible(vis: Visibility | None, virtual: str) -> bool:
+def path_visible(vis: Visibility | None, path: PathSpec) -> bool:
     """Whether one session's path axis leaves this virtual path
     visible: the whole composition law for the VFS axis.
 
@@ -260,8 +261,9 @@ def path_visible(vis: Visibility | None, virtual: str) -> bool:
     Args:
         vis (Visibility | None): the session's visibility, None for an
             unrestricted one.
-        virtual (str): absolute virtual path to test.
+        path (PathSpec): concrete workspace path to test.
     """
+    virtual = path.virtual
     if vis is None:
         return True
     deepest_hide = hide_depth(vis.paths, virtual)
@@ -286,14 +288,14 @@ def path_visible(vis: Visibility | None, virtual: str) -> bool:
                 return True
             continue
         if (norm == "/" or head.startswith(norm + "/")) and path_visible(
-            vis, head
+            vis, PathSpec.from_str_path(head)
         ):
             return True
     return False
 
 
 def shown_mode(
-    shown: ShownPaths | None, virtual: str
+    shown: ShownPaths | None, path: PathSpec
 ) -> tuple[int, MountMode] | None:
     """The deepest mode-carrying show entry covering this path, as
     (anchor depth, mode); None when none does.
@@ -304,11 +306,11 @@ def shown_mode(
 
     Args:
         shown (ShownPaths | None): the session's show entries.
-        virtual (str): absolute virtual path to test.
+        path (PathSpec): concrete workspace path to test.
     """
     if shown is None or not shown.entries:
         return None
-    norm = _norm_abs(virtual)
+    norm = _norm_abs(path.virtual)
     parts = [seg for seg in norm.split("/") if seg]
     best: tuple[int, MountMode] | None = None
     for entry in shown.entries:
@@ -377,7 +379,7 @@ def path_covers(
     )
 
 
-def move_reveals(vis: Visibility | None, src: str, dst: str) -> bool:
+def move_reveals(vis: Visibility | None, src: PathSpec, dst: PathSpec) -> bool:
     """Whether relocating ``src`` to ``dst`` could surface a hidden path.
 
     The reveal half of the subtree law: a session's mutation may destroy
@@ -401,14 +403,14 @@ def move_reveals(vis: Visibility | None, src: str, dst: str) -> bool:
     Args:
         vis (Visibility | None): the session's visibility, None for an
             unrestricted one.
-        src (str): absolute virtual path being moved or copied.
-        dst (str): absolute virtual path it would land at.
+        src (PathSpec): path being moved or copied.
+        dst (PathSpec): destination path.
     """
     hidden = vis.paths if vis is not None else None
     if hidden is None or (not hidden.paths and not hidden.patterns):
         return False
-    s = _norm_abs(src)
-    d = _norm_abs(dst)
+    s = _norm_abs(src.virtual)
+    d = _norm_abs(dst.virtual)
     if s == "/":
         return True
     for entry in hidden.paths:
@@ -416,7 +418,7 @@ def move_reveals(vis: Visibility | None, src: str, dst: str) -> bool:
         if not e.startswith(s + "/"):
             continue
         mapped = ("" if d == "/" else d) + e[len(s) :]
-        if path_visible(vis, mapped):
+        if path_visible(vis, PathSpec.from_str_path(mapped)):
             return True
     for pat in hidden.patterns:
         if "/" not in pat:
@@ -446,7 +448,7 @@ def classify_shows(entries: Iterable[ShowEntry]) -> ShownPaths | None:
     return ShownPaths(entries=listed) if listed else None
 
 
-def hidden_under(vis: Visibility | None, virtual: str) -> bool:
+def hidden_under(vis: Visibility | None, path: PathSpec) -> bool:
     """Whether the session could hide anything at or under this path.
 
     The session form of :func:`hides_intersect`, for the view a native
@@ -455,9 +457,11 @@ def hidden_under(vis: Visibility | None, virtual: str) -> bool:
     Args:
         vis (Visibility | None): the session's visibility, None for an
             unrestricted one.
-        virtual (str): absolute virtual path of the walk's start point.
+        path (PathSpec): the walk's starting path.
     """
-    return hides_intersect(vis.paths if vis is not None else None, virtual)
+    return hides_intersect(
+        vis.paths if vis is not None else None, path.virtual
+    )
 
 
 def hides_intersect(hidden: HiddenPaths | None, virtual: str) -> bool:

@@ -18,16 +18,15 @@ from mirage.commands.builtin.dify.io import IO as _IO
 from mirage.commands.builtin.dify.search import search
 from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.slug_tree.find import make_find, reads_times
-from mirage.core.dify.stat import stat, stat_light
+from mirage.core.dify.stat import stat_light
 from mirage.core.dify.tree import DIFY_TREE
 
 COMMANDS = [
     *make_generic_commands(
         "dify",
         _IO,
-        overrides={"find"},
+        overrides={"find": make_find(DIFY_TREE, stat_light, reads_times)},
         ops_overrides={"ls": replace(_IO, stat=stat_light)},
     ),
-    make_find("dify", _IO, DIFY_TREE, stat, stat_light, reads_times),
     search,
 ]

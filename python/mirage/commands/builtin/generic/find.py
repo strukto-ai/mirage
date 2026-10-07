@@ -612,7 +612,7 @@ async def early_root(
         is_link=is_link(links, search),
         follow=link_follow(links),
     )
-    if start.stat is None or not path_visible(visibility, search.virtual):
+    if start.stat is None or not path_visible(visibility, search):
         return []
     prefix = mount_prefix_of(search.virtual, search.vfs_path)
     tree = find_eval.bind_tree(
@@ -805,7 +805,11 @@ async def _find_root(
     # Hidden rows drop here, above the native-op/walk fork and after the
     # link merge, so a mount's visibility behavior cannot depend on
     # whether its backend ships a native find op.
-    results = [r for r in results if path_visible(visibility, r)]
+    results = [
+        r
+        for r in results
+        if path_visible(visibility, PathSpec.from_str_path(r))
+    ]
     return respell_raw(
         results, search_path.virtual, search_path.raw_path
     ), start.detail

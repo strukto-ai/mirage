@@ -245,7 +245,10 @@ async def _target_mounts(
         (
             m
             for m in registry.visible_mounts()
-            if path_visible(session.visibility, m.prefix.rstrip("/") or "/")
+            if path_visible(
+                session.visibility,
+                PathSpec.from_str_path(m.prefix.rstrip("/") or "/"),
+            )
         ),
         key=lambda m: m.prefix,
     )

@@ -15,7 +15,7 @@
 import { usageHint } from '../../../../commands/spec/usage.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { MountMode } from '../../../../types.ts'
-import type { PathSpec } from '../../../../types.ts'
+import { PathSpec } from '../../../../types.ts'
 import { pathVisible } from '../../../../utils/hidden.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
@@ -88,7 +88,9 @@ export function handleMount(
   const types = fl.asStr('types')
   const lines = [...registry.visibleMounts()]
     .sort((a, b) => compareCodePoints(a.prefix, b.prefix))
-    .filter((m) => pathVisible(session.visibility, m.prefix.replace(/\/+$/, '') || '/'))
+    .filter((m) =>
+      pathVisible(session.visibility, PathSpec.fromStrPath(m.prefix.replace(/\/+$/, '') || '/')),
+    )
     .filter((m) => types === undefined || matchType(m.vfs.name, types))
     .map(
       (m) =>

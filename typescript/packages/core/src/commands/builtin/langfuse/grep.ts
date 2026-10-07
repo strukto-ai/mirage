@@ -13,19 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LangfuseAccessor } from '../../../accessor/langfuse.ts'
+import type { Builder } from '../generic_bind/adapter.ts'
 
-import { VFSName } from '../../../types.ts'
-import { command } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { scanIo } from '../generic_bind/index.ts'
 import { runSearch } from '../generic_bind/search.ts'
 
-import { IO } from './io.ts'
-
-export const LANGFUSE_GREP = command({
+export const BUILDER: Builder<LangfuseAccessor> = {
   name: 'grep',
-  vfs: VFSName.LANGFUSE,
-  spec: specOf('grep'),
-  fn: (accessor: LangfuseAccessor, paths, texts, opts) =>
-    runSearch(scanIo(IO, opts.ns, opts.mountPrefix)[0], 'grep', accessor, paths, texts, opts),
-})
+  read: true,
+  fn: (ops, accessor: LangfuseAccessor, paths, texts, opts) =>
+    runSearch(ops, 'grep', accessor, paths, texts, opts),
+}

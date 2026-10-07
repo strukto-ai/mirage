@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { checkSearch, searchScoped, visibleResults } from '../../../vfs/search.ts'
+import type { SearchResult } from '../../../vfs/types.ts'
 import type {
   ContentSearchOps,
   ReadOps,
@@ -28,18 +30,16 @@ import type { Accessor } from '../../../accessor/base.ts'
 import {
   requirePathsWritable,
   effectivePathMode,
-  getAdmission,
   getCurrentSession,
   getOpPolicies,
-  hiddenRefusal,
+  requireVisible,
   mountGateFor,
   sessionVisibility,
   walkProbeFor,
 } from '../../../context/session_context.ts'
-import { pathsScoped } from '../../../ops/namespace_view.ts'
-import { METADATA_OPS } from '../../../policy/constants.ts'
-import { preVfsGate, type Policies } from '../../../policy/policies.ts'
-import type { DispatchFn } from '../../../runtime/types.ts'
+import { pathsScoped, visibleEntries } from '../../../ops/namespace_view.ts'
+import type { Policies } from '../../../policy/policies.ts'
+import { OpBoundary } from '../../../ops/boundary.ts'
 import { hasAborted, makeAbortError } from '../../../workspace/abort.ts'
 import { hiddenUnder, moveReveals, pathVisible } from '../../../utils/hidden.ts'
 import { removeRemnants, visibleBelow, type RemnantChannel } from '../../../utils/remnants.ts'
@@ -429,29 +429,9 @@ export interface Builder<A extends Accessor = Accessor> {
   read?: boolean
 }
 
-/** Refuse a hidden path the way nonexistence would: ENOENT for anything
- * acting on the path; a create answers as `hiddenRefusal` says, EACCES
- * only when the directory it lands in is visible. Raised at the op
- * boundary so each command renders the refusal through its own
- * missing-file wording, indistinguishable from a real miss. */
-export function refuseHidden(path: PathSpec, create: boolean): void {
-  const vis = sessionVisibility()
-  if (pathVisible(vis, path.virtual)) return
-  throw hiddenRefusal(vis, path.virtual, create)
-}
-
-function visibleChildren(entries: string[], parent: PathSpec): string[] {
-  const base = rstripSlash(parent.virtual)
-  const vis = sessionVisibility()
-  return entries.filter((e) => {
-    const trimmed = rstripSlash(e)
-    return pathVisible(vis, `${base}/${trimmed.slice(trimmed.lastIndexOf('/') + 1)}`)
-  })
-}
-
 /** Whether the bound session's hides make this relocation a reveal. */
 function moveWouldReveal(src: PathSpec, dst: PathSpec): boolean {
-  return moveReveals(sessionVisibility(), src.virtual, dst.virtual)
+  return moveReveals(sessionVisibility(), src, dst)
 }
 
 /** Refuse a relocation that would surface a hidden path.
@@ -500,14 +480,15 @@ function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): Command
   const guarded: CommandIO<A> = {
     ...ops,
     readdir: async (accessor, path, index) => {
-      refuseHidden(path, false)
-      return visibleChildren(await ops.readdir(accessor, path, index), path)
+      requireVisible(sessionVisibility(), path, false)
+      const vis = sessionVisibility()
+      return visibleEntries(await ops.readdir(accessor, path, index), path, vis)
     },
   }
   const ex = ops.exists
   if (ex !== undefined) {
     guarded.exists = async (accessor, path) => {
-      if (!pathVisible(sessionVisibility(), path.virtual)) return false
+      if (!pathVisible(sessionVisibility(), path)) return false
       return ex(accessor, path)
     }
   }
@@ -531,7 +512,7 @@ function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): Command
     // the factory applies this guard per invocation, after stamping it.
     const children = ops.globChildren
     guarded.rmdir = async (accessor, path, index) => {
-      refuseHidden(path, false)
+      requireVisible(sessionVisibility(), path, false)
       try {
         await rd(accessor, path, index)
         return
@@ -541,7 +522,7 @@ function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): Command
         if (
           rawUnlink === undefined ||
           (code !== 'ENOTEMPTY' && code !== 'EEXIST') ||
-          !hiddenUnder(vis, path.virtual)
+          !hiddenUnder(vis, path)
         ) {
           throw exc
         }
@@ -561,8 +542,8 @@ function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): Command
         // as the ops plane's merged listing does, while the cascade
         // itself only ever removes what the backend holds.
         const merged = children === undefined ? entries : [...entries, ...children(path.virtual)]
-        const visible = (virtual: string): boolean => pathVisible(vis, virtual)
-        if (entries.length === 0 || visibleBelow(path.virtual, merged, visible)) {
+        const visible = (path: PathSpec): boolean => pathVisible(vis, path)
+        if (entries.length === 0 || visibleBelow(path, merged, visible)) {
           throw exc
         }
         const channel: RemnantChannel = {
@@ -590,8 +571,8 @@ function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): Command
     // Only a directory source can carry hidden content into view, so a
     // rename whose source stats as a file passes the reveal check.
     guarded.rename = async (accessor, src, dst) => {
-      refuseHidden(src, false)
-      refuseHidden(dst, true)
+      requireVisible(sessionVisibility(), src, false)
+      requireVisible(sessionVisibility(), dst, true)
       if (moveWouldReveal(src, dst) && (await pairSrcIsDir(ops.stat, accessor, src))) {
         throw eacces(src.virtual)
       }
@@ -601,8 +582,8 @@ function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): Command
   const dc = ops.dirCopy
   if (dc !== undefined) {
     guarded.dirCopy = (accessor, src, dst) => {
-      refuseHidden(src, false)
-      refuseHidden(dst, true)
+      requireVisible(sessionVisibility(), src, false)
+      requireVisible(sessionVisibility(), dst, true)
       refuseReveal(src, dst)
       return dc(accessor, src, dst)
     }
@@ -902,10 +883,10 @@ function checkCommandPaths(
   checkMode = true,
 ): void {
   const access = mutationOf(slot)
-  const admission = getAdmission()
   for (const [position, path] of paths.entries()) {
-    if (checkHidden) refuseHidden(path, position > 0 || access?.create === true)
-    if (slot !== 'stat' && slot !== 'exists') admission?.check(path.virtual)
+    if (checkHidden)
+      requireVisible(sessionVisibility(), path, position > 0 || access?.create === true)
+    OpBoundary.check(slot, path)
   }
   if (access !== undefined && checkMode) {
     for (const path of access.firstSource ? paths.slice(1) : paths) {
@@ -971,9 +952,7 @@ export function withCommandGuards<A extends Accessor>(
   if (guarded.exists !== undefined) {
     const exists = guarded.exists
     guarded.exists = (accessor, path) =>
-      pathVisible(sessionVisibility(), path.virtual)
-        ? exists(accessor, path)
-        : Promise.resolve(false)
+      pathVisible(sessionVisibility(), path) ? exists(accessor, path) : Promise.resolve(false)
   }
   if (ops.du !== undefined) {
     guarded.du = {
@@ -981,23 +960,22 @@ export function withCommandGuards<A extends Accessor>(
       entries: commandCall(ops.du.entries, 'du'),
     }
   }
-  if (ops.search !== undefined)
-    guarded.search = { ...ops.search, search: commandCall(ops.search.search, 'search') }
+  if (ops.search !== undefined) {
+    guarded.search = { ...ops.search, search: guardedSearch(ops.search.search) }
+    if (ops.search.searchMany !== undefined)
+      guarded.search.searchMany = guardedSearch(ops.search.searchMany)
+  }
   return guarded
 }
 
-/**
- * Return `dispatch` marking each op with the admitted command's gate as
- * `ruleGate`, which the door judges on the paths the op reaches: the
- * command's dispatcher skips its guarded slots, and the door cannot tell
- * which command issued an op. A metadata op passes unmarked, as
- * `withCommandGuards` lets `stat` pass.
- */
-export function withDispatchRuleGuard(dispatch: DispatchFn): DispatchFn {
-  return async (op, path, args, options, report) => {
-    const gate = getAdmission()
-    if (gate === null || METADATA_OPS.has(op)) return dispatch(op, path, args, options, report)
-    return dispatch(op, path, args, { ...options, ruleGate: gate }, report)
+/** Check search inputs and filter returned records in the same view. */
+function guardedSearch<Args extends unknown[]>(
+  fn: (...args: Args) => Promise<SearchResult[] | null>,
+): (...args: Args) => Promise<SearchResult[] | null> {
+  return async (...args) => {
+    const vis = checkSearch(pathsOf(args))
+    const result = await fn(...args)
+    return result === null ? null : visibleResults(result, vis)
   }
 }
 
@@ -1029,8 +1007,8 @@ function opPolicyScope(prefix: string | null): OpPolicyScope | null {
  * wrap-time capture also covers a reader the output pipeline drains
  * after dispatch has reset the context (head/tail/wc bind lazy
  * readers), with the prefix and session identity the drained op
- * belongs to; a registration-time wrap (the object-store overrides,
- * the loose-write chain) has no window when applied and reads the
+ * belongs to; a registration-time wrap (the loose-write chain)
+ * has no window when applied and reads the
  * live context instead, which its eager handlers are inside.
  */
 function livePolicyScope(scope: OpPolicyScope | null): OpPolicyScope | null {
@@ -1050,7 +1028,7 @@ async function policyAdmit(
   write: boolean,
 ): Promise<void> {
   const prefix = scope.prefix ?? mountGateFor(path.virtual)?.[0] ?? ''
-  await preVfsGate(scope.policies, op, path, write, prefix, scope.sessionId, undefined, {
+  await new OpBoundary(scope.policies, prefix, undefined, scope.sessionId).admit(op, path, write, {
     checkHidden: false,
   })
 }
@@ -1129,11 +1107,17 @@ function policyCall<T extends (...args: never[]) => unknown>(
   }) as T
 }
 
-function guardOperation<Args extends unknown[], R>(
+export function guardOperation<Args extends unknown[], R>(
   fn: (...args: Args) => Promise<R> | R,
-  name: MutationSlot | 'exists',
+  name: GuardedSlot,
 ): (...args: Args) => Promise<R> {
-  return walkedCall(null, commandCall(fn, name) as (...args: Args) => Promise<R>)
+  const policed =
+    name === 'stat' || name === 'exists' ? fn : policyCall(opPolicyScope(null), fn, name)
+  return walkedCall(
+    null,
+    commandCall(policed, name) as (...args: Args) => Promise<R>,
+    name === 'mkdir',
+  )
 }
 
 /**
@@ -1151,7 +1135,7 @@ export function scopedIo<A extends Accessor>(
   const result = { ...ops }
   delete result.find
   delete result.du
-  delete result.search
+  if (searchScoped(ns, paths)) delete result.search
   delete result.contentSearch
   delete result.copy
   delete result.dirCopy

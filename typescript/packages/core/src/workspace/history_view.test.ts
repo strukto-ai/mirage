@@ -74,7 +74,7 @@ describe('history view + builtin', () => {
     await ws.close()
   })
 
-  it('cat /.bash_history shows all sessions in histfile format', async () => {
+  it('cat /.bash_history shows only the calling session in histfile format', async () => {
     const ws = makeWs()
     ws.createSession('s2')
     await ws.shell('ls /data')
@@ -82,8 +82,11 @@ describe('history view + builtin', () => {
     const res = await ws.shell('cat /.bash_history')
     expect(res.exitCode).toBe(0)
     expect(out(res)).toContain('ls /data')
-    expect(out(res)).toContain('pwd')
-    expect((out(res).match(/#/g) ?? []).length).toBeGreaterThanOrEqual(2)
+    expect(out(res)).not.toContain('pwd')
+    expect((out(res).match(/#/g) ?? []).length).toBe(1)
+    const other = out(await ws.shell('cat /.bash_history', { sessionId: 's2' }))
+    expect(other).toContain('pwd')
+    expect(other).not.toContain('ls /data')
     await ws.close()
   })
 

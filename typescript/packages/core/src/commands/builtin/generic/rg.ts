@@ -12,46 +12,45 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
-import { cacheAwareStream } from '../../../cache/read_through.ts'
-import { mountParentReaddir, mountParentStat } from '../utils/wrap.ts'
+import { isFsError, isWalkError, walkRefusal } from '../../../errors/fs.ts'
+import { concat } from '../../../io/cachable_iterator.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { MountView } from '../../../ops/types.ts'
+import { decodeText, encodeText } from '../../../shell/bytes.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import { isFsError, isWalkError, walkRefusal } from '../../../errors/fs.ts'
+import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView, flagOccurrences } from '../../spec/flag_view.ts'
 import type { FlagValue, ParsedFlagValue } from '../../spec/types.ts'
-import { decodeText, encodeText } from '../../../shell/bytes.ts'
 import { NEVER_MATCH, resolvePattern, rustEscape } from '../grep_pattern.ts'
 import { exitCodeFor } from '../grep_scan.ts'
 import { FileTypes, typeListing, type TypeChange, type TypeSelection } from '../rg_filetypes.ts'
 import { Overrides } from '../rg_glob.ts'
 import {
-  type Haystack,
   WalkFilter,
   onOtherMount,
   openErrorLine,
   walkErrorLine,
   walkHaystacks,
+  type Haystack,
 } from '../rg_scan.ts'
 import {
   printsContext,
-  type RgFlags,
   searchHaystack,
   smartCaseFolds,
+  type RgFlags,
   type Tally,
 } from '../rg_search.ts'
-import { STDIN_OPERAND } from '../utils/constants.ts'
-import { type LinkDoor, linkDoor } from '../utils/links.ts'
-import { formatOptionalRecords, formatRecords } from '../utils/output.ts'
-import { isStdin, stdinStream } from '../utils/stream.ts'
 import { RegexSyntax } from '../types.ts'
+import { STDIN_OPERAND } from '../utils/constants.ts'
+import { linkDoor, type LinkDoor } from '../utils/links.ts'
+import { formatOptionalRecords, formatRecords } from '../utils/output.ts'
 import { PcreError, hostFlags, translatePcre } from '../utils/pcre.ts'
 import { RustRegexError, translateRust, wholeLine, wholeWord } from '../utils/rust_regex.ts'
-import { concat } from '../../../io/cachable_iterator.ts'
+import { isStdin, stdinStream } from '../utils/stream.ts'
+import { mountParentReaddir, mountParentStat } from '../utils/wrap.ts'
 
 const ENC = new TextEncoder()
 // ripgrep's own words for a line with no pattern, exit 2 (14.1.1).
@@ -629,7 +628,7 @@ export async function rgGeneric(
   // Every `-` operand reads stdin through one cursor, as grep's do. With no
   // operand typed, the implicit one below is stdin's sole reader, so a search
   // that stops early closes the input.
-  stream = stdinStream(cacheAwareStream(stream), opts.stdin, paths.length === 0)
+  stream = stdinStream(stream, opts.stdin, paths.length === 0)
   const fl = new FlagView(opts.flags, specOf('rg'))
   const f = parseFlags(fl)
   const types = new FileTypes(f.typeChanges, f.typeSelections)

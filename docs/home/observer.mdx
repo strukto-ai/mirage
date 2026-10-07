@@ -17,7 +17,7 @@ flowchart TD
     Exec["ws.shell(cmd)"] --> Obs[Observer]
     Obs --> Store[("ObserverStore<br/>RAM · Disk · Redis")]
     Store --> Hist["history builtin<br/>(calling session)"]
-    Store --> File["/.bash_history<br/>(all sessions)"]
+    Store --> File["/.bash_history<br/>(calling session)"]
 ```
 
 ## Storage backends
@@ -75,7 +75,14 @@ events:
 | Surface | Scope | Notes |
 | --- | --- | --- |
 | `history` builtin | calling session | GNU flags `-c -d -a -n -r -w -s -p` and a count arg |
-| `/.bash_history` mount | all sessions | read-only, GNU histfile format (`#<epoch>` then the command) |
+| `/.bash_history` mount | calling session | read-only, GNU histfile format (`#<epoch>` then the command) |
+
+Mirage treats each session as an access boundary, so even sessions with the same
+profile see separate history files. This deliberately differs from GNU Bash,
+where shells normally share a per-user `HISTFILE`. The file retains recorded
+commands after `history -c` or `history -d` changes the builtin’s visible list.
+A file read without an unambiguous session is refused; host Observer queries can
+still inspect the complete recording.
 
 Because `/.bash_history` is a real read-only mount, the ordinary file commands work
 on it directly:

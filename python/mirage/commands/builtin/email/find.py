@@ -16,18 +16,20 @@ from collections.abc import Awaitable, Callable
 from functools import partial
 
 from mirage.accessor.email import EmailAccessor
-from mirage.commands.builtin.email.io import IO
 from mirage.commands.builtin.generic.find import (
     find_walk_generic,
     is_link,
     parse_find_args,
     resolve_start,
 )
-from mirage.commands.builtin.generic_bind.adapter import overlaid_stat
-from mirage.commands.builtin.generic_bind.factory import scan_io
+from mirage.commands.builtin.generic_bind.adapter import (
+    Builder,
+    CommandIO,
+    overlaid_stat,
+)
 from mirage.commands.builtin.grep_pushdown import lone_operand
 from mirage.commands.builtin.utils.output import format_records
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.email.client import fetch_headers
@@ -35,6 +37,7 @@ from mirage.core.email.readdir import _date_bucket, _msg_filename
 from mirage.core.email.search import search_messages
 from mirage.core.generic.find import walk_find
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.namespace_view import paths_scoped
 from mirage.types import FileStat, PathSpec
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import mount_prefix_of
@@ -66,8 +69,8 @@ def _folder_operand(paths: list[PathSpec]) -> PathSpec | None:
     return operand if len(parts) == 1 else None
 
 
-@command("find", vfs="email", spec=SPECS["find"])
 async def find(
+    ops: CommandIO,
     accessor: EmailAccessor,
     paths: list[PathSpec],
     texts: list[str],
@@ -83,8 +86,10 @@ async def find(
     path = fl.as_str("path")
     mindepth = fl.as_str("mindepth")
     empty = fl.as_bool("empty")
-    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
-    paths = await scan.resolve_glob(accessor, paths, opts.index)
+    scoped = paths_scoped(
+        opts.ns, [PathSpec.from_str_path(opts.mount_prefix or "/")]
+    )
+    paths = await ops.resolve_glob(accessor, paths, opts.index)
     # A pure -name search at folder level pushes the subject query down to
     # IMAP search instead of walking every message; any other predicate
     # falls through to the local walk so nothing is silently dropped.
@@ -103,7 +108,7 @@ async def find(
         # Under a hide or a rule the walk is the generic builder's, which
         # names an entry it cannot open where GNU find does.
         walk_stat: Callable[..., Awaitable[FileStat]] = partial(
-            scan.stat, accessor
+            ops.stat, accessor
         )
         overlay = opts.ns.stat_overlay if opts.ns is not None else None
         if overlay is not None:
@@ -112,7 +117,7 @@ async def find(
             paths,
             list(texts),
             opts,
-            readdir=partial(scan.readdir, accessor),
+            readdir=partial(ops.readdir, accessor),
             stat=walk_stat,
         )
     if name and name_only:
@@ -150,8 +155,8 @@ async def find(
         results.extend(
             await walk_find(
                 search,
-                readdir=partial(scan.readdir, accessor),
-                stat=partial(scan.stat, accessor),
+                readdir=partial(ops.readdir, accessor),
+                stat=partial(ops.stat, accessor),
                 index=opts.index,
                 args=args,
                 links=links,
@@ -206,3 +211,6 @@ async def _find_server_side(
 
     output = format_records(sorted(results))
     return output, IOResult()
+
+
+BUILDER = Builder("find", find)

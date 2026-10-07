@@ -13,18 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
-import { pathsScoped } from '../../../ops/namespace_view.ts'
-import { withCommandGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
-import { IO } from './io.ts'
 import { SCOPE_ERROR } from '../../../core/github/constants.ts'
-import { readdir as githubReaddir } from '../../../core/github/readdir.ts'
-import { stat as githubStat } from '../../../core/github/stat.ts'
-import { readStream as githubStream } from '../../../core/github/read.ts'
 import { IOResult } from '../../../io/types.ts'
-import { type FileStat, VFSName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { pathsScoped } from '../../../ops/namespace_view.ts'
+import type { PathSpec } from '../../../types.ts'
+import { type FileStat } from '../../../types.ts'
+import { type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { patternArg } from '../grep_pattern.ts'
+import { FlagView } from '../../spec/flag_view.ts'
 import {
   labelled,
   needsEveryFile,
@@ -33,13 +29,15 @@ import {
   rgGeneric,
   walkFilter,
 } from '../generic/rg.ts'
+import type { Builder, CommandIO } from '../generic_bind/adapter.ts'
+import { patternArg } from '../grep_pattern.ts'
 import { walkCandidates } from '../rg_scan.ts'
 import { narrowScope, scopeRefusal } from './pushdown.ts'
-import { FlagView } from '../../spec/flag_view.ts'
 
 const ENC = new TextEncoder()
 
 async function rg(
+  ops: CommandIO<GitHubAccessor>,
   accessor: GitHubAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -52,8 +50,8 @@ async function rg(
   const f = parseFlags(fl)
   const refused = refuseMissingPattern(pattern, fl, f)
   if (refused !== null) return refused
-  // Code search and the core ops answer from the raw repository, so under a
-  // hide or a path rule the scan sets search aside and reads through the
+  // Code search and the core scan answer from the raw repository, so under a
+  // hide or a path rule the handler sets search aside and reads through the
   // command guards, which report a refused directory where ripgrep does and
   // never open a sealed file.
   const scoped = pathsScoped(opts.ns, paths)
@@ -95,19 +93,14 @@ async function rg(
     }
   }
   const idx = opts.index ?? undefined
-  const io = scoped ? withCommandGuards(withPolicyGuard(IO)) : null
-  const stat = (p: PathSpec): Promise<FileStat> =>
-    io !== null ? io.stat(accessor, p, idx) : githubStat(accessor, p, idx)
-  const readdir = (p: PathSpec): Promise<string[]> =>
-    io !== null ? io.readdir(accessor, p, idx) : githubReaddir(accessor, p, idx)
-  const stream = (p: PathSpec): AsyncIterable<Uint8Array> =>
-    io !== null ? io.readStream(accessor, p, idx) : githubStream(accessor, p, idx)
+  const stat = (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, idx)
+  const readdir = (p: PathSpec): Promise<string[]> => ops.readdir(accessor, p, idx)
+  const stream = (p: PathSpec): AsyncIterable<Uint8Array> => ops.readStream(accessor, p, idx)
   return rgGeneric(resolved, texts, runOpts, stat, readdir, stream)
 }
 
-export const GITHUB_RG = command({
+export const BUILDER: Builder<GitHubAccessor> = {
   name: 'rg',
-  vfs: VFSName.GITHUB,
-  spec: specOf('rg'),
+  read: true,
   fn: rg,
-})
+}

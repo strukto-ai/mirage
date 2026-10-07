@@ -15,17 +15,13 @@
 import type { LangfuseAccessor } from '../../../accessor/langfuse.ts'
 import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
-import { LANGFUSE_GREP } from './grep.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
+import * as grep from './grep.ts'
 import { IO } from './io.ts'
-import { LANGFUSE_RG } from './rg.ts'
-
-const LANGFUSE_OVERRIDES = new Set(['grep', 'rg'])
+import * as rg from './rg.ts'
 
 export const LANGFUSE_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<LangfuseAccessor>(VFSName.LANGFUSE, IO, {
-    overrides: LANGFUSE_OVERRIDES,
+    overrides: { grep: grep.BUILDER, rg: rg.BUILDER },
   }),
-  ...LANGFUSE_GREP,
-  ...LANGFUSE_RG,
 ]

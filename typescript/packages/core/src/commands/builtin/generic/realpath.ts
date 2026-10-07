@@ -106,7 +106,9 @@ export async function canonicalize(
     }
     path = path === '/' ? `/${name}` : `${path}/${name}`
     const target =
-      nolinks || readlink === null || !pathVisible(visibility, path) ? null : readlink(path)
+      nolinks || readlink === null || !pathVisible(visibility, PathSpec.fromStrPath(path))
+        ? null
+        : readlink(path)
     if (target !== null) {
       links++
       const key = JSON.stringify([path, names])

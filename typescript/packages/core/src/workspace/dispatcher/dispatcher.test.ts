@@ -14,7 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { materialize } from '../../io/types.ts'
-import { runWithSession } from '../../context/session_context.ts'
+import { runWithSession, runWithAdmission } from '../../context/session_context.ts'
 import { revisionFor } from '../../observe/context.ts'
 import { OpsRegistry, type RegisteredOp } from '../../ops/registry.ts'
 import { POLICY_WRITE_OPS } from './constants.ts'
@@ -1039,6 +1039,7 @@ function refusing(refused: string) {
     asked,
     gate: {
       scoped: true,
+      scopes: () => true,
       granted: [],
       check: (virtual: string): void => {
         asked.push(virtual)
@@ -1068,10 +1069,10 @@ const text = async (ws: Workspace, virtual: string): Promise<string> =>
 
 const spec = (virtual: string): PathSpec => PathSpec.fromStrPath(virtual)
 
-describe('a marked op is judged on the paths the door reaches', () => {
+describe('an op inherits the gate on the paths the door reaches', () => {
   // Each spelling once, in the order the door meets it: as handed in,
-  // walked, then followed. A refused op leaves the bytes alone; an unmarked
-  // one is the door's alone.
+  // walked, then followed. A refused op leaves the bytes alone; a call
+  // outside the command has no inherited gate.
   it('judges every spelling once', async () => {
     const ws = await linkedWs()
     try {
@@ -1086,9 +1087,9 @@ describe('a marked op is judged on the paths the door reaches', () => {
         ['read', '/data/flink', [], {}],
         ['write', '/data/alias/secret', [new TextEncoder().encode('x\n')], { nofollow: true }],
       ] as const) {
-        await expect(ws.dispatch(op, virtual, args, { ...kwargs, ruleGate: gate })).rejects.toThrow(
-          'sealed',
-        )
+        await expect(
+          runWithAdmission(gate, () => ws.dispatch(op, virtual, args, kwargs)),
+        ).rejects.toThrow('sealed')
       }
       expect(asked).toEqual([
         '/data/alias/secret',
@@ -1105,7 +1106,7 @@ describe('a marked op is judged on the paths the door reaches', () => {
       expect(await text(ws, '/data/real/other')).toBe('new\n')
       const walked = refusing('/data/real/flink2')
       await expect(
-        ws.dispatch('read', '/data/alias/flink2', [], { ruleGate: walked.gate }),
+        runWithAdmission(walked.gate, () => ws.dispatch('read', '/data/alias/flink2')),
       ).rejects.toThrow('sealed')
       expect(walked.asked).toEqual(['/data/alias/flink2', '/data/real/flink2'])
       await ws.dispatch('unlink', '/data/alias/secret')
@@ -1121,10 +1122,10 @@ describe('a marked op is judged on the paths the door reaches', () => {
     const ws = await linkedWs()
     try {
       await expect(
-        ws.dispatch('unlink', '/data/flink', [], { ruleGate: refusing('/data/flink').gate }),
+        runWithAdmission(refusing('/data/flink').gate, () => ws.dispatch('unlink', '/data/flink')),
       ).rejects.toThrow('sealed')
       const referent = refusing('/data/real/secret')
-      await ws.dispatch('unlink', '/data/flink', [], { ruleGate: referent.gate })
+      await runWithAdmission(referent.gate, () => ws.dispatch('unlink', '/data/flink'))
       expect(referent.asked).toEqual(['/data/flink'])
       expect(await text(ws, '/data/real/secret')).toBe('s\n')
     } finally {
@@ -1154,7 +1155,9 @@ describe('a marked op is judged on the paths the door reaches', () => {
           ['rename', '/data/hid/h', [spec('/data/real/moved')]],
           ['rename', '/data/real/secret', [spec('/data/halias/x')]],
         ] as const) {
-          await expect(ws.dispatch(op, virtual, args, { ruleGate: gate })).rejects.toMatchObject({
+          await expect(
+            runWithAdmission(gate, () => ws.dispatch(op, virtual, args)),
+          ).rejects.toMatchObject({
             code: 'ENOENT',
           })
         }
@@ -1165,22 +1168,18 @@ describe('a marked op is judged on the paths the door reaches', () => {
     }
   })
 
-  // The door lifts the mark at entry: the mount's op sees only its own
-  // arguments. A null mark is no mark, as Python's rule_gate=None.
-  it('never forwards the mark to the op', async () => {
+  it('keeps metadata exempt from the command gate', async () => {
     const ws = await linkedWs()
-    const spy = vi.spyOn(OpsRegistry.prototype, 'call')
     try {
-      const { gate, asked } = refusing('/nothing')
-      await ws.dispatch('read', '/data/real/secret', [], { ruleGate: gate })
-      const seen = spy.mock.calls.map((call) => call[5])
-      expect(seen.length).toBeGreaterThan(0)
-      expect(seen.every((kw) => kw === undefined || !('ruleGate' in kw))).toBe(true)
-      expect(asked).toEqual(['/data/real/secret'])
-      const read = await ws.dispatch('read', '/data/real/secret', [], { ruleGate: null })
-      expect(new TextDecoder().decode(read as Uint8Array)).toBe('s\n')
+      const { gate, asked } = refusing('/data/real/secret')
+      await runWithAdmission(gate, async () => {
+        const stat = (await ws.dispatch('stat', '/data/real/secret')) as FileStat
+        expect(stat.type).toBe(FileType.FILE)
+        expect(asked).toEqual([])
+        await expect(text(ws, '/data/real/secret')).rejects.toThrow('sealed')
+        expect(asked).toEqual(['/data/real/secret'])
+      })
     } finally {
-      spy.mockRestore()
       await ws.close()
     }
   })

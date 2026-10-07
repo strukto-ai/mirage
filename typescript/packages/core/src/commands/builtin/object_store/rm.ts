@@ -16,13 +16,12 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, type PathSpec } from '../../../types.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import type { RegisteredCommand } from '../../config.ts'
+import { type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { cpWalk } from '../generic/cp.ts'
 import { rmWithoutOperands } from '../generic/rm_cmd.ts'
-import { requireOp } from '../generic_bind/adapter.ts'
+import { requireOp, type Builder } from '../generic_bind/adapter.ts'
 import { resolveGlobOf, type CommandIO } from '../generic_bind/index.ts'
 import { formatRecords } from '../utils/output.ts'
 import { isSlashedLink, rmLinkRefusal } from '../utils/slash_links.ts'
@@ -37,14 +36,19 @@ interface RmOpts {
   verbose: boolean
 }
 
-/** Build the no-real-directories rm override for one keyed store. */
-export function makeRm<A extends Accessor>(vfs: string, io: CommandIO<A>): RegisteredCommand[] {
-  const stat = io.stat
-  const readdir = io.readdir
-  const resolveGlob = resolveGlobOf(io)
-  const unlink = requireOp(io.unlink, 'unlink')
-  const rmdir = requireOp(io.rmdir, 'rmdir')
-  const rmR = requireOp(io.rmR, 'rmR')
+export async function rm<A extends Accessor>(
+  ops: CommandIO<A>,
+  accessor: A,
+  paths: PathSpec[],
+  _texts: string[],
+  opts: CommandOpts,
+): Promise<CommandFnResult> {
+  const stat = ops.stat
+  const readdir = ops.readdir
+  const resolveGlob = resolveGlobOf(ops)
+  const unlink = requireOp(ops.unlink, 'unlink')
+  const rmdir = requireOp(ops.rmdir, 'rmdir')
+  const rmR = requireOp(ops.rmR, 'rmR')
 
   // Remove one operand, returning a GNU stderr line on failure (null when
   // removed, or skipped under -f) alongside the verbose lines.
@@ -102,63 +106,49 @@ export function makeRm<A extends Accessor>(vfs: string, io: CommandIO<A>): Regis
     return [null, opts.verbose ? [`removed '${label}'`] : []]
   }
 
-  async function rmCommand(
-    accessor: A,
-    paths: PathSpec[],
-    _texts: string[],
-    opts: CommandOpts,
-  ): Promise<CommandFnResult> {
-    const fl = new FlagView(opts.flags, specOf('rm'))
-    const recursive = fl.asBool('r') || fl.asBool('R')
-    const force = fl.asBool('f')
-    const removeDir = fl.asBool('d')
-    const verbose = fl.asBool('v')
-    if (paths.length === 0) return rmWithoutOperands(force)
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const verboseParts: string[] = []
-    const errors: string[] = []
-    const writes: Record<string, Uint8Array> = {}
-    const links = opts.ns?.links ?? null
-    for (const p of resolved) {
-      // A link typed with a trailing slash is refused, never followed: the
-      // shared helper keeps this identical to the generic builder.
-      if (isSlashedLink(p, links)) {
-        const refusal = await rmLinkRefusal(p, links, { recursive, force })
-        if (refusal !== null) errors.push(refusal)
-        continue
-      }
-      // GNU rm reports the operand and keeps removing the rest.
-      const [error, entryLines] = await rmOne(
-        accessor,
-        p,
-        { recursive, force, removeDir, verbose },
-        opts.index,
-      )
-      if (error !== null) {
-        errors.push(error)
-        continue
-      }
-      writes[p.mountPath] = new Uint8Array()
-      if (verbose) verboseParts.push(...entryLines)
+  const fl = new FlagView(opts.flags, specOf('rm'))
+  const recursive = fl.asBool('r') || fl.asBool('R')
+  const force = fl.asBool('f')
+  const removeDir = fl.asBool('d')
+  const verbose = fl.asBool('v')
+  if (paths.length === 0) return rmWithoutOperands(force)
+  const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
+  const verboseParts: string[] = []
+  const errors: string[] = []
+  const writes: Record<string, Uint8Array> = {}
+  const links = opts.ns?.links ?? null
+  for (const p of resolved) {
+    // A link typed with a trailing slash is refused, never followed: the
+    // shared helper keeps this identical to the generic builder.
+    if (isSlashedLink(p, links)) {
+      const refusal = await rmLinkRefusal(p, links, { recursive, force })
+      if (refusal !== null) errors.push(refusal)
+      continue
     }
-    const output: ByteSource | null = verbose ? formatRecords(verboseParts) : null
-    const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : undefined
-    return [
-      output,
-      new IOResult({
-        writes,
-        exitCode: errors.length > 0 ? 1 : 0,
-        ...(stderr !== undefined ? { stderr } : {}),
-      }),
-    ]
+    // GNU rm reports the operand and keeps removing the rest.
+    const [error, entryLines] = await rmOne(
+      accessor,
+      p,
+      { recursive, force, removeDir, verbose },
+      opts.index,
+    )
+    if (error !== null) {
+      errors.push(error)
+      continue
+    }
+    writes[p.mountPath] = new Uint8Array()
+    if (verbose) verboseParts.push(...entryLines)
   }
-
-  return command<A>({
-    name: 'rm',
-    vfs,
-    spec: specOf('rm'),
-    fn: rmCommand,
-    write: true,
-    pathGuarded: true,
-  })
+  const output: ByteSource | null = verbose ? formatRecords(verboseParts) : null
+  const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : undefined
+  return [
+    output,
+    new IOResult({
+      writes,
+      exitCode: errors.length > 0 ? 1 : 0,
+      ...(stderr !== undefined ? { stderr } : {}),
+    }),
+  ]
 }
+
+export const BUILDER = { name: 'rm', fn: rm, write: true } satisfies Builder

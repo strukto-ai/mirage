@@ -13,14 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
-import type { PathSpec } from '../../types.ts'
+import { PathSpec } from '../../types.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { floatOption, intOption, textOption, validateOptions } from '../../vfs/search.ts'
-import type { SearchOps, SearchQuery } from '../../vfs/types.ts'
+import type { SearchOps, SearchQuery, SearchResult } from '../../vfs/types.ts'
 import type { VectorTree } from './types.ts'
 
-const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 function targetTable(pinned: string | null, paths: PathSpec[]): string | null {
@@ -33,7 +32,7 @@ function targetTable(pinned: string | null, paths: PathSpec[]): string | null {
 }
 
 /** Rank a table's rows and render each hit under its canonical path. */
-export async function searchRowsOutput<A extends Accessor>(
+export async function searchResults<A extends Accessor>(
   tree: VectorTree<A>,
   accessor: A,
   query: string,
@@ -41,13 +40,13 @@ export async function searchRowsOutput<A extends Accessor>(
   topK: number,
   threshold: number,
   mountPrefix: string,
-): Promise<Uint8Array> {
+): Promise<SearchResult[]> {
   if (query === '') throw new Error('search: query is required')
   if (topK <= 0) throw new Error('search: top-k must be positive')
   const pinned = tree.pinned(accessor)
   const table = targetTable(pinned, paths)
   if (table === null) throw new Error('search: no table to search')
-  const blocks: string[] = []
+  const blocks: SearchResult[] = []
   for (const row of await tree.searchRows(accessor, table, query, topK)) {
     const rank = row[tree.rankKey]
     const ranked = rank !== null && rank !== undefined
@@ -57,14 +56,21 @@ export async function searchRowsOutput<A extends Accessor>(
       '/',
     )
     const header = ranked ? `${path}:${Number(rank).toFixed(4)}` : path
-    blocks.push(`${header}\n${DEC.decode(body).replace(/\n+$/, '')}`)
+    blocks.push([
+      PathSpec.fromStrPath(path, [...(pinned === null ? [table] : []), ...segments].join('/')),
+      `${header}\n${DEC.decode(body).replace(/\n+$/, '')}`,
+    ])
   }
-  return blocks.length === 0 ? new Uint8Array() : ENC.encode(blocks.join('\n') + '\n')
+  return blocks
 }
 
 /** Build a store's ranked search, one native ranking per batch. */
 export function makeSearch<A extends Accessor>(tree: VectorTree<A>): SearchOps<A> {
-  async function searchMany(accessor: A, paths: PathSpec[], query: SearchQuery): Promise<string[]> {
+  async function searchMany(
+    accessor: A,
+    paths: PathSpec[],
+    query: SearchQuery,
+  ): Promise<SearchResult[]> {
     validateOptions(query, ['top_k', 'threshold', 'method'])
     const topK = intOption(query, 'top_k', tree.searchLimit(accessor))
     const first = paths[0]
@@ -72,7 +78,7 @@ export function makeSearch<A extends Accessor>(tree: VectorTree<A>): SearchOps<A
     const method = textOption(query, 'method', 'semantic')
     const threshold = floatOption(query, 'threshold', 0)
     if (method !== 'semantic') throw new Error("search: only the 'semantic' method is supported")
-    const output = await searchRowsOutput(
+    return searchResults(
       tree,
       accessor,
       query.query,
@@ -81,7 +87,6 @@ export function makeSearch<A extends Accessor>(tree: VectorTree<A>): SearchOps<A
       threshold,
       mountPrefixOf(first.virtual, first.vfsPath),
     )
-    return output.length === 0 ? [] : DEC.decode(output).replace(/\n$/, '').split('\n')
   }
   return { search: (accessor, path, query) => searchMany(accessor, [path], query), searchMany }
 }

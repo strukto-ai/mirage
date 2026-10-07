@@ -210,15 +210,25 @@ class Observer:
         out.sort(key=lambda e: e.get("timestamp", 0))
         return out
 
-    async def command_events(self) -> list[dict[str, Any]]:
-        """Command events across all sessions, in append order.
+    async def command_events(
+        self, session: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Recorded commands, optionally restricted to one session.
+
+        Args:
+            session (str | None): session ID, or all sessions for host queries.
 
         Returns:
             list[dict]: Events with type == EVENT_COMMAND.
         """
-        return [
-            e for e in await self.events() if e.get("type") == EVENT_COMMAND
-        ]
+        entries = (
+            await self.events()
+            if session is None
+            else _parse_files(
+                await self._store.read_matching(f"/{session}.jsonl")
+            )
+        )
+        return [e for e in entries if e.get("type") == EVENT_COMMAND]
 
     async def session_command_events(
         self, session: str

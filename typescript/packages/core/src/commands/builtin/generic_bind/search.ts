@@ -142,7 +142,8 @@ export async function runSearch<A extends Accessor>(
     }
     let lines: string[] | null
     try {
-      lines = await capability.search(accessor, operand, query, opts.index ?? undefined)
+      const results = await capability.search(accessor, operand, query, opts.index ?? undefined)
+      lines = results === null ? null : results.map(([, text]) => text)
     } catch (err) {
       // A push-down whose answer is past the mount's read cap cannot print
       // it; the scan reads each operand, and reports the same refusal against

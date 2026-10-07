@@ -18,6 +18,7 @@ import pytest
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.commands.builtin.mongodb.io import IO as BACKEND_IO
 from mirage.commands.builtin.mongodb.wc import wc
 from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
@@ -36,7 +37,7 @@ async def test_wc_l_counts_a_visible_collection_server_side(monkeypatch):
         AsyncMock(return_value=True),
     )
     monkeypatch.setitem(
-        wc.__wrapped__.__globals__,
+        wc.__globals__,
         "count_documents",
         AsyncMock(return_value=7),
     )
@@ -45,6 +46,7 @@ async def test_wc_l_counts_a_visible_collection_server_side(monkeypatch):
     )
     path = "/db1/collections/coll1/documents.jsonl"
     out, io = await wc(
+        BACKEND_IO,
         accessor,
         [_path(path)],
         [],

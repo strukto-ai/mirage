@@ -31,7 +31,7 @@ import * as clientModule from '../../../core/postgres/client.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { resolvePostgresConfig } from '../../../vfs/postgres/config.ts'
-import { POSTGRES_HEAD } from './head.ts'
+import { POSTGRES_COMMANDS } from './index.ts'
 
 class StubDriver implements PgDriver {
   query<R = Record<string, unknown>>(): Promise<PgQueryResult<R>> {
@@ -57,7 +57,7 @@ function table(n: number): void {
 }
 
 async function head(n: number, maxReadRows?: number): Promise<[string[], number, string]> {
-  const cmd = POSTGRES_HEAD[0]
+  const cmd = POSTGRES_COMMANDS.find((cmd) => cmd.name === 'head')
   if (cmd === undefined) throw new Error('head not registered')
   const accessor = new PostgresAccessor(
     new StubDriver(),

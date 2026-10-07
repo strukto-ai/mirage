@@ -7,7 +7,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     CommandIO,
     with_command_guards,
 )
-from mirage.commands.builtin.object_store.rm import make_rm
+from mirage.commands.builtin.object_store.rm import rm
 from mirage.commands.config import CommandOpts
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -48,8 +48,8 @@ async def test_rm_refused_operand_keeps_spelling_and_continues(
         PathSpec.from_str_path("/data"), raw_path=raw, walk_error=refusal
     )
     valid = PathSpec.from_str_path("/data/ok")
-    _, result = await make_rm("s3", io)(
-        None, [refused, valid], [], CommandOpts(flags={"f": force})
+    _, result = await rm(
+        io, None, [refused, valid], [], CommandOpts(flags={"f": force})
     )
     assert (result.exit_code, result.stderr) == (code, stderr)
     assert stat.await_count == 1

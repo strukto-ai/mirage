@@ -174,7 +174,9 @@ async function targetMounts(
   operands: (string | PathSpec)[],
 ): Promise<[MountEntry[], string[]]> {
   const ordered = [...registry.visibleMounts()]
-    .filter((m) => pathVisible(session.visibility, m.prefix.replace(/\/+$/, '') || '/'))
+    .filter((m) =>
+      pathVisible(session.visibility, PathSpec.fromStrPath(m.prefix.replace(/\/+$/, '') || '/')),
+    )
     .sort((a, b) => compareCodePoints(a.prefix, b.prefix))
   if (operands.length === 0) return [ordered, []]
   const seen = new Set<string>()

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SearchResult } from '../../vfs/types.ts'
 import { describe, expect, it } from 'vitest'
 import { formatGrepResults, type GmailSearchRow } from './search.ts'
 
@@ -32,8 +33,8 @@ function row(bodyText: string): GmailSearchRow {
 }
 
 /** The excerpt is everything after the `<path>:[<sender>] ` header. */
-function excerptOf(lines: string[]): string {
-  const line = lines[0] ?? ''
+function excerptOf(lines: SearchResult[]): string {
+  const line = lines[0]?.[1] ?? ''
   return line.slice(line.indexOf('] ') + 2)
 }
 
@@ -80,6 +81,8 @@ describe('formatGrepResults excerpts', () => {
 
   it('falls back to the snippet when the pattern is empty', () => {
     const lines = formatGrepResults([row('body')], LABEL, '/gmail')
-    expect(lines).toEqual(['/gmail/INBOX/2026-08-19/note__m1.gmail.json:[a@b.c] fallback snippet'])
+    expect(lines.map(([, text]) => text)).toEqual([
+      '/gmail/INBOX/2026-08-19/note__m1.gmail.json:[a@b.c] fallback snippet',
+    ])
   })
 })

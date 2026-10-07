@@ -125,7 +125,7 @@ async def canonicalize(
             None
             if nolinks
             or readlink is None
-            or not path_visible(visibility, path)
+            or not path_visible(visibility, PathSpec.from_str_path(path))
             else readlink(path)
         )
         if target is not None:

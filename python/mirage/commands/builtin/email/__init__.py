@@ -12,13 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.email.find import find
-from mirage.commands.builtin.email.grep import grep
+from mirage.commands.builtin.email import find, grep, rg
 from mirage.commands.builtin.email.io import IO as _IO
-from mirage.commands.builtin.email.rg import rg
 from mirage.commands.builtin.generic_bind import make_generic_commands
-
-_EMAIL_OVERRIDES = {"find", "grep", "rg"}
 
 # Mail verbs live in the himalaya CLI
 # (mirage.commands.cli.builtin.himalaya), installed by name; the mount
@@ -27,9 +23,10 @@ COMMANDS = [
     *make_generic_commands(
         "email",
         _IO,
-        overrides=_EMAIL_OVERRIDES,
+        overrides={
+            "grep": grep.BUILDER,
+            "rg": rg.BUILDER,
+            "find": find.BUILDER,
+        },
     ),
-    find,
-    grep,
-    rg,
 ]

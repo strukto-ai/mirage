@@ -16,22 +16,21 @@ import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { MONGODB_CAT } from './cat.ts'
-import { MONGODB_GREP } from './grep.ts'
+import * as cat from './cat.ts'
+import * as grep from './grep.ts'
 import { IO } from './io.ts'
-import { MONGODB_RG } from './rg.ts'
-import { MONGODB_TAIL } from './tail.ts'
-import { MONGODB_WC } from './wc.ts'
-
-const MONGODB_OVERRIDES = new Set(['cat', 'grep', 'rg', 'tail', 'wc'])
+import * as rg from './rg.ts'
+import * as tail from './tail.ts'
+import * as wc from './wc.ts'
 
 export const MONGODB_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<MongoDBAccessor>(VFSName.MONGODB, IO, {
-    overrides: MONGODB_OVERRIDES,
+    overrides: {
+      cat: cat.BUILDER,
+      grep: grep.BUILDER,
+      rg: rg.BUILDER,
+      tail: tail.BUILDER,
+      wc: wc.BUILDER,
+    },
   }),
-  ...MONGODB_CAT,
-  ...MONGODB_GREP,
-  ...MONGODB_RG,
-  ...MONGODB_TAIL,
-  ...MONGODB_WC,
 ]

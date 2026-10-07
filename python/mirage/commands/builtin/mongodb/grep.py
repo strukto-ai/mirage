@@ -13,11 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.commands.builtin.generic_bind.factory import scan_io
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.search import run_search
-from mirage.commands.builtin.mongodb.io import IO
-from mirage.commands.config import CommandOpts, command
-from mirage.commands.spec import SPECS
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -26,12 +24,14 @@ from mirage.types import PathSpec
 # pushdown_operand defers shaping flags and multi-operand lines to the
 # generic scan, which streams documents rather than reading whole
 # collections.
-@command("grep", vfs="mongodb", spec=SPECS["grep"])
 async def grep(
+    ops: CommandIO,
     accessor: MongoDBAccessor,
     paths: list[PathSpec],
     texts: list[str],
     opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
-    scan, _ = scan_io(IO, opts.ns, opts.mount_prefix)
-    return await run_search(scan, "grep", accessor, paths, texts, opts)
+    return await run_search(ops, "grep", accessor, paths, texts, opts)
+
+
+BUILDER = Builder("grep", grep, read=True)

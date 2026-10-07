@@ -178,8 +178,8 @@ class RegisteredCommand:
             split across mounts.
         write (bool): Whether it changes files.
         limit (Limit | None): Its output limit.
-        path_guarded (bool): Whether mount-root policy checks its
-            operands.
+        path_guarded (bool): Whether the handler enforces visibility and
+            mount restrictions on every path it reaches, including results.
     """
 
     name: str
@@ -268,8 +268,8 @@ def command(
             mounts.
         write (bool): Whether it changes files.
         limit (Limit | None): Its output limit.
-        path_guarded (bool): Whether mount-root policy checks its
-            operands.
+        path_guarded (bool): Whether the handler enforces visibility and
+            mount restrictions on every path it reaches, including results.
     """
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:

@@ -21,6 +21,28 @@ from mirage.utils.hidden import path_visible
 from mirage.utils.path import norm_dir
 
 
+def visible_entries(
+    entries: list[str], parent: PathSpec, vis: Visibility | None
+) -> list[str]:
+    """Drop listing entries the reader's view hides.
+
+    Entry shapes vary by backend (bare names, trailing-slash names,
+    full paths), so each is keyed by its final segment against the
+    listed directory, the same normalization ``merge_readdir`` dedups
+    by.
+
+    Args:
+        entries (list[str]): the merged listing.
+        vis (Visibility | None): the reading session's view.
+        parent (PathSpec): the directory that was listed.
+    """
+    return [
+        e
+        for e in entries
+        if path_visible(vis, parent.join(e.rstrip("/").rsplit("/", 1)[-1]))
+    ]
+
+
 def visible_child_segments(
     vis: Visibility | None, paths: Iterable[str], parent: str
 ) -> list[str]:
@@ -53,7 +75,11 @@ def visible_child_segments(
         if not path.startswith(norm):
             continue
         name = path[len(norm) :].split("/", 1)[0]
-        if not name or name in out or not path_visible(vis, path):
+        if (
+            not name
+            or name in out
+            or not path_visible(vis, PathSpec.from_str_path(path))
+        ):
             continue
         out.add(name)
     return sorted(out)
@@ -235,6 +261,10 @@ def paths_scoped(
     """
     scoped = ns.scoped if ns is not None else None
     return scoped is not None and any(
-        scoped(prefix or "/" if path.pattern is not None else path.virtual)
+        scoped(
+            PathSpec.from_str_path(prefix or "/")
+            if path.pattern is not None
+            else path
+        )
         for path in paths
     )

@@ -13,26 +13,56 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.mongodb import MongoDBAccessor
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.tail import parse_flags, tail_generic
-from mirage.commands.builtin.generic.tail import tail as generic_tail
 from mirage.commands.builtin.generic_bind.adapter import (
+    Builder,
+    CommandIO,
     bound_op,
+    guard_operation,
     resolve_or_empty,
 )
-from mirage.commands.builtin.mongodb.io import IO
-from mirage.commands.builtin.utils.limit import row_cap_notice
-from mirage.commands.config import CommandOpts, command
-from mirage.commands.spec import SPECS
-from mirage.core.mongodb.read import stream_any
+from mirage.commands.builtin.utils.limit import note_after, row_cap_notice
+from mirage.commands.config import CommandOpts
 from mirage.core.mongodb.readdir import documents_exist
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.stream import read_tail, watch_stream
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import PathSpec, PolymorphicReadResult
 
 
-@command("tail", vfs="mongodb", spec=SPECS["tail"])
+async def _tail_documents(
+    accessor: MongoDBAccessor,
+    path: PathSpec,
+    index: IndexCacheStore = NULL_INDEX,
+    *,
+    n: int,
+    notices: list[bytes],
+) -> bytes:
+    data, stopped = await read_tail(accessor, path, n, index)
+    if stopped:
+        notices.append(
+            row_cap_notice(
+                "tail",
+                path.raw_path,
+                accessor.config.max_doc_limit,
+                "documents",
+                "max_doc_limit",
+            )
+        )
+    return data
+
+
+async def _watch(
+    accessor: MongoDBAccessor, path: PathSpec, index: IndexCacheStore
+) -> ByteSource | None:
+    if not await documents_exist(accessor, detect_scope(path), path.virtual):
+        return None
+    return watch_stream(accessor, path, index)
+
+
 async def tail(
+    ops: CommandIO,
     accessor: MongoDBAccessor,
     paths: list[PathSpec],
     texts: list[str],
@@ -42,50 +72,42 @@ async def tail(
         parsed = parse_flags(opts.flags)
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=str(exc).encode())
-    counts = parsed.counts
-    resolved = await resolve_or_empty(IO, accessor, paths, opts.index)
-    # Both fast paths query the collection by the names in the path, so
-    # they run only for one the mount can see; anything else takes the
-    # generic, which stats it through the same guard and reports it the
-    # way GNU names a missing file.
-    scope = detect_scope(resolved[0]) if len(resolved) == 1 else None
-    fast = (
-        scope is not None
-        and scope.kind == "documents"
-        and await documents_exist(accessor, scope, resolved[0].virtual)
-    )
-    if fast and parsed.follow:
-        return watch_stream(accessor, resolved[0], opts.index), IOResult()
-    # Collections fetch only the last N documents server-side (sort by
-    # primary key descending + limit) instead of reading everything.
-    n_eff = counts.lines if counts.lines is not None else 10
+    resolved = await resolve_or_empty(ops, accessor, paths, opts.index)
     if (
-        fast
-        and counts.byte_count is None
-        and counts.from_byte is None
-        and counts.from_line is None
-        and n_eff > 0
+        parsed.follow
+        and len(resolved) == 1
+        and detect_scope(resolved[0]).kind == "documents"
     ):
-        data, stopped = await read_tail(
-            accessor, resolved[0], n_eff, opts.index
+        stream = await guard_operation(_watch, "read_bytes")(
+            accessor, resolved[0], opts.index
         )
-        io = IOResult()
-        if stopped:
-            io = IOResult(
-                exit_code=1,
-                stderr=row_cap_notice(
-                    "tail",
-                    resolved[0].raw_path,
-                    accessor.config.max_doc_limit,
-                    "documents",
-                    "max_doc_limit",
-                ),
-            )
-        return generic_tail(data, n=n_eff, c=None, from_line=None), io
-    return await tail_generic(
+        if stream is not None:
+            return stream, IOResult()
+    counts = parsed.counts
+    n = counts.lines if counts.lines is not None else 10
+    notices: list[bytes] = []
+    bounded = guard_operation(_tail_documents, "read_bytes")
+
+    def read(path: PathSpec) -> PolymorphicReadResult:
+        if (
+            detect_scope(path).kind == "documents"
+            and counts.byte_count is None
+            and counts.from_byte is None
+            and n > 0
+            and counts.from_line is None
+            and not parsed.follow
+        ):
+            return bounded(accessor, path, opts.index, n=n, notices=notices)
+        return ops.read_stream(accessor, path, opts.index)
+
+    out, io = await tail_generic(
         resolved,
-        list(texts),
+        texts,
         opts,
-        bound_op(IO.stat, accessor, opts.index),
-        bound_op(stream_any, accessor, opts.index),
+        bound_op(ops.stat, accessor, opts.index),
+        read,
     )
+    return (note_after(out, io, notices) if out is not None else out), io
+
+
+BUILDER = Builder("tail", tail, read=True)

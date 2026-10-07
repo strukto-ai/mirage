@@ -3,7 +3,9 @@
     {
       "id": "history_syntax_error_line",
       "seq": 310056,
-      "targets": ["ram-history"],
+      "targets": [
+        "ram-history"
+      ],
       "session": "s2",
       "command": "if then",
       "expect": {
@@ -15,7 +17,9 @@
     {
       "id": "syntax_error_sets_status",
       "seq": 310057,
-      "targets": ["ram-history"],
+      "targets": [
+        "ram-history"
+      ],
       "session": "s2",
       "command": "echo \"status=$?\"",
       "expect": {
@@ -27,13 +31,16 @@
     {
       "id": "bash_history_keeps_the_syntax_error_line",
       "seq": 310058,
-      "targets": ["ram-history"],
+      "targets": [
+        "ram-history"
+      ],
       "command": "grep -c '^if then$' /.bash_history",
       "expect": {
         "exit": 0,
         "stdout": "1\n",
         "stderr": ""
-      }
+      },
+      "session": "s2"
     }
   ]
 }

@@ -90,6 +90,57 @@
         "stdout": "",
         "stderr": "head: error reading '/airtable/bases/Product_Roadmap__appRoadmapBase001/Backlog__tblBacklog0000003/records.jsonl': File too large\n"
       }
+    },
+    {
+      "id": "airtable_native_hide",
+      "targets": [
+        "airtable"
+      ],
+      "session": "airtable-native-hide",
+      "session_profiles": {
+        "airtable-native-hide": {
+          "paths": {
+            "hide": [
+              "/airtable/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/records.jsonl"
+            ]
+          }
+        }
+      },
+      "command": "head -n 1 /airtable/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/records.jsonl 2>/dev/null; echo head=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "head=1\n",
+        "stderr": ""
+      },
+      "seq": 990016
+    },
+    {
+      "id": "airtable_native_deny",
+      "targets": [
+        "airtable"
+      ],
+      "session": "airtable-native-deny",
+      "session_profiles": {
+        "airtable-native-deny": {
+          "commands": {
+            "deny": [
+              {
+                "paths": [
+                  "/airtable/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/records.jsonl"
+                ],
+                "reason": "sealed"
+              }
+            ]
+          }
+        }
+      },
+      "command": "head -n 1 /airtable/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/records.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "head: cannot open '/airtable/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/records.jsonl' for reading: Permission denied\n"
+      },
+      "seq": 990017
     }
   ]
 }

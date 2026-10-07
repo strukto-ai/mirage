@@ -19,6 +19,7 @@ import pytest
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.commands.builtin.postgres.io import IO as BACKEND_IO
 from mirage.commands.builtin.postgres.tail import tail
 from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
@@ -85,6 +86,7 @@ async def _tail(
     accessor: PostgresAccessor, n: int
 ) -> tuple[list[bytes], int, bytes]:
     out, io = await tail(
+        BACKEND_IO,
         accessor,
         [_path("/public/tables/users/rows.jsonl")],
         [],

@@ -23,7 +23,7 @@ from mirage.vfs.search import (
     text_option,
     validate_options,
 )
-from mirage.vfs.types import SearchOps, SearchQuery
+from mirage.vfs.types import SearchOps, SearchQuery, SearchResult
 
 
 def _target_table(pinned: str | None, paths: list[PathSpec]) -> str | None:
@@ -36,7 +36,7 @@ def _target_table(pinned: str | None, paths: list[PathSpec]) -> str | None:
     return None
 
 
-async def search_rows_output(
+async def search_results(
     tree: VectorTree[A],
     accessor: A,
     query: str,
@@ -45,7 +45,7 @@ async def search_rows_output(
     top_k: int,
     threshold: float,
     mount_prefix: str,
-) -> bytes:
+) -> list[SearchResult]:
     """Rank a table's rows and render each hit under its canonical path.
 
     Args:
@@ -65,7 +65,7 @@ async def search_rows_output(
     table = _target_table(pinned, paths)
     if table is None:
         raise ValueError("search: no table to search")
-    blocks: list[str] = []
+    blocks: list[SearchResult] = []
     for row in await tree.search_rows(accessor, table, query, top_k):
         rank = row.get(tree.rank_key)
         if (
@@ -80,8 +80,15 @@ async def search_rows_output(
         )
         header = path if rank is None else f"{path}:{float(rank):.4f}"
         content = body.decode().rstrip("\n")
-        blocks.append(f"{header}\n{content}")
-    return ("\n".join(blocks) + "\n").encode() if blocks else b""
+        blocks.append(
+            (
+                PathSpec.from_str_path(
+                    path, "/".join(([] if pinned else [table]) + segments)
+                ),
+                f"{header}\n{content}",
+            )
+        )
+    return blocks
 
 
 def make_search(tree: VectorTree[A]) -> SearchOps:
@@ -96,7 +103,7 @@ def make_search(tree: VectorTree[A]) -> SearchOps:
         paths: list[PathSpec],
         query: SearchQuery,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> list[str]:
+    ) -> list[SearchResult]:
         validate_options(query, {"top_k", "method", "threshold"})
         top_k = int_option(query, "top_k", tree.search_limit(accessor))
         if not paths:
@@ -105,7 +112,7 @@ def make_search(tree: VectorTree[A]) -> SearchOps:
         threshold = float_option(query, "threshold", 0.0)
         if method != "semantic":
             raise ValueError("search: only the 'semantic' method is supported")
-        output = await search_rows_output(
+        return await search_results(
             tree,
             accessor,
             query.query,
@@ -114,14 +121,13 @@ def make_search(tree: VectorTree[A]) -> SearchOps:
             threshold=threshold,
             mount_prefix=mount_prefix_of(paths[0].virtual, paths[0].vfs_path),
         )
-        return output.decode().removesuffix("\n").split("\n") if output else []
 
     async def search(
         accessor: A,
         path: PathSpec,
         query: SearchQuery,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> list[str]:
+    ) -> list[SearchResult]:
         return await search_many(accessor, [path], query, index)
 
     return SearchOps(search=search, search_many=search_many)

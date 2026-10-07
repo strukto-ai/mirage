@@ -12,18 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isStdin, operandLabel } from '../utils/stream.ts'
-import { stdinStream, stdinStat } from '../utils/stream.ts'
-import { STDIN_HEADER_NAME } from '../utils/constants.ts'
+import { READ_FAILURES } from '../../../errors/constants.ts'
+import { fsStrerror, isEisdir, isFsError } from '../../../errors/fs.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
+import { concat } from '../../../io/cachable_iterator.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { encodeText } from '../../../shell/bytes.ts'
+import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
+import { shellQuote } from '../../../utils/quote.ts'
+import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { quoteText } from '../../quote.ts'
+import { argmatch } from '../../spec/argmatch.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
 import { argmatchError } from '../../spec/usage.ts'
-import { argmatch } from '../../spec/argmatch.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import {
   numberFlagError,
   parseCounts,
@@ -31,16 +35,9 @@ import {
   tailBytes,
   type TailCounts,
 } from '../tail_counts.ts'
-import { fsErrorLine } from '../../../errors/render.ts'
-import { fsStrerror, isEisdir, isFsError } from '../../../errors/fs.ts'
-import { READ_FAILURES } from '../../../errors/constants.ts'
-import { shellQuote } from '../../../utils/quote.ts'
+import { STDIN_HEADER_NAME } from '../utils/constants.ts'
 import { splitOpened } from '../utils/operands.ts'
-import { readStdinAsync } from '../utils/stream.ts'
-import { quoteText } from '../../quote.ts'
-import { concat } from '../../../io/cachable_iterator.ts'
-import { encodeText } from '../../../shell/bytes.ts'
-import { posixPhrase } from '../../../errors/posix.ts'
+import { isStdin, operandLabel, readStdinAsync, stdinStat, stdinStream } from '../utils/stream.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 type Stat = (p: PathSpec) => Promise<FileStat>
@@ -407,7 +404,7 @@ interface TailFlags {
   readonly following: FollowFlags
 }
 
-function parseFlags(bag: Record<string, FlagValue>): TailFlags | string {
+export function parseFlags(bag: Record<string, FlagValue>): TailFlags | string {
   const fl = new FlagView(bag, specOf('tail'))
   const nRaw = fl.asStr('n') ?? null
   const cRaw = fl.asStr('c') ?? null
@@ -439,7 +436,7 @@ export async function tailGeneric(
   // what it is polling for is exactly the change the cached body does
   // not have yet.
   const backend = stream
-  stream = stdinStream(cacheAwareStreamEager(stream), opts.stdin)
+  stream = stdinStream(stream, opts.stdin)
   if (typeof parsed === 'string')
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]
   const { counts, quiet: qFlag, verbose: vFlag, following } = parsed

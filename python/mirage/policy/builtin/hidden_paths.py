@@ -31,6 +31,6 @@ class HiddenPathsPolicy:
             ctx (VfsContext): the op about to run.
         """
         vis = session_visibility()
-        if path_visible(vis, ctx.path.virtual):
+        if path_visible(vis, ctx.path):
             return None
-        return Hide(hidden_refusal(vis, ctx.path.virtual, ctx.create))
+        return Hide(hidden_refusal(vis, ctx.path, ctx.create))

@@ -501,7 +501,7 @@ export function findGeneric(
             ? await applyMtimeFilter(rootRows, effMtimeMin, effMtimeMax, stat, prefix)
             : rootRows
         first = respellRaw(
-          checked.filter((row) => pathVisible(opts.ns?.visibility, row)),
+          checked.filter((row) => pathVisible(opts.ns?.visibility, PathSpec.fromStrPath(row))),
           root.virtual,
           root.rawPath,
         )
@@ -597,7 +597,9 @@ export function findGeneric(
       // Hidden rows drop here, above the native-op/walk fork and after
       // the link merge, so a mount's visibility behavior cannot depend
       // on whether its backend ships a native find op.
-      const visibleRows = unpruned.filter((row) => pathVisible(opts.ns?.visibility, row))
+      const visibleRows = unpruned.filter((row) =>
+        pathVisible(opts.ns?.visibility, PathSpec.fromStrPath(row)),
+      )
       const added = respellRaw(visibleRows, root.virtual, root.rawPath)
       for (const row of added) if (!first.includes(row)) yield ENC.encode(row + '\n')
       for (const r of added) run.push(matchedPath(r, root))

@@ -30,7 +30,7 @@ from mirage.vfs.search import (
     text_option,
     validate_options,
 )
-from mirage.vfs.types import SearchQuery
+from mirage.vfs.types import SearchQuery, SearchResult
 
 
 def _validate(query: str, top_k: int, threshold: float) -> None:
@@ -42,7 +42,7 @@ def _validate(query: str, top_k: int, threshold: float) -> None:
         raise ValueError("search: threshold must be in [0, 1]")
 
 
-async def search_memories_rendered(
+async def search_results(
     accessor: Mem0Accessor,
     query: str,
     *,
@@ -50,7 +50,7 @@ async def search_memories_rendered(
     top_k: int,
     threshold: float,
     memory_ids: set[str] | None = None,
-) -> bytes:
+) -> list[SearchResult]:
     """Run a semantic search in the scope and render ranked results.
 
     Args:
@@ -69,7 +69,7 @@ async def search_memories_rendered(
         top_k=top_k,
         threshold=threshold,
     )
-    lines: list[str] = []
+    lines: list[SearchResult] = []
     for r in results:
         memory_id = str(r["id"])
         if memory_ids is not None and memory_id not in memory_ids:
@@ -77,10 +77,13 @@ async def search_memories_rendered(
         path = f"{mount_prefix.rstrip('/')}/{memory_id}.json"
         score = format_score(r.get("score"))
         header = path if score is None else f"{path}:{score}"
-        lines.append(f"{header}\n{r.get('memory', '')}")
-    if not lines:
-        return b""
-    return ("\n".join(lines) + "\n").encode()
+        lines.append(
+            (
+                PathSpec.from_str_path(path, f"{memory_id}.json"),
+                f"{header}\n{r.get('memory', '')}",
+            )
+        )
+    return lines
 
 
 async def search_many(
@@ -88,7 +91,7 @@ async def search_many(
     paths: list[PathSpec],
     query: SearchQuery,
     index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
+) -> list[SearchResult]:
     validate_options(query, {"top_k", "method", "threshold"})
     top_k = int_option(query, "top_k", accessor.config.default_search_limit)
     if not paths:
@@ -112,7 +115,7 @@ async def search_many(
             raise enoent(path.virtual)
         if ids is not None:
             ids.add(match.slots["memory_id"])
-    output = await search_memories_rendered(
+    return await search_results(
         accessor,
         query.query,
         mount_prefix=prefix,
@@ -120,7 +123,6 @@ async def search_many(
         threshold=threshold,
         memory_ids=ids,
     )
-    return output.decode().removesuffix("\n").split("\n") if output else []
 
 
 async def search_resource(
@@ -128,5 +130,5 @@ async def search_resource(
     path: PathSpec,
     query: SearchQuery,
     index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
+) -> list[SearchResult]:
     return await search_many(accessor, [path], query, index)

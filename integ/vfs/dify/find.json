@@ -116,6 +116,57 @@
         "stdout": ".\n./auth\n./quickstart\n./quickstart\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "dify_find_hides_native_and_stat_traversal",
+      "targets": [
+        "dify"
+      ],
+      "session": "find-hide",
+      "session_profiles": {
+        "find-hide": {
+          "paths": {
+            "hide": [
+              "/knowledge/guides"
+            ]
+          }
+        }
+      },
+      "command": "find /knowledge -type f | grep guides; echo find=$?; find /knowledge -type f -size -1k | grep guides; echo sized=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "find=1\nsized=1\n",
+        "stderr": ""
+      },
+      "seq": 990018
+    },
+    {
+      "id": "dify_find_refuses_a_denied_subtree",
+      "targets": [
+        "dify"
+      ],
+      "session": "find-deny",
+      "session_profiles": {
+        "find-deny": {
+          "commands": {
+            "deny": [
+              {
+                "paths": [
+                  "/knowledge/guides"
+                ],
+                "reason": "sealed"
+              }
+            ]
+          }
+        }
+      },
+      "command": "set -o pipefail; find /knowledge -type f 2>/dev/null | grep guides; echo find=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "find=1\n",
+        "stderr": ""
+      },
+      "seq": 990019
     }
   ]
 }

@@ -14,7 +14,8 @@
 
 import pytest
 
-from mirage.core.vector.search import make_search, search_rows_output
+from mirage.commands.builtin.utils.output import format_records
+from mirage.core.vector.search import make_search, search_results
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.types import SearchQuery
@@ -29,7 +30,7 @@ def _ps(path: str) -> PathSpec:
 async def _headers(
     tree, accessor, path: str, top_k: int = 10, threshold: float = 0.0
 ) -> list[str]:
-    out = await search_rows_output(
+    out = await search_results(
         tree,
         accessor,
         "q",
@@ -38,12 +39,18 @@ async def _headers(
         threshold=threshold,
         mount_prefix="/db",
     )
-    return [line for line in out.decode().splitlines() if ":" in line]
+    return [
+        line
+        for line in format_records([text for _, text in out])
+        .decode()
+        .splitlines()
+        if ":" in line
+    ]
 
 
 @pytest.mark.asyncio
 async def test_a_hit_is_spelled_under_its_table_with_its_rank(tree, accessor):
-    out = await search_rows_output(
+    out = await search_results(
         tree,
         accessor,
         "q",
@@ -52,7 +59,10 @@ async def test_a_hit_is_spelled_under_its_table_with_its_rank(tree, accessor):
         threshold=0.0,
         mount_prefix="/db",
     )
-    assert out == b"/db/animals/cat/1.txt:0.9000\ncat\n"
+    assert (
+        format_records([text for _, text in out])
+        == b"/db/animals/cat/1.txt:0.9000\ncat\n"
+    )
 
 
 @pytest.mark.asyncio
@@ -92,7 +102,7 @@ async def test_a_refused_search_says_why(
     tree, accessor, query, top_k, path, message
 ):
     with pytest.raises(ValueError) as err:
-        await search_rows_output(
+        await search_results(
             tree,
             accessor,
             query,
@@ -109,9 +119,10 @@ async def test_a_refused_search_says_why(
 async def test_one_scope_searches_as_a_batch_of_one(tree, accessor):
     ops = make_search(tree)
     query = SearchQuery("q", options={"top_k": 1})
-    assert await ops.search(accessor, _ps("/db/animals"), query) == [
-        "/db/animals/cat/1.txt:0.9000",
-        "cat",
+    results = await ops.search(accessor, _ps("/db/animals"), query)
+    assert results is not None
+    assert [(path.virtual, text) for path, text in results] == [
+        ("/db/animals/cat/1.txt", "/db/animals/cat/1.txt:0.9000\ncat"),
     ]
 
 

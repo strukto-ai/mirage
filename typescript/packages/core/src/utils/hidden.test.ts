@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../types.ts'
 import { describe, expect, it } from 'vitest'
 import {
   classifyPaths,
@@ -214,44 +215,50 @@ describe('pathVisible', () => {
   const shown = classifyShows([{ path: '/repo/public', mode: MountMode.READ }])
 
   it('is the anchor-depth rule', () => {
-    expect(pathVisible(vis(hidden, shown), '/repo/public/index.html')).toBe(true)
-    expect(pathVisible(vis(hidden, shown), '/repo/public')).toBe(true)
-    expect(pathVisible(vis(hidden, shown), '/repo/secrets/key.pem')).toBe(false)
-    expect(pathVisible(vis(null, shown), '/anywhere')).toBe(true)
-    expect(pathVisible(vis(hidden), '/repo/x')).toBe(false)
+    expect(pathVisible(vis(hidden, shown), PathSpec.fromStrPath('/repo/public/index.html'))).toBe(
+      true,
+    )
+    expect(pathVisible(vis(hidden, shown), PathSpec.fromStrPath('/repo/public'))).toBe(true)
+    expect(pathVisible(vis(hidden, shown), PathSpec.fromStrPath('/repo/secrets/key.pem'))).toBe(
+      false,
+    )
+    expect(pathVisible(vis(null, shown), PathSpec.fromStrPath('/anywhere'))).toBe(true)
+    expect(pathVisible(vis(hidden), PathSpec.fromStrPath('/repo/x'))).toBe(false)
   })
 
   it('lets hide win the equal-depth tie', () => {
     const tied = classifyPaths(['/repo/public'])
-    expect(pathVisible(vis(tied, shown), '/repo/public/x')).toBe(false)
+    expect(pathVisible(vis(tied, shown), PathSpec.fromStrPath('/repo/public/x'))).toBe(false)
   })
 
   it('re-closes a deeper hide inside a show', () => {
     const nested = classifyPaths(['/repo', '/repo/public/sealed'])
-    expect(pathVisible(vis(nested, shown), '/repo/public/a.txt')).toBe(true)
-    expect(pathVisible(vis(nested, shown), '/repo/public/sealed/k')).toBe(false)
+    expect(pathVisible(vis(nested, shown), PathSpec.fromStrPath('/repo/public/a.txt'))).toBe(true)
+    expect(pathVisible(vis(nested, shown), PathSpec.fromStrPath('/repo/public/sealed/k'))).toBe(
+      false,
+    )
   })
 
   it('outranks a name pattern only inside the anchor', () => {
     const pem = classifyPaths(['*.pem'])
     const open = classifyShows([{ path: '/repo/public', mode: null }])
-    expect(pathVisible(vis(pem, open), '/repo/public/tls.pem')).toBe(true)
-    expect(pathVisible(vis(pem, open), '/other/tls.pem')).toBe(false)
+    expect(pathVisible(vis(pem, open), PathSpec.fromStrPath('/repo/public/tls.pem'))).toBe(true)
+    expect(pathVisible(vis(pem, open), PathSpec.fromStrPath('/other/tls.pem'))).toBe(false)
   })
 
   it('keeps ancestors of a show anchor visible', () => {
     const deep = classifyShows([{ path: '/repo/public/docs', mode: null }])
     for (const virtual of ['/', '/repo', '/repo/public']) {
-      expect(pathVisible(vis(hidden, deep), virtual)).toBe(true)
+      expect(pathVisible(vis(hidden, deep), PathSpec.fromStrPath(virtual))).toBe(true)
     }
-    expect(pathVisible(vis(hidden, deep), '/repo/other')).toBe(false)
+    expect(pathVisible(vis(hidden, deep), PathSpec.fromStrPath('/repo/other'))).toBe(false)
   })
 
   it('opens no road through a hidden show anchor', () => {
     const reclosed = classifyPaths(['/repo', '/repo/public'])
     const open = classifyShows([{ path: '/repo/public', mode: null }])
-    expect(pathVisible(vis(reclosed, open), '/repo')).toBe(false)
-    expect(pathVisible(vis(reclosed, open), '/repo/public/x')).toBe(false)
+    expect(pathVisible(vis(reclosed, open), PathSpec.fromStrPath('/repo'))).toBe(false)
+    expect(pathVisible(vis(reclosed, open), PathSpec.fromStrPath('/repo/public/x'))).toBe(false)
   })
 })
 
@@ -262,11 +269,11 @@ describe('shownMode', () => {
       { path: '/repo/build', mode: MountMode.WRITE },
       { path: '/repo/public', mode: null },
     ])
-    expect(shownMode(shown, '/repo/src/a.py')).toEqual([1, MountMode.READ])
-    expect(shownMode(shown, '/repo/build/out')).toEqual([2, MountMode.WRITE])
-    expect(shownMode(shown, '/repo/public/x')).toEqual([1, MountMode.READ])
-    expect(shownMode(shown, '/elsewhere')).toBeNull()
-    expect(shownMode(null, '/repo')).toBeNull()
+    expect(shownMode(shown, PathSpec.fromStrPath('/repo/src/a.py'))).toEqual([1, MountMode.READ])
+    expect(shownMode(shown, PathSpec.fromStrPath('/repo/build/out'))).toEqual([2, MountMode.WRITE])
+    expect(shownMode(shown, PathSpec.fromStrPath('/repo/public/x'))).toEqual([1, MountMode.READ])
+    expect(shownMode(shown, PathSpec.fromStrPath('/elsewhere'))).toBeNull()
+    expect(shownMode(null, PathSpec.fromStrPath('/repo'))).toBeNull()
   })
 
   it('takes the weaker at equal depth', () => {
@@ -274,7 +281,7 @@ describe('shownMode', () => {
       { path: '/repo', mode: MountMode.EXEC },
       { path: '/repo/*', mode: MountMode.READ },
     ])
-    expect(shownMode(both, '/repo/x')).toEqual([1, MountMode.READ])
+    expect(shownMode(both, PathSpec.fromStrPath('/repo/x'))).toEqual([1, MountMode.READ])
   })
 })
 
@@ -288,17 +295,17 @@ describe('classifyShows', () => {
 describe('hiddenUnder', () => {
   it('is the per-operand gate', () => {
     const spec = classifyPaths(['/repo/.env'])
-    expect(hiddenUnder(vis(spec), '/repo')).toBe(true)
-    expect(hiddenUnder(vis(spec), '/')).toBe(true)
-    expect(hiddenUnder(vis(spec), '/repo/.env')).toBe(true)
-    expect(hiddenUnder(vis(spec), '/s3')).toBe(false)
-    expect(hiddenUnder(vis(spec), '/repo/open')).toBe(false)
-    expect(hiddenUnder(vis(classifyPaths(['*.pem'])), '/s3')).toBe(true)
+    expect(hiddenUnder(vis(spec), PathSpec.fromStrPath('/repo'))).toBe(true)
+    expect(hiddenUnder(vis(spec), PathSpec.fromStrPath('/'))).toBe(true)
+    expect(hiddenUnder(vis(spec), PathSpec.fromStrPath('/repo/.env'))).toBe(true)
+    expect(hiddenUnder(vis(spec), PathSpec.fromStrPath('/s3'))).toBe(false)
+    expect(hiddenUnder(vis(spec), PathSpec.fromStrPath('/repo/open'))).toBe(false)
+    expect(hiddenUnder(vis(classifyPaths(['*.pem'])), PathSpec.fromStrPath('/s3'))).toBe(true)
     const sealed = classifyPaths(['/repo/sealed/*'])
-    expect(hiddenUnder(vis(sealed), '/repo')).toBe(true)
-    expect(hiddenUnder(vis(sealed), '/repo/sealed/x')).toBe(true)
-    expect(hiddenUnder(vis(sealed), '/repo/open')).toBe(false)
-    expect(hiddenUnder(null, '/')).toBe(false)
+    expect(hiddenUnder(vis(sealed), PathSpec.fromStrPath('/repo'))).toBe(true)
+    expect(hiddenUnder(vis(sealed), PathSpec.fromStrPath('/repo/sealed/x'))).toBe(true)
+    expect(hiddenUnder(vis(sealed), PathSpec.fromStrPath('/repo/open'))).toBe(false)
+    expect(hiddenUnder(null, PathSpec.fromStrPath('/'))).toBe(false)
   })
 
   it("counts an operand below a pattern's head", () => {
@@ -307,10 +314,10 @@ describe('hiddenUnder', () => {
     // covers `/repo/public/secret`), even though the operand itself is
     // neither hidden nor an ancestor of the head.
     const spec = classifyPaths(['/repo/*/secret'])
-    expect(hiddenUnder(vis(spec), '/repo/public')).toBe(true)
-    expect(hiddenUnder(vis(spec), '/repo/public/deep')).toBe(true)
-    expect(hiddenUnder(vis(spec), '/repo')).toBe(true)
-    expect(hiddenUnder(vis(spec), '/other')).toBe(false)
+    expect(hiddenUnder(vis(spec), PathSpec.fromStrPath('/repo/public'))).toBe(true)
+    expect(hiddenUnder(vis(spec), PathSpec.fromStrPath('/repo/public/deep'))).toBe(true)
+    expect(hiddenUnder(vis(spec), PathSpec.fromStrPath('/repo'))).toBe(true)
+    expect(hiddenUnder(vis(spec), PathSpec.fromStrPath('/other'))).toBe(false)
   })
 })
 
@@ -321,49 +328,107 @@ describe('a globbed show keeps its anchor traversable', () => {
     // stay visible instead of hiding around visible children.
     const hidden = classifyPaths(['/repo'])
     const shown = classifyShows([{ path: '/repo/public/*', mode: null }])
-    expect(pathVisible(vis(hidden, shown), '/repo/public/index.html')).toBe(true)
-    expect(pathVisible(vis(hidden, shown), '/repo/public')).toBe(true)
-    expect(pathVisible(vis(hidden, shown), '/repo')).toBe(true)
-    expect(pathVisible(vis(hidden, shown), '/repo/secrets')).toBe(false)
+    expect(pathVisible(vis(hidden, shown), PathSpec.fromStrPath('/repo/public/index.html'))).toBe(
+      true,
+    )
+    expect(pathVisible(vis(hidden, shown), PathSpec.fromStrPath('/repo/public'))).toBe(true)
+    expect(pathVisible(vis(hidden, shown), PathSpec.fromStrPath('/repo'))).toBe(true)
+    expect(pathVisible(vis(hidden, shown), PathSpec.fromStrPath('/repo/secrets'))).toBe(false)
     // A hide at the anchor's own depth still wins the tie.
     const rehidden = classifyPaths(['/repo', '/repo/public'])
-    expect(pathVisible(vis(rehidden, shown), '/repo/public')).toBe(false)
-    expect(pathVisible(vis(rehidden, shown), '/repo/public/index.html')).toBe(false)
+    expect(pathVisible(vis(rehidden, shown), PathSpec.fromStrPath('/repo/public'))).toBe(false)
+    expect(pathVisible(vis(rehidden, shown), PathSpec.fromStrPath('/repo/public/index.html'))).toBe(
+      false,
+    )
   })
 })
 
 describe('moveReveals', () => {
   it('an exact entry below the source reveals at its mapped path', () => {
     const spec = classifyPaths(['/m/data/secret'])
-    expect(moveReveals(vis(spec), '/m/data', '/m/moved')).toBe(true)
-    expect(moveReveals(vis(spec), '/m/other', '/m/moved')).toBe(false)
+    expect(
+      moveReveals(vis(spec), PathSpec.fromStrPath('/m/data'), PathSpec.fromStrPath('/m/moved')),
+    ).toBe(true)
+    expect(
+      moveReveals(vis(spec), PathSpec.fromStrPath('/m/other'), PathSpec.fromStrPath('/m/moved')),
+    ).toBe(false)
     // The entry itself is the source: the operand is hidden and the
     // per-path guard answered before this predicate is asked.
-    expect(moveReveals(vis(spec), '/m/data/secret/deep', '/m/x')).toBe(false)
-    expect(moveReveals(null, '/m/data', '/m/moved')).toBe(false)
+    expect(
+      moveReveals(
+        vis(spec),
+        PathSpec.fromStrPath('/m/data/secret/deep'),
+        PathSpec.fromStrPath('/m/x'),
+      ),
+    ).toBe(false)
+    expect(
+      moveReveals(null, PathSpec.fromStrPath('/m/data'), PathSpec.fromStrPath('/m/moved')),
+    ).toBe(false)
   })
 
   it('no reveal when the mapped path stays hidden', () => {
     const spec = classifyPaths(['/m/d/sec', '/m/moved/sec'])
-    expect(moveReveals(vis(spec), '/m/d', '/m/moved')).toBe(false)
-    expect(moveReveals(vis(spec), '/m/d', '/m/elsewhere')).toBe(true)
+    expect(
+      moveReveals(vis(spec), PathSpec.fromStrPath('/m/d'), PathSpec.fromStrPath('/m/moved')),
+    ).toBe(false)
+    expect(
+      moveReveals(vis(spec), PathSpec.fromStrPath('/m/d'), PathSpec.fromStrPath('/m/elsewhere')),
+    ).toBe(true)
   })
 
   it('component patterns follow the name and never reveal', () => {
-    expect(moveReveals(vis(classifyPaths(['*.env'])), '/m/d', '/m/moved')).toBe(false)
+    expect(
+      moveReveals(
+        vis(classifyPaths(['*.env'])),
+        PathSpec.fromStrPath('/m/d'),
+        PathSpec.fromStrPath('/m/moved'),
+      ),
+    ).toBe(false)
   })
 
   it('anchored patterns fail toward refusal', () => {
-    expect(moveReveals(vis(classifyPaths(['/m/d/sec/*'])), '/m/d', '/m/moved')).toBe(true)
-    expect(moveReveals(vis(classifyPaths(['/m/d/*'])), '/m/d', '/m/moved')).toBe(true)
-    expect(moveReveals(vis(classifyPaths(['/m/*/secret'])), '/m/d', '/m/moved')).toBe(true)
-    expect(moveReveals(vis(classifyPaths(['/other/*/secret'])), '/m/d', '/m/moved')).toBe(false)
+    expect(
+      moveReveals(
+        vis(classifyPaths(['/m/d/sec/*'])),
+        PathSpec.fromStrPath('/m/d'),
+        PathSpec.fromStrPath('/m/moved'),
+      ),
+    ).toBe(true)
+    expect(
+      moveReveals(
+        vis(classifyPaths(['/m/d/*'])),
+        PathSpec.fromStrPath('/m/d'),
+        PathSpec.fromStrPath('/m/moved'),
+      ),
+    ).toBe(true)
+    expect(
+      moveReveals(
+        vis(classifyPaths(['/m/*/secret'])),
+        PathSpec.fromStrPath('/m/d'),
+        PathSpec.fromStrPath('/m/moved'),
+      ),
+    ).toBe(true)
+    expect(
+      moveReveals(
+        vis(classifyPaths(['/other/*/secret'])),
+        PathSpec.fromStrPath('/m/d'),
+        PathSpec.fromStrPath('/m/moved'),
+      ),
+    ).toBe(false)
   })
 
   it('a show below the mapped path counts as a reveal', () => {
     const hidden = classifyPaths(['/m/d/sec', '/m/moved'])
     const shown = classifyShows([{ path: '/m/moved/sec/open', mode: null }])
-    expect(moveReveals(vis(hidden, shown), '/m/d', '/m/moved')).toBe(true)
-    expect(moveReveals(vis(hidden), '/m/d', '/m/moved')).toBe(false)
+    expect(
+      moveReveals(
+        vis(hidden, shown),
+        PathSpec.fromStrPath('/m/d'),
+        PathSpec.fromStrPath('/m/moved'),
+      ),
+    ).toBe(true)
+    expect(
+      moveReveals(vis(hidden), PathSpec.fromStrPath('/m/d'), PathSpec.fromStrPath('/m/moved')),
+    ).toBe(false)
   })
 })

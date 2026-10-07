@@ -298,7 +298,9 @@ class Ops:
             if (
                 follow
                 and self._links is not None
-                and path_visible(session_visibility(), path)
+                and path_visible(
+                    session_visibility(), PathSpec.from_str_path(path)
+                )
             ):
                 resolved[0] = self._links.follow(path)
             spec = PathSpec.from_str_path(resolved[0])

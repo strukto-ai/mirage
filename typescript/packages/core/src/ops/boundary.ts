@@ -16,7 +16,9 @@ import { applyOpLimit } from '../commands/builtin/utils/limit.ts'
 import type { Decisions } from '../policy/decisions.ts'
 import type { Policies } from '../policy/policies.ts'
 import { postVfsGate, preVfsGate } from '../policy/policies.ts'
-import type { MountMode, PathSpec } from '../types.ts'
+import { PathSpec, type MountMode } from '../types.ts'
+import { getAdmission } from '../context/session_context.ts'
+import { METADATA_OPS } from '../policy/constants.ts'
 
 /** The POSIX policy boundary for dispatched filesystem operations: the
  * ordered builtin and user policies, the owning mount prefix, its
@@ -24,6 +26,18 @@ import type { MountMode, PathSpec } from '../types.ts'
  * govern the op, and the approval ledger a path rule that asks is put to
  * where no line is running. Mirrors Python's OpBoundary. */
 export class OpBoundary {
+  /** Check each spelling once against the active command's rules. Metadata retains its exemption. */
+  static check(op: string, ...paths: readonly unknown[]): void {
+    const gate = getAdmission()
+    if (gate !== null && !METADATA_OPS.has(op)) {
+      for (const virtual of new Set(
+        paths.flatMap((path) => (path instanceof PathSpec ? [path.virtual] : [])),
+      )) {
+        gate.check(virtual)
+      }
+    }
+  }
+
   constructor(
     readonly policies: Policies,
     readonly prefix = '',

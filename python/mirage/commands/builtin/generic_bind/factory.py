@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from typing import Any
 
@@ -24,6 +24,7 @@ from mirage.cache.read_through import (
     cache_aware_read_stream,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
+    Builder,
     CommandIO,
     scoped_io,
     with_command_guards,
@@ -35,7 +36,6 @@ from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.errors.fs import eisdir
-from mirage.ops.types import NamespaceView
 from mirage.types import PathSpec
 
 
@@ -102,34 +102,6 @@ def with_read_cache(ops: CommandIO) -> CommandIO:
         ),
         read_bytes=read_bytes,
     )
-
-
-def scan_io(
-    ops: CommandIO,
-    ns: NamespaceView | None,
-    prefix: str,
-) -> tuple[CommandIO, bool]:
-    """The adapter a bespoke search command scans through, and whether a
-    hide, a path rule or a coded pre_vfs policy judges anything on its
-    mount.
-
-    The mount, not the operands: a service's own search answers for more
-    than the operand it is given (a whole folder for one of its days,
-    every channel under a container). A judged command must not hand the
-    service's search the answer, since the service sees every entry, and
-    its scan reads the operands through the guards the generic builders
-    bind, over the read cache as theirs is, so a warm copy is served only
-    once the path is admitted; an unjudged one scans the raw adapter.
-
-    Args:
-        ops (CommandIO): the backend's raw IO adapter.
-        ns (NamespaceView | None): the command's namespace view.
-        prefix (str): the prefix of the mount running the command.
-    """
-    scoped = ns.scoped if ns is not None else None
-    if scoped is None or not scoped(prefix.rstrip("/") or "/"):
-        return ops, False
-    return with_command_guards(with_policy_guard(with_read_cache(ops))), True
 
 
 async def _slash_checked_write(
@@ -305,7 +277,7 @@ def make_generic_commands(
     vfs: str,
     ops: CommandIO,
     *,
-    overrides: set[str] | None = None,
+    overrides: Mapping[str, Builder | None] | None = None,
     ops_overrides: dict[str, CommandIO] | None = None,
 ) -> list[Callable[..., Any]]:
     """Generate the default command set for a backend from its ops.
@@ -313,29 +285,32 @@ def make_generic_commands(
     Args:
         vfs (str): VFS name the commands register under.
         ops (CommandIO): the backend's IO adapter.
-        overrides (set[str] | None): command names to skip (the backend
-            ships its own wrapper for these).
+        overrides (Mapping[str, Builder | None] | None): replacement builders;
+            None omits a command supplied separately by the backend.
         ops_overrides (dict[str, CommandIO] | None): per-command adapters
             that replace the shared adapter when one command needs a cheaper
             backend operation.
     """
-    skip = overrides or set()
+    replacements = overrides or {}
     ops_over = ops_overrides or {}
     # A name no builder has does nothing at all, so a misspelled override
     # left the generic registered beside the bespoke one, and an override
     # for a command the table never had (mem0's `search`) read as if it
     # displaced something. Refused at registration, which is import time.
     known = {b.name for b in BUILDERS}
-    unknown = sorted((set(skip) | set(ops_over)) - known)
+    unknown = sorted((set(replacements) | set(ops_over)) - known)
     if unknown:
         raise ValueError(
             f"make_generic_commands({vfs!r}): no generic "
             f"builder named {', '.join(unknown)}"
         )
     commands: list[Callable[..., Any]] = []
-    for b in BUILDERS:
-        if b.name in skip:
+    for default in BUILDERS:
+        b = replacements.get(default.name, default)
+        if b is None:
             continue
+        if b.name != default.name:
+            raise ValueError(f"override {default.name!r} names {b.name!r}")
         raw = ops_over.get(b.name, ops)
         finish: Callable[[CommandIO], CommandIO]
         if b.read:
@@ -354,7 +329,7 @@ def make_generic_commands(
         bound = functools.partial(
             _run_with_namespace_globs, answered, finish, b.fn
         )
-        agg = b.aggregate if raw.local else None
+        agg = b.aggregate if raw.local or b.name in replacements else None
         commands.append(
             command(
                 b.name,

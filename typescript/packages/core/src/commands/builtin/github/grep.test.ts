@@ -18,8 +18,8 @@
 // the files that do not reach narrowScope as an exact file set.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as PushdownModule from './pushdown.ts'
 import type * as GenericModule from '../generic/grep.ts'
+import type * as PushdownModule from './pushdown.ts'
 
 vi.mock('./pushdown.ts', async () => {
   const actual = await vi.importActual<typeof PushdownModule>('./pushdown.ts')
@@ -31,13 +31,17 @@ vi.mock('../generic/grep.ts', async () => {
 })
 
 import { GitHubAccessor } from '../../../accessor/github.ts'
+import { runWithCacheManager } from '../../../cache/context.ts'
+import { RAMFileCacheStore } from '../../../cache/file/ram.ts'
+import { CacheManager } from '../../../cache/manager.ts'
 import type { GitHubTransport } from '../../../core/github/client.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { grepGeneric } from '../generic/grep.ts'
-import { GITHUB_GREP } from './grep.ts'
+import { GITHUB_COMMANDS as GITHUB_GREP_COMMANDS } from './index.ts'
 import { narrowScope } from './pushdown.ts'
+const GITHUB_GREP = GITHUB_GREP_COMMANDS.filter((cmd) => cmd.name === 'grep')
 
 const narrow = vi.mocked(narrowScope)
 
@@ -75,6 +79,25 @@ beforeEach(() => {
 })
 
 describe('github grep push-down', () => {
+  it('supplies a cached reader to the generic scan', async () => {
+    const path = new PathSpec({ virtual: '/src/a.py', directory: '/', vfsPath: 'src/a.py' })
+    const cache = new RAMFileCacheStore()
+    const payload = new TextEncoder().encode('cached match\n')
+    await cache.set(path.virtual, payload)
+    narrow.mockResolvedValue({ resolved: [path], fileCount: 1, usedSearch: false })
+    vi.mocked(grepGeneric).mockImplementationOnce(
+      (_name, _paths, _texts, _opts, _stat, _readdir, stream) =>
+        Promise.resolve([stream(path), new IOResult()]),
+    )
+    const cmd = GITHUB_GREP[0]
+    if (cmd === undefined) throw new Error('grep not registered')
+    const opts: CommandOpts = { stdin: null, flags: {}, filetypeFns: null, cwd: '/' }
+    const result = await runWithCacheManager(new CacheManager(cache, null, '/', true), async () =>
+      cmd.fn(makeAccessor(), [path], ['cached'], opts),
+    )
+    expect(await materialize(result?.[0] ?? null)).toEqual(payload)
+  })
+
   it.each<[string, CommandOpts['flags']]>([
     ['-L', { r: true, w: true, files_without_match: true }],
     ['-f', { r: true, w: true, file: ['/docs/patterns.txt'] }],

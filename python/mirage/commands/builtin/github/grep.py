@@ -16,28 +16,24 @@ from mirage.accessor.github import GitHubAccessor
 from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.generic.grep import grep_generic, labelled
 from mirage.commands.builtin.generic_bind.adapter import (
+    Builder,
+    CommandIO,
     bound_op,
-    with_command_guards,
-    with_policy_guard,
 )
-from mirage.commands.builtin.github.io import IO
 from mirage.commands.builtin.github.pushdown import narrow_scope, scope_refusal
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import grep_needs_every_file
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.github.constants import SCOPE_ERROR
-from mirage.core.github.read import read as github_read
-from mirage.core.github.readdir import readdir as github_readdir
-from mirage.core.github.stat import stat as github_stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.namespace_view import paths_scoped
 from mirage.types import PathSpec
 
 
-@command("grep", vfs="github", spec=SPECS["grep"], aggregate=prefix_aggregate)
 async def grep(
+    ops: CommandIO,
     accessor: GitHubAccessor,
     paths: list[PathSpec],
     texts: list[str],
@@ -46,8 +42,8 @@ async def grep(
     fl = FlagView(opts.flags, spec=SPECS["grep"])
     pattern = pattern_arg(texts, fl)
     recursive = fl.as_bool("r") or fl.as_bool("R")
-    # Code search and the core ops answer from the raw repository, so
-    # under a hide or a path rule the scan sets search aside and reads
+    # Code search and the core scan answer from the raw repository, so
+    # under a hide or a path rule the handler sets search aside and reads
     # through the command guards, which report a refused directory where
     # GNU does and never open a sealed file.
     scoped = paths_scoped(opts.ns, paths)
@@ -76,24 +72,16 @@ async def grep(
     if used_search:
         opts = labelled(opts)
 
-    io = with_command_guards(with_policy_guard(IO)) if scoped else None
     return await grep_generic(
         resolved,
         texts,
         opts,
-        readdir=bound_op(
-            io.readdir if io is not None else github_readdir,
-            accessor,
-            opts.index,
-        ),
-        stat=bound_op(
-            io.stat if io is not None else github_stat, accessor, opts.index
-        ),
-        read_bytes=bound_op(
-            io.read_bytes if io is not None else github_read,
-            accessor,
-            opts.index,
-        ),
+        readdir=bound_op(ops.readdir, accessor, opts.index),
+        stat=bound_op(ops.stat, accessor, opts.index),
+        read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
         read_stream=None,
         stdin=opts.stdin,
     )
+
+
+BUILDER = Builder("grep", grep, read=True, aggregate=prefix_aggregate)

@@ -14,20 +14,18 @@
 
 import type { DifyAccessor } from '../../accessor/dify.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import { PathSpec } from '../../types.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { formatScore } from '../../utils/score.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { floatOption, intOption, textOption, validateOptions } from '../../vfs/search.ts'
-import type { SearchQuery } from '../../vfs/types.ts'
+import type { SearchQuery, SearchResult } from '../../vfs/types.ts'
 import { normalizeSlug, scalarString } from '../slug_tree/rows.ts'
-import { hitLines, searchScope, targetEntries, validateQuery } from '../slug_tree/search.ts'
+import { searchScope, targetEntries, validateQuery } from '../slug_tree/search.ts'
 import { difyPost } from './client.ts'
 import { segmentText } from './read.ts'
 import { DIFY_TREE, SLUG_NOUN } from './tree.ts'
-
-const ENC = new TextEncoder()
 
 const METHODS: Record<string, string> = {
   semantic: 'semantic_search',
@@ -49,7 +47,7 @@ export async function searchSegments(
   paths: readonly PathSpec[],
   index?: IndexCacheStore,
   options: SearchOptions = {},
-): Promise<Uint8Array> {
+): Promise<SearchResult[]> {
   const method = options.method ?? 'semantic'
   const topK = options.topK ?? 10
   const threshold = options.threshold ?? 0
@@ -67,14 +65,14 @@ export async function searchSegments(
   }
   if (paths.length > 0) {
     const conditions = await metadataConditions(accessor, paths, index)
-    if (conditions.length === 0) return new Uint8Array(0)
+    if (conditions.length === 0) return []
     retrievalModel.metadata_filtering_conditions = { logical_operator: 'or', conditions }
   }
   const response = await difyPost(accessor, `/datasets/${accessor.config.datasetId}/retrieve`, {
     query,
     retrieval_model: retrievalModel,
   })
-  return recordsToBytes(
+  return recordResults(
     responseRecords(response.records),
     accessor.config.slugMetadataName,
     mountPrefix,
@@ -138,33 +136,25 @@ function responseRecords(value: unknown): Record<string, unknown>[] {
   return records
 }
 
-function recordsToBytes(
+function recordResults(
   records: Record<string, unknown>[],
   slugMetadataName: string,
   mountPrefix: string,
-): Uint8Array {
-  const contents: string[] = []
+): SearchResult[] {
+  const contents: SearchResult[] = []
   for (const record of records) {
     const segment = record.segment
     if (segment === null || typeof segment !== 'object' || Array.isArray(segment)) continue
-    const header = formatRecordHeader(record, slugMetadataName, mountPrefix)
-    if (header === null) continue
-    contents.push(`${header}\n${segmentText(segment as Record<string, unknown>)}`)
+    const path = recordPath(record, slugMetadataName, mountPrefix)
+    if (path === null) continue
+    const score = formatScore(record.score)
+    const header = score === null ? path : `${path}:${score}`
+    contents.push([
+      PathSpec.fromStrPath(path, path.slice(rstripSlash(mountPrefix).length).replace(/^\//, '')),
+      `${header}\n${segmentText(segment as Record<string, unknown>)}`,
+    ])
   }
-  if (contents.length === 0) return new Uint8Array(0)
-  return ENC.encode(contents.join('\n') + '\n')
-}
-
-function formatRecordHeader(
-  record: Record<string, unknown>,
-  slugMetadataName: string,
-  mountPrefix: string,
-): string | null {
-  const path = recordPath(record, slugMetadataName, mountPrefix)
-  if (path === null) return null
-  const score = formatScore(record.score)
-  if (score === null) return path
-  return `${path}:${score}`
+  return contents
 }
 
 function recordPath(
@@ -214,19 +204,18 @@ export async function searchMany(
   paths: PathSpec[],
   query: SearchQuery,
   index?: IndexCacheStore,
-): Promise<string[]> {
+): Promise<SearchResult[]> {
   validateOptions(query, ['top_k', 'threshold', 'method'])
   const topK = intOption(query, 'top_k', 10)
   const method = textOption(query, 'method', 'semantic')
   const threshold = floatOption(query, 'threshold', 0)
   const [targets, prefix] = await searchScope(DIFY_TREE, accessor, paths, index)
-  const output = await searchSegments(accessor, query.query, targets, index, {
+  return searchSegments(accessor, query.query, targets, index, {
     method,
     topK,
     threshold,
     mountPrefix: prefix,
   })
-  return hitLines(output)
 }
 
 export function searchResource(
@@ -234,6 +223,6 @@ export function searchResource(
   path: PathSpec,
   query: SearchQuery,
   index?: IndexCacheStore,
-): Promise<string[]> {
+): Promise<SearchResult[]> {
   return searchMany(accessor, [path], query, index)
 }

@@ -19,6 +19,8 @@ from mirage.core.api.client import SessionArg
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.entry import snowflake_to_iso
 from mirage.core.discord.paginate import offset_pages
+from mirage.types import PathSpec
+from mirage.vfs.types import SearchResult
 
 PAGE_SIZE = 25
 
@@ -116,7 +118,7 @@ def format_grep_results(
     prefix: str,
     guild_dirname: str,
     channel_names: dict[str, str] | None = None,
-) -> list[str]:
+) -> list[SearchResult]:
     """Format guild-search hits as grep-style lines.
 
     Args:
@@ -126,10 +128,10 @@ def format_grep_results(
         channel_names (dict[str, str] | None): channel_id → workspace name.
 
     Returns:
-        list[str]: grep-style lines, one per matched message.
+        list[SearchResult]: grep-style lines, one per matched message.
     """
     names = channel_names or {}
-    lines: list[str] = []
+    lines: list[SearchResult] = []
     for msg in messages:
         ts = (msg.get("timestamp") or "")[:10]
         if not ts:
@@ -146,5 +148,12 @@ def format_grep_results(
             if ts
             else f"{prefix}/{guild_dirname}/channels/{ch_name}"
         )
-        lines.append(f"{path}:[{author}] {content}")
+        lines.append(
+            (
+                PathSpec.from_str_path(
+                    path, path.removeprefix(prefix).lstrip("/")
+                ),
+                f"{path}:[{author}] {content}",
+            )
+        )
     return lines

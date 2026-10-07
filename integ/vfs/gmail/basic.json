@@ -733,6 +733,55 @@
         "stdout": "grepw=1\nrgw=1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gmail_native_search_filters_hidden_day",
+      "targets": [
+        "gmail"
+      ],
+      "session": "native-search-hide",
+      "session_profiles": {
+        "native-search-hide": {
+          "paths": {
+            "hide": [
+              "/mail/INBOX/2026-01-05"
+            ]
+          }
+        }
+      },
+      "command": "grep -rw Budget /mail/INBOX; echo grep=$?; rg -w Budget /mail/INBOX; echo rg=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grep=1\nrg=1\n",
+        "stderr": ""
+      },
+      "seq": 990063
+    },
+    {
+      "id": "gmail_native_search_keeps_shown_day",
+      "targets": [
+        "gmail"
+      ],
+      "session": "native-search-show",
+      "session_profiles": {
+        "native-search-show": {
+          "paths": {
+            "hide": [
+              "/mail/INBOX"
+            ],
+            "show": [
+              "/mail/INBOX/2026-01-05"
+            ]
+          }
+        }
+      },
+      "command": "grep -rw Budget /mail/INBOX | wc -l; rg -w Budget /mail/INBOX | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n2\n",
+        "stderr": ""
+      },
+      "seq": 990064
     }
   ]
 }

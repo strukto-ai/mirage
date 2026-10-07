@@ -13,15 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import type { Accessor } from '../../accessor/base.ts'
+import { materialize } from '../../io/types.ts'
 import { PathSpec } from '../../types.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
+import { stripSlash } from '../../utils/slash.ts'
 import { PatternType } from './constants.ts'
-import { RegexSyntax } from './types.ts'
+import { FakeDiscordTransport, makeFakeVfs as discordVfs } from './discord/_test_util.ts'
 import {
-  grepSearchMeta,
-  grepSearchOptions,
-  textSearchResults,
+  DISCORD_COMMANDS as DISCORD_GREP_COMMANDS,
+  DISCORD_COMMANDS as DISCORD_RG_COMMANDS,
+} from './discord/index.ts'
+import {
   classifyPattern,
   extractRequiredLiteral,
+  grepSearchMeta,
+  grepSearchOptions,
   hasSearchShapingFlags,
   isLiteralPattern,
   literalPushdownOperand,
@@ -30,18 +37,19 @@ import {
   searchPushdownOk,
   searchQuery,
   textCandidates,
+  textSearchResults,
   wholeWordLiteral,
 } from './grep_pushdown.ts'
-import { stripSlash } from '../../utils/slash.ts'
-import type { Accessor } from '../../accessor/base.ts'
-import { materialize } from '../../io/types.ts'
-import { mountKey } from '../../utils/key_prefix.ts'
-import { FakeDiscordTransport, makeFakeVfs as discordVfs } from './discord/_test_util.ts'
-import { DISCORD_GREP } from './discord/grep.ts'
-import { DISCORD_RG } from './discord/rg.ts'
 import { FakeSlackTransport, makeFakeVfs as slackVfs } from './slack/_test_util.ts'
-import { SLACK_GREP } from './slack/grep.ts'
-import { SLACK_RG } from './slack/rg.ts'
+import {
+  SLACK_COMMANDS as SLACK_GREP_COMMANDS,
+  SLACK_COMMANDS as SLACK_RG_COMMANDS,
+} from './slack/index.ts'
+import { RegexSyntax } from './types.ts'
+const DISCORD_GREP = DISCORD_GREP_COMMANDS.filter((cmd) => cmd.name === 'grep')
+const DISCORD_RG = DISCORD_RG_COMMANDS.filter((cmd) => cmd.name === 'rg')
+const SLACK_GREP = SLACK_GREP_COMMANDS.filter((cmd) => cmd.name === 'grep')
+const SLACK_RG = SLACK_RG_COMMANDS.filter((cmd) => cmd.name === 'rg')
 
 describe('classifyPattern', () => {
   it('newlines and regex are REGEX, plain text is SIMPLE, fixed is EXACT', () => {

@@ -237,9 +237,9 @@ def _visible_link(namespace: Namespace, virtual: str) -> bool:
         namespace (Namespace): the link table.
         virtual (str): absolute virtual path.
     """
-    return path_visible(session_visibility(), virtual) and namespace.is_link(
-        virtual
-    )
+    return path_visible(
+        session_visibility(), PathSpec.from_str_path(virtual)
+    ) and namespace.is_link(virtual)
 
 
 def _follow_visible(namespace: Namespace, virtual: str) -> str:
@@ -252,7 +252,7 @@ def _follow_visible(namespace: Namespace, virtual: str) -> str:
     """
     return (
         namespace.follow(virtual)
-        if path_visible(session_visibility(), virtual)
+        if path_visible(session_visibility(), PathSpec.from_str_path(virtual))
         else virtual
     )
 
@@ -273,7 +273,7 @@ def operand_abs(namespace: Namespace, arg: str | PathSpec, cwd: str) -> str:
     """
     virtual = abs_path(arg, cwd)
     if isinstance(arg, PathSpec) or not path_visible(
-        session_visibility(), virtual
+        session_visibility(), PathSpec.from_str_path(virtual)
     ):
         return virtual
     try:
@@ -308,7 +308,7 @@ def _walk_verdict(
     if word_text(word) == "":
         return FsCondition.ENOENT
     virtual = abs_path(word, cwd)
-    if not path_visible(session_visibility(), virtual):
+    if not path_visible(session_visibility(), PathSpec.from_str_path(virtual)):
         return None
     trimmed = virtual.rstrip("/") or "/"
     try:
@@ -697,7 +697,7 @@ async def make_link(
                 errors.append(refusal)
                 return
     if path_visible(
-        session_visibility(), plan.link_abs
+        session_visibility(), PathSpec.from_str_path(plan.link_abs)
     ) and namespace.is_mount_root(plan.link_abs):
         errors.append(f"ln: failed to create {kind} '{typed}': File exists\n")
         return

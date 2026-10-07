@@ -15,15 +15,15 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { materialize } from '../../io/types.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { PolicyDenied } from '../../policy/index.ts'
+import { parseSessionProfile, type SessionProfile } from '../../policy/profile.ts'
+import type { AdmissionRules, CommandRule } from '../../policy/types.ts'
 import { MountMode } from '../../types.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { classifyParts } from '../expand/classify/parts.ts'
 import { getTestParser, voicedStderr } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { parseSessionProfile, type SessionProfile } from '../../policy/profile.ts'
 import { Admitted, admit, admitLine, policyScopes } from './admission.ts'
-import { PolicyDenied } from '../../policy/index.ts'
-import type { CommandRule, AdmissionRules } from '../../policy/types.ts'
 
 const DEC = new TextDecoder()
 
@@ -458,7 +458,6 @@ describe('admission', () => {
       tokens: ['grep', '-r', 'x', '/data'],
       judged: new Set(['/data']),
       granted: [],
-      scoped: true,
     })
     gate.check('/data')
     gate.check('/data/open/o')
@@ -487,7 +486,6 @@ describe('admission', () => {
       tokens: ['grep', 'x', '/data/asked/a'],
       judged: new Set(['/data/asked/a']),
       granted: [],
-      scoped: true,
     })
     judged.check('/data/asked/a')
     const granted = new Admitted({
@@ -495,7 +493,6 @@ describe('admission', () => {
       tokens: ['grep', '-r', 'x', '/data/asked'],
       judged: new Set(['/data/asked']),
       granted: [ask],
-      scoped: true,
     })
     granted.check('/data/asked/a')
     // refuses answers exactly where check throws, without throwing.
@@ -518,7 +515,6 @@ describe('admission', () => {
       tokens: ['find', '/data', '/other'],
       judged: new Set(['/data', '/other']),
       granted: [],
-      scoped: true,
     })
     expect(['/data', '/data/sealed/s', '/other'].map((p) => gate.scopes(p))).toEqual([
       true,
@@ -531,7 +527,6 @@ describe('admission', () => {
       tokens: ['find', '/other'],
       judged: new Set(['/other']),
       granted: [],
-      scoped: true,
       opsJudged: true,
     })
     expect(judged.scopes('/other')).toBe(true)

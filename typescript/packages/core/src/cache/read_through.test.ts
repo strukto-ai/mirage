@@ -12,16 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stdinStream } from '../commands/builtin/utils/stream.ts'
-import { mountKey } from '../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import type { Accessor } from '../accessor/base.ts'
+import { stdinStream } from '../commands/builtin/utils/stream.ts'
 import { PathSpec } from '../types.ts'
+import { mountKey } from '../utils/key_prefix.ts'
 import { runWithCacheManager } from './context.ts'
 import { withCacheMutation } from './file/io.ts'
 import { RAMFileCacheStore } from './file/ram.ts'
 import { CacheManager } from './manager.ts'
-import { cacheAwareReadBytes, cacheAwareReadStream, cacheAwareStreamEager } from './read_through.ts'
+import { cacheAwareReadBytes, cacheAwareReadStream } from './read_through.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -130,18 +130,16 @@ describe('cacheAwareReadStream', () => {
   })
 })
 
-describe('cacheAwareStreamEager', () => {
+describe('readStream binding', () => {
   it('captures the manager before lazy drain', async () => {
     const backend = new CountingBackend(ENC.encode('payload'))
     const manager = await warmManager(ENC.encode('payload'))
-    // Wrap inside the scope, drain outside it: the eager variant must have
+    // Wrap inside the scope, drain outside it: the adapter must have
     // captured the manager at wrap time.
     const wrapped = await runWithCacheManager(manager, () =>
-      Promise.resolve(
-        cacheAwareStreamEager((p) => backend.readStream(null as unknown as Accessor, p)),
-      ),
+      Promise.resolve(cacheAwareReadStream(backend.readStream.bind(backend))),
     )
-    const out = await drain(wrapped(spec()))
+    const out = await drain(wrapped(null as unknown as Accessor, spec()))
     expect(DEC.decode(out)).toBe('payload')
     expect(backend.streamCalls).toBe(0)
   })

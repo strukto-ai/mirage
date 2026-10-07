@@ -18,10 +18,6 @@ import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { IO } from './io.ts'
 
-const LINEAR_OVERRIDES = new Set<string>()
-
 export const LINEAR_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<LinearAccessor>(VFSName.LINEAR, IO, {
-    overrides: LINEAR_OVERRIDES,
-  }),
+  ...makeGenericCommands<LinearAccessor>(VFSName.LINEAR, IO),
 ]

@@ -38,6 +38,55 @@
         "stdout": "/knowledge/policies/privacy:0.89\nCustomer data is stored encrypted at rest and in transit.\nrc=2\n",
         "stderr": "search: query is required\n"
       }
+    },
+    {
+      "id": "dify_search_filters_hidden_multiline_hits",
+      "targets": [
+        "dify"
+      ],
+      "session": "search-hide",
+      "session_profiles": {
+        "search-hide": {
+          "paths": {
+            "hide": [
+              "/knowledge/guides/auth"
+            ]
+          }
+        }
+      },
+      "command": "search \"how am I throttled\" /knowledge; echo root=$?; search \"how am I throttled\" /knowledge/guides/auth 2>/dev/null; echo named=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "root=0\nnamed=1\n",
+        "stderr": ""
+      },
+      "seq": 990060
+    },
+    {
+      "id": "dify_search_show_overrides_hidden_parent",
+      "targets": [
+        "dify"
+      ],
+      "session": "search-show",
+      "session_profiles": {
+        "search-show": {
+          "paths": {
+            "hide": [
+              "/knowledge/guides"
+            ],
+            "show": [
+              "/knowledge/guides/auth"
+            ]
+          }
+        }
+      },
+      "command": "search \"how am I throttled\" /knowledge",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/guides/auth:0.92\nRequests are rate limited to 100 calls per minute per token.\n/knowledge/guides/auth:0.88\nIf you exceed the limit you receive HTTP 429 and must back off.\n",
+        "stderr": ""
+      },
+      "seq": 990061
     }
   ]
 }

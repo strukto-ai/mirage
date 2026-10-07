@@ -73,7 +73,7 @@ def make_search(
         )
         return output, IOResult()
 
-    wrapped: Callable[..., Any] = command(name, vfs=vfs, spec=SPECS["search"])(
-        search
-    )
+    wrapped: Callable[..., Any] = command(
+        name, vfs=vfs, spec=SPECS["search"], path_guarded=True
+    )(search)
     return wrapped

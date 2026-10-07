@@ -69,7 +69,3 @@ export async function searchScope<A>(
     prefix,
   ]
 }
-
-export function hitLines(output: Uint8Array): string[] {
-  return output.length === 0 ? [] : new TextDecoder().decode(output).replace(/\n$/, '').split('\n')
-}

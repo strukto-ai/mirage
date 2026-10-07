@@ -16,6 +16,7 @@ from mirage.types import (
     HiddenPaths,
     HiddenVars,
     MountMode,
+    PathSpec,
     ShowEntry,
     Visibility,
 )
@@ -219,31 +220,39 @@ def test_show_head_is_the_anchor():
 def test_path_visible_is_the_anchor_depth_rule():
     vis = _vis(["/repo"], (ShowEntry("/repo/public", MountMode.READ),))
     # The deeper show re-opens its subtree.
-    assert path_visible(vis, "/repo/public/index.html")
-    assert path_visible(vis, "/repo/public")
+    assert path_visible(vis, PathSpec.from_str_path("/repo/public/index.html"))
+    assert path_visible(vis, PathSpec.from_str_path("/repo/public"))
     # Everything else under the hide stays nonexistent.
-    assert not path_visible(vis, "/repo/secrets/key.pem")
-    assert not path_visible(vis, "/repo/README.md")
+    assert not path_visible(
+        vis, PathSpec.from_str_path("/repo/secrets/key.pem")
+    )
+    assert not path_visible(vis, PathSpec.from_str_path("/repo/README.md"))
     # No hide, always visible; no show, plain hiding.
-    assert path_visible(Visibility(shown=vis.shown), "/anywhere")
-    assert not path_visible(Visibility(paths=vis.paths), "/repo/x")
+    assert path_visible(
+        Visibility(shown=vis.shown), PathSpec.from_str_path("/anywhere")
+    )
+    assert not path_visible(
+        Visibility(paths=vis.paths), PathSpec.from_str_path("/repo/x")
+    )
 
 
 def test_hide_wins_the_equal_depth_tie():
     vis = _vis(["/repo/public"], (ShowEntry("/repo/public", MountMode.READ),))
-    assert not path_visible(vis, "/repo/public/x")
+    assert not path_visible(vis, PathSpec.from_str_path("/repo/public/x"))
 
 
 def test_deeper_hide_re_closes_inside_a_show():
     vis = _vis(["/repo", "/repo/public/sealed"], (ShowEntry("/repo/public"),))
-    assert path_visible(vis, "/repo/public/a.txt")
-    assert not path_visible(vis, "/repo/public/sealed/k")
+    assert path_visible(vis, PathSpec.from_str_path("/repo/public/a.txt"))
+    assert not path_visible(
+        vis, PathSpec.from_str_path("/repo/public/sealed/k")
+    )
 
 
 def test_show_outranks_a_name_pattern_only_inside_its_anchor():
     vis = _vis(["*.pem"], (ShowEntry("/repo/public"),))
-    assert path_visible(vis, "/repo/public/tls.pem")
-    assert not path_visible(vis, "/other/tls.pem")
+    assert path_visible(vis, PathSpec.from_str_path("/repo/public/tls.pem"))
+    assert not path_visible(vis, PathSpec.from_str_path("/other/tls.pem"))
 
 
 def test_ancestors_of_a_show_anchor_stay_visible():
@@ -251,16 +260,16 @@ def test_ancestors_of_a_show_anchor_stay_visible():
     # though `/repo` itself lies under the hide.
     vis = _vis(["/repo"], (ShowEntry("/repo/public/docs"),))
     for virtual in ("/", "/repo", "/repo/public"):
-        assert path_visible(vis, virtual)
-    assert not path_visible(vis, "/repo/other")
+        assert path_visible(vis, PathSpec.from_str_path(virtual))
+    assert not path_visible(vis, PathSpec.from_str_path("/repo/other"))
 
 
 def test_a_hidden_show_anchor_opens_no_road():
     # The show anchor is itself re-hidden at equal depth, so nothing
     # above it gains visibility from it.
     vis = _vis(["/repo", "/repo/public"], (ShowEntry("/repo/public"),))
-    assert not path_visible(vis, "/repo")
-    assert not path_visible(vis, "/repo/public/x")
+    assert not path_visible(vis, PathSpec.from_str_path("/repo"))
+    assert not path_visible(vis, PathSpec.from_str_path("/repo/public/x"))
 
 
 def test_shown_mode_is_the_deepest_mode_entry():
@@ -271,12 +280,21 @@ def test_shown_mode_is_the_deepest_mode_entry():
             ShowEntry("/repo/public"),
         ]
     )
-    assert shown_mode(shown, "/repo/src/a.py") == (1, MountMode.READ)
-    assert shown_mode(shown, "/repo/build/out") == (2, MountMode.WRITE)
+    assert shown_mode(shown, PathSpec.from_str_path("/repo/src/a.py")) == (
+        1,
+        MountMode.READ,
+    )
+    assert shown_mode(shown, PathSpec.from_str_path("/repo/build/out")) == (
+        2,
+        MountMode.WRITE,
+    )
     # A list-form entry states visibility only.
-    assert shown_mode(shown, "/repo/public/x") == (1, MountMode.READ)
-    assert shown_mode(shown, "/elsewhere") is None
-    assert shown_mode(None, "/repo") is None
+    assert shown_mode(shown, PathSpec.from_str_path("/repo/public/x")) == (
+        1,
+        MountMode.READ,
+    )
+    assert shown_mode(shown, PathSpec.from_str_path("/elsewhere")) is None
+    assert shown_mode(None, PathSpec.from_str_path("/repo")) is None
 
 
 def test_shown_mode_equal_depth_takes_the_weaker():
@@ -286,7 +304,10 @@ def test_shown_mode_equal_depth_takes_the_weaker():
             ShowEntry("/repo/*", MountMode.READ),
         ]
     )
-    assert shown_mode(shown, "/repo/docs/a") == (2, MountMode.EXEC)
+    assert shown_mode(shown, PathSpec.from_str_path("/repo/docs/a")) == (
+        2,
+        MountMode.EXEC,
+    )
     # Both anchor at depth 1 for a path only the pattern reaches; a
     # second depth-1 statement can only weaken the first.
     both = classify_shows(
@@ -295,7 +316,10 @@ def test_shown_mode_equal_depth_takes_the_weaker():
             ShowEntry("/repo/*", MountMode.READ),
         ]
     )
-    assert shown_mode(both, "/repo/x") == (1, MountMode.READ)
+    assert shown_mode(both, PathSpec.from_str_path("/repo/x")) == (
+        1,
+        MountMode.READ,
+    )
 
 
 def test_classify_shows_empty_is_none():
@@ -306,21 +330,21 @@ def test_classify_shows_empty_is_none():
 def test_hidden_under_is_the_per_operand_gate():
     spec = _vis(["/repo/.env"])
     # The walk that could reach the entry loses its fast path...
-    assert hidden_under(spec, "/repo")
-    assert hidden_under(spec, "/")
-    assert hidden_under(spec, "/repo/.env")
+    assert hidden_under(spec, PathSpec.from_str_path("/repo"))
+    assert hidden_under(spec, PathSpec.from_str_path("/"))
+    assert hidden_under(spec, PathSpec.from_str_path("/repo/.env"))
     # ...and a sibling mount keeps its native op.
-    assert not hidden_under(spec, "/s3")
-    assert not hidden_under(spec, "/repo/open")
+    assert not hidden_under(spec, PathSpec.from_str_path("/s3"))
+    assert not hidden_under(spec, PathSpec.from_str_path("/repo/open"))
     # A component pattern names no place, so it intersects everything.
-    assert hidden_under(_vis(["*.pem"]), "/s3")
+    assert hidden_under(_vis(["*.pem"]), PathSpec.from_str_path("/s3"))
     # An anchored pattern intersects through its fixed head, and inside
     # its own subtree.
     sealed = _vis(["/repo/sealed/*"])
-    assert hidden_under(sealed, "/repo")
-    assert hidden_under(sealed, "/repo/sealed/x")
-    assert not hidden_under(sealed, "/repo/open")
-    assert not hidden_under(None, "/")
+    assert hidden_under(sealed, PathSpec.from_str_path("/repo"))
+    assert hidden_under(sealed, PathSpec.from_str_path("/repo/sealed/x"))
+    assert not hidden_under(sealed, PathSpec.from_str_path("/repo/open"))
+    assert not hidden_under(None, PathSpec.from_str_path("/"))
 
 
 def test_hidden_under_counts_an_operand_below_a_patterns_head():
@@ -329,10 +353,10 @@ def test_hidden_under_counts_an_operand_below_a_patterns_head():
     # covers `/repo/public/secret`), even though the operand itself is
     # neither hidden nor an ancestor of the head.
     spec = _vis(["/repo/*/secret"])
-    assert hidden_under(spec, "/repo/public")
-    assert hidden_under(spec, "/repo/public/deep")
-    assert hidden_under(spec, "/repo")
-    assert not hidden_under(spec, "/other")
+    assert hidden_under(spec, PathSpec.from_str_path("/repo/public"))
+    assert hidden_under(spec, PathSpec.from_str_path("/repo/public/deep"))
+    assert hidden_under(spec, PathSpec.from_str_path("/repo"))
+    assert not hidden_under(spec, PathSpec.from_str_path("/other"))
 
 
 def test_a_globbed_show_keeps_its_anchor_traversable():
@@ -341,37 +365,67 @@ def test_a_globbed_show_keeps_its_anchor_traversable():
     # answer by the same compare instead of staying hidden around
     # visible children.
     vis = _vis(["/repo"], (ShowEntry("/repo/public/*"),))
-    assert path_visible(vis, "/repo/public/index.html")
-    assert path_visible(vis, "/repo/public")
-    assert path_visible(vis, "/repo")
-    assert not path_visible(vis, "/repo/secrets")
+    assert path_visible(vis, PathSpec.from_str_path("/repo/public/index.html"))
+    assert path_visible(vis, PathSpec.from_str_path("/repo/public"))
+    assert path_visible(vis, PathSpec.from_str_path("/repo"))
+    assert not path_visible(vis, PathSpec.from_str_path("/repo/secrets"))
     # A hide at the anchor's own depth still wins the tie.
     rehidden = _vis(["/repo", "/repo/public"], (ShowEntry("/repo/public/*"),))
-    assert not path_visible(rehidden, "/repo/public")
-    assert not path_visible(rehidden, "/repo/public/index.html")
+    assert not path_visible(rehidden, PathSpec.from_str_path("/repo/public"))
+    assert not path_visible(
+        rehidden, PathSpec.from_str_path("/repo/public/index.html")
+    )
 
 
 def test_move_reveals_an_exact_entry_below_the_source():
     # /m/data/secret re-anchors to /m/moved/secret, which nothing hides.
     spec = _vis(["/m/data/secret"])
-    assert move_reveals(spec, "/m/data", "/m/moved")
+    assert move_reveals(
+        spec,
+        PathSpec.from_str_path("/m/data"),
+        PathSpec.from_str_path("/m/moved"),
+    )
     # An entry not below the source moves nothing.
-    assert not move_reveals(spec, "/m/other", "/m/moved")
+    assert not move_reveals(
+        spec,
+        PathSpec.from_str_path("/m/other"),
+        PathSpec.from_str_path("/m/moved"),
+    )
     # The entry itself is the source: the operand is hidden and the
     # per-path guard answered before this predicate is asked.
-    assert not move_reveals(spec, "/m/data/secret/deep", "/m/x")
-    assert not move_reveals(None, "/m/data", "/m/moved")
+    assert not move_reveals(
+        spec,
+        PathSpec.from_str_path("/m/data/secret/deep"),
+        PathSpec.from_str_path("/m/x"),
+    )
+    assert not move_reveals(
+        None,
+        PathSpec.from_str_path("/m/data"),
+        PathSpec.from_str_path("/m/moved"),
+    )
 
 
 def test_move_does_not_reveal_when_the_mapped_path_stays_hidden():
     spec = _vis(["/m/d/sec", "/m/moved/sec"])
-    assert not move_reveals(spec, "/m/d", "/m/moved")
-    assert move_reveals(spec, "/m/d", "/m/elsewhere")
+    assert not move_reveals(
+        spec,
+        PathSpec.from_str_path("/m/d"),
+        PathSpec.from_str_path("/m/moved"),
+    )
+    assert move_reveals(
+        spec,
+        PathSpec.from_str_path("/m/d"),
+        PathSpec.from_str_path("/m/elsewhere"),
+    )
 
 
 def test_component_patterns_follow_the_name_and_never_reveal():
     spec = _vis(["*.env"])
-    assert not move_reveals(spec, "/m/d", "/m/moved")
+    assert not move_reveals(
+        spec,
+        PathSpec.from_str_path("/m/d"),
+        PathSpec.from_str_path("/m/moved"),
+    )
 
 
 def test_anchored_patterns_refuse_toward_refusal():
@@ -380,8 +434,16 @@ def test_anchored_patterns_refuse_toward_refusal():
     # below the source refuses: head at the source, below it, or above
     # it with the wildcard region spanning the source.
     for hide in ("/m/d/sec/*", "/m/d/*", "/m/*/secret"):
-        assert move_reveals(_vis([hide]), "/m/d", "/m/moved")
-    assert not move_reveals(_vis(["/other/*/secret"]), "/m/d", "/m/moved")
+        assert move_reveals(
+            _vis([hide]),
+            PathSpec.from_str_path("/m/d"),
+            PathSpec.from_str_path("/m/moved"),
+        )
+    assert not move_reveals(
+        _vis(["/other/*/secret"]),
+        PathSpec.from_str_path("/m/d"),
+        PathSpec.from_str_path("/m/moved"),
+    )
 
 
 def test_a_show_below_the_mapped_path_counts_as_a_reveal():
@@ -389,5 +451,11 @@ def test_a_show_below_the_mapped_path_counts_as_a_reveal():
     # anchored strictly below it re-opens a road in, which pathVisible's
     # carve-out rule reports as visibility.
     vis = _vis(["/m/d/sec", "/m/moved"], (ShowEntry("/m/moved/sec/open"),))
-    assert move_reveals(vis, "/m/d", "/m/moved")
-    assert not move_reveals(Visibility(paths=vis.paths), "/m/d", "/m/moved")
+    assert move_reveals(
+        vis, PathSpec.from_str_path("/m/d"), PathSpec.from_str_path("/m/moved")
+    )
+    assert not move_reveals(
+        Visibility(paths=vis.paths),
+        PathSpec.from_str_path("/m/d"),
+        PathSpec.from_str_path("/m/moved"),
+    )

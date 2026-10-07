@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../types.ts'
 import { strongestUnderSession } from '../../context/session_context.ts'
 import type { Ops } from '../../ops/ops.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
@@ -128,7 +129,7 @@ export function writes(session: SessionState, mounts: readonly MountEntry[]): bo
   return mounts.some(
     (mount) =>
       mount.prefix !== DEV_PREFIX &&
-      pathVisible(session.visibility, mount.prefix) &&
+      pathVisible(session.visibility, PathSpec.fromStrPath(mount.prefix)) &&
       MOUNT_MODE_RANK[strongestUnderSession(session, mount.prefix, mount.mode)] >=
         MOUNT_MODE_RANK[MountMode.WRITE],
   )

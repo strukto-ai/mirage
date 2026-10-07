@@ -12,18 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { streamFromBytes } from '../utils/wrap.ts'
-import { guardInput } from '../utils/limit.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
-import { cacheAwareReadBytes, cacheAwareReadStream } from '../../../cache/read_through.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { PathSpec } from '../../../types.ts'
+import { cacheAwareReadBytes, cacheAwareReadStream } from '../../../cache/read_through.ts'
 import { eisdir } from '../../../errors/fs.ts'
-import type { ChildMounts, LinkView, NamespaceView } from '../../../ops/types.ts'
+import type { ChildMounts, LinkView } from '../../../ops/types.ts'
+import { PathSpec } from '../../../types.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
+import { type StatOp } from '../../../vfs/types.ts'
 import { type CommandFn, type RegisteredCommand, command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { guardInput } from '../utils/limit.ts'
+import { streamFromBytes } from '../utils/wrap.ts'
 import {
+  type Builder,
   type CommandIO,
   scopedIo,
   withAbortGuard,
@@ -31,10 +34,7 @@ import {
   withDirGuard,
   withPolicyGuard,
 } from './adapter.ts'
-import { type StatOp } from '../../../vfs/types.ts'
 import { BUILDERS } from './builders/index.ts'
-import { compareCodePoints } from '../../../utils/sort.ts'
-import { rstripSlash } from '../../../utils/slash.ts'
 
 function cachedStat<A extends Accessor>(stat: StatOp<A>): StatOp<A> {
   return async (accessor: A, path: PathSpec, index?: IndexCacheStore) => {
@@ -122,28 +122,6 @@ export function withReadCache<A extends Accessor>(ops: CommandIO<A>): CommandIO<
   }
 }
 
-/**
- * The adapter a bespoke search command scans through, and whether a hide,
- * a path rule or a coded preVfs policy judges anything on its mount. The
- * mount, not the operands: a service's own search answers for more than
- * the operand it is given (a whole folder for one of its days, every
- * channel under a container). A judged command must not hand the
- * service's search the answer, since the service sees every entry, and
- * its scan reads the operands through the guards the generic builders
- * bind, over the read cache as theirs is, so a warm copy is served only
- * once the path is admitted; an unjudged one scans the raw adapter.
- * Mirrors Python's scan_io.
- */
-export function scanIo<A extends Accessor>(
-  ops: CommandIO<A>,
-  ns: NamespaceView | undefined,
-  prefix: string | undefined,
-): [CommandIO<A>, boolean] {
-  const scoped = ns?.scoped
-  if (!scoped?.(rstripSlash(prefix ?? '') || '/')) return [ops, false]
-  return [withCommandGuards(withPolicyGuard(withReadCache(ops), prefix), prefix), true]
-}
-
 // The builder tier's cache and slash wraps, chosen at registration from
 // the builder's read/write kind and applied per invocation on top of
 // the path guards (mirror Python's _read_wraps/_stat_wraps/_write_wraps).
@@ -160,7 +138,7 @@ function writeWraps<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
 }
 
 export interface MakeGenericCommandsOptions<A extends Accessor = Accessor> {
-  overrides?: ReadonlySet<string>
+  overrides?: Record<string, Builder<A> | null>
   // Per-command adapters that replace the shared adapter when one command
   // needs a cheaper backend operation (mirrors the Python ops_overrides).
   opsOverrides?: Record<string, CommandIO<A>>
@@ -187,7 +165,7 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
   ops: CommandIO<A>,
   options: MakeGenericCommandsOptions<A> = {},
 ): RegisteredCommand[] {
-  const skip = options.overrides ?? new Set<string>()
+  const replacements = options.overrides ?? {}
   const opsOver = options.opsOverrides ?? {}
   // A name no builder has does nothing at all, so a misspelled override left
   // the generic registered beside the bespoke one, and an override for a
@@ -195,15 +173,20 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
   // something. Refused at registration, which is import time. Mirrors
   // `make_generic_commands` in `generic_bind/factory.py`.
   const known = new Set(BUILDERS.map((b) => b.name))
-  const unknown = [...new Set([...skip, ...Object.keys(opsOver)])]
+  const unknown = [...new Set([...Object.keys(replacements), ...Object.keys(opsOver)])]
     .filter((name) => !known.has(name))
     .sort(compareCodePoints)
   if (unknown.length > 0) {
     throw new Error(`makeGenericCommands('${vfs}'): no generic builder named ${unknown.join(', ')}`)
   }
   const commands: RegisteredCommand[] = []
-  for (const b of BUILDERS) {
-    if (skip.has(b.name)) continue
+  for (const fallback of BUILDERS) {
+    const replacement = replacements[fallback.name]
+    if (replacement === null) continue
+    const b = (replacement ?? fallback) as Builder
+    if (b.name !== fallback.name) {
+      throw new Error(`override '${fallback.name}' names '${b.name}'`)
+    }
     const raw = (opsOver[b.name] ?? ops) as CommandIO
     // Path guards are applied per invocation, over the stamped adapter,
     // inside the command closure below. The raw adapter stays untouched
@@ -274,7 +257,8 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
         },
       )
     }
-    const aggregate = raw.local !== false ? (b.aggregate ?? null) : null
+    const aggregate =
+      raw.local !== false || replacement !== undefined ? (b.aggregate ?? null) : null
     commands.push(
       ...command({
         name: b.name,

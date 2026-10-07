@@ -481,8 +481,10 @@ def test_compile_profile_collects_the_shows_of_every_mount_section():
         )
     )
     # The axis reads them together: the show reopens its subtree.
-    assert path_visible(out.visibility, "/repo/public/a")
-    assert not path_visible(out.visibility, "/repo/x")
+    assert path_visible(
+        out.visibility, PathSpec.from_str_path("/repo/public/a")
+    )
+    assert not path_visible(out.visibility, PathSpec.from_str_path("/repo/x"))
 
 
 def test_compile_profile_anchors_a_mount_sections_reasons():

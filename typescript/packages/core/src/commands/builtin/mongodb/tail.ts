@@ -14,123 +14,92 @@
 
 import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { countDocuments, findDocuments } from '../../../core/mongodb/client.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
-import { streamAny } from '../../../core/mongodb/read.ts'
-import { documentsExist, entityGuard } from '../../../core/mongodb/readdir.ts'
+import { documentsExist } from '../../../core/mongodb/readdir.ts'
 import { detectScope } from '../../../core/mongodb/scope.ts'
+import { readTail, watchStream } from '../../../core/mongodb/stream.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
+import type { PathSpec } from '../../../types.ts'
+import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { tailGeneric, parseFlags } from '../generic/tail.ts'
 import {
-  applyElision,
-  elisionPaths,
-  stringifyDoc,
-  watchStream,
-} from '../../../core/mongodb/stream.ts'
-import { IOResult } from '../../../io/types.ts'
-import { type PathSpec, VFSName } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { followFlags, tailGeneric } from '../generic/tail.ts'
-import { parseN } from '../tail_counts.ts'
-import { FlagView } from '../../spec/flag_view.ts'
+  type Builder,
+  type CommandIO,
+  guardOperation,
+  resolveGlobOf,
+} from '../generic_bind/adapter.ts'
 import { noteAfter, rowCapNotice } from '../utils/limit.ts'
+import { streamFromBytes } from '../utils/wrap.ts'
 
-const resolveGlob = resolveGlobOf(IO)
-
-const ENC = new TextEncoder()
-
-// Fetches only the last N documents server-side (sort _id desc + limit)
-// instead of streaming the whole collection; tailGeneric then trims the
-// already-small chunk. Falls back to a full stream for byte mode, +N mode,
-// and non-collection paths.
-// `maxDocLimit` is the most documents one read may return; a count past it
-// that the collection could fill prints the last `maxDocLimit` and says so,
-// where the ceiling used to stand in for the count in silence.
-async function* tailSource(
+async function tailDocuments(
   accessor: MongoDBAccessor,
-  p: PathSpec,
+  path: PathSpec,
   index: IndexCacheStore | undefined,
-  lines: number,
-  pushdown: boolean,
+  n: number,
   notices: Uint8Array[],
-): AsyncIterable<Uint8Array> {
-  const scope = detectScope(p)
-  if (pushdown && scope.kind === 'documents') {
-    await entityGuard(accessor, scope, p.virtual)
-    const cap = accessor.config.maxDocLimit
-    const limit = Math.min(lines, cap)
-    if (
-      lines > cap &&
-      (await countDocuments(accessor, scope.slots.database ?? '', scope.slots.name ?? '')) > cap
-    ) {
-      notices.push(rowCapNotice('tail', p.rawPath, cap, 'documents', 'max_doc_limit'))
-    }
-    const docs = await findDocuments(
-      accessor,
-      scope.slots.database ?? '',
-      scope.slots.name ?? '',
-      {},
-      { limit, sort: { _id: -1 } },
+): Promise<Uint8Array> {
+  const [data, stopped] = await readTail(accessor, path, n, index)
+  if (stopped)
+    notices.push(
+      rowCapNotice('tail', path.rawPath, accessor.config.maxDocLimit, 'documents', 'max_doc_limit'),
     )
-    docs.reverse()
-    if (docs.length === 0) return
-    const elide = elisionPaths(accessor, scope.slots.database ?? '', scope.slots.name ?? '')
-    const jsonl =
-      docs.map((d) => stringifyDoc(elide.size > 0 ? applyElision(d, elide) : d)).join('\n') + '\n'
-    yield ENC.encode(jsonl)
-    return
-  }
-  yield* streamAny(accessor, p, index)
+  return data
 }
 
-async function tail(
+async function watch(accessor: MongoDBAccessor, path: PathSpec): Promise<ByteSource | null> {
+  if (!(await documentsExist(accessor, detectScope(path), path.virtual))) return null
+  return watchStream(accessor, path)
+}
+
+export async function tail(
+  ops: CommandIO<MongoDBAccessor>,
   accessor: MongoDBAccessor,
   paths: PathSpec[],
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('tail'))
+  const parsed = parseFlags(opts.flags)
+  if (typeof parsed === 'string')
+    return [null, new IOResult({ exitCode: 1, stderr: new TextEncoder().encode(parsed) })]
   const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+    paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, opts.index ?? undefined) : []
   const first = resolved[0]
-  // One followed collection is a change stream (-F included, as the
-  // Python twin reads it); anything else a follow polls, and a
-  // pushed-down suffix moves with the collection, so it has no byte
-  // position to measure against: a follow reads the collection whole.
-  const following = followFlags(fl)
-  const follow = typeof following !== 'string' && following.follow
-  // The change stream queries the collection by the names in the path, so it
-  // runs only for one the mount can see; anything else takes the generic,
-  // which stats it through the same guard and reports it.
   if (
-    follow &&
+    parsed.following.follow &&
     resolved.length === 1 &&
     first !== undefined &&
-    detectScope(first).kind === 'documents' &&
-    (await documentsExist(accessor, detectScope(first), first.virtual))
+    detectScope(first).kind === 'documents'
   ) {
-    return [watchStream(accessor, first), new IOResult()]
+    const stream = await guardOperation(watch, 'readBytes')(accessor, first)
+    if (stream !== null) return [stream, new IOResult()]
   }
-  const nRaw = fl.asStr('n') ?? null
-  const [lines, plusMode] = parseN(nRaw)
-  const pushdown = fl.asStr('c') === undefined && !plusMode && lines > 0 && !follow
+  const counts = parsed.counts
   const notices: Uint8Array[] = []
-  const result = await tailGeneric(
-    resolved,
-    texts,
-    opts,
-    (p) => tailSource(accessor, p, opts.index ?? undefined, lines, pushdown, notices),
-    (p) => IO.stat(accessor, p, opts.index ?? undefined),
+  const bounded = guardOperation(tailDocuments, 'readBytes')
+  const read = (path: PathSpec): AsyncIterable<Uint8Array> => {
+    const n = counts.lines ?? 10
+    if (
+      detectScope(path).kind === 'documents' &&
+      counts.byteCount === null &&
+      counts.fromByte === null &&
+      n > 0 &&
+      counts.fromLine === null &&
+      !parsed.following.follow
+    ) {
+      return streamFromBytes(
+        (a, p, i) => bounded(a, p, i, n, notices),
+        accessor,
+        path,
+        opts.index ?? undefined,
+      )
+    }
+    return ops.readStream(accessor, path, opts.index ?? undefined)
+  }
+  const result = await tailGeneric(resolved, texts, opts, read, (p) =>
+    ops.stat(accessor, p, opts.index ?? undefined),
   )
   if (result === null) return result
   const [out, io] = result
-  if (out === null) return result
-  return [noteAfter(out, io, notices), io]
+  return [out === null ? out : noteAfter(out, io, notices), io]
 }
 
-export const MONGODB_TAIL = command({
-  name: 'tail',
-  vfs: VFSName.MONGODB,
-  spec: specOf('tail'),
-  fn: tail,
-})
+export const BUILDER: Builder<MongoDBAccessor> = { name: 'tail', fn: tail, read: true }

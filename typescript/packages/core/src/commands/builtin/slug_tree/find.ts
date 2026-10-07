@@ -17,16 +17,11 @@ import { pathsScoped } from '../../../ops/namespace_view.ts'
 import { makeSearchBackedFind } from '../../../core/generic/find.ts'
 import type { SlugTree } from '../../../core/slug_tree/tree.ts'
 import { materialize, type ByteSource } from '../../../io/types.ts'
-import type { PathSpec, VFSName } from '../../../types.ts'
+import { PathSpec } from '../../../types.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { StatOp } from '../../../vfs/types.ts'
-import {
-  command,
-  type CommandFnResult,
-  type CommandOpts,
-  type RegisteredCommand,
-} from '../../config.ts'
+import { type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
@@ -35,8 +30,8 @@ import { parseFindExpression, type FindExpr } from '../find_parse.ts'
 import { findGeneric } from '../generic/find.ts'
 import {
   resolveGlobOf,
-  withCommandGuards,
-  withPolicyGuard,
+  guardOperation,
+  type Builder,
   type CommandIO,
 } from '../generic_bind/adapter.ts'
 import { findWalk } from '../generic_bind/builders/find.ts'
@@ -84,49 +79,31 @@ function flagsTest(fl: FlagView): boolean {
   return fl.asStr('size') !== undefined || fl.asStr('mtime') !== undefined || fl.asBool('empty')
 }
 
-/**
- * Build `find` for a slug-tree backend, filtered over one tree walk.
- *
- * Args:
- *   vfs: the backend the command registers for.
- *   io: the backend's command IO.
- *   tree: the backend's tree.
- *   stat: the full stat.
- *   statLight: the index-only stat, used unless the expression tests a
- *     field it lacks.
- *   needsFull: whether an expression tests a field `statLight` lacks:
- *     `readsSizes` where the size costs a content scan, `readsTimes` where
- *     the listing carries no modified time.
- */
+/** Build a find override using the factory's prepared operations.
+ * `tree` supplies unrestricted native traversal, `statLight` cheaper metadata,
+ * and `needsFull` selects expressions needing the full stat. */
 export function makeFind<A extends Accessor>(
-  vfs: VFSName,
-  io: CommandIO<A>,
   tree: SlugTree<A>,
-  stat: StatOp<A>,
   statLight: StatOp<A>,
   needsFull: (expr: FindExpr) => boolean,
-): RegisteredCommand[] {
-  const resolveGlob = resolveGlobOf(io)
-  const findFull = makeSearchBackedFind<A>({ resolvePath: tree.resolve, stat, walk: tree.walk })
-  const findLight = makeSearchBackedFind<A>({
-    resolvePath: tree.resolve,
-    stat: statLight,
-    walk: tree.walk,
-  })
-  const walkFull = withCommandGuards(withPolicyGuard(io))
-  const walkLight = withCommandGuards(withPolicyGuard({ ...io, stat: statLight }))
-  return command({
+): Builder<A> {
+  return {
     name: 'find',
-    vfs,
-    spec: specOf('find'),
     fn: async (
+      ops: CommandIO<A>,
       accessor: A,
       paths: PathSpec[],
       texts: string[],
       opts: CommandOpts,
     ): Promise<CommandFnResult> => {
+      const light = guardOperation(statLight, 'stat')
+      const resolveGlob = resolveGlobOf(ops)
       const index = opts.index ?? undefined
-      const resolved = paths.length > 0 ? await resolveGlob(accessor, paths, index) : []
+      const resolved = await resolveGlob(
+        accessor,
+        paths.length > 0 ? paths : [PathSpec.fromStrPath(opts.cwd)],
+        index,
+      )
       const searchPath = resolved[0]
       // Push-down choices: a bare word acts as the -name filter, and the
       // heavier stat is only paid when a test needs what it adds.
@@ -136,14 +113,18 @@ export function makeFind<A extends Accessor>(
       if (name !== undefined) bag.name = name
       const words = isBareName(texts) ? [] : texts
       const full = words.length > 0 ? needsFull(parseFindExpression(words)) : flagsTest(fl)
-      const findCore = full ? findFull : findLight
-      const statFn = full ? stat : statLight
+      const statFn = full ? ops.stat : light
+      const findCore = makeSearchBackedFind<A>({
+        resolvePath: tree.resolve,
+        stat: statFn,
+        walk: tree.walk,
+      })
       // A tree walk classifies on the raw backend tree, so under hidden
       // paths or a path rule it would answer for entries the session cannot
       // see; the walk classifies through the guarded readdir/stat, the fork
       // the factory builder takes.
       const result = pathsScoped(opts.ns, resolved)
-        ? await findWalk(full ? walkFull : walkLight, accessor, resolved, words, {
+        ? await findWalk(full ? ops : { ...ops, stat: light }, accessor, resolved, words, {
             ...opts,
             flags: bag,
           })
@@ -158,5 +139,5 @@ export function makeFind<A extends Accessor>(
       const [stdout, ioResult] = result
       return [await normalizeFindOutput(stdout, searchPath), ioResult]
     },
-  })
+  }
 }

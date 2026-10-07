@@ -11,7 +11,8 @@
         "exit": 0,
         "stdout": "2\n",
         "stderr": ""
-      }
+      },
+      "session": "s2"
     },
     {
       "id": "find_view_by_name",

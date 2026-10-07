@@ -18,6 +18,7 @@ import pytest
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import NULL_INDEX
+from mirage.commands.builtin.mongodb.io import IO as BACKEND_IO
 from mirage.commands.builtin.mongodb.rg import rg
 from mirage.commands.config import CommandOpts
 from mirage.io.types import IOResult
@@ -78,7 +79,11 @@ async def test_rg_unresolved_glob_skips_pushdown(accessor):
         patch.dict(GENERICS, {"rg": fake_generic}),
     ):
         await rg(
-            accessor, [_glob_path()], ["target"], CommandOpts(index=NULL_INDEX)
+            BACKEND_IO,
+            accessor,
+            [_glob_path()],
+            ["target"],
+            CommandOpts(index=NULL_INDEX),
         )
 
     assert seen["generic"] == ["/db1/collections/coll1"]

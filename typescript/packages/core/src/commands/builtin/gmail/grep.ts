@@ -12,20 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountPrefixOf } from '../../../utils/key_prefix.ts'
+import { checkSearch, searchScoped, visibleResults } from '../../../vfs/search.ts'
 import type { GmailAccessor } from '../../../accessor/gmail.ts'
-import { resolveGlobOf, scanIo } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
 import { detectScope, NATIVE_KINDS } from '../../../core/gmail/scope.ts'
 import { formatGrepResults, searchMessages } from '../../../core/gmail/search.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { type FileStat, type PathSpec, VFSName } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { pathsScoped } from '../../../ops/namespace_view.ts'
+import { PathSpec, type FileStat } from '../../../types.ts'
+import { mountPrefixOf } from '../../../utils/key_prefix.ts'
+import { type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/flag_view.ts'
 import { grepGeneric } from '../generic/grep.ts'
+import type { Builder, CommandIO } from '../generic_bind/adapter.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
 import { patternArg } from '../grep_pattern.ts'
 import { pushdownOperand, textSearchResults } from '../grep_pushdown.ts'
-import { FlagView } from '../../spec/flag_view.ts'
 
 // Gmail search answers with whole messages and the push-down prints that
 // answer verbatim, so it can stand in for a scan only when the line names one
@@ -40,6 +42,7 @@ export const SEARCH_MAX_RESULTS = 50
 const ENC = new TextEncoder()
 
 async function grep(
+  ops: CommandIO<GmailAccessor>,
   accessor: GmailAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -49,13 +52,17 @@ async function grep(
   const fl = new FlagView(opts.flags, specOf('grep'))
   // Output-shaping flags, a glob operand and a multi-operand line all need
   // the generic grep over rendered files; see SEARCH_HONORED above.
-  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
+  const scoped = searchScoped(opts.ns, [PathSpec.fromStrPath((opts.mountPrefix ?? '') || '/')])
   const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
   if (pattern !== null && operand !== null && fl.asBool('w')) {
     const match = detectScope(operand)
-    if (NATIVE_KINDS.has(match.kind)) {
+    if (
+      NATIVE_KINDS.has(match.kind) &&
+      (match.kind !== 'root' || !pathsScoped(opts.ns, [operand]))
+    ) {
       const labelName = match.slots.label ?? null
       const filePrefix = mountPrefixOf(operand.virtual, operand.vfsPath)
+      const vis = checkSearch([operand])
       const rows = await searchMessages(
         accessor.tokenManager,
         pattern,
@@ -63,28 +70,32 @@ async function grep(
         match.slots.day ?? null,
         SEARCH_MAX_RESULTS,
       )
-      const lines = formatGrepResults(rows, labelName, filePrefix, pattern)
-      if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-      if (textSearchResults(lines)) {
-        const out: ByteSource = ENC.encode(lines.join('\n') + '\n')
-        return [out, new IOResult()]
+      // A guessed path or a capped search cannot establish the visible result set.
+      const complete = rows.length < SEARCH_MAX_RESULTS && rows.every((row) => row.date !== '')
+      if (!pathsScoped(opts.ns, [operand]) || complete) {
+        const results = formatGrepResults(rows, labelName, filePrefix, pattern)
+        const lines = visibleResults(results, vis).map(([, text]) => text)
+        if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
+        if (textSearchResults(lines)) {
+          const out: ByteSource = ENC.encode(lines.join('\n') + '\n')
+          return [out, new IOResult()]
+        }
       }
     }
   }
 
   const resolved =
-    paths.length > 0 ? await resolveGlobOf(scan)(accessor, paths, opts.index ?? undefined) : []
-  const stat = (p: PathSpec): Promise<FileStat> => scan.stat(accessor, p, opts.index ?? undefined)
+    paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, opts.index ?? undefined) : []
+  const stat = (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, opts.index ?? undefined)
   const readdir = (p: PathSpec): Promise<string[]> =>
-    scan.readdir(accessor, p, opts.index ?? undefined)
+    ops.readdir(accessor, p, opts.index ?? undefined)
   return grepGeneric('grep', resolved, texts, opts, stat, readdir, (p) =>
-    scan.readStream(accessor, p, opts.index ?? undefined),
+    ops.readStream(accessor, p, opts.index ?? undefined),
   )
 }
 
-export const GMAIL_GREP = command({
+export const BUILDER: Builder<GmailAccessor> = {
   name: 'grep',
-  vfs: VFSName.GMAIL,
-  spec: specOf('grep'),
+  read: true,
   fn: grep,
-})
+}

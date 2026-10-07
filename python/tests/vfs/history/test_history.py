@@ -16,12 +16,17 @@ import asyncio
 
 import pytest
 
+from mirage.context.session_context import (
+    reset_current_session,
+    set_current_session,
+)
 from mirage.errors.types import OperationNotSupportedError
 from mirage.observe.log_entry import EVENT_COMMAND, LogEntry
 from mirage.observe.observer import Observer
 from mirage.types import FileType, MountMode
 from mirage.vfs.history import HistoryViewVFS
 from mirage.workspace.mount.registry import MountRegistry
+from mirage.workspace.session.state import SessionState
 
 
 def _observer_with(commands: list[tuple[str, str]]) -> Observer:
@@ -45,10 +50,19 @@ def _mounted(obs: Observer):
     return registry.mount_for("/.bash_history")
 
 
+@pytest.fixture(autouse=True)
+def reading_session():
+    token = set_current_session(SessionState(session_id="s1"))
+    try:
+        yield
+    finally:
+        reset_current_session(token)
+
+
 def test_read_op_renders_gnu_file():
     mount = _mounted(_observer_with([("ls /data", "s1"), ("pwd", "s2")]))
     data = asyncio.run(mount.execute_op("read", "/.bash_history"))
-    assert data == b"#1\nls /data\n#2\npwd\n"
+    assert data == b"#1\nls /data\n"
 
 
 def test_read_reflects_new_events_without_invalidation():
@@ -89,3 +103,14 @@ def test_other_paths_not_found():
     mount = _mounted(_observer_with([("ls /a", "s1")]))
     with pytest.raises(FileNotFoundError):
         asyncio.run(mount.execute_op("read", "/.bash_history/nope"))
+
+
+def test_unbound_reader_cannot_read_or_measure_history():
+    mount = _mounted(_observer_with([("private", "s1")]))
+    token = set_current_session(None)
+    try:
+        for op in ("read", "stat"):
+            with pytest.raises(PermissionError):
+                asyncio.run(mount.execute_op(op, "/.bash_history"))
+    finally:
+        reset_current_session(token)

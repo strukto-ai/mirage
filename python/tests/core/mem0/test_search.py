@@ -2,7 +2,8 @@ import pytest
 from pydantic import SecretStr
 
 from mirage.accessor.mem0 import Mem0Accessor
-from mirage.core.mem0.search import search_memories_rendered
+from mirage.commands.builtin.utils.output import format_records
+from mirage.core.mem0.search import search_results
 from mirage.vfs.mem0.config import Mem0Config
 
 
@@ -35,10 +36,10 @@ def _accessor():
 @pytest.mark.asyncio
 async def test_search_renders_ranked():
     acc = _accessor()
-    out = await search_memories_rendered(
+    out = await search_results(
         acc, "morning", mount_prefix="/mem", top_k=5, threshold=0.0
     )
-    text = out.decode()
+    text = format_records([text for _, text in out]).decode()
     assert "/mem/aaa.json:0.91" in text
     assert "eats banana" in text
     assert acc._client.calls[0][1]["filters"] == {"agent_id": "routine_agent"}
@@ -49,16 +50,16 @@ async def test_search_renders_ranked():
 async def test_search_empty():
     acc = _accessor()
     acc._client = EmptyClient()
-    out = await search_memories_rendered(
+    out = await search_results(
         acc, "nope", mount_prefix="/mem", top_k=5, threshold=0.0
     )
-    assert out == b""
+    assert format_records([text for _, text in out]) == b""
 
 
 @pytest.mark.asyncio
 async def test_search_filters_memory_ids():
     acc = _accessor()
-    out = await search_memories_rendered(
+    out = await search_results(
         acc,
         "morning",
         mount_prefix="/mem",
@@ -66,15 +67,15 @@ async def test_search_filters_memory_ids():
         threshold=0.0,
         memory_ids={"bbb"},
     )
-    assert b"/mem/bbb.json" in out
-    assert b"/mem/aaa.json" not in out
+    assert b"/mem/bbb.json" in format_records([text for _, text in out])
+    assert b"/mem/aaa.json" not in format_records([text for _, text in out])
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("threshold", [-0.1, 1.1, float("nan")])
 async def test_search_rejects_invalid_threshold(threshold):
     with pytest.raises(ValueError, match="threshold"):
-        await search_memories_rendered(
+        await search_results(
             _accessor(),
             "morning",
             mount_prefix="/mem",
@@ -86,6 +87,6 @@ async def test_search_rejects_invalid_threshold(threshold):
 @pytest.mark.asyncio
 async def test_search_rejects_non_positive_top_k():
     with pytest.raises(ValueError, match="top-k"):
-        await search_memories_rendered(
+        await search_results(
             _accessor(), "morning", mount_prefix="/mem", top_k=0, threshold=0.0
         )

@@ -14,8 +14,9 @@
 
 import pytest
 
+from mirage.commands.builtin.utils.output import format_records
 from mirage.core.lancedb.tree import TREE
-from mirage.core.vector.search import search_rows_output
+from mirage.core.vector.search import search_results
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -24,7 +25,7 @@ async def _search(accessor, query: str, path: str, top_k: int = 1) -> str:
     spec = PathSpec(
         vfs_path=mount_key(path, "/db"), virtual=path, directory=path
     )
-    out = await search_rows_output(
+    out = await search_results(
         TREE,
         accessor,
         query,
@@ -33,7 +34,7 @@ async def _search(accessor, query: str, path: str, top_k: int = 1) -> str:
         threshold=0.0,
         mount_prefix="/db",
     )
-    return out.decode()
+    return format_records([text for _, text in out]).decode()
 
 
 @pytest.mark.asyncio
@@ -45,9 +46,9 @@ async def test_search_emits_canonical_path_with_score(accessor):
 @pytest.mark.asyncio
 async def test_search_body_matches_card(accessor):
     out = await _search(accessor, "a small white dog", "/db/animals")
-    assert "# a small white dog" in out
-    assert "label: dog" in out
-    assert "score:" not in out
+    assert "# a small white dog" in format_records([text for _, text in out])
+    assert "label: dog" in format_records([text for _, text in out])
+    assert "score:" not in format_records([text for _, text in out])
 
 
 @pytest.mark.asyncio

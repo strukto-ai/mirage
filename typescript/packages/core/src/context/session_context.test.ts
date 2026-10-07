@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../types.ts'
 import { describe, expect, it } from 'vitest'
 import {
   effectiveMountMode,
@@ -22,6 +23,7 @@ import {
   getCurrentSessionUnlessForeign,
   getOpPolicies,
   hiddenRefusal,
+  requireVisible,
   sessionVisibility,
   readonlyBelow,
   requireMountWritable,
@@ -38,9 +40,10 @@ import { SessionManager } from '../workspace/session/manager.ts'
 import { SessionState } from '../workspace/session/session.ts'
 import { hiddenUnder, pathVisible } from '../utils/hidden.ts'
 
-const visible = (virtual: string): boolean => pathVisible(sessionVisibility(), virtual)
+const visible = (virtual: string): boolean =>
+  pathVisible(sessionVisibility(), PathSpec.fromStrPath(virtual))
 const refused = (virtual: string, create: boolean) =>
-  hiddenRefusal(sessionVisibility(), virtual, create)
+  hiddenRefusal(sessionVisibility(), PathSpec.fromStrPath(virtual), create)
 
 function narrowedSession(): SessionState {
   return new SessionState({
@@ -215,9 +218,9 @@ describe('hides', () => {
       visibility: { paths: { paths: ['/a/secrets'], patterns: ['*.pem'] } },
     })
     expect(getCurrentSession()).toBeNull()
-    expect(pathVisible(sess.visibility, '/a/secrets/x')).toBe(false)
-    expect(pathVisible(sess.visibility, '/repo/k.pem')).toBe(false)
-    expect(pathVisible(sess.visibility, '/a/public')).toBe(true)
+    expect(pathVisible(sess.visibility, PathSpec.fromStrPath('/a/secrets/x'))).toBe(false)
+    expect(pathVisible(sess.visibility, PathSpec.fromStrPath('/repo/k.pem'))).toBe(false)
+    expect(pathVisible(sess.visibility, PathSpec.fromStrPath('/a/public'))).toBe(true)
     expect(visible('/a/secrets/x')).toBe(true)
     await runWithSession(sess, () => {
       expect(visible('/a/secrets/x')).toBe(false)
@@ -400,12 +403,12 @@ describe('the per-operand hide gate', () => {
       visibility: { paths: { paths: ['/repo/.env'] } },
     })
     await runWithSession(sess, () => {
-      expect(hiddenUnder(sessionVisibility(), '/repo')).toBe(true)
-      expect(hiddenUnder(sessionVisibility(), '/repo/.env')).toBe(true)
-      expect(hiddenUnder(sessionVisibility(), '/s3')).toBe(false)
+      expect(hiddenUnder(sessionVisibility(), PathSpec.fromStrPath('/repo'))).toBe(true)
+      expect(hiddenUnder(sessionVisibility(), PathSpec.fromStrPath('/repo/.env'))).toBe(true)
+      expect(hiddenUnder(sessionVisibility(), PathSpec.fromStrPath('/s3'))).toBe(false)
       return Promise.resolve()
     })
-    expect(hiddenUnder(sessionVisibility(), '/repo')).toBe(false)
+    expect(hiddenUnder(sessionVisibility(), PathSpec.fromStrPath('/repo'))).toBe(false)
   })
 
   it('a show reaches the session predicate', () => {
@@ -416,9 +419,9 @@ describe('the per-operand hide gate', () => {
         shown: { entries: [{ path: '/repo/public', mode: null }] },
       },
     })
-    expect(pathVisible(sess.visibility, '/repo/public/index.html')).toBe(true)
-    expect(pathVisible(sess.visibility, '/repo')).toBe(true)
-    expect(pathVisible(sess.visibility, '/repo/secrets')).toBe(false)
+    expect(pathVisible(sess.visibility, PathSpec.fromStrPath('/repo/public/index.html'))).toBe(true)
+    expect(pathVisible(sess.visibility, PathSpec.fromStrPath('/repo'))).toBe(true)
+    expect(pathVisible(sess.visibility, PathSpec.fromStrPath('/repo/secrets'))).toBe(false)
   })
 })
 
@@ -457,4 +460,23 @@ describe('the op-policies binding', () => {
     })
     expect(getOpPolicies()).toBeNull()
   })
+})
+
+it('uses workspace identity and the caller’s view for visibility', () => {
+  const path = new PathSpec({
+    virtual: '/data/sealed/key',
+    directory: '/data/sealed/',
+    vfsPath: 'public',
+    rawPath: '/data/public',
+  })
+  const restricted = new SessionState({
+    sessionId: 'reader',
+    visibility: { paths: { paths: ['/data/sealed'] } },
+  }).visibility
+  requireVisible(null, path)
+  expect(() => {
+    requireVisible(restricted, path)
+  }).toThrow(expect.objectContaining({ code: 'ENOENT' }))
+  requireVisible(null, path)
+  expect(path.virtual).toBe('/data/sealed/key')
 })

@@ -672,7 +672,7 @@ async def resolve_glob_with(
                 for m in await expand_pattern(
                     readdir, accessor, word, index, children
                 )
-                if path_visible(vis, m.virtual)
+                if path_visible(vis, m)
             ]
             if dirs_only:
                 kept: list[PathSpec] = []

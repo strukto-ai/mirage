@@ -26,7 +26,7 @@ import { readFailExitCode } from '../../commands/spec/usage.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { NamespaceView, SessionView } from '../../ops/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
-import type { PathSpec } from '../../types.ts'
+import { PathSpec } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { formatFsError } from '../../errors/render.ts'
@@ -185,7 +185,8 @@ export async function fanOutTraversal(
   for (const path of paths) {
     if (path.walkError !== null) continue
     for (const mount of registry.descendantMounts(path.virtual))
-      if (pathVisible(vis, '/' + stripSlash(mount.prefix))) prefixes.add(mount.prefix)
+      if (pathVisible(vis, PathSpec.fromStrPath('/' + stripSlash(mount.prefix))))
+        prefixes.add(mount.prefix)
   }
   io.producer = {
     command: cmdName,

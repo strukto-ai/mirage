@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../types.ts'
 import type { CLISpec } from '../../commands/cli/types.ts'
 import { nodeHelp, ownsArgv } from '../../commands/cli/walk.ts'
 import type { UsageStyle } from '../../commands/spec/types.ts'
@@ -41,7 +42,7 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
     if (
       ['/dev', '/usr/bin', '/.bash_history'].includes(prefix) ||
       ['dev', 'history', 'bin', 'document'].includes(mount.vfs.name) ||
-      !pathVisible(vis, prefix)
+      !pathVisible(vis, PathSpec.fromStrPath(prefix))
     )
       continue
     const mode = effectivePathMode(prefix, mount.prefix, mount.mode)
@@ -58,7 +59,12 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
         parts.push(mount.vfs.writePrompt.replaceAll('{prefix}', prefix).trim())
     }
     for (const entry of vis.shown?.entries ?? []) {
-      if (entry.mode === null || isGlob(entry.path) || !pathVisible(vis, entry.path)) continue
+      if (
+        entry.mode === null ||
+        isGlob(entry.path) ||
+        !pathVisible(vis, PathSpec.fromStrPath(entry.path))
+      )
+        continue
       if (registry.tryMountFor(entry.path) === mount) {
         const effective = effectivePathMode(entry.path, mount.prefix, mount.mode)
         parts.push(`- \`${entry.path}\`: ${MODE_LINES[effective]}.`)

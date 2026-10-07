@@ -15,6 +15,7 @@
 import importlib
 import sys
 from collections.abc import Callable
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -23,20 +24,21 @@ import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.email.io import IO as EMAIL_IO
+from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.config import CommandOpts
 from mirage.io.types import IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
 
-def _io(**slots: Callable[..., Any]) -> SimpleNamespace:
-    """The command's IO with the given slots faked; the rest stay real."""
-    real = {
-        "readdir": EMAIL_IO.readdir,
-        "stat": EMAIL_IO.stat,
-        "read_bytes": EMAIL_IO.read_bytes,
-    }
-    return SimpleNamespace(**{**real, **slots})
+def _io(
+    monkeypatch: pytest.MonkeyPatch, **slots: Callable[..., Any]
+) -> CommandIO:
+    """Replace backend slots while retaining the checked adapter contract."""
+    resolve = slots.pop("resolve_glob", None)
+    if resolve is not None:
+        monkeypatch.setattr(CommandIO, "resolve_glob", staticmethod(resolve))
+    return replace(EMAIL_IO, **slots)
 
 
 sys.modules.setdefault(
@@ -56,7 +58,7 @@ def _path(s: str = "/email/INBOX") -> PathSpec:
 
 
 @pytest.mark.asyncio
-async def test_rg_multi_pattern_skips_imap_search():
+async def test_rg_multi_pattern_skips_imap_search(monkeypatch):
     # A newline-joined multi -e set must bypass the IMAP text search and
     # still resolve globs before the generic runs (#347).
     accessor = SimpleNamespace(config=SimpleNamespace(max_messages=10))
@@ -70,17 +72,18 @@ async def test_rg_multi_pattern_skips_imap_search():
         seen["generic"] = [p.virtual for p in paths]
         return b"", IOResult()
 
+    ops = _io(monkeypatch, resolve_glob=fake_resolve)
     with patch.dict(
-        rg.__wrapped__.__globals__,
+        rg.__globals__,
         {
             "search_messages": AsyncMock(
                 side_effect=AssertionError("imap search ran")
             ),
-            "IO": _io(resolve_glob=fake_resolve),
             "rg_generic": fake_generic,
         },
     ):
         _, io = await rg(
+            ops,
             accessor,
             [_path()],
             [],
@@ -95,19 +98,21 @@ async def test_rg_multi_pattern_skips_imap_search():
 
 
 @pytest.mark.asyncio
-async def test_rg_single_pattern_uses_imap_search():
+async def test_rg_single_pattern_uses_imap_search(monkeypatch):
     accessor = SimpleNamespace(config=SimpleNamespace(max_messages=10))
     search = AsyncMock(return_value=[])
+    ops = _io(
+        monkeypatch,
+        resolve_glob=AsyncMock(side_effect=AssertionError("glob ran")),
+    )
     with patch.dict(
-        rg.__wrapped__.__globals__,
+        rg.__globals__,
         {
             "search_messages": search,
-            "IO": _io(
-                resolve_glob=AsyncMock(side_effect=AssertionError("glob ran")),
-            ),
         },
     ):
         _, io = await rg(
+            ops,
             accessor,
             [_path()],
             ["ada"],
@@ -119,22 +124,23 @@ async def test_rg_single_pattern_uses_imap_search():
 
 
 @pytest.mark.asyncio
-async def test_rg_message_file_operand_defers_to_generic():
+async def test_rg_message_file_operand_defers_to_generic(monkeypatch):
     # A single .email.json is not a folder scope, so it reads the one file
     # rather than reporting exit 1 without searching.
     accessor = SimpleNamespace(config=SimpleNamespace(max_messages=10))
     msg = _path("/email/INBOX/2026-01-05/Q2__1.email.json")
     search = AsyncMock(return_value=[])
     generic = AsyncMock(return_value=(b"", IOResult()))
+    ops = _io(monkeypatch, resolve_glob=AsyncMock(return_value=[]))
     with patch.dict(
-        rg.__wrapped__.__globals__,
+        rg.__globals__,
         {
             "search_messages": search,
-            "IO": _io(resolve_glob=AsyncMock(return_value=[])),
             "rg_generic": generic,
         },
     ):
         _out, io = await rg(
+            ops,
             accessor,
             [msg],
             ["foo"],
@@ -146,20 +152,22 @@ async def test_rg_message_file_operand_defers_to_generic():
 
 
 @pytest.mark.asyncio
-async def test_rg_regex_hands_the_server_its_required_literal():
+async def test_rg_regex_hands_the_server_its_required_literal(monkeypatch):
     # `worker.3` matches `worker-3`; the server is asked for `worker`.
     accessor = SimpleNamespace(config=SimpleNamespace(max_messages=10))
     search = AsyncMock(return_value=[])
+    ops = _io(
+        monkeypatch,
+        resolve_glob=AsyncMock(side_effect=AssertionError("glob ran")),
+    )
     with patch.dict(
-        rg.__wrapped__.__globals__,
+        rg.__globals__,
         {
             "search_messages": search,
-            "IO": _io(
-                resolve_glob=AsyncMock(side_effect=AssertionError("glob ran")),
-            ),
         },
     ):
         _, io = await rg(
+            ops,
             accessor,
             [_path()],
             ["worker.3"],

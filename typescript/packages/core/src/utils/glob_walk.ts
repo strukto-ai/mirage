@@ -415,7 +415,7 @@ export async function resolveGlobWith<A, I>(
       // no matches and falls back to the literal word, exactly what bash
       // prints when nothing matched.
       let matched = (await expandPattern(readdir, accessor, word, index, children)).filter((m) =>
-        pathVisible(vis, m.virtual),
+        pathVisible(vis, m),
       )
       if (dirsOnly) {
         const kept: PathSpec[] = []

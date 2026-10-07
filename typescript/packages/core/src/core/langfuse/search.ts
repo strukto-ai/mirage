@@ -1,3 +1,5 @@
+import { PathSpec } from '../../types.ts'
+import type { SearchResult } from '../../vfs/types.ts'
 import type { LangfuseAccessor } from '../../accessor/langfuse.ts'
 import { fetchDatasets, fetchPrompts, fetchSessions, fetchTraces } from './client.ts'
 import { SEARCH_KINDS } from './scope.ts'
@@ -8,13 +10,19 @@ function pickString(record: Record<string, unknown>, key: string): string {
   return typeof value === 'string' ? value : ''
 }
 
-function filterTraces(traces: readonly Record<string, unknown>[], matcher: LineMatcher): string[] {
-  const lines: string[] = []
+function filterTraces(
+  traces: readonly Record<string, unknown>[],
+  matcher: LineMatcher,
+): SearchResult[] {
+  const lines: SearchResult[] = []
   for (const t of traces) {
     const traceId = pickString(t, 'id')
     const lineJson = JSON.stringify(t)
     if (!matcher(lineJson)) continue
-    lines.push(`traces/${traceId}.json:${lineJson}`)
+    lines.push([
+      PathSpec.fromStrPath(`/traces/${traceId}.json`),
+      `traces/${traceId}.json:${lineJson}`,
+    ])
   }
   return lines
 }
@@ -22,12 +30,15 @@ function filterTraces(traces: readonly Record<string, unknown>[], matcher: LineM
 function filterSessions(
   sessions: readonly Record<string, unknown>[],
   matcher: LineMatcher,
-): string[] {
-  const lines: string[] = []
+): SearchResult[] {
+  const lines: SearchResult[] = []
   for (const s of sessions) {
     const sessionId = pickString(s, 'id')
     if (!matcher(sessionId)) continue
-    lines.push(`sessions/${sessionId}:${JSON.stringify(s)}`)
+    lines.push([
+      PathSpec.fromStrPath(`/sessions/${sessionId}`),
+      `sessions/${sessionId}:${JSON.stringify(s)}`,
+    ])
   }
   return lines
 }
@@ -35,15 +46,18 @@ function filterSessions(
 function filterPrompts(
   prompts: readonly Record<string, unknown>[],
   matcher: LineMatcher,
-): string[] {
-  const lines: string[] = []
+): SearchResult[] {
+  const lines: SearchResult[] = []
   const seen = new Set<string>()
   for (const p of prompts) {
     const promptName = pickString(p, 'name')
     if (seen.has(promptName)) continue
     if (!matcher(promptName)) continue
     seen.add(promptName)
-    lines.push(`prompts/${promptName}:${JSON.stringify(p)}`)
+    lines.push([
+      PathSpec.fromStrPath(`/prompts/${promptName}`),
+      `prompts/${promptName}:${JSON.stringify(p)}`,
+    ])
   }
   return lines
 }
@@ -51,12 +65,15 @@ function filterPrompts(
 function filterDatasets(
   datasets: readonly Record<string, unknown>[],
   matcher: LineMatcher,
-): string[] {
-  const lines: string[] = []
+): SearchResult[] {
+  const lines: SearchResult[] = []
   for (const d of datasets) {
     const datasetName = pickString(d, 'name')
     if (!matcher(datasetName)) continue
-    lines.push(`datasets/${datasetName}:${JSON.stringify(d)}`)
+    lines.push([
+      PathSpec.fromStrPath(`/datasets/${datasetName}`),
+      `datasets/${datasetName}:${JSON.stringify(d)}`,
+    ])
   }
   return lines
 }

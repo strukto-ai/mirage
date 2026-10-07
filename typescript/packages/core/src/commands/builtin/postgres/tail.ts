@@ -15,83 +15,77 @@
 import type { PostgresAccessor } from '../../../accessor/postgres.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { countRows } from '../../../core/postgres/client.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
-import { readStream } from '../../../core/postgres/read.ts'
+import { read as postgresRead } from '../../../core/postgres/read.ts'
+import { entityExists } from '../../../core/postgres/readdir.ts'
 import { detectScope } from '../../../core/postgres/scope.ts'
-import { VFSName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { followFlags, tailGeneric } from '../generic/tail.ts'
-import { parseN } from '../tail_counts.ts'
-import { FlagView } from '../../spec/flag_view.ts'
+import type { PathSpec } from '../../../types.ts'
+import { IOResult } from '../../../io/types.ts'
+import { enoent } from '../../../errors/fs.ts'
+import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { tailGeneric, parseFlags } from '../generic/tail.ts'
+import {
+  type Builder,
+  type CommandIO,
+  guardOperation,
+  resolveGlobOf,
+} from '../generic_bind/adapter.ts'
 import { noteAfter, rowCapNotice } from '../utils/limit.ts'
+import { streamFromBytes } from '../utils/wrap.ts'
 
-const resolveGlob = resolveGlobOf(IO)
-
-// Row reads on tables/views fetch only the last N rows (COUNT + OFFSET)
-// instead of the whole relation; tailGeneric then trims the already-small
-// chunk. Falls back to a full read for byte mode, +N mode, and non-row paths.
-// `maxReadRows` is the most rows one read may return; a suffix longer than
-// that prints the ceiling and says so, where the ceiling (`defaultRowLimit`)
-// used to stand in for the count with exit 0.
-async function* tailSource(
+async function tailRows(
   accessor: PostgresAccessor,
-  p: PathSpec,
+  path: PathSpec,
   index: IndexCacheStore | undefined,
-  lines: number,
-  pushdown: boolean,
+  n: number,
   notices: Uint8Array[],
-): AsyncIterable<Uint8Array> {
-  const scope = detectScope(p)
-  if (pushdown && scope.kind === 'entity_rows') {
-    const cap = accessor.config.maxReadRows
-    const total = await countRows(accessor, scope.slots.schema ?? '', scope.slots.entity ?? '')
-    let limit = Math.min(lines, total)
-    if (limit > cap) {
-      limit = cap
-      notices.push(rowCapNotice('tail', p.rawPath, cap, 'rows', 'max_read_rows'))
-    }
-    yield* readStream(accessor, p, index, { limit, offset: total - limit })
-    return
-  }
-  yield* readStream(accessor, p, index)
+): Promise<Uint8Array> {
+  const scope = detectScope(path)
+  if (scope.kind !== 'entity_rows') return postgresRead(accessor, path, index)
+  if (!(await entityExists(accessor, scope, path.virtual))) throw enoent(path.virtual)
+  const schema = scope.slots.schema ?? '',
+    entity = scope.slots.entity ?? ''
+  const cap = accessor.config.maxReadRows
+  const total = await countRows(accessor, schema, entity)
+  const limit = Math.min(n, total, cap)
+  if (Math.min(n, total) > cap)
+    notices.push(rowCapNotice('tail', path.rawPath, cap, 'rows', 'max_read_rows'))
+  return postgresRead(accessor, path, index, { limit, offset: total - limit })
 }
 
-async function tail(
+export async function tail(
+  ops: CommandIO<PostgresAccessor>,
   accessor: PostgresAccessor,
   paths: PathSpec[],
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  const fl = new FlagView(opts.flags, specOf('tail'))
-  const nRaw = fl.asStr('n') ?? null
-  const [lines, plusMode] = parseN(nRaw)
-  // A follow polls the file as it grows, and a pushed-down suffix moves
-  // with the table, so it has no byte position to measure against: a
-  // follow reads the relation whole.
-  const following = followFlags(fl)
-  const follow = typeof following !== 'string' && following.follow
-  const pushdown = fl.asStr('c') === undefined && !plusMode && lines > 0 && !follow
+  const parsed = parseFlags(opts.flags)
+  if (typeof parsed === 'string')
+    return [null, new IOResult({ exitCode: 1, stderr: new TextEncoder().encode(parsed) })]
+  const counts = parsed.counts
   const notices: Uint8Array[] = []
+  const bounded = guardOperation(tailRows, 'readBytes')
+  const n = counts.lines ?? 10
+  const read =
+    counts.byteCount === null &&
+    counts.fromByte === null &&
+    n > 0 &&
+    counts.fromLine === null &&
+    !parsed.following.follow
+      ? (a: PostgresAccessor, p: PathSpec, i?: IndexCacheStore) => bounded(a, p, i, n, notices)
+      : ops.readBytes
+  const resolved =
+    paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, opts.index ?? undefined) : []
   const result = await tailGeneric(
     resolved,
     texts,
     opts,
-    (p) => tailSource(accessor, p, opts.index ?? undefined, lines, pushdown, notices),
-    (p) => IO.stat(accessor, p, opts.index ?? undefined),
+    (p) => streamFromBytes(read, accessor, p, opts.index ?? undefined),
+    (p) => ops.stat(accessor, p, opts.index ?? undefined),
   )
   if (result === null) return result
   const [out, io] = result
-  if (out === null) return result
-  return [noteAfter(out, io, notices), io]
+  return [out === null ? out : noteAfter(out, io, notices), io]
 }
 
-export const POSTGRES_TAIL = command({
-  name: 'tail',
-  vfs: VFSName.POSTGRES,
-  spec: specOf('tail'),
-  fn: tail,
-})
+export const BUILDER: Builder<PostgresAccessor> = { name: 'tail', fn: tail, read: true }

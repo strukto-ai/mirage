@@ -332,7 +332,8 @@ async def du_has_content(
     try:
         entries, _ = await compute_entries(path)
         return any(
-            path_visible(vis, leaf) for leaf, _ in to_virtual(entries, path)
+            path_visible(vis, PathSpec.from_str_path(leaf))
+            for leaf, _ in to_virtual(entries, path)
         )
     except Exception as exc:
         # This runs only after stat already failed, to tell an implicit
@@ -600,7 +601,7 @@ async def _du_one(
         d
         for d in (directories() if directories is not None else ())
         if _norm(d).startswith(under)
-        and path_visible(vis, d)
+        and path_visible(vis, PathSpec.from_str_path(d))
         and not any(
             _norm(d) == r or _norm(d).startswith(r + "/") for r in roots
         )
@@ -623,7 +624,9 @@ async def _du_one(
 
     virtual = to_virtual(entries, path) + leaves
     visible = [
-        (leaf, size) for leaf, size in virtual if path_visible(vis, leaf)
+        (leaf, size)
+        for leaf, size in virtual
+        if path_visible(vis, PathSpec.from_str_path(leaf))
     ]
     if len(visible) != len(virtual):
         # Same honesty rule as shadowed leaves: the total is the sum of

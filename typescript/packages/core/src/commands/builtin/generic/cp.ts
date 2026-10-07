@@ -370,7 +370,7 @@ export async function copyTreeLinks(
   const shownDst = rstripSlash(target.rawPath) || target.rawPath
   const below = [...copies.links.subtree(base)].sort((a, b) => compareCodePoints(a[0], b[0]))
   for (const [virtual, row] of below) {
-    if (!pathVisible(copies.visibility, virtual)) continue
+    if (!pathVisible(copies.visibility, PathSpec.fromStrPath(virtual))) continue
     const rel = virtual.slice(rstripSlash(base).length + 1)
     const landing = `${dstBase}/${rel}`
     const shown = `${shownSrc}/${rel}`

@@ -15,24 +15,18 @@
 import { materialize } from '../../../io/types.ts'
 
 import { describe, expect, it } from 'vitest'
+import { runWithCacheManager } from '../../../cache/context.ts'
+import { RAMFileCacheStore } from '../../../cache/file/ram.ts'
+import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
+import { runInCommandScope } from '../../../cache/index/scope.ts'
+import { CacheManager } from '../../../cache/manager.ts'
+import { FakeAccessor, FakeStore, makeDriver, spec } from '../../../core/object_store/fakes.ts'
+import { makeFind } from '../../../core/object_store/find.ts'
+import { makeStat } from '../../../core/object_store/stat.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import { type CommandIO, requireOp } from './adapter.ts'
 import { BUILDERS } from './builders/index.ts'
-import {
-  makeGenericCommands,
-  scanIo,
-  withProbeAnswers,
-  withReadCache,
-  withSlashGuard,
-} from './factory.ts'
-import { runWithCacheManager } from '../../../cache/context.ts'
-import { RAMFileCacheStore } from '../../../cache/file/ram.ts'
-import { runInCommandScope } from '../../../cache/index/scope.ts'
-import { CacheManager } from '../../../cache/manager.ts'
-import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
-import { makeFind } from '../../../core/object_store/find.ts'
-import { makeStat } from '../../../core/object_store/stat.ts'
-import { FakeAccessor, FakeStore, makeDriver, spec } from '../../../core/object_store/fakes.ts'
+import { makeGenericCommands, withProbeAnswers, withReadCache, withSlashGuard } from './factory.ts'
 
 function makeOps(overrides: Partial<CommandIO> = {}): CommandIO {
   return {
@@ -104,7 +98,7 @@ describe('makeGenericCommands', () => {
 
   it('skips overridden commands', () => {
     const names = makeGenericCommands('ram', makeOps(), {
-      overrides: new Set(['stat', 'du']),
+      overrides: { stat: null, du: null },
     }).map((c) => c.name)
     expect(names).not.toContain('stat')
     expect(names).not.toContain('du')
@@ -116,7 +110,7 @@ describe('makeGenericCommands', () => {
   // something.
   it('refuses a name no builder has', () => {
     expect(() =>
-      makeGenericCommands('fake', makeOps(), { overrides: new Set(['cat', 'search']) }),
+      makeGenericCommands('fake', makeOps(), { overrides: { cat: null, search: null } }),
     ).toThrow(/no generic builder named search/)
     expect(() =>
       makeGenericCommands('fake', makeOps(), { opsOverrides: { lss: makeOps() } }),
@@ -225,45 +219,6 @@ describe('withSlashGuard on the write tier', () => {
     const guarded = withSlashGuard(makeOps())
     expect(guarded.write).toBeUndefined()
     expect(guarded.append).toBeUndefined()
-  })
-})
-
-describe('scanIo', () => {
-  const path = new PathSpec({ vfsPath: 'a.txt', virtual: '/s3/a.txt', directory: '/s3/' })
-
-  it('guards only a judged mount', () => {
-    // A bespoke search scans the raw adapter when nothing on its mount is
-    // hidden or refused, and the guarded one when anything is, since the
-    // service's own search can answer for more than the operand.
-    const io = makeOps()
-    const free = { scoped: () => false }
-    const judged = { scoped: (virtual: string) => virtual === '/s3' }
-    expect(scanIo(io, free, '/s3/')).toEqual([io, false])
-    expect(scanIo(io, undefined, '/s3/')).toEqual([io, false])
-    const [scan, scoped] = scanIo(io, judged, '/s3/')
-    expect(scan).not.toBe(io)
-    expect(scoped).toBe(true)
-  })
-
-  // The generics' own cache steps aside for a judged path, so the guarded
-  // scan reads the cache itself once its guards admit the path.
-  it('serves warm bytes below its guards', async () => {
-    let calls = 0
-    const io = makeOps({
-      local: false,
-      readBytes: () => {
-        calls += 1
-        return Promise.resolve(new TextEncoder().encode('cold'))
-      },
-    })
-    const store = new RAMFileCacheStore()
-    await store.set('/s3/a.txt', new TextEncoder().encode('payload'))
-    const manager = new CacheManager(store, null, '/s3/', true)
-    const out = await runWithCacheManager(manager, () => {
-      const [scan] = scanIo(io, { scoped: () => true }, '/s3/')
-      return scan.readBytes(new FakeAccessor(), path)
-    })
-    expect([new TextDecoder().decode(out), calls]).toEqual(['payload', 0])
   })
 })
 

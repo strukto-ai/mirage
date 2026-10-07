@@ -187,7 +187,7 @@ def visible_path(location: RepoLocation, relative: str) -> bool:
     if ns is None or ns.visibility is None:
         return True
     path = location.worktree.join(relative)
-    if not path_visible(ns.visibility, path.virtual):
+    if not path_visible(ns.visibility, path):
         return False
     try:
         parent = (
@@ -201,7 +201,7 @@ def visible_path(location: RepoLocation, relative: str) -> bool:
     followed = PathSpec.from_str_path(parent, cwd="/").join(
         posixpath.basename(path.virtual)
     )
-    return path_visible(ns.visibility, followed.virtual)
+    return path_visible(ns.visibility, followed)
 
 
 def visible_entries(

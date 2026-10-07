@@ -155,9 +155,6 @@ class Admitted:
         granted (tuple[CommandRule, ...]): the ask rules the line runs
             under a grant for: the one the door answered for this
             line, and the session's standing ones.
-        scoped (bool): whether a path rule in force reads this
-            command's paths, or a pre_vfs policy speaks for its session
-            (``EntryGate.scoped``).
         ops_judged (bool): whether a coded or scripted pre_vfs policy
             speaks for the session, which judges every path.
     """
@@ -166,8 +163,12 @@ class Admitted:
     tokens: tuple[str, ...]
     judged: frozenset[str]
     granted: tuple[CommandRule, ...]
-    scoped: bool
     ops_judged: bool = False
+
+    @property
+    def scoped(self) -> bool:
+        """Whether the command's paths require checked I/O."""
+        return self.ops_judged or scopes_paths(self.rules, self.tokens[0])
 
     def scopes(self, virtual: str) -> bool:
         """Whether anything at or under this path could be refused for
@@ -317,8 +318,7 @@ def _seen(
     return tuple(
         p
         for p in specs
-        if p.virtual not in unread
-        and path_visible(session.visibility, p.virtual)
+        if p.virtual not in unread and path_visible(session.visibility, p)
     )
 
 
@@ -536,7 +536,6 @@ async def admit(
             tokens=ctx.tokens,
             judged=frozenset(_norm(p.virtual) for p in ctx.paths),
             granted=tuple(granted),
-            scoped=scopes_paths(rules, name) or ops_judged,
             ops_judged=ops_judged,
         )
     err, code = (

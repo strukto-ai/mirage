@@ -13,21 +13,23 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
-from collections.abc import Callable
-from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cp import walk
 from mirage.commands.builtin.generic.rm_cmd import rm_without_operands
-from mirage.commands.builtin.generic_bind.adapter import CommandIO, Operation
+from mirage.commands.builtin.generic_bind.adapter import (
+    Builder,
+    CommandIO,
+    Operation,
+)
 from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.builtin.utils.slash_links import (
     is_slashed_link,
     rm_link_refusal,
 )
 from mirage.commands.builtin.utils.verbose import removal_lines
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
@@ -36,19 +38,19 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 
 
-def make_rm(vfs: str, io: CommandIO) -> Callable[..., Any]:
-    """Build the no-real-directories rm override for one keyed store.
-
-    Args:
-        vfs (str): VFS name the command registers under.
-        io (CommandIO): the backend's op table; must wire rm_r.
-    """
-    stat = io.stat
-    readdir = io.readdir
-    resolve_glob = io.resolve_glob
-    unlink = io.require(Operation.UNLINK)
-    rmdir = io.require(Operation.RMDIR)
-    rm_r = io.rm_r
+async def rm(
+    ops: CommandIO,
+    accessor: Accessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
+) -> tuple[ByteSource | None, IOResult]:
+    stat = ops.stat
+    readdir = ops.readdir
+    resolve_glob = ops.resolve_glob
+    unlink = ops.require(Operation.UNLINK)
+    rmdir = ops.require(Operation.RMDIR)
+    rm_r = ops.rm_r
     if rm_r is None:
         raise NotImplementedError(
             "operation 'rm_r' is not supported on this backend"
@@ -135,55 +137,47 @@ def make_rm(vfs: str, io: CommandIO) -> Callable[..., Any]:
             return f"rm: cannot remove '{label}': {fs_strerror(exc)}", []
         return None, [f"removed '{label}'"] if verbose else []
 
-    async def rm(
-        accessor: Accessor,
-        paths: list[PathSpec],
-        texts: list[str],
-        opts: CommandOpts,
-    ) -> tuple[ByteSource | None, IOResult]:
-        fl = FlagView(opts.flags, spec=SPECS["rm"])
-        r = fl.as_bool("r") or fl.as_bool("R")
-        f = fl.as_bool("f")
-        v = fl.as_bool("v")
-        d = fl.as_bool("d")
-        if not paths:
-            return rm_without_operands(f)
-        paths = await resolve_glob(accessor, paths, opts.index)
-        verbose_parts: list[str] = []
-        errors: list[str] = []
-        removed: dict[str, ByteSource] = {}
-        links = opts.ns.links if opts.ns is not None else None
-        for p in paths:
-            # A link typed with a trailing slash is refused, never
-            # followed: the shared helper keeps this identical to the
-            # generic builder.
-            if is_slashed_link(p, links):
-                refusal = await rm_link_refusal(p, links, recursive=r, force=f)
-                if refusal is not None:
-                    errors.append(refusal)
-                continue
-            # GNU rm reports the operand and keeps removing the rest.
-            error, entry_lines = await _rm(
-                accessor,
-                p,
-                recursive=r,
-                force=f,
-                remove_dir=d,
-                verbose=v,
-                index=opts.index,
-            )
-            if error is not None:
-                errors.append(error)
-                continue
-            removed[p.mount_path] = b""
-            verbose_parts.extend(entry_lines)
-        output = format_optional_records(verbose_parts) if v else None
-        stderr = ("\n".join(errors) + "\n").encode() if errors else None
-        return output, IOResult(
-            writes=removed, stderr=stderr, exit_code=1 if errors else 0
+    fl = FlagView(opts.flags, spec=SPECS["rm"])
+    r = fl.as_bool("r") or fl.as_bool("R")
+    f = fl.as_bool("f")
+    v = fl.as_bool("v")
+    d = fl.as_bool("d")
+    if not paths:
+        return rm_without_operands(f)
+    paths = await resolve_glob(accessor, paths, opts.index)
+    verbose_parts: list[str] = []
+    errors: list[str] = []
+    removed: dict[str, ByteSource] = {}
+    links = opts.ns.links if opts.ns is not None else None
+    for p in paths:
+        # A link typed with a trailing slash is refused, never
+        # followed: the shared helper keeps this identical to the
+        # generic builder.
+        if is_slashed_link(p, links):
+            refusal = await rm_link_refusal(p, links, recursive=r, force=f)
+            if refusal is not None:
+                errors.append(refusal)
+            continue
+        # GNU rm reports the operand and keeps removing the rest.
+        error, entry_lines = await _rm(
+            accessor,
+            p,
+            recursive=r,
+            force=f,
+            remove_dir=d,
+            verbose=v,
+            index=opts.index,
         )
+        if error is not None:
+            errors.append(error)
+            continue
+        removed[p.mount_path] = b""
+        verbose_parts.extend(entry_lines)
+    output = format_optional_records(verbose_parts) if v else None
+    stderr = ("\n".join(errors) + "\n").encode() if errors else None
+    return output, IOResult(
+        writes=removed, stderr=stderr, exit_code=1 if errors else 0
+    )
 
-    wrapped: Callable[..., Any] = command(
-        "rm", vfs=vfs, spec=SPECS["rm"], write=True, path_guarded=True
-    )(rm)
-    return wrapped
+
+BUILDER = Builder("rm", rm, write=True)

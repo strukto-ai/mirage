@@ -24,6 +24,8 @@ from mirage.core.gmail.messages import (
 )
 from mirage.core.gmail.readdir import _msg_filename
 from mirage.core.google.client import TokenManager
+from mirage.types import PathSpec
+from mirage.vfs.types import SearchResult
 
 EXCERPT_WINDOW = 120
 EXCERPT_MAX = 240
@@ -116,8 +118,8 @@ def format_grep_results(
     label_name: str | None,
     prefix: str,
     pattern: str = "",
-) -> list[str]:
-    lines: list[str] = []
+) -> list[SearchResult]:
+    lines: list[SearchResult] = []
     for row in rows:
         label = row.get("label") or label_name or "INBOX"
         date = row.get("date", "")
@@ -137,7 +139,14 @@ def format_grep_results(
             if date
             else f"{prefix}/{label}/{filename}"
         )
-        lines.append(f"{path}:[{sender}] {excerpt}")
+        lines.append(
+            (
+                PathSpec.from_str_path(
+                    path, path.removeprefix(prefix).lstrip("/")
+                ),
+                f"{path}:[{sender}] {excerpt}",
+            )
+        )
     return lines
 
 

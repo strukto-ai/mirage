@@ -24,7 +24,7 @@ from mirage.context import strongest_under_session
 from mirage.io.types import IOResult
 from mirage.ops.ops import Ops
 from mirage.policy.match.pattern import pattern_matches
-from mirage.types import MOUNT_MODE_RANK, MountMode
+from mirage.types import MOUNT_MODE_RANK, MountMode, PathSpec
 from mirage.utils.hidden import path_visible
 from mirage.utils.path import gnu_dirname
 from mirage.workspace.lookup import command_visible
@@ -181,7 +181,9 @@ def writes(session: "SessionState", mounts: list["MountEntry"]) -> bool:
     """
     return any(
         mount.prefix != DEV_PREFIX
-        and path_visible(session.visibility, mount.prefix)
+        and path_visible(
+            session.visibility, PathSpec.from_str_path(mount.prefix)
+        )
         and MOUNT_MODE_RANK[
             strongest_under_session(session, mount.prefix, mount.mode)
         ]

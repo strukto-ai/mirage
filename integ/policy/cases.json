@@ -268,6 +268,375 @@
     {"op": "answer", "outcome": "allow", "scope": "once"},
     {"op": "exec", "session": "agent", "command": "f(){ cat /data/secret; }; f; f(){ cat /data/secret; }; f", "expect": {"value": {"exit_code": 0, "stdout": "s\ns\n", "stderr": "", "refusal": null}}}
    ]
+  },
+  {
+   "id": "command_io_keeps_hidden_content_below_the_read_cache",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "cached-ram", "config": {"files": {"/secret": "alpha\n", "/public": "alpha\n"}}}}},
+   "steps": [
+    {"op": "session", "id": "agent", "profile": {"paths": {"hide": ["/data/secret"]}}},
+    {"op": "exec", "command": "cat /data/secret /data/public > /dev/null", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "cached", "path": "/data/secret", "expect": {"value": "alpha\n"}},
+    {"op": "exec", "session": "agent", "command": "head /data/secret", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "head: cannot open '/data/secret' for reading: No such file or directory\n", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "tail /data/secret", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "tail: cannot open '/data/secret' for reading: No such file or directory\n", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "wc -c /data/secret", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "wc: /data/secret: No such file or directory\n", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "find /data -type f", "expect": {"value": {"exit_code": 0, "stdout": "/data/public\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "du -a /data", "expect": {"value": {"exit_code": 0, "stdout": "6\t/data/public\n6\t/data\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "grep -r alpha /data", "expect": {"value": {"exit_code": 0, "stdout": "/data/public:alpha\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "rg alpha /data", "expect": {"value": {"exit_code": 0, "stdout": "/data/public:alpha\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "grep -f /data/secret /data/public", "expect": {"value": {"exit_code": 2, "stdout": "", "stderr": "grep: /data/secret: No such file or directory\n", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "rg -f /data/secret /data/public", "expect": {"value": {"exit_code": 2, "stdout": "", "stderr": "rg: /data/secret: No such file or directory (os error 2)\n", "refusal": null}}}
+   ]
+  },
+  {
+   "id": "custom_cli_reads_inherit_the_command_gate",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "cached-ram", "config": {"files": {"/secret": "secret\n"}}}}, "runtimes": ["monty", "workspace"]},
+   "steps": [
+    {"op": "register_cli", "name": "peek", "script": {"language": "python", "source": "from pathlib import Path\ntry:\n    print(Path('/data/link').read_text(), end='')\nexcept PermissionError:\n    print('denied')"}, "runtime": "monty"},
+    {"op": "exec", "command": "ln -s /data/secret /data/link", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": ""}}},
+    {"op": "session", "id": "agent", "profile": {"commands": {"deny": [{"reason": "sealed", "commands": {"peek": ["/data/secret"]}}]}}},
+    {"op": "exec", "session": "agent", "command": "peek", "expect": {"value": {"exit_code": 0, "stdout": "denied\n", "stderr": "", "refusal": "sealed"}}},
+    {"op": "exec", "command": "cat /data/secret > /dev/null", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": ""}}},
+    {"op": "cached", "path": "/data/secret", "expect": {"value": "secret\n"}},
+    {"op": "exec", "session": "agent", "command": "peek", "expect": {"value": {"exit_code": 0, "stdout": "denied\n", "stderr": "", "refusal": "sealed"}}},
+    {"op": "exec", "command": "peek", "expect": {"value": {"exit_code": 0, "stdout": "secret\n", "stderr": "", "refusal": null}}},
+    {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/secret"}, "expect": {"value": {"data_base64": "c2VjcmV0Cg=="}}}
+   ]
+  },
+  {
+   "id": "history_file_is_session_scoped_even_for_identical_profiles",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "alice", "profile": {"paths": {"hide": ["/data/private"]}}},
+    {"op": "session", "id": "bob", "profile": {"paths": {"hide": ["/data/private"]}}},
+    {"op": "exec", "session": "alice", "command": "echo alice-only", "expect": {"value": {"exit_code": 0, "stdout": "alice-only\n", "stderr": "", "refusal": null}}},
+    {"op": "vfs", "session": "bob", "call": "read", "args": {"path": "/.bash_history"}, "expect": {"value": {"data_base64": ""}}},
+    {"op": "vfs", "session": "bob", "call": "stat", "args": {"path": "/.bash_history"}, "expect": {"value": {"stat": {"type": "file", "size": 0}}}},
+    {"op": "exec", "session": "bob", "command": "echo bob-only", "expect": {"value": {"exit_code": 0, "stdout": "bob-only\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "alice", "command": "grep '^echo ' /.bash_history", "expect": {"value": {"exit_code": 0, "stdout": "echo alice-only\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "bob", "command": "grep '^echo ' /.bash_history", "expect": {"value": {"exit_code": 0, "stdout": "echo bob-only\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "alice", "command": "history -d 1; history -c", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "alice", "command": "grep '^echo ' /.bash_history", "expect": {"value": {"exit_code": 0, "stdout": "echo alice-only\n", "stderr": "", "refusal": null}}},
+    {"op": "snapshot"},
+    {"op": "checkout"},
+    {"op": "exec", "session": "bob", "command": "grep '^echo ' /.bash_history", "expect": {"value": {"exit_code": 0, "stdout": "echo bob-only\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "alice", "command": "grep '^echo ' /.bash_history", "expect": {"value": {"exit_code": 0, "stdout": "echo alice-only\n", "stderr": "", "refusal": null}}},
+    {"op": "concurrent", "steps": [{"op": "exec", "session": "alice", "command": "sleep 0.01; if grep -q '^echo bob-only$' /.bash_history 2>/dev/null; then echo leaked; else echo safe; fi"}, {"op": "exec", "session": "bob", "command": "sleep 0.01; if grep -q '^echo alice-only$' /.bash_history 2>/dev/null; then echo leaked; else echo safe; fi"}], "expect": {"value": [{"exit_code": 0, "stdout": "safe\n", "stderr": ""}, {"exit_code": 0, "stdout": "safe\n", "stderr": ""}]}}
+   ]
+  },
+  {
+    "id": "custom_cli_hides_reads_and_listing_cold_and_warm",
+    "steps": [
+      {
+        "op": "register_cli",
+        "name": "peek",
+        "script": {
+          "language": "python",
+          "source": "from pathlib import Path\nprint(','.join(sorted(p.name for p in Path('/data').iterdir())))\ntry:\n    print(Path('/data/secret').read_text(), end='')\nexcept FileNotFoundError:\n    print('absent')"
+        },
+        "runtime": "monty"
+      },
+      {
+        "op": "session",
+        "id": "reader",
+        "profile": {
+          "paths": {
+            "hide": [
+              "/data/secret"
+            ]
+          }
+        }
+      },
+      {
+        "op": "exec",
+        "session": "reader",
+        "command": "peek",
+        "expect": {
+          "value": {
+            "exit_code": 0,
+            "stdout": "public\nabsent\n",
+            "stderr": ""
+          }
+        }
+      },
+      {
+        "op": "exec",
+        "command": "cat /data/secret >/dev/null",
+        "expect": {
+          "value": {
+            "exit_code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        }
+      },
+      {
+        "op": "cached",
+        "path": "/data/secret",
+        "expect": {
+          "value": "secret\n"
+        }
+      },
+      {
+        "op": "exec",
+        "session": "reader",
+        "command": "peek",
+        "expect": {
+          "value": {
+            "exit_code": 0,
+            "stdout": "public\nabsent\n",
+            "stderr": ""
+          }
+        }
+      },
+      {
+        "op": "vfs",
+        "session": "reader",
+        "call": "read",
+        "args": {
+          "path": "/data/secret"
+        },
+        "expect": {
+          "errno": "ENOENT"
+        }
+      }
+    ],
+    "settings": {
+      "mode": "write",
+      "mounts": {
+        "/data": {
+          "vfs": "cached-ram",
+          "config": {
+            "files": {
+              "/secret": "secret\n",
+              "/public": "visible\n"
+            }
+          }
+        }
+      },
+      "runtimes": [
+        "monty",
+        "workspace"
+      ]
+    }
+  },
+  {
+    "id": "visibility_is_one_view_for_walks_aliases_and_warm_reads",
+    "settings": {
+      "mode": "write",
+      "mounts": {
+        "/data": {
+          "vfs": "cached-ram",
+          "config": {}
+        }
+      }
+    },
+    "steps": [
+      {
+        "op": "exec",
+        "command": "mkdir /data/sealed; printf 'secret\\n' > /data/sealed/key; printf 'visible\\n' > /data/sealed/public",
+        "expect": {
+          "value": {
+            "exit_code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        }
+      },
+      {
+        "op": "session",
+        "id": "reader",
+        "profile": {
+          "paths": {
+            "hide": [
+              "/data/sealed"
+            ],
+            "show": [
+              "/data/sealed/public"
+            ]
+          }
+        }
+      },
+      {
+        "op": "exec",
+        "command": "ln -s /data/sealed/key /data/link",
+        "expect": {
+          "value": {
+            "exit_code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        }
+      },
+      {
+        "op": "exec",
+        "session": "reader",
+        "command": "ls /data/sealed; find /data/sealed -type f; du -s /data/sealed; cat /data/link >/dev/null 2>&1; echo link=$?; wc -c /data/sealed/key >/dev/null 2>&1; echo bytes=$?",
+        "expect": {
+          "value": {
+            "exit_code": 0,
+            "stdout": "public\n/data/sealed/public\n8\t/data/sealed\nlink=1\nbytes=1\n",
+            "stderr": ""
+          }
+        }
+      },
+      {
+        "op": "exec",
+        "command": "cat /data/sealed/key >/dev/null",
+        "expect": {
+          "value": {
+            "exit_code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        }
+      },
+      {
+        "op": "cached",
+        "path": "/data/sealed/key",
+        "expect": {
+          "value": "secret\n"
+        }
+      },
+      {
+        "op": "exec",
+        "session": "reader",
+        "command": "ls /data/sealed; find /data/sealed -type f; du -s /data/sealed; cat /data/link >/dev/null 2>&1; echo link=$?; wc -c /data/sealed/key >/dev/null 2>&1; echo bytes=$?",
+        "expect": {
+          "value": {
+            "exit_code": 0,
+            "stdout": "public\n/data/sealed/public\n8\t/data/sealed\nlink=1\nbytes=1\n",
+            "stderr": ""
+          }
+        }
+      },
+      {
+        "op": "vfs",
+        "session": "reader",
+        "call": "read",
+        "args": {
+          "path": "/data/sealed/key"
+        },
+        "expect": {
+          "errno": "ENOENT"
+        }
+      },
+      {
+        "op": "set_profile",
+        "session": "reader",
+        "profile": {}
+      },
+      {
+        "op": "exec",
+        "session": "reader",
+        "command": "cat /data/link",
+        "expect": {
+          "value": {
+            "exit_code": 0,
+            "stdout": "secret\n",
+            "stderr": ""
+          }
+        }
+      },
+      {
+        "op": "set_profile",
+        "session": "reader",
+        "profile": {
+          "paths": {
+            "hide": [
+              "/data/sealed"
+            ],
+            "show": [
+              "/data/sealed/public"
+            ]
+          }
+        }
+      },
+      {
+        "op": "exec",
+        "session": "reader",
+        "command": "ls /data/sealed; find /data/sealed -type f; du -s /data/sealed; cat /data/link >/dev/null 2>&1; echo link=$?; wc -c /data/sealed/key >/dev/null 2>&1; echo bytes=$?",
+        "expect": {
+          "value": {
+            "exit_code": 0,
+            "stdout": "public\n/data/sealed/public\n8\t/data/sealed\nlink=1\nbytes=1\n",
+            "stderr": ""
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "ordered_walks_keep_the_same_per_path_refusal",
+    "settings": {
+      "mode": "write",
+      "mounts": {
+        "/data": {
+          "vfs": "ram",
+          "config": {}
+        },
+        "/data/sub": {
+          "vfs": "ram",
+          "config": {}
+        }
+      }
+    },
+    "steps": [
+      {
+        "op": "exec",
+        "command": "mkdir -p /data/w; echo 'secret a' > /data/w/a.txt; echo 'secret b' > /data/w/b.txt",
+        "expect": {
+          "value": {
+            "exit_code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        }
+      },
+      {
+        "op": "session",
+        "id": "reader",
+        "profile": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "commands": {
+                  "rg": [
+                    "/data/w/a.txt"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "op": "exec",
+        "session": "reader",
+        "command": "rg secret /data",
+        "expect": {
+          "value": {
+            "exit_code": 2,
+            "stdout": "/data/w/b.txt:secret b\n",
+            "stderr": "rg: /data/w/a.txt: Permission denied (os error 13)\n",
+            "refusal": "sealed"
+          }
+        }
+      },
+      {
+        "op": "exec",
+        "session": "reader",
+        "command": "rg --sort path secret /data",
+        "expect": {
+          "value": {
+            "exit_code": 2,
+            "stdout": "/data/w/b.txt:secret b\n",
+            "stderr": "rg: /data/w/a.txt: Permission denied (os error 13)\n",
+            "refusal": "sealed"
+          }
+        }
+      }
+    ]
   }
  ]
 }

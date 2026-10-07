@@ -13,6 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import type { SearchResult } from '../../../vfs/types.ts'
+import * as airtableHead from '../airtable/head.ts'
+import * as mongodbTail from '../mongodb/tail.ts'
+import * as mongodbWc from '../mongodb/wc.ts'
+import * as postgresHead from '../postgres/head.ts'
+import * as postgresTail from '../postgres/tail.ts'
+import * as postgresWc from '../postgres/wc.ts'
+import type { FlagValue } from '../../spec/types.ts'
+import { materialize } from '../../../io/types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import {
   runWithAdmission,
@@ -20,18 +29,10 @@ import {
   runWithOpPolicies,
   runWithSession,
 } from '../../../context/session_context.ts'
-import { IOResult } from '../../../io/types.ts'
 import type { Policy } from '../../../policy/base.ts'
 import { Policies } from '../../../policy/policies.ts'
 import type { Action, VfsContext } from '../../../policy/types.ts'
-import type { DispatchFn } from '../../../runtime/types.ts'
-import {
-  requireOp,
-  withAbortGuard,
-  withCommandGuards,
-  withDispatchRuleGuard,
-  withPolicyGuard,
-} from './adapter.ts'
+import { requireOp, withAbortGuard, withCommandGuards, withPolicyGuard } from './adapter.ts'
 import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import { eacces, eisdir, enoent } from '../../../errors/fs.ts'
 import { formatFsError } from '../../../errors/render.ts'
@@ -275,6 +276,39 @@ describe('dirAwareStream', () => {
   })
 })
 
+function probeOps(calls: string[][]): CommandIO {
+  async function* stream(_a: Accessor, path: PathSpec): AsyncGenerator<Uint8Array> {
+    calls.push(['stream', path.virtual])
+    yield await Promise.resolve(new Uint8Array([1]))
+  }
+  return {
+    readdir: (_a, path) => {
+      calls.push(['readdir', path.virtual])
+      return Promise.resolve(['a'])
+    },
+    readBytes: (_a, path) => {
+      calls.push(['read', path.virtual])
+      return Promise.resolve(new Uint8Array([1]))
+    },
+    readStream: stream,
+    stat: (_a, path) => {
+      calls.push(['stat', path.virtual])
+      return Promise.resolve(
+        new FileStat({ name: 'k', type: FileType.FILE, content: ContentType.TEXT, size: 1 }),
+      )
+    },
+    isMounted: () => true,
+    copy: (_a, src, dst) => {
+      calls.push(['copy', src.virtual, dst.virtual])
+      return Promise.resolve()
+    },
+    unlink: (_a, path) => {
+      calls.push(['unlink', path.virtual])
+      return Promise.resolve()
+    },
+  }
+}
+
 describe('withCommandGuards', () => {
   const spec = (virtual: string): PathSpec =>
     new PathSpec({
@@ -283,39 +317,6 @@ describe('withCommandGuards', () => {
       vfsPath: virtual,
       resolved: true,
     })
-
-  function probeOps(calls: string[][]): CommandIO {
-    async function* stream(_a: Accessor, path: PathSpec): AsyncGenerator<Uint8Array> {
-      calls.push(['stream', path.virtual])
-      yield await Promise.resolve(new Uint8Array([1]))
-    }
-    return {
-      readdir: (_a, path) => {
-        calls.push(['readdir', path.virtual])
-        return Promise.resolve(['a'])
-      },
-      readBytes: (_a, path) => {
-        calls.push(['read', path.virtual])
-        return Promise.resolve(new Uint8Array([1]))
-      },
-      readStream: stream,
-      stat: (_a, path) => {
-        calls.push(['stat', path.virtual])
-        return Promise.resolve(
-          new FileStat({ name: 'k', type: FileType.FILE, content: ContentType.TEXT, size: 1 }),
-        )
-      },
-      isMounted: () => true,
-      copy: (_a, src, dst) => {
-        calls.push(['copy', src.virtual, dst.virtual])
-        return Promise.resolve()
-      },
-      unlink: (_a, path) => {
-        calls.push(['unlink', path.virtual])
-        return Promise.resolve()
-      },
-    }
-  }
 
   it('command path restrictions apply before a warm serve', async () => {
     const calls: string[][] = []
@@ -416,49 +417,6 @@ async function drain(stream: AsyncIterable<Uint8Array>): Promise<Uint8Array[]> {
   return out
 }
 
-describe('withDispatchRuleGuard', () => {
-  const spec = (virtual: string): PathSpec =>
-    new PathSpec({
-      virtual,
-      directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
-      vfsPath: virtual,
-      resolved: true,
-    })
-
-  it('marks an op with the bound gate for the door to judge', async () => {
-    const seen: [string, unknown][] = []
-    const door: DispatchFn = (op, _path, _args, kwargs) => {
-      seen.push([op, kwargs?.ruleGate])
-      return Promise.resolve([null, new IOResult()])
-    }
-    const dispatch = withDispatchRuleGuard(door)
-    // No gate bound: the op goes to the door unmarked.
-    await dispatch('read', spec('/data/f'))
-    const asked: string[] = []
-    const gate = {
-      scoped: true,
-      scopes: () => true,
-      granted: [],
-      check: (virtual: string) => {
-        asked.push(virtual)
-      },
-      refuses: () => false,
-    }
-    await runWithAdmission(gate, async () => {
-      await dispatch('read', spec('/data/f'), [spec('/data/g')])
-      // A metadata op is never judged: deny is present and refused.
-      await dispatch('stat', spec('/data/f'))
-    })
-    expect(seen).toEqual([
-      ['read', undefined],
-      ['read', gate],
-      ['stat', undefined],
-    ])
-    // The wrapper judges nothing itself: the door does, on its own paths.
-    expect(asked).toEqual([])
-  })
-})
-
 describe('scopedIo', () => {
   it('sets a content index aside', () => {
     // A content index names files under a listing a rule may refuse, so a
@@ -468,7 +426,7 @@ describe('scopedIo', () => {
     const io: CommandIO = { ...dirOps([]), contentSearch: index }
     const roots = [PathSpec.fromStrPath('/data')]
     const free = { scoped: () => false }
-    const judged = { scoped: (virtual: string) => virtual === '/data' }
+    const judged = { scoped: (path: PathSpec) => path.virtual === '/data' }
     expect(scopedIo(io, free, roots, '/data/').contentSearch).toBe(index)
     expect(scopedIo(io, undefined, roots, '/data/').contentSearch).toBe(index)
     expect(scopedIo(io, judged, roots, '/data/').contentSearch).toBeUndefined()
@@ -500,39 +458,6 @@ describe('withPolicyGuard', () => {
       vfsPath: virtual,
       resolved: true,
     })
-
-  function probeOps(calls: string[][]): CommandIO {
-    async function* stream(_a: Accessor, path: PathSpec): AsyncGenerator<Uint8Array> {
-      calls.push(['stream', path.virtual])
-      yield await Promise.resolve(new Uint8Array([1]))
-    }
-    return {
-      readdir: (_a, path) => {
-        calls.push(['readdir', path.virtual])
-        return Promise.resolve(['a'])
-      },
-      readBytes: (_a, path) => {
-        calls.push(['read', path.virtual])
-        return Promise.resolve(new Uint8Array([1]))
-      },
-      readStream: stream,
-      stat: (_a, path) => {
-        calls.push(['stat', path.virtual])
-        return Promise.resolve(
-          new FileStat({ name: 'k', type: FileType.FILE, content: ContentType.TEXT, size: 1 }),
-        )
-      },
-      isMounted: () => true,
-      copy: (_a, src, dst) => {
-        calls.push(['copy', src.virtual, dst.virtual])
-        return Promise.resolve()
-      },
-      unlink: (_a, path) => {
-        calls.push(['unlink', path.virtual])
-        return Promise.resolve()
-      },
-    }
-  }
 
   it('admits slots and leaves stat alone', async () => {
     const calls: string[][] = []
@@ -1119,5 +1044,78 @@ describe('directory EOF', () => {
       expect(await drain(ops.readStream(accessor, path))).toEqual([new Uint8Array()])
       expect(await ops.readRange?.(accessor, path, undefined, 0, null)).toEqual(new Uint8Array())
     }
+  })
+})
+
+it.each([
+  [postgresHead.BUILDER, 'public/tables/books/rows.jsonl', {}],
+  [postgresTail.BUILDER, 'public/tables/books/rows.jsonl', {}],
+  [postgresWc.BUILDER, 'public/tables/books/rows.jsonl', { lines: true }],
+  [mongodbTail.BUILDER, 'db/collections/books/documents.jsonl', {}],
+  [mongodbTail.BUILDER, 'db/collections/books/documents.jsonl', { follow: true }],
+  [mongodbWc.BUILDER, 'db/collections/books/documents.jsonl', { lines: true }],
+  [airtableHead.BUILDER, 'bases/base/table/records.jsonl', {}],
+] as const)(
+  'native %s admits before touching the accessor (%s, %s)',
+  async (builder, relative, flags) => {
+    const path = new PathSpec({
+      virtual: '/data/' + relative,
+      directory: '/data/',
+      vfsPath: relative,
+      resolved: true,
+    })
+    const policy = new SealedRead(path.virtual)
+    try {
+      const result = await runWithOpPolicies(new Policies([policy]), async () =>
+        builder.fn(probeOps([]) as never, accessor, [path], [], {
+          flags: flags as Record<string, FlagValue>,
+          stdin: null,
+          filetypeFns: null,
+          cwd: '/',
+        }),
+      )
+      // Lazy readers retain the policy after the command binding ends.
+      if (result !== null) {
+        expect(await materialize(result[0])).toEqual(new Uint8Array())
+        expect(result[1].exitCode).toBe(1)
+        expect(new TextDecoder().decode(await materialize(result[1].stderr))).toContain(
+          'Permission denied',
+        )
+      }
+    } catch (error) {
+      expect(error).toMatchObject(SEALED)
+    }
+    expect(policy.asked).toEqual([['read_bytes', path.virtual, false]])
+  },
+)
+
+it.each([false, true])('prepared search checks inputs and results (batch=%s)', async (batch) => {
+  const calls: number[] = []
+  const hidden = PathSpec.fromStrPath('/data/secret')
+  const shown = PathSpec.fromStrPath('/data/public')
+  const search = (): Promise<SearchResult[]> => {
+    calls.push(1)
+    return Promise.resolve([
+      [hidden, 'hidden\nbody'],
+      [shown, 'visible'],
+    ])
+  }
+  const ops = withCommandGuards({ ...capabilityOps(), search: { search, searchMany: search } })
+  const session = new SessionState({
+    sessionId: 'reader',
+    visibility: { paths: { paths: ['/data/secret'] } },
+  })
+  await runWithSession(session, async () => {
+    const scope = PathSpec.fromStrPath('/data')
+    const result = batch
+      ? await ops.search?.searchMany?.(accessor, [scope], { query: 'q' })
+      : await ops.search?.search(accessor, scope, { query: 'q' })
+    expect(result).toEqual([[shown, 'visible']])
+    await expect(
+      batch
+        ? ops.search?.searchMany?.(accessor, [scope, hidden], { query: 'q' })
+        : ops.search?.search(accessor, hidden, { query: 'q' }),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(calls).toEqual([1])
   })
 })

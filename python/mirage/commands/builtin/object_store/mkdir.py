@@ -12,18 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
-from typing import Any
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic_bind.adapter import CommandIO, Operation
+from mirage.commands.builtin.generic_bind.adapter import (
+    Builder,
+    CommandIO,
+    Operation,
+)
 from mirage.commands.builtin.generic_bind.builders.mkdir import (
     created_lines,
     created_names,
     make_directory,
 )
 from mirage.commands.builtin.utils.slash_links import mkdir_link_refusal
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import missing_operand_error
@@ -31,60 +33,47 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def make_mkdir(vfs: str, io: CommandIO) -> Callable[..., Any]:
-    """Build the implicit-parents mkdir override for one keyed store.
-
-    Args:
-        vfs (str): VFS name the command registers under.
-        io (CommandIO): the backend's op table; must wire mkdir.
-    """
-    mkdir_impl = io.require(Operation.MKDIR)
-    resolve_glob = io.resolve_glob
-
-    async def mkdir(
-        accessor: Accessor,
-        paths: list[PathSpec],
-        texts: list[str],
-        opts: CommandOpts,
-    ) -> tuple[ByteSource | None, IOResult]:
-        fl = FlagView(opts.flags, spec=SPECS["mkdir"])
-        parents = fl.as_bool("parents")
-        verbose = fl.as_bool("verbose")
-        if not paths:
-            raise missing_operand_error("mkdir", None)
-        paths = await resolve_glob(accessor, paths, opts.index)
-        lines: list[str] = []
-        errors: list[str] = []
-        writes: dict[str, ByteSource] = {}
-        links = opts.ns.links if opts.ns is not None else None
-        for path in paths:
-            # A symlink occupying the name is EEXIST; the shared helper
-            # keeps this identical to the generic builder's answer.
-            taken, refusal = await mkdir_link_refusal(
-                path, links, parents=parents
-            )
-            if taken:
-                if refusal is not None:
-                    errors.append(refusal)
-                continue
-            names = (
-                await created_names(path, parents, links) if verbose else []
-            )
-            failed = await make_directory(
-                mkdir_impl, accessor, path, parents, links
-            )
-            if failed is not None:
-                errors.append(failed)
-                continue
-            writes[path.mount_path] = b""
-            lines.extend(created_lines(names))
-        output = ("\n".join(lines) + "\n").encode() if lines else None
-        stderr = ("\n".join(errors) + "\n").encode() if errors else None
-        return output, IOResult(
-            writes=writes, stderr=stderr, exit_code=1 if errors else 0
+async def mkdir(
+    ops: CommandIO,
+    accessor: Accessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
+) -> tuple[ByteSource | None, IOResult]:
+    mkdir_impl = ops.require(Operation.MKDIR)
+    resolve_glob = ops.resolve_glob
+    fl = FlagView(opts.flags, spec=SPECS["mkdir"])
+    parents = fl.as_bool("parents")
+    verbose = fl.as_bool("verbose")
+    if not paths:
+        raise missing_operand_error("mkdir", None)
+    paths = await resolve_glob(accessor, paths, opts.index)
+    lines: list[str] = []
+    errors: list[str] = []
+    writes: dict[str, ByteSource] = {}
+    links = opts.ns.links if opts.ns is not None else None
+    for path in paths:
+        # A symlink occupying the name is EEXIST; the shared helper
+        # keeps this identical to the generic builder's answer.
+        taken, refusal = await mkdir_link_refusal(path, links, parents=parents)
+        if taken:
+            if refusal is not None:
+                errors.append(refusal)
+            continue
+        names = await created_names(path, parents, links) if verbose else []
+        failed = await make_directory(
+            mkdir_impl, accessor, path, parents, links
         )
+        if failed is not None:
+            errors.append(failed)
+            continue
+        writes[path.mount_path] = b""
+        lines.extend(created_lines(names))
+    output = ("\n".join(lines) + "\n").encode() if lines else None
+    stderr = ("\n".join(errors) + "\n").encode() if errors else None
+    return output, IOResult(
+        writes=writes, stderr=stderr, exit_code=1 if errors else 0
+    )
 
-    wrapped: Callable[..., Any] = command(
-        "mkdir", vfs=vfs, spec=SPECS["mkdir"], write=True, path_guarded=True
-    )(mkdir)
-    return wrapped
+
+BUILDER = Builder("mkdir", mkdir, write=True)

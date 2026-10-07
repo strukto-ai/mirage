@@ -177,7 +177,7 @@ async function duHasContent(
     // accessor, which knows nothing of hides, so counting its raw answer
     // would confirm a walled-off subtree's parent. Entries are lifted onto
     // virtual paths first, since that is the space a hide is written in.
-    return toVirtual(entries, path).some(([leaf]) => pathVisible(vis, leaf))
+    return toVirtual(entries, path).some(([leaf]) => pathVisible(vis, PathSpec.fromStrPath(leaf)))
   } catch {
     // This runs only after stat already failed, to tell an implicit
     // directory from an absent path. Backends raise their own error types
@@ -518,7 +518,7 @@ async function duOne(
   const dirs = (directories?.() ?? []).filter(
     (d) =>
       norm(d).startsWith(under) &&
-      pathVisible(vis, d) &&
+      pathVisible(vis, PathSpec.fromStrPath(d)) &&
       !roots.some((r) => norm(d) === r || norm(d).startsWith(r + '/')),
   )
   const walked = (directories?.() ?? []).some((d) => norm(d) === rootKey)
@@ -537,7 +537,7 @@ async function duOne(
   }
 
   let entries = toVirtual(raw, path).concat(leaves)
-  const visible = entries.filter(([leaf]) => pathVisible(vis, leaf))
+  const visible = entries.filter(([leaf]) => pathVisible(vis, PathSpec.fromStrPath(leaf)))
   if (visible.length !== entries.length) {
     // Same honesty rule as shadowed leaves: the total is the sum of
     // what the session may see, never the backend's own number.

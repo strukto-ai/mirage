@@ -187,7 +187,7 @@ export interface NamespaceView {
   // The running session's hides and shows; absent when unrestricted.
   visibility?: Visibility
   // Whether anything at or under a path is judged; a native walk yields.
-  scoped?: (virtual: string) => boolean
+  scoped?: (path: PathSpec) => boolean
 }
 
 /**

@@ -19,7 +19,10 @@ import { CLISpec, type CLIInvocation, type CLIVerbFn } from '../../../commands/c
 import { PartialOutputError } from '../../../commands/errors.ts'
 import { Operand, Option, UsageStyle } from '../../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { Limit } from '../../../types.ts'
+import { Limit, MountMode, PathSpec } from '../../../types.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { getTestParser } from '../../fixtures/workspace_fixture.ts'
+import { Workspace } from '../../workspace/workspace.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import { ScriptSource } from '../../../runtime/types.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
@@ -31,6 +34,56 @@ import { dropsMountCaches, handleCli } from './cli.ts'
 
 const calls: CLIInvocation[] = []
 const dec = new TextDecoder()
+
+class CachedRAM extends RAMVFS {
+  override readonly cachesReads: boolean = true
+}
+
+describe.each([false, true])('CLI discovered paths with warm cache %s', (warm) => {
+  describe.each(['dispatch', 'facade'])('through %s', (door) => {
+    it.each(['/data/secret', '/data/link'])('checks the command gate for %s', async (virtual) => {
+      const ws = new Workspace(
+        { '/data': new CachedRAM() },
+        { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      )
+      const spec = new CLISpec({
+        name: 'peek',
+        fn: async (inv) => {
+          const path = PathSpec.fromStrPath(virtual)
+          if (door === 'facade') return [await ws.vfs.read(path.virtual), new IOResult()]
+          const dispatch = inv.doors?.dispatch
+          if (dispatch === undefined) throw new Error('missing dispatch')
+          const [data, io] = await dispatch('read', path)
+          if (!(data instanceof Uint8Array)) throw new Error('expected bytes')
+          return [data, io]
+        },
+      })
+      ws.registerCli('peek', spec)
+      ws.registerCli('openpeek', spec)
+      try {
+        await ws.shell('echo secret > /data/secret; ln -s /data/secret /data/link')
+        if (warm) {
+          expect((await ws.shell('cat /data/secret > /dev/null')).exitCode).toBe(0)
+          expect(await ws.cache.exists('/data/secret')).toBe(true)
+        }
+        ws.createSession('agent', {
+          profile: {
+            commands: { deny: [{ reason: 'sealed', commands: ['peek'], paths: ['/data/secret'] }] },
+          },
+        })
+        const denied = await ws.shell('peek', { sessionId: 'agent' })
+        expect(denied.exitCode).not.toBe(0)
+        expect(dec.decode(denied.stdout)).toBe('')
+        expect(denied.refusal?.reason).toBe('sealed')
+        const allowed = await ws.shell('openpeek', { sessionId: 'agent' })
+        expect(allowed.exitCode).toBe(0)
+        expect(dec.decode(allowed.stdout)).toBe('secret\n')
+      } finally {
+        await ws.close()
+      }
+    })
+  })
+})
 
 function send(inv: CLIInvocation): [Uint8Array, IOResult] {
   calls.push(inv)

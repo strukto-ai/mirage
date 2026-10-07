@@ -45,6 +45,8 @@ import { walkErrorLine } from '../../rg_scan.ts'
 import { LinkDoor } from '../../utils/links.ts'
 import { fsErrorLine } from '../../../../errors/render.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { OpBoundary } from '../../../../ops/boundary.ts'
+import { isFsError } from '../../../../errors/fs.ts'
 
 function admitGrep(flags: FlagSet, path: PathSpec, stat: FileStat): boolean {
   if (stat.type === FileType.DIRECTORY) return dirAdmitted(path.virtual, flags.filters)
@@ -177,6 +179,14 @@ export async function runSearch(
   const results: OperandRun[] = []
   for await (const scope of scopes()) {
     signal?.throwIfAborted()
+    if (planned && !rg.listFiles && scope.error === undefined && scope.diagnostic === undefined) {
+      try {
+        OpBoundary.check('read', scope.path)
+      } catch (error) {
+        if (!isFsError(error)) throw error
+        scope.error = error as Error
+      }
+    }
     if (scope.error !== undefined || scope.diagnostic !== undefined) {
       const message =
         scope.diagnostic ??

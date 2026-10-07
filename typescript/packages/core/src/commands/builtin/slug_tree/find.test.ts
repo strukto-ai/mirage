@@ -47,7 +47,7 @@ import { hiddenUnder } from '../../../utils/hidden.ts'
 
 // The command's view as the workspace builds it for a session.
 function viewOf(vis: Visibility): NamespaceView {
-  return { visibility: vis, scoped: (virtual: string) => hiddenUnder(vis, virtual) }
+  return { visibility: vis, scoped: (path: PathSpec) => hiddenUnder(vis, path) }
 }
 
 function doc(id: string, name: string, slug: string): Record<string, unknown> {

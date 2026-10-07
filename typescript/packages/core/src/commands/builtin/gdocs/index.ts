@@ -24,7 +24,7 @@ import { GDOCS_RM } from './rm.ts'
 // the filesystem surface.
 export const GDOCS_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GDocsAccessor>(VFSName.GDOCS, IO, {
-    overrides: new Set(['rm']),
+    overrides: { rm: null },
   }),
   ...GDOCS_RM,
 ]

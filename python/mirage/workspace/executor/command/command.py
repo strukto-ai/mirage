@@ -31,9 +31,6 @@ from mirage.commands.builtin.generic.program import (
     prepare_program,
     program_files,
 )
-from mirage.commands.builtin.generic_bind.adapter import (
-    with_dispatch_rule_guard,
-)
 from mirage.commands.builtin.utils.identity import identity_from
 from mirage.commands.builtin.utils.limit import maybe_with_timeout
 from mirage.commands.errors import FindParseError
@@ -315,10 +312,6 @@ async def handle_command(
                 else None
             ),
         )
-
-    # Every op the command issues from here carries its gate to the door.
-    if dispatch is not None:
-        dispatch = with_dispatch_rule_guard(dispatch)
 
     if cmd_name in CWD_DEFAULT_RAW:
         operand = default_cwd_operand(

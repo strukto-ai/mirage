@@ -45,6 +45,7 @@ from mirage.context import (
     require_paths_writable,
     reset_mount_gate,
     reset_walk_probe,
+    session_visibility,
     set_mount_gate,
     set_walk_probe,
     strongest_mode_under,
@@ -75,6 +76,7 @@ from mirage.types import (
     WalkProbe,
 )
 from mirage.utils.context_scope import ContextScope
+from mirage.utils.hidden import hidden_under
 from mirage.utils.ids import uuid7
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.base import BaseVFS
@@ -857,6 +859,23 @@ class MountEntry:
                         flags.get("version") is True
                         and has_injected_version(cmd.spec)
                     )
+                    # Opaque service replies have no paths to filter. Only
+                    # commands enforcing visibility per path may run in a
+                    # restricted view; refuse before their raw client runs.
+                    if (
+                        not cmd.path_guarded
+                        and not info_only
+                        and hidden_under(
+                            session_visibility(),
+                            PathSpec.from_str_path(self.prefix),
+                        )
+                    ):
+                        return None, IOResult(
+                            exit_code=1,
+                            stderr=encode_text(
+                                f"{cmd_name}: command requires path visibility checks\n"
+                            ),
+                        )
                     # A command whose I/O runs under the path guards is
                     # refused where it writes, because only the write
                     # knows whether a line writes: `gzip -c`, `tar -t` and

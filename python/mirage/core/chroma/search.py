@@ -4,7 +4,6 @@ from mirage.accessor.chroma import ChromaAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.chroma.tree import CHROMA_TREE
 from mirage.core.slug_tree.search import (
-    hit_lines,
     search_scope,
     target_entries,
     validate_query,
@@ -13,7 +12,7 @@ from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.score import score_from_distance
 from mirage.vfs.search import int_option, validate_options
-from mirage.vfs.types import SearchQuery
+from mirage.vfs.types import SearchQuery, SearchResult
 
 
 async def search_segments(
@@ -23,7 +22,7 @@ async def search_segments(
     index: IndexCacheStore = NULL_INDEX,
     top_k: int = 10,
     mount_prefix: str = "",
-) -> bytes:
+) -> list[SearchResult]:
     validate_query(query, top_k)
     if not mount_prefix and paths:
         mount_prefix = mount_prefix_of(paths[0].virtual, paths[0].vfs_path)
@@ -38,27 +37,27 @@ async def search_segments(
             (await target_entries(CHROMA_TREE, accessor, paths, index)).keys()
         )
         if not scoped_slugs:
-            return b""
+            return []
         kwargs["where"] = {
             accessor.config.slug_field: {"$in": sorted(scoped_slugs)}
         }
     collection = await accessor.get_collection()
     response = await collection.query(**kwargs)
-    return query_result_to_bytes(
+    return query_results(
         response, accessor.config.slug_field, mount_prefix, scoped_slugs
     )
 
 
-def query_result_to_bytes(
+def query_results(
     response: dict[str, Any],
     slug_field: str,
     mount_prefix: str,
     scoped_slugs: set[str] | None = None,
-) -> bytes:
+) -> list[SearchResult]:
     documents = first_result_list(response.get("documents"))
     metadatas = first_result_list(response.get("metadatas"))
     distances = first_result_list(response.get("distances"))
-    contents: list[str] = []
+    contents: list[SearchResult] = []
     for index, document in enumerate(documents):
         metadata = metadatas[index] if index < len(metadatas) else {}
         if not isinstance(metadata, dict):
@@ -77,10 +76,13 @@ def query_result_to_bytes(
         if prefix:
             path = prefix + path
         content = "" if document is None else str(document)
-        contents.append(f"{path}:{score}\n{content}")
-    if not contents:
-        return b""
-    return ("\n".join(contents) + "\n").encode()
+        contents.append(
+            (
+                PathSpec.from_str_path(path, slug_value),
+                f"{path}:{score}\n{content}",
+            )
+        )
+    return contents
 
 
 def first_result_list(value: Any) -> list[Any]:
@@ -96,19 +98,17 @@ async def search_many(
     paths: list[PathSpec],
     query: SearchQuery,
     index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
+) -> list[SearchResult]:
     validate_options(query, {"top_k"})
     top_k = int_option(query, "top_k", 10)
     targets, prefix = await search_scope(CHROMA_TREE, accessor, paths, index)
-    return hit_lines(
-        await search_segments(
-            accessor,
-            query.query,
-            targets,
-            index,
-            top_k=top_k,
-            mount_prefix=prefix,
-        )
+    return await search_segments(
+        accessor,
+        query.query,
+        targets,
+        index,
+        top_k=top_k,
+        mount_prefix=prefix,
     )
 
 
@@ -117,5 +117,5 @@ async def search_resource(
     path: PathSpec,
     query: SearchQuery,
     index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
+) -> list[SearchResult]:
     return await search_many(accessor, [path], query, index)

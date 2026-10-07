@@ -30,7 +30,8 @@ from mirage.core.postgres.client import (
 from mirage.core.postgres.read import read_rows, row_line
 from mirage.core.postgres.semantic import build_entity_semantic_json
 from mirage.errors.fs import efbig
-from mirage.vfs.types import SearchQuery
+from mirage.types import PathSpec
+from mirage.vfs.types import SearchQuery, SearchResult
 
 # Column types whose `::text` is the value exactly as a rows.jsonl line
 # spells it, so a LIKE over the cast finds every row whose line holds
@@ -192,7 +193,7 @@ async def search_entity_metadata(
     kind: str,
     entity: str,
     query: SearchQuery,
-) -> list[str]:
+) -> list[SearchResult]:
     """Grep an entity's rendered metadata files.
 
     The LIKE push-down only ever sees row values, so schema.json and
@@ -224,18 +225,25 @@ async def search_entity_metadata(
             ),
         ),
     )
-    lines: list[str] = []
+    lines: list[SearchResult] = []
     for name, doc in docs:
         rendered = orjson.dumps(doc, option=orjson.OPT_INDENT_2).decode()
         for line in rendered.splitlines():
             if matcher(line):
-                lines.append(f"{schema}/{kind}/{entity}/{name}:{line}")
+                lines.append(
+                    (
+                        PathSpec.from_str_path(
+                            f"/{schema}/{kind}/{entity}/{name}"
+                        ),
+                        f"{schema}/{kind}/{entity}/{name}:{line}",
+                    )
+                )
     return lines
 
 
 async def search_kind_metadata(
     accessor: PostgresAccessor, schema: str, kind: str, query: SearchQuery
-) -> list[str]:
+) -> list[SearchResult]:
     """Grep every entity's metadata files under one kind directory.
 
     Args:
@@ -245,7 +253,7 @@ async def search_kind_metadata(
         query (SearchQuery): the qualified request.
     """
     names = await _entity_names(accessor, schema, kind)
-    lines: list[str] = []
+    lines: list[SearchResult] = []
     for n in names:
         lines.extend(
             await search_entity_metadata(accessor, schema, kind, n, query)
@@ -255,7 +263,7 @@ async def search_kind_metadata(
 
 async def search_schema_metadata(
     accessor: PostgresAccessor, schema: str, query: SearchQuery
-) -> list[str]:
+) -> list[SearchResult]:
     """Grep metadata files across both kinds of one schema.
 
     Args:
@@ -263,7 +271,7 @@ async def search_schema_metadata(
         schema (str): the owning schema.
         query (SearchQuery): the qualified request.
     """
-    lines: list[str] = []
+    lines: list[SearchResult] = []
     for kind in ("tables", "views"):
         lines.extend(await search_kind_metadata(accessor, schema, kind, query))
     return lines
@@ -271,14 +279,14 @@ async def search_schema_metadata(
 
 async def search_database_metadata(
     accessor: PostgresAccessor, query: SearchQuery
-) -> list[str]:
+) -> list[SearchResult]:
     """Grep metadata files across every visible schema.
 
     Args:
         accessor (PostgresAccessor): backend handle.
         query (SearchQuery): the qualified request.
     """
-    lines: list[str] = []
+    lines: list[SearchResult] = []
     for s in await _schemas(accessor):
         lines.extend(await search_schema_metadata(accessor, s, query))
     return lines
@@ -355,9 +363,12 @@ async def search_database(
     return out
 
 
-def format_grep_results(results: list[EntityLines]) -> list[str]:
+def format_grep_results(results: list[EntityLines]) -> list[SearchResult]:
     return [
-        f"{schema}/{kind}/{entity}/rows.jsonl:{line}"
+        (
+            PathSpec.from_str_path(f"/{schema}/{kind}/{entity}/rows.jsonl"),
+            f"{schema}/{kind}/{entity}/rows.jsonl:{line}",
+        )
         for schema, kind, entity, lines in results
         for line in lines
     ]
@@ -369,7 +380,7 @@ def format_grep_results(results: list[EntityLines]) -> list[str]:
 # rather than in per-entity readdir order.
 async def _root_searcher(
     accessor: PostgresAccessor, match: ScopeMatch, query: SearchQuery
-) -> list[str]:
+) -> list[SearchResult]:
     return format_grep_results(
         await search_database(accessor, query)
     ) + await search_database_metadata(accessor, query)
@@ -377,7 +388,7 @@ async def _root_searcher(
 
 async def _schema_searcher(
     accessor: PostgresAccessor, match: ScopeMatch, query: SearchQuery
-) -> list[str]:
+) -> list[SearchResult]:
     schema = match.slots["schema"]
     return format_grep_results(
         await search_schema(accessor, schema, query)
@@ -386,7 +397,7 @@ async def _schema_searcher(
 
 async def _kind_searcher(
     accessor: PostgresAccessor, match: ScopeMatch, query: SearchQuery
-) -> list[str]:
+) -> list[SearchResult]:
     schema = match.slots["schema"]
     kind = match.slots["kind"]
     return format_grep_results(
@@ -399,7 +410,7 @@ async def _entity_lines(
     match: ScopeMatch,
     query: SearchQuery,
     metadata: bool,
-) -> list[str]:
+) -> list[SearchResult]:
     schema = match.slots["schema"]
     kind = match.slots["kind"]
     entity = match.slots["entity"]

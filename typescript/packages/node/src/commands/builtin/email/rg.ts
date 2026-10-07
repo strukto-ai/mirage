@@ -19,28 +19,32 @@ import {
   rgMatcher,
   rgSyntax,
 } from '@struktoai/mirage-core/commands/builtin/generic/rg'
-import { resolveGlobOf, scanIo } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import type {
+  Builder,
+  CommandIO,
+} from '@struktoai/mirage-core/commands/builtin/generic_bind/adapter'
+import { resolveGlobOf } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import { patternArg } from '@struktoai/mirage-core/commands/builtin/grep_pattern'
 import { pushdownOperand, searchQuery } from '@struktoai/mirage-core/commands/builtin/grep_pushdown'
-import { grepLines } from '@struktoai/mirage-core/commands/builtin/grep_scan'
 import type { GrepLinesOptions } from '@struktoai/mirage-core/commands/builtin/grep_scan'
-import { command } from '@struktoai/mirage-core/commands/config'
+import { grepLines } from '@struktoai/mirage-core/commands/builtin/grep_scan'
 import type { CommandFnResult, CommandOpts } from '@struktoai/mirage-core/commands/config'
 import { FlagView, specOf } from '@struktoai/mirage-core/commands/spec/index'
-import { IOResult } from '@struktoai/mirage-core/io/types'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { VFSName } from '@struktoai/mirage-core/types'
-import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
+import { IOResult } from '@struktoai/mirage-core/io/types'
+import { pathsScoped } from '@struktoai/mirage-core/ops/namespace_view'
+import type { FileStat } from '@struktoai/mirage-core/types'
+import { PathSpec } from '@struktoai/mirage-core/types'
 import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { detectScope, NATIVE_KINDS } from '../../../core/email/scope.ts'
 import { searchAndFormat } from '../../../core/email/search.ts'
-import { IO } from './io.ts'
-import { RG_SEARCH_HONORED, messageLines } from './grep.ts'
+import { messageLines, RG_SEARCH_HONORED } from './grep.ts'
 
 const ENC = new TextEncoder()
 
 async function rg(
+  ops: CommandIO<EmailAccessor>,
   accessor: EmailAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -62,7 +66,7 @@ async function rg(
 
   // Same gate as email grep, from the same table, and it reads the scope the
   // same way: a line the push-down cannot answer takes the generic scan.
-  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
+  const scoped = pathsScoped(opts.ns, [PathSpec.fromStrPath((opts.mountPrefix ?? '') || '/')])
   const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, RG_SEARCH_HONORED)
   // The server is asked for the literal every match must contain, never
   // the regex's own spelling: IMAP TEXT is a substring search.
@@ -96,18 +100,17 @@ async function rg(
   }
 
   const resolved =
-    paths.length > 0 ? await resolveGlobOf(scan)(accessor, paths, opts.index ?? undefined) : []
-  const stat = (p: PathSpec): Promise<FileStat> => scan.stat(accessor, p, opts.index ?? undefined)
+    paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, opts.index ?? undefined) : []
+  const stat = (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, opts.index ?? undefined)
   const readdir = (p: PathSpec): Promise<string[]> =>
-    scan.readdir(accessor, p, opts.index ?? undefined)
+    ops.readdir(accessor, p, opts.index ?? undefined)
   return rgGeneric(resolved, texts, opts, stat, readdir, (p) =>
-    scan.readStream(accessor, p, opts.index ?? undefined),
+    ops.readStream(accessor, p, opts.index ?? undefined),
   )
 }
 
-export const EMAIL_RG = command({
+export const BUILDER: Builder<EmailAccessor> = {
   name: 'rg',
-  vfs: VFSName.EMAIL,
-  spec: specOf('rg'),
+  read: true,
   fn: rg,
-})
+}

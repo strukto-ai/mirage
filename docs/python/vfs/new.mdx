@@ -107,8 +107,11 @@ operation, and mount mode still controls whether a supported mutation may run. S
 
 `VFSAdapter.to_command_io()` assembles the single `CommandIO` used by commands
 and filesystem ops. Builtins compile `VFSAdapter` into this table; advanced integrations can also
-supply `CommandIO` directly. `overrides=` suppresses a generic command you replace, and
-`commands=[...]` adds bespoke `@command` verbs.
+supply `CommandIO` directly. `overrides={"find": builder}` replaces a generic
+command with an existing `Builder` definition. Its callback receives
+`(ops, accessor, paths, texts, opts)`, with namespace handling, path guards,
+policy and caching already applied to `ops`. A `None` value suppresses that
+command. `commands=[...]` adds bespoke `@command` verbs.
 
 VFS/FUSE ops are derived from the same table automatically (`make_generic_ops` under the hood): read/readdir/stat, a `glob` walk over `readdir`, plus whatever mutations the table carries. Pass `ops=[...]` only for irregular handlers (they shadow same-named derived ops), or `auto_ops=False` to opt out. A verb the op table does not carry is not served: the mount answers `Operation not supported` for it, so a backend can be partial.
 
@@ -147,7 +150,7 @@ Search is a separate optional capability:
 ```python
 from mirage import DuOps, SearchOps, SearchQuery
 
-async def search(accessor, path, query: SearchQuery, index=None) -> list[str] | None:
+async def search(accessor, path, query: SearchQuery, index=None) -> list[tuple[PathSpec, str]] | None:
     # Interpret query.query and validate the options your resource supports.
     ...
 
@@ -160,6 +163,12 @@ adapter = VFSAdapter(
 `SearchQuery(query="recent deployments", options={"limit": 20})` carries plain
 search text and backend-specific arguments. The options can hold filters, limits,
 or other JSON values. `SearchOps.meta` is optional static capability metadata.
+Each result is a pair of its canonical `PathSpec` and one complete text record.
+Keep multiline bodies in that same record. The shared command I/O and resource
+search helper check input visibility before querying and filter returned records
+by path before exposing their text. Bare strings are refused because their
+visibility cannot be established.
+
 Neither regex support nor grep compatibility is required. Omitting `search`
 entirely also works: MIRAGE implements grep and rg by reading files.
 
@@ -342,12 +351,14 @@ Write a dedicated op module only for an irregular handler with no generic equiva
 
 ## 4. Commands
 
-Build the standard set with `make_generic_commands("<name>", IO, overrides={...})`; the generic command owns flag interpretation, so a backend wrapper is wiring only. `overrides` names the builders a bespoke command replaces, and a name no builder has is refused.
+Build the standard set with `make_generic_commands("<name>", IO, overrides={...})`; the generic command owns flag interpretation, so a backend wrapper is wiring only. `overrides` maps command names to replacement `Builder` definitions (or `None` to omit one). Both default and replacement builders receive the same prepared IO. A name no builder has is refused.
+
+Visibility is evaluated on `PathSpec` using the current session/profile view. The dispatcher and prepared command IO check inputs before backend or cache access; listings and other path-bearing results apply the same predicate before rendering. Custom CLIs inherit these checks through their VFS doors. Keep visibility decisions out of `PathSpec` and shared caches: the same path can be visible to one session and hidden from another.
 
 - Declare native text search in `VFSAdapter(search=SearchOps(...))`. The generic grep/rg builders consume it only when `search.meta["grep"]` opts in; semantic search does not opt in. The hierarchy kit supplies `make_search_op` for scope-based core functions; unsupported requests fall back to scanning. Existing wrappers may call `run_search(IO, name, ...)` when preserving a custom registration.
 - A verb (`trello card create`) declares its own `CommandSpec` with every id as a flag, reads flags through `FlagView(opts.flags, spec=SPEC)` (never `flags.get(...)`), registers `write=True` for a mutation, and calls `require_mount_writable()` before the client. Specs declared inline are dumped to `.cache/spec/python/vfs_commands/` and compared with TypeScript's, and a prompt that teaches the verbs is pinned against their specs (`tests/vfs/trello/test_prompt.py`).
 - Handlers take `(accessor, paths, texts, opts)`. Read `stdin`, `index`, `prefix`, and namespace facts from `opts`; do not add injected parameters or a second handler convention.
-- A handler that reads its `accessor` directly is trusted host code. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands.
+- Opaque mount commands are refused when the mount contains hidden paths. Only mark a handler `path_guarded`/`pathGuarded` when it enforces visibility and mount restrictions on every input and returned path. Prefer the shared builders and path-addressed search callbacks. Raw backend callbacks remain trusted host code.
 
 Export the final list as `COMMANDS` from `commands/builtin/<name>/__init__.py`.
 

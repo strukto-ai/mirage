@@ -80,7 +80,7 @@ def _match(path: str) -> ScopeMatch:
 
 async def _search(path: str, pattern: str, **flags) -> list[str]:
     match = _match(path)
-    return await SEARCHERS[match.kind](
+    results = await SEARCHERS[match.kind](
         _accessor(),
         match,
         SearchQuery(
@@ -90,6 +90,7 @@ async def _search(path: str, pattern: str, **flags) -> list[str]:
             },
         ),
     )
+    return [text for _, text in results]
 
 
 @pytest.mark.asyncio

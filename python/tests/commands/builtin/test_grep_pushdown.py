@@ -1,4 +1,5 @@
 import re
+from dataclasses import replace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -7,8 +8,10 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin import grep_pushdown
 from mirage.commands.builtin.constants import PatternType
 from mirage.commands.builtin.discord.grep import grep as discord_grep
+from mirage.commands.builtin.discord.io import IO as DISCORD_IO
 from mirage.commands.builtin.discord.rg import rg as discord_rg
 from mirage.commands.builtin.slack.grep import grep as slack_grep
+from mirage.commands.builtin.slack.io import IO as SLACK_IO
 from mirage.commands.builtin.slack.rg import rg as slack_rg
 from mirage.commands.builtin.types import RegexSyntax
 from mirage.commands.config import CommandOpts
@@ -498,8 +501,13 @@ async def test_an_empty_search_answer_is_final(
     spec = PathSpec(
         vfs_path=mount_key(virtual, prefix), virtual=virtual, directory=virtual
     )
-    with patch.dict(cmd.__wrapped__.__globals__, mocks):
+    with patch.dict(cmd.__globals__, mocks):
         out, io = await cmd(
+            replace(
+                DISCORD_IO if prefix == "/discord" else SLACK_IO,
+                read_bytes=mocks[read],
+                read_stream=mocks[read],
+            ),
             accessor,
             [spec],
             ["missing"],

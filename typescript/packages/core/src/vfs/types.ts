@@ -160,14 +160,17 @@ export interface SearchQuery {
   readonly options?: Readonly<Record<string, JsonValue>>
 }
 
-/** Text records in the backend's declared format. null declines; [] means no results.
+/** A canonical file path paired with one complete rendered record. */
+export type SearchResult = readonly [PathSpec, string]
+
+/** Path-addressed records. null declines; [] means no results.
  * Integrations such as grep require an explicit declaration in metadata. */
 export type SearchOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   query: SearchQuery,
   index?: IndexCacheStore,
-) => Promise<string[] | null>
+) => Promise<SearchResult[] | null>
 
 /** Optional batch callback preserves ranking and limits across scopes. */
 export type SearchManyOp<A extends Accessor = Accessor> = (
@@ -175,7 +178,7 @@ export type SearchManyOp<A extends Accessor = Accessor> = (
   paths: PathSpec[],
   query: SearchQuery,
   index?: IndexCacheStore,
-) => Promise<string[] | null>
+) => Promise<SearchResult[] | null>
 
 /** Optional resource search. Consumers validate their own metadata namespace. */
 /**

@@ -1,6 +1,6 @@
-import type * as BindModule from '../generic_bind/index.ts'
-import type * as SearchModule from '../../../core/gmail/search.ts'
 import { beforeEach, expect, it, vi } from 'vitest'
+import type * as SearchModule from '../../../core/gmail/search.ts'
+import type * as BindModule from '../generic_bind/index.ts'
 vi.mock('../../../core/gmail/search.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof SearchModule>()),
   searchMessages: vi.fn(),
@@ -12,13 +12,14 @@ vi.mock('../generic_bind/index.ts', async (importOriginal) => ({
 }))
 
 import { GmailAccessor } from '../../../accessor/gmail.ts'
-import type { TokenManager } from '../../../core/google/client.ts'
 import { searchMessages } from '../../../core/gmail/search.ts'
+import type { TokenManager } from '../../../core/google/client.ts'
 import { IOResult } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { grepGeneric } from '../generic/grep.ts'
-import { GMAIL_GREP } from './grep.ts'
+import { GMAIL_COMMANDS as GMAIL_GREP_COMMANDS } from './index.ts'
+const GMAIL_GREP = GMAIL_GREP_COMMANDS.filter((cmd) => cmd.name === 'grep')
 
 const search = vi.mocked(searchMessages)
 const generic = vi.mocked(grepGeneric)

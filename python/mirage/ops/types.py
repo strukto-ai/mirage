@@ -254,7 +254,7 @@ class NamespaceView:
     # The running session's hides and shows; None when unrestricted.
     visibility: Visibility | None = None
     # Whether anything at or under a path is judged; a native walk yields.
-    scoped: Callable[[str], bool] | None = None
+    scoped: Callable[[PathSpec], bool] | None = None
 
 
 # Run one facade op as a session: ``(session_id, run) -> result``, None

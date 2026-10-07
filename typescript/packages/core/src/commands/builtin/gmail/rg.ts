@@ -12,25 +12,28 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountPrefixOf } from '../../../utils/key_prefix.ts'
+import { checkSearch, searchScoped, visibleResults } from '../../../vfs/search.ts'
 import type { GmailAccessor } from '../../../accessor/gmail.ts'
-import { resolveGlobOf, scanIo } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
 import { detectScope, NATIVE_KINDS } from '../../../core/gmail/scope.ts'
 import { formatGrepResults, searchMessages } from '../../../core/gmail/search.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { type FileStat, type PathSpec, VFSName } from '../../../types.ts'
+import { pathsScoped } from '../../../ops/namespace_view.ts'
+import { PathSpec, type FileStat } from '../../../types.ts'
+import { mountPrefixOf } from '../../../utils/key_prefix.ts'
+import { type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/flag_view.ts'
+import { parseFlags, refuseMissingPattern, rgGeneric } from '../generic/rg.ts'
+import type { Builder, CommandIO } from '../generic_bind/adapter.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
 import { patternArg } from '../grep_pattern.ts'
 import { pushdownOperand } from '../grep_pushdown.ts'
 import { RG_SEARCH_HONORED, SEARCH_MAX_RESULTS } from './grep.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { parseFlags, refuseMissingPattern, rgGeneric } from '../generic/rg.ts'
-import { FlagView } from '../../spec/flag_view.ts'
 
 const ENC = new TextEncoder()
 
 async function rg(
+  ops: CommandIO<GmailAccessor>,
   accessor: GmailAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -42,13 +45,17 @@ async function rg(
   if (refused !== null) return refused
   // Same gate as gmail grep, from the same table: only a lone concrete
   // operand with no reshaping flag may be answered by the search API.
-  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
+  const scoped = searchScoped(opts.ns, [PathSpec.fromStrPath((opts.mountPrefix ?? '') || '/')])
   const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, RG_SEARCH_HONORED)
   if (operand !== null && pattern !== null && fl.asBool('word_regexp')) {
     const match = detectScope(operand)
-    if (NATIVE_KINDS.has(match.kind)) {
+    if (
+      NATIVE_KINDS.has(match.kind) &&
+      (match.kind !== 'root' || !pathsScoped(opts.ns, [operand]))
+    ) {
       const labelName = match.slots.label ?? null
       const filePrefix = mountPrefixOf(operand.virtual, operand.vfsPath)
+      const vis = checkSearch([operand])
       const rows = await searchMessages(
         accessor.tokenManager,
         pattern,
@@ -56,26 +63,30 @@ async function rg(
         match.slots.day ?? null,
         SEARCH_MAX_RESULTS,
       )
-      const lines = formatGrepResults(rows, labelName, filePrefix, pattern)
-      if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-      const out: ByteSource = ENC.encode(lines.join('\n') + '\n')
-      return [out, new IOResult()]
+      // A guessed path or a capped search cannot establish the visible result set.
+      const complete = rows.length < SEARCH_MAX_RESULTS && rows.every((row) => row.date !== '')
+      if (!pathsScoped(opts.ns, [operand]) || complete) {
+        const results = formatGrepResults(rows, labelName, filePrefix, pattern)
+        const lines = visibleResults(results, vis).map(([, text]) => text)
+        if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
+        const out: ByteSource = ENC.encode(lines.join('\n') + '\n')
+        return [out, new IOResult()]
+      }
     }
   }
 
   const resolved =
-    paths.length > 0 ? await resolveGlobOf(scan)(accessor, paths, opts.index ?? undefined) : []
-  const stat = (p: PathSpec): Promise<FileStat> => scan.stat(accessor, p, opts.index ?? undefined)
+    paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, opts.index ?? undefined) : []
+  const stat = (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, opts.index ?? undefined)
   const readdir = (p: PathSpec): Promise<string[]> =>
-    scan.readdir(accessor, p, opts.index ?? undefined)
+    ops.readdir(accessor, p, opts.index ?? undefined)
   return rgGeneric(resolved, texts, opts, stat, readdir, (p) =>
-    scan.readStream(accessor, p, opts.index ?? undefined),
+    ops.readStream(accessor, p, opts.index ?? undefined),
   )
 }
 
-export const GMAIL_RG = command({
+export const BUILDER: Builder<GmailAccessor> = {
   name: 'rg',
-  vfs: VFSName.GMAIL,
-  spec: specOf('rg'),
+  read: true,
   fn: rg,
-})
+}

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { hiddenUnder } from '../../utils/hidden.ts'
+import { sessionVisibility } from '../../context/session_context.ts'
 import { ContextScope } from '../../utils/context_scope.ts'
 import {
   captureSessionContext,
@@ -674,6 +676,23 @@ export class MountEntry {
                       const infoOnly =
                         flags.help === true ||
                         (flags.version === true && hasInjectedVersion(cmd.spec))
+                      // Opaque service replies have no paths to filter. Refuse
+                      // before the raw client runs in a restricted view.
+                      if (
+                        !cmd.pathGuarded &&
+                        !infoOnly &&
+                        hiddenUnder(sessionVisibility(), PathSpec.fromStrPath(this.prefix))
+                      ) {
+                        return [
+                          null,
+                          new IOResult({
+                            exitCode: 1,
+                            stderr: encodeText(
+                              `${cmdName}: command requires path visibility checks\n`,
+                            ),
+                          }),
+                        ]
+                      }
                       // A command whose I/O runs under the path guards is
                       // refused where it writes, because only the write knows
                       // whether a line writes: `gzip -c`, `tar -t` and

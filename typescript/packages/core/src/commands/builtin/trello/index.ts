@@ -17,6 +17,7 @@ import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { IO } from './io.ts'
+import { makeTrelloReadCommands } from './reads.ts'
 import { TRELLO_CARD_ASSIGN } from './trello_card_assign.ts'
 import { TRELLO_CARD_COMMENT_ADD } from './trello_card_comment_add.ts'
 import { TRELLO_CARD_COMMENT_UPDATE } from './trello_card_comment_update.ts'
@@ -25,14 +26,9 @@ import { TRELLO_CARD_LABEL_ADD } from './trello_card_label_add.ts'
 import { TRELLO_CARD_LABEL_REMOVE } from './trello_card_label_remove.ts'
 import { TRELLO_CARD_MOVE } from './trello_card_move.ts'
 import { TRELLO_CARD_UPDATE } from './trello_card_update.ts'
-import { makeTrelloReadCommands } from './reads.ts'
-
-const TRELLO_OVERRIDES = new Set<string>()
 
 export const TRELLO_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<TrelloAccessor>(VFSName.TRELLO, IO, {
-    overrides: TRELLO_OVERRIDES,
-  }),
+  ...makeGenericCommands<TrelloAccessor>(VFSName.TRELLO, IO),
   ...TRELLO_CARD_ASSIGN,
   ...TRELLO_CARD_COMMENT_ADD,
   ...TRELLO_CARD_COMMENT_UPDATE,

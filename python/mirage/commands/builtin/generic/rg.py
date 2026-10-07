@@ -10,10 +10,6 @@ from collections.abc import (
 from dataclasses import replace
 from functools import partial
 
-from mirage.cache.read_through import (
-    cache_aware_bound_bytes,
-    cache_aware_bound_stream,
-)
 from mirage.commands.builtin.grep_pattern import (
     NEVER_MATCH,
     resolve_pattern,
@@ -842,9 +838,6 @@ async def rg_generic(
     Returns:
         tuple[ByteSource | None, IOResult]: Output stream and exit metadata.
     """
-    read_bytes = cache_aware_bound_bytes(read_bytes)
-    if read_stream is not None:
-        read_stream = cache_aware_bound_stream(read_stream)
     # Every `-` operand reads stdin through one cursor, as grep's do. With
     # no operand typed, the implicit one below is stdin's sole reader, so a
     # search that stops early closes the input.

@@ -12,11 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.airtable.head import head
+from mirage.commands.builtin.airtable import head
 from mirage.commands.builtin.airtable.io import IO as _IO
 from mirage.commands.builtin.generic_bind import make_generic_commands
 
 COMMANDS = [
-    *make_generic_commands("airtable", _IO, overrides={"head"}),
-    head,
+    *make_generic_commands("airtable", _IO, overrides={"head": head.BUILDER}),
 ]

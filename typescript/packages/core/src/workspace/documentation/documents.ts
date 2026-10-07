@@ -97,7 +97,9 @@ export class Documents {
           // Bound where a later read lands: every link above the name is
           // followed, as the read's own walk follows it.
           const bound = this.followParent(virtual)
-          if (![virtual, bound].every((p) => pathVisible(session.visibility, p)))
+          if (
+            ![virtual, bound].every((p) => pathVisible(session.visibility, PathSpec.fromStrPath(p)))
+          )
             throw enoent(virtual)
           await this.lock.withLock('documents', () =>
             this.expose(kind, bound, sessionId === undefined ? null : session),

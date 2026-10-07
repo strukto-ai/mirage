@@ -20,6 +20,7 @@ from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.slack.grep import grep
+from mirage.commands.builtin.slack.io import IO as BACKEND_IO
 from mirage.commands.config import CommandOpts
 from mirage.core.slack.config import SlackConfig
 from mirage.core.time_range import TimeRange
@@ -62,6 +63,7 @@ async def test_grep_on_a_time_scoped_mount_skips_native_search():
         new=AsyncMock(return_value=b"{}"),
     ) as fake_search:
         _out, io = await grep(
+            BACKEND_IO,
             accessor,
             channel,
             ["hello"],

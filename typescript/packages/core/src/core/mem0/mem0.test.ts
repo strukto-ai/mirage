@@ -6,7 +6,7 @@ import { PathSpec } from '../../types.ts'
 import { read } from './read.ts'
 import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
-import { searchMemoriesRendered } from './search.ts'
+import { searchResults } from './search.ts'
 import { stat } from './stat.ts'
 
 afterEach(() => {
@@ -107,16 +107,11 @@ describe('Mem0 filesystem', () => {
     )
     const accessor = new Mem0Accessor({ apiKey: 'key', agentId: 'agent' })
 
-    const output = await searchMemoriesRendered(
-      accessor,
-      'remember',
-      '/memories',
-      5,
-      0.2,
-      new Set(['keep']),
-    )
+    const output = await searchResults(accessor, 'remember', '/memories', 5, 0.2, new Set(['keep']))
 
-    expect(new TextDecoder().decode(output)).toBe('/memories/keep.json:0.88\nremember me\n')
+    expect(output.map(([, text]) => text).join('\n') + (output.length ? '\n' : '')).toBe(
+      '/memories/keep.json:0.88\nremember me\n',
+    )
   })
 })
 

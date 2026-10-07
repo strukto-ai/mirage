@@ -13,22 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.commands.builtin.github.du import du
-from mirage.commands.builtin.github.find import find
-from mirage.commands.builtin.github.grep import grep
+from mirage.commands.builtin.github import du, find, grep, rg
 from mirage.commands.builtin.github.io import IO as _IO
-from mirage.commands.builtin.github.rg import rg
-
-_GITHUB_OVERRIDES = {"du", "find", "grep", "rg"}
 
 COMMANDS = [
     *make_generic_commands(
         "github",
         _IO,
-        overrides=_GITHUB_OVERRIDES,
+        overrides={
+            "grep": grep.BUILDER,
+            "rg": rg.BUILDER,
+            "du": du.BUILDER,
+            "find": find.BUILDER,
+        },
     ),
-    du,
-    find,
-    grep,
-    rg,
 ]

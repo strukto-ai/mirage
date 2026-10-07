@@ -14,85 +14,63 @@
 
 import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import { countDocuments } from '../../../core/mongodb/client.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
-import { streamAny } from '../../../core/mongodb/read.ts'
 import { documentsExist } from '../../../core/mongodb/readdir.ts'
 import { detectScope } from '../../../core/mongodb/scope.ts'
-import { type ByteSource, IOResult } from '../../../io/types.ts'
-import { type PathSpec, VFSName } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
+import { IOResult } from '../../../io/types.ts'
+import type { PathSpec } from '../../../types.ts'
+import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { formatCountRows, parseFlags, wcGeneric, type WcRow } from '../generic/wc.ts'
 import {
-  formatCountRows,
-  parseFlags as parseWcFlags,
-  wcGeneric,
-  type WcRow,
-} from '../generic/wc.ts'
+  type Builder,
+  type CommandIO,
+  guardOperation,
+  resolveGlobOf,
+} from '../generic_bind/adapter.ts'
 
-const ENC = new TextEncoder()
-
-const resolveGlob = resolveGlobOf(IO)
-
-function documentsScope(p: PathSpec): { database: string; name: string } | null {
-  const scope = detectScope(p)
-  if (scope.kind === 'documents') {
-    return { database: scope.slots.database ?? '', name: scope.slots.name ?? '' }
-  }
-  return null
+async function count(accessor: MongoDBAccessor, path: PathSpec): Promise<number | null> {
+  const scope = detectScope(path)
+  if (!(await documentsExist(accessor, scope, path.virtual))) return null
+  return countDocuments(accessor, scope.slots.database ?? '', scope.slots.name ?? '')
 }
 
-// The count answers 0 for a collection that does not exist, and for one the
-// mount's `databases` leaves out, so the fast path runs only when every
-// operand is one the mount can see; the generic reports the rest.
-async function allExist(accessor: MongoDBAccessor, paths: readonly PathSpec[]): Promise<boolean> {
-  for (const p of paths) {
-    if (!(await documentsExist(accessor, detectScope(p), p.virtual))) return false
-  }
-  return true
-}
-
-async function wc(
+export async function wc(
+  ops: CommandIO<MongoDBAccessor>,
   accessor: MongoDBAccessor,
   paths: PathSpec[],
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const parsed = parseWcFlags(opts.flags)
-  if (typeof parsed === 'string') {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
-  }
+  const parsed = parseFlags(opts.flags)
+  if (typeof parsed === 'string')
+    return [null, new IOResult({ exitCode: 1, stderr: new TextEncoder().encode(parsed) })]
   const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  // Line counts on collections come from a server-side countDocuments
-  // instead of reading every document. -l only (default prints words and
-  // bytes too, which needs the content).
+    paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, opts.index ?? undefined) : []
   const countOnly =
     parsed.lines && !parsed.words && !parsed.bytes && !parsed.chars && !parsed.maxLineLength
   if (
     countOnly &&
     resolved.length > 0 &&
-    resolved.every((p) => documentsScope(p) !== null) &&
-    (await allExist(accessor, resolved))
+    resolved.every((p) => detectScope(p).kind === 'documents')
   ) {
     const rows: WcRow[] = []
     let total = 0
+    const counted = guardOperation(count, 'readBytes')
     for (const p of resolved) {
-      const scope = documentsScope(p)
-      if (scope === null) continue
-      const count = await countDocuments(accessor, scope.database, scope.name)
-      rows.push({ values: [count], label: p.rawPath })
-      total += count
+      const n = await counted(accessor, p)
+      if (n === null) break
+      rows.push({ values: [n], label: p.rawPath })
+      total += n
     }
-    const out: ByteSource | null = formatCountRows(rows, [total], resolved.length, parsed.total)
-    return [out, new IOResult({ countedRuns: rows })]
+    if (rows.length === resolved.length) {
+      return [
+        formatCountRows(rows, [total], resolved.length, parsed.total),
+        new IOResult({ countedRuns: rows }),
+      ]
+    }
   }
-  return wcGeneric(resolved, texts, opts, (p) => streamAny(accessor, p, opts.index ?? undefined))
+  return wcGeneric(resolved, texts, opts, (p) =>
+    ops.readStream(accessor, p, opts.index ?? undefined),
+  )
 }
 
-export const MONGODB_WC = command({
-  name: 'wc',
-  vfs: VFSName.MONGODB,
-  spec: specOf('wc'),
-  fn: wc,
-})
+export const BUILDER: Builder<MongoDBAccessor> = { name: 'wc', fn: wc, read: true }

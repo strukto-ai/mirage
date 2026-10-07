@@ -25,7 +25,7 @@ from mirage.core.mongodb.scope import entity_kind
 from mirage.core.mongodb.stream import read_stream, render_doc
 from mirage.core.mongodb.types import KIND_TO_DIR, EntityKind
 from mirage.types import PathSpec
-from mirage.vfs.types import SearchQuery
+from mirage.vfs.types import SearchQuery, SearchResult
 
 # A directory's answer is grep -r's over the files under it, spelled
 # relative to the mount, in the order a walk visits them (sorted, so
@@ -38,8 +38,12 @@ from mirage.vfs.types import SearchQuery
 # and stopped at `default_search_limit` documents per collection.
 
 
-def _matched(rel: str, text: str, matcher: LineMatcher) -> list[str]:
-    return [f"{rel}:{line}" for line in text.splitlines() if matcher(line)]
+def _matched(rel: str, text: str, matcher: LineMatcher) -> list[SearchResult]:
+    return [
+        (PathSpec.from_str_path("/" + rel, rel), f"{rel}:{line}")
+        for line in text.splitlines()
+        if matcher(line)
+    ]
 
 
 async def search_entity(
@@ -48,10 +52,10 @@ async def search_entity(
     kind: EntityKind,
     name: str,
     matcher: LineMatcher,
-) -> list[str]:
+) -> list[SearchResult]:
     rel = f"{database}/{KIND_TO_DIR[kind]}/{name}"
     docs = f"{rel}/documents.jsonl"
-    lines: list[str] = []
+    lines: list[SearchResult] = []
     async for chunk in read_stream(
         accessor,
         PathSpec(virtual="/" + docs, directory="/" + rel, vfs_path=docs),
@@ -66,8 +70,8 @@ async def _kind_lines(
     database: str,
     kind: EntityKind,
     matcher: LineMatcher,
-) -> list[str]:
-    lines: list[str] = []
+) -> list[SearchResult]:
+    lines: list[SearchResult] = []
     for name in await list_collections(accessor.client, database, kind=kind):
         lines.extend(
             await search_entity(accessor, database, kind, name, matcher)
@@ -77,7 +81,7 @@ async def _kind_lines(
 
 async def search_database(
     accessor: MongoDBAccessor, database: str, matcher: LineMatcher
-) -> list[str]:
+) -> list[SearchResult]:
     payload = render_doc(await build_database_json(accessor, database))
     return (
         await _kind_lines(accessor, database, EntityKind.COLLECTION, matcher)
@@ -88,7 +92,7 @@ async def search_database(
 
 async def _entity_searcher(
     accessor: MongoDBAccessor, match: ScopeMatch, query: SearchQuery
-) -> list[str]:
+) -> list[SearchResult]:
     return await search_entity(
         accessor,
         match.slots["database"],
@@ -100,7 +104,7 @@ async def _entity_searcher(
 
 async def _database_searcher(
     accessor: MongoDBAccessor, match: ScopeMatch, query: SearchQuery
-) -> list[str]:
+) -> list[SearchResult]:
     return await search_database(
         accessor, match.slots["database"], query_matcher(query)
     )
@@ -108,9 +112,9 @@ async def _database_searcher(
 
 async def _root_searcher(
     accessor: MongoDBAccessor, match: ScopeMatch, query: SearchQuery
-) -> list[str]:
+) -> list[SearchResult]:
     matcher = query_matcher(query)
-    lines: list[str] = []
+    lines: list[SearchResult] = []
     for database in await list_databases(accessor.client, accessor.config):
         lines.extend(await search_database(accessor, database, matcher))
     return lines

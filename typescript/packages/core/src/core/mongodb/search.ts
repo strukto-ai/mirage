@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SearchResult } from '../../vfs/types.ts'
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { PathSpec } from '../../types.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
@@ -34,10 +35,12 @@ import { EntityKind, KIND_TO_DIR } from './types.ts'
 
 const DEC = new TextDecoder()
 
-function matched(rel: string, text: string, matcher: LineMatcher): string[] {
+function matched(rel: string, text: string, matcher: LineMatcher): SearchResult[] {
   const lines = text.split('\n')
   if (lines[lines.length - 1] === '') lines.pop()
-  return lines.filter((line) => matcher(line)).map((line) => `${rel}:${line}`)
+  return lines
+    .filter((line) => matcher(line))
+    .map((line) => [PathSpec.fromStrPath(`/${rel}`), `${rel}:${line}`])
 }
 
 async function entityLines(
@@ -46,10 +49,10 @@ async function entityLines(
   kind: EntityKind,
   name: string,
   matcher: LineMatcher,
-): Promise<string[]> {
+): Promise<SearchResult[]> {
   const rel = `${database}/${KIND_TO_DIR[kind]}/${name}`
   const docs = `${rel}/documents.jsonl`
-  const lines: string[] = []
+  const lines: SearchResult[] = []
   const path = new PathSpec({ virtual: `/${docs}`, directory: `/${rel}`, vfsPath: docs })
   for await (const chunk of readStream(accessor, path)) {
     lines.push(...matched(docs, DEC.decode(chunk), matcher))
@@ -70,8 +73,8 @@ async function kindLines(
   database: string,
   kind: EntityKind,
   matcher: LineMatcher,
-): Promise<string[]> {
-  const lines: string[] = []
+): Promise<SearchResult[]> {
+  const lines: SearchResult[] = []
   for (const name of await listCollections(accessor, database, kind)) {
     for (const line of await entityLines(accessor, database, kind, name, matcher)) {
       lines.push(line)
@@ -84,7 +87,7 @@ async function databaseLines(
   accessor: MongoDBAccessor,
   database: string,
   matcher: LineMatcher,
-): Promise<string[]> {
+): Promise<SearchResult[]> {
   const payload = stringifyDoc(
     (await buildDatabaseJson(accessor, database)) as unknown as Record<string, unknown>,
   )
@@ -109,7 +112,7 @@ const databaseSearcher: Searcher<MongoDBAccessor> = (accessor, match, query) =>
 
 const rootSearcher: Searcher<MongoDBAccessor> = async (accessor, _match, query) => {
   const matcher = queryMatcher(query)
-  const lines: string[] = []
+  const lines: SearchResult[] = []
   for (const database of await listDatabases(accessor)) {
     for (const line of await databaseLines(accessor, database, matcher)) {
       lines.push(line)

@@ -20,6 +20,7 @@ import pytest
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.postgres.grep import grep
+from mirage.commands.builtin.postgres.io import IO as BACKEND_IO
 from mirage.commands.builtin.postgres.rg import rg
 from mirage.commands.builtin.postgres.tail import tail
 from mirage.commands.config import CommandOpts
@@ -102,7 +103,11 @@ async def test_grep_glob_skips_pushdown_and_expands(accessor):
         patch.dict(GENERICS, {"grep": fake_generic}),
     ):
         _, io = await grep(
-            accessor, [_glob_path()], ["ada"], CommandOpts(index=NULL_INDEX)
+            BACKEND_IO,
+            accessor,
+            [_glob_path()],
+            ["ada"],
+            CommandOpts(index=NULL_INDEX),
         )
 
     assert io.exit_code == 0
@@ -145,6 +150,7 @@ async def test_grep_regex_pattern_skips_pushdown(accessor):
         patch.dict(GENERICS, {"grep": fake_generic}),
     ):
         await grep(
+            BACKEND_IO,
             accessor,
             [_concrete_path()],
             ["a.b"],
@@ -174,7 +180,11 @@ async def test_rg_glob_skips_pushdown_and_expands(accessor):
         patch.dict(GENERICS, {"rg": fake_generic}),
     ):
         _, io = await rg(
-            accessor, [_glob_path()], ["ada"], CommandOpts(index=NULL_INDEX)
+            BACKEND_IO,
+            accessor,
+            [_glob_path()],
+            ["ada"],
+            CommandOpts(index=NULL_INDEX),
         )
 
     assert io.exit_code == 0
@@ -216,6 +226,7 @@ async def test_tail_follow_reads_the_relation_whole(accessor, flags):
         ),
     ):
         _, io = await tail(
+            BACKEND_IO,
             accessor,
             [concrete],
             [],
@@ -252,6 +263,7 @@ async def test_tail_glob_does_not_query_a_relation_named_star(accessor):
         ),
     ):
         _, io = await tail(
+            BACKEND_IO,
             accessor,
             [_glob_path()],
             [],

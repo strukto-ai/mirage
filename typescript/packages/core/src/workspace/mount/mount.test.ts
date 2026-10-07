@@ -30,6 +30,8 @@ import type { RegisteredOp } from '../../ops/registry.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
 import { MountEntry } from './mount.ts'
+import { runWithSession } from '../../context/session_context.ts'
+import { SessionState } from '../session/session.ts'
 
 class StubVFS extends BaseVFS {
   override readonly name = 'ram'
@@ -544,4 +546,39 @@ it('a path-guarded command is still held at its write', async () => {
     '\ngzip: /ram/a.gz: Read-only file system\n',
   ])
   expect([...vfs.store.files.entries()]).toEqual([['/a', new TextEncoder().encode('original')]])
+})
+
+it('refuses an opaque command before backend access under hides', async () => {
+  const mount = makeMount()
+  const calls: number[] = []
+  const [cmd] = command({
+    name: 'opaque',
+    vfs: 'ram',
+    spec: new CommandSpec(),
+    fn: (_accessor, paths) => {
+      calls.push(paths.length)
+      return [new TextEncoder().encode('ran\n'), new IOResult()]
+    },
+  })
+  if (cmd === undefined) throw new Error('missing')
+  mount.register(cmd)
+  const session = new SessionState({
+    sessionId: 'reader',
+    visibility: { paths: { paths: ['/ram/secret'] } },
+  })
+  await runWithSession(session, async () => {
+    const [, io] = await mount.executeCmd('opaque', [], [], {})
+    expect(io.exitCode).toBe(1)
+    expect(new TextDecoder().decode(io.stderr as Uint8Array)).toBe(
+      'opaque: command requires path visibility checks\n',
+    )
+    expect(calls).toEqual([])
+    const [, helpIo] = await mount.executeCmd('opaque', [], [], { help: true })
+    expect(helpIo.exitCode).toBe(0)
+    expect(calls).toEqual([])
+  })
+  const [stdout, io] = await mount.executeCmd('opaque', [], [], {})
+  expect(io.exitCode).toBe(0)
+  expect(new TextDecoder().decode(await materialize(stdout))).toBe('ran\n')
+  expect(calls).toEqual([0])
 })

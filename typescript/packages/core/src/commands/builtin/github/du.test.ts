@@ -16,11 +16,12 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { GitHubAccessor } from '../../../accessor/github.ts'
 import type { GitHubTransport } from '../../../core/github/client.ts'
 import type { TreeEntry } from '../../../core/github/tree_entry.ts'
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { materialize } from '../../../io/types.ts'
+import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { FlagValue } from '../../spec/types.ts'
+import { GITHUB_COMMANDS as GITHUB_DU_COMMANDS } from './index.ts'
 import { IO } from './io.ts'
-import { GITHUB_DU } from './du.ts'
+const GITHUB_DU = GITHUB_DU_COMMANDS.filter((cmd) => cmd.name === 'du')
 
 vi.mock('../../../core/github/tree.ts', () => ({
   ensureTree: vi.fn().mockResolvedValue(undefined),

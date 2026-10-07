@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ChromaAccessor } from '../../../accessor/chroma.ts'
-import { stat, statLight } from '../../../core/chroma/stat.ts'
+import { statLight } from '../../../core/chroma/stat.ts'
 import { CHROMA_TREE } from '../../../core/chroma/tree.ts'
 import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
@@ -24,8 +24,7 @@ import { CHROMA_SEARCH } from './search.ts'
 
 export const CHROMA_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<ChromaAccessor>(VFSName.CHROMA, IO, {
-    overrides: new Set(['find']),
+    overrides: { find: makeFind(CHROMA_TREE, statLight, readsSizes) },
   }),
-  ...makeFind(VFSName.CHROMA, IO, CHROMA_TREE, stat, statLight, readsSizes),
   ...CHROMA_SEARCH,
 ]

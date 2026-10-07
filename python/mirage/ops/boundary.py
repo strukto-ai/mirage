@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from mirage.commands.builtin.utils.limit import apply_op_limit
+from mirage.context.session_context import get_admission
+from mirage.policy.constants import METADATA_OPS
 from mirage.policy.policies import Policies, post_vfs_gate, pre_vfs_gate
 from mirage.types import MountMode, PathSpec
 
@@ -41,6 +43,21 @@ class OpBoundary:
     mode: MountMode | None = None
     session_id: str = ""
     decisions: "Decisions | None" = None
+
+    @staticmethod
+    def check(op: str, *paths: PathSpec | None) -> None:
+        """Check each spelling once against the active command's rules.
+
+        Args:
+            op (str): operation name; metadata retains its exemption.
+            *paths (PathSpec | None): typed, walked and followed endpoints.
+        """
+        gate = get_admission()
+        if gate is not None and op not in METADATA_OPS:
+            for virtual in dict.fromkeys(
+                p.virtual for p in paths if isinstance(p, PathSpec)
+            ):
+                gate.check(virtual)
 
     async def admit(
         self,

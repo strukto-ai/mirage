@@ -20,7 +20,7 @@ import { IO } from '../../commands/builtin/qdrant/io.ts'
 import { searchResources } from '../../vfs/search.ts'
 import { resolveQdrantConfig, type QdrantConfig } from '../../vfs/qdrant/config.ts'
 import { PathSpec } from '../../types.ts'
-import { searchRowsOutput } from '../vector/search.ts'
+import { searchResults } from '../vector/search.ts'
 import type { QdrantPoint } from './query.ts'
 import { TREE } from './tree.ts'
 
@@ -54,9 +54,8 @@ it('returns the canonical nested document lineage path', async () => {
     ],
   )
   const path = new PathSpec({ virtual: '/db', directory: '/db', vfsPath: '' })
-  const output = new TextDecoder().decode(
-    await searchRowsOutput(TREE, accessor, 'refund', [path], 1, 0, '/db'),
-  )
+  const results = await searchResults(TREE, accessor, 'refund', [path], 1, 0, '/db')
+  const output = results.map(([, text]) => text).join('\n') + '\n'
   expect(output).toBe('/db/refund.pdf/004__17.txt:0.8100\nRefunds are processed within 14 days\n')
 })
 

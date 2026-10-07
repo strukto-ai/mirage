@@ -20,7 +20,7 @@ from mirage.ops.config import NamespaceLinks
 from mirage.ops.namespace_view import namespace_names
 from mirage.ops.types import LinkView, MountView, NamespaceView
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, Visibility
+from mirage.types import FileStat, PathSpec, Visibility
 from mirage.utils.hidden import hidden_under, path_visible
 from mirage.workspace.mount.namespace.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
@@ -122,7 +122,7 @@ def visible_mount_roots_below(
     return [
         root
         for root in mount_roots_below(registry, virtual)
-        if path_visible(vis, root)
+        if path_visible(vis, PathSpec.from_str_path(root))
     ]
 
 
@@ -205,9 +205,9 @@ def namespace_view_of(
     vis = session.visibility if session is not None else None
     gate = get_admission()
 
-    def scoped(virtual: str) -> bool:
-        return hidden_under(vis, virtual) or (
-            gate is not None and gate.scopes(virtual)
+    def scoped(path: PathSpec) -> bool:
+        return hidden_under(vis, path) or (
+            gate is not None and gate.scopes(path.virtual)
         )
 
     return NamespaceView(

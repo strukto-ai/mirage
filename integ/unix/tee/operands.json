@@ -208,6 +208,48 @@
         "stdout": "q\nz\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "mutations_hold_each_path_to_its_profile_region",
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "gridfs",
+        "box",
+        "dropbox",
+        "dropbox-root",
+        "gdrive",
+        "gdrive-folder",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "redis",
+        "s3-prefix",
+        "sharepoint",
+        "ssh"
+      ],
+      "session": "region-writer",
+      "session_profiles": {
+        "region-writer": {
+          "mounts": {
+            "/data": "read"
+          },
+          "paths": {
+            "show": {
+              "/data/policy-build": "write"
+            }
+          }
+        }
+      },
+      "command": "mkdir -p /data/policy-build; printf a | tee /data/readonly.txt /data/policy-build/out 2>/dev/null; echo tee=$?; printf b | tee -a /data/policy-build/out > /dev/null; touch /data/blocked /data/policy-build/touched 2>/dev/null; echo touch=$?; cat /data/policy-build/out; echo; stat -c %s /data/policy-build/out; rm /data/policy-build/touched; rm -r /data/policy-build; test ! -e /data/policy-build; echo removed=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "atee=1\ntouch=1\nab\n2\nremoved=0\n",
+        "stderr": ""
+      },
+      "seq": 990020
     }
   ]
 }

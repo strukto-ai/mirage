@@ -47,6 +47,60 @@ class TokenConfig(BaseModel):
     token: str
 
 
+class CachedRAM(RAMVFS):
+    caches_reads = True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("warm", [False, True])
+@pytest.mark.parametrize("door", ["dispatch", "facade"])
+@pytest.mark.parametrize("virtual", ["/data/secret", "/data/link"])
+async def test_cli_discovered_paths_meet_the_command_gate(warm, door, virtual):
+    ws = Workspace({"/data": CachedRAM()}, mode=MountMode.WRITE)
+
+    async def read_selected(inv: CLIInvocation):
+        path = PathSpec.from_str_path(virtual)
+        if door == "facade":
+            return await ws.vfs.read(path.virtual), IOResult()
+        assert inv.doors is not None and inv.doors.dispatch is not None
+        return await inv.doors.dispatch("read", path)
+
+    spec = CLISpec(name="peek", fn=read_selected)
+    ws.register_cli("peek", spec)
+    ws.register_cli("openpeek", spec)
+    try:
+        await ws.shell(
+            "echo secret > /data/secret; ln -s /data/secret /data/link"
+        )
+        if warm:
+            assert (
+                await ws.shell("cat /data/secret > /dev/null")
+            ).exit_code == 0
+            assert await ws.cache.exists("/data/secret")
+        ws.create_session(
+            "agent",
+            profile={
+                "commands": {
+                    "deny": [
+                        {
+                            "reason": "sealed",
+                            "commands": {"peek": ["/data/secret"]},
+                        }
+                    ]
+                }
+            },
+        )
+        denied = await ws.shell("peek", session_id="agent")
+        assert denied.exit_code != 0
+        assert await denied.stdout_str() == ""
+        assert denied.refusal is not None and denied.refusal.reason == "sealed"
+        allowed = await ws.shell("openpeek", session_id="agent")
+        assert allowed.exit_code == 0
+        assert await allowed.stdout_str() == "secret\n"
+    finally:
+        await ws.close()
+
+
 CALLS: list[dict] = []
 
 

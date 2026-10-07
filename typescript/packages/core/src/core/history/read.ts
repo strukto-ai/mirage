@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { HistoryAccessor } from '../../accessor/history.ts'
-import { enoent } from '../../errors/fs.ts'
+import { eacces, enoent } from '../../errors/fs.ts'
+import { liveSessions } from '../../context/session_context.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { PathSpec } from '../../types.ts'
 import { renderBashHistory } from './render.ts'
@@ -27,6 +28,13 @@ export async function read(accessor: HistoryAccessor, path: PathSpec): Promise<U
   if (!VIEW_KEYS.includes(stripSlash(key))) {
     throw enoent(path)
   }
-  const events = await accessor.observer.commandEvents()
+  // Mirage sessions are access boundaries. Unlike GNU Bash's shared
+  // per-user HISTFILE, this file exposes only the reading session's log.
+  // Keep the persisted-file semantics: history -c/-d affect the builtin's
+  // list, not this recording. An absent or ambiguous caller is refused.
+  const sessions = new Set(liveSessions().map((session) => session.sessionId))
+  const session = sessions.values().next().value
+  if (sessions.size !== 1 || session === undefined) throw eacces(path.virtual)
+  const events = await accessor.observer.commandEvents(session)
   return new TextEncoder().encode(renderBashHistory(events))
 }

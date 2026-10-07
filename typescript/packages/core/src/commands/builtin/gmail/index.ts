@@ -16,19 +16,15 @@ import type { GmailAccessor } from '../../../accessor/gmail.ts'
 import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { GMAIL_GREP } from './grep.ts'
+import * as grep from './grep.ts'
 import { IO } from './io.ts'
-import { GMAIL_RG } from './rg.ts'
-
-const GMAIL_OVERRIDES = new Set(['grep', 'rg'])
+import * as rg from './rg.ts'
 
 // Gmail verbs and API passthroughs live in the gws CLI
 // (commands/cli/builtin/gws), installed by name; the mount only serves
 // the filesystem surface.
 export const GMAIL_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GmailAccessor>(VFSName.GMAIL, IO, {
-    overrides: GMAIL_OVERRIDES,
+    overrides: { grep: grep.BUILDER, rg: rg.BUILDER },
   }),
-  ...GMAIL_GREP,
-  ...GMAIL_RG,
 ]

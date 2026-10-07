@@ -13,46 +13,32 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiscordAccessor } from '../../../accessor/discord.ts'
-import type { IndexCacheStore } from '../../../cache/index/index.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
-import { read as discordRead } from '../../../core/discord/read.ts'
-import { stat as discordStat } from '../../../core/discord/stat.ts'
-import { VFSName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
+import type { PathSpec } from '../../../types.ts'
+import { type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { headGeneric } from '../generic/head.ts'
-
-const resolveDiscordGlob = resolveGlobOf(IO)
-
-async function* discordStream(
-  accessor: DiscordAccessor,
-  p: PathSpec,
-  index: IndexCacheStore | undefined,
-): AsyncIterable<Uint8Array> {
-  yield await discordRead(accessor, p, index)
-}
+import type { Builder, CommandIO } from '../generic_bind/adapter.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
 
 async function head(
+  ops: CommandIO<DiscordAccessor>,
   accessor: DiscordAccessor,
   paths: PathSpec[],
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const resolved =
-    paths.length > 0 ? await resolveDiscordGlob(accessor, paths, opts.index ?? undefined) : []
+    paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, opts.index ?? undefined) : []
   return headGeneric(
     resolved,
     texts,
     opts,
-    (p) => discordStat(accessor, p, opts.index ?? undefined),
-    (p) => discordStream(accessor, p, opts.index ?? undefined),
+    (p) => ops.stat(accessor, p, opts.index ?? undefined),
+    (p) => ops.readStream(accessor, p, opts.index ?? undefined),
   )
 }
 
-export const DISCORD_HEAD = command({
+export const BUILDER: Builder<DiscordAccessor> = {
   name: 'head',
-  vfs: VFSName.DISCORD,
-  spec: specOf('head'),
+  read: true,
   fn: head,
-})
+}

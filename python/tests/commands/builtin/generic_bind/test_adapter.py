@@ -17,22 +17,29 @@ import errno
 
 import pytest
 
+import mirage.commands.builtin.airtable.head as airtable_head
 import mirage.commands.builtin.generic_bind.adapter as adapter
+import mirage.commands.builtin.mongodb.tail as mongodb_tail
+import mirage.commands.builtin.mongodb.wc as mongodb_wc
+import mirage.commands.builtin.postgres.head as postgres_head
+import mirage.commands.builtin.postgres.tail as postgres_tail
+import mirage.commands.builtin.postgres.wc as postgres_wc
 from mirage.accessor.base import NOOPAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.config import CommandOpts
 from mirage.context import (
-    reset_admission,
     reset_current_session,
     reset_mount_gate,
-    set_admission,
     set_current_session,
     set_mount_gate,
 )
+from mirage.context.session_context import reset_op_policies, set_op_policies
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import OperationNotSupportedError
+from mirage.io.types import materialize
 from mirage.ops.types import NamespaceView
 from mirage.policy import Action, Deny, Policy, VfsContext
+from mirage.policy.policies import Policies
 from mirage.types import (
     ContentType,
     FileStat,
@@ -45,7 +52,7 @@ from mirage.types import (
     Visibility,
 )
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
-from mirage.vfs.types import ContentSearchOps
+from mirage.vfs.types import ContentSearchOps, SearchOps, SearchQuery
 from mirage.workspace.session import SessionState
 
 from mirage.commands.builtin.generic_bind.adapter import (  # isort: skip
@@ -56,6 +63,7 @@ from mirage.commands.builtin.generic_bind.adapter import (  # isort: skip
     resolve_or_empty,
     with_command_guards,
     with_dir_guard,
+    with_policy_guard,
 )
 
 TREE = {
@@ -347,39 +355,11 @@ def test_scoped_io_sets_a_content_index_aside():
     io = make_io(content_search=index)
     roots = [_spec("/data")]
     free = NamespaceView(scoped=lambda _virtual: False)
-    judged = NamespaceView(scoped=lambda virtual: virtual == "/data")
+    judged = NamespaceView(scoped=lambda path: path.virtual == "/data")
     assert adapter.scoped_io(io, free, roots, "/data/").content_search is index
     assert adapter.scoped_io(io, None, roots, "/data/").content_search is index
     scoped = adapter.scoped_io(io, judged, roots, "/data/")
     assert scoped.content_search is None
-
-
-@pytest.mark.asyncio
-async def test_dispatch_rule_guard_marks_an_op_with_the_bound_gate():
-    from mirage.commands.builtin.generic_bind.adapter import (
-        with_dispatch_rule_guard,
-    )
-
-    seen: list[tuple[str, _Gate | None]] = []
-
-    async def door(op, path, **kwargs):
-        seen.append((op, kwargs.get("rule_gate")))
-        return None, None
-
-    dispatch = with_dispatch_rule_guard(door)
-    # No gate bound: the op goes to the door unmarked.
-    await dispatch("read", _spec("/data/f"))
-    gate = _Gate(refused="/data/locked/y")
-    token = set_admission(gate)
-    try:
-        await dispatch("read", _spec("/data/f"), dst=_spec("/data/g"))
-        # A metadata op is never judged: deny is present and refused.
-        await dispatch("stat", _spec("/data/f"))
-    finally:
-        reset_admission(token)
-    assert seen == [("read", None), ("read", gate), ("stat", None)]
-    # The wrapper judges nothing itself: the door does, on its own paths.
-    assert gate.asked == []
 
 
 class _SealedRead(Policy):
@@ -441,7 +421,7 @@ async def _probe_chunks(calls: list[tuple[str, ...]], path: PathSpec):
 @pytest.mark.asyncio
 async def test_command_path_guard_admits_before_a_warm_serve(monkeypatch):
     gate = _Gate("/data/secret")
-    monkeypatch.setattr(adapter, "get_admission", lambda: gate)
+    monkeypatch.setattr("mirage.ops.boundary.get_admission", lambda: gate)
     calls: list[tuple[str, ...]] = []
     ops = with_command_guards(
         dataclasses.replace(_policy_probe_ops(calls), read_bytes=_warm_read)
@@ -702,7 +682,9 @@ async def test_guarded_rmdir_threads_the_index_to_the_fallback_listing(
         removed.append(("unlink", path.virtual))
 
     monkeypatch.setattr(adapter, "hidden_under", lambda _vis, _v: True)
-    monkeypatch.setattr(adapter, "path_visible", lambda _vis, v: v == "/m/d")
+    monkeypatch.setattr(
+        adapter, "path_visible", lambda _vis, path: path.virtual == "/m/d"
+    )
     spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     await adapter._guarded_rmdir(
         rmdir,
@@ -741,7 +723,9 @@ async def test_guarded_rmdir_answers_a_cascade_failure_with_the_refusal(
         )
 
     monkeypatch.setattr(adapter, "hidden_under", lambda _vis, _v: True)
-    monkeypatch.setattr(adapter, "path_visible", lambda _vis, v: v == "/m/d")
+    monkeypatch.setattr(
+        adapter, "path_visible", lambda _vis, path: path.virtual == "/m/d"
+    )
     spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     with pytest.raises(OSError) as exc:
         await adapter._guarded_rmdir(
@@ -768,7 +752,9 @@ async def test_guarded_rmdir_folds_a_non_oserror_cascade_failure(monkeypatch):
         raise RuntimeError("api exploded")
 
     monkeypatch.setattr(adapter, "hidden_under", lambda _vis, _v: True)
-    monkeypatch.setattr(adapter, "path_visible", lambda _vis, v: v == "/m/d")
+    monkeypatch.setattr(
+        adapter, "path_visible", lambda _vis, path: path.virtual == "/m/d"
+    )
     spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     with pytest.raises(OSError) as exc:
         await adapter._guarded_rmdir(
@@ -795,7 +781,9 @@ async def test_guarded_rmdir_folds_a_failed_fallback_listing(monkeypatch):
         raise AssertionError("never reached")
 
     monkeypatch.setattr(adapter, "hidden_under", lambda _vis, _v: True)
-    monkeypatch.setattr(adapter, "path_visible", lambda _vis, v: v == "/m/d")
+    monkeypatch.setattr(
+        adapter, "path_visible", lambda _vis, path: path.virtual == "/m/d"
+    )
     spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     with pytest.raises(OSError) as exc:
         await adapter._guarded_rmdir(
@@ -828,7 +816,9 @@ async def test_guarded_rmdir_counts_a_visible_mounted_child_as_content(
 
     monkeypatch.setattr(adapter, "hidden_under", lambda _vis, _v: True)
     monkeypatch.setattr(
-        adapter, "path_visible", lambda _vis, v: v in ("/m/d", "/m/d/m")
+        adapter,
+        "path_visible",
+        lambda _vis, path: path.virtual in ("/m/d", "/m/d/m"),
     )
     spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     with pytest.raises(OSError) as exc:
@@ -870,7 +860,9 @@ async def test_hidden_guard_rmdir_reads_the_stamped_children(monkeypatch):
 
     monkeypatch.setattr(adapter, "hidden_under", lambda _vis, _v: True)
     monkeypatch.setattr(
-        adapter, "path_visible", lambda _vis, v: v in ("/m/d", "/m/d/m")
+        adapter,
+        "path_visible",
+        lambda _vis, path: path.virtual in ("/m/d", "/m/d/m"),
     )
     base = CommandIO(
         readdir=readdir,
@@ -1076,7 +1068,7 @@ async def test_missing_copy_checks_command_paths_before_capability_failure(
     monkeypatch,
 ):
     gate = _Gate("/data/secret")
-    monkeypatch.setattr(adapter, "get_admission", lambda: gate)
+    monkeypatch.setattr("mirage.ops.boundary.get_admission", lambda: gate)
     with pytest.raises(PermissionError):
         await make_io().require(Operation.COPY)(
             NOOPAccessor(), _spec("/data/secret"), _spec("/data/dst")
@@ -1148,16 +1140,6 @@ async def test_mode_guard_refuses_a_taken_name_on_a_writable_mount(
 
 @pytest.mark.asyncio
 async def test_policy_guard_admits_slots_and_leaves_stat_alone():
-    from mirage.commands.builtin.generic_bind.adapter import with_policy_guard
-    from mirage.context import (
-        reset_mount_gate,
-        reset_op_policies,
-        set_mount_gate,
-        set_op_policies,
-    )
-    from mirage.policy.policies import Policies
-    from mirage.types import MountMode
-
     calls: list[tuple[str, ...]] = []
     raw = _policy_probe_ops(calls)
     acc = NOOPAccessor()
@@ -1206,16 +1188,6 @@ async def test_policy_guard_admits_slots_and_leaves_stat_alone():
 async def test_policy_guard_admits_before_a_warm_serve():
     # The guard wraps outside the cache tier (`finish` in the factory),
     # so a warm reader below it never answers a refused read.
-    from mirage.commands.builtin.generic_bind.adapter import with_policy_guard
-    from mirage.context import (
-        reset_mount_gate,
-        reset_op_policies,
-        set_mount_gate,
-        set_op_policies,
-    )
-    from mirage.policy.policies import Policies
-    from mirage.types import MountMode
-
     calls: list[tuple[str, ...]] = []
     warm = dataclasses.replace(_policy_probe_ops(calls), read_bytes=_warm_read)
     acc = NOOPAccessor()
@@ -1237,16 +1209,6 @@ async def test_policy_guard_wrap_time_capture_covers_late_drains():
     # head/tail/wc bind lazy readers the pipeline drains after dispatch
     # has reset the context; the guard captured at wrap time still
     # answers (_live_policy_scope).
-    from mirage.commands.builtin.generic_bind.adapter import with_policy_guard
-    from mirage.context import (
-        reset_mount_gate,
-        reset_op_policies,
-        set_mount_gate,
-        set_op_policies,
-    )
-    from mirage.policy.policies import Policies
-    from mirage.types import MountMode
-
     calls: list[tuple[str, ...]] = []
     raw = _policy_probe_ops(calls)
     acc = NOOPAccessor()
@@ -1265,3 +1227,93 @@ async def test_policy_guard_wrap_time_capture_covers_late_drains():
     assert ("stream", "/data/secret") not in calls
     with pytest.raises(PermissionError):
         await ops.read_bytes(acc, _spec("/data/secret"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "builder,relative,flags",
+    [
+        (postgres_head.BUILDER, "public/tables/books/rows.jsonl", {}),
+        (postgres_tail.BUILDER, "public/tables/books/rows.jsonl", {}),
+        (
+            postgres_wc.BUILDER,
+            "public/tables/books/rows.jsonl",
+            {"lines": True},
+        ),
+        (mongodb_tail.BUILDER, "db/collections/books/documents.jsonl", {}),
+        (
+            mongodb_tail.BUILDER,
+            "db/collections/books/documents.jsonl",
+            {"follow": True},
+        ),
+        (
+            mongodb_wc.BUILDER,
+            "db/collections/books/documents.jsonl",
+            {"lines": True},
+        ),
+        (airtable_head.BUILDER, "bases/base/table/records.jsonl", {}),
+    ],
+)
+async def test_native_readers_admit_before_touching_the_accessor(
+    builder, relative, flags
+):
+    path = PathSpec(
+        virtual="/data/" + relative,
+        directory="/data/",
+        vfs_path=relative,
+        resolved=True,
+    )
+    policy = _SealedRead(path.virtual)
+    with pytest.raises(PermissionError, match="Permission denied"):
+        token = set_op_policies(Policies([policy]))
+        try:
+            out, _ = await builder.fn(
+                _policy_probe_ops([]),
+                NOOPAccessor(),
+                [path],
+                [],
+                CommandOpts(flags=flags),
+            )
+        finally:
+            reset_op_policies(token)
+        # Lazy readers retain the policy after the command binding ends.
+        await materialize(out)
+    assert policy.asked == [("read_bytes", path.virtual, False)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batch", [False, True])
+async def test_prepared_search_checks_inputs_and_results(batch):
+    calls: list[int] = []
+    hidden = PathSpec.from_str_path("/data/secret")
+    shown = PathSpec.from_str_path("/data/public")
+
+    async def search(*args, **kwargs):
+        calls.append(1)
+        return [(hidden, "hidden\nbody"), (shown, "visible")]
+
+    ops = with_command_guards(
+        make_io(search=SearchOps(search=search, search_many=search))
+    )
+    token = set_current_session(
+        SessionState(
+            session_id="reader",
+            visibility=Visibility(paths=HiddenPaths(paths=("/data/secret",))),
+        )
+    )
+    try:
+        call = ops.search.search_many if batch else ops.search.search
+        scope = PathSpec.from_str_path("/data")
+        result = await call(
+            NOOPAccessor(), [scope] if batch else scope, SearchQuery("q")
+        )
+        assert result == [(shown, "visible")]
+        with pytest.raises(FileNotFoundError):
+            await call(
+                NOOPAccessor(),
+                [scope, hidden] if batch else hidden,
+                SearchQuery("q"),
+            )
+        assert calls == [1]
+    finally:
+        reset_current_session(token)

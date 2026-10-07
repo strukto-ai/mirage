@@ -272,6 +272,29 @@
         "stdout": "rc=2\nrc=2\nrc=2\n",
         "stderr": "search: query is required\nsearch: query is required\nsearch: only the 'semantic' method is supported\n"
       }
+    },
+    {
+      "id": "mem0_search_filters_hidden_hit",
+      "targets": [
+        "mem0"
+      ],
+      "session": "search-hide",
+      "session_profiles": {
+        "search-hide": {
+          "paths": {
+            "hide": [
+              "/memories/mem-alpha.json"
+            ]
+          }
+        }
+      },
+      "command": "search --top-k 2 planning /memories; echo root=$?; search planning /memories/mem-alpha.json 2>/dev/null; echo named=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "root=0\nnamed=1\n",
+        "stderr": ""
+      },
+      "seq": 990062
     }
   ]
 }

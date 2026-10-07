@@ -12,8 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../types.ts'
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { grepSearchOptions } from '../../commands/builtin/grep_pushdown.ts'
-import type { SearchQuery, SearchOp, StatOp } from '../../vfs/types.ts'
+import type { SearchQuery, SearchOp, SearchResult, StatOp } from '../../vfs/types.ts'
 
 import type { Accessor } from '../../accessor/base.ts'
 import { compilePattern } from '../../commands/builtin/grep_pattern.ts'
@@ -52,7 +54,7 @@ export type Searcher<A extends Accessor> = (
   accessor: A,
   match: ScopeMatch,
   query: SearchQuery,
-) => Promise<string[]>
+) => Promise<SearchResult[]>
 
 /** Adapt scope-specific handlers; an unhandled scope requests a scan. */
 export function makeSearchOp<A extends Accessor>(
@@ -65,6 +67,10 @@ export function makeSearchOp<A extends Accessor>(
     const searcher = searchers[match.kind]
     if (searcher === undefined) return null
     if (stat !== undefined && match.kind !== ROOT) await stat(accessor, path, index)
-    return searcher(accessor, match, query)
+    const prefix = mountPrefixOf(path.virtual, path.vfsPath).replace(/\/$/, '')
+    return (await searcher(accessor, match, query)).map(([hit, text]) => [
+      PathSpec.fromStrPath(`${prefix}/${hit.vfsPath.replace(/^\//, '')}`, hit.vfsPath),
+      text,
+    ])
   }
 }

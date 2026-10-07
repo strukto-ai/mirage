@@ -197,6 +197,8 @@ describe('searchKind', () => {
     const { accessor } = makeAccessor(USERS, [{ id: 1, name: 'ada' }])
     const found = await searchKind(accessor, 'public', 'tables', query('ada'))
     expect(found.map((m) => m.entity)).toEqual(['users', 'empty'])
-    expect(formatGrepResults(found)[0]).toBe('public/tables/users/rows.jsonl:{"id":1,"name":"ada"}')
+    expect(formatGrepResults(found)[0]?.[1]).toBe(
+      'public/tables/users/rows.jsonl:{"id":1,"name":"ada"}',
+    )
   })
 })

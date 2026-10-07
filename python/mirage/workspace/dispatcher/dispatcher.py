@@ -30,7 +30,7 @@ from mirage.commands.resolve import get_extension
 from mirage.context import (
     explaining,
     get_current_session,
-    hidden_refusal,
+    require_visible,
     session_visibility,
 )
 from mirage.errors.constants import MISS_ERRORS
@@ -57,6 +57,7 @@ from mirage.ops.namespace_view import (
     merge_readdir,
     namespace_listing,
     namespace_stat,
+    visible_entries,
 )
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.shell.bytes import encode_text
@@ -65,7 +66,6 @@ from mirage.types import (
     CacheFacts,
     CapacityResult,
     CapacityState,
-    EntryGate,
     FileStat,
     FileType,
     MountMode,
@@ -145,27 +145,6 @@ def _appends_nothing(op: str, kwargs: dict[str, Any]) -> bool:
         kwargs (dict[str, Any]): its kwargs; an append's ``data``.
     """
     return op == "append" and not kwargs.get("data")
-
-
-def _visible_entries(entries: list[str], parent: str) -> list[str]:
-    """Drop listing entries the bound session hides.
-
-    Entry shapes vary by backend (bare names, trailing-slash names,
-    full paths), so each is keyed by its final segment against the
-    listed directory, the same normalization ``merge_readdir`` dedups
-    by.
-
-    Args:
-        entries (list[str]): the merged listing.
-        parent (str): the directory that was listed, as a virtual path.
-    """
-    base = parent.rstrip("/")
-    vis = session_visibility()
-    return [
-        e
-        for e in entries
-        if path_visible(vis, f"{base}/{e.rstrip('/').rsplit('/', 1)[-1]}")
-    ]
 
 
 def _lists(listing: list[str], virtual: str) -> bool:
@@ -274,20 +253,6 @@ class _MountChannel:
             await self.invalidate(spec)
 
 
-def _judge(gate: EntryGate, *paths: PathSpec | None) -> None:
-    """Ask a command's gate once about each distinct path an op reaches.
-
-    Args:
-        gate (EntryGate): the gate the command was admitted under.
-        *paths (PathSpec | None): the spellings in the order the door
-            met them; None (no rename destination) is skipped.
-    """
-    for virtual in dict.fromkeys(
-        p.virtual for p in paths if isinstance(p, PathSpec)
-    ):
-        gate.check(virtual)
-
-
 class Dispatcher:
     """Route a single VFS op to its mount and keep the file cache + index
     consistent.
@@ -393,7 +358,7 @@ class Dispatcher:
         await boundary.admit(op, path, write)
         _memory_answered(report)
         if op == "readdir" and isinstance(fallback, list):
-            fallback = _visible_entries(fallback, path.virtual)
+            fallback = visible_entries(fallback, path, session_visibility())
         return await boundary.complete(op, path, write, fallback)
 
     async def dispatch(
@@ -417,8 +382,6 @@ class Dispatcher:
         report: OpReport | None = None,
         **kwargs: Any,
     ) -> tuple[Any, IOResult]:
-        # with_dispatch_rule_guard's mark, never forwarded to an op.
-        rule_gate: EntryGate | None = kwargs.pop("rule_gate", None)
         await self._namespace.ensure_loaded()
         # Pending fingerprint checks from a strict snapshot restore run
         # before the op can touch a mount, whichever surface called:
@@ -439,15 +402,10 @@ class Dispatcher:
         # out of it, the followed path is re-checked so a visible link
         # cannot lead in, and a rename destination is a create.
         vis = session_visibility()
-        if not path_visible(vis, path.virtual):
-            raise hidden_refusal(vis, path.virtual, op in HIDDEN_CREATE_OPS)
+        require_visible(vis, path, op in HIDDEN_CREATE_OPS)
         dst = kwargs.get("dst")
-        if (
-            op == "rename"
-            and isinstance(dst, PathSpec)
-            and not path_visible(vis, dst.virtual)
-        ):
-            raise hidden_refusal(vis, dst.virtual, True)
+        if op == "rename" and isinstance(dst, PathSpec):
+            require_visible(vis, dst, True)
         # An operand the walk already refused (the empty name, a link
         # loop) names nothing an op can reach, whatever `virtual` says.
         for walked in (path, dst):
@@ -485,8 +443,8 @@ class Dispatcher:
         # walked, once both walks have answered for hidden space: here
         # for an op on the name itself, below the follow for the rest.
         no_follow = op in NO_FOLLOW_OPS or bool(kwargs.get("nofollow"))
-        if rule_gate is not None and no_follow:
-            _judge(rule_gate, typed, path, typed_dst, dst)
+        if no_follow:
+            OpBoundary.check(op, typed, path, typed_dst, dst)
         if op == "rename" and isinstance(dst, PathSpec):
             # A rename re-anchors everything below its source while the
             # hides stay where they are written, so hidden content would
@@ -495,7 +453,7 @@ class Dispatcher:
             # relocating it into view is refused. Only a directory has
             # anything below it to re-anchor, so a file source passes.
             if move_reveals(
-                vis, path.virtual, dst.virtual
+                vis, path, dst
             ) and await self._moved_source_is_dir(path):
                 raise eacces(path.virtual)
         if (
@@ -527,12 +485,9 @@ class Dispatcher:
                 raise eloop(path) from None
             if followed != path.virtual:
                 path = PathSpec.from_str_path(followed)
-                if not path_visible(vis, path.virtual):
-                    raise hidden_refusal(
-                        vis, path.virtual, op in HIDDEN_CREATE_OPS
-                    )
-        if rule_gate is not None and not no_follow:
-            _judge(rule_gate, typed, walked, path)
+                require_visible(vis, path, op in HIDDEN_CREATE_OPS)
+        if not no_follow:
+            OpBoundary.check(op, typed, walked, path)
         if op in XATTR_OPS:
             return await self._xattr_op(op, path, kwargs, report), IOResult()
         if op == "statfs":
@@ -596,7 +551,7 @@ class Dispatcher:
                 self._namespace.try_mount_for(dst.virtual)
             ).admit(op, dst, True, create=True, subtree=True)
         if op == "rmdir" and any(
-            path_visible(vis, link)
+            path_visible(vis, PathSpec.from_str_path(link))
             for link, _ in self._namespace.link_stats_below(path.virtual)
         ):
             raise enotempty(path.virtual)
@@ -747,7 +702,7 @@ class Dispatcher:
             # them cannot erase a transfer the backend already made.
             _served(report, result)
         if op == "readdir":
-            result = _visible_entries(
+            result = visible_entries(
                 merge_readdir(
                     vis,
                     result,
@@ -758,7 +713,8 @@ class Dispatcher:
                     self._namespace,
                     path.virtual,
                 ),
-                path.virtual,
+                path,
+                vis,
             )
         if op == "stat" and isinstance(result, FileStat):
             result = merge_overlay_stat(
@@ -812,7 +768,7 @@ class Dispatcher:
                     for link, _ in self._namespace.link_stats_below(
                         path.virtual
                     )
-                    if path_visible(vis, link)
+                    if path_visible(vis, PathSpec.from_str_path(link))
                 )
                 await self._namespace.purge_under(path.virtual, keep=arrived)
         if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
@@ -892,7 +848,7 @@ class Dispatcher:
             refusal (OSError): the backend's not-empty error.
         """
         vis = session_visibility()
-        if not hidden_under(vis, path.virtual):
+        if not hidden_under(vis, path):
             raise refusal
         try:
             entries = await mount.execute_op("readdir", path.virtual)
@@ -914,7 +870,7 @@ class Dispatcher:
             path.virtual,
         )
         visible = functools.partial(path_visible, vis)
-        if not entries or visible_below(path.virtual, merged, visible):
+        if not entries or visible_below(path, merged, visible):
             raise refusal
         channel = _MountChannel(
             mount,
@@ -940,7 +896,9 @@ class Dispatcher:
         links_below = [
             p for p in self._namespace.symlink_targets() if p.startswith(base)
         ]
-        if any(path_visible(vis, p) for p in links_below):
+        if any(
+            path_visible(vis, PathSpec.from_str_path(p)) for p in links_below
+        ):
             raise refusal
         await self._namespace.purge_under(path.virtual)
 
@@ -985,9 +943,9 @@ class Dispatcher:
         if walked == path.virtual:
             return path
         vis = session_visibility()
-        if not path_visible(vis, walked):
-            raise hidden_refusal(vis, walked, create)
-        return PathSpec.from_str_path(walked)
+        result = PathSpec.from_str_path(walked)
+        require_visible(vis, result, create)
+        return result
 
     def _table_answers(
         self, op: str, virtual: str, kwargs: dict[str, Any]

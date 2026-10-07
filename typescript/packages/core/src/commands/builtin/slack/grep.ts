@@ -12,26 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { SlackAccessor } from '../../../accessor/slack.ts'
 import {
   buildQuery,
   formatFileGrepResults,
   formatGrepResults,
 } from '../../../core/slack/formatters.ts'
-import { resolveGlobOf, scanIo } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
 import { detectScope, NATIVE_KINDS, searchTarget } from '../../../core/slack/scope.ts'
 import { searchFiles, searchMessages } from '../../../core/slack/search.ts'
 import { IOResult } from '../../../io/types.ts'
-import { type FileStat, type PathSpec, VFSName } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { pathsScoped } from '../../../ops/namespace_view.ts'
+import { type FileStat, PathSpec } from '../../../types.ts'
+import { mountPrefixOf } from '../../../utils/key_prefix.ts'
+import { type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/flag_view.ts'
 import { grepGeneric } from '../generic/grep.ts'
+import type { Builder, CommandIO } from '../generic_bind/adapter.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
 import { patternArg } from '../grep_pattern.ts'
 import { pushdownOperand, textSearchResults } from '../grep_pushdown.ts'
 import { prependStderr } from '../utils/output.ts'
-import { FlagView } from '../../spec/flag_view.ts'
 
 const ENC = new TextEncoder()
 
@@ -53,6 +54,7 @@ export const RG_SEARCH_HONORED = ['word_regexp'] as const
 export const SEARCH_MAX_RESULTS = 100
 
 async function grep(
+  ops: CommandIO<SlackAccessor>,
   accessor: SlackAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -63,8 +65,8 @@ async function grep(
 
   const pushdownWarnings: string[] = []
   // Output-shaping flags, a glob operand and a multi-operand line all need
-  // the per-message scan; see SEARCH_HONORED above.
-  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
+  // the per-message ops; see SEARCH_HONORED above.
+  const scoped = pathsScoped(opts.ns, [PathSpec.fromStrPath((opts.mountPrefix ?? '') || '/')])
   const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
   if (pattern !== null && operand !== null && fl.asBool('w')) {
     const match = detectScope(operand)
@@ -93,7 +95,7 @@ async function grep(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         pushdownWarnings.push(
-          `slack: native search push-down failed (${msg}); falling back to per-file scan`,
+          `slack: native search push-down failed (${msg}); falling back to per-file ops`,
         )
         if (msg.includes('not_allowed_token_type') || msg.includes('missing_scope')) {
           pushdownWarnings.push(
@@ -105,21 +107,20 @@ async function grep(
   }
 
   const resolved =
-    paths.length > 0 ? await resolveGlobOf(scan)(accessor, paths, opts.index ?? undefined) : []
-  const stat = (p: PathSpec): Promise<FileStat> => scan.stat(accessor, p, opts.index ?? undefined)
+    paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, opts.index ?? undefined) : []
+  const stat = (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, opts.index ?? undefined)
   const readdir = (p: PathSpec): Promise<string[]> =>
-    scan.readdir(accessor, p, opts.index ?? undefined)
+    ops.readdir(accessor, p, opts.index ?? undefined)
   const result = await grepGeneric('grep', resolved, texts, opts, stat, readdir, (p) =>
-    scan.readStream(accessor, p, opts.index ?? undefined),
+    ops.readStream(accessor, p, opts.index ?? undefined),
   )
   if (result === null) return result
   if (pushdownWarnings.length > 0) await prependStderr(result[1], pushdownWarnings)
   return result
 }
 
-export const SLACK_GREP = command({
+export const BUILDER: Builder<SlackAccessor> = {
   name: 'grep',
-  vfs: VFSName.SLACK,
-  spec: specOf('grep'),
+  read: true,
   fn: grep,
-})
+}

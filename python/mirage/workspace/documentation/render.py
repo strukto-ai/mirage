@@ -16,7 +16,7 @@ from mirage.commands.cli.types import CLISpec
 from mirage.commands.cli.walk import node_help, owns_argv
 from mirage.commands.spec.types import UsageStyle
 from mirage.context import effective_path_mode
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.utils.hidden import is_glob, path_visible
 from mirage.workspace.lookup.lookup import command_visible, verb_visible
 from mirage.workspace.mount.registry import MountRegistry
@@ -48,7 +48,7 @@ def vfs_md(registry: MountRegistry, session: SessionState) -> str:
         if (
             prefix in {"/dev", "/usr/bin", "/.bash_history"}
             or mount.vfs.name in {"dev", "history", "bin", "document"}
-            or not path_visible(vis, prefix)
+            or not path_visible(vis, PathSpec.from_str_path(prefix))
         ):
             continue
         mode = effective_path_mode(prefix, mount.prefix, mount.mode)
@@ -78,7 +78,9 @@ def vfs_md(registry: MountRegistry, session: SessionState) -> str:
                 if (
                     entry.mode is None
                     or is_glob(entry.path)
-                    or not path_visible(vis, entry.path)
+                    or not path_visible(
+                        vis, PathSpec.from_str_path(entry.path)
+                    )
                 ):
                     continue
                 if registry.try_mount_for(entry.path) is mount:

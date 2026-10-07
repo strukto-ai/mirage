@@ -15,54 +15,44 @@
 import type { AirtableAccessor } from '../../../accessor/airtable.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { read as airtableRead } from '../../../core/airtable/read.ts'
-import { stat as airtableStat } from '../../../core/airtable/stat.ts'
-import { VFSName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { FlagView } from '../../spec/flag_view.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { headGeneric } from '../generic/head.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
+import type { PathSpec } from '../../../types.ts'
+import { IOResult } from '../../../io/types.ts'
+import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { headGeneric, parseFlags } from '../generic/head.ts'
+import {
+  type Builder,
+  type CommandIO,
+  guardOperation,
+  resolveGlobOf,
+} from '../generic_bind/adapter.ts'
+import { streamFromBytes } from '../utils/wrap.ts'
 
-const resolveGlob = resolveGlobOf(IO)
-
-// A record renders as exactly one line, so the first N lines of a records
-// file are its first N records: the count rides maxRecords instead of paging
-// the whole table. Files that are not record lists ignore the window.
-async function* headSource(
-  accessor: AirtableAccessor,
-  p: PathSpec,
-  index: IndexCacheStore | undefined,
-  lines: number,
-  pushdown: boolean,
-): AsyncIterable<Uint8Array> {
-  yield await airtableRead(accessor, p, index, pushdown ? { limit: lines } : {})
-}
-
-async function head(
+export async function head(
+  ops: CommandIO<AirtableAccessor>,
   accessor: AirtableAccessor,
   paths: PathSpec[],
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
+  const parsed = parseFlags(opts.flags)
+  if (typeof parsed === 'string')
+    return [null, new IOResult({ exitCode: 1, stderr: new TextEncoder().encode(parsed) })]
+  // One record is one line; the bounded read pushes the limit into maxRecords.
+  const bounded = guardOperation(airtableRead, 'readBytes')
+  const read =
+    parsed.bytesMode === null && parsed.lines > 0 && !parsed.zeroTerminated
+      ? (a: AirtableAccessor, p: PathSpec, i?: IndexCacheStore) =>
+          bounded(a, p, i, { limit: parsed.lines })
+      : ops.readBytes
   const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  const fl = new FlagView(opts.flags, specOf('head'))
-  const nRaw = fl.asStr('lines') ?? null
-  const lines = nRaw !== null ? Number.parseInt(nRaw, 10) : 10
-  const pushdown = fl.asStr('bytes') === undefined && !fl.asBool('zero_terminated') && lines > 0
+    paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, opts.index ?? undefined) : []
   return headGeneric(
     resolved,
     texts,
     opts,
-    (p) => airtableStat(accessor, p, opts.index ?? undefined),
-    (p) => headSource(accessor, p, opts.index ?? undefined, lines, pushdown),
+    (p) => ops.stat(accessor, p, opts.index ?? undefined),
+    (p) => streamFromBytes(read, accessor, p, opts.index ?? undefined),
   )
 }
 
-export const AIRTABLE_HEAD = command({
-  name: 'head',
-  vfs: VFSName.AIRTABLE,
-  spec: specOf('head'),
-  fn: head,
-})
+export const BUILDER: Builder<AirtableAccessor> = { name: 'head', fn: head, read: true }

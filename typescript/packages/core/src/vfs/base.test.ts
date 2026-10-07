@@ -15,15 +15,18 @@
 import { describe, expect, it } from 'vitest'
 import { Accessor, NOOPAccessor } from '../accessor/base.ts'
 import { RAMAccessor } from '../accessor/ram.ts'
-import { IO } from '../commands/builtin/ram/io.ts'
 import type { CommandIO } from '../commands/builtin/generic_bind/index.ts'
+import { BUILDERS } from '../commands/builtin/generic_bind/builders/index.ts'
+import type { Builder } from '../commands/builtin/generic_bind/adapter.ts'
+import { IO } from '../commands/builtin/ram/io.ts'
 import { streamFromBytes } from '../commands/builtin/utils/wrap.ts'
+import { CLISpec, type CLIInvocation } from '../commands/cli/types.ts'
 import { command, type RegisteredCommand } from '../commands/config.ts'
 import { CommandSpec, Operand } from '../commands/spec/types.ts'
-import { CLISpec, type CLIInvocation } from '../commands/cli/types.ts'
-import { RuntimeVFS } from '../runtime/vfs.ts'
-import { IOResult } from '../io/types.ts'
+import { enoent } from '../errors/fs.ts'
+import { IOResult, materialize } from '../io/types.ts'
 import type { RegisteredOp } from '../ops/registry.ts'
+import { RuntimeVFS } from '../runtime/vfs.ts'
 import { ops } from '../test-utils.ts'
 import { CapacityState, ContentType, FileStat, FileType, MountMode, PathSpec } from '../types.ts'
 import { getTestParser, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
@@ -60,9 +63,9 @@ class WikiAccessor extends Accessor {
 function node(pages: Tree, key: string): Tree | string {
   let current: Tree | string = pages
   for (const part of key.split('/').filter((p) => p !== '')) {
-    if (typeof current === 'string') throw new Error(`ENOENT: ${key}`)
+    if (typeof current === 'string') throw enoent(key)
     const child: Tree | string | undefined = current[part]
-    if (child === undefined) throw new Error(`ENOENT: ${key}`)
+    if (child === undefined) throw enoent(key)
     current = child
   }
   return current
@@ -237,6 +240,51 @@ describe('BaseVFS close', () => {
 })
 
 describe('BaseVFS wires a backend from one CommandIO table', () => {
+  it.each([
+    'head /wiki/notes.md',
+    'tail /wiki/notes.md',
+    'wc -c /wiki/notes.md',
+    'find /wiki',
+    'du -a /wiki',
+  ])('overrides observe hidden paths after a warm read: %s', async (line) => {
+    const original = BUILDERS.find((b) => b.name === line.split(' ')[0])
+    if (original === undefined) throw new Error('missing builder')
+    let calls = 0
+    const replacement: Builder<WikiAccessor> = {
+      ...original,
+      fn: (io, accessor, paths, texts, opts) => {
+        calls += 1
+        return original.fn(io as CommandIO, accessor, paths, texts, opts)
+      },
+    }
+    const vfs = makeVfs({ overrides: { [original.name]: replacement }, cachesReads: true })
+    const absent = new BaseVFS({
+      name: 'wiki',
+      accessor: new WikiAccessor({ guides: PAGES.guides ?? {} }),
+      io: makeIO(),
+      overrides: { [original.name]: replacement },
+      cachesReads: true,
+    })
+    const parser = await getTestParser()
+    const ws = new Workspace({ '/wiki': vfs }, { shellParser: parser })
+    const missing = new Workspace({ '/wiki': absent }, { shellParser: parser })
+    try {
+      await ws.shell('cat /wiki/notes.md > /dev/null')
+      ws.createSession('agent', { profile: { paths: { hide: ['/wiki/notes.md'] } } })
+      const actual = await ws.shell(line, { sessionId: 'agent' })
+      const expected = await missing.shell(line)
+      expect([actual.exitCode, actual.stdout, await materialize(actual.stderr)]).toEqual([
+        expected.exitCode,
+        expected.stdout,
+        await materialize(expected.stderr),
+      ])
+      expect(calls).toBe(2)
+    } finally {
+      await ws.close()
+      await missing.close()
+    }
+  })
+
   it('registers the generic command set', () => {
     const names = commandNames(makeVfs())
     for (const name of ['ls', 'cat', 'grep', 'find', 'head', 'wc']) {
@@ -252,7 +300,7 @@ describe('BaseVFS wires a backend from one CommandIO table', () => {
   })
 
   it('suppresses a generic the backend overrides', () => {
-    const names = commandNames(makeVfs({ overrides: new Set(['grep']) }))
+    const names = commandNames(makeVfs({ overrides: { grep: null } }))
     expect(names).not.toContain('grep')
     expect(names).toContain('rg')
   })

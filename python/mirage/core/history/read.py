@@ -14,8 +14,9 @@
 
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.context.session_context import live_sessions
 from mirage.core.history.render import render_bash_history
-from mirage.errors.fs import enoent
+from mirage.errors.fs import eacces, enoent
 from mirage.types import PathSpec
 
 VIEW_NAME = ".bash_history"
@@ -40,5 +41,12 @@ async def read(
     key = path.mount_path if isinstance(path, PathSpec) else path
     if key.strip("/") not in VIEW_KEYS:
         raise enoent(key)
-    events = await accessor.observer.command_events()
+    # Mirage sessions are access boundaries. Unlike GNU Bash's shared
+    # per-user HISTFILE, this file exposes only the reading session's log.
+    # Keep the persisted-file semantics: history -c/-d affect the builtin's
+    # list, not this recording. An absent or ambiguous caller is refused.
+    sessions = {session.session_id for session in live_sessions()}
+    if len(sessions) != 1:
+        raise eacces(path)
+    events = await accessor.observer.command_events(next(iter(sessions)))
     return render_bash_history(events).encode()

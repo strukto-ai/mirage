@@ -107,7 +107,7 @@ describe('removeRemnants', () => {
   it('aborts on a visible entry before it is touched', async () => {
     const ch = new TreeChannel(['/d', '/d/sec'], ['/d/sec/k', '/d/sec/new.txt'])
     await expect(
-      removeRemnants(ch, (v) => v === '/d/sec/new.txt', spec('/d')),
+      removeRemnants(ch, (p) => p.virtual === '/d/sec/new.txt', spec('/d')),
     ).rejects.toBeInstanceOf(VisibleRemnant)
     expect(ch.files.has('/d/sec/new.txt')).toBe(true)
     expect(ch.dirs.has('/d')).toBe(true)
@@ -145,13 +145,13 @@ describe('removeRemnants', () => {
 describe('visibleBelow', () => {
   it('normalizes slashes and whole paths to child names', () => {
     const seen: string[] = []
-    const probe = (v: string): boolean => {
-      seen.push(v)
-      return v === '/d/pub'
+    const probe = (path: PathSpec): boolean => {
+      seen.push(path.virtual)
+      return path.virtual === '/d/pub'
     }
-    expect(visibleBelow('/d/', ['sec/', '/d/pub'], probe)).toBe(true)
+    expect(visibleBelow(spec('/d/'), ['sec/', '/d/pub'], probe)).toBe(true)
     expect(seen).toEqual(['/d/sec', '/d/pub'])
-    expect(visibleBelow('/d', ['sec', 'hidden.txt'], nothingVisible)).toBe(false)
+    expect(visibleBelow(spec('/d'), ['sec', 'hidden.txt'], nothingVisible)).toBe(false)
   })
 })
 

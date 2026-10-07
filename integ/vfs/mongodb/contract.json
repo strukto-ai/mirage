@@ -428,6 +428,70 @@
         "stdout": "rc=1\nrc=1\n",
         "stderr": "tail: cannot open '/mongodb/mirage_integ/collections/missing/documents.jsonl' for reading: No such file or directory\ntail: no files remaining\ntail: cannot open '/mongo-denied/mirage_integ/collections/books/documents.jsonl' for reading: No such file or directory\ntail: no files remaining\n"
       }
+    },
+    {
+      "id": "mongodb_native_hide",
+      "targets": [
+        "mongodb"
+      ],
+      "session": "mongodb-native-hide",
+      "session_profiles": {
+        "mongodb-native-hide": {
+          "paths": {
+            "hide": [
+              "/mongodb/mirage_integ/collections/books/documents.jsonl"
+            ]
+          }
+        }
+      },
+      "command": "head -n 1 /mongodb/mirage_integ/collections/books/documents.jsonl 2>/dev/null; echo head=$?; tail -n 1 /mongodb/mirage_integ/collections/books/documents.jsonl 2>/dev/null; echo tail=$?; wc -l /mongodb/mirage_integ/collections/books/documents.jsonl 2>/dev/null; echo wc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "head=1\ntail=1\nwc=1\n",
+        "stderr": ""
+      },
+      "seq": 990013
+    },
+    {
+      "id": "mongodb_native_deny",
+      "targets": [
+        "mongodb"
+      ],
+      "session": "mongodb-native-deny",
+      "session_profiles": {
+        "mongodb-native-deny": {
+          "commands": {
+            "deny": [
+              {
+                "paths": [
+                  "/mongodb/mirage_integ/collections/books/documents.jsonl"
+                ],
+                "reason": "sealed"
+              }
+            ]
+          }
+        }
+      },
+      "command": "head -n 1 /mongodb/mirage_integ/collections/books/documents.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "head: cannot open '/mongodb/mirage_integ/collections/books/documents.jsonl' for reading: Permission denied\n"
+      },
+      "seq": 990014
+    },
+    {
+      "id": "mongodb_native_reads_continue_after_missing_operand",
+      "targets": [
+        "mongodb"
+      ],
+      "command": "head -q -n 1 /mongodb/mirage_integ/collections/no_such_table/documents.jsonl /mongodb/mirage_integ/collections/books/documents.jsonl 2>/dev/null | wc -l; tail -q -n 1 /mongodb/mirage_integ/collections/no_such_table/documents.jsonl /mongodb/mirage_integ/collections/books/documents.jsonl 2>/dev/null | wc -l; wc -l --total=only /mongodb/mirage_integ/collections/no_such_table/documents.jsonl /mongodb/mirage_integ/collections/books/documents.jsonl 2>/dev/null; echo wc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n1\n5\nwc=1\n",
+        "stderr": ""
+      },
+      "seq": 990015
     }
   ]
 }

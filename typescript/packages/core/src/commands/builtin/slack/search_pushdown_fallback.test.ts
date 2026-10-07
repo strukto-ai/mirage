@@ -12,15 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { SlackApiError, type SlackResponse } from '../../../core/slack/client.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { FakeSlackTransport, makeFakeVfs, seedChannel } from './_test_util.ts'
-import { SLACK_GREP } from './grep.ts'
-import { SLACK_RG } from './rg.ts'
+import {
+  SLACK_COMMANDS as SLACK_GREP_COMMANDS,
+  SLACK_COMMANDS as SLACK_RG_COMMANDS,
+} from './index.ts'
+const SLACK_GREP = SLACK_GREP_COMMANDS.filter((cmd) => cmd.name === 'grep')
+const SLACK_RG = SLACK_RG_COMMANDS.filter((cmd) => cmd.name === 'rg')
 
 const DEC = new TextDecoder()
 

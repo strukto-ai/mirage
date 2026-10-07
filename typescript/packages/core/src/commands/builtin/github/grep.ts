@@ -13,35 +13,33 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
-import { pathsScoped } from '../../../ops/namespace_view.ts'
-import { withCommandGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
-import { IO } from './io.ts'
 import { SCOPE_ERROR } from '../../../core/github/constants.ts'
-import { readdir as githubReaddir } from '../../../core/github/readdir.ts'
-import { stat as githubStat } from '../../../core/github/stat.ts'
-import { readStream as githubStream } from '../../../core/github/read.ts'
 import { IOResult } from '../../../io/types.ts'
-import { type FileStat, VFSName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { pathsScoped } from '../../../ops/namespace_view.ts'
+import type { PathSpec } from '../../../types.ts'
+import { type FileStat } from '../../../types.ts'
+import { type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { prefixAggregate } from '../aggregators.ts'
-import { grepNeedsEveryFile } from '../grep_pushdown.ts'
-import { patternArg } from '../grep_pattern.ts'
-import { grepGeneric, labelled } from '../generic/grep.ts'
-import { narrowScope, scopeRefusal } from './pushdown.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import { prefixAggregate } from '../aggregators.ts'
+import { grepGeneric, labelled } from '../generic/grep.ts'
+import type { Builder, CommandIO } from '../generic_bind/adapter.ts'
+import { patternArg } from '../grep_pattern.ts'
+import { grepNeedsEveryFile } from '../grep_pushdown.ts'
+import { narrowScope, scopeRefusal } from './pushdown.ts'
 
 const ENC = new TextEncoder()
 
 async function grep(
+  ops: CommandIO<GitHubAccessor>,
   accessor: GitHubAccessor,
   paths: PathSpec[],
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   let resolved: PathSpec[] = []
-  // Code search and the core ops answer from the raw repository, so under a
-  // hide or a path rule the scan sets search aside and reads through the
+  // Code search and the core scan answer from the raw repository, so under a
+  // hide or a path rule the handler sets search aside and reads through the
   // command guards, which report a refused directory where GNU does and
   // never open a sealed file.
   const scoped = pathsScoped(opts.ns, paths)
@@ -78,20 +76,15 @@ async function grep(
     }
   }
   const idx = opts.index ?? undefined
-  const io = scoped ? withCommandGuards(withPolicyGuard(IO)) : null
-  const stat = (p: PathSpec): Promise<FileStat> =>
-    io !== null ? io.stat(accessor, p, idx) : githubStat(accessor, p, idx)
-  const readdir = (p: PathSpec): Promise<string[]> =>
-    io !== null ? io.readdir(accessor, p, idx) : githubReaddir(accessor, p, idx)
-  const stream = (p: PathSpec): AsyncIterable<Uint8Array> =>
-    io !== null ? io.readStream(accessor, p, idx) : githubStream(accessor, p, idx)
+  const stat = (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, idx)
+  const readdir = (p: PathSpec): Promise<string[]> => ops.readdir(accessor, p, idx)
+  const stream = (p: PathSpec): AsyncIterable<Uint8Array> => ops.readStream(accessor, p, idx)
   return grepGeneric('grep', resolved, texts, opts, stat, readdir, stream)
 }
 
-export const GITHUB_GREP = command({
+export const BUILDER: Builder<GitHubAccessor> = {
   name: 'grep',
-  vfs: VFSName.GITHUB,
-  spec: specOf('grep'),
+  read: true,
   fn: grep,
   aggregate: prefixAggregate,
-})
+}

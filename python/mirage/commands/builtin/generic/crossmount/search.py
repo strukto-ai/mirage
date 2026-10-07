@@ -60,6 +60,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.errors.render import fs_error_line
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.ops.boundary import OpBoundary
 from mirage.ops.types import NamespaceView
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
@@ -253,6 +254,17 @@ async def run_search(
 
     results: list[OperandRun] = []
     async for scope in scopes():
+        if (
+            planned
+            and rg is not None
+            and not rg.list_files
+            and scope.error is None
+            and scope.diagnostic is None
+        ):
+            try:
+                OpBoundary.check("read", scope.path)
+            except OSError as exc:
+                scope = replace(scope, error=exc)
         if scope.error is not None or scope.diagnostic is not None:
             message = scope.diagnostic
             if message is None:

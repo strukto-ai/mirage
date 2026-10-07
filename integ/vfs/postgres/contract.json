@@ -178,7 +178,7 @@
       "command": "grep right /pg-contract/contract/tables/probes/rows.jsonl",
       "expect": {
         "exit": 0,
-        "stdout": "contract/tables/probes/rows.jsonl:{\"id\":2,\"body\":\"left right\",\"active\":false}\ncontract/tables/probes/rows.jsonl:{\"id\":3,\"body\":\"left right\",\"active\":true}\ncontract/tables/probes/rows.jsonl:{\"id\":4,\"body\":\"leftright\",\"active\":false}\n",
+        "stdout": "contract/tables/probes/rows.jsonl:{\"id\":2,\"body\":\"left\u2028right\",\"active\":false}\ncontract/tables/probes/rows.jsonl:{\"id\":3,\"body\":\"left\u2029right\",\"active\":true}\ncontract/tables/probes/rows.jsonl:{\"id\":4,\"body\":\"left\u0085right\",\"active\":false}\n",
         "stderr": ""
       }
     },
@@ -204,7 +204,7 @@
       "command": "grep true /pg-contract/contract/tables/probes/rows.jsonl",
       "expect": {
         "exit": 0,
-        "stdout": "contract/tables/probes/rows.jsonl:{\"id\":1,\"body\":\"Ada\\ttab\",\"active\":true}\ncontract/tables/probes/rows.jsonl:{\"id\":3,\"body\":\"left right\",\"active\":true}\ncontract/tables/probes/rows.jsonl:{\"id\":5,\"body\":null,\"active\":true}\n",
+        "stdout": "contract/tables/probes/rows.jsonl:{\"id\":1,\"body\":\"Ada\\ttab\",\"active\":true}\ncontract/tables/probes/rows.jsonl:{\"id\":3,\"body\":\"left\u2029right\",\"active\":true}\ncontract/tables/probes/rows.jsonl:{\"id\":5,\"body\":null,\"active\":true}\n",
         "stderr": ""
       }
     },
@@ -230,7 +230,7 @@
       "command": "grep body /pg-contract/contract/tables/probes/rows.jsonl",
       "expect": {
         "exit": 0,
-        "stdout": "contract/tables/probes/rows.jsonl:{\"id\":1,\"body\":\"Ada\\ttab\",\"active\":true}\ncontract/tables/probes/rows.jsonl:{\"id\":2,\"body\":\"left right\",\"active\":false}\ncontract/tables/probes/rows.jsonl:{\"id\":3,\"body\":\"left right\",\"active\":true}\ncontract/tables/probes/rows.jsonl:{\"id\":4,\"body\":\"leftright\",\"active\":false}\ncontract/tables/probes/rows.jsonl:{\"id\":5,\"body\":null,\"active\":true}\n",
+        "stdout": "contract/tables/probes/rows.jsonl:{\"id\":1,\"body\":\"Ada\\ttab\",\"active\":true}\ncontract/tables/probes/rows.jsonl:{\"id\":2,\"body\":\"left\u2028right\",\"active\":false}\ncontract/tables/probes/rows.jsonl:{\"id\":3,\"body\":\"left\u2029right\",\"active\":true}\ncontract/tables/probes/rows.jsonl:{\"id\":4,\"body\":\"left\u0085right\",\"active\":false}\ncontract/tables/probes/rows.jsonl:{\"id\":5,\"body\":null,\"active\":true}\n",
         "stderr": ""
       }
     },
@@ -396,7 +396,7 @@
       "targets": [
         "postgres"
       ],
-      "command": "grep -F é /pg-bytes/byte_budget/tables/wide/rows.jsonl",
+      "command": "grep -F \u00e9 /pg-bytes/byte_budget/tables/wide/rows.jsonl",
       "expect": {
         "exit": 2,
         "stdout": "",
@@ -409,7 +409,7 @@
       "targets": [
         "postgres"
       ],
-      "command": "rg -F é /pg-bytes/byte_budget/tables/wide/rows.jsonl",
+      "command": "rg -F \u00e9 /pg-bytes/byte_budget/tables/wide/rows.jsonl",
       "expect": {
         "exit": 2,
         "stdout": "",
@@ -441,6 +441,70 @@
         "stdout": "{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n",
         "stderr": "tail: error reading '/pg-limited/public/tables/books/rows.jsonl': File too large\ntail: no files remaining\n"
       }
+    },
+    {
+      "id": "postgres_native_hide",
+      "targets": [
+        "postgres"
+      ],
+      "session": "postgres-native-hide",
+      "session_profiles": {
+        "postgres-native-hide": {
+          "paths": {
+            "hide": [
+              "/pg/public/tables/books/rows.jsonl"
+            ]
+          }
+        }
+      },
+      "command": "head -n 1 /pg/public/tables/books/rows.jsonl 2>/dev/null; echo head=$?; tail -n 1 /pg/public/tables/books/rows.jsonl 2>/dev/null; echo tail=$?; wc -l /pg/public/tables/books/rows.jsonl 2>/dev/null; echo wc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "head=1\ntail=1\nwc=1\n",
+        "stderr": ""
+      },
+      "seq": 990010
+    },
+    {
+      "id": "postgres_native_deny",
+      "targets": [
+        "postgres"
+      ],
+      "session": "postgres-native-deny",
+      "session_profiles": {
+        "postgres-native-deny": {
+          "commands": {
+            "deny": [
+              {
+                "paths": [
+                  "/pg/public/tables/books/rows.jsonl"
+                ],
+                "reason": "sealed"
+              }
+            ]
+          }
+        }
+      },
+      "command": "head -n 1 /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "head: cannot open '/pg/public/tables/books/rows.jsonl' for reading: Permission denied\n"
+      },
+      "seq": 990011
+    },
+    {
+      "id": "postgres_native_reads_continue_after_missing_operand",
+      "targets": [
+        "postgres"
+      ],
+      "command": "head -q -n 1 /pg/public/tables/no_such_table/rows.jsonl /pg/public/tables/books/rows.jsonl 2>/dev/null | wc -l; tail -q -n 1 /pg/public/tables/no_such_table/rows.jsonl /pg/public/tables/books/rows.jsonl 2>/dev/null | wc -l; wc -l --total=only /pg/public/tables/no_such_table/rows.jsonl /pg/public/tables/books/rows.jsonl 2>/dev/null; echo wc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n1\n5\nwc=1\n",
+        "stderr": ""
+      },
+      "seq": 990012
     }
   ]
 }

@@ -166,9 +166,10 @@ async def run_search(
             },
         )
         try:
-            lines = await capability.search(
+            results = await capability.search(
                 accessor, operand, query, opts.index
             )
+            lines = None if results is None else [text for _, text in results]
         except FileTooLargeError as exc:
             # A push-down whose answer is past the mount's read cap cannot
             # print it; the scan reads each operand, and reports the same

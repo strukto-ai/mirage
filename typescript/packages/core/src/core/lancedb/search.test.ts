@@ -18,7 +18,7 @@ import { LanceDBAccessor } from '../../accessor/lancedb.ts'
 import { LANCEDB_COMMANDS } from '../../commands/builtin/lancedb/index.ts'
 import { resolveLanceDBConfig } from '../../vfs/lancedb/config.ts'
 import { PathSpec } from '../../types.ts'
-import { searchRowsOutput } from '../vector/search.ts'
+import { searchResults } from '../vector/search.ts'
 import type { LanceDriver } from './query.ts'
 import { TREE } from './tree.ts'
 
@@ -41,9 +41,8 @@ it('spells a group value in the canonical path the way the listing does', async 
   } as unknown as LanceDriver
   const accessor = new LanceDBAccessor(driver, config)
   const path = new PathSpec({ virtual: '/db/docs', directory: '/db/docs', vfsPath: 'docs' })
-  const output = new TextDecoder().decode(
-    await searchRowsOutput(TREE, accessor, 'one', [path], 3, 0, '/db'),
-  )
+  const results = await searchResults(TREE, accessor, 'one', [path], 3, 0, '/db')
+  const output = results.map(([, text]) => text).join('\n') + '\n'
   const headers = output.split('\n').filter((line) => line.startsWith('/db/'))
   expect(headers).toEqual([
     '/db/docs/a∕b/1.md:0.1000',

@@ -295,11 +295,15 @@ class SearchQuery:
     options: Mapping[str, JsonValue] = field(default_factory=dict)
 
 
+SearchResult = tuple[PathSpec, str]
+
+
 class SearchOp(Protocol):
     """Search a resource; None declines, [] means no results.
 
-    Results are text records in the backend's declared format. Integrations
-    such as grep require an explicit compatibility declaration in metadata.
+    Each record keeps its canonical file path separate from its rendered text,
+    so visibility never depends on parsing backend output. Integrations such
+    as grep require an explicit compatibility declaration in metadata.
     Errors and incomplete results must be reported, never treated as misses.
     """
 
@@ -310,7 +314,7 @@ class SearchOp(Protocol):
         query: SearchQuery,
         /,
         index: IndexCacheStore = ...,
-    ) -> Awaitable[list[str] | None]: ...
+    ) -> Awaitable[list[SearchResult] | None]: ...
 
 
 class SearchManyOp(Protocol):
@@ -323,7 +327,7 @@ class SearchManyOp(Protocol):
         query: SearchQuery,
         /,
         index: IndexCacheStore = ...,
-    ) -> Awaitable[list[str] | None]: ...
+    ) -> Awaitable[list[SearchResult] | None]: ...
 
 
 @dataclass(frozen=True, kw_only=True)

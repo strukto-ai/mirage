@@ -56,7 +56,6 @@ import {
 import { resolveNewerRefs } from '../find_refs.ts'
 import type { ExecuteFn } from '../../expand/node.ts'
 import { FindParseError } from '../../../commands/errors.ts'
-import { withDispatchRuleGuard } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { maybeWithTimeout } from '../../../commands/builtin/utils/limit.ts'
 import { resolveProducer, resolveLimit } from '../../../policy/index.ts'
 import {
@@ -295,9 +294,6 @@ export async function handleCommand(
       mergeSignals(signal, context.frame.abortSignal),
     )
   }
-
-  // Every op the command issues from here carries its gate to the door.
-  dispatch = withDispatchRuleGuard(dispatch)
 
   if (cmdName in CWD_DEFAULT_RAW) {
     const operand = defaultCwdOperand(parts, cmdName, registry, session.cwd, stdin)

@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type * as BindModule from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
-import type * as SearchModule from '../../../core/email/search.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as SearchModule from '../../../core/email/search.ts'
 
 vi.mock('../../../core/email/search.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof SearchModule>()),
@@ -32,7 +32,8 @@ import { IOResult } from '@struktoai/mirage-core/io/types'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { searchAndFormat } from '../../../core/email/search.ts'
-import { EMAIL_GREP } from './grep.ts'
+import { EMAIL_COMMANDS as EMAIL_GREP_COMMANDS } from './index.ts'
+const EMAIL_GREP = EMAIL_GREP_COMMANDS.filter((cmd) => cmd.name === 'grep')
 
 const search = vi.mocked(searchAndFormat)
 const generic = vi.mocked(grepGeneric)

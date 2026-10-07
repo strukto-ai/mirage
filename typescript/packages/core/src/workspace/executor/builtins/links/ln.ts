@@ -231,13 +231,17 @@ async function listedByParent(dispatch: DispatchFn, virtual: string): Promise<bo
 // way, or a link inside hidden space leads ln out of it: into the
 // directory it points at, or to the target string a hard link would copy.
 function visibleLink(namespace: Namespace, virtual: string): boolean {
-  return pathVisible(sessionVisibility(), virtual) && namespace.isLink(virtual)
+  return (
+    pathVisible(sessionVisibility(), PathSpec.fromStrPath(virtual)) && namespace.isLink(virtual)
+  )
 }
 
 // Resolve the links along a path the session may see; a hidden path
 // stays as typed. Throws CycleError as `follow` does.
 function followVisible(namespace: Namespace, virtual: string): string {
-  return pathVisible(sessionVisibility(), virtual) ? namespace.follow(virtual) : virtual
+  return pathVisible(sessionVisibility(), PathSpec.fromStrPath(virtual))
+    ? namespace.follow(virtual)
+    : virtual
 }
 
 // An operand as the path the kernel reaches, its final name kept. Command
@@ -248,7 +252,8 @@ function followVisible(namespace: Namespace, virtual: string): string {
 // link is made. Mirrors Python's operand_abs.
 export function operandAbs(namespace: Namespace, arg: string | PathSpec, cwd: string): string {
   const virtual = absPath(arg, cwd)
-  if (arg instanceof PathSpec || !pathVisible(sessionVisibility(), virtual)) return virtual
+  if (arg instanceof PathSpec || !pathVisible(sessionVisibility(), PathSpec.fromStrPath(virtual)))
+    return virtual
   try {
     return posixNormpath(namespace.followParent(dottedSpelling(arg, cwd) ?? virtual))
   } catch (err) {
@@ -272,7 +277,7 @@ function walkVerdict(
 ): FsCondition | null {
   if (wordText(word) === '') return 'ENOENT'
   const virtual = absPath(word, cwd)
-  if (!pathVisible(sessionVisibility(), virtual)) return null
+  if (!pathVisible(sessionVisibility(), PathSpec.fromStrPath(virtual))) return null
   const trimmed = rstripSlash(virtual) || '/'
   try {
     if (followLast) namespace.follow(trimmed)
@@ -584,7 +589,10 @@ export async function makeLink(
       data = bytes
     }
   }
-  if (pathVisible(sessionVisibility(), plan.linkAbs) && namespace.isMountRoot(plan.linkAbs)) {
+  if (
+    pathVisible(sessionVisibility(), PathSpec.fromStrPath(plan.linkAbs)) &&
+    namespace.isMountRoot(plan.linkAbs)
+  ) {
     errors.push(`ln: failed to create ${kind} '${typed}': File exists\n`)
     return
   }

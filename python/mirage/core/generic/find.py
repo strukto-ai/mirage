@@ -621,7 +621,7 @@ async def walk_find(
     results: list[str] = []
     vis = session_visibility()
     for p, kind in sorted(collected):
-        if not path_visible(vis, p):
+        if not path_visible(vis, PathSpec.from_str_path(p)):
             continue
         is_dir = kind == "d"
         entry_name = p.rsplit("/", 1)[-1]
@@ -694,7 +694,7 @@ async def walk_find(
         for r in await link_results(
             links, root_path, prefix, search_key, args, tree, follow=follow
         )
-        if path_visible(vis, r)
+        if path_visible(vis, PathSpec.from_str_path(r))
     )
     find_eval.settle_prunes(tree, learned)
     return sorted(find_eval.drop_pruned(results, tree, prefix))

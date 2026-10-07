@@ -19,7 +19,7 @@ import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { resolveMongoDBConfig } from '../../../vfs/mongodb/config.ts'
-import { MONGODB_WC } from './wc.ts'
+import { MONGODB_COMMANDS } from './index.ts'
 
 function docs(name: string): PathSpec {
   const virtual = `/mongo/app/collections/${name}/documents.jsonl`
@@ -32,7 +32,7 @@ function docs(name: string): PathSpec {
 }
 
 async function wcLines(path: PathSpec, counted: string[]): Promise<[string, number, string]> {
-  const cmd = MONGODB_WC[0]
+  const cmd = MONGODB_COMMANDS.find((cmd) => cmd.name === 'wc')
   if (cmd === undefined) throw new Error('wc not registered')
   const driver = stubMongoDriver({
     listDatabases: () => Promise.resolve(['app']),

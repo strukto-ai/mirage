@@ -15,6 +15,7 @@
 from typing import Any
 
 from mirage.core.gmail.search import format_grep_results
+from mirage.vfs.types import SearchResult
 
 LABEL = "INBOX"
 
@@ -33,9 +34,9 @@ def _row(body_text: str) -> dict[str, Any]:
     }
 
 
-def _excerpt(lines: list[str]) -> str:
+def _excerpt(lines: list[SearchResult]) -> str:
     """Everything after the ``<path>:[<sender>] `` header."""
-    line = lines[0]
+    line = lines[0][1]
     return line[line.index("] ") + 2 :]
 
 
@@ -74,6 +75,6 @@ def test_match_window_on_ascii():
 
 def test_empty_pattern_falls_back_to_the_snippet():
     lines = format_grep_results([_row("body")], LABEL, "/gmail")
-    assert lines == [
+    assert [text for _, text in lines] == [
         "/gmail/INBOX/2026-08-19/note__m1.gmail.json:[a@b.c] fallback snippet"
     ]

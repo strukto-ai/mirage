@@ -16,12 +16,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from mirage.commands.builtin.github.io import IO as BACKEND_IO
 from mirage.commands.builtin.github.rg import rg
 from mirage.commands.config import CommandOpts
 from mirage.io.types import IOResult
 from mirage.types import PathSpec
 
-_GLOBALS = rg.__wrapped__.__globals__
+_GLOBALS = rg.__globals__
 
 
 def _subdir() -> PathSpec:
@@ -54,6 +55,7 @@ async def test_dash_upper_i_suppression_survives_narrowing(github_env, seam):
     narrow, generic = seam
     narrow.return_value = ([_narrowed("/src/a.py")], 1, True)
     await rg(
+        BACKEND_IO,
         accessor,
         [_subdir()],
         ["needle"],
@@ -69,6 +71,7 @@ async def test_walk_fallback_leaves_flags_alone(github_env, seam):
     accessor, index = github_env
     _, generic = seam
     await rg(
+        BACKEND_IO,
         accessor,
         [_subdir()],
         ["needle"],
@@ -109,6 +112,7 @@ async def test_walk_filters_over_narrowed_candidates(
     narrowed = [_narrowed(v) for v in candidates]
     narrow.return_value = (narrowed, len(narrowed), True)
     stdout, io = await rg(
+        BACKEND_IO,
         accessor,
         [_subdir()],
         ["needle"],

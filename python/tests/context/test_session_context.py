@@ -26,6 +26,7 @@ from mirage.context import (
     program_invocation,
     readonly_below,
     require_mount_writable,
+    require_visible,
     reset_current_session,
     reset_mount_gate,
     reset_program_invocation,
@@ -39,6 +40,7 @@ from mirage.errors.types import ReadOnlyError
 from mirage.types import (
     HiddenPaths,
     MountMode,
+    PathSpec,
     ShowEntry,
     ShownPaths,
     Visibility,
@@ -157,16 +159,22 @@ def test_the_boundary_reads_the_bound_sessions_visibility():
         visibility=Visibility(paths=hidden),
     )
     assert session_visibility() is None
-    assert path_visible(session_visibility(), "/a/secrets/x")
+    assert path_visible(
+        session_visibility(), PathSpec.from_str_path("/a/secrets/x")
+    )
     token = set_current_session(sess)
     try:
         vis = session_visibility()
         assert vis is sess.visibility
-        assert not path_visible(vis, "/a/secrets/x")
-        assert not path_visible(vis, "/shared/finance/q1.csv")
-        assert not path_visible(vis, "/repo/certs/k.pem")
-        assert path_visible(vis, "/repo/README")
-        assert path_visible(vis, "/shared/public")
+        assert not path_visible(vis, PathSpec.from_str_path("/a/secrets/x"))
+        assert not path_visible(
+            vis, PathSpec.from_str_path("/shared/finance/q1.csv")
+        )
+        assert not path_visible(
+            vis, PathSpec.from_str_path("/repo/certs/k.pem")
+        )
+        assert path_visible(vis, PathSpec.from_str_path("/repo/README"))
+        assert path_visible(vis, PathSpec.from_str_path("/shared/public"))
     finally:
         reset_current_session(token)
 
@@ -408,12 +416,20 @@ def test_hidden_under_is_per_operand():
     )
     token = set_current_session(sess)
     try:
-        assert hidden_under(session_visibility(), "/repo")
-        assert hidden_under(session_visibility(), "/repo/.env")
-        assert not hidden_under(session_visibility(), "/s3")
+        assert hidden_under(
+            session_visibility(), PathSpec.from_str_path("/repo")
+        )
+        assert hidden_under(
+            session_visibility(), PathSpec.from_str_path("/repo/.env")
+        )
+        assert not hidden_under(
+            session_visibility(), PathSpec.from_str_path("/s3")
+        )
     finally:
         reset_current_session(token)
-    assert not hidden_under(session_visibility(), "/repo")
+    assert not hidden_under(
+        session_visibility(), PathSpec.from_str_path("/repo")
+    )
 
 
 def test_hidden_refusal_answers_a_create_by_its_parent():
@@ -430,28 +446,51 @@ def test_hidden_refusal_answers_a_create_by_its_parent():
         ),
     )
     vis = sess.visibility
-    under = hidden_refusal(vis, "/w/vault/new.txt", create=True)
+    under = hidden_refusal(
+        vis, PathSpec.from_str_path("/w/vault/new.txt"), create=True
+    )
     assert under.errno == errno.ENOENT
     assert under.filename == "/w/vault/new.txt"
     assert (
-        hidden_refusal(vis, "/w/vault/a/b", create=True).errno == errno.ENOENT
-    )
-    assert hidden_refusal(vis, "/w/vault", create=True).errno == errno.EACCES
-    assert hidden_refusal(vis, "/w/vault/", create=True).errno == errno.EACCES
-    assert (
-        hidden_refusal(vis, "/w/open/file.txt", create=True).errno
-        == errno.EACCES
-    )
-    assert (
-        hidden_refusal(vis, "/w/open/new.key", create=True).errno
-        == errno.EACCES
-    )
-    assert (
-        hidden_refusal(vis, "/w/vault/new.txt", create=False).errno
+        hidden_refusal(
+            vis, PathSpec.from_str_path("/w/vault/a/b"), create=True
+        ).errno
         == errno.ENOENT
     )
     assert (
-        hidden_refusal(vis, "/w/open/file.txt", create=False).errno
+        hidden_refusal(
+            vis, PathSpec.from_str_path("/w/vault"), create=True
+        ).errno
+        == errno.EACCES
+    )
+    assert (
+        hidden_refusal(
+            vis, PathSpec.from_str_path("/w/vault/"), create=True
+        ).errno
+        == errno.EACCES
+    )
+    assert (
+        hidden_refusal(
+            vis, PathSpec.from_str_path("/w/open/file.txt"), create=True
+        ).errno
+        == errno.EACCES
+    )
+    assert (
+        hidden_refusal(
+            vis, PathSpec.from_str_path("/w/open/new.key"), create=True
+        ).errno
+        == errno.EACCES
+    )
+    assert (
+        hidden_refusal(
+            vis, PathSpec.from_str_path("/w/vault/new.txt"), create=False
+        ).errno
+        == errno.ENOENT
+    )
+    assert (
+        hidden_refusal(
+            vis, PathSpec.from_str_path("/w/open/file.txt"), create=False
+        ).errno
         == errno.ENOENT
     )
 
@@ -494,3 +533,18 @@ def test_a_program_run_covers_the_child_evaluations_under_it():
     finally:
         reset_program_invocation(mark)
     assert not program_invocation(parent)
+
+
+def test_visibility_uses_workspace_identity_and_the_callers_view():
+    path = PathSpec(
+        virtual="/data/sealed/key",
+        directory="/data/sealed/",
+        vfs_path="public",
+        raw_path="/data/public",
+    )
+    restricted = Visibility(paths=HiddenPaths(paths=("/data/sealed",)))
+    require_visible(None, path)
+    with pytest.raises(FileNotFoundError):
+        require_visible(restricted, path)
+    require_visible(None, path)
+    assert path.virtual == "/data/sealed/key"

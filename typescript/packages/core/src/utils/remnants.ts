@@ -16,7 +16,7 @@ import { FileStat, FileType, PathSpec } from '../types.ts'
 import { isEnotdir, isMissingPath } from '../errors/fs.ts'
 import { rstripSlash } from './slash.ts'
 
-export type Allowed = (virtual: string) => boolean
+export type Allowed = (path: PathSpec) => boolean
 
 /**
  * A remnant cascade met an entry the session can see.
@@ -77,10 +77,9 @@ export function entryName(entry: string): string {
  * ops plane the namespace's merged children too), so "visibly empty"
  * cannot mean different things at different doors.
  */
-export function visibleBelow(base: string, names: Iterable<string>, allowed: Allowed): boolean {
-  const root = rstripSlash(base)
+export function visibleBelow(base: PathSpec, names: Iterable<string>, allowed: Allowed): boolean {
   for (const name of names) {
-    if (allowed(`${root}/${entryName(name)}`)) return true
+    if (allowed(childSpec(base, entryName(name)))) return true
   }
   return false
 }
@@ -126,7 +125,7 @@ export async function removeRemnants(
   for (const entry of entries) {
     const name = entryName(entry)
     const child = childSpec(spec, name)
-    if (allowed(child.virtual)) throw new VisibleRemnant(child.virtual)
+    if (allowed(child)) throw new VisibleRemnant(child.virtual)
     let row: unknown
     try {
       row = await channel.stat(child)

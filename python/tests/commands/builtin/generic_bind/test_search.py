@@ -80,7 +80,12 @@ IO = CommandIO(
 async def _room_searcher(
     accessor: FakeAccessor, match: ScopeMatch, query: SearchQuery
 ) -> list[str]:
-    return [f"rooms/{match.slots['room']}:{query.query}"]
+    return [
+        (
+            PathSpec.from_str_path(f"/rooms/{match.slots['room']}"),
+            f"rooms/{match.slots['room']}:{query.query}",
+        )
+    ]
 
 
 async def _empty_searcher(
@@ -272,7 +277,7 @@ def test_query_carries_the_honored_flags():
         accessor: FakeAccessor, match: ScopeMatch, query: SearchQuery
     ) -> list[str]:
         seen.append(query)
-        return ["line"]
+        return [(PathSpec.from_str_path("/rooms/red"), "line")]
 
     search = _search_command({"room": recorder}, IO)
     asyncio.run(

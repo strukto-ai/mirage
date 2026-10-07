@@ -17,7 +17,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../../core/postgres/read.ts', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  readStream: vi.fn(),
+  read: vi.fn(),
+}))
+vi.mock('../../../core/postgres/readdir.ts', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  entityExists: vi.fn(() => Promise.resolve(true)),
 }))
 vi.mock('../../../core/postgres/stat.ts', () => ({
   stat: vi.fn(),
@@ -35,7 +39,8 @@ import * as statModule from '../../../core/postgres/stat.ts'
 import { resolvePostgresConfig } from '../../../vfs/postgres/config.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { POSTGRES_TAIL } from './tail.ts'
+import { POSTGRES_COMMANDS } from './index.ts'
+import { materialize } from '../../../io/types.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -60,15 +65,11 @@ const ROWS = new PathSpec({
   vfsPath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
 })
 
-async function* rows(): AsyncGenerator<Uint8Array> {
-  yield await Promise.resolve(ENC.encode('{"id":1}\n{"id":2}\n'))
-}
-
 async function run(
   flags: Record<string, FlagValue>,
   signal?: AbortSignal,
 ): Promise<AsyncIterable<Uint8Array> | Uint8Array | null> {
-  const cmd = POSTGRES_TAIL[0]
+  const cmd = POSTGRES_COMMANDS.find((cmd) => cmd.name === 'tail')
   if (cmd === undefined) throw new Error('tail not registered')
   const result = await cmd.fn(makeAccessor(), [ROWS], [], {
     stdin: null,
@@ -83,21 +84,21 @@ async function run(
 
 describe('postgres tail pushdown', () => {
   beforeEach(() => {
-    vi.mocked(readModule.readStream).mockReset()
+    vi.mocked(readModule.read).mockReset()
     vi.mocked(statModule.stat).mockReset()
     vi.mocked(clientModule.countRows).mockReset()
     vi.mocked(statModule.stat).mockResolvedValue(
       new FileStat({ name: 'rows.jsonl', type: FileType.FILE, size: null }),
     )
-    vi.mocked(readModule.readStream).mockImplementation(() => rows())
+    vi.mocked(readModule.read).mockResolvedValue(ENC.encode('{"id":1}\n{"id":2}\n'))
   })
 
   // `defaultRowLimit` clamped the suffix, so `tail -n 1200` of a 1500-row
   // table fetched the last 1000 rows and exited 0.
   it('fetches every row asked for past the default', async () => {
     vi.mocked(clientModule.countRows).mockResolvedValue(1500)
-    await run({ n: '1200' })
-    expect(vi.mocked(readModule.readStream).mock.calls[0]?.[3]).toEqual({
+    await materialize(await run({ n: '1200' }))
+    expect(vi.mocked(readModule.read).mock.calls[0]?.[3]).toEqual({
       limit: 1200,
       offset: 300,
     })
@@ -118,7 +119,7 @@ describe('postgres tail pushdown', () => {
       await it.return?.()
       expect(DEC.decode(first.value as Uint8Array)).toBe('{"id":1}\n{"id":2}\n')
       expect(clientModule.countRows).not.toHaveBeenCalled()
-      expect(vi.mocked(readModule.readStream).mock.calls[0]?.[3]).toBeUndefined()
+      expect(vi.mocked(readModule.read).mock.calls[0]?.[3]).toBeUndefined()
     },
   )
 })

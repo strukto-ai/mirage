@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DifyAccessor } from '../../../accessor/dify.ts'
-import { stat, statLight } from '../../../core/dify/stat.ts'
+import { statLight } from '../../../core/dify/stat.ts'
 import { DIFY_TREE } from '../../../core/dify/tree.ts'
 import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
@@ -24,11 +24,10 @@ import { DIFY_SEARCH } from './search.ts'
 
 export const DIFY_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<DifyAccessor>(VFSName.DIFY, IO, {
-    overrides: new Set(['find']),
+    overrides: { find: makeFind(DIFY_TREE, statLight, readsTimes) },
     // ls stats every listed entry, so it keeps the index-only stat instead
     // of paying one document-detail call per row, as python does.
     opsOverrides: { ls: { ...IO, stat: statLight } },
   }),
-  ...makeFind(VFSName.DIFY, IO, DIFY_TREE, stat, statLight, readsTimes),
   ...DIFY_SEARCH,
 ]

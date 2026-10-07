@@ -13,26 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PostgresAccessor } from '../../../accessor/postgres.ts'
+import type { Builder } from '../generic_bind/adapter.ts'
 
-import { VFSName } from '../../../types.ts'
-import { command } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { scanIo } from '../generic_bind/index.ts'
 import { runSearch } from '../generic_bind/search.ts'
 
-import { IO } from './io.ts'
-
-export const POSTGRES_RG = command({
+export const BUILDER: Builder<PostgresAccessor> = {
   name: 'rg',
-  vfs: VFSName.POSTGRES,
-  spec: specOf('rg'),
-  fn: (accessor: PostgresAccessor, paths, texts, opts) =>
-    runSearch<PostgresAccessor>(
-      scanIo(IO, opts.ns, opts.mountPrefix)[0],
-      'rg',
-      accessor,
-      paths,
-      texts,
-      opts,
-    ),
-})
+  read: true,
+  fn: (ops, accessor: PostgresAccessor, paths, texts, opts) =>
+    runSearch<PostgresAccessor>(ops, 'rg', accessor, paths, texts, opts),
+}

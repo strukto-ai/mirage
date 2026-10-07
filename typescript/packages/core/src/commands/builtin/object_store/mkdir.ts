@@ -15,11 +15,10 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import type { RegisteredCommand } from '../../config.ts'
+import { type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { requireOp } from '../generic_bind/adapter.ts'
+import { requireOp, type Builder } from '../generic_bind/adapter.ts'
 import { createdLines, createdNames, makeDirectory } from '../generic_bind/builders/mkdir.ts'
 import { resolveGlobOf, type CommandIO } from '../generic_bind/index.ts'
 import { mkdirLinkRefusal } from '../utils/slash_links.ts'
@@ -27,61 +26,52 @@ import { missingOperandError } from '../../spec/usage.ts'
 
 const ENC = new TextEncoder()
 
-/** Build the implicit-parents mkdir override for one keyed store. */
-export function makeMkdir<A extends Accessor>(vfs: string, io: CommandIO<A>): RegisteredCommand[] {
-  const mkdirImpl = requireOp(io.mkdir, 'mkdir')
-  const resolveGlob = resolveGlobOf(io)
+export async function mkdir<A extends Accessor>(
+  ops: CommandIO<A>,
+  accessor: A,
+  paths: PathSpec[],
+  _texts: string[],
+  opts: CommandOpts,
+): Promise<CommandFnResult> {
+  const mkdirImpl = requireOp(ops.mkdir, 'mkdir')
+  const resolveGlob = resolveGlobOf(ops)
 
-  async function mkdirCommand(
-    accessor: A,
-    paths: PathSpec[],
-    _texts: string[],
-    opts: CommandOpts,
-  ): Promise<CommandFnResult> {
-    if (paths.length === 0) throw missingOperandError('mkdir', null)
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const fl = new FlagView(opts.flags, specOf('mkdir'))
-    const verbose = fl.asBool('verbose')
-    const parents = fl.asBool('parents')
-    const lines: string[] = []
-    const writes: Record<string, Uint8Array> = {}
-    const errors: string[] = []
-    const links = opts.ns?.links ?? null
-    for (const path of resolved) {
-      // A symlink occupying the name is EEXIST; the shared helper keeps
-      // this identical to the generic builder's answer.
-      const collision = await mkdirLinkRefusal(path, links, { parents })
-      if (collision.taken) {
-        if (collision.message !== null) errors.push(collision.message)
-        continue
-      }
-      const names = verbose ? await createdNames(path, parents, links) : []
-      const failed = await makeDirectory(mkdirImpl, accessor, path, parents, links)
-      if (failed !== null) {
-        errors.push(failed)
-        continue
-      }
-      writes[path.mountPath] = new Uint8Array()
-      lines.push(...createdLines(names))
+  if (paths.length === 0) throw missingOperandError('mkdir', null)
+  const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
+  const fl = new FlagView(opts.flags, specOf('mkdir'))
+  const verbose = fl.asBool('verbose')
+  const parents = fl.asBool('parents')
+  const lines: string[] = []
+  const writes: Record<string, Uint8Array> = {}
+  const errors: string[] = []
+  const links = opts.ns?.links ?? null
+  for (const path of resolved) {
+    // A symlink occupying the name is EEXIST; the shared helper keeps
+    // this identical to the generic builder's answer.
+    const collision = await mkdirLinkRefusal(path, links, { parents })
+    if (collision.taken) {
+      if (collision.message !== null) errors.push(collision.message)
+      continue
     }
-    const output: ByteSource | null = lines.length > 0 ? ENC.encode(lines.join('\n') + '\n') : null
-    const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : undefined
-    return [
-      output,
-      new IOResult({
-        writes,
-        exitCode: errors.length > 0 ? 1 : 0,
-        ...(stderr !== undefined ? { stderr } : {}),
-      }),
-    ]
+    const names = verbose ? await createdNames(path, parents, links) : []
+    const failed = await makeDirectory(mkdirImpl, accessor, path, parents, links)
+    if (failed !== null) {
+      errors.push(failed)
+      continue
+    }
+    writes[path.mountPath] = new Uint8Array()
+    lines.push(...createdLines(names))
   }
-
-  return command<A>({
-    name: 'mkdir',
-    vfs,
-    spec: specOf('mkdir'),
-    fn: mkdirCommand,
-    write: true,
-    pathGuarded: true,
-  })
+  const output: ByteSource | null = lines.length > 0 ? ENC.encode(lines.join('\n') + '\n') : null
+  const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : undefined
+  return [
+    output,
+    new IOResult({
+      writes,
+      exitCode: errors.length > 0 ? 1 : 0,
+      ...(stderr !== undefined ? { stderr } : {}),
+    }),
+  ]
 }
+
+export const BUILDER = { name: 'mkdir', fn: mkdir, write: true } satisfies Builder

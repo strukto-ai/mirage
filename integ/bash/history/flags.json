@@ -24,7 +24,7 @@
       "command": "history 3",
       "expect": {
         "exit": 0,
-        "stdout": "2  history\n3  synthetic entry one\n4  history -s synthetic entry one\n",
+        "stdout": "3  grep -c marker-s2 /.bash_history\n4  synthetic entry one\n5  history -s synthetic entry one\n",
         "stderr": ""
       }
     },
@@ -52,7 +52,7 @@
       "command": "history 3",
       "expect": {
         "exit": 0,
-        "stdout": "3  history -s synthetic entry one\n4  history 3\n5  history -d 1\n",
+        "stdout": "4  history -s synthetic entry one\n5  history 3\n6  history -d 1\n",
         "stderr": ""
       }
     },

@@ -20,7 +20,7 @@ import type {
   ShownPaths,
   Visibility,
 } from '../types.ts'
-import { weakerMode } from '../types.ts'
+import { PathSpec, weakerMode } from '../types.ts'
 import { fnmatch } from './fnmatch.ts'
 import { stripSlash } from './slash.ts'
 
@@ -256,7 +256,8 @@ export function showDepth(shown: ShownPaths | null | undefined, virtual: string)
  * to a carve-out exists (`hide /repo` + `show /repo/public` keeps
  * `/repo` listable, holding only the carve-out).
  */
-export function pathVisible(vis: Visibility | null | undefined, virtual: string): boolean {
+export function pathVisible(vis: Visibility | null | undefined, path: PathSpec): boolean {
+  const virtual = path.virtual
   if (vis == null) return true
   const deepestHide = hideDepth(vis.paths, virtual)
   if (deepestHide === null) return true
@@ -275,7 +276,10 @@ export function pathVisible(vis: Visibility | null | undefined, virtual: string)
       if (head !== entry.path && anchorDepth(entry.path) > deepestHide) return true
       continue
     }
-    if ((norm === '/' || head.startsWith(norm + '/')) && pathVisible(vis, head)) {
+    if (
+      (norm === '/' || head.startsWith(norm + '/')) &&
+      pathVisible(vis, PathSpec.fromStrPath(head))
+    ) {
       return true
     }
   }
@@ -292,10 +296,10 @@ export function pathVisible(vis: Visibility | null | undefined, virtual: string)
  */
 export function shownMode(
   shown: ShownPaths | null | undefined,
-  virtual: string,
+  path: PathSpec,
 ): [number, MountMode] | null {
   if (shown == null || shown.entries.length === 0) return null
-  const norm = normAbs(virtual)
+  const norm = normAbs(path.virtual)
   const parts = norm.split('/').filter((seg) => seg !== '')
   let best: [number, MountMode] | null = null
   for (const entry of shown.entries) {
@@ -324,8 +328,8 @@ export function classifyShows(entries: readonly ShowEntry[]): ShownPaths | null 
  * session form of `hidesIntersect`, for the view a native walk asks
  * before it trusts the raw tree.
  */
-export function hiddenUnder(vis: Visibility | null | undefined, virtual: string): boolean {
-  return hidesIntersect(vis?.paths, virtual)
+export function hiddenUnder(vis: Visibility | null | undefined, path: PathSpec): boolean {
+  return hidesIntersect(vis?.paths, path.virtual)
 }
 
 /**
@@ -378,20 +382,24 @@ export function hidesIntersect(hidden: HiddenPaths | null | undefined, virtual: 
  * `src` refuses, failing toward refusal the way `readonlyBelow` blames
  * a pattern.
  */
-export function moveReveals(vis: Visibility | null | undefined, src: string, dst: string): boolean {
+export function moveReveals(
+  vis: Visibility | null | undefined,
+  src: PathSpec,
+  dst: PathSpec,
+): boolean {
   const hidden = vis?.paths
   if (hidden == null) return false
   const paths = hidden.paths ?? []
   const patterns = hidden.patterns ?? []
   if (paths.length === 0 && patterns.length === 0) return false
-  const s = normAbs(src)
-  const d = normAbs(dst)
+  const s = normAbs(src.virtual)
+  const d = normAbs(dst.virtual)
   if (s === '/') return true
   for (const entry of paths) {
     const e = normAbs(entry)
     if (!e.startsWith(s + '/')) continue
     const mapped = (d === '/' ? '' : d) + e.slice(s.length)
-    if (pathVisible(vis, mapped)) return true
+    if (pathVisible(vis, PathSpec.fromStrPath(mapped))) return true
   }
   for (const pat of patterns) {
     if (!pat.includes('/')) continue

@@ -246,6 +246,29 @@
         "stdout": "/discord/Mirage HQ__100000000000000001/channels/releases__200000000000000002/2026-06-01/chat.jsonl\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "discord_native_search_filters_hidden_day",
+      "targets": [
+        "discord"
+      ],
+      "session": "native-search-day",
+      "session_profiles": {
+        "native-search-day": {
+          "paths": {
+            "hide": [
+              "/discord/Mirage HQ__100000000000000001/channels/releases__200000000000000002/2026-06-01"
+            ]
+          }
+        }
+      },
+      "command": "grep -rw released '/discord/Mirage HQ__100000000000000001/channels/releases__200000000000000002' | grep 2026-06-01; echo grep=$?; rg -w released '/discord/Mirage HQ__100000000000000001/channels/releases__200000000000000002' | grep 2026-06-01; echo rg=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grep=1\nrg=1\n",
+        "stderr": ""
+      },
+      "seq": 990065
     }
   ]
 }

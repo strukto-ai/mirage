@@ -87,5 +87,6 @@ export function makeSearch<A extends Accessor>(
     vfs,
     spec: specOf('search'),
     fn: search,
+    pathGuarded: true,
   })
 }

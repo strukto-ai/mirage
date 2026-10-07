@@ -14,10 +14,12 @@
 
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.builtin.aggregators import prefix_aggregate
-from mirage.commands.builtin.email.io import IO
 from mirage.commands.builtin.generic.grep import grep_generic
-from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.generic_bind.factory import scan_io
+from mirage.commands.builtin.generic_bind.adapter import (
+    Builder,
+    CommandIO,
+    bound_op,
+)
 from mirage.commands.builtin.grep_pattern import (
     compile_pattern,
     matcher_syntax,
@@ -31,12 +33,13 @@ from mirage.commands.builtin.grep_pushdown import (
 from mirage.commands.builtin.grep_scan import grep_lines
 from mirage.commands.builtin.types import RegexSyntax
 from mirage.commands.builtin.utils.output import format_records
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.email.scope import NATIVE_KINDS, detect_scope
 from mirage.core.email.search import search_and_format
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.namespace_view import paths_scoped
 from mirage.shell.bytes import byte_view, text_view, utf8_locale
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
@@ -65,8 +68,8 @@ RG_SEARCH_HONORED = (
 )
 
 
-@command("grep", vfs="email", spec=SPECS["grep"], aggregate=prefix_aggregate)
 async def grep(
+    ops: CommandIO,
     accessor: EmailAccessor,
     paths: list[PathSpec],
     texts: list[str],
@@ -79,7 +82,9 @@ async def grep(
     # push-down waits for it too; every other reason to defer is the shared
     # gate's. A scope that names no folder falls through to the generic scan
     # rather than answering, which is what the mount root does.
-    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
+    scoped = paths_scoped(
+        opts.ns, [PathSpec.from_str_path(opts.mount_prefix or "/")]
+    )
     operand = (
         None
         if scoped
@@ -123,15 +128,15 @@ async def grep(
                 return result
 
     resolved = (
-        await scan.resolve_glob(accessor, paths, opts.index) if paths else []
+        await ops.resolve_glob(accessor, paths, opts.index) if paths else []
     )
     return await grep_generic(
         resolved,
         texts,
         opts,
-        readdir=bound_op(scan.readdir, accessor, opts.index),
-        stat=bound_op(scan.stat, accessor, opts.index),
-        read_bytes=bound_op(scan.read_bytes, accessor, opts.index),
+        readdir=bound_op(ops.readdir, accessor, opts.index),
+        stat=bound_op(ops.stat, accessor, opts.index),
+        read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
         read_stream=None,
         stdin=opts.stdin,
     )
@@ -200,3 +205,6 @@ async def _grep_server_side(
             return format_records(all_results), IOResult(exit_code=1)
         return b"", IOResult(exit_code=1)
     return format_records(all_results), IOResult()
+
+
+BUILDER = Builder("grep", grep, read=True, aggregate=prefix_aggregate)

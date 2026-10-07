@@ -53,7 +53,7 @@ def documents(monkeypatch):
 
 def view(vis: Visibility) -> NamespaceView:
     return NamespaceView(
-        visibility=vis, scoped=lambda virtual: hidden_under(vis, virtual)
+        visibility=vis, scoped=lambda path: hidden_under(vis, path)
     )
 
 

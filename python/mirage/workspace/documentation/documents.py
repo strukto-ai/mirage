@@ -112,7 +112,7 @@ class Documents:
                 # name is followed, as the read's own walk follows it.
                 bound = ws._namespace.follow_parent(virtual)
                 if not all(
-                    path_visible(session.visibility, p)
+                    path_visible(session.visibility, PathSpec.from_str_path(p))
                     for p in (virtual, bound)
                 ):
                     raise enoent(virtual)
