@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { runWithMountContext, withMountContext } from '../../../observe/context.ts'
+import type { IOContext } from '../../../context/types.ts'
 import type {
   ContentSearchOps,
   ReadOps,
@@ -73,6 +75,7 @@ export interface CommandIO<A extends Accessor = Accessor>
   extends ReadOps<A>, NativeReadOps<A>, WriteOps<A> {
   readStream: ReadStreamOp<A>
   isMounted: (accessor: A) => boolean
+  ioContext?: IOContext
   streamsBytes?: boolean
   local?: boolean
   maxGlobMatches?: number
@@ -98,6 +101,7 @@ export function resolveGlobOf<A extends Accessor = Accessor>(ops: CommandIO<A>):
     ops.globChildren,
     ops.stat,
     ops.globTargetStat,
+    ops.ioContext,
   )
 }
 
@@ -434,15 +438,15 @@ export interface Builder<A extends Accessor = Accessor> {
  * only when the directory it lands in is visible. Raised at the op
  * boundary so each command renders the refusal through its own
  * missing-file wording, indistinguishable from a real miss. */
-export function refuseHidden(path: PathSpec, create: boolean): void {
-  const vis = sessionVisibility()
+export function refuseHidden(path: PathSpec, create: boolean, context?: IOContext): void {
+  const vis = sessionVisibility(context)
   if (pathVisible(vis, path.virtual)) return
   throw hiddenRefusal(vis, path.virtual, create)
 }
 
-function visibleChildren(entries: string[], parent: PathSpec): string[] {
+function visibleChildren(entries: string[], parent: PathSpec, context?: IOContext): string[] {
   const base = rstripSlash(parent.virtual)
-  const vis = sessionVisibility()
+  const vis = sessionVisibility(context)
   return entries.filter((e) => {
     const trimmed = rstripSlash(e)
     return pathVisible(vis, `${base}/${trimmed.slice(trimmed.lastIndexOf('/') + 1)}`)
@@ -450,8 +454,8 @@ function visibleChildren(entries: string[], parent: PathSpec): string[] {
 }
 
 /** Whether the bound session's hides make this relocation a reveal. */
-function moveWouldReveal(src: PathSpec, dst: PathSpec): boolean {
-  return moveReveals(sessionVisibility(), src.virtual, dst.virtual)
+function moveWouldReveal(src: PathSpec, dst: PathSpec, context?: IOContext): boolean {
+  return moveReveals(sessionVisibility(context), src.virtual, dst.virtual)
 }
 
 /** Refuse a relocation that would surface a hidden path.
@@ -463,8 +467,8 @@ function moveWouldReveal(src: PathSpec, dst: PathSpec): boolean {
  * Only a directory has anything below it to re-anchor, so callers
  * check this for a source they know is a directory and skip it for a
  * file. */
-export function refuseReveal(src: PathSpec, dst: PathSpec): void {
-  if (moveWouldReveal(src, dst)) throw eacces(src.virtual)
+export function refuseReveal(src: PathSpec, dst: PathSpec, visibility = sessionVisibility()): void {
+  if (moveReveals(visibility, src.virtual, dst.virtual)) throw eacces(src.virtual)
 }
 
 /** Whether a pair op's source stats as a directory, probed only when
@@ -497,17 +501,18 @@ async function pairSrcIsDir<A extends Accessor>(
  * one wrapped copy is shared across sessions.
  */
 function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): CommandIO<A> {
+  const context = ops.ioContext
   const guarded: CommandIO<A> = {
     ...ops,
     readdir: async (accessor, path, index) => {
-      refuseHidden(path, false)
-      return visibleChildren(await ops.readdir(accessor, path, index), path)
+      refuseHidden(path, false, context)
+      return visibleChildren(await ops.readdir(accessor, path, index), path, context)
     },
   }
   const ex = ops.exists
   if (ex !== undefined) {
     guarded.exists = async (accessor, path) => {
-      if (!pathVisible(sessionVisibility(), path.virtual)) return false
+      if (!pathVisible(sessionVisibility(context), path.virtual)) return false
       return ex(accessor, path)
     }
   }
@@ -531,13 +536,13 @@ function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): Command
     // the factory applies this guard per invocation, after stamping it.
     const children = ops.globChildren
     guarded.rmdir = async (accessor, path, index) => {
-      refuseHidden(path, false)
+      refuseHidden(path, false, context)
       try {
         await rd(accessor, path, index)
         return
       } catch (exc) {
         const code = (exc as { code?: string }).code
-        const vis = sessionVisibility()
+        const vis = sessionVisibility(context)
         if (
           rawUnlink === undefined ||
           (code !== 'ENOTEMPTY' && code !== 'EEXIST') ||
@@ -569,11 +574,11 @@ function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): Command
           readdir: (at) => rawReaddir(accessor, at, index),
           stat: (at) => rawStat(accessor, at, index),
           unlink: async (at) => {
-            checkCommandPaths([at], 'unlink', false)
+            checkCommandPaths([at], 'unlink', false, true, context)
             await rawUnlink(accessor, at)
           },
           rmdir: async (at) => {
-            checkCommandPaths([at], 'rmdir', false)
+            checkCommandPaths([at], 'rmdir', false, true, context)
             await rd(accessor, at, index)
           },
         }
@@ -590,9 +595,9 @@ function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): Command
     // Only a directory source can carry hidden content into view, so a
     // rename whose source stats as a file passes the reveal check.
     guarded.rename = async (accessor, src, dst) => {
-      refuseHidden(src, false)
-      refuseHidden(dst, true)
-      if (moveWouldReveal(src, dst) && (await pairSrcIsDir(ops.stat, accessor, src))) {
+      refuseHidden(src, false, context)
+      refuseHidden(dst, true, context)
+      if (moveWouldReveal(src, dst, context) && (await pairSrcIsDir(ops.stat, accessor, src))) {
         throw eacces(src.virtual)
       }
       return rn(accessor, src, dst)
@@ -601,9 +606,9 @@ function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): Command
   const dc = ops.dirCopy
   if (dc !== undefined) {
     guarded.dirCopy = (accessor, src, dst) => {
-      refuseHidden(src, false)
-      refuseHidden(dst, true)
-      refuseReveal(src, dst)
+      refuseHidden(src, false, context)
+      refuseHidden(dst, true, context)
+      refuseReveal(src, dst, sessionVisibility(context))
       return dc(accessor, src, dst)
     }
   }
@@ -673,6 +678,7 @@ async function mkdirOnReadOnly<A extends Accessor>(
   accessor: A,
   path: PathSpec,
   parents: boolean,
+  context?: IOContext,
 ): Promise<void> {
   const [prefix, mode] = gate
   const base = rstripSlash(prefix)
@@ -701,7 +707,9 @@ async function mkdirOnReadOnly<A extends Accessor>(
       const blame =
         chain
           .slice(index)
-          .find((spec) => effectivePathMode(spec.virtual, prefix, mode) === MountMode.READ) ?? path
+          .find(
+            (spec) => effectivePathMode(spec.virtual, prefix, mode, context) === MountMode.READ,
+          ) ?? path
       throw erofs(blame.virtual, `mount ${prefix} is read-only`)
     }
     if (row.type !== FileType.DIRECTORY) {
@@ -746,11 +754,12 @@ async function walkAdmit(
 function walkProbeOf(
   bound: WalkProbe | null,
   args: readonly unknown[],
+  context?: IOContext,
 ): [WalkProbe, PathSpec[]] | null {
   const specs = args.filter((a): a is PathSpec => a instanceof PathSpec && a.dotted !== null)
   const first = specs[0]
   if (first === undefined) return null
-  const probe = bound ?? walkProbeFor(first.virtual)
+  const probe = bound ?? walkProbeFor(first.virtual, context)
   return probe === null ? null : [probe, specs]
 }
 
@@ -768,10 +777,11 @@ function walkedCall<Args extends unknown[], R>(
   bound: WalkProbe | null,
   fn: (...args: Args) => Promise<R>,
   creates = false,
+  context?: IOContext,
 ): (...args: Args) => Promise<R> {
   return async (...args: Args) => {
     refuseUnwalked(args)
-    const walk = walkProbeOf(bound, args)
+    const walk = walkProbeOf(bound, args, context)
     if (walk !== null) await walkAdmit(walk[0], walk[1], creates)
     return fn(...args)
   }
@@ -871,8 +881,9 @@ export function withAbortGuard<A extends Accessor = Accessor>(
  */
 export function withWriteGuards<A extends Accessor, R>(
   fn: (accessor: A, path: PathSpec, index?: IndexCacheStore) => Promise<R> | R,
+  context?: IOContext,
 ): (accessor: A, path: PathSpec, index?: IndexCacheStore) => Promise<R> {
-  return guardOperation(fn, 'unlink')
+  return guardOperation(fn, 'unlink', context)
 }
 
 /** Require a capability at call time, after the same guards as an available op. */
@@ -900,17 +911,18 @@ function checkCommandPaths(
   slot: GuardedSlot,
   checkHidden = true,
   checkMode = true,
+  context?: IOContext,
 ): void {
   const access = mutationOf(slot)
-  const admission = getAdmission()
+  const admission = getAdmission(context)
   for (const [position, path] of paths.entries()) {
-    if (checkHidden) refuseHidden(path, position > 0 || access?.create === true)
+    if (checkHidden) refuseHidden(path, position > 0 || access?.create === true, context)
     if (slot !== 'stat' && slot !== 'exists') admission?.check(path.virtual)
   }
   if (access !== undefined && checkMode) {
     for (const path of access.firstSource ? paths.slice(1) : paths) {
-      const gate = mountGateFor(path.virtual)
-      if (gate !== null) requirePathsWritable([path], ...gate, access.subtree)
+      const gate = mountGateFor(path.virtual, context)
+      if (gate !== null) requirePathsWritable([path], ...gate, access.subtree, context)
     }
   }
 }
@@ -919,9 +931,10 @@ function commandCall<T extends (...args: never[]) => unknown>(
   fn: T,
   slot: GuardedSlot,
   checkMode = true,
+  context?: IOContext,
 ): T {
   return ((...args: never[]) => {
-    checkCommandPaths(pathsOf(args), slot, true, checkMode)
+    checkCommandPaths(pathsOf(args), slot, true, checkMode, context)
     return fn(...args)
   }) as T
 }
@@ -930,14 +943,18 @@ export function withCommandGuards<A extends Accessor>(
   ops: CommandIO<A>,
   prefix?: string,
 ): CommandIO<A> {
-  const probe = prefix === undefined ? null : walkProbeFor(prefix)
+  const context = ops.ioContext
+  const probe = prefix === undefined ? null : walkProbeFor(prefix, context)
   const prepared = namespaceOps(ops)
   const mk = ops.mkdir
   if (mk !== undefined) {
     prepared.mkdir = (accessor, path, parents) => {
-      const gate = mountGateFor(path.virtual)
-      if (gate !== null && effectivePathMode(path.virtual, gate[0], gate[1]) === MountMode.READ) {
-        return mkdirOnReadOnly(ops.stat, gate, accessor, path, parents ?? false)
+      const gate = mountGateFor(path.virtual, context)
+      if (
+        gate !== null &&
+        effectivePathMode(path.virtual, gate[0], gate[1], context) === MountMode.READ
+      ) {
+        return mkdirOnReadOnly(ops.stat, gate, accessor, path, parents ?? false, context)
       }
       return mkdirOnWritable(mk, ops.stat, accessor, path, parents ?? false)
     }
@@ -957,32 +974,38 @@ export function withCommandGuards<A extends Accessor>(
     Object.assign(guarded, {
       [slot]: walkedCall(
         probe,
-        commandCall(fn, slot, slot !== 'mkdir') as (...args: unknown[]) => Promise<unknown>,
+        commandCall(fn, slot, slot !== 'mkdir', context) as (
+          ...args: unknown[]
+        ) => Promise<unknown>,
         slot === 'mkdir',
+        context,
       ),
     })
   }
   guarded.readStream = (accessor, path, index) => {
-    checkCommandPaths([path], 'readStream')
+    checkCommandPaths([path], 'readStream', true, true, context)
     const source = prepared.readStream(accessor, path, index)
-    const walk = walkProbeOf(probe, [path])
+    const walk = walkProbeOf(probe, [path], context)
     return walkedStream(walk?.[0] ?? null, [path], source)
   }
   if (guarded.exists !== undefined) {
     const exists = guarded.exists
     guarded.exists = (accessor, path) =>
-      pathVisible(sessionVisibility(), path.virtual)
+      pathVisible(sessionVisibility(context), path.virtual)
         ? exists(accessor, path)
         : Promise.resolve(false)
   }
   if (ops.du !== undefined) {
     guarded.du = {
-      size: commandCall(ops.du.size, 'du'),
-      entries: commandCall(ops.du.entries, 'du'),
+      size: commandCall(ops.du.size, 'du', true, context),
+      entries: commandCall(ops.du.entries, 'du', true, context),
     }
   }
   if (ops.search !== undefined)
-    guarded.search = { ...ops.search, search: commandCall(ops.search.search, 'search') }
+    guarded.search = {
+      ...ops.search,
+      search: commandCall(ops.search.search, 'search', true, context),
+    }
   return guarded
 }
 
@@ -993,9 +1016,9 @@ export function withCommandGuards<A extends Accessor>(
  * which command issued an op. A metadata op passes unmarked, as
  * `withCommandGuards` lets `stat` pass.
  */
-export function withDispatchRuleGuard(dispatch: DispatchFn): DispatchFn {
+export function withDispatchRuleGuard(dispatch: DispatchFn, context?: IOContext): DispatchFn {
   return async (op, path, args, options, report) => {
-    const gate = getAdmission()
+    const gate = getAdmission(context)
     if (gate === null || METADATA_OPS.has(op)) return dispatch(op, path, args, options, report)
     return dispatch(op, path, args, { ...options, ruleGate: gate }, report)
   }
@@ -1009,16 +1032,22 @@ interface OpPolicyScope {
    * time (a registration-time wrap has no one mount). */
   prefix: string | null
   sessionId: string
+  context?: IOContext
 }
 
 /**
  * The scope to consult for this op call: null is the fast path (no
  * dispatched command bound policies, or none of them override preVfs).
  */
-function opPolicyScope(prefix: string | null): OpPolicyScope | null {
-  const policies = getOpPolicies()
+function opPolicyScope(prefix: string | null, context?: IOContext): OpPolicyScope | null {
+  const policies = getOpPolicies(context)
   if (!policies?.wants('preVfs')) return null
-  return { policies, prefix, sessionId: getCurrentSession()?.sessionId ?? '' }
+  return {
+    policies,
+    prefix,
+    sessionId: context?.sessionId ?? getCurrentSession()?.sessionId ?? '',
+    ...(context === undefined ? {} : { context }),
+  }
 }
 
 /**
@@ -1033,8 +1062,8 @@ function opPolicyScope(prefix: string | null): OpPolicyScope | null {
  * the loose-write chain) has no window when applied and reads the
  * live context instead, which its eager handlers are inside.
  */
-function livePolicyScope(scope: OpPolicyScope | null): OpPolicyScope | null {
-  return scope ?? opPolicyScope(null)
+function livePolicyScope(scope: OpPolicyScope | null, context?: IOContext): OpPolicyScope | null {
+  return context === undefined ? (scope ?? opPolicyScope(null)) : scope
 }
 
 /** Fire preVfs for one PathSpec of one slot call; the op is the slot
@@ -1049,9 +1078,10 @@ async function policyAdmit(
   path: PathSpec,
   write: boolean,
 ): Promise<void> {
-  const prefix = scope.prefix ?? mountGateFor(path.virtual)?.[0] ?? ''
+  const prefix = scope.prefix ?? mountGateFor(path.virtual, scope.context)?.[0] ?? ''
   await preVfsGate(scope.policies, op, path, write, prefix, scope.sessionId, undefined, {
     checkHidden: false,
+    ...(scope.context === undefined ? {} : { io: scope.context }),
   })
 }
 
@@ -1090,11 +1120,11 @@ export function withPolicyGuard<A extends Accessor = Accessor>(
   ops: CommandIO<A>,
   prefix?: string,
 ): CommandIO<A> {
-  const scope = opPolicyScope(prefix ?? null)
+  const scope = opPolicyScope(prefix ?? null, ops.ioContext)
   const guarded: CommandIO<A> = {
     ...ops,
     readStream: (accessor, path, index) => {
-      const p = livePolicyScope(scope)
+      const p = livePolicyScope(scope, ops.ioContext)
       const inner = ops.readStream(accessor, path, index)
       if (p === null) return inner
       return policyStream(p, path, inner)
@@ -1104,7 +1134,7 @@ export function withPolicyGuard<A extends Accessor = Accessor>(
     const fn = ops[slot]
     if (fn !== undefined) {
       // All slots in this set return promises; readStream keeps its own wrapper.
-      Object.assign(guarded, { [slot]: policyCall(scope, fn, slot) })
+      Object.assign(guarded, { [slot]: policyCall(scope, fn, slot, ops.ioContext) })
     }
   }
   return guarded
@@ -1114,9 +1144,10 @@ function policyCall<T extends (...args: never[]) => unknown>(
   scope: OpPolicyScope | null,
   fn: T,
   slot: GuardedSlot,
+  context?: IOContext,
 ): T {
   return (async (...args: never[]) => {
-    const p = livePolicyScope(scope)
+    const p = livePolicyScope(scope, context)
     if (p !== null) {
       const access = mutationOf(slot)
       const paths = pathsOf(args)
@@ -1132,8 +1163,14 @@ function policyCall<T extends (...args: never[]) => unknown>(
 function guardOperation<Args extends unknown[], R>(
   fn: (...args: Args) => Promise<R> | R,
   name: MutationSlot | 'exists',
+  context?: IOContext,
 ): (...args: Args) => Promise<R> {
-  return walkedCall(null, commandCall(fn, name) as (...args: Args) => Promise<R>)
+  return walkedCall(
+    null,
+    commandCall(fn, name, true, context) as (...args: Args) => Promise<R>,
+    false,
+    context,
+  )
 }
 
 /**
@@ -1156,4 +1193,30 @@ export function scopedIo<A extends Accessor>(
   delete result.copy
   delete result.dirCopy
   return result
+}
+
+/** Bind byte-transfer recording to each backend call and deferred stream pull. */
+export function withRecording<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
+  const recorder = ops.ioContext?.recorder
+  if (recorder === undefined) return ops
+  const bound = { ...ops }
+  for (const slot of [
+    'readBytes',
+    'readRange',
+    'stat',
+    'exists',
+    'readdir',
+    'find',
+    ...mutationSlots,
+  ] as const) {
+    const fn = ops[slot] as ((...args: never[]) => unknown) | undefined
+    if (fn === undefined) continue
+    Object.assign(bound, {
+      [slot]: (...args: never[]) =>
+        runWithMountContext(() => Promise.resolve(fn(...args)), undefined, recorder),
+    })
+  }
+  bound.readStream = (accessor, path, index) =>
+    withMountContext(ops.readStream(accessor, path, index), undefined, recorder)
+  return bound
 }

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { IOContext } from '../../../../context/types.ts'
+
 import { IOResult } from '../../../../io/types.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 import { errorVirtualPath, fsStrerror, isFsError } from '../../../../errors/fs.ts'
@@ -51,6 +53,7 @@ async function enterNode<A extends Accessor>(
   node: string,
   root: string,
   links: LinkView | null,
+  context?: IOContext,
 ): Promise<string | null> {
   if (links !== null && links.statAt(node) !== null) {
     try {
@@ -63,7 +66,7 @@ async function enterNode<A extends Accessor>(
     if (target === null) return posixPhrase('EEXIST')
     return target.type === FileType.DIRECTORY ? null : posixPhrase('ENOTDIR')
   }
-  const probe = walkProbeFor(path.virtual)
+  const probe = walkProbeFor(path.virtual, context)
   if (probe !== null) {
     const { exists, isDir } = await entryKind(probe.stat, PathSpec.fromStrPath(node))
     if (exists) return isDir ? null : posixPhrase('ENOTDIR')
@@ -88,13 +91,14 @@ async function makeWalked<A extends Accessor>(
   path: PathSpec,
   dotted: string,
   links: LinkView | null,
+  context?: IOContext,
 ): Promise<string | null> {
   const root = rstripSlash(mountPrefixOf(path.virtual, path.vfsPath))
   const follow = links === null ? null : (virtual: string) => links.resolve(virtual)
   for (const [node, spelled] of walkNodes(dotted, path.rawPath, follow)) {
     let why: string | null
     try {
-      why = await enterNode(mkdir, accessor, path, node, root, links)
+      why = await enterNode(mkdir, accessor, path, node, root, links, context)
     } catch (err) {
       if (!isFsError(err)) throw err
       why =
@@ -128,8 +132,9 @@ export async function createdNames(
   path: PathSpec,
   parents: boolean,
   links: LinkView | null = null,
+  context?: IOContext,
 ): Promise<string[]> {
-  const probe = walkProbeFor(path.virtual)
+  const probe = walkProbeFor(path.virtual, context)
   if (!parents || probe === null) return [operandSpelling(path.virtual, path)]
   const named = PathSpec.fromStrPath(path.virtual)
   const names: string[] = []
@@ -167,13 +172,21 @@ export async function makeDirectory<A extends Accessor>(
   path: PathSpec,
   parents: boolean,
   links: LinkView | null = null,
+  context?: IOContext,
 ): Promise<string | null> {
   let target = path
   // -p enters the names in front of the operand one at a time, so a dot
   // among them, or a link loop the walk refused the operand for, is met at
   // that name and GNU quotes it rather than the operand.
   if (parents && (path.dotted !== null || path.walkError === 'ELOOP')) {
-    const failed = await makeWalked(mkdir, accessor, path, path.dotted ?? path.virtual, links)
+    const failed = await makeWalked(
+      mkdir,
+      accessor,
+      path,
+      path.dotted ?? path.virtual,
+      links,
+      context,
+    )
     if (failed !== null) return failed
     // The walk has entered every name the spelling passes through, so the
     // operand is made by its resolved path alone: walking it again would ask
@@ -222,7 +235,7 @@ const mkdir: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
     // mask away from bash's default costs a setattr, since 755 is what
     // every backend already renders for a fresh directory; parents
     // made by `-p` keep that default.
-    const umask = sessionUmask()
+    const umask = sessionUmask(opts.ioContext)
     if (umask !== DEFAULT_UMASK) mode = 0o777 & ~umask
   }
   const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
@@ -235,8 +248,8 @@ const mkdir: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
       if (collision.message !== null) errors.push(collision.message)
       continue
     }
-    const names = verbose ? await createdNames(p, parents, links) : []
-    const failed = await makeDirectory(mkdirOp, accessor, p, parents, links)
+    const names = verbose ? await createdNames(p, parents, links, opts.ioContext) : []
+    const failed = await makeDirectory(mkdirOp, accessor, p, parents, links, opts.ioContext)
     if (failed !== null) {
       errors.push(failed)
       continue

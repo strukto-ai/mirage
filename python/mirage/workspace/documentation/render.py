@@ -20,6 +20,7 @@ from mirage.types import MountMode
 from mirage.utils.hidden import is_glob, path_visible
 from mirage.workspace.lookup.lookup import command_visible, verb_visible
 from mirage.workspace.mount.registry import MountRegistry
+from mirage.workspace.session.access import io_context
 from mirage.workspace.session.session import SessionState
 
 MODE_LINES = {
@@ -51,7 +52,9 @@ def vfs_md(registry: MountRegistry, session: SessionState) -> str:
             or not path_visible(vis, prefix)
         ):
             continue
-        mode = effective_path_mode(prefix, mount.prefix, mount.mode)
+        mode = effective_path_mode(
+            prefix, mount.prefix, mount.mode, io_context(session)
+        )
         parts.append(
             f"## `{prefix}`\n\nBackend: `{mount.vfs.name}`. Access: {MODE_LINES[mode]}."
         )
@@ -83,7 +86,10 @@ def vfs_md(registry: MountRegistry, session: SessionState) -> str:
                     continue
                 if registry.try_mount_for(entry.path) is mount:
                     effective = effective_path_mode(
-                        entry.path, mount.prefix, mount.mode
+                        entry.path,
+                        mount.prefix,
+                        mount.mode,
+                        io_context(session),
                     )
                     parts.append(f"- `{entry.path}`: {MODE_LINES[effective]}.")
     if command_visible("man", session):

@@ -55,8 +55,6 @@ export function makeRm<A extends Accessor>(
   io: CommandIO<A>,
   rawUnlink: UnlinkFn<A>,
 ): RegisteredCommand[] {
-  const resolveGlob = resolveGlobOf(io)
-  const unlink = withWriteGuards(rawUnlink)
   return command({
     name: 'rm',
     vfs,
@@ -69,6 +67,11 @@ export function makeRm<A extends Accessor>(
       _texts: string[],
       opts: CommandOpts,
     ): Promise<CommandFnResult> => {
+      const resolveGlob = resolveGlobOf({
+        ...io,
+        ...(opts.ioContext === undefined ? {} : { ioContext: opts.ioContext }),
+      })
+      const unlink = withWriteGuards(rawUnlink, opts.ioContext)
       const fl = new FlagView(opts.flags, specOf('rm'))
       const force = fl.asBool('f')
       const verbose = fl.asBool('v')

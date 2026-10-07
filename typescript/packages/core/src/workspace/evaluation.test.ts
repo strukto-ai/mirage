@@ -18,8 +18,8 @@ const it = test.extend<{ owned: { ws: Workspace; programs: ParsedProgram[] } }>(
     const parser = await getTestParser()
     const programs: ParsedProgram[] = []
     const original = parser.parseProgram.bind(parser)
-    vi.spyOn(parser, 'parseProgram').mockImplementation((source) => {
-      const program = original(source)
+    vi.spyOn(parser, 'parseProgram').mockImplementation((...args) => {
+      const program = original(...args)
       programs.push(program)
       return program
     })

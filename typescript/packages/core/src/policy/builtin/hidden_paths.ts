@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { IOContext } from '../../context/types.ts'
 import { hiddenRefusal, sessionVisibility } from '../../context/session_context.ts'
 import { pathVisible } from '../../utils/hidden.ts'
 import type { Hide, VfsContext } from '../types.ts'
@@ -22,9 +23,11 @@ import type { Hide, VfsContext } from '../types.ts'
  * not a `Policy`, because no coded hook returns a Hide.
  */
 export class HiddenPathsPolicy {
+  constructor(private readonly context?: IOContext) {}
+
   /** Hide the op's path when the bound session cannot see it. */
   preVfs(ctx: VfsContext): Promise<Hide | null> {
-    const vis = sessionVisibility()
+    const vis = sessionVisibility(this.context)
     if (pathVisible(vis, ctx.path.virtual)) return Promise.resolve(null)
     return Promise.resolve({
       kind: 'hide',

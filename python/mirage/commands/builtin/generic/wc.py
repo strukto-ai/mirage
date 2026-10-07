@@ -19,6 +19,7 @@ from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import argmatch_error
+from mirage.context.types import IOContext
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
 from mirage.io.cooperative import chunks
@@ -367,6 +368,7 @@ async def format_multi(
     chars: bool = False,
     max_line_length: bool = False,
     total: str = "auto",
+    context: IOContext | None = None,
 ) -> tuple[bytes, bytes, list[CountedRun]]:
     """Format wc output for multiple already-resolved paths.
 
@@ -396,7 +398,7 @@ async def format_multi(
         max_line_length=max_line_length,
         total=total,
     )
-    cached = cache_aware_read(read)
+    cached = cache_aware_read(read, context)
     rows: list[tuple[WCCounts, str | None]] = []
     sizes: list[int | None] = []
     totals = WCCounts()
@@ -475,6 +477,7 @@ async def wc_generic(
     if paths:
         body, err, runs = await format_multi(
             paths,
+            context=opts.io_context,
             read=stream,
             lines=parsed.lines,
             words=parsed.words,

@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { childMountNames, namespaceNames } from '../../ops/namespace_view.ts'
+import type { IOContext } from '../../context/types.ts'
+import { ioContext } from '../session/access.ts'
 import { sessionVisibility } from '../../context/session_context.ts'
 import type { NamespaceLinks } from '../../ops/config.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
@@ -45,6 +47,7 @@ const GLOBSTAR_MAX_DEPTH = 32
 // inside the backend glob (`globNameMatches`), so it does not travel
 // here.
 export interface GlobOptions {
+  context?: IOContext
   nullglob: boolean
   failglob: boolean
   globstar: boolean
@@ -58,6 +61,7 @@ export function globNeedsShell(opts: GlobOptions): boolean {
 
 export function globOptions(session: SessionState): GlobOptions {
   return {
+    context: ioContext(session),
     nullglob: session.shopts.nullglob ?? SHOPT_DEFAULTS.get('nullglob') ?? false,
     failglob: session.shopts.failglob ?? SHOPT_DEFAULTS.get('failglob') ?? false,
     globstar: session.shopts.globstar ?? SHOPT_DEFAULTS.get('globstar') ?? false,
@@ -77,11 +81,12 @@ function namespaceChildren(
   links: NamespaceLinks | null,
   directory: string,
   pattern: string,
+  context?: IOContext,
 ): string[] {
   const base = rstripSlash(directory)
   const matcher = globPattern(pattern)
-  return namespaceNames(sessionVisibility(), registry.mountPrefixes(), links, directory)
-    .filter((name) => globNameMatches(name, matcher))
+  return namespaceNames(sessionVisibility(context), registry.mountPrefixes(), links, directory)
+    .filter((name) => globNameMatches(name, matcher, context))
     .map((name) => `${base}/${name}`)
 }
 
@@ -187,6 +192,7 @@ async function levelMatches(
   links: NamespaceLinks | null,
   dirVirtual: string,
   seg: string,
+  context?: IOContext,
 ): Promise<string[]> {
   const real = listingDir(links, dirVirtual)
   const owner = mountOf(registry, real, mount)
@@ -202,7 +208,7 @@ async function levelMatches(
       resolved: false,
     })
     try {
-      const matches = await owner.expandGlob([spec], prefix)
+      const matches = await owner.expandGlob([spec], prefix, context)
       // A descent step yields children, so a match that is the parent
       // itself is not one. A backend asked to list a path that is really
       // a file answers with that file, which walked back out as a
@@ -219,7 +225,7 @@ async function levelMatches(
       if ((err as { code?: string }).code === undefined) throw err
     }
   }
-  out.push(...namespaceChildren(registry, links, real, seg))
+  out.push(...namespaceChildren(registry, links, real, seg, context))
   return real === dirVirtual ? out : respell(out, dirVirtual)
 }
 
@@ -260,16 +266,17 @@ async function descend(
   parent: string,
   spelled: string,
   depth: number,
+  context?: IOContext,
 ): Promise<[string, string][]> {
   if (depth >= GLOBSTAR_MAX_DEPTH) return []
   const out: [string, string][] = []
-  const children = [...new Set(await levelMatches(registry, mount, links, `${parent}/`, '*'))].sort(
-    compareCodePoints,
-  )
+  const children = [
+    ...new Set(await levelMatches(registry, mount, links, `${parent}/`, '*', context)),
+  ].sort(compareCodePoints)
   for (const child of children) {
     const childSpelled = joinSpelling(spelled, child.split('/').pop() ?? '')
     out.push([child, childSpelled])
-    out.push(...(await descend(registry, mount, links, child, childSpelled, depth + 1)))
+    out.push(...(await descend(registry, mount, links, child, childSpelled, depth + 1, context)))
   }
   return out
 }
@@ -294,6 +301,7 @@ async function walk(
   registry: MountRegistry,
   links: NamespaceLinks | null,
   globstar: boolean,
+  context?: IOContext,
 ): Promise<PathSpec[]> {
   const typed = stripSlash(item.dotted ?? item.virtual).split('/')
   const first = typed.findIndex((seg) => hasGlobChars(seg) || seg === '.' || seg === '..')
@@ -314,7 +322,7 @@ async function walk(
         }
       } else if (globstar && seg === '**') {
         gathered.push([dir, spelled, true])
-        for (const [v, sp] of await descend(registry, mount, links, dir, spelled, 0)) {
+        for (const [v, sp] of await descend(registry, mount, links, dir, spelled, 0, context)) {
           gathered.push([v, sp, false])
         }
       } else {
@@ -324,6 +332,7 @@ async function walk(
           links,
           `${rstripSlash(dir)}/`,
           seg,
+          context,
         )) {
           gathered.push([child, joinSpelling(spelled, child.split('/').pop() ?? ''), false])
         }
@@ -418,6 +427,7 @@ export async function resolveGlobs(
   // literal spelling like a zero-match glob.
   if (noglob) return classified.map((item) => literalWord(item))
   const opts: GlobOptions = options ?? { nullglob: false, failglob: false, globstar: false }
+  const context = opts.context
   const result: (string | PathSpec)[] = []
   for (const item of classified) {
     if (item instanceof PathSpec && item.pattern !== null) {
@@ -440,7 +450,9 @@ export async function resolveGlobs(
       // has nothing to list and levelMatches has to follow it first.
       const linked = !midPath && listingDir(links, directory) !== directory
       const extra =
-        midPath || linked ? [] : namespaceChildren(registry, links, directory, item.pattern)
+        midPath || linked
+          ? []
+          : namespaceChildren(registry, links, directory, item.pattern, context)
       if (!linked && !mount.hasOp('glob') && extra.length === 0) {
         result.push(item)
         continue
@@ -476,9 +488,9 @@ export async function resolveGlobs(
       try {
         let resolved: PathSpec[]
         if (midPath || (opts.globstar && hasGlobstarSegment(withPrefix))) {
-          resolved = await walk(withPrefix, mount, registry, links, opts.globstar)
+          resolved = await walk(withPrefix, mount, registry, links, opts.globstar, context)
         } else if (linked) {
-          const found = await levelMatches(registry, mount, links, directory, item.pattern)
+          const found = await levelMatches(registry, mount, links, directory, item.pattern, context)
           resolved = toSpecs(
             [...new Set(found)].sort(compareCodePoints),
             withPrefix,
@@ -493,7 +505,7 @@ export async function resolveGlobs(
           // to `xa.txt` lost its first match to that ambiguity. The
           // directory-shaped spec has no literal to reinstate, so an
           // empty list means no match and every spec returned is one.
-          const own = await mount.expandGlob([withPrefix.dir], prefix)
+          const own = await mount.expandGlob([withPrefix.dir], prefix, context)
           resolved = mergeNamespace(own, extra, directory, registry, mount)
         }
         if (dirsOnly) {
@@ -576,9 +588,10 @@ export async function expandBoundaryGlobs(
   parts: readonly (string | PathSpec)[],
   registry: MountRegistry,
   links: NamespaceLinks | null,
+  context?: IOContext,
 ): Promise<(string | PathSpec)[]> {
   const prefixes = registry.mountPrefixes()
-  const vis = sessionVisibility()
+  const vis = sessionVisibility(context)
   const spans = (p: string | PathSpec): boolean =>
     p instanceof PathSpec &&
     p.pattern !== null &&
@@ -587,7 +600,14 @@ export async function expandBoundaryGlobs(
   const out: (string | PathSpec)[] = []
   for (const item of parts) {
     if (spans(item)) {
-      out.push(...(await resolveGlobs([item], registry, false, links)))
+      out.push(
+        ...(await resolveGlobs([item], registry, false, links, {
+          nullglob: false,
+          failglob: false,
+          globstar: false,
+          ...(context === undefined ? {} : { context }),
+        })),
+      )
     } else {
       out.push(item)
     }

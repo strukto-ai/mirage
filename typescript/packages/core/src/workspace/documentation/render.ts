@@ -21,6 +21,7 @@ import { isGlob, pathVisible } from '../../utils/hidden.ts'
 import { commandVisible, verbVisible } from '../lookup/lookup.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
+import { ioContext } from '../session/access.ts'
 
 const MODE_LINES: Record<MountMode, string> = {
   [MountMode.READ]: 'read-only',
@@ -44,7 +45,7 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
       !pathVisible(vis, prefix)
     )
       continue
-    const mode = effectivePathMode(prefix, mount.prefix, mount.mode)
+    const mode = effectivePathMode(prefix, mount.prefix, mount.mode, ioContext(session))
     parts.push(`## \`${prefix}\`\n\nBackend: \`${mount.vfs.name}\`. Access: ${MODE_LINES[mode]}.`)
     if (
       vis.paths === null &&
@@ -60,7 +61,12 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
     for (const entry of vis.shown?.entries ?? []) {
       if (entry.mode === null || isGlob(entry.path) || !pathVisible(vis, entry.path)) continue
       if (registry.tryMountFor(entry.path) === mount) {
-        const effective = effectivePathMode(entry.path, mount.prefix, mount.mode)
+        const effective = effectivePathMode(
+          entry.path,
+          mount.prefix,
+          mount.mode,
+          ioContext(session),
+        )
         parts.push(`- \`${entry.path}\`: ${MODE_LINES[effective]}.`)
       }
     }

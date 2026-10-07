@@ -33,7 +33,9 @@ const mv: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
     idx,
     undefined,
     (p: PathSpec) => ops.readdir(accessor, p, idx),
-    refuseReveal,
+    (src, dst) => {
+      refuseReveal(src, dst, opts.ns?.visibility)
+    },
     opts.ns?.links == null || opts.dispatch == null
       ? undefined
       : transferLinksOf(opts.ns.links, opts.dispatch, opts.cwd, opts.ns.visibility),

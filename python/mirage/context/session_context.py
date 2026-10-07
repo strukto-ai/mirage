@@ -17,6 +17,7 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from mirage.context.types import IOContext
 from mirage.errors.fs import eacces, enoent, erofs
 from mirage.types import (
     MOUNT_MODE_RANK,
@@ -172,7 +173,7 @@ def _session_mode(mount_prefix: str) -> "MountMode":
 DEFAULT_UMASK = 0o022
 
 
-def session_umask() -> int:
+def session_umask(context: IOContext | None = None) -> int:
     """The file-creation mask of the session bound to this context.
 
     Read by the creators that run inside a command handler (`mkdir`,
@@ -184,11 +185,13 @@ def session_umask() -> int:
     Args:
         None
     """
+    if context is not None:
+        return context.umask
     sess = get_current_session()
     return DEFAULT_UMASK if sess is None else sess.umask
 
 
-def dotglob_active() -> bool:
+def dotglob_active(context: IOContext | None = None) -> bool:
     """Whether the bound session's `shopt -s dotglob` is on.
 
     Read inside pathname expansion, which runs in every backend's
@@ -200,11 +203,13 @@ def dotglob_active() -> bool:
     Args:
         None
     """
+    if context is not None:
+        return context.dotglob
     sess = get_current_session()
     return sess is not None and bool(sess.shopts.get("dotglob"))
 
 
-def session_visibility() -> Visibility | None:
+def session_visibility(context: IOContext | None = None) -> Visibility | None:
     """The bound session's visibility, None when no session is bound.
 
     For the op boundary, which runs under the session it serves and
@@ -215,6 +220,8 @@ def session_visibility() -> Visibility | None:
     Args:
         None
     """
+    if context is not None:
+        return context.visibility
     sess = get_current_session()
     return sess.visibility if sess is not None else None
 
@@ -272,10 +279,12 @@ def reset_admission(token: Token[Any]) -> None:
     _current_admission.reset(token)
 
 
-def get_admission() -> "EntryGate | None":
+def get_admission(context: IOContext | None = None) -> "EntryGate | None":
     """The entry gate of the command running in this context, None
     when no admitted command is bound (a command constructed outside
     the dispatcher, or a line no gate judged)."""
+    if context is not None:
+        return context.admission
     return _current_admission.get()
 
 
@@ -307,8 +316,10 @@ def reset_op_policies(token: Token[Any]) -> None:
     _op_policies.reset(token)
 
 
-def get_op_policies() -> "Policies | None":
+def get_op_policies(context: IOContext | None = None) -> "Policies | None":
     """The policies bound to the running command, None outside one."""
+    if context is not None:
+        return context.policies
     return _op_policies.get()
 
 
@@ -341,11 +352,17 @@ def reset_mount_gate(token: Token[Any]) -> None:
     _current_mount_gate.reset(token)
 
 
-def get_mount_gate() -> tuple[str, MountMode] | None:
+def get_mount_gate(
+    context: IOContext | None = None,
+) -> tuple[str, MountMode] | None:
     """The executing mount's (prefix, configured mode), None outside a
     mount's command (a generic invoked directly in a test, or the
     scratch tier)."""
-    return _current_mount_gate.get()
+    return (
+        context.mount_gate
+        if context is not None
+        else _current_mount_gate.get()
+    )
 
 
 # Where a refusal a door raises is noted for the line running it.
@@ -493,10 +510,14 @@ def reset_walk_probe(token: Token[Any]) -> None:
     _current_walk_probe.reset(token)
 
 
-def get_walk_probe() -> WalkProbe | None:
+def get_walk_probe(context: IOContext | None = None) -> WalkProbe | None:
     """The walk probe bound to the running command, None outside a
     mount's command (a generic invoked directly in a test)."""
-    return _current_walk_probe.get()
+    return (
+        context.walk_probe
+        if context is not None
+        else _current_walk_probe.get()
+    )
 
 
 # Opens a statement's write targets as bash does before the command
@@ -642,7 +663,9 @@ def redirect_target_judged(virtual: str) -> bool:
 
 
 def effective_mount_mode(
-    mount_prefix: str, mount_mode: MountMode
+    mount_prefix: str,
+    mount_mode: MountMode,
+    context: IOContext | None = None,
 ) -> MountMode:
     """The mount mode after narrowing by the current session's cap.
 
@@ -654,11 +677,19 @@ def effective_mount_mode(
         mount_prefix (str): the mount's prefix, e.g. ``/s3``.
         mount_mode (MountMode): the mount's configured mode.
     """
+    if context is not None:
+        cap = (context.mount_modes or {}).get(
+            _norm_prefix(mount_prefix), MountMode.EXEC
+        )
+        return weaker_mode(mount_mode, cap)
     return weaker_mode(mount_mode, _session_mode(mount_prefix))
 
 
 def effective_path_mode(
-    virtual: str, mount_prefix: str, mount_mode: MountMode
+    virtual: str,
+    mount_prefix: str,
+    mount_mode: MountMode,
+    context: IOContext | None = None,
 ) -> MountMode:
     """The mode in force at one path: the whole VFS axis on the one
     anchor-depth rule.
@@ -677,7 +708,7 @@ def effective_path_mode(
         mount_prefix (str): the owning mount's prefix.
         mount_mode (MountMode): the mount's configured mode.
     """
-    sess = get_current_session()
+    sess = context if context is not None else get_current_session()
     if sess is None:
         return mount_mode
     prefix = _norm_prefix(mount_prefix)
@@ -717,7 +748,7 @@ def _reaches_under(head: str, prefix: str) -> bool:
 
 
 def strongest_under_session(
-    sess: "SessionState", mount_prefix: str, mount_mode: MountMode
+    sess: "SessionState | IOContext", mount_prefix: str, mount_mode: MountMode
 ) -> MountMode:
     """The strongest mode one session reaches anywhere under a mount:
     its mount-wide mode, or a deeper show grant, still capped by the
@@ -749,7 +780,9 @@ def strongest_under_session(
 
 
 def strongest_mode_under(
-    mount_prefix: str, mount_mode: MountMode
+    mount_prefix: str,
+    mount_mode: MountMode,
+    context: IOContext | None = None,
 ) -> MountMode:
     """The strongest mode the current session reaches anywhere under a
     mount (:func:`strongest_under_session`), the mount's own mode when no
@@ -764,14 +797,17 @@ def strongest_mode_under(
         mount_prefix (str): the mount's prefix.
         mount_mode (MountMode): the mount's configured mode.
     """
-    sess = get_current_session()
+    sess = context if context is not None else get_current_session()
     if sess is None:
         return mount_mode
     return strongest_under_session(sess, mount_prefix, mount_mode)
 
 
 def readonly_below(
-    virtual: str, mount_prefix: str, mount_mode: MountMode
+    virtual: str,
+    mount_prefix: str,
+    mount_mode: MountMode,
+    context: IOContext | None = None,
 ) -> str | None:
     """The path to blame when a subtree mutation reaches into a
     read-only region below its operand, None when nothing below is
@@ -792,7 +828,7 @@ def readonly_below(
         mount_prefix (str): the owning mount's prefix.
         mount_mode (MountMode): the mount's configured mode.
     """
-    sess = get_current_session()
+    sess = context if context is not None else get_current_session()
     shown = sess.visibility.shown if sess is not None else None
     if shown is None:
         return None
@@ -811,7 +847,7 @@ def readonly_below(
         if not below:
             continue
         if (
-            effective_path_mode(anchor, mount_prefix, mount_mode)
+            effective_path_mode(anchor, mount_prefix, mount_mode, context)
             == MountMode.READ
         ):
             return anchor
@@ -824,6 +860,7 @@ def require_paths_writable(
     mount_mode: MountMode,
     *,
     subtree: bool = False,
+    context: IOContext | None = None,
 ) -> None:
     """Apply the same mode ceiling to command, dispatcher and namespace writes.
 
@@ -835,13 +872,17 @@ def require_paths_writable(
     """
     for path in paths:
         if (
-            effective_path_mode(path.virtual, mount_prefix, mount_mode)
+            effective_path_mode(
+                path.virtual, mount_prefix, mount_mode, context
+            )
             == MountMode.READ
         ):
             raise erofs(path.virtual)
     if subtree:
         for path in paths:
-            blame = readonly_below(path.virtual, mount_prefix, mount_mode)
+            blame = readonly_below(
+                path.virtual, mount_prefix, mount_mode, context
+            )
             if blame is not None:
                 raise erofs(blame)
 

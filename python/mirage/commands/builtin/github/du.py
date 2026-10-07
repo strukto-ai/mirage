@@ -19,15 +19,15 @@ from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.du import du_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    with_command_guards,
-    with_policy_guard,
+    CommandIO,
 )
 from mirage.commands.builtin.generic_bind.builders.du import (
     WalkBudget,
     walk_entries,
     walk_size,
 )
-from mirage.commands.builtin.github.io import IO, resolve_glob
+from mirage.commands.builtin.generic_bind.factory import invocation_io
+from mirage.commands.builtin.github.io import IO
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.core.github.tree import ensure_tree
@@ -70,23 +70,25 @@ def _subtree(
 
 
 async def _resolve(
+    bound: CommandIO,
     live: Callable[[], Awaitable[None]],
     accessor: GitHubAccessor,
     index: IndexCacheStore,
     targets: list[PathSpec],
 ) -> list[PathSpec]:
     await live()
-    return await resolve_glob(accessor, targets, index)
+    return await bound.resolve_glob(accessor, targets, index)
 
 
 async def _stat(
+    bound: CommandIO,
     live: Callable[[], Awaitable[None]],
     accessor: GitHubAccessor,
     index: IndexCacheStore,
     path: PathSpec,
 ):
     await live()
-    return await IO.stat(accessor, path, index)
+    return await bound.stat(accessor, path, index)
 
 
 def _walked(
@@ -104,6 +106,7 @@ def _walked(
 
 
 async def _live_size(
+    bound: CommandIO,
     live: Callable[[], Awaitable[None]],
     accessor: GitHubAccessor,
     index: IndexCacheStore,
@@ -118,7 +121,7 @@ async def _live_size(
     # what the session cannot see and never report a refused directory.
     if _walked(accessor, ns, path):
         return await walk_size(
-            with_command_guards(with_policy_guard(IO)),
+            bound,
             accessor,
             index,
             budget,
@@ -129,6 +132,7 @@ async def _live_size(
 
 
 async def _live_entries(
+    bound: CommandIO,
     live: Callable[[], Awaitable[None]],
     accessor: GitHubAccessor,
     index: IndexCacheStore,
@@ -139,7 +143,7 @@ async def _live_entries(
     await live()
     if _walked(accessor, ns, path):
         return await walk_entries(
-            with_command_guards(with_policy_guard(IO)),
+            bound,
             accessor,
             index,
             budget,
@@ -158,6 +162,7 @@ async def du(
     texts: list[str],
     opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
+    bound = invocation_io(IO, opts)
     checked = False
     budget = WalkBudget(IO.max_du_entries)
 
@@ -175,10 +180,14 @@ async def du(
         paths,
         list(texts),
         opts,
-        partial(_resolve, live, accessor, opts.index),
-        partial(_stat, live, accessor, opts.index),
-        partial(_live_size, live, accessor, opts.index, budget, opts.ns),
-        partial(_live_entries, live, accessor, opts.index, budget, opts.ns),
+        partial(_resolve, bound, live, accessor, opts.index),
+        partial(_stat, bound, live, accessor, opts.index),
+        partial(
+            _live_size, bound, live, accessor, opts.index, budget, opts.ns
+        ),
+        partial(
+            _live_entries, bound, live, accessor, opts.index, budget, opts.ns
+        ),
         truncated=lambda: budget.hit,
         unreadable=lambda: budget.unreadable,
         directories=lambda: budget.directories,

@@ -1,5 +1,7 @@
+import type { Recorder } from '../observe/context.ts'
 /** Temporary state of one evaluation; never part of a session record. */
 export class ExecutionFrame {
+  recorder: Recorder | null = null
   diagnostics: (string | Uint8Array)[] = []
   cmdsubSeq = 0
   cmdsubStatus = 0
@@ -13,6 +15,7 @@ export class ExecutionFrame {
   fork(): ExecutionFrame {
     const child = new ExecutionFrame()
     child.abortSignal = this.abortSignal
+    child.recorder = this.recorder
     return child
   }
 }

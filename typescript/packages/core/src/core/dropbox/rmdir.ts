@@ -14,7 +14,7 @@
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { invalidateAfterUnlink } from '../../cache/context.ts'
-import { record, startOp } from '../../observe/context.ts'
+import { activeRecorder, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent, enotdir, enotempty } from '../../errors/fs.ts'
 import { DropboxApiError } from './client.ts'
@@ -26,6 +26,7 @@ import { dropboxPathOf } from './paths.ts'
 // ENOTEMPTY on a non-empty dir instead of nuking the subtree (the s3
 // backend once had this exact data-loss hazard — do not regress it).
 export async function rmdir(accessor: DropboxAccessor, path: PathSpec): Promise<void> {
+  const recorder = activeRecorder()
   const apiPath = dropboxPathOf(accessor, path)
   let tag: string
   try {
@@ -37,7 +38,7 @@ export async function rmdir(accessor: DropboxAccessor, path: PathSpec): Promise<
   if (tag !== 'folder') throw enotdir(path.virtual)
   const children = await listFolder(accessor.tokenManager, apiPath, { limit: 1 })
   if (children.length > 0) throw enotempty(path.virtual)
-  const timer = startOp()
+  const timer = startOp(recorder)
   await deletePath(accessor.tokenManager, apiPath)
   record('rmdir', path.virtual, 'dropbox', 0, timer)
   await invalidateAfterUnlink(path)

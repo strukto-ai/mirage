@@ -36,6 +36,7 @@ from mirage.commands.spec.usage import (
     usage_hint,
 )
 from mirage.context import session_visibility
+from mirage.context.types import IOContext
 from mirage.errors.classify import classify
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
@@ -57,6 +58,7 @@ from mirage.workspace.mount.namespace.probe import (
     path_stat,
 )
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.access import io_context
 
 _TARGET_DIR_LONG = "--target-directory"
 _SUFFIX_LONG = "--suffix"
@@ -223,7 +225,9 @@ def operand_words(
     return operands, target_typed
 
 
-def _visible_link(namespace: Namespace, virtual: str) -> bool:
+def _visible_link(
+    namespace: Namespace, virtual: str, context: IOContext | None = None
+) -> bool:
     """Whether the session may know that a path is a link.
 
     A hidden path is nonexistent for the session, so a link there is
@@ -237,12 +241,14 @@ def _visible_link(namespace: Namespace, virtual: str) -> bool:
         namespace (Namespace): the link table.
         virtual (str): absolute virtual path.
     """
-    return path_visible(session_visibility(), virtual) and namespace.is_link(
-        virtual
-    )
+    return path_visible(
+        session_visibility(context), virtual
+    ) and namespace.is_link(virtual)
 
 
-def _follow_visible(namespace: Namespace, virtual: str) -> str:
+def _follow_visible(
+    namespace: Namespace, virtual: str, context: IOContext | None = None
+) -> str:
     """Resolve the links along a path the session may see; a hidden
     path stays as typed. Raises ``CycleError`` as ``follow`` does.
 
@@ -252,12 +258,17 @@ def _follow_visible(namespace: Namespace, virtual: str) -> str:
     """
     return (
         namespace.follow(virtual)
-        if path_visible(session_visibility(), virtual)
+        if path_visible(session_visibility(context), virtual)
         else virtual
     )
 
 
-def operand_abs(namespace: Namespace, arg: str | PathSpec, cwd: str) -> str:
+def operand_abs(
+    namespace: Namespace,
+    arg: str | PathSpec,
+    cwd: str,
+    context: IOContext | None = None,
+) -> str:
     """An operand as the path the kernel reaches, its final name kept.
 
     Command dispatch walks the links above the name of every operand it
@@ -273,7 +284,7 @@ def operand_abs(namespace: Namespace, arg: str | PathSpec, cwd: str) -> str:
     """
     virtual = abs_path(arg, cwd)
     if isinstance(arg, PathSpec) or not path_visible(
-        session_visibility(), virtual
+        session_visibility(context), virtual
     ):
         return virtual
     try:
@@ -289,6 +300,7 @@ def _walk_verdict(
     word: str | PathSpec,
     cwd: str,
     follow_last: bool = False,
+    context: IOContext | None = None,
 ) -> FsCondition | None:
     """The condition the kernel walk answers for an operand before any op.
 
@@ -308,7 +320,7 @@ def _walk_verdict(
     if word_text(word) == "":
         return FsCondition.ENOENT
     virtual = abs_path(word, cwd)
-    if not path_visible(session_visibility(), virtual):
+    if not path_visible(session_visibility(context), virtual):
         return None
     trimmed = virtual.rstrip("/") or "/"
     try:
@@ -350,6 +362,7 @@ async def _dir_at(
     dispatch: DispatchFn,
     virtual: str,
     no_dereference: bool,
+    context: IOContext | None = None,
 ) -> tuple[str, FileStat | None]:
     """What a destination operand names once links are resolved.
 
@@ -365,7 +378,7 @@ async def _dir_at(
         virtual (str): absolute virtual path of the operand.
         no_dereference (bool): ``-n``.
     """
-    if _visible_link(namespace, virtual):
+    if _visible_link(namespace, virtual, context=context):
         if no_dereference:
             return virtual, None
         try:
@@ -433,6 +446,7 @@ async def plan_links(
     target_dir: str | None,
     target_typed: str | None,
     flags: LnFlags,
+    context: IOContext | None = None,
 ) -> tuple[list[LinkPlan], str | None]:
     """Turn ln's operands into the links to make, GNU's four forms.
 
@@ -456,7 +470,9 @@ async def plan_links(
     hint = usage_hint("ln") + "\n"
     if target_dir is not None:
         typed = target_typed if target_typed is not None else target_dir
-        why = _walk_verdict(namespace, typed, cwd, follow_last=True)
+        why = _walk_verdict(
+            namespace, typed, cwd, follow_last=True, context=context
+        )
         if why is not None:
             return [], f"ln: failed to access '{typed}': {posix_phrase(why)}\n"
         unwalked = await dot_refusal(
@@ -471,8 +487,9 @@ async def plan_links(
         resolved, stat = await _dir_at(
             namespace,
             dispatch,
-            operand_abs(namespace, target_dir, cwd),
+            operand_abs(namespace, target_dir, cwd, context=context),
             flags.no_dereference,
+            context=context,
         )
         if stat is None:
             return [], (
@@ -497,18 +514,24 @@ async def plan_links(
         return [
             LinkPlan(
                 operands[0],
-                operand_abs(namespace, operands[1], cwd),
+                operand_abs(namespace, operands[1], cwd, context=context),
                 word_text(operands[1]),
             )
         ], None
     last = operands[-1]
-    last_abs = operand_abs(namespace, last, cwd)
+    last_abs = operand_abs(namespace, last, cwd, context=context)
     # The empty name reads as the working directory in `last_abs`, and it
     # is no directory to link into.
     resolved, stat = (
         (last_abs, None)
         if word_text(last) == ""
-        else await _dir_at(namespace, dispatch, last_abs, flags.no_dereference)
+        else await _dir_at(
+            namespace,
+            dispatch,
+            last_abs,
+            flags.no_dereference,
+            context=context,
+        )
     )
     is_dir = stat is not None and stat.type == FileType.DIRECTORY
     if len(operands) == 2 and not is_dir:
@@ -519,7 +542,8 @@ async def plan_links(
             # looping, is ENOENT to GNU; a loop above it is ELOOP.
             why = (
                 FsCondition.ENOENT
-                if word_text(last) == "" or _visible_link(namespace, last_abs)
+                if word_text(last) == ""
+                or _visible_link(namespace, last_abs, context=context)
                 else await miss_condition(dispatch, resolved)
             )
             return [], f"ln: target '{word_text(last)}': {posix_phrase(why)}\n"
@@ -538,6 +562,7 @@ async def _source_bytes(
     typed: str,
     link_typed: str,
     flags: LnFlags,
+    context: IOContext | None = None,
 ) -> tuple[bytes | None, str | None]:
     """The bytes a hard link copies, or the refusal in ln's words.
 
@@ -554,7 +579,7 @@ async def _source_bytes(
         link_typed (str): the link name as typed, for ``-d``'s refusal.
         flags (LnFlags): the parsed flags.
     """
-    if _visible_link(namespace, src_abs):
+    if _visible_link(namespace, src_abs, context=context):
         try:
             src_abs = namespace.follow(src_abs)
         except CycleError:
@@ -592,6 +617,7 @@ async def make_link(
     flags: LnFlags,
     errors: list[str],
     out: list[str],
+    context: IOContext | None = None,
 ) -> None:
     """Make one link, appending GNU's line to ``errors`` or ``out``.
 
@@ -633,13 +659,15 @@ async def make_link(
         )
         return
     if not flags.symbolic:
-        why = _walk_verdict(namespace, plan.source, cwd, flags.logical)
+        why = _walk_verdict(
+            namespace, plan.source, cwd, flags.logical, context=context
+        )
         if why is not None:
             errors.append(
                 f"ln: failed to access '{target_typed}': {posix_phrase(why)}\n"
             )
             return
-    why = _walk_verdict(namespace, typed, cwd)
+    why = _walk_verdict(namespace, typed, cwd, context=context)
     if why is not None:
         errors.append(_refused(flags, typed, target_typed, why))
         return
@@ -680,24 +708,37 @@ async def make_link(
             link_dir = posixpath.dirname(plan.link_abs) or "/"
             target_abs = abs_path(plan.source, cwd)
             try:
-                target_abs = _follow_visible(namespace, target_abs)
-                link_dir = _follow_visible(namespace, link_dir)
+                target_abs = _follow_visible(
+                    namespace, target_abs, context=context
+                )
+                link_dir = _follow_visible(
+                    namespace, link_dir, context=context
+                )
             except CycleError:
                 pass
             link_target = posixpath.relpath(target_abs, link_dir)
     else:
-        src_abs = operand_abs(namespace, plan.source, cwd)
-        if _visible_link(namespace, src_abs) and not flags.logical:
+        src_abs = operand_abs(namespace, plan.source, cwd, context=context)
+        if (
+            _visible_link(namespace, src_abs, context=context)
+            and not flags.logical
+        ):
             link_target = namespace.readlink(src_abs)
         else:
             data, refusal = await _source_bytes(
-                namespace, dispatch, src_abs, target_typed, typed, flags
+                namespace,
+                dispatch,
+                src_abs,
+                target_typed,
+                typed,
+                flags,
+                context=context,
             )
             if refusal is not None:
                 errors.append(refusal)
                 return
     if path_visible(
-        session_visibility(), plan.link_abs
+        session_visibility(context), plan.link_abs
     ) and namespace.is_mount_root(plan.link_abs):
         errors.append(f"ln: failed to create {kind} '{typed}': File exists\n")
         return
@@ -716,7 +757,7 @@ async def make_link(
         # plan_links, so only a non-directory and the absent name are
         # settled here, and a plain file without a flag falls to the
         # door's "File exists" below.
-        linked = _visible_link(namespace, plan.link_abs)
+        linked = _visible_link(namespace, plan.link_abs, context=context)
         behind = (
             await link_target_stat(namespace, dispatch, plan.link_abs)
             if linked
@@ -745,9 +786,10 @@ async def make_link(
     if (
         flags.force
         and not backs
-        and operand_abs(namespace, plan.source, cwd) == plan.link_abs
+        and operand_abs(namespace, plan.source, cwd, context=context)
+        == plan.link_abs
         and (
-            _visible_link(namespace, plan.link_abs)
+            _visible_link(namespace, plan.link_abs, context=context)
             or await path_stat(dispatch, plan.link_abs) is not None
         )
     ):
@@ -766,13 +808,15 @@ async def make_link(
     if data is not None or backs:
         found = (
             None
-            if _visible_link(namespace, plan.link_abs)
+            if _visible_link(namespace, plan.link_abs, context=context)
             else await path_stat(dispatch, plan.link_abs)
         )
         if backs and found is not None and found.type is FileType.DIRECTORY:
             errors.append(f"ln: {typed}: cannot overwrite directory\n")
             return
-        occupied = found is not None or _visible_link(namespace, plan.link_abs)
+        occupied = found is not None or _visible_link(
+            namespace, plan.link_abs, context=context
+        )
     if occupied and backs:
         backup = await backup_target(
             partial(_readdir, dispatch),
@@ -897,6 +941,7 @@ async def handle_ln(
         session (SessionState): session whose cwd resolves relative operands.
         args (list[str | PathSpec]): args after the command name.
     """
+    context = io_context(session)
     parsed = parse_command(
         SPECS["ln"], [word_text(a) for a in args], session.cwd, "ln"
     )
@@ -934,6 +979,7 @@ async def handle_ln(
         target_dir,
         target_typed,
         flags,
+        context=context,
     )
     if refused is not None:
         return fail("ln", refused)
@@ -941,7 +987,14 @@ async def handle_ln(
     out: list[str] = []
     for plan in plans:
         await make_link(
-            namespace, dispatch, session.cwd, plan, flags, errors, out
+            namespace,
+            dispatch,
+            session.cwd,
+            plan,
+            flags,
+            errors,
+            out,
+            context=context,
         )
     return result(
         "ln",

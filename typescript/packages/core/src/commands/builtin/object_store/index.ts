@@ -15,8 +15,7 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
-import { withCommandGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
-import { withProbeAnswers, withSlashGuard } from '../generic_bind/factory.ts'
+import { withProbeAnswers } from '../generic_bind/factory.ts'
 import { makeMkdir } from './mkdir.ts'
 import { makeRm } from './rm.ts'
 import { makeStat } from './stat.ts'
@@ -46,13 +45,11 @@ export function makeObjectStoreCommands<A extends Accessor>(
   vfs: string,
   rawIo: CommandIO<A>,
 ): RegisteredCommand[] {
-  const guarded = withCommandGuards(withPolicyGuard(withSlashGuard(rawIo)))
-  const answered = withCommandGuards(withPolicyGuard(withSlashGuard(withProbeAnswers(rawIo))))
   return [
-    ...makeMkdir(vfs, guarded),
-    ...makeRm(vfs, guarded),
-    ...makeStat(vfs, answered),
-    ...makeTee(vfs, guarded),
-    ...makeTouch(vfs, guarded),
+    ...makeMkdir(vfs, rawIo),
+    ...makeRm(vfs, rawIo),
+    ...makeStat(vfs, withProbeAnswers(rawIo)),
+    ...makeTee(vfs, rawIo),
+    ...makeTouch(vfs, rawIo),
   ]
 }

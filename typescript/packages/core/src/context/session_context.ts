@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { IOContext } from './types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { ContextCall } from '../utils/async_context.ts'
 import type { SessionManager } from '../workspace/session/manager.ts'
@@ -134,14 +135,14 @@ function normPrefix(mountPrefix: string): string {
  * profile cannot see. Folded to the weakest across every live session,
  * which on an isolating runtime is the bound one alone.
  */
-function sessionModeOf(sess: SessionState, mountPrefix: string): MountMode {
+function sessionModeOf(sess: SessionState | IOContext, mountPrefix: string): MountMode {
   if (sess.mountModes == null) return MountMode.EXEC
   return sess.mountModes.get(normPrefix(mountPrefix)) ?? MountMode.EXEC
 }
 
-function sessionMode(mountPrefix: string): MountMode {
+function sessionMode(mountPrefix: string, context?: IOContext): MountMode {
   let mode: MountMode = MountMode.EXEC
-  for (const sess of liveSessions()) {
+  for (const sess of context === undefined ? liveSessions() : [context]) {
     mode = weakerMode(mode, sessionModeOf(sess, mountPrefix))
   }
   return mode
@@ -150,6 +151,9 @@ function sessionMode(mountPrefix: string): MountMode {
 export const DEFAULT_UMASK = 0o022
 
 /**
+ * A shell invocation supplies its own IOContext. The ambient fallback
+ * below is retained for direct callers without an evaluation context.
+ *
  * The file-creation mask of the session bound to this context, read by
  * the creators that run inside a command handler (`mkdir`, which cannot
  * be handed the session) the way `dotglobActive` reads the shell
@@ -157,7 +161,8 @@ export const DEFAULT_UMASK = 0o022
  * sessions otherwise, since a mask can only clear more bits, failing
  * toward the tighter mode.
  */
-export function sessionUmask(): number {
+export function sessionUmask(context?: IOContext): number {
+  if (context !== undefined) return context.umask
   const live = liveSessions()
   if (live.length === 0) return DEFAULT_UMASK
   let mask = 0
@@ -166,6 +171,9 @@ export function sessionUmask(): number {
 }
 
 /**
+ * A shell invocation supplies its own IOContext. The ambient fallback
+ * below is retained for direct callers without an evaluation context.
+ *
  * Whether the bound session's `shopt -s dotglob` is on. Read inside
  * pathname expansion, which runs in every backend's resolveGlob and so
  * cannot be handed the session: a name starting with `.` is matched
@@ -175,12 +183,16 @@ export function sessionUmask(): number {
  * surprising direction, so one session's opt-in must not widen a
  * concurrent one's expansion.
  */
-export function dotglobActive(): boolean {
+export function dotglobActive(context?: IOContext): boolean {
+  if (context !== undefined) return context.dotglob
   const live = liveSessions()
   return live.length > 0 && live.every((sess) => sess.shopts.dotglob === true)
 }
 
 /**
+ * A shell invocation supplies its own IOContext. The ambient fallback
+ * below is retained for direct callers without an evaluation context.
+ *
  * The bound session's visibility, null when no session is bound.
  *
  * For the op boundary, which runs under the session it serves and
@@ -193,7 +205,8 @@ export function dotglobActive(): boolean {
  * session's own shows), so no live session sees more than it would
  * alone.
  */
-export function sessionVisibility(): Visibility | null {
+export function sessionVisibility(context?: IOContext): Visibility | null {
+  if (context !== undefined) return context.visibility
   const live = liveSessions().map((sess) => sess.visibility)
   const first = live[0]
   if (first === undefined) return null
@@ -254,6 +267,9 @@ export function runWithAdmission<T>(gate: EntryGate, fn: () => Promise<T>): Prom
 }
 
 /**
+ * A shell invocation supplies its own IOContext. The ambient fallback
+ * below is retained for direct callers without an evaluation context.
+ *
  * The entry gate of the command running in this context, null when no
  * admitted command is bound (a command constructed outside the
  * dispatcher, or a line no gate judged).
@@ -268,7 +284,8 @@ export function runWithAdmission<T>(gate: EntryGate, fn: () => Promise<T>): Prom
  * any live gate scopes, keeping walks off the unfiltered native fast
  * paths.
  */
-export function getAdmission(): EntryGate | null {
+export function getAdmission(context?: IOContext): EntryGate | null {
+  if (context !== undefined) return context.admission
   const gates = admissionStorage.liveStores()
   const first = gates[0]
   if (first === undefined) return null
@@ -305,6 +322,9 @@ export function runWithOpPolicies<T>(policies: Policies, fn: () => Promise<T>): 
 }
 
 /**
+ * A shell invocation supplies its own IOContext. The ambient fallback
+ * below is retained for direct callers without an evaluation context.
+ *
  * The policies bound to the running command, null outside one.
  *
  * The newest live armed set. On an isolating runtime the live set is
@@ -315,7 +335,8 @@ export function runWithOpPolicies<T>(policies: Policies, fn: () => Promise<T>): 
  * its removal (an over-count, failing closed) instead of a concurrent
  * command's ops running unguarded.
  */
-export function getOpPolicies(): Policies | null {
+export function getOpPolicies(context?: IOContext): Policies | null {
+  if (context !== undefined) return context.policies
   let armed: Policies | null = null
   for (const policies of opPoliciesStorage.liveStores()) {
     if (policies !== null) armed = policies
@@ -345,6 +366,9 @@ export function runWithMountGate<T>(
 }
 
 /**
+ * A shell invocation supplies its own IOContext. The ambient fallback
+ * below is retained for direct callers without an evaluation context.
+ *
  * The gate of the mount serving `virtual`: its [prefix, configured
  * mode], null outside a mount's command (a generic invoked directly in
  * a test, or the scratch tier).
@@ -360,7 +384,11 @@ export function runWithMountGate<T>(
  * against the other's. A path no live gate covers answers null, the
  * same inert reading an unbound context gives.
  */
-export function mountGateFor(virtual: string): readonly [string, MountMode] | null {
+export function mountGateFor(
+  virtual: string,
+  context?: IOContext,
+): readonly [string, MountMode] | null {
+  if (context !== undefined) return context.mountGate ?? null
   const v = normPrefix(virtual)
   let bestLen = -1
   let bestPrefix: string | null = null
@@ -489,6 +517,9 @@ export function runWithWalkProbe<T>(
 }
 
 /**
+ * A shell invocation supplies its own IOContext. The ambient fallback
+ * below is retained for direct callers without an evaluation context.
+ *
  * The walk probe bound to the command serving `virtual`, null outside a
  * mount's command (a generic invoked directly in a test).
  *
@@ -496,7 +527,8 @@ export function runWithWalkProbe<T>(
  * fallback storage a concurrent command on another mount cannot lend its
  * probe to this one. Mirrors Python's get_walk_probe.
  */
-export function walkProbeFor(virtual: string): WalkProbe | null {
+export function walkProbeFor(virtual: string, context?: IOContext): WalkProbe | null {
+  if (context !== undefined) return context.walkProbe ?? null
   const v = normPrefix(virtual)
   let bestLen = -1
   let best: WalkProbe | null = null
@@ -654,8 +686,12 @@ export function redirectTargetJudged(virtual: string): boolean {
  * only weaken it (a READ mount stays read-only whatever the profile says).
  * A mount the profile does not name keeps its own mode.
  */
-export function effectiveMountMode(mountPrefix: string, mountMode: MountMode): MountMode {
-  return weakerMode(mountMode, sessionMode(mountPrefix))
+export function effectiveMountMode(
+  mountPrefix: string,
+  mountMode: MountMode,
+  context?: IOContext,
+): MountMode {
+  return weakerMode(mountMode, sessionMode(mountPrefix, context))
 }
 
 /**
@@ -674,7 +710,7 @@ export function effectiveMountMode(mountPrefix: string, mountMode: MountMode): M
  * isolating runtime is the bound one alone.
  */
 function pathModeUnder(
-  sess: SessionState,
+  sess: SessionState | IOContext,
   virtual: string,
   mountPrefix: string,
   mountMode: MountMode,
@@ -701,9 +737,10 @@ export function effectivePathMode(
   virtual: string,
   mountPrefix: string,
   mountMode: MountMode,
+  context?: IOContext,
 ): MountMode {
   let mode = mountMode
-  for (const sess of liveSessions()) {
+  for (const sess of context === undefined ? liveSessions() : [context]) {
     mode = weakerMode(mode, pathModeUnder(sess, virtual, mountPrefix, mountMode))
   }
   return mode
@@ -730,7 +767,7 @@ function reachesUnder(head: string, prefix: string): boolean {
  * configured mode. Mirrors the Python `strongest_under_session`.
  */
 export function strongestUnderSession(
-  sess: SessionState,
+  sess: SessionState | IOContext,
   mountPrefix: string,
   mountMode: MountMode,
 ): MountMode {
@@ -758,9 +795,13 @@ export function strongestUnderSession(
  * refuses per path), and the interpreters' any-`x` rule counts a show
  * grant the way it counts a whole mount.
  */
-export function strongestModeUnder(mountPrefix: string, mountMode: MountMode): MountMode {
+export function strongestModeUnder(
+  mountPrefix: string,
+  mountMode: MountMode,
+  context?: IOContext,
+): MountMode {
   let best = mountMode
-  for (const sess of liveSessions()) {
+  for (const sess of context === undefined ? liveSessions() : [context]) {
     best = weakerMode(best, strongestUnderSession(sess, mountPrefix, mountMode))
   }
   return best
@@ -782,7 +823,7 @@ export function strongestModeUnder(mountPrefix: string, mountMode: MountMode): M
  * blame any live session raises answers.
  */
 function readonlyBelowUnder(
-  sess: SessionState,
+  sess: SessionState | IOContext,
   virtual: string,
   mountPrefix: string,
   mountMode: MountMode,
@@ -812,8 +853,9 @@ export function readonlyBelow(
   virtual: string,
   mountPrefix: string,
   mountMode: MountMode,
+  context?: IOContext,
 ): string | null {
-  for (const sess of liveSessions()) {
+  for (const sess of context === undefined ? liveSessions() : [context]) {
     const blame = readonlyBelowUnder(sess, virtual, mountPrefix, mountMode)
     if (blame !== null) return blame
   }
@@ -826,15 +868,16 @@ export function requirePathsWritable(
   mountPrefix: string,
   mountMode: MountMode,
   subtree = false,
+  context?: IOContext,
 ): void {
   for (const path of paths) {
-    if (effectivePathMode(path.virtual, mountPrefix, mountMode) === MountMode.READ) {
+    if (effectivePathMode(path.virtual, mountPrefix, mountMode, context) === MountMode.READ) {
       throw erofs(path, `mount ${mountPrefix} is read-only`)
     }
   }
   if (subtree) {
     for (const path of paths) {
-      const blame = readonlyBelow(path.virtual, mountPrefix, mountMode)
+      const blame = readonlyBelow(path.virtual, mountPrefix, mountMode, context)
       if (blame !== null) throw erofs(blame, `mount ${mountPrefix} is read-only`)
     }
   }

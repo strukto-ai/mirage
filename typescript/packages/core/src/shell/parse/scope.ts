@@ -11,10 +11,19 @@ export class ParseScope {
   constructor(private readonly parser: ShellParser) {}
 
   parse(command: string): ShellNode {
+    return this.program(command).root
+  }
+
+  /** Parse source with its alias grammar and retain the owned result. */
+  program(
+    command: string,
+    aliases: ReadonlySet<string> = new Set(),
+    own: ReadonlyMap<string, readonly [number, number]> = new Map(),
+  ): ParsedProgram {
     if (this.references === 0) throw new Error('parse scope is released')
-    const program = this.parser.parseProgram(command)
+    const program = this.parser.parseProgram(command, aliases, own)
     this.programs.push(program)
-    return program.root
+    return program
   }
 
   fork(): ParseScope {

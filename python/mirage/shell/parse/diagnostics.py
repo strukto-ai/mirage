@@ -1,4 +1,4 @@
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.parse.syntax import (
@@ -15,6 +15,7 @@ def diagnose(
     offsets: Sequence[int],
     parse_fn: Callable[[str], TSNodeLike] | None = None,
     aliases: frozenset[str] = frozenset(),
+    own: Mapping[str, tuple[int, int]] | None = None,
 ) -> tuple[SyntaxDiagnostic, ...]:
     """The line's syntax errors, each span mapped back into the line.
 
@@ -24,8 +25,10 @@ def diagnose(
         parse_fn (Callable[[str], TSNodeLike] | None): parses a ``$(...)``
             body so its own syntax is judged.
         aliases (frozenset[str]): alias names the shell would expand.
+        own (Mapping[str, tuple[int, int]] | None): alias source spans
+            whose reserved words retain their grammatical meaning.
     """
-    found = find_syntax_issue(root, aliases, parse_fn=parse_fn)
+    found = find_syntax_issue(root, aliases, own, offsets, parse_fn)
     unclosed = find_unterminated_backtick(decode_text(root.text or b""))
     if found is None and unclosed is not None:
         found = SyntaxIssue(

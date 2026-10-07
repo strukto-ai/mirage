@@ -68,6 +68,7 @@ from mirage.shell.parse.names import literal_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import PipelineStages, Redirect, RedirectKind
 from mirage.types import PathSpec
+from mirage.workspace.dispatcher.context import bind_dispatch
 from mirage.workspace.evaluation import (
     EvaluationContext,
     child_context,
@@ -124,6 +125,7 @@ from mirage.workspace.node.test_expr import (
     expand_test_expr,
 )
 from mirage.workspace.node.timing import timing_report
+from mirage.workspace.session.access import io_context
 from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.functions import FunctionSite
 from mirage.workspace.session.state import (
@@ -897,6 +899,15 @@ async def execute_node(
     ends_shell: bool = False,
     own_diagnostics: bool = True,
 ) -> tuple[Any, IOResult, ExecutionNode]:
+    dispatch = bind_dispatch(
+        dispatch,
+        io_context(
+            context.session,
+            context.admission,
+            registry.policies,
+            context.frame.recorder,
+        ),
+    )
     session = context.session
     execution_scope = execution_scope or ExecutionScope()
     # The node is the whole of a child shell (a background job), which

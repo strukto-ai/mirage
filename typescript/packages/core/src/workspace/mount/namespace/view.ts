@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { FileStat, Visibility } from '../../../types.ts'
+import type { EntryGate, FileStat, Visibility } from '../../../types.ts'
 import type { LinkView, MountView, NamespaceView, StatOverlay } from '../../../ops/types.ts'
 import { namespaceNames } from '../../../ops/namespace_view.ts'
-import { getAdmission, liveSessions, sessionVisibility } from '../../../context/session_context.ts'
 import { hiddenUnder, pathVisible } from '../../../utils/hidden.ts'
 import type { SessionState } from '../../session/session.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
@@ -125,20 +124,15 @@ export function namespaceViewOf(
   namespace: Namespace | null,
   dispatch: DispatchFn,
   session: SessionState | null,
+  admission: EntryGate | null = null,
 ): NamespaceView {
   const links = linkViewFor(namespace, dispatch)
   const statOverlay =
     namespace !== null
       ? (virtual: string, stat: FileStat) => namespaceStatOverlay(namespace, virtual, stat)
       : null
-  // A session running a line sees what the op door folds for it: on the
-  // fallback storage every live session's hides hold, so a command never
-  // lists a name its own reads would answer as absent.
-  const vis =
-    session !== null && liveSessions().includes(session)
-      ? sessionVisibility()
-      : (session?.visibility ?? null)
-  const gate = getAdmission()
+  const vis = session?.visibility ?? null
+  const gate = admission
   return {
     ...(links !== null ? { links } : {}),
     mounts: mountView(registry, vis),

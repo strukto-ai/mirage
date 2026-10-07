@@ -16,7 +16,7 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { entryOrWarm } from '../../cache/index/warm.ts'
-import { record, recordStream, startOp } from '../../observe/context.ts'
+import { activeRecorder, record, recordStream, startOp } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import { DropboxApiError, dropboxDownload, dropboxDownloadStream } from './client.ts'
 import { RESULT_HEADER } from './constants.ts'
@@ -48,6 +48,7 @@ export async function read(
   index?: IndexCacheStore,
   options?: { offset?: number; size?: number },
 ): Promise<Uint8Array> {
+  const recorder = activeRecorder()
   const window = windowFor(options?.offset ?? 0, options?.size ?? null)
   const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   let p = path.virtual
@@ -70,7 +71,7 @@ export async function read(
     if (entry.resourceType === 'dropbox/folder') throw eisdir(path.virtual)
   }
   const dropboxPath = dropboxPathFromVirtual(accessor.rootPath, virtualKey, prefix)
-  const timer = startOp()
+  const timer = startOp(recorder)
   let download: [Uint8Array, string | null]
   try {
     download = await dropboxDownload(accessor.tokenManager, dropboxPath, window)
@@ -94,6 +95,7 @@ export async function* readStream(
   path: PathSpec,
   index?: IndexCacheStore,
 ): AsyncIterable<Uint8Array> {
+  const recorder = activeRecorder()
   const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   let p = path.virtual
   if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
@@ -120,7 +122,7 @@ export async function* readStream(
   if (entry === null) throw enoent(path.virtual)
   if (entry.resourceType === 'dropbox/folder') throw eisdir(path.virtual)
   const dropboxPath = dropboxPathFromVirtual(accessor.rootPath, virtualKey, prefix)
-  const rec = recordStream('read', path.virtual, 'dropbox')
+  const rec = recordStream('read', path.virtual, 'dropbox', {}, recorder)
   const stamp = (headers: Record<string, string>): void => {
     if (rec !== null) rec.fingerprint = resultToken(headers[RESULT_HEADER.toLowerCase()])
   }

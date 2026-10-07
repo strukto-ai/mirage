@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Mapping
 from functools import partial
 
 from mirage.shell.bytes import encode_text
@@ -71,6 +72,8 @@ def parse(command: str) -> TSNodeLike:
 
     Args:
         command (str): shell source to parse.
+        aliases (frozenset[str]): names eligible for alias expansion.
+        own (Mapping[str, tuple[int, int]] | None): alias source spans.
 
     Returns:
         TSNodeLike: root node, or the original errored root when no
@@ -151,7 +154,11 @@ def parse(command: str) -> TSNodeLike:
     )
 
 
-def parse_program(command: str) -> ParsedProgram:
+def parse_program(
+    command: str,
+    aliases: frozenset[str] = frozenset(),
+    own: Mapping[str, tuple[int, int]] | None = None,
+) -> ParsedProgram:
     """Parse a line into a program its holders release when done with it.
 
     Args:
@@ -160,5 +167,8 @@ def parse_program(command: str) -> ParsedProgram:
     root = parse(command)
     offsets = source_offsets(command, root)
     return ParsedProgram(
-        command, root, offsets, partial(diagnose, root, offsets, parse)
+        command,
+        root,
+        offsets,
+        partial(diagnose, root, offsets, parse, aliases, own),
     )

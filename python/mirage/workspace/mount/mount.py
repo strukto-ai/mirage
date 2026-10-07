@@ -49,11 +49,13 @@ from mirage.context import (
     set_walk_probe,
     strongest_mode_under,
 )
+from mirage.context.types import IOContext
 from mirage.errors.fs import ebusy, enotsup
 from mirage.errors.render import format_fs_error
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.observe.context import (
+    Recorder,
     push_mount_context,
     push_revisions,
     reset_active_recorder,
@@ -309,7 +311,10 @@ class MountEntry:
         return bool(self._resolve_cascade(name, None, self._ops))
 
     async def expand_glob(
-        self, paths: list[PathSpec], prefix: str
+        self,
+        paths: list[PathSpec],
+        prefix: str,
+        io_context: IOContext | None = None,
     ) -> list[PathSpec]:
         """Expand glob words through the ``glob`` op, one spec at a time.
 
@@ -328,12 +333,14 @@ class MountEntry:
         async with self.use():
             if self.cache_manager is None:
                 return await self._run_glob(
-                    levels, paths, prefix, self.index_store
+                    levels, paths, prefix, self.index_store, io_context
                 )
             async with self.cache_manager.mutation():
                 await self.ensure_ready()
                 index = self.cache_manager.scope_index_locked(self.index_store)
-                return await self._run_glob(levels, paths, prefix, index)
+                return await self._run_glob(
+                    levels, paths, prefix, index, io_context
+                )
 
     async def _run_glob(
         self,
@@ -341,6 +348,7 @@ class MountEntry:
         paths: list[PathSpec],
         prefix: str,
         index: IndexCacheStore,
+        io_context: IOContext | None = None,
     ) -> list[PathSpec]:
         out: list[PathSpec] = []
         for p in paths:
@@ -350,7 +358,9 @@ class MountEntry:
                 else p
             )
             for op in levels:
-                matches = await op.fn(self.vfs.accessor, spec, index=index)
+                matches = await op.fn(
+                    self.vfs.accessor, spec, index=index, io_context=io_context
+                )
                 if matches is not None:
                     out.extend(matches)
                     break
@@ -378,13 +388,13 @@ class MountEntry:
         if self.retiring:
             raise ebusy(self.prefix)
 
-    def effective_mode(self) -> MountMode:
+    def effective_mode(self, context: IOContext | None = None) -> MountMode:
         """This mount's mode narrowed by the current session's cap.
 
         The configured mode is the ceiling; a session's mode can only
         weaken it.
         """
-        return effective_mount_mode(self.prefix, self.mode)
+        return effective_mount_mode(self.prefix, self.mode, context)
 
     # ── command registration ──────────────────────────
 
@@ -800,6 +810,31 @@ class MountEntry:
             # reads the fields it wants and ignores the rest, so there is no
             # opt-in registry (mirrors Mount.executeCmd building CommandOpts).
             opts = CommandOpts(
+                io_context=(
+                    dataclasses.replace(
+                        context.io_context,
+                        recorder=Recorder(
+                            context.io_context.recorder.sink, self.mount_id
+                        )
+                        if context.io_context.recorder
+                        else None,
+                        mount_gate=(self.prefix, self.mode),
+                        walk_probe=(
+                            WalkProbe(
+                                stat=functools.partial(
+                                    dispatch_stat, context.dispatch
+                                ),
+                                follow=link_follow(
+                                    context.ns.links if context.ns else None
+                                ),
+                            )
+                            if context.dispatch
+                            else None
+                        ),
+                    )
+                    if context.io_context is not None
+                    else None
+                ),
                 command=cmd_name,
                 stdin=stdin,
                 flags=flags,
@@ -874,7 +909,9 @@ class MountEntry:
                         cmd.write
                         and not cmd.path_guarded
                         and not info_only
-                        and strongest_mode_under(self.prefix, self.mode)
+                        and strongest_mode_under(
+                            self.prefix, self.mode, context.io_context
+                        )
                         == MountMode.READ
                     ):
                         return None, IOResult(

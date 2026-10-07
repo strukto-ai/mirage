@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ioContext } from '../../session/access.ts'
 import type { EvaluationContext } from '../../evaluation.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
 import { wrapCachableStreams } from '../../../io/stream.ts'
@@ -234,7 +235,7 @@ export async function runOnMount(
   // namespace owes a directory. A command that does not read `ns` off
   // its context ignores it, so there is no list of aware commands to
   // keep in step.
-  const ns = namespaceViewOf(registry, namespace ?? null, dispatch, session)
+  const ns = namespaceViewOf(registry, namespace ?? null, dispatch, session, context.admission)
   const statOverlay = ns.statOverlay ?? null
   // A traversal command's start point is statted through the dispatcher so
   // a start point under another mount answers (`find -L` follows a link
@@ -264,11 +265,12 @@ export async function runOnMount(
       cwd: session.cwd,
       dispatch,
       sessionId: session.sessionId,
+      ioContext: ioContext(session, context.admission, registry.policies, context.frame.recorder),
       env: envSnapshot(session),
       sessionView: sessionView(session, registry.policies, context.frame.diagnostics),
       ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
-      execAllowed: registry.isExecAllowed(),
-      execPathAllowed: registry.execAllowedAt,
+      execAllowed: registry.isExecAllowed(ioContext(session)),
+      execPathAllowed: (path) => registry.execAllowedAt(path, ioContext(session)),
       ...(lineRuntime !== undefined ? { runtime: lineRuntime } : {}),
       ns,
       statPath,

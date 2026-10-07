@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ioContext } from '../../../session/access.ts'
+
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
 import { CycleError, dottedSpelling, resolvePath, resolveSymlinks } from '../../../../utils/path.ts'
 import { materialize, type ByteSource } from '../../../../io/types.ts'
@@ -94,7 +96,9 @@ export async function applyUnary(
     }
   }
   if (op === '-L' || op === '-h') {
-    return ctx.namespace.isLink(operandAbs(ctx.namespace, val, ctx.session.cwd))
+    return ctx.namespace.isLink(
+      operandAbs(ctx.namespace, val, ctx.session.cwd, ioContext(ctx.session)),
+    )
   }
   if (FILE_UNARY.has(op)) {
     if (!(val instanceof PathSpec) && text === '') return false

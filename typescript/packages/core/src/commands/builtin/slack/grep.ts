@@ -64,7 +64,7 @@ async function grep(
   const pushdownWarnings: string[] = []
   // Output-shaping flags, a glob operand and a multi-operand line all need
   // the per-message scan; see SEARCH_HONORED above.
-  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
+  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix, opts.ioContext)
   const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
   if (pattern !== null && operand !== null && fl.asBool('w')) {
     const match = detectScope(operand)

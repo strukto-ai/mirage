@@ -18,7 +18,7 @@ import posixpath
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
@@ -33,6 +33,7 @@ from mirage.context import (
     hidden_refusal,
     session_visibility,
 )
+from mirage.context.types import IOContext
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import (
     eacces,
@@ -147,7 +148,9 @@ def _appends_nothing(op: str, kwargs: dict[str, Any]) -> bool:
     return op == "append" and not kwargs.get("data")
 
 
-def _visible_entries(entries: list[str], parent: str) -> list[str]:
+def _visible_entries(
+    entries: list[str], parent: str, context: IOContext | None = None
+) -> list[str]:
     """Drop listing entries the bound session hides.
 
     Entry shapes vary by backend (bare names, trailing-slash names,
@@ -160,7 +163,7 @@ def _visible_entries(entries: list[str], parent: str) -> list[str]:
         parent (str): the directory that was listed, as a virtual path.
     """
     base = parent.rstrip("/")
-    vis = session_visibility()
+    vis = session_visibility(context)
     return [
         e
         for e in entries
@@ -311,13 +314,22 @@ class Dispatcher:
         drift: DriftQueue | None = None,
         admit_write: Callable[[], AbstractAsyncContextManager[None]]
         | None = None,
+        io: IOContext | None = None,
+        owner: "Dispatcher | None" = None,
     ) -> None:
         self._namespace = namespace
         self._cache = cache
-        self._reconciler = Reconciler(cache, namespace)
+        self._reconciler: Reconciler = (
+            owner._reconciler
+            if owner is not None
+            else Reconciler(cache, namespace)
+        )
         self._drift = drift
         self._admit_write = admit_write
-        self._writers = KeyLock()
+        self._writers: KeyLock = (
+            owner._writers if owner is not None else KeyLock()
+        )
+        self._io = io
 
     def _boundary(self, mount: MountEntry | None) -> OpBoundary:
         """The policy boundary for an op on a path ``mount`` owns.
@@ -334,8 +346,9 @@ class Dispatcher:
             self._namespace.registry.policies,
             mount.prefix if mount is not None else "",
             mount.mode if mount is not None else MountMode.WRITE,
-            _session_id(),
+            self._io.session_id if self._io is not None else _session_id(),
             self._namespace.registry.decisions,
+            self._io,
         )
 
     @property
@@ -359,7 +372,7 @@ class Dispatcher:
         prefixes = [
             m.prefix for m in self._namespace.registry.visible_mounts()
         ]
-        vis = session_visibility()
+        vis = session_visibility(self._io)
         if op == "readdir":
             return namespace_listing(vis, prefixes, self._namespace, virtual)
         if op == "stat":
@@ -393,7 +406,7 @@ class Dispatcher:
         await boundary.admit(op, path, write)
         _memory_answered(report)
         if op == "readdir" and isinstance(fallback, list):
-            fallback = _visible_entries(fallback, path.virtual)
+            fallback = _visible_entries(fallback, path.virtual, self._io)
         return await boundary.complete(op, path, write, fallback)
 
     async def dispatch(
@@ -404,6 +417,20 @@ class Dispatcher:
         report: OpReport | None = None,
         **kwargs: Any,
     ) -> tuple[Any, IOResult]:
+        context = kwargs.pop("_io_context", None)
+        judged = kwargs.pop("_judged_targets", None)
+        if context is not None and judged is not None:
+            context = replace(context, judged_targets=judged)
+        if context is not None:
+            scoped = Dispatcher(
+                self._namespace,
+                self._cache,
+                self._drift,
+                self._admit_write,
+                context,
+                self,
+            )
+            return await scoped.dispatch(op, path, report=report, **kwargs)
         if self._admit_write is None or op not in POLICY_WRITE_OPS:
             return await self._dispatch(op, path, report=report, **kwargs)
         async with self._admit_write():
@@ -438,7 +465,7 @@ class Dispatcher:
         # is checked so a link inside hidden space cannot be followed
         # out of it, the followed path is re-checked so a visible link
         # cannot lead in, and a rename destination is a create.
-        vis = session_visibility()
+        vis = session_visibility(self._io)
         if not path_visible(vis, path.virtual):
             raise hidden_refusal(vis, path.virtual, op in HIDDEN_CREATE_OPS)
         dst = kwargs.get("dst")
@@ -759,6 +786,7 @@ class Dispatcher:
                     path.virtual,
                 ),
                 path.virtual,
+                self._io,
             )
         if op == "stat" and isinstance(result, FileStat):
             result = merge_overlay_stat(
@@ -806,7 +834,7 @@ class Dispatcher:
                 # serial order (a link synthesizes its parents), and
                 # the purge taking the directory's hidden nodes must
                 # not take it too.
-                vis = session_visibility()
+                vis = session_visibility(self._io)
                 arrived = frozenset(
                     link
                     for link, _ in self._namespace.link_stats_below(
@@ -891,7 +919,7 @@ class Dispatcher:
             path (PathSpec): the directory being removed.
             refusal (OSError): the backend's not-empty error.
         """
-        vis = session_visibility()
+        vis = session_visibility(self._io)
         if not hidden_under(vis, path.virtual):
             raise refusal
         try:
@@ -984,7 +1012,7 @@ class Dispatcher:
             walked = posixpath.normpath(walked)
         if walked == path.virtual:
             return path
-        vis = session_visibility()
+        vis = session_visibility(self._io)
         if not path_visible(vis, walked):
             raise hidden_refusal(vis, walked, create)
         return PathSpec.from_str_path(walked)
@@ -1180,7 +1208,10 @@ class Dispatcher:
         ]
         if (
             namespace_stat(
-                session_visibility(), prefixes, self._namespace, path.virtual
+                session_visibility(self._io),
+                prefixes,
+                self._namespace,
+                path.virtual,
             )
             is not None
         ):
@@ -1280,7 +1311,10 @@ class Dispatcher:
         ]
         if (
             namespace_stat(
-                session_visibility(), prefixes, self._namespace, virtual
+                session_visibility(self._io),
+                prefixes,
+                self._namespace,
+                virtual,
             )
             is not None
         ):

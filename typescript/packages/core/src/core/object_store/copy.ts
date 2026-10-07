@@ -14,7 +14,7 @@
 
 import type { Accessor } from '../../accessor/base.ts'
 import { evictAfter, invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
-import { record, startOp } from '../../observe/context.ts'
+import { activeRecorder, record, startOp } from '../../observe/context.ts'
 import { enoent } from '../../errors/fs.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import type { ExistsFn, ObjectStoreDriver, PairFn } from './driver.ts'
@@ -35,6 +35,7 @@ export function makeCopy<A extends Accessor, C>(
     )
   }
   return async function copy(accessor, src, dst) {
+    const recorder = activeRecorder()
     const kpfx = driver.keyPrefixOf(accessor)
     const srcKey = kp.apply(kpfx, src.mountPath)
     const dstKey = kp.apply(kpfx, dst.mountPath)
@@ -46,7 +47,7 @@ export function makeCopy<A extends Accessor, C>(
       if (!(await exists(accessor, src))) throw enoent(src)
       return
     }
-    const timer = startOp()
+    const timer = startOp(recorder)
     const settle = async (copied: boolean | undefined): Promise<void> => {
       // undefined when the store threw: only a clean false, "nothing was
       // copied", is safe to skip -- a throw may have left a partial object

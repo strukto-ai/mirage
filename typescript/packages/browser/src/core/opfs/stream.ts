@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { recordStream } from '@struktoai/mirage-core/observe/context'
+import { activeRecorder, recordStream } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
@@ -22,6 +22,7 @@ export async function* readStream(
   accessor: OPFSAccessor,
   path: PathSpec,
 ): AsyncIterable<Uint8Array> {
+  const recorder = activeRecorder()
   const root = await accessor.root()
   const key = path.mountPath
   let handle: FileSystemFileHandle
@@ -33,7 +34,7 @@ export async function* readStream(
     throw await openError(root, key, err, path)
   }
   const file = await handle.getFile()
-  const rec = recordStream('read', path.virtual, VFSName.OPFS)
+  const rec = recordStream('read', path.virtual, VFSName.OPFS, {}, recorder)
   const reader = file.stream().getReader()
   for (;;) {
     const { value, done } = await reader.read()

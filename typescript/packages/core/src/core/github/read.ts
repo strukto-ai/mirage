@@ -14,7 +14,7 @@
 
 import type { GitHubAccessor } from '../../accessor/github.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { record, startOp } from '../../observe/context.ts'
+import { activeRecorder, record, startOp } from '../../observe/context.ts'
 import { type PathSpec, VFSName } from '../../types.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
 import { fetchBlob } from './client.ts'
@@ -38,13 +38,14 @@ export async function read(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<Uint8Array> {
+  const recorder = activeRecorder()
   const { prefix, rel, key } = locate(path)
   if (rel === '') throw eisdir(path.virtual)
   if (index === undefined) throw enoent(path)
   const { entry } = await lookupRetrying(accessor, index, prefix, key)
   if (entry === null) throw enoent(path)
   if (entry.resourceType === 'folder') throw eisdir(path.virtual)
-  const timer = startOp()
+  const timer = startOp(recorder)
   const data = await fetchBlob(accessor.transport, accessor.owner, accessor.repo, entry.id)
   record('read', path.virtual, VFSName.GITHUB, data.length, timer, { fingerprint: entry.id })
   return data

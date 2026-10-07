@@ -17,6 +17,7 @@ from mirage.context.session_context import (
     line_running,
     redirect_target_judged,
 )
+from mirage.context.types import IOContext
 from mirage.policy.base import Policy
 from mirage.policy.match import Outcome, decide, op_ruling, posix_level
 from mirage.policy.mixin import SessionScopedMixin
@@ -61,8 +62,14 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
             ``commands_of(session_id)``.
     """
 
-    def __init__(self, sessions: SessionCommandsQuery) -> None:
+    def __init__(
+        self, sessions: SessionCommandsQuery, context: IOContext | None = None
+    ) -> None:
         self._sessions = sessions
+        self._context = context
+
+    def with_context(self, context: IOContext) -> "PermissionsPolicy":
+        return PermissionsPolicy(self._sessions, context)
 
     async def pre_command(self, ctx: CommandContext) -> Action | None:
         decision = decide(ctx, self._sessions.commands_of(ctx.session_id))
@@ -84,13 +91,17 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
         )
 
     async def pre_vfs(self, ctx: VfsContext) -> Action | None:
-        if redirect_target_judged(ctx.path.virtual):
+        if (
+            ctx.path.virtual in self._context.judged_targets
+            if self._context is not None
+            else redirect_target_judged(ctx.path.virtual)
+        ):
             return None
         # The grants belong to the line, not the session: a once grant
         # is spent as the command is admitted, so by the time its own
         # walk reaches this door the session holds nothing and only the
         # bound gate still remembers the nod.
-        gate = get_admission()
+        gate = get_admission(self._context)
         granted = gate.granted if gate is not None else ()
         ruled = op_ruling(
             self._sessions.commands_of(ctx.session_id), ctx, granted
@@ -98,7 +109,12 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
         if ruled is None:
             return None
         rule, asks = ruled
-        if asks and gate is None and not line_running():
+        if (
+            asks
+            and gate is None
+            and self._context is None
+            and not line_running()
+        ):
             return Ask(rule.reason, rule)
         return Deny(rule.reason, rule=rule)
 

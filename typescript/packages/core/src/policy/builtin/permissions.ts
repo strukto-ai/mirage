@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { IOContext } from '../../context/types.ts'
 import { getAdmission, lineRunning, redirectTargetJudged } from '../../context/session_context.ts'
 import type { Policy } from '../base.ts'
 import { decide } from '../match/decide.ts'
@@ -53,8 +54,15 @@ export class PermissionsPolicy implements Policy, SessionScoped {
   readonly [SESSION_SCOPED] = true as const
   private readonly sessions: SessionCommandsQuery
 
-  constructor(sessions: SessionCommandsQuery) {
+  constructor(
+    sessions: SessionCommandsQuery,
+    private readonly context?: IOContext,
+  ) {
     this.sessions = sessions
+  }
+
+  withContext(context: IOContext): PermissionsPolicy {
+    return new PermissionsPolicy(this.sessions, context)
   }
 
   preCommand(ctx: CommandContext): Action | null {
@@ -81,16 +89,22 @@ export class PermissionsPolicy implements Policy, SessionScoped {
   }
 
   preVfs(ctx: VfsContext): Action | null {
-    if (redirectTargetJudged(ctx.path.virtual)) return null
+    if (
+      this.context === undefined
+        ? redirectTargetJudged(ctx.path.virtual)
+        : this.context.judgedTargets?.includes(ctx.path.virtual)
+    )
+      return null
     // The grants belong to the line, not the session: a once grant is
     // spent as the command is admitted, so by the time its own walk
     // reaches this door the session holds nothing and only the bound
     // gate still remembers the nod.
-    const gate = getAdmission()
+    const gate = getAdmission(this.context)
     const ruled = opRuling(this.sessions.commandsOf(ctx.sessionId ?? ''), ctx, gate?.granted ?? [])
     if (ruled === null) return null
     const [rule, asks] = ruled
-    if (asks && gate === null && !lineRunning()) return { kind: 'ask', reason: rule.reason, rule }
+    if (asks && gate === null && this.context === undefined && !lineRunning())
+      return { kind: 'ask', reason: rule.reason, rule }
     return { kind: 'deny', reason: rule.reason, rule }
   }
 

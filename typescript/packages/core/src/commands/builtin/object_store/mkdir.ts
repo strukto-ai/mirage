@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invocationIo } from '../generic_bind/factory.ts'
+
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -28,16 +30,20 @@ import { missingOperandError } from '../../spec/usage.ts'
 const ENC = new TextEncoder()
 
 /** Build the implicit-parents mkdir override for one keyed store. */
-export function makeMkdir<A extends Accessor>(vfs: string, io: CommandIO<A>): RegisteredCommand[] {
-  const mkdirImpl = requireOp(io.mkdir, 'mkdir')
-  const resolveGlob = resolveGlobOf(io)
-
+export function makeMkdir<A extends Accessor>(
+  vfs: string,
+  rawIo: CommandIO<A>,
+): RegisteredCommand[] {
   async function mkdirCommand(
     accessor: A,
     paths: PathSpec[],
     _texts: string[],
     opts: CommandOpts,
   ): Promise<CommandFnResult> {
+    const io = invocationIo(rawIo, opts)
+    const mkdirImpl = requireOp(io.mkdir, 'mkdir')
+    const resolveGlob = resolveGlobOf(io)
+
     if (paths.length === 0) throw missingOperandError('mkdir', null)
     const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
     const fl = new FlagView(opts.flags, specOf('mkdir'))
@@ -55,8 +61,8 @@ export function makeMkdir<A extends Accessor>(vfs: string, io: CommandIO<A>): Re
         if (collision.message !== null) errors.push(collision.message)
         continue
       }
-      const names = verbose ? await createdNames(path, parents, links) : []
-      const failed = await makeDirectory(mkdirImpl, accessor, path, parents, links)
+      const names = verbose ? await createdNames(path, parents, links, opts.ioContext) : []
+      const failed = await makeDirectory(mkdirImpl, accessor, path, parents, links, opts.ioContext)
       if (failed !== null) {
         errors.push(failed)
         continue

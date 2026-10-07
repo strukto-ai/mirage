@@ -18,7 +18,13 @@ import type { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { entryOrWarm } from '../../cache/index/warm.ts'
 import { PathSpec } from '../../types.ts'
-import { record, recordingActive, revisionFor, startOp } from '../../observe/context.ts'
+import {
+  activeRecorder,
+  record,
+  recordingActive,
+  revisionFor,
+  startOp,
+} from '../../observe/context.ts'
 import { readDoc } from '../gdocs/read.ts'
 import { downloadFile } from '../google/drive.ts'
 import { captureFileMetadata, downloadRevision } from './versions.ts'
@@ -104,6 +110,7 @@ export async function read(
   index?: IndexCacheStore,
   options?: { offset?: number; size?: number },
 ): Promise<Uint8Array> {
+  const recorder = activeRecorder()
   const offset = options?.offset ?? 0
   const size = options?.size ?? null
   const prefix = mountPrefixOf(path.virtual, path.vfsPath)
@@ -123,7 +130,7 @@ export async function read(
   if (DIRECTORY_RESOURCE_TYPES.has(rt)) throw eisdir(path.virtual)
   if (!NATIVE_RESOURCE_TYPES.has(rt))
     return readFileVersioned(accessor.tokenManager, entry.id, path.virtual, entry, offset, size)
-  const timer = startOp()
+  const timer = startOp(recorder)
   let rendered: Uint8Array
   if (rt === 'gdrive/gdoc') rendered = await readDoc(accessor.tokenManager, entry.id)
   else if (rt === 'gdrive/gsheet') rendered = await readSpreadsheet(accessor.tokenManager, entry.id)

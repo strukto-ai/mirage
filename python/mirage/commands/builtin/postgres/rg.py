@@ -29,5 +29,5 @@ async def rg(
     texts: list[str],
     opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
-    scan, _ = scan_io(IO, opts.ns, opts.mount_prefix)
+    scan, _ = scan_io(IO, opts.ns, opts.mount_prefix, opts.io_context)
     return await run_search(scan, "rg", accessor, paths, texts, opts)

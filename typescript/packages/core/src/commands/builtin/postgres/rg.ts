@@ -28,7 +28,7 @@ export const POSTGRES_RG = command({
   spec: specOf('rg'),
   fn: (accessor: PostgresAccessor, paths, texts, opts) =>
     runSearch<PostgresAccessor>(
-      scanIo(IO, opts.ns, opts.mountPrefix)[0],
+      scanIo(IO, opts.ns, opts.mountPrefix, opts.ioContext)[0],
       'rg',
       accessor,
       paths,

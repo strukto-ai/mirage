@@ -83,7 +83,7 @@ async def find(
     path = fl.as_str("path")
     mindepth = fl.as_str("mindepth")
     empty = fl.as_bool("empty")
-    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
+    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix, opts.io_context)
     paths = await scan.resolve_glob(accessor, paths, opts.index)
     # A pure -name search at folder level pushes the subject query down to
     # IMAP search instead of walking every message; any other predicate

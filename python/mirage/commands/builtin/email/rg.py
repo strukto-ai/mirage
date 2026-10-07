@@ -61,7 +61,7 @@ async def rg(
     # way: a line the push-down cannot answer takes the generic scan below.
     # It used to return exit 1 instead, reporting "nothing matched" for a
     # search it had not run.
-    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
+    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix, opts.io_context)
     operand = (
         None
         if scoped

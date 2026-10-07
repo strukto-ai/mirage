@@ -14,7 +14,7 @@
 
 import type { Accessor } from '../../accessor/base.ts'
 import { evictAfter, invalidateAfterMove, invalidateAncestors } from '../../cache/context.ts'
-import { record, startOp } from '../../observe/context.ts'
+import { activeRecorder, record, startOp } from '../../observe/context.ts'
 import { enoent } from '../../errors/fs.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import type { ExistsFn, ObjectStoreDriver, PairFn } from './driver.ts'
@@ -39,6 +39,7 @@ export function makeRename<A extends Accessor, C>(
     )
   }
   return async function rename(accessor, src, dst) {
+    const recorder = activeRecorder()
     const kpfx = driver.keyPrefixOf(accessor)
     const srcKey = kp.apply(kpfx, src.mountPath)
     if (srcKey === kp.apply(kpfx, dst.mountPath)) {
@@ -49,7 +50,7 @@ export function makeRename<A extends Accessor, C>(
       if (!(await exists(accessor, src))) throw enoent(src)
       return
     }
-    const timer = startOp()
+    const timer = startOp(recorder)
     // Which of the two paths ran, because only the prefix walk moves a
     // subtree and capture retracts on the op name. A rejection from
     // moveFile leaves this 'rename': the walk never ran, so nothing under

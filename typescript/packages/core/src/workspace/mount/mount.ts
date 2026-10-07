@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Recorder } from '../../observe/context.ts'
+import type { IOContext } from '../../context/types.ts'
 import { ContextScope } from '../../utils/context_scope.ts'
 import {
   captureSessionContext,
@@ -215,15 +217,25 @@ export class MountEntry {
    * since the key is the placement's to know, and keeps the VFS retained
    * while the walk reads metadata.
    */
-  async expandGlob(paths: readonly PathSpec[], prefix: string): Promise<PathSpec[]> {
+  async expandGlob(
+    paths: readonly PathSpec[],
+    prefix: string,
+    ioContext?: IOContext,
+  ): Promise<PathSpec[]> {
     const levels = this.resolveCascade('glob', null, this.ops, this.generalOps)
     if (levels.length === 0) return [...paths]
     return this.use(async () => {
       const manager = this.cacheManager
-      if (manager === null) return this.runGlob(levels, paths, prefix, this.indexStore)
+      if (manager === null) return this.runGlob(levels, paths, prefix, this.indexStore, ioContext)
       return manager.withMutation(async () => {
         await this.ensureReady()
-        return this.runGlob(levels, paths, prefix, manager.scopeIndexLocked(this.indexStore))
+        return this.runGlob(
+          levels,
+          paths,
+          prefix,
+          manager.scopeIndexLocked(this.indexStore),
+          ioContext,
+        )
       })
     })
   }
@@ -233,8 +245,9 @@ export class MountEntry {
     paths: readonly PathSpec[],
     prefix: string,
     index: IndexCacheStore,
+    ioContext?: IOContext,
   ): Promise<PathSpec[]> {
-    const kwargs: OpKwargs = { index }
+    const kwargs: OpKwargs = { index, ...(ioContext === undefined ? {} : { ioContext }) }
     const out: PathSpec[] = []
     for (const p of paths) {
       const spec = prefix
@@ -295,8 +308,8 @@ export class MountEntry {
    * This mount's mode narrowed by the current session's cap. The
    * configured mode is the ceiling; a session's mode can only weaken it.
    */
-  effectiveMode(): MountMode {
-    return effectiveMountMode(this.prefix, this.mode)
+  effectiveMode(context?: IOContext): MountMode {
+    return effectiveMountMode(this.prefix, this.mode, context)
   }
 
   // ── command registration ──────────────────────────
@@ -635,6 +648,26 @@ export class MountEntry {
 
       const accessor = this.vfs.accessor
       const cmdOpts: CommandOpts = {
+        ...(context.ioContext === undefined
+          ? {}
+          : {
+              ioContext: {
+                ...context.ioContext,
+                recorder:
+                  context.ioContext.recorder == null
+                    ? null
+                    : { ...context.ioContext.recorder, mountId: this.mountId },
+                mountGate: [this.prefix, this.mode],
+                ...(context.dispatch === undefined
+                  ? {}
+                  : {
+                      walkProbe: {
+                        stat: dispatchStat(context.dispatch),
+                        follow: linkFollow(context.ns?.links),
+                      },
+                    }),
+              },
+            }),
         stdin: context.stdin ?? null,
         flags: stampedFlags,
         filetypeFns: isFiletypeCmd ? null : filetypeFns,
@@ -691,7 +724,8 @@ export class MountEntry {
                         cmd.write &&
                         !cmd.pathGuarded &&
                         !infoOnly &&
-                        strongestModeUnder(this.prefix, this.mode) === MountMode.READ
+                        strongestModeUnder(this.prefix, this.mode, context.ioContext) ===
+                          MountMode.READ
                       ) {
                         return [
                           null,
@@ -852,13 +886,18 @@ async function* commandOutput(
 }
 
 /** Preserve a streaming operation's recording owner after its dispatch frame exits. */
-export function wrapOpStream(result: unknown, mountId: string, activity: VFSActivity): unknown {
+export function wrapOpStream(
+  result: unknown,
+  mountId: string,
+  activity: VFSActivity,
+  recorder?: Recorder | null,
+): unknown {
   if (result instanceof CachableAsyncIterator) {
-    result.wrapSource((source) => withMountContext(source, mountId))
+    result.wrapSource((source) => withMountContext(source, mountId, recorder))
     return activity.hold(result)
   }
   if (result !== null && typeof result === 'object' && Symbol.asyncIterator in result) {
-    return activity.hold(withMountContext(result as AsyncIterable<Uint8Array>, mountId))
+    return activity.hold(withMountContext(result as AsyncIterable<Uint8Array>, mountId, recorder))
   }
   return result
 }

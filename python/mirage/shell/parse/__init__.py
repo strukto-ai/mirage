@@ -27,7 +27,6 @@ from mirage.shell.parse.source import join_continuations, source_offsets
 from mirage.shell.parse.syntax import (
     find_syntax_error,
     find_unterminated_backtick,
-    syntax_error_result,
 )
 
 __all__ = [
@@ -47,5 +46,4 @@ __all__ = [
     "referenced_names",
     "join_continuations",
     "source_offsets",
-    "syntax_error_result",
 ]

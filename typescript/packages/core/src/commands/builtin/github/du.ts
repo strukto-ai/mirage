@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invocationIo } from '../generic_bind/factory.ts'
+
 import type { GitHubAccessor } from '../../../accessor/github.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
 import { pathsScoped } from '../../../ops/namespace_view.ts'
 import type { NamespaceView } from '../../../ops/types.ts'
-import { withCommandGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
 import { IO } from './io.ts'
 import { ensureTree } from '../../../core/github/tree.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
@@ -28,8 +29,6 @@ import type { DuEntries } from '../../../vfs/types.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
-
-const resolveGlob = resolveGlobOf(IO)
 
 /**
  * Every blob and every directory at or under `path`, and the blobs' sum.
@@ -86,7 +85,7 @@ async function du(
     opts,
     async (targets) => {
       await live()
-      return resolveGlob(accessor, targets, idx)
+      return resolveGlobOf(invocationIo(IO, opts))(accessor, targets, idx)
     },
     async (p) => {
       await live()
@@ -98,13 +97,13 @@ async function du(
     async (p) => {
       await live()
       if (walked(accessor, opts.ns, p))
-        return walkSize(withCommandGuards(withPolicyGuard(IO)), accessor, idx, budget, p)
+        return walkSize(invocationIo(IO, opts), accessor, idx, budget, p)
       return subtree(accessor, p)[0][1]
     },
     async (p) => {
       await live()
       if (walked(accessor, opts.ns, p))
-        return walkEntries(withCommandGuards(withPolicyGuard(IO)), accessor, idx, budget, p)
+        return walkEntries(invocationIo(IO, opts), accessor, idx, budget, p)
       const [entries, directories] = subtree(accessor, p)
       const mount = mountPrefixOf(p.virtual, p.vfsPath)
       budget.directories.push(...directories.map((d) => `${mount}${d}`))

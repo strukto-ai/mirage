@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SessionState } from '../session/session.ts'
+
 import { compareCodePoints } from '../../utils/sort.ts'
 import { contentSize } from '../../utils/stat_view.ts'
 import { resolvePath } from '../../utils/path.ts'
@@ -56,6 +58,7 @@ export interface FindActionDoors {
   // where `-exec` is refused.
   executeFn?: ExecuteFn
   sessionId?: string
+  session?: SessionState
   // The invocation's abort, checked between matches so a cancelled
   // `-delete` or `-exec` stops at the next row instead of the last one.
   signal?: AbortSignal
@@ -118,11 +121,12 @@ async function headState(
   registry: MountRegistry,
   cwd: string,
   statPath: StatPath | null,
+  session: SessionState | null,
 ): Promise<[boolean, boolean]> {
   if (head.includes('/')) {
     return [statPath !== null && (await statPath(resolvePath(head, cwd))) === null, false]
   }
-  const sess = getCurrentSession()
+  const sess = session
   // A shell function is not found either, nor a builtin that is the
   // shell's own: GNU execs the head through execvp, which sees programs
   // and nothing the shell defined, so `f(){ :; }; find d -exec f {} \;`
@@ -155,13 +159,14 @@ async function runExec(
   out: Uint8Array[],
   errors: Uint8Array[],
   stdin: SharedStdin | null,
+  session: SessionState | null,
 ): Promise<boolean> {
   // GNU substitutes the matches into the words and only then hands them
   // to execvp, so the head looked up is the substituted one: `-exec {}
   // \;` runs each match itself.
   const words = execWords(action, paths)
   const head = words[0] ?? action.argv[0] ?? ''
-  const [missing, shadowed] = await headState(head, registry, cwd, statPath)
+  const [missing, shadowed] = await headState(head, registry, cwd, statPath, session)
   if (missing) {
     errors.push(encodeText(`find: '${head}': No such file or directory\n`))
     return false
@@ -171,7 +176,7 @@ async function runExec(
   // program run for the session, so a builtin that doubles as a program
   // answers as the program (`printf -v` is a format).
   const line = (shadowed ? 'command ' : '') + shellJoin(words)
-  const sess = getCurrentSession()
+  const sess = session
   const run = () => executeFn(`( ${line} )`, { sessionId, stdin })
   const io = sess === null ? await run() : await runAsProgram(sess, run)
   if (io.stdout !== null) {
@@ -422,6 +427,7 @@ export async function applyFindActions(
     return [null, encodeText('find: -exec: no shell to run the command\n'), 1]
   }
   const sessionId = doors.sessionId ?? ''
+  const session = doors.session ?? getCurrentSession()
   const ns = doors.ns ?? null
   const statPath = doors.statPath ?? null
   const dispatch = doors.dispatch ?? null
@@ -484,6 +490,7 @@ export async function applyFindActions(
             out,
             errors,
             once,
+            session,
           ))
         )
           break
@@ -531,6 +538,7 @@ export async function applyFindActions(
         out,
         errors,
         once,
+        session,
       ))
     )
       exitCode = 1

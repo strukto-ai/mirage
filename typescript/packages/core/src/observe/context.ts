@@ -16,12 +16,12 @@ import { createAsyncContext } from '../utils/async_context.ts'
 import type { ContextCall } from '../utils/async_context.ts'
 import { OpRecord } from './record.ts'
 
-interface RecordingState {
+export interface Recorder {
   records: OpRecord[]
   mountId: string | null
 }
 
-const storage = createAsyncContext<RecordingState>()
+const storage = createAsyncContext<Recorder | undefined>()
 
 /**
  * Per-task revision pins. Independent of the recording context so that
@@ -39,13 +39,19 @@ export function captureRecordingContext(): ContextCall[] {
   return [storage.capture(), revisionsStorage.capture()]
 }
 
+export function activeRecorder(): Recorder | null {
+  return storage.getStore() ?? null
+}
+
 export function activeRecords(): readonly OpRecord[] | undefined {
   return storage.getStore()?.records
 }
 
-export async function runWithRecording<T>(fn: () => Promise<T>): Promise<[T, OpRecord[]]> {
-  const state: RecordingState = { records: [], mountId: null }
-  const value = await storage.run(state, fn)
+export async function runWithRecording<T>(
+  fn: (recorder: Recorder) => Promise<T>,
+): Promise<[T, OpRecord[]]> {
+  const state: Recorder = { records: [], mountId: null }
+  const value = await storage.run(state, () => fn(state))
   return [value, state.records]
 }
 
@@ -60,9 +66,13 @@ export async function runWithRecording<T>(fn: () => Promise<T>): Promise<[T, OpR
  *
  * Inert (runs `fn` unchanged) when no recording context is active.
  */
-export function runWithMountContext<T>(fn: () => Promise<T>, mountId?: string | null): Promise<T> {
-  const state = storage.getStore()
-  if (state === undefined) return fn()
+export function runWithMountContext<T>(
+  fn: () => Promise<T>,
+  mountId?: string | null,
+  recorder?: Recorder | null,
+): Promise<T> {
+  const state = recorder === undefined ? storage.getStore() : recorder
+  if (state == null) return Promise.resolve(storage.run(undefined, fn))
   return Promise.resolve(
     storage.run(
       {
@@ -84,11 +94,12 @@ export function runWithMountContext<T>(fn: () => Promise<T>, mountId?: string | 
 export async function* withMountContext(
   it: AsyncIterable<Uint8Array>,
   mountId?: string | null,
+  recorder?: Recorder | null,
 ): AsyncGenerator<Uint8Array> {
   const iter = it[Symbol.asyncIterator]()
   try {
     for (;;) {
-      const step = await runWithMountContext(() => iter.next(), mountId)
+      const step = await runWithMountContext(() => iter.next(), mountId, recorder)
       if (step.done === true) return
       yield step.value
     }
@@ -119,9 +130,11 @@ export interface RecordOptions {
  */
 export class OpTimer {
   private readonly startMs: number
+  readonly recorder: Recorder | undefined
 
-  constructor() {
+  constructor(recorder: Recorder | null | undefined = storage.getStore()) {
     this.startMs = performance.now()
+    this.recorder = recorder ?? undefined
   }
 
   /** Milliseconds elapsed since the timer was opened. */
@@ -134,8 +147,8 @@ export class OpTimer {
  * Open the record path's stopwatch for one op. Hand the timer to
  * {@link record} or {@link finishRecord} when the op completes.
  */
-export function startOp(): OpTimer {
-  return new OpTimer()
+export function startOp(recorder?: Recorder | null): OpTimer {
+  return new OpTimer(recorder)
 }
 
 /**
@@ -164,7 +177,7 @@ export function finishRecord(
     durationMs: elapsed,
     fingerprint: options.fingerprint ?? null,
     revision: options.revision ?? null,
-    mountId: storage.getStore()?.mountId ?? null,
+    mountId: timer.recorder?.mountId ?? null,
   })
 }
 
@@ -181,7 +194,7 @@ export function record(
   timer: OpTimer,
   options: RecordOptions = {},
 ): void {
-  const state = storage.getStore()
+  const state = timer.recorder
   if (state === undefined) return
   state.records.push(finishRecord(op, path, source, nbytes, timer, options))
 }
@@ -196,9 +209,10 @@ export function recordStream(
   path: string,
   source: string,
   options: RecordOptions = {},
+  recorder?: Recorder | null,
 ): OpRecord | null {
-  const state = storage.getStore()
-  if (state === undefined) return null
+  const state = recorder === undefined ? storage.getStore() : recorder
+  if (state == null) return null
   const rec = new OpRecord({
     op,
     path,
@@ -208,7 +222,7 @@ export function recordStream(
     durationMs: 0,
     fingerprint: options.fingerprint ?? null,
     revision: options.revision ?? null,
-    mountId: storage.getStore()?.mountId ?? null,
+    mountId: state.mountId,
   })
   state.records.push(rec)
   return rec

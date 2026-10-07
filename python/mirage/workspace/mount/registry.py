@@ -29,6 +29,7 @@ from mirage.context import (
     get_admission,
     strongest_mode_under,
 )
+from mirage.context.types import IOContext
 from mirage.errors.fs import no_mount
 from mirage.errors.types import NoMountError
 from mirage.ops.config import OpsMount
@@ -494,17 +495,22 @@ class MountRegistry:
             return None
         return self.try_mount_for_prefix(owner)
 
-    def is_exec_allowed(self) -> bool:
+    def is_exec_allowed(self, context: IOContext | None = None) -> bool:
         for m in self._mounts:
             if m.prefix == DEV_PREFIX:
                 continue
             # strongest_mode_under, not effective_mode: a session whose
             # only x grant is a show entry still counts as having one.
-            if strongest_mode_under(m.prefix, m.mode) == MountMode.EXEC:
+            if (
+                strongest_mode_under(m.prefix, m.mode, context)
+                == MountMode.EXEC
+            ):
                 return True
         return False
 
-    def exec_allowed_at(self, virtual: str) -> bool:
+    def exec_allowed_at(
+        self, virtual: str, context: IOContext | None = None
+    ) -> bool:
         """Whether code may be loaded from this path: the per-script
         form of ``is_exec_allowed``, read by an interpreter running a
         file operand (``python3 path.py``, ``js app.js``, or a
@@ -519,7 +525,10 @@ class MountRegistry:
         m = self.try_mount_for(virtual)
         if m is None:
             return False
-        return effective_path_mode(virtual, m.prefix, m.mode) == MountMode.EXEC
+        return (
+            effective_path_mode(virtual, m.prefix, m.mode, context)
+            == MountMode.EXEC
+        )
 
     def mount_for_command(self, cmd_name: str) -> MountEntry | None:
         """Find a mount that has this command registered.

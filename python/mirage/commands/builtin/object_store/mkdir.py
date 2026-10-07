@@ -22,6 +22,7 @@ from mirage.commands.builtin.generic_bind.builders.mkdir import (
     created_names,
     make_directory,
 )
+from mirage.commands.builtin.generic_bind.factory import invocation_io
 from mirage.commands.builtin.utils.slash_links import mkdir_link_refusal
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
@@ -31,15 +32,13 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def make_mkdir(vfs: str, io: CommandIO) -> Callable[..., Any]:
+def make_mkdir(vfs: str, raw_io: CommandIO) -> Callable[..., Any]:
     """Build the implicit-parents mkdir override for one keyed store.
 
     Args:
         vfs (str): VFS name the command registers under.
-        io (CommandIO): the backend's op table; must wire mkdir.
+        raw_io (CommandIO): the backend's op table; must wire mkdir.
     """
-    mkdir_impl = io.require(Operation.MKDIR)
-    resolve_glob = io.resolve_glob
 
     async def mkdir(
         accessor: Accessor,
@@ -47,6 +46,10 @@ def make_mkdir(vfs: str, io: CommandIO) -> Callable[..., Any]:
         texts: list[str],
         opts: CommandOpts,
     ) -> tuple[ByteSource | None, IOResult]:
+        io = invocation_io(raw_io, opts)
+        mkdir_impl = io.require(Operation.MKDIR)
+        resolve_glob = io.resolve_glob
+
         fl = FlagView(opts.flags, spec=SPECS["mkdir"])
         parents = fl.as_bool("parents")
         verbose = fl.as_bool("verbose")
@@ -68,10 +71,12 @@ def make_mkdir(vfs: str, io: CommandIO) -> Callable[..., Any]:
                     errors.append(refusal)
                 continue
             names = (
-                await created_names(path, parents, links) if verbose else []
+                await created_names(path, parents, links, opts.io_context)
+                if verbose
+                else []
             )
             failed = await make_directory(
-                mkdir_impl, accessor, path, parents, links
+                mkdir_impl, accessor, path, parents, links, opts.io_context
             )
             if failed is not None:
                 errors.append(failed)

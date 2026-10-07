@@ -32,6 +32,7 @@ from mirage.workspace.executor.builtins.shared import (
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.access import io_context
 from mirage.workspace.types import ExecutionNode
 
 # The last canonicalizing flag decides how much of the path must exist,
@@ -104,7 +105,7 @@ async def handle_readlink(
     lines: list[str] = []
     exit_code = 0
     for op in operands:
-        abs_op = operand_abs(namespace, op, session.cwd)
+        abs_op = operand_abs(namespace, op, session.cwd, io_context(session))
         spec = PathSpec.from_str_path(op, cwd=session.cwd)
         # The link entry is namespace state behind the op door: session
         # grants and admission policies decide whether this session may

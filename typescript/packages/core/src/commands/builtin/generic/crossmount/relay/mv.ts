@@ -63,7 +63,9 @@ export async function runMv(
     undefined,
     storageKey,
     undefined,
-    refuseReveal,
+    (src, dst) => {
+      refuseReveal(src, dst, ns?.visibility)
+    },
     ns?.links == null ? undefined : transferLinksOf(ns.links, dispatch, '/', ns.visibility),
     stdin,
   )

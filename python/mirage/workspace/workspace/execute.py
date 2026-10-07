@@ -26,18 +26,12 @@ from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope
 from mirage.policy import Deny, HandOff
 from mirage.runtime.routing import RouteDecision, RouteError
-from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole, Terminal
 from mirage.shell.constants import FORK_FAILED, FORK_FAILED_STATUS
 from mirage.shell.helpers import input_substitution_redirect
 from mirage.shell.job_table import JobTable, JobWaits
 from mirage.shell.literal import literal_tree
-from mirage.shell.parse import (
-    find_syntax_error,
-    find_unterminated_backtick,
-    syntax_error_result,
-)
 from mirage.shell.parse.scope import ParseScope
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
@@ -68,6 +62,7 @@ from mirage.workspace.node.admission import (
     is_pending,
     is_pending_refusal,
 )
+from mirage.workspace.node.diagnostics import syntax_error_result
 from mirage.workspace.node.explain import (
     Judged,
     Walked,
@@ -587,6 +582,7 @@ async def run_prepared_line(
     # evaluations get an inert scope.
     is_line = record
     scope = RecordingScope(active=is_line)
+    context.frame.recorder = scope.recorder
     parse_scope = ParseScope()
 
     session_token = set_current_evaluation(context, owner=ws._session_mgr)
@@ -601,25 +597,14 @@ async def run_prepared_line(
         # and every nested evaluation under it inherits the identity.
         set_line_writer(frame.writer)
     try:
-        ast = (
-            parse_scope.parse(command) if argv is None else literal_tree(argv)
+        program = (
+            parse_scope.program(command, expanding_aliases(effective_session))
+            if argv is None
+            else None
         )
-        # Syntax gates before policy, mirroring the TS order and
-        # bash: an unparsable line exits 2 and the policy is never
-        # consulted about it.
-        offending = find_syntax_error(
-            ast,
-            expanding_aliases(effective_session),
-            parse_fn=parse_scope.parse,
-        )
-        if offending is None and argv is None:
-            # tree-sitter accepts an unclosed backtick as a complete
-            # command, so the region is scanned separately.
-            offending = find_unterminated_backtick(
-                decode_text(ast.text or b"")
-            )
-        if offending is not None:
-            io = syntax_error_result(offending, ast)
+        ast = program.root if program is not None else literal_tree(argv or ())
+        if program is not None and program.diagnostics:
+            io = syntax_error_result(program.diagnostics[0])
             record_status(session, io.exit_code)
             return io
         nested = NestedRefusal()

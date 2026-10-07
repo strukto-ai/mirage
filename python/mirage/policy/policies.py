@@ -26,6 +26,7 @@ from mirage.context import (
     reset_explaining,
     set_explaining,
 )
+from mirage.context.types import IOContext
 from mirage.errors.fs import eacces, erofs
 from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.render import fs_error_line
@@ -33,6 +34,7 @@ from mirage.errors.types import FsCondition
 from mirage.policy.base import Policy
 from mirage.policy.builtin.hidden_paths import HiddenPathsPolicy
 from mirage.policy.builtin.mount_mode import MountModePolicy
+from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.policy.constants import POLICY_DENIED_EXIT
 from mirage.policy.errors import Explained, PolicyDenied, PolicyError
 from mirage.policy.match.decide import source_of
@@ -209,6 +211,7 @@ async def pre_vfs_gate(
     check_hidden: bool = True,
     decisions: "Decisions | None" = None,
     final: bool = True,
+    io: IOContext | None = None,
 ) -> None:
     """Fire pre_vfs at an op door; a Deny becomes EACCES.
 
@@ -264,11 +267,11 @@ async def pre_vfs_gate(
     if isinstance(trace, list):
         token = set_explaining(DryRun.DECIDING)
         try:
-            hidden = check_hidden and await policies.hides(ctx)
+            hidden = check_hidden and await policies.hides(ctx, io)
             noted = (
                 None
                 if hidden
-                else await _explained_op(policies, ctx, decisions)
+                else await _explained_op(policies, ctx, decisions, io)
             )
         finally:
             reset_explaining(token)
@@ -287,7 +290,7 @@ async def pre_vfs_gate(
         or (write and mode is not None)
     ):
         return
-    answer = await policies.pre_vfs(ctx, check_hidden=check_hidden)
+    answer = await policies.pre_vfs(ctx, check_hidden=check_hidden, io=io)
     if isinstance(answer, Hide):
         raise answer.error
     if isinstance(answer, Ask):
@@ -310,7 +313,10 @@ async def pre_vfs_gate(
 
 
 async def _explained_op(
-    policies: "Policies", ctx: VfsContext, decisions: "Decisions | None"
+    policies: "Policies",
+    ctx: VfsContext,
+    decisions: "Decisions | None",
+    io: IOContext | None = None,
 ) -> VfsExplanation:
     """What the gate would answer one VFS call, as ``pre_vfs_gate``
     decides it and without its consequences: every policy's answer, the
@@ -323,7 +329,7 @@ async def _explained_op(
         decisions (Decisions | None): the approval ledger, None at a
             door that cannot ask.
     """
-    said = await policies.answers("pre_vfs", ctx)
+    said = await policies.answers("pre_vfs", ctx, io=io)
     answers = tuple(a for a in said if isinstance(a, (Deny, Ask)))
     first = answers[0] if answers else None
     winner = next((a for a in answers if isinstance(a, Deny)), first)
@@ -611,7 +617,9 @@ class Policies:
                     break
         self._wanted = frozenset(wanted)
 
-    def _chain(self, hook: str, placed: bool) -> tuple[Policy, ...]:
+    def _chain(
+        self, hook: str, placed: bool, io: IOContext | None = None
+    ) -> tuple[Policy, ...]:
         """The policies a stage asks, in order: the built-in placement
         first at ``pre_execute`` (unless the caller placed the line),
         the registered ones, and the built-in mount mode last at
@@ -624,15 +632,27 @@ class Policies:
         """
         # A snapshot, so the order holds if the host edits registrations
         # while a hook awaits. Changes take effect at the next gate.
-        chain: tuple[Policy, ...] = tuple(self._policies)
+        chain: tuple[Policy, ...] = tuple(
+            p.with_context(io)
+            if hook == "pre_vfs"
+            and io is not None
+            and isinstance(p, PermissionsPolicy)
+            else p
+            for p in self._policies
+        )
         if hook == "pre_execute" and self._placement and not placed:
             chain = (self._placement, *chain)
         if hook == "pre_vfs":
-            chain = (*chain, self._mode)
+            chain = (*chain, self._mode if io is None else MountModePolicy(io))
         return chain
 
     async def _said(
-        self, hook: str, ctx: HookContext, every: bool, placed: bool = False
+        self,
+        hook: str,
+        ctx: HookContext,
+        every: bool,
+        placed: bool = False,
+        io: IOContext | None = None,
     ) -> tuple[list[Deny | Ask | Route], list[Limit]]:
         """The one loop every stage runs: each policy's answer, named and
         checked against what the hook may carry.
@@ -656,7 +676,7 @@ class Policies:
         legal = VALIDITY[hook]
         said: list[Deny | Ask | Route] = []
         limits: list[Limit] = []
-        for policy in self._chain(hook, placed):
+        for policy in self._chain(hook, placed, io):
             if getattr(type(policy), hook) is base:
                 continue
             name = type(policy).__name__
@@ -695,7 +715,11 @@ class Policies:
         return said, limits
 
     async def _fire(
-        self, hook: str, ctx: HookContext, placed: bool = False
+        self,
+        hook: str,
+        ctx: HookContext,
+        placed: bool = False,
+        io: IOContext | None = None,
     ) -> tuple[Deny | Ask | None, Limit | None, tuple[Route, ...]]:
         """One stage at a door: the first Deny wins, Limits merge.
 
@@ -712,7 +736,7 @@ class Policies:
             ctx (HookContext): the context the stage sees.
             placed (bool): the caller placed the line itself.
         """
-        said, limits = await self._said(hook, ctx, False, placed)
+        said, limits = await self._said(hook, ctx, False, placed, io)
         deny = next((a for a in said if isinstance(a, Deny)), None)
         if deny is not None:
             return deny, None, ()
@@ -721,7 +745,11 @@ class Policies:
         return asked, Limit.aggr(limits), routes
 
     async def answers(
-        self, hook: str, ctx: HookContext, every: bool = True
+        self,
+        hook: str,
+        ctx: HookContext,
+        every: bool = True,
+        io: IOContext | None = None,
     ) -> tuple[Deny | Ask | Route, ...]:
         """The policies' answers at one stage, in the order the stage
         asks them, each naming its policy: what ``explain`` shows, from
@@ -739,7 +767,7 @@ class Policies:
             ctx (HookContext): the context the stage would see.
             every (bool): ask every policy, past a Deny.
         """
-        said, _ = await self._said(hook, ctx, every)
+        said, _ = await self._said(hook, ctx, every, io=io)
         return tuple(said)
 
     async def pre_command(self, ctx: CommandContext) -> Deny | Ask | None:
@@ -770,17 +798,24 @@ class Policies:
             return action
         return None if placed else agreed(list(routes))
 
-    async def hides(self, ctx: VfsContext) -> bool:
+    async def hides(
+        self, ctx: VfsContext, io: IOContext | None = None
+    ) -> bool:
         """Whether the built-in hides answer the op as absent, before any
         policy is asked.
 
         Args:
             ctx (VfsContext): the op about to run.
         """
-        return await self._hidden.pre_vfs(ctx) is not None
+        hidden = self._hidden if io is None else HiddenPathsPolicy(io)
+        return await hidden.pre_vfs(ctx) is not None
 
     async def pre_vfs(
-        self, ctx: VfsContext, *, check_hidden: bool = True
+        self,
+        ctx: VfsContext,
+        *,
+        check_hidden: bool = True,
+        io: IOContext | None = None,
     ) -> Hide | Deny | Ask | None:
         """Fire pre_vfs across the policies; first Deny wins, else the
         first Ask, which the door decides how to put.
@@ -797,10 +832,12 @@ class Policies:
                 answered the hides itself.
         """
         if check_hidden:
-            hidden = await self._hidden.pre_vfs(ctx)
+            hidden = await (
+                self._hidden if io is None else HiddenPathsPolicy(io)
+            ).pre_vfs(ctx)
             if hidden is not None:
                 return hidden
-        action, _, _ = await self._fire("pre_vfs", ctx)
+        action, _, _ = await self._fire("pre_vfs", ctx, io=io)
         return action
 
     async def pre_session(self, ctx: SessionContext) -> Deny | None:

@@ -20,6 +20,7 @@ from mirage.workspace.executor.builtins.shared import fail, ok, parse_line
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.access import io_context
 
 # The mount options a mode reads as: the ladder's READ cannot write and
 # only EXEC lets the interpreters run a script, which is what ro, rw and
@@ -100,7 +101,7 @@ async def handle_mount(
     types = fl.as_str("types")
     lines = [
         f"{m.vfs.name} on {m.prefix.rstrip('/') or '/'} type {m.vfs.name} "
-        f"({MODE_OPTIONS[m.effective_mode()]})\n"
+        f"({MODE_OPTIONS[m.effective_mode(io_context(session))]})\n"
         for m in sorted(registry.visible_mounts(), key=lambda m: m.prefix)
         if path_visible(session.visibility, m.prefix.rstrip("/") or "/")
         and (types is None or match_type(m.vfs.name, types))

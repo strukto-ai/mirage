@@ -8,8 +8,9 @@ export function diagnose(
   offsets: readonly number[],
   parse?: (command: string) => TSNodeLike,
   aliases: ReadonlySet<string> = new Set(),
+  own: ReadonlyMap<string, readonly [number, number]> = new Map(),
 ): readonly SyntaxDiagnostic[] {
-  let found = findSyntaxIssue(root, parse, aliases)
+  let found = findSyntaxIssue(root, parse, aliases, own, offsets)
   const unclosed = findUnterminatedBacktick(root.text)
   if (found === null && unclosed !== null)
     found = {

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.context.session_context import require_paths_writable
+from mirage.context.types import IOContext
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition, ReadOnlyError
 from mirage.policy.base import Policy
@@ -25,6 +26,9 @@ class MountModePolicy(Policy):
     An op outside every mount carries an empty prefix and is governed
     by ``/``, the turf a profile's root mode is written under.
     """
+
+    def __init__(self, context: IOContext | None = None) -> None:
+        self._context = context
 
     async def pre_vfs(self, ctx: VfsContext) -> Deny | None:
         if not ctx.write or ctx.mode is None:

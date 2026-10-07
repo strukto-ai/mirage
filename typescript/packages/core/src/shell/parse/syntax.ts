@@ -14,8 +14,6 @@
 
 import type { SyntaxIssue } from './types.ts'
 
-import { IOResult } from '../../io/types.ts'
-import { encodeText } from '../bytes.ts'
 import type { TSNodeLike } from '../types.ts'
 
 import {
@@ -92,11 +90,6 @@ function innermostUnclosed(children: readonly TSNodeLike[]): string | null {
     }
   }
   return pending.at(-1)?.[1] ?? null
-}
-
-/** Exit 2 with the bash-style diagnostic for an unparsable line. */
-export function syntaxErrorResult(offending: string, node: TSNodeLike): IOResult {
-  return new IOResult({ exitCode: 2, stderr: encodeText(syntaxErrorMessage(offending, node)) })
 }
 
 /** Format the diagnostic shared by parsed programs and execution results. */

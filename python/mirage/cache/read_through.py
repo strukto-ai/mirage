@@ -20,6 +20,7 @@ from typing import Any
 from mirage.accessor.base import Accessor
 from mirage.cache.context import CacheInvalidator, active_cache_manager
 from mirage.context.session_context import get_admission
+from mirage.context.types import IOContext
 from mirage.types import (
     EntryGate,
     PathSpec,
@@ -102,7 +103,9 @@ def cache_aware_read_stream(raw: ReadStreamFn) -> ReadStreamFn:
     return reader
 
 
-def cache_aware_bound_stream(raw: ReadStreamFn) -> ReadStreamFn:
+def cache_aware_bound_stream(
+    raw: ReadStreamFn, context: IOContext | None = None
+) -> ReadStreamFn:
     """Path-first twin of :func:`cache_aware_read_stream`.
 
     For readers injected into the generics, which arrive with accessor
@@ -117,7 +120,9 @@ def cache_aware_bound_stream(raw: ReadStreamFn) -> ReadStreamFn:
     def reader(
         path: PathSpec, *args: Any, **kwargs: Any
     ) -> AsyncIterator[bytes]:
-        manager = _serving(active_cache_manager(), get_admission(), path)
+        manager = _serving(
+            active_cache_manager(), get_admission(context), path
+        )
         return _serve_stream(
             manager, partial(raw, path, *args, **kwargs), path
         )
@@ -152,7 +157,9 @@ def cache_aware_read_bytes(raw: ReadBytesFn) -> ReadBytesFn:
     return reader
 
 
-def cache_aware_bound_bytes(raw: ReadBytesFn) -> ReadBytesFn:
+def cache_aware_bound_bytes(
+    raw: ReadBytesFn, context: IOContext | None = None
+) -> ReadBytesFn:
     """Path-first twin of :func:`cache_aware_read_bytes`.
 
     For readers injected into the generics, which arrive with accessor
@@ -165,7 +172,9 @@ def cache_aware_bound_bytes(raw: ReadBytesFn) -> ReadBytesFn:
     """
 
     async def reader(path: PathSpec, *args: Any, **kwargs: Any) -> bytes:
-        manager = _serving(active_cache_manager(), get_admission(), path)
+        manager = _serving(
+            active_cache_manager(), get_admission(context), path
+        )
         if manager is not None:
             cached = await manager.cached_bytes(path)
             if cached is not None:
@@ -175,7 +184,9 @@ def cache_aware_bound_bytes(raw: ReadBytesFn) -> ReadBytesFn:
     return reader
 
 
-def cache_aware_read(raw: PolymorphicReadFn) -> PolymorphicReadFn:
+def cache_aware_read(
+    raw: PolymorphicReadFn, context: IOContext | None = None
+) -> PolymorphicReadFn:
     """Wrap a polymorphic bound reader so warm reads serve cached bytes.
 
     For the ``read`` contract used by ``head_multi`` / ``tail_multi`` /
@@ -201,7 +212,7 @@ def cache_aware_read(raw: PolymorphicReadFn) -> PolymorphicReadFn:
         raw (PolymorphicReadFn): bound bytes / awaitable / stream reader.
     """
     bound = active_cache_manager()
-    gate = get_admission()
+    gate = get_admission(context)
 
     async def reader(
         path: PathSpec, *args: Any, **kwargs: Any

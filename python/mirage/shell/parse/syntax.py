@@ -15,7 +15,6 @@
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from itertools import chain
 
-from mirage.io import IOResult
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.parse.constants import (
     BASH_KEYWORDS,
@@ -500,20 +499,6 @@ def _innermost_unclosed(children: Sequence[TSNodeLike]) -> str | None:
                 return None
             pending.pop()
     return pending[-1][1] if pending else None
-
-
-def syntax_error_result(
-    offending: str, node: TSNodeLike | None = None
-) -> IOResult:
-    """Exit 2 with the bash-style diagnostic for an unparsable line.
-
-    Args:
-        offending (str): the span the parser flagged.
-        node (TSNodeLike | None): the parsed command, for quote diagnostics.
-    """
-    return IOResult(
-        exit_code=2, stderr=encode_text(syntax_error_message(offending, node))
-    )
 
 
 def syntax_error_message(

@@ -54,7 +54,10 @@ async def mv(
         stat=overlayable_stat(ops, accessor, opts.index, overlay),
         flags=parsed,
         readdir=bound_op(ops.readdir, accessor, opts.index),
-        guard=refuse_reveal,
+        guard=partial(
+            refuse_reveal,
+            visibility=opts.ns.visibility if opts.ns is not None else None,
+        ),
         copies=(
             transfer_links_of(
                 opts.ns.links,

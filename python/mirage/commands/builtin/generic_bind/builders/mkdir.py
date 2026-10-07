@@ -31,6 +31,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.context import DEFAULT_UMASK, get_walk_probe, session_umask
+from mirage.context.types import IOContext
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import error_path, fs_strerror
 from mirage.errors.posix import posix_phrase
@@ -77,7 +78,7 @@ async def mkdir(
         # parents made by `-p` keep that default (GNU gives them
         # `u+wx` on top of the mask, which the one backend op cannot
         # tell apart from the named directory).
-        umask = session_umask()
+        umask = session_umask(opts.io_context)
         if umask != DEFAULT_UMASK:
             mode = 0o777 & ~umask
     mkdir_fn = ops.require(Operation.MKDIR)
@@ -91,8 +92,14 @@ async def mkdir(
             if refusal is not None:
                 errors.append(refusal)
             continue
-        names = await created_names(path, parents, links) if verbose else []
-        failed = await make_directory(mkdir_fn, accessor, path, parents, links)
+        names = (
+            await created_names(path, parents, links, context=opts.io_context)
+            if verbose
+            else []
+        )
+        failed = await make_directory(
+            mkdir_fn, accessor, path, parents, links, context=opts.io_context
+        )
         if failed is not None:
             errors.append(failed)
             continue
@@ -107,7 +114,10 @@ async def mkdir(
 
 
 async def created_names(
-    path: PathSpec, parents: bool, links: LinkView | None = None
+    path: PathSpec,
+    parents: bool,
+    links: LinkView | None = None,
+    context: IOContext | None = None,
 ) -> list[str]:
     """The names a verbose mkdir reports for ``path``, top-down, as GNU
     spells them.
@@ -125,7 +135,7 @@ async def created_names(
         parents (bool): whether ``-p`` makes the missing ancestors.
         links (LinkView | None): the namespace's symlink facts.
     """
-    probe = get_walk_probe()
+    probe = get_walk_probe(context)
     if not parents or probe is None:
         return [operand_spelling(path.virtual, path)]
     named = PathSpec.from_str_path(path.virtual)
@@ -176,6 +186,7 @@ async def make_directory(
     path: PathSpec,
     parents: bool,
     links: LinkView | None = None,
+    context: IOContext | None = None,
 ) -> str | None:
     """Make one mkdir operand, or the line GNU reports when it cannot.
 
@@ -197,7 +208,12 @@ async def make_directory(
     # is met at that name and GNU quotes it rather than the operand.
     if parents and (path.dotted is not None or path.walk_error == "ELOOP"):
         failed = await _make_walked(
-            mkdir_fn, accessor, path, path.dotted or path.virtual, links
+            mkdir_fn,
+            accessor,
+            path,
+            path.dotted or path.virtual,
+            links,
+            context=context,
         )
         if failed is not None:
             return failed
@@ -220,6 +236,7 @@ async def _make_walked(
     path: PathSpec,
     dotted: str,
     links: LinkView | None,
+    context: IOContext | None = None,
 ) -> str | None:
     """Make every name an operand's walk enters, GNU ``mkdir -p`` style.
 
@@ -241,7 +258,7 @@ async def _make_walked(
     for node, spelled in walk_nodes(dotted, path.raw_path, follow):
         try:
             why = await _enter_node(
-                mkdir_fn, accessor, path, node, root, links
+                mkdir_fn, accessor, path, node, root, links, context=context
             )
         except FileExistsError:
             why = posix_phrase(FsCondition.ENOTDIR)
@@ -259,6 +276,7 @@ async def _enter_node(
     node: str,
     root: str,
     links: LinkView | None,
+    context: IOContext | None = None,
 ) -> str | None:
     """Make one name of a walk a directory, or say why it is not one.
 
@@ -290,7 +308,7 @@ async def _enter_node(
         if target.type != FileType.DIRECTORY:
             return posix_phrase(FsCondition.ENOTDIR)
         return None
-    probe = get_walk_probe()
+    probe = get_walk_probe(context)
     if probe is not None:
         exists, is_dir = await entry_kind(
             probe.stat, PathSpec.from_str_path(node)

@@ -186,6 +186,8 @@ export function makeGenericOps<A extends Accessor>(
         table.maxGlobMatches ?? DEFAULT_MAX_GLOB_MATCHES,
         undefined,
         statOf,
+        undefined,
+        kwargs.ioContext,
       ),
     false,
   )

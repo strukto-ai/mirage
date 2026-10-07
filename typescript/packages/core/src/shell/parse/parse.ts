@@ -38,7 +38,11 @@ import {
 import type { ShellNode, TSNodeLike } from '../types.ts'
 
 export interface ShellParser {
-  parseProgram(command: string): ParsedProgram
+  parseProgram(
+    command: string,
+    aliases?: ReadonlySet<string>,
+    own?: ReadonlyMap<string, readonly [number, number]>,
+  ): ParsedProgram
   dispose(): void
   parse(command: string): ShellNode
   /** Where each char of the source `parse` read sits in `command`. */
@@ -88,7 +92,11 @@ export async function createShellParser(config: ShellParserConfig): Promise<Shel
     parse(this: ShellParser, command: string): ShellNode {
       return this.parseProgram(command).root
     },
-    parseProgram(command: string): ParsedProgram {
+    parseProgram(
+      command: string,
+      aliases: ReadonlySet<string> = new Set(),
+      own: ReadonlyMap<string, readonly [number, number]> = new Map(),
+    ): ParsedProgram {
       if (disposed) throw new Error('shell parser is disposed')
       const trees = new ParseTrees(parser)
       try {
@@ -106,7 +114,7 @@ export async function createShellParser(config: ShellParserConfig): Promise<Shel
             if (disposed) throw new Error('shell parser is disposed')
             const nested = new ParseTrees(parser)
             try {
-              return diagnose(root, offsets, (source) => parseRoot(nested, source))
+              return diagnose(root, offsets, (source) => parseRoot(nested, source), aliases, own)
             } finally {
               nested.release()
             }

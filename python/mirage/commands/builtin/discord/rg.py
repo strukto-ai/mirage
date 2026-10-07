@@ -58,7 +58,7 @@ async def rg(
     pushdown_warnings: list[str] = []
     # Output-shaping flags, a glob operand and a multi-operand line all need
     # the generic scan; see SEARCH_HONORED above.
-    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
+    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix, opts.io_context)
     operand = (
         None
         if scoped

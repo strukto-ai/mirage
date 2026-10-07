@@ -41,12 +41,8 @@ import {
   runWithSession,
 } from '../../context/session_context.ts'
 import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
-import {
-  syntaxErrorResult,
-  findSyntaxError,
-  findUnterminatedBacktick,
-  type ShellParser,
-} from '../../shell/parse/index.ts'
+import type { ShellParser } from '../../shell/parse/index.ts'
+import { syntaxErrorResult } from '../node/diagnostics.ts'
 import { formatFsError } from '../../errors/render.ts'
 import { isFsError } from '../../errors/fs.ts'
 import {
@@ -425,21 +421,12 @@ async function runPreparedLine(
       async () => {
         const parser = new ParseScope(await abortable(env.parser(), options.signal))
         try {
-          const root = argv === undefined ? parser.parse(command) : literalTree(argv)
-          // Syntax gates before policy, mirroring bash: an unparsable line exits 2
-          // and the policy is never consulted about it. tree-sitter accepts an
-          // unclosed backtick as a complete command, so the region is scanned
-          // separately.
-          const offending =
-            argv === undefined
-              ? (findSyntaxError(
-                  root,
-                  (source) => parser.parse(source),
-                  expandingAliases(effectiveSession),
-                ) ?? findUnterminatedBacktick(root.text))
-              : null
-          if (offending !== null) {
-            const io = syntaxErrorResult(offending, root)
+          const program =
+            argv === undefined ? parser.program(command, expandingAliases(effectiveSession)) : null
+          const root = program !== null ? program.root : literalTree(argv ?? [])
+          const diagnostic = program?.diagnostics[0]
+          if (diagnostic !== undefined) {
+            const io = syntaxErrorResult(diagnostic)
             return await answerLine(
               env,
               command,
@@ -1026,7 +1013,12 @@ async function runParsedLine(
     }
     try {
       execResult = await runWithRefusalSink(note, async () =>
-        isLine ? runWithRecording(runBody) : [await runBody(), []],
+        isLine
+          ? runWithRecording((recorder) => {
+              context.frame.recorder = recorder
+              return runBody()
+            })
+          : [await runBody(), []],
       )
       // A record a nested line earned is the line's to report when its
       // own tree earned none (see NestedRefusal). A question a gate left

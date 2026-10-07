@@ -28,7 +28,7 @@ export const MONGODB_RG = command({
   spec: specOf('rg'),
   fn: (accessor: MongoDBAccessor, paths, texts, opts) =>
     runSearch<MongoDBAccessor>(
-      scanIo(IO, opts.ns, opts.mountPrefix)[0],
+      scanIo(IO, opts.ns, opts.mountPrefix, opts.ioContext)[0],
       'rg',
       accessor,
       paths,

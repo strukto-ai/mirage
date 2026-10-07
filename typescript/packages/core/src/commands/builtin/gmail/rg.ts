@@ -42,7 +42,7 @@ async function rg(
   if (refused !== null) return refused
   // Same gate as gmail grep, from the same table: only a lone concrete
   // operand with no reshaping flag may be answered by the search API.
-  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
+  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix, opts.ioContext)
   const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, RG_SEARCH_HONORED)
   if (operand !== null && pattern !== null && fl.asBool('word_regexp')) {
     const match = detectScope(operand)

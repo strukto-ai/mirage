@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { IOContext } from '../../context/types.ts'
+
 import type { ProcessView } from '../../process/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { isNoMount, noMount } from '../../errors/fs.ts'
@@ -581,12 +583,12 @@ export class MountRegistry {
     return this.mountList
   }
 
-  isExecAllowed(): boolean {
+  isExecAllowed(context?: IOContext): boolean {
     for (const m of this.mountList) {
       if (m.prefix === DEV_PREFIX) continue
       // strongestModeUnder, not effectiveMode: a session whose only x
       // grant is a show entry still counts as having one.
-      if (strongestModeUnder(m.prefix, m.mode) === MountMode.EXEC) return true
+      if (strongestModeUnder(m.prefix, m.mode, context) === MountMode.EXEC) return true
     }
     return false
   }
@@ -599,10 +601,10 @@ export class MountRegistry {
    * shebang or an sh one) never ask: they run in the shell, which checks
    * each of their commands like a typed one.
    */
-  execAllowedAt = (virtual: string): boolean => {
+  execAllowedAt = (virtual: string, context?: IOContext): boolean => {
     const m = this.tryMountFor(virtual)
     if (m === null) return false
-    return effectivePathMode(virtual, m.prefix, m.mode) === MountMode.EXEC
+    return effectivePathMode(virtual, m.prefix, m.mode, context) === MountMode.EXEC
   }
 
   mountForCommand(cmdName: string): MountEntry | null {

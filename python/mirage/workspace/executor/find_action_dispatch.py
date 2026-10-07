@@ -48,6 +48,7 @@ from mirage.workspace.lookup.constants import SHELL_ONLY_BUILTINS
 from mirage.workspace.lookup.lookup import lookup_all
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
+from mirage.workspace.session.session import SessionState
 from mirage.workspace.types import ExecuteLine
 
 
@@ -75,7 +76,11 @@ def exec_words(action: ExecAction, paths: list[str]) -> list[str]:
 
 
 async def _head_state(
-    head: str, registry: MountRegistry, cwd: str, stat_path: StatPath | None
+    head: str,
+    registry: MountRegistry,
+    cwd: str,
+    stat_path: StatPath | None,
+    session: SessionState | None,
 ) -> tuple[bool, bool]:
     """Whether ``execvp`` would fail to find an ``-exec`` head word, and
     whether a shell function shadows the program it would find.
@@ -107,7 +112,7 @@ async def _head_state(
             stat_path is not None
             and await stat_path(resolve_path(head, cwd)) is None
         ), False
-    sess = get_current_session()
+    sess = session
     if sess is None:
         return False, False
     layers = lookup_all(head, sess, registry)
@@ -133,6 +138,7 @@ async def _run_exec(
     out: list[bytes],
     errors: list[bytes],
     stdin: SharedStdin | None,
+    session: SessionState | None,
 ) -> bool:
     """Run one ``-exec`` invocation, collecting its streams.
 
@@ -162,7 +168,9 @@ async def _run_exec(
     # `-exec {} \;` runs each match itself.
     words = exec_words(action, paths)
     head = words[0] if words else action.argv[0]
-    missing, shadowed = await _head_state(head, registry, cwd, stat_path)
+    missing, shadowed = await _head_state(
+        head, registry, cwd, stat_path, session
+    )
     if missing:
         errors.append(
             encode_text(f"find: '{head}': No such file or directory\n")
@@ -173,7 +181,7 @@ async def _run_exec(
     # marked a program run for the session, so a builtin that doubles
     # as a program answers as the program (`printf -v` is a format).
     line = ("command " if shadowed else "") + shell_join(words)
-    sess = get_current_session()
+    sess = session
     token = set_program_invocation(sess) if sess is not None else None
     try:
         io = await execute_fn(
@@ -452,6 +460,7 @@ async def _apply_find_actions(
     *,
     execute_fn: ExecuteLine | None = None,
     session_id: str = "",
+    session: SessionState | None = None,
     ns: NamespaceView | None = None,
     stat_path: StatPath | None = None,
     dispatch: DispatchFn | None = None,
@@ -539,6 +548,7 @@ async def _apply_find_actions(
     await materialize(stdout)
     if expr.execs and execute_fn is None:
         return None, b"find: -exec: no shell to run the command\n", 1
+    session = session if session is not None else get_current_session()
     if matched_runs is None:
         return None, b"find: actions require structured matches\n", 1
     # The runs arrive one per start point, in operand order, so each row
@@ -593,6 +603,7 @@ async def _apply_find_actions(
                     out,
                     errors,
                     once,
+                    session=session,
                 ):
                     break
             elif _reads_stat(action):
@@ -645,6 +656,7 @@ async def _apply_find_actions(
             out,
             errors,
             once,
+            session=session,
         ):
             exit_code = 1
     body = b"".join(out)

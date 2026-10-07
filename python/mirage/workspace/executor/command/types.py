@@ -24,8 +24,10 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec
-from mirage.workspace.session import SessionState
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.types import ExecutionNode
+
+Result = tuple[ByteSource | None, IOResult, ExecutionNode]
 
 
 class ExecuteNodeFn(Protocol):
@@ -39,9 +41,9 @@ class ExecuteNodeFn(Protocol):
     def __call__(
         self,
         node: TSNodeLike,
-        session: SessionState,
+        context: EvaluationContext,
         stdin: ByteSource | None,
-        call_stack: CallStack,
+        call_stack: CallStack | None,
         *,
         sink: JobConsole | None = None,
         handed: HandOff | None = None,

@@ -82,3 +82,25 @@ describe('recording on the fallback storage', () => {
     await first
   })
 })
+
+it('records a suspended operation with the recorder captured when it started', async () => {
+  const [holdA, releaseA] = gate()
+  const [holdB, releaseB] = gate()
+  const first = runWithRecording(async () => {
+    const timer = startOp()
+    await holdA
+    record('read', '/a', 'test', 1, timer)
+  })
+  const second = runWithRecording(async () => {
+    const timer = startOp()
+    releaseA()
+    await holdB
+    record('read', '/b', 'test', 2, timer)
+  })
+  try {
+    expect((await first)[1].map((r) => r.path)).toEqual(['/a'])
+  } finally {
+    releaseB()
+  }
+  expect((await second)[1].map((r) => r.path)).toEqual(['/b'])
+})

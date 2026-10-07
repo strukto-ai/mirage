@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ioContext } from '../../../session/access.ts'
+
 import { usageHint } from '../../../../commands/spec/usage.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { MountMode } from '../../../../types.ts'
@@ -93,7 +95,7 @@ export function handleMount(
     .map(
       (m) =>
         `${m.vfs.name} on ${m.prefix.replace(/\/+$/, '') || '/'} type ${m.vfs.name} ` +
-        `(${MODE_OPTIONS[m.effectiveMode()]})\n`,
+        `(${MODE_OPTIONS[m.effectiveMode(ioContext(session))]})\n`,
     )
   return ok('mount', lines.length > 0 ? encodeText(lines.join('')) : null)
 }

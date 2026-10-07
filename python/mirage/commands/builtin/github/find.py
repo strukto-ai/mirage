@@ -19,11 +19,8 @@ from mirage.commands.builtin.generic.find import (
     find_generic,
     find_walk_generic,
 )
-from mirage.commands.builtin.generic_bind.adapter import (
-    with_command_guards,
-    with_policy_guard,
-)
-from mirage.commands.builtin.github.io import IO, resolve_glob
+from mirage.commands.builtin.generic_bind.factory import invocation_io
+from mirage.commands.builtin.github.io import IO
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.core.github.find import find as find_core
@@ -32,8 +29,6 @@ from mirage.core.github.tree import ensure_tree
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.namespace_view import paths_scoped
 from mirage.types import PathSpec
-
-_WALK_IO = with_command_guards(with_policy_guard(IO))
 
 
 @command("find", vfs="github", spec=SPECS["find"])
@@ -45,8 +40,9 @@ async def find(
 ) -> tuple[ByteSource | None, IOResult]:
     # find walks accessor.tree directly rather than the index, so the
     # tree has to be hydrated first; the mount is built without it.
+    bound = invocation_io(IO, opts)
     await ensure_tree(accessor, opts.index, opts.mount_prefix)
-    paths = await resolve_glob(accessor, paths, opts.index)
+    paths = await bound.resolve_glob(accessor, paths, opts.index)
     # A native find op classifies on the raw backend tree, so under
     # hidden paths or a path rule it would answer for entries the
     # session cannot see; the walk classifies through the guarded
@@ -58,8 +54,8 @@ async def find(
             paths,
             list(texts),
             opts,
-            readdir=partial(_WALK_IO.readdir, accessor),
-            stat=partial(_WALK_IO.stat, accessor),
+            readdir=partial(bound.readdir, accessor),
+            stat=partial(bound.stat, accessor),
         )
     return await find_generic(
         paths,

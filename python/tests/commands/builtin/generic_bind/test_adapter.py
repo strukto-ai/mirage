@@ -441,7 +441,7 @@ async def _probe_chunks(calls: list[tuple[str, ...]], path: PathSpec):
 @pytest.mark.asyncio
 async def test_command_path_guard_admits_before_a_warm_serve(monkeypatch):
     gate = _Gate("/data/secret")
-    monkeypatch.setattr(adapter, "get_admission", lambda: gate)
+    monkeypatch.setattr(adapter, "get_admission", lambda context=None: gate)
     calls: list[tuple[str, ...]] = []
     ops = with_command_guards(
         dataclasses.replace(_policy_probe_ops(calls), read_bytes=_warm_read)
@@ -1076,7 +1076,7 @@ async def test_missing_copy_checks_command_paths_before_capability_failure(
     monkeypatch,
 ):
     gate = _Gate("/data/secret")
-    monkeypatch.setattr(adapter, "get_admission", lambda: gate)
+    monkeypatch.setattr(adapter, "get_admission", lambda context=None: gate)
     with pytest.raises(PermissionError):
         await make_io().require(Operation.COPY)(
             NOOPAccessor(), _spec("/data/secret"), _spec("/data/dst")

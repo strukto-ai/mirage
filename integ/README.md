@@ -269,6 +269,12 @@ The ownership follow-ups in `bash/jobs/bg.json` (substitutions after `eval`
 returns) and `bash/cmdsub/scope.json` (child local and temporary environment
 scopes) are pinned to the same image and included in the Chrome battery.
 
+The caller IO context (`context/types`, `workspace/session/access`,
+`workspace/dispatcher/context`), command preparation, and owned-diagnostic
+execution boundary are covered by the existing `python/**` and `typescript/**`
+filters above. Chrome also gates suspended-session permissions, visibility,
+umask and dotglob, plus recorder ownership across workspaces sharing a prefix.
+
 The #1438 behavior coverage uses the existing shared corpus on both hosts;
 Chrome imports these same files rather than maintaining another set of goldens:
 

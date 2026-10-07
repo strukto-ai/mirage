@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { bindRedirects } from '../dispatcher/context.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { runWithRedirectPaths } from '../../context/session_context.ts'
 import { fsStrerror, isFsError, isMissingPath } from '../../errors/fs.ts'
@@ -406,6 +407,10 @@ export async function handleRedirect(
         r.kind !== RedirectKind.HERESTRING,
     )
     .map((r) => ensureScope(r.target))
+  dispatch = bindRedirects(
+    dispatch,
+    targets.map((p) => p.virtual),
+  )
   const terminalOutput = session.terminalOutput
   session.terminalOutput = terminalOutput && outputs.get(1) === TO_STDOUT
   const jobOutput = session.jobOutput

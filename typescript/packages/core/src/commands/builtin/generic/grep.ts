@@ -190,7 +190,7 @@ export async function grepGeneric(
   stream: Stream,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
-  const cachedStream = stdinStream(cacheAwareStream(stream), opts.stdin)
+  const cachedStream = stdinStream(cacheAwareStream(stream, opts.ioContext), opts.stdin)
   stream = (path) => guardInput(cachedStream(path), opts)
   const fl = new FlagView(opts.flags, specOf('grep'))
   const resolution = await resolvePattern(name, texts, opts.flags, paths, opts.mountPrefix, stream)

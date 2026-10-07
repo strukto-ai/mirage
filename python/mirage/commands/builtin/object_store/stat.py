@@ -23,6 +23,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
     overlaid_stat,
 )
+from mirage.commands.builtin.generic_bind.factory import invocation_io
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.usage import missing_operand_error
@@ -30,7 +31,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def make_stat(vfs: str, io: CommandIO) -> Callable[..., Any]:
+def make_stat(vfs: str, raw_io: CommandIO) -> Callable[..., Any]:
     """Build the index-threaded stat override for one keyed store.
 
     Wiring only, and it delegates to ``stat_generic`` rather than to the
@@ -43,10 +44,8 @@ def make_stat(vfs: str, io: CommandIO) -> Callable[..., Any]:
 
     Args:
         vfs (str): VFS name the command registers under.
-        io (CommandIO): the backend's op table.
+        raw_io (CommandIO): the backend's op table.
     """
-    stat_core = io.stat
-    resolve_glob = io.resolve_glob
 
     async def stat(
         accessor: Accessor,
@@ -54,6 +53,10 @@ def make_stat(vfs: str, io: CommandIO) -> Callable[..., Any]:
         texts: list[str],
         opts: CommandOpts,
     ) -> tuple[ByteSource | None, IOResult]:
+        io = invocation_io(raw_io, opts)
+        stat_core = io.stat
+        resolve_glob = io.resolve_glob
+
         if not paths:
             raise missing_operand_error("stat", None)
         resolved = await resolve_glob(accessor, paths, opts.index)

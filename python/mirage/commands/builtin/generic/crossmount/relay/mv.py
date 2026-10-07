@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
+from functools import partial
 from typing import Callable
 
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
@@ -74,7 +75,9 @@ async def run_mv(
         ),
         flags=parse_flags(fl),
         backend_key=storage_key,
-        guard=refuse_reveal,
+        guard=partial(
+            refuse_reveal, visibility=ns.visibility if ns is not None else None
+        ),
         copies=(
             transfer_links_of(ns.links, dispatch, "/", ns.visibility)
             if ns is not None and ns.links is not None

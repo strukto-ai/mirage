@@ -15,6 +15,7 @@
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.context.types import IOContext
 from mirage.errors.fs import eexist, einval, eisdir, enotsup
 from mirage.ops.generic.types import OpCoreFn, OpsTable
 from mirage.ops.registry import RegisteredOp
@@ -98,17 +99,20 @@ def _make_glob(table: OpsTable) -> OpCoreFn:
     # only. The mount hands it one pattern spec at a time and passes the
     # rest through, which is what every driver's resolver did with the
     # list.
-    resolve = make_resolve_glob(
-        table.readdir, table.max_glob_matches, stat=table.stat
-    )
-
     async def glob(
         accessor: Accessor,
         path: PathSpec,
         *,
         index: IndexCacheStore = NULL_INDEX,
+        io_context: IOContext | None = None,
         **kwargs,
     ) -> list[PathSpec]:
+        resolve = make_resolve_glob(
+            table.readdir,
+            table.max_glob_matches,
+            stat=table.stat,
+            context=io_context,
+        )
         return await resolve(accessor, [path], index)
 
     return glob

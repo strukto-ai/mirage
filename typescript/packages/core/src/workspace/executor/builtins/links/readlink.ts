@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ioContext } from '../../../session/access.ts'
+
 import { canonicalize } from '../../../../commands/builtin/generic/realpath.ts'
 import { missingOperandError } from '../../../../commands/spec/usage.ts'
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
@@ -98,7 +100,7 @@ export async function handleReadlink(
   const lines: string[] = []
   let exitCode = 0
   for (const op of operands) {
-    const absOp = operandAbs(namespace, op, session.cwd)
+    const absOp = operandAbs(namespace, op, session.cwd, ioContext(session))
     const spec = PathSpec.fromStrPath(op, undefined, session.cwd)
     // The link entry is namespace state behind the op door: session grants
     // and admission policies decide whether this session may read the

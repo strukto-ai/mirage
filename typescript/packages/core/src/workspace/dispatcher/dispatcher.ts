@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { IOContext } from '../../context/types.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { applyIo } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
@@ -117,9 +118,9 @@ function appendsNothing(opName: string, args: readonly unknown[]): boolean {
  * paths), so each is keyed by its final segment against the listed
  * directory, the same normalization `mergeReaddir` dedups by.
  */
-function visibleEntries(entries: string[], parent: string): string[] {
+function visibleEntries(entries: string[], parent: string, context?: IOContext): string[] {
   const base = rstripSlash(parent)
-  const vis = sessionVisibility()
+  const vis = sessionVisibility(context)
   return entries.filter((e) => {
     const trimmed = rstripSlash(e)
     const name = trimmed.slice(trimmed.lastIndexOf('/') + 1)
@@ -249,8 +250,9 @@ export class Dispatcher {
   // And the approval ledger, which a path rule that asks is put to where
   // no line is running.
   private readonly decisions: Decisions | null
-  private readonly writers = new KeyLock()
-  private readonly stores = new WeakMap<BaseVFS, number>()
+  private readonly writers: KeyLock
+  private readonly stores: WeakMap<BaseVFS, number>
+  private readonly owner: Dispatcher
   private storeCount = 0
   readonly reconciler: Reconciler
 
@@ -262,6 +264,8 @@ export class Dispatcher {
     drift?: DriftQueue,
     admitWrite?: AdmitWrite,
     decisions?: Decisions,
+    private readonly io?: IOContext,
+    owner?: Dispatcher,
   ) {
     this.namespace = namespace
     this.cache = cache
@@ -270,7 +274,10 @@ export class Dispatcher {
     this.drift = drift ?? null
     this.admitWrite = admitWrite ?? null
     this.decisions = decisions ?? null
-    this.reconciler = new Reconciler(cache, namespace, opsRegistry)
+    this.owner = owner ?? this
+    this.writers = owner?.writers ?? new KeyLock()
+    this.stores = owner?.stores ?? new WeakMap<BaseVFS, number>()
+    this.reconciler = owner?.reconciler ?? new Reconciler(cache, namespace, opsRegistry)
   }
 
   /**
@@ -282,7 +289,7 @@ export class Dispatcher {
    * namespace knows nothing at `virtual`.
    */
   private namespaceResult(opName: string, virtual: string): string[] | FileStat | null {
-    const vis = sessionVisibility()
+    const vis = sessionVisibility(this.io)
     if (opName === 'readdir') {
       return namespaceListing(vis, this.namespace.mountPrefixes(), this.namespace, virtual)
     }
@@ -292,7 +299,30 @@ export class Dispatcher {
     return null
   }
 
+  /** An operation view shares the workspace's locks, cache and namespace. */
+  private withContext(context: IOContext): Dispatcher {
+    return new Dispatcher(
+      this.namespace,
+      this.cache,
+      this.opsRegistry,
+      this.policies,
+      this.drift ?? undefined,
+      this.admitWrite ?? undefined,
+      this.decisions ?? undefined,
+      context,
+      this.owner,
+    )
+  }
+
   dispatch: DispatchFn = (opName, path, args, kwargs, report) => {
+    if (kwargs?._ioContext !== undefined) {
+      const { _ioContext, _judgedTargets, ...rest } = kwargs
+      const io =
+        _judgedTargets === undefined
+          ? (_ioContext as IOContext)
+          : { ...(_ioContext as IOContext), judgedTargets: _judgedTargets as readonly string[] }
+      return this.withContext(io).dispatch(opName, path, args, rest, report)
+    }
     const run = (): ReturnType<DispatchFn> =>
       this.dispatchAdmitted(opName, path, args, kwargs, report)
     if (this.admitWrite === null || !POLICY_WRITE_OPS.has(opName)) return run()
@@ -328,7 +358,7 @@ export class Dispatcher {
     // checked so a link inside hidden space cannot be followed out of
     // it, the followed path is re-checked so a visible link cannot
     // lead in, and a rename destination is a create.
-    const vis = sessionVisibility()
+    const vis = sessionVisibility(this.io)
     if (!pathVisible(vis, path.virtual)) {
       throw hiddenRefusal(vis, path.virtual, HIDDEN_CREATE_OPS.has(opName))
     }
@@ -516,7 +546,7 @@ export class Dispatcher {
       let fallback = eligible ? this.namespaceResult(opName, p.virtual) : null
       if (fallback === null) throw err
       if (opName === 'readdir' && Array.isArray(fallback)) {
-        fallback = visibleEntries(fallback, p.virtual)
+        fallback = visibleEntries(fallback, p.virtual, this.io)
       }
       const fallbackWrite = POLICY_WRITE_OPS.has(opName)
       await bare.admit(opName, p, fallbackWrite, {}, issuer)
@@ -602,12 +632,15 @@ export class Dispatcher {
         ? mount.cacheManager
         : null
     if (this.opsRegistry.find(opName, vfs)?.write === true) {
-      if (effectivePathMode(p.virtual, mountPrefix, mode) === MountMode.READ) {
+      if (effectivePathMode(p.virtual, mountPrefix, mode, this.io) === MountMode.READ) {
         throw erofs(p, `mount at '${p.virtual}' is read-only`)
       }
       // A rename mutates its destination too, so both endpoints answer.
       const wDst = opName === 'rename' && args?.[0] instanceof PathSpec ? args[0] : null
-      if (wDst !== null && effectivePathMode(wDst.virtual, mountPrefix, mode) === MountMode.READ) {
+      if (
+        wDst !== null &&
+        effectivePathMode(wDst.virtual, mountPrefix, mode, this.io) === MountMode.READ
+      ) {
         throw erofs(wDst, `mount at '${wDst.virtual}' is read-only`)
       }
     }
@@ -658,8 +691,9 @@ export class Dispatcher {
                 return runWithTimeout(call, opTimeout, opName)
               }),
             mount.mountId,
+            this.io?.recorder,
           )
-          return wrapOpStream(answer, mount.mountId, mount.activity)
+          return wrapOpStream(answer, mount.mountId, mount.activity, this.io?.recorder)
         })
       if (filler !== null) {
         const kept = await filler.fill(
@@ -719,6 +753,7 @@ export class Dispatcher {
       result = visibleEntries(
         mergeReaddir(vis, result, this.namespace.mountPrefixes(), this.namespace, p.virtual),
         p.virtual,
+        this.io,
       )
     }
     if (DISPATCH_WRITE_OPS.has(opName) && !SERIAL_WRITE_OPS.has(opName)) {
@@ -854,7 +889,7 @@ export class Dispatcher {
         // its parents), and the purge taking the directory's hidden nodes
         // must not take it too.
         const arrived = new Set<string>()
-        const vis = sessionVisibility()
+        const vis = sessionVisibility(this.io)
         for (const [link] of this.namespace.linkStatsBelow(p.virtual)) {
           if (pathVisible(vis, link)) arrived.add(link)
         }
@@ -890,9 +925,9 @@ export class Dispatcher {
   private storeId(vfs: BaseVFS): number {
     const known = this.stores.get(vfs)
     if (known !== undefined) return known
-    this.storeCount += 1
-    this.stores.set(vfs, this.storeCount)
-    return this.storeCount
+    this.owner.storeCount += 1
+    this.stores.set(vfs, this.owner.storeCount)
+    return this.owner.storeCount
   }
 
   /**
@@ -926,8 +961,9 @@ export class Dispatcher {
       this.policies,
       mount?.prefix ?? '',
       mount?.mode ?? MountMode.WRITE,
-      sessionId(),
+      this.io?.sessionId ?? sessionId(),
       this.decisions,
+      this.io,
     )
   }
 
@@ -958,7 +994,14 @@ export class Dispatcher {
   ): Promise<unknown> {
     const mount = this.namespace.mountFor(spec.virtual)
     const write = this.opsRegistry.find(opName, vfs)?.write === true
-    const boundary = new OpBoundary(this.policies, mountPrefix, mode, sessionId(), this.decisions)
+    const boundary = new OpBoundary(
+      this.policies,
+      mountPrefix,
+      mode,
+      this.io?.sessionId ?? sessionId(),
+      this.decisions,
+      this.io,
+    )
     if (write) {
       // The same pre-vfs admission a dispatched op answers, with the
       // walk's own child path: the gate that admitted the rmdir judged
@@ -986,8 +1029,9 @@ export class Dispatcher {
               }),
             ),
           mount.mountId,
+          this.io?.recorder,
         )
-        return wrapOpStream(answer, mount.mountId, mount.activity)
+        return wrapOpStream(answer, mount.mountId, mount.activity, this.io?.recorder)
       })
       // A deletion is not completed through postVfs, which could only
       // refuse after the entry is gone and strand the cascade.
@@ -1084,7 +1128,7 @@ export class Dispatcher {
     refusal: unknown,
     issuer?: symbol,
   ): Promise<void> {
-    const vis = sessionVisibility()
+    const vis = sessionVisibility(this.io)
     if (!hiddenUnder(vis, path.virtual)) throw refusal
     let entries: unknown
     try {
@@ -1155,7 +1199,7 @@ export class Dispatcher {
     let walked = followOrLoop(this.namespace, path, false, spelled)
     if (spelled !== path.virtual) walked = posixNormpath(walked)
     if (walked === path.virtual) return path
-    const vis = sessionVisibility()
+    const vis = sessionVisibility(this.io)
     if (!pathVisible(vis, walked)) throw hiddenRefusal(vis, walked, create)
     return PathSpec.fromStrPath(walked)
   }
@@ -1197,7 +1241,7 @@ export class Dispatcher {
     report: OpReport | undefined,
     issuer?: symbol,
   ): Promise<string | FileStat | null> {
-    const timer = startOp()
+    const timer = startOp(this.io?.recorder)
     const mount = this.namespace.tryMountFor(path.virtual)
     const boundary = this.boundary(mount)
     const write = POLICY_WRITE_OPS.has(opName)
@@ -1310,7 +1354,9 @@ export class Dispatcher {
   ): Promise<[boolean, readonly string[] | null]> {
     if (this.namespace.isLink(path.virtual)) return [true, null]
     const prefixes = this.namespace.mountPrefixes()
-    if (namespaceStat(sessionVisibility(), prefixes, this.namespace, path.virtual) !== null) {
+    if (
+      namespaceStat(sessionVisibility(this.io), prefixes, this.namespace, path.virtual) !== null
+    ) {
       return [true, null]
     }
     const mount = this.namespace.tryMountFor(path.virtual)
@@ -1400,7 +1446,7 @@ export class Dispatcher {
   private async entryType(virtual: string, issuer?: symbol): Promise<FileType | null> {
     if (virtual === '/') return FileType.DIRECTORY
     const prefixes = this.namespace.mountPrefixes()
-    if (namespaceStat(sessionVisibility(), prefixes, this.namespace, virtual) !== null) {
+    if (namespaceStat(sessionVisibility(this.io), prefixes, this.namespace, virtual) !== null) {
       return FileType.DIRECTORY
     }
     const mount = this.namespace.tryMountFor(virtual)
@@ -1512,7 +1558,7 @@ export class Dispatcher {
     report: OpReport | undefined,
     issuer?: symbol,
   ): Promise<unknown> {
-    const timer = startOp()
+    const timer = startOp(this.io?.recorder)
     const mount = this.namespace.tryMountFor(path.virtual)
     const boundary = this.boundary(mount)
     const write = POLICY_WRITE_OPS.has(opName)
@@ -1646,7 +1692,7 @@ export class Dispatcher {
     p: PathSpec,
     kwargs: OpKwargs,
   ): Promise<Record<string, number | string>> {
-    const timer = startOp()
+    const timer = startOp(this.io?.recorder)
     const overlay: Record<string, number | string> = {}
     for (const key of SETATTR_KEYS) {
       const value = kwargs[key]

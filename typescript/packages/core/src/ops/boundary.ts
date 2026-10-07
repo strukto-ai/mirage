@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { IOContext } from '../context/types.ts'
 import { applyOpLimit } from '../commands/builtin/utils/limit.ts'
 import type { Decisions } from '../policy/decisions.ts'
 import type { Policies } from '../policy/policies.ts'
@@ -30,6 +31,7 @@ export class OpBoundary {
     readonly mode?: MountMode | undefined,
     readonly sessionId = '',
     readonly decisions: Decisions | null = null,
+    readonly io?: IOContext,
   ) {}
 
   async admit(
@@ -43,6 +45,7 @@ export class OpBoundary {
       ...(this.mode === undefined ? {} : { mode: this.mode }),
       decisions: this.decisions,
       ...access,
+      ...(this.io === undefined ? {} : { io: this.io }),
     })
   }
 

@@ -1,3 +1,4 @@
+import type { EntryGate } from '../types.ts'
 import { runWithSession } from '../context/session_context.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { SessionManager } from './session/manager.ts'
@@ -10,6 +11,7 @@ export class EvaluationContext {
     readonly session: SessionState,
     readonly frame = new ExecutionFrame(),
     readonly parent: EvaluationContext | null = null,
+    readonly admission: EntryGate | null = null,
   ) {}
 
   /** An evaluation on a fork of this session: a job or a stage. */

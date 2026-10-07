@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from mirage.commands.builtin.utils.limit import apply_op_limit
+from mirage.context.types import IOContext
 from mirage.policy.policies import Policies, post_vfs_gate, pre_vfs_gate
 from mirage.types import MountMode, PathSpec
 
@@ -41,6 +42,7 @@ class OpBoundary:
     mode: MountMode | None = None
     session_id: str = ""
     decisions: "Decisions | None" = None
+    io: IOContext | None = None
 
     async def admit(
         self,
@@ -66,6 +68,7 @@ class OpBoundary:
             check_hidden=check_hidden,
             decisions=self.decisions,
             final=final,
+            io=self.io,
         )
 
     async def complete(

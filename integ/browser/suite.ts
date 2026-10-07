@@ -108,6 +108,18 @@ function battery(): [string, Check][] {
   )
 }
 
+function barrier(): { wait: Promise<void>; open: () => void } {
+  let open!: () => void
+  return {
+    wait: new Promise<void>((resolve) => {
+      open = resolve
+    }),
+    get open() {
+      return open
+    },
+  }
+}
+
 const CHECKS: [string, Check][] = [
   [
     'a page has no task-local async context',
@@ -261,6 +273,194 @@ const CHECKS: [string, Check][] = [
       equal(await aborted(running), 'AbortError')
       equal((await shell(ws, 'test -e /data/cancelled'))[0], 1)
       await sink.close()
+    },
+  ],
+  [
+    'restricted sessions retain their own access facts across awaits',
+    async (ws) => {
+      const a = barrier(),
+        b = barrier(),
+        releaseA = barrier(),
+        releaseB = barrier()
+      ws.registerCli(
+        'holda',
+        new CLISpec({
+          name: 'holda',
+          fn: async () => {
+            a.open()
+            await releaseA.wait
+            return [null, new IOResult()]
+          },
+        }),
+      )
+      ws.registerCli(
+        'holdb',
+        new CLISpec({
+          name: 'holdb',
+          fn: async () => {
+            b.open()
+            await releaseB.wait
+            return [null, new IOResult()]
+          },
+        }),
+      )
+      ws.createSession('restricted', {
+        profile: {
+          paths: { hide: ['/data/.hidden'] },
+          mounts: new Map([['/data', { mode: MountMode.READ }]]),
+        },
+      })
+      const setup = await ws.shell('echo secret > /data/.hidden; echo public > /data/public')
+      equal(setup.exitCode, 0)
+      let left: ReturnType<Workspace['shell']> | undefined,
+        right: ReturnType<Workspace['shell']> | undefined
+      try {
+        left = ws.shell(
+          'umask 002; shopt -s dotglob; holda; printf "%s\\n" /data/*; mkdir /data/left; stat -c %a /data/left',
+        )
+        await a.wait
+        right = ws.shell('umask 077; holdb; printf "%s\\n" /data/*; mkdir /data/right', {
+          sessionId: 'restricted',
+        })
+        await b.wait
+        releaseA.open()
+        const l = await left
+        equal(
+          [l.exitCode, l.stdoutText, l.stderrText],
+          [0, '/data/.hidden\n/data/public\n775\n', ''],
+        )
+        releaseB.open()
+        const r = await right
+        equal(r.stdoutText, '/data/left\n/data/public\n')
+        equal(r.exitCode, 1)
+        equal(r.stderrText.includes('Read-only file system'), true)
+      } finally {
+        releaseA.open()
+        releaseB.open()
+        await Promise.allSettled([left, right])
+      }
+    },
+  ],
+  [
+    'concurrent workspaces record their own I/O at identical mount paths',
+    async (ws) => {
+      const peer = workspace()
+      const enteredA = barrier(),
+        enteredB = barrier(),
+        releaseA = barrier(),
+        releaseB = barrier()
+      ws.registerCli(
+        'hold',
+        new CLISpec({
+          name: 'hold',
+          fn: async () => {
+            enteredA.open()
+            await releaseA.wait
+            return [null, new IOResult()]
+          },
+        }),
+      )
+      peer.registerCli(
+        'hold',
+        new CLISpec({
+          name: 'hold',
+          fn: async () => {
+            enteredB.open()
+            await releaseB.wait
+            return [null, new IOResult()]
+          },
+        }),
+      )
+      let left: ReturnType<Workspace['shell']> | undefined,
+        right: ReturnType<Workspace['shell']> | undefined
+      try {
+        left = ws.shell('hold; echo left > /data/same; cat /data/same')
+        await enteredA.wait
+        right = peer.shell('hold; echo right > /data/same; cat /data/same')
+        await enteredB.wait
+        releaseA.open()
+        equal((await left).stdoutText, 'left\n')
+        releaseB.open()
+        equal((await right).stdoutText, 'right\n')
+        const leftOps = (await ws.observer.events()).filter((e) => e.type === 'op')
+        const rightOps = (await peer.observer.events()).filter((e) => e.type === 'op')
+        equal(
+          leftOps.map((e) => [e.op, e.path, e.bytes]),
+          [
+            ['write', '/data/same', 5],
+            ['read', '/data/same', 5],
+          ],
+        )
+        equal(
+          rightOps.map((e) => [e.op, e.path, e.bytes]),
+          [
+            ['write', '/data/same', 6],
+            ['read', '/data/same', 6],
+          ],
+        )
+      } finally {
+        releaseA.open()
+        releaseB.open()
+        await Promise.allSettled([left, right])
+        await peer.close()
+      }
+    },
+  ],
+  [
+    'a foreign workspace policy never judges a suspended caller',
+    async (ws) => {
+      const peer = new Workspace(
+        { '/data': new RAMVFS() },
+        {
+          mode: MountMode.WRITE,
+          policies: [{ preVfs: () => ({ kind: 'deny', reason: 'peer-only refusal' }) }],
+        },
+      )
+      const a = barrier(),
+        b = barrier(),
+        releaseA = barrier(),
+        releaseB = barrier()
+      ws.registerCli(
+        'hold',
+        new CLISpec({
+          name: 'hold',
+          fn: async () => {
+            a.open()
+            await releaseA.wait
+            return [null, new IOResult()]
+          },
+        }),
+      )
+      peer.registerCli(
+        'hold',
+        new CLISpec({
+          name: 'hold',
+          fn: async () => {
+            b.open()
+            await releaseB.wait
+            return [null, new IOResult()]
+          },
+        }),
+      )
+      await ws.shell('echo allowed > /data/text')
+      let left: ReturnType<Workspace['shell']> | undefined,
+        right: ReturnType<Workspace['shell']> | undefined
+      try {
+        left = ws.shell('hold; cat /data/text')
+        await a.wait
+        right = peer.shell('hold; echo forbidden > /data/text')
+        await b.wait
+        releaseA.open()
+        const allowed = await left
+        equal([allowed.exitCode, allowed.stdoutText, allowed.stderrText], [0, 'allowed\n', ''])
+        releaseB.open()
+        equal((await right).exitCode !== 0, true)
+      } finally {
+        releaseA.open()
+        releaseB.open()
+        await Promise.allSettled([left, right])
+        await peer.close()
+      }
     },
   ],
   ...battery(),

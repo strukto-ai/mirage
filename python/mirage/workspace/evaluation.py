@@ -6,6 +6,7 @@ from mirage.context.session_context import (
     reset_current_session,
     set_current_session,
 )
+from mirage.types import EntryGate
 from mirage.workspace.frame import ExecutionFrame
 from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.session.session import SessionState
@@ -22,6 +23,7 @@ class EvaluationContext:
     session: SessionState
     frame: ExecutionFrame = field(default_factory=ExecutionFrame)
     parent: "EvaluationContext | None" = None
+    admission: EntryGate | None = None
 
     def fork(self) -> "EvaluationContext":
         """An evaluation on a fork of this session: a job or a stage.

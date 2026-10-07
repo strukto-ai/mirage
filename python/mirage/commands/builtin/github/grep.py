@@ -17,9 +17,8 @@ from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.generic.grep import grep_generic, labelled
 from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
-    with_command_guards,
-    with_policy_guard,
 )
+from mirage.commands.builtin.generic_bind.factory import invocation_io
 from mirage.commands.builtin.github.io import IO
 from mirage.commands.builtin.github.pushdown import narrow_scope, scope_refusal
 from mirage.commands.builtin.grep_pattern import pattern_arg
@@ -76,7 +75,7 @@ async def grep(
     if used_search:
         opts = labelled(opts)
 
-    io = with_command_guards(with_policy_guard(IO)) if scoped else None
+    io = invocation_io(IO, opts) if scoped else None
     return await grep_generic(
         resolved,
         texts,

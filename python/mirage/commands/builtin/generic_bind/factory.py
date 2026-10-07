@@ -29,11 +29,13 @@ from mirage.commands.builtin.generic_bind.adapter import (
     with_command_guards,
     with_dir_guard,
     with_policy_guard,
+    with_recording,
 )
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
+from mirage.context.types import IOContext
 from mirage.errors.fs import eisdir
 from mirage.ops.types import NamespaceView
 from mirage.types import PathSpec
@@ -108,6 +110,7 @@ def scan_io(
     ops: CommandIO,
     ns: NamespaceView | None,
     prefix: str,
+    context: IOContext | None = None,
 ) -> tuple[CommandIO, bool]:
     """The adapter a bespoke search command scans through, and whether a
     hide, a path rule or a coded pre_vfs policy judges anything on its
@@ -126,6 +129,8 @@ def scan_io(
         ns (NamespaceView | None): the command's namespace view.
         prefix (str): the prefix of the mount running the command.
     """
+    if context is not None:
+        ops = with_recording(replace(ops, io_context=context))
     scoped = ns.scoped if ns is not None else None
     if scoped is None or not scoped(prefix.rstrip("/") or "/"):
         return ops, False
@@ -284,6 +289,7 @@ async def _run_with_namespace_globs(
     links = opts.ns.links if opts.ns is not None else None
     stamped = replace(
         ops,
+        io_context=opts.io_context,
         glob_children=children,
         glob_target_stat=(links.target_stat if links is not None else None),
     )
@@ -295,7 +301,7 @@ async def _run_with_namespace_globs(
     # hide or a path rule the native subtree ops are set aside
     # (`scoped_io`), so every entry passes through the guarded walk.
     bound = with_dir_guard(
-        with_command_guards(with_policy_guard(finish(stamped)))
+        with_command_guards(with_policy_guard(finish(with_recording(stamped))))
     )
     bound = scoped_io(bound, opts.ns, paths or [opts.cwd], opts.mount_prefix)
     return await fn(bound, accessor, paths, texts, opts)
@@ -366,3 +372,17 @@ def make_generic_commands(
             )(bound)
         )
     return commands
+
+
+def invocation_io(ops: CommandIO, opts: CommandOpts) -> CommandIO:
+    """Apply caller-owned guards to a bespoke backend command's adapter."""
+    links = opts.ns.links if opts.ns is not None else None
+    stamped = replace(
+        ops,
+        io_context=opts.io_context,
+        glob_children=opts.ns.child_mounts if opts.ns is not None else None,
+        glob_target_stat=links.target_stat if links is not None else None,
+    )
+    return with_command_guards(
+        with_policy_guard(with_recording(with_slash_guard(stamped)))
+    )

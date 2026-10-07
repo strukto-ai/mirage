@@ -21,6 +21,7 @@ from typing import Any, Protocol
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.context import dotglob_active, session_visibility
+from mirage.context.types import IOContext
 from mirage.errors.constants import WALK_ERRORS
 from mirage.ops.types import ChildMounts, LinkTargetStat
 from mirage.types import FileStat, FileType, PathSpec
@@ -368,7 +369,9 @@ def spell_match(raw: str, virtual: str, walked: int) -> str:
     return "/".join([*head, *tail])
 
 
-def glob_name_matches(name: str, pattern: str) -> bool:
+def glob_name_matches(
+    name: str, pattern: str, context: IOContext | None = None
+) -> bool:
     """Whether one directory entry answers a pathname-expansion segment.
 
     `fnmatch` plus bash's leading-dot rule: a name that starts with `.`
@@ -385,7 +388,7 @@ def glob_name_matches(name: str, pattern: str) -> bool:
     if (
         name.startswith(".")
         and not pattern.startswith(".")
-        and not dotglob_active()
+        and not dotglob_active(context)
     ):
         return False
     return fnmatch(name, pattern)
@@ -397,6 +400,7 @@ async def expand_pattern(
     path: PathSpec,
     index: IndexCacheStore,
     children: ChildMounts | None = None,
+    context: IOContext | None = None,
 ) -> list[PathSpec]:
     """Expand a glob PathSpec segment-by-segment via readdir.
 
@@ -462,7 +466,9 @@ async def expand_pattern(
             # gdrive, dropbox); the marker is not part of the name.
             for e in entries:
                 entry = e.rstrip("/")
-                if glob_name_matches(entry.rsplit("/", 1)[-1], pattern):
+                if glob_name_matches(
+                    entry.rsplit("/", 1)[-1], pattern, context
+                ):
                     next_level.append(entry)
             if children is not None:
                 # A nested mount root or a link is a real child of this
@@ -471,7 +477,7 @@ async def expand_pattern(
                 next_level.extend(
                     f"{base_dir}/{name}"
                     for name in children(f"{base_dir}/")
-                    if glob_name_matches(name, pattern)
+                    if glob_name_matches(name, pattern, context)
                 )
         # bash sorts a pathname expansion, and the two sources are
         # enumerated separately, so the union is ordered here.
@@ -520,6 +526,7 @@ def make_resolve_glob(
     children: ChildMounts | None = None,
     stat: Callable[..., Any] | None = None,
     target_stat: LinkTargetStat | None = None,
+    context: IOContext | None = None,
 ) -> ResolveGlobFn:
     """Build a resolve_glob generic over a backend's readdir.
 
@@ -551,6 +558,7 @@ def make_resolve_glob(
             children,
             stat,
             target_stat,
+            context,
         )
 
     return resolve_glob
@@ -610,6 +618,7 @@ async def resolve_glob_with(
     children: ChildMounts | None = None,
     stat: Callable[..., Any] | None = None,
     target_stat: LinkTargetStat | None = None,
+    context: IOContext | None = None,
 ) -> list[PathSpec]:
     """Shared resolve_glob loop over a backend's readdir.
 
@@ -644,7 +653,7 @@ async def resolve_glob_with(
             it a trailing slash keeps every owed name.
     """
     result: list[PathSpec] = []
-    vis = session_visibility()
+    vis = session_visibility(context)
     for p in paths:
         if p.resolved:
             result.append(p)
@@ -670,7 +679,7 @@ async def resolve_glob_with(
             matched = [
                 m
                 for m in await expand_pattern(
-                    readdir, accessor, word, index, children
+                    readdir, accessor, word, index, children, context
                 )
                 if path_visible(vis, m.virtual)
             ]

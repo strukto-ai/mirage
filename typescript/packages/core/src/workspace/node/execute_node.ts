@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { bindDispatch } from '../dispatcher/context.ts'
+import { ioContext } from '../session/access.ts'
 import { runWithEvaluation, type EvaluationContext, childContext } from '../evaluation.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 
@@ -111,7 +113,7 @@ import {
 } from '../session/state.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import { drained, runStatement } from '../executor/jobs.ts'
-import type { ExecuteNodeOpts } from '../executor/command/types.ts'
+import type { ExecuteNodeOpts, ExecuteNodeFn, Result } from '../executor/command/types.ts'
 import { endShell } from '../executor/traps.ts'
 import { concat } from '../../io/cachable_iterator.ts'
 import { encodeText } from '../../shell/bytes.ts'
@@ -131,14 +133,7 @@ const STREAMING_KINDS: ReadonlySet<NodeKind> = new Set([
   NodeKind.NEGATED,
 ])
 
-type Result = [ByteSource | null, IOResult, ExecutionNode]
-type Recurse = (
-  node: TSNodeLike,
-  context: EvaluationContext,
-  stdin: ByteSource | null,
-  callStack: CallStack | null,
-  opts?: ExecuteNodeOpts,
-) => Promise<Result>
+type Recurse = ExecuteNodeFn
 
 /**
  * The deps for a subtree that runs on `handed`.
@@ -821,6 +816,13 @@ export async function executeNode(
   // `executeNodeBody` binds it for the node's own lines.
   endsShell = false,
 ): Promise<Result> {
+  deps = {
+    ...deps,
+    dispatch: bindDispatch(
+      deps.dispatch,
+      ioContext(context.session, context.admission, deps.registry.policies, context.frame.recorder),
+    ),
+  }
   const session = context.session
   if (endsShell) {
     const { signal, executionScope } = deps

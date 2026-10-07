@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invocationIo } from '../generic_bind/factory.ts'
+
 import type { GitHubAccessor } from '../../../accessor/github.ts'
 import { pathsScoped } from '../../../ops/namespace_view.ts'
 import { find as githubFind } from '../../../core/github/find.ts'
@@ -19,14 +21,10 @@ import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { findGeneric } from '../generic/find.ts'
-import { withCommandGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
 import { findWalk } from '../generic_bind/builders/find.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
 import { IO } from './io.ts'
 import { ensureTree } from '../../../core/github/tree.ts'
-
-const resolveGlob = resolveGlobOf(IO)
-const WALK_IO = withCommandGuards(withPolicyGuard(IO))
 
 async function find(
   accessor: GitHubAccessor,
@@ -37,14 +35,18 @@ async function find(
   await ensureTree(accessor, opts.index ?? undefined, opts.mountPrefix ?? '')
   // The dispatcher hands a pattern over whole; the wrapper resolves it,
   // as python's does, before the walk names anything.
-  const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
+  const resolved = await resolveGlobOf(invocationIo(IO, opts))(
+    accessor,
+    paths,
+    opts.index ?? undefined,
+  )
   // The native find classifies on the raw tree, so under hidden paths or a
   // path rule it would answer for entries the session cannot see; the walk
   // classifies through the guarded readdir/stat, the fork the factory
   // builder takes. A truncated tree names only some paths and is never
   // refetched, so it takes the same folder-by-folder walk.
   if (accessor.truncated || pathsScoped(opts.ns, resolved)) {
-    return findWalk(WALK_IO, accessor, resolved, texts, opts)
+    return findWalk(invocationIo(IO, opts), accessor, resolved, texts, opts)
   }
   return findGeneric(resolved, texts, opts, (root, options) => githubFind(accessor, root, options))
 }

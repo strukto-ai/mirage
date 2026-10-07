@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { IOContext } from '../../../context/types.ts'
+
 import { streamFromBytes } from '../utils/wrap.ts'
 import { guardInput } from '../utils/limit.ts'
 import type { Accessor } from '../../../accessor/base.ts'
@@ -21,7 +23,7 @@ import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
 import type { ChildMounts, LinkView, NamespaceView } from '../../../ops/types.ts'
-import { type CommandFn, type RegisteredCommand, command } from '../../config.ts'
+import { type CommandOpts, type CommandFn, type RegisteredCommand, command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import {
   type CommandIO,
@@ -30,6 +32,7 @@ import {
   withCommandGuards,
   withDirGuard,
   withPolicyGuard,
+  withRecording,
 } from './adapter.ts'
 import { type StatOp } from '../../../vfs/types.ts'
 import { BUILDERS } from './builders/index.ts'
@@ -138,7 +141,9 @@ export function scanIo<A extends Accessor>(
   ops: CommandIO<A>,
   ns: NamespaceView | undefined,
   prefix: string | undefined,
+  ioContext?: IOContext,
 ): [CommandIO<A>, boolean] {
+  if (ioContext !== undefined) ops = withRecording({ ...ops, ioContext })
   const scoped = ns?.scoped
   if (!scoped?.(rstripSlash(prefix ?? '') || '/')) return [ops, false]
   return [withCommandGuards(withPolicyGuard(withReadCache(ops), prefix), prefix), true]
@@ -172,7 +177,11 @@ export interface MakeGenericCommandsOptions<A extends Accessor = Accessor> {
 // the way bash does. Conditional spreads, not `undefined` values, because
 // exactOptionalPropertyTypes refuses an explicit undefined on an optional
 // field; Python's fields are `| None` and take the uniform path.
-function stampNamespace(raw: CommandIO, children?: ChildMounts, links?: LinkView): CommandIO {
+function stampNamespace<A extends Accessor>(
+  raw: CommandIO<A>,
+  children?: ChildMounts,
+  links?: LinkView,
+): CommandIO<A> {
   return {
     ...raw,
     ...(children === undefined ? {} : { globChildren: children }),
@@ -224,8 +233,8 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
     // the guards at registration instead would strand them behind
     // closures built before any invocation exists, which is exactly the
     // wiring that made the rmdir guard blind to a mounted child. The
-    // guards read the current session at call time, so per-invocation
-    // binding changes cost, not behavior.
+    // guards capture the invocation context, so deferred reads keep
+    // their caller even when another session is running.
     // The conditional spread is not a leftover: exactOptionalPropertyTypes
     // refuses an explicit `undefined` for an optional field, so an absent
     // namespace has to mean an absent key rather than an undefined value.
@@ -248,7 +257,18 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
           withDirGuard(
             withCommandGuards(
               withPolicyGuard(
-                finish(stampNamespace(answered, opts.ns?.childMounts, opts.ns?.links)),
+                finish(
+                  withRecording(
+                    stampNamespace(
+                      {
+                        ...answered,
+                        ...(opts.ioContext === undefined ? {} : { ioContext: opts.ioContext }),
+                      },
+                      opts.ns?.childMounts,
+                      opts.ns?.links,
+                    ),
+                  ),
+                ),
                 opts.mountPrefix,
               ),
               opts.mountPrefix,
@@ -288,4 +308,20 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
     )
   }
   return commands
+}
+
+/** Apply caller-owned guards to a bespoke backend command's adapter. */
+export function invocationIo<A extends Accessor>(
+  ops: CommandIO<A>,
+  opts: CommandOpts,
+): CommandIO<A> {
+  const stamped = stampNamespace(
+    { ...ops, ...(opts.ioContext === undefined ? {} : { ioContext: opts.ioContext }) },
+    opts.ns?.childMounts,
+    opts.ns?.links,
+  )
+  return withCommandGuards(
+    withPolicyGuard(withRecording(withSlashGuard(stamped)), opts.mountPrefix),
+    opts.mountPrefix,
+  )
 }

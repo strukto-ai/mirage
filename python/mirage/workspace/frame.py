@@ -1,10 +1,13 @@
 from dataclasses import dataclass, field
 
+from mirage.observe.context import Recorder
+
 
 @dataclass
 class ExecutionFrame:
     """Temporary state of one evaluation; never part of a session record."""
 
+    recorder: Recorder | None = None
     diagnostics: list[str | bytes] = field(default_factory=list)
     cmdsub_seq: int = 0
     cmdsub_status: int = 0
@@ -18,4 +21,4 @@ class ExecutionFrame:
         Args:
             None
         """
-        return ExecutionFrame()
+        return ExecutionFrame(recorder=self.recorder)

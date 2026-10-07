@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { record, startOp } from '@struktoai/mirage-core/observe/context'
+import { activeRecorder, record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
@@ -23,8 +23,9 @@ export async function appendBytes(
   p: PathSpec,
   data: Uint8Array,
 ): Promise<void> {
+  const recorder = activeRecorder()
   const root = await accessor.root()
-  const timer = startOp()
+  const timer = startOp(recorder)
   const key = p.mountPath
   let handle: FileSystemFileHandle
   try {

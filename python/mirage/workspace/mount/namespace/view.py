@@ -15,12 +15,11 @@
 import functools
 from typing import TYPE_CHECKING
 
-from mirage.context import get_admission
 from mirage.ops.config import NamespaceLinks
 from mirage.ops.namespace_view import namespace_names
 from mirage.ops.types import LinkView, MountView, NamespaceView
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, Visibility
+from mirage.types import EntryGate, FileStat, Visibility
 from mirage.utils.hidden import hidden_under, path_visible
 from mirage.workspace.mount.namespace.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
@@ -181,6 +180,7 @@ def namespace_view_of(
     namespace: Namespace | None,
     dispatch: DispatchFn | None,
     session: "SessionState | None",
+    admission: EntryGate | None = None,
 ) -> NamespaceView:
     """The name plane's facts on offer to one session, bundled as one
     view.
@@ -203,7 +203,7 @@ def namespace_view_of(
             None for an unrestricted view.
     """
     vis = session.visibility if session is not None else None
-    gate = get_admission()
+    gate = admission
 
     def scoped(virtual: str) -> bool:
         return hidden_under(vis, virtual) or (

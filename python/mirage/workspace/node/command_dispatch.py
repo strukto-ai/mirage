@@ -16,8 +16,6 @@ import asyncio
 import dataclasses
 from collections.abc import Awaitable, Callable
 from functools import partial
-from types import SimpleNamespace
-from typing import Any, TypeVar
 
 from mirage.commands.builtin.utils.limit import guard_io, run_with_timeout
 from mirage.context import (
@@ -30,35 +28,30 @@ from mirage.context import (
     set_op_policies,
 )
 from mirage.io import IOResult
-from mirage.io.types import materialize
+from mirage.io.types import ByteSource, materialize
 from mirage.policy import PolicyDenied, resolve_limit, resolve_producer
 from mirage.policy.types import Claimant, HandOff, SessionContext
 from mirage.runtime.routing import RouteDecision
+from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
-from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import (
     get_command_name,
     get_parts,
-    get_process_sub_body,
-    get_process_sub_direction,
     get_text,
     split_env_prefix,
 )
-from mirage.shell.parse import (
-    find_syntax_error,
-    source_offsets,
-    syntax_error_result,
-)
+from mirage.shell.job_table import JobTable
 from mirage.shell.parse.scope import ParseScope
 from mirage.shell.types import NodeType as NT
-from mirage.shell.types import ProcessSubDirection
+from mirage.shell.types import TSNodeLike
 from mirage.shell.variable import TempEnv, VarAttr
 from mirage.shell.xtrace import trace_command
 from mirage.types import LsLinkMode, PathSpec, Producer, word_text
 from mirage.utils.glob_walk import glob_pattern
 from mirage.utils.path import CycleError
-from mirage.vfs.dev.dev import DevVFS
+from mirage.workspace.dispatcher.context import bind_dispatch
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import (
     accepts_line,
@@ -87,10 +80,14 @@ from mirage.workspace.executor.builtins.table import BUILTINS
 from mirage.workspace.executor.builtins.types import BuiltinCall
 from mirage.workspace.executor.command import handle_command
 from mirage.workspace.executor.command.external import run_external
+from mirage.workspace.executor.command.prepare import (
+    CommandPreparation,
+    own_words,
+)
+from mirage.workspace.executor.command.types import ExecuteNodeFn, Result
 from mirage.workspace.expand import expand_node
-from mirage.workspace.expand.argv import Argv, expand_argv
+from mirage.workspace.expand.argv import Argv
 from mirage.workspace.expand.globs import expand_boundary_globs
-from mirage.workspace.expand.node import child_line
 from mirage.workspace.lookup import (
     SLASH_KEEPS_LAST,
     UNSUPPORTED_BUILTINS,
@@ -101,8 +98,12 @@ from mirage.workspace.lookup import (
     runtime_refused,
 )
 from mirage.workspace.lookup.constants import INTERPRETER_NAMES
+from mirage.workspace.mount.namespace.namespace import Namespace
+from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.node.admission import Admitted, Refused, admit
+from mirage.workspace.node.diagnostics import syntax_error_result
 from mirage.workspace.node.occurrence import claimant_for, evaluated_from
+from mirage.workspace.session.access import io_context
 from mirage.workspace.session.state import (
     ensure_var_visible,
     pre_session_gate,
@@ -112,41 +113,24 @@ from mirage.workspace.session.state import (
 )
 from mirage.workspace.types import ExecutionNode
 
-T = TypeVar("T")
-
-
-async def _own_words(node: Any, pending: Awaitable[T]) -> T:
-    """Await an expansion of the command's own words; an ``ExitSignal``
-    it raises names the command, whose redirects bash had not applied.
-
-    Args:
-        node (Any): the command.
-        pending (Awaitable[T]): the expansion.
-    """
-    try:
-        return await pending
-    except ExitSignal as exc:
-        exc.expanding = node.id
-        raise
-
 
 async def execute_command(
-    recurse,
-    dispatch,
-    registry,
-    namespace,
-    execute_fn,
-    node,
+    recurse: ExecuteNodeFn,
+    dispatch: DispatchFn,
+    registry: MountRegistry,
+    namespace: Namespace,
+    execute_fn: Callable[..., Awaitable[IOResult]],
+    node: TSNodeLike,
     context: EvaluationContext,
-    stdin,
-    call_stack,
-    job_table,
+    stdin: ByteSource | None,
+    call_stack: CallStack | None,
+    job_table: JobTable | None,
     cancel: asyncio.Event | None = None,
     routing_decision: RouteDecision | None = None,
     agent_id: str = "",
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> Result:
     """Dispatch a command node by name.
 
     ``sink`` is where a command that runs statements of its own (a
@@ -188,20 +172,14 @@ async def execute_command(
             line = decode_text(source[:at]) + rewritten
             scope = ParseScope()
             try:
-                ast = scope.parse(line)
                 own: dict[str, tuple[int, int]] = {}
                 for alias, text in texts:
                     own[alias] = (at, at + len(encode_text(text)))
                     at = own[alias][1]
-                offending = find_syntax_error(
-                    ast,
-                    expanding_aliases(session),
-                    own,
-                    source_offsets(line, ast),
-                    parse_fn=scope.parse,
-                )
-                if offending is not None:
-                    io = syntax_error_result(offending, ast)
+                program = scope.program(line, expanding_aliases(session), own)
+                ast = program.root
+                if program.diagnostics:
+                    io = syntax_error_result(program.diagnostics[0])
                     bad = io.stderr if isinstance(io.stderr, bytes) else b""
                     return (
                         None,
@@ -247,7 +225,7 @@ async def execute_command(
         key, _, raw_val = atext.partition("=")
         val_nodes = [c for c in p.named_children if c.type != NT.VARIABLE_NAME]
         if val_nodes:
-            v = await _own_words(
+            v = await own_words(
                 node,
                 expand_node(
                     val_nodes[0],
@@ -375,25 +353,25 @@ async def execute_command(
 
 
 async def _dispatch_command_body(
-    recurse,
-    dispatch,
-    registry,
-    namespace,
-    execute_fn,
-    node,
-    parts,
-    name,
+    recurse: ExecuteNodeFn,
+    dispatch: DispatchFn,
+    registry: MountRegistry,
+    namespace: Namespace,
+    execute_fn: Callable[..., Awaitable[IOResult]],
+    node: TSNodeLike,
+    parts: list[TSNodeLike],
+    name: str,
     context: EvaluationContext,
-    stdin,
-    call_stack,
-    job_table,
+    stdin: ByteSource | None,
+    call_stack: CallStack | None,
+    job_table: JobTable | None,
     seed_prefix: Callable[[str], None],
     cancel: asyncio.Event | None = None,
     routing_decision: RouteDecision | None = None,
     agent_id: str = "",
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> Result:
     # The command's place on the line, as the pass computed it, and
     # the door its nested evaluations re-enter through: a word that
     # runs a line (eval, source, xargs) is bound to this node, and a
@@ -403,65 +381,28 @@ async def _dispatch_command_body(
     claimant = claimant_for(node, handed)
     execute_fn = partial(execute_fn, node=node)
 
-    # Buffered virtual files preserve operand identity without host pipes.
-    dev: DevVFS | None = None
-    proc_sub_inputs: list[tuple[str, int]] = []
-    proc_sub_stderr = []
-    clean_parts = []
+    preparation = CommandPreparation()
     try:
-        for p in parts:
-            if p.type != NT.PROCESS_SUBSTITUTION:
-                clean_parts.append(p)
-                continue
-            if get_process_sub_direction(p) == ProcessSubDirection.OUTPUT:
-                err = b"mirage: unsupported: process substitution >(...)\n"
-                return (
-                    None,
-                    IOResult(exit_code=2, stderr=err),
-                    ExecutionNode(
-                        command=name or "process_sub", exit_code=2, stderr=err
-                    ),
-                )
-            if dev is None:
-                dev, _, _ = registry.resolve("/dev/null")
-                assert isinstance(dev, DevVFS)
-            path, allocation = dev.allocate_input()
-            proc_sub_inputs.append((path, allocation))
-            inner = get_process_sub_body(p)
-            if inner:
-                io_ps = await child_line(
-                    context, execute_fn, inner, p, call_stack
-                )
-                data = await materialize(io_ps.stdout)
-                dev.set_input(path, allocation, data)
-                proc_sub_stderr.append(await materialize(io_ps.stderr))
-            clean_parts.append(
-                SimpleNamespace(
-                    type=NT.WORD,
-                    text=encode_text(path),
-                    children=[],
-                    named_children=[],
-                )
-            )
-        parts = clean_parts
-
-        argv = await _own_words(
+        argv = await preparation.expand(
             node,
-            expand_argv(
-                parts,
-                context,
-                execute_fn,
-                call_stack,
-                registry,
-                namespace,
-                view=session_view(
-                    session,
-                    registry.policies,
-                    diagnostics=context.frame.diagnostics,
-                ),
-                routing=routing_decision,
-            ),
+            parts,
+            context,
+            execute_fn,
+            call_stack,
+            registry,
+            namespace,
+            routing_decision,
         )
+        if isinstance(argv, IOResult):
+            return (
+                None,
+                argv,
+                ExecutionNode(
+                    command=name or "process_sub",
+                    exit_code=argv.exit_code,
+                    stderr=await materialize(argv.stderr),
+                ),
+            )
         seed_prefix(argv.name)
 
         # Limits resolve against the expanded name, so `$CMD`-style
@@ -534,34 +475,30 @@ async def _dispatch_command_body(
                 )
                 stdout = guard_io(stdout, io, bound, io.producer.command)
                 exec_node.exit_code = io.exit_code
-        if proc_sub_stderr:
-            io.stderr = b"".join(proc_sub_stderr) + await materialize(
+        if preparation.diagnostics:
+            io.stderr = b"".join(preparation.diagnostics) + await materialize(
                 io.stderr
             )
             exec_node.stderr = io.stderr
         if xtrace:
             existing = await materialize(io.stderr) or b""
             io.stderr = trace_command([argv.name, *argv.args]) + existing
-        if proc_sub_inputs and stdout is not None:
-            stdout = await materialize(stdout)
-        return stdout, io, exec_node
+        return await preparation.settle(stdout), io, exec_node
     finally:
-        if dev is not None:
-            for path, allocation in proc_sub_inputs:
-                dev.release_input(path, allocation)
+        preparation.release()
 
 
 async def _run_argv(
-    recurse,
-    dispatch,
-    registry,
-    namespace,
-    execute_fn,
+    recurse: ExecuteNodeFn,
+    dispatch: DispatchFn,
+    registry: MountRegistry,
+    namespace: Namespace,
+    execute_fn: Callable[..., Awaitable[IOResult]],
     argv: Argv,
     context: EvaluationContext,
-    stdin,
-    call_stack,
-    job_table,
+    stdin: ByteSource | None,
+    call_stack: CallStack | None,
+    job_table: JobTable | None,
     cancel: asyncio.Event | None = None,
     routing_decision: RouteDecision | None = None,
     row: int = 0,
@@ -570,7 +507,7 @@ async def _run_argv(
     opener: RedirectOpener | None = None,
     claimant: Claimant | None = None,
     sink: JobConsole | None = None,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> Result:
     """Route one expanded command to its builtin or mount handler.
 
     ``row`` is the command's line within its parse, which only ``alias``
@@ -669,6 +606,13 @@ async def _run_argv(
     # policies bind in the same window, whether or not a gate judged the
     # line, so the command tier's policy guard can fire pre_vfs for the
     # backend I/O a handler performs.
+    context = dataclasses.replace(context, admission=admitted)
+    dispatch = bind_dispatch(
+        dispatch,
+        io_context(
+            session, admitted, registry.policies, context.frame.recorder
+        ),
+    )
     ptoken = set_op_policies(registry.policies)
     try:
         if admitted is None:
@@ -740,23 +684,23 @@ def unsaid(lines: list[str], said: bytes) -> list[str]:
 
 
 async def _route_argv(
-    recurse,
-    dispatch,
-    registry,
-    namespace,
-    execute_fn,
+    recurse: ExecuteNodeFn,
+    dispatch: DispatchFn,
+    registry: MountRegistry,
+    namespace: Namespace,
+    execute_fn: Callable[..., Awaitable[IOResult]],
     argv: Argv,
     context: EvaluationContext,
-    stdin,
-    call_stack,
-    job_table,
+    stdin: ByteSource | None,
+    call_stack: CallStack | None,
+    job_table: JobTable | None,
     cancel: asyncio.Event | None,
     routing_decision: RouteDecision | None,
     row: int,
     agent_id: str = "",
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> Result:
     """Route one admitted command to its builtin or mount handler.
 
     The half of ``_run_argv`` past the gate, split out so the gate's

@@ -25,9 +25,8 @@ from mirage.commands.builtin.generic.find import (
 )
 from mirage.commands.builtin.generic_bind.adapter import (
     CommandIO,
-    with_command_guards,
-    with_policy_guard,
 )
+from mirage.commands.builtin.generic_bind.factory import invocation_io
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import default_paths
 from mirage.commands.config import CommandOpts, command
@@ -143,10 +142,6 @@ def make_find(
     """
     find_full = make_search_backed_find(tree.resolve, stat, tree.walk)
     find_light = make_search_backed_find(tree.resolve, stat_light, tree.walk)
-    walk_full = with_command_guards(with_policy_guard(io))
-    walk_light = with_command_guards(
-        with_policy_guard(replace(io, stat=stat_light))
-    )
 
     @command("find", vfs=vfs, spec=SPECS["find"])
     async def find(
@@ -155,8 +150,10 @@ def make_find(
         texts: list[str],
         opts: CommandOpts,
     ) -> tuple[ByteSource | None, IOResult]:
+        walk_full = invocation_io(io, opts)
+        walk_light = invocation_io(replace(io, stat=stat_light), opts)
         paths = default_paths(paths, opts.cwd)
-        paths = await io.resolve_glob(accessor, paths, opts.index)
+        paths = await walk_full.resolve_glob(accessor, paths, opts.index)
         search_path = paths[0]
 
         fl = FlagView(opts.flags, spec=SPECS["find"])

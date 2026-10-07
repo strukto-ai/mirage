@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { recordStream } from '../../observe/context.ts'
+import { activeRecorder, recordStream } from '../../observe/context.ts'
 import { VFSName } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
 import { lookupError } from './dest.ts'
@@ -26,13 +26,14 @@ export async function* readStream(
   path: PathSpec,
   _index?: IndexCacheStore,
 ): AsyncIterable<Uint8Array> {
+  const recorder = activeRecorder()
   const p = norm(path.mountPath)
   const data = await accessor.store.getFile(p)
   if (data === null) {
     if (await accessor.store.hasDir(p)) throw eisdir(path)
     throw await lookupError(accessor.store, path, p)
   }
-  const rec = recordStream('read', path.virtual, VFSName.REDIS)
+  const rec = recordStream('read', path.virtual, VFSName.REDIS, {}, recorder)
   if (rec !== null) rec.bytes = data.byteLength
   yield data
 }

@@ -64,7 +64,7 @@ async def rg(
 
     # Same gate as slack grep, from the same table: only a lone concrete
     # operand with no reshaping flag may be answered by the search API.
-    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
+    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix, opts.io_context)
     operand = (
         None
         if scoped

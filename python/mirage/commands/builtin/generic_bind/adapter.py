@@ -36,6 +36,7 @@ from mirage.context import (
     session_visibility,
 )
 from mirage.context.session_context import require_paths_writable
+from mirage.context.types import IOContext
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import (
     eacces,
@@ -49,6 +50,12 @@ from mirage.errors.fs import (
 )
 from mirage.errors.types import DotWalkError
 from mirage.io import IOResult
+from mirage.observe.context import (
+    Recorder,
+    push_mount_context,
+    reset_active_recorder,
+    with_mount_context,
+)
 from mirage.ops.generic.factory import refuse_taken
 from mirage.ops.namespace_view import paths_scoped
 from mirage.ops.types import (
@@ -60,7 +67,14 @@ from mirage.ops.types import (
 from mirage.policy.constants import METADATA_OPS
 from mirage.policy.policies import Policies, pre_vfs_gate
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, FileType, MountMode, PathSpec, WalkProbe
+from mirage.types import (
+    FileStat,
+    FileType,
+    MountMode,
+    PathSpec,
+    Visibility,
+    WalkProbe,
+)
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
 from mirage.utils.hidden import hidden_under, move_reveals, path_visible
 from mirage.utils.path import norm, parent
@@ -193,6 +207,7 @@ class CommandIO(ReadOps, NativeReadOps, WriteOps):
 
     read_stream: ReadStreamOp = field()
     is_mounted: IsMountedOp = field()
+    io_context: IOContext | None = None
     streams_bytes: bool = False
     local: bool = True
     max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES
@@ -210,6 +225,7 @@ class CommandIO(ReadOps, NativeReadOps, WriteOps):
             self.glob_children,
             self.stat,
             self.glob_target_stat,
+            self.io_context,
         )
 
     def operation(self, op: Operation) -> OperationFn | None:
@@ -427,6 +443,7 @@ async def _drain_refusing_dirs(
     index: IndexCacheStore,
     path: PathSpec,
     source: AsyncIterator[bytes],
+    context: IOContext | None = None,
 ) -> AsyncIterator[bytes]:
     empty = True
     try:
@@ -616,7 +633,9 @@ async def resolve_or_empty(
     return []
 
 
-def _refuse_hidden(path: PathSpec, create: bool) -> None:
+def _refuse_hidden(
+    path: PathSpec, create: bool, context: IOContext | None = None
+) -> None:
     """Refuse a hidden path the way nonexistence would.
 
     ENOENT for anything acting on the path; a create answers as
@@ -629,14 +648,17 @@ def _refuse_hidden(path: PathSpec, create: bool) -> None:
         path (PathSpec): the operand being guarded.
         create (bool): whether the op creates the path it names.
     """
-    vis = session_visibility()
+    vis = session_visibility(context)
     if path_visible(vis, path.virtual):
         return
     raise hidden_refusal(vis, path.virtual, create)
 
 
 async def _guarded_readdir(
-    fn: OperationFn, *args: Any, **kwargs: Any
+    fn: OperationFn,
+    *args: Any,
+    context: IOContext | None = None,
+    **kwargs: Any,
 ) -> list[str]:
     """Readdir with hidden names dropped from the listing.
 
@@ -647,10 +669,10 @@ async def _guarded_readdir(
         **kwargs: forwarded untouched.
     """
     parent = next(a for a in args if isinstance(a, PathSpec))
-    _refuse_hidden(parent, create=False)
+    _refuse_hidden(parent, create=False, context=context)
     entries = await fn(*args, **kwargs)
     base = parent.virtual.rstrip("/")
-    vis = session_visibility()
+    vis = session_visibility(context)
     return [
         e
         for e in entries
@@ -658,17 +680,21 @@ async def _guarded_readdir(
     ]
 
 
-def _move_would_reveal(src: PathSpec, dst: PathSpec) -> bool:
+def _move_would_reveal(
+    src: PathSpec, dst: PathSpec, context: IOContext | None = None
+) -> bool:
     """Whether the session's hides make this relocation a reveal.
 
     Args:
         src (PathSpec): the subtree being moved or copied.
         dst (PathSpec): where it would land.
     """
-    return move_reveals(session_visibility(), src.virtual, dst.virtual)
+    return move_reveals(session_visibility(context), src.virtual, dst.virtual)
 
 
-def refuse_reveal(src: PathSpec, dst: PathSpec) -> None:
+def refuse_reveal(
+    src: PathSpec, dst: PathSpec, visibility: Visibility | None = None
+) -> None:
     """Refuse a relocation that would surface a hidden path.
 
     A rename or a native directory copy re-anchors everything below its
@@ -683,7 +709,11 @@ def refuse_reveal(src: PathSpec, dst: PathSpec) -> None:
         src (PathSpec): the subtree being moved or copied.
         dst (PathSpec): where it would land.
     """
-    if _move_would_reveal(src, dst):
+    if move_reveals(
+        visibility if visibility is not None else session_visibility(),
+        src.virtual,
+        dst.virtual,
+    ):
         raise eacces(src.virtual)
 
 
@@ -707,7 +737,12 @@ async def _pair_src_is_dir(stat: StatOp, accessor: Any, src: PathSpec) -> bool:
 
 
 async def _guarded_pair(
-    fn: OperationFn, stat: StatOp, assume_dir: bool, *args: Any, **kwargs: Any
+    fn: OperationFn,
+    stat: StatOp,
+    assume_dir: bool,
+    *args: Any,
+    context: IOContext | None = None,
+    **kwargs: Any,
 ) -> Any:
     """Rename/dir-copy guard: per-path visibility checks, then
     the subtree reveal check on the (src, dst) pair.
@@ -728,8 +763,10 @@ async def _guarded_pair(
     """
     specs = [arg for arg in args if isinstance(arg, PathSpec)]
     for position, spec in enumerate(specs):
-        _refuse_hidden(spec, create=position > 0)
-    reveal = len(specs) >= 2 and _move_would_reveal(specs[0], specs[1])
+        _refuse_hidden(spec, create=position > 0, context=context)
+    reveal = len(specs) >= 2 and _move_would_reveal(
+        specs[0], specs[1], context
+    )
     if reveal and (
         assume_dir or await _pair_src_is_dir(stat, args[0], specs[0])
     ):
@@ -759,6 +796,7 @@ class _SlotChannel:
     stat_fn: OperationFn
     unlink_fn: OperationFn
     rmdir_fn: OperationFn
+    context: IOContext | None = None
 
     async def readdir(self, spec: PathSpec) -> list[str]:
         entries: list[str] = await self.readdir_fn(
@@ -771,11 +809,15 @@ class _SlotChannel:
         return row
 
     async def unlink(self, spec: PathSpec) -> None:
-        _check_command_paths([spec], "unlink", check_hidden=False)
+        _check_command_paths(
+            [spec], "unlink", check_hidden=False, context=self.context
+        )
         await self.unlink_fn(*self.lead, spec)
 
     async def rmdir(self, spec: PathSpec) -> None:
-        _check_command_paths([spec], "rmdir", check_hidden=False)
+        _check_command_paths(
+            [spec], "rmdir", check_hidden=False, context=self.context
+        )
         await self.rmdir_fn(*self.lead, spec, index=self.index)
 
 
@@ -786,6 +828,7 @@ async def _guarded_rmdir(
     unlink: OperationFn | None,
     children: ChildMounts | None,
     *args: Any,
+    context: IOContext | None = None,
     index: IndexCacheStore = NULL_INDEX,
     **kwargs: Any,
 ) -> Any:
@@ -827,13 +870,13 @@ async def _guarded_rmdir(
     target: PathSpec | None = None
     for arg in args:
         if isinstance(arg, PathSpec):
-            _refuse_hidden(arg, create=False)
+            _refuse_hidden(arg, create=False, context=context)
             if target is None:
                 target = arg
     try:
         return await fn(*args, index=index, **kwargs)
     except OSError as exc:
-        vis = session_visibility()
+        vis = session_visibility(context)
         if (
             target is None
             or unlink is None
@@ -861,7 +904,9 @@ async def _guarded_rmdir(
         visible = functools.partial(path_visible, vis)
         if not entries or visible_below(target.virtual, merged, visible):
             raise
-        channel = _SlotChannel(tuple(lead), index, readdir, stat, unlink, fn)
+        channel = _SlotChannel(
+            tuple(lead), index, readdir, stat, unlink, fn, context
+        )
         try:
             await remove_remnants(channel, visible, target)
         except Exception as cascade:
@@ -869,7 +914,12 @@ async def _guarded_rmdir(
         return None
 
 
-async def _guarded_exists(fn: OperationFn, *args: Any, **kwargs: Any) -> bool:
+async def _guarded_exists(
+    fn: OperationFn,
+    *args: Any,
+    context: IOContext | None = None,
+    **kwargs: Any,
+) -> bool:
     """Exists that answers False for a hidden path, never a refusal.
 
     Args:
@@ -878,7 +928,7 @@ async def _guarded_exists(fn: OperationFn, *args: Any, **kwargs: Any) -> bool:
         **kwargs: forwarded untouched.
     """
     probed = next(a for a in args if isinstance(a, PathSpec))
-    if not path_visible(session_visibility(), probed.virtual):
+    if not path_visible(session_visibility(context), probed.virtual):
         return False
     return bool(await fn(*args, **kwargs))
 
@@ -912,6 +962,7 @@ def _check_command_paths(
     slot: str,
     check_hidden: bool = True,
     check_mode: bool = True,
+    context: IOContext | None = None,
 ) -> None:
     """Enforce the admitted command's paths and mount capabilities.
 
@@ -921,20 +972,23 @@ def _check_command_paths(
         check_hidden (bool): false only for private remnant deletion.
     """
     access = _MUTATIONS.get(slot)
-    admission = get_admission()
+    admission = get_admission(context)
     for position, path in enumerate(paths):
         if check_hidden:
             _refuse_hidden(
-                path, create=position > 0 or bool(access and access.create)
+                path,
+                create=position > 0 or bool(access and access.create),
+                context=context,
             )
         if admission is not None and slot not in ("stat", "exists"):
             admission.check(path.virtual)
-    mount = get_mount_gate()
+    mount = get_mount_gate(context)
     if access is not None and check_mode and mount is not None:
         require_paths_writable(
             paths[1:] if access.first_source else paths,
             *mount,
             subtree=access.subtree,
+            context=context,
         )
 
 
@@ -943,6 +997,7 @@ def _command_call(
     slot: str,
     *args: Any,
     check_mode: bool = True,
+    context: IOContext | None = None,
     **kwargs: Any,
 ) -> Any:
     paths = [
@@ -951,23 +1006,29 @@ def _command_call(
         for path in (arg if isinstance(arg, (list, tuple)) else (arg,))
         if isinstance(path, PathSpec)
     ]
-    _check_command_paths(paths, slot, check_mode=check_mode)
+    _check_command_paths(paths, slot, check_mode=check_mode, context=context)
     return fn(*args, **kwargs)
 
 
-def _with_operation_guards(fn: OperationFn, slot: str) -> OperationFn:
+def _with_operation_guards(
+    fn: OperationFn, slot: str, context: IOContext | None = None
+) -> OperationFn:
     access = _MUTATIONS.get(slot)
     policed = functools.partial(
         _policy_call,
-        _op_policy_scope(),
+        _op_policy_scope(context=context),
         fn,
         slot,
         access is not None,
         access.first_source if access else False,
     )
-    guarded = functools.partial(_command_call, policed, slot)
+    guarded = functools.partial(_command_call, policed, slot, context=context)
     return functools.partial(
-        _walked_call, get_walk_probe(), slot == "mkdir", guarded
+        _walked_call,
+        get_walk_probe(context),
+        slot == "mkdir",
+        guarded,
+        context=context,
     )
 
 
@@ -1061,6 +1122,7 @@ def _walked_call(
     creates: bool,
     fn: OperationFn,
     *args: Any,
+    context: IOContext | None = None,
     **kwargs: Any,
 ) -> Any:
     """Call a backend op once the dots of its PathSpec positionals walk.
@@ -1088,7 +1150,7 @@ def _walked_call(
         for arg in args
         if isinstance(arg, PathSpec) and arg.dotted is not None
     ]
-    probe = walk if walk is not None else get_walk_probe()
+    probe = walk if walk is not None else get_walk_probe(context)
     if not specs or probe is None:
         return fn(*args, **kwargs)
     admit = functools.partial(_walk_admit, probe, specs, creates)
@@ -1104,6 +1166,7 @@ async def _mkdir_on_read_only(
     accessor: Any,
     path: PathSpec,
     parents: bool,
+    context: IOContext | None = None,
 ) -> None:
     """Answer a mkdir on a read-only region the way the filesystem would.
 
@@ -1147,7 +1210,7 @@ async def _mkdir_on_read_only(
                 (
                     spec
                     for spec in chain[index:]
-                    if effective_path_mode(spec.virtual, prefix, mode)
+                    if effective_path_mode(spec.virtual, prefix, mode, context)
                     == MountMode.READ
                 ),
                 path,
@@ -1191,6 +1254,7 @@ def _mode_mkdir(
     accessor: Any,
     path: Any,
     parents: bool = False,
+    context: IOContext | None = None,
     **options: Any,
 ) -> Any:
     """The mkdir slot of ``_mode_call``: a directory on a read-only
@@ -1207,17 +1271,21 @@ def _mode_mkdir(
         parents (bool): ``-p``.
         **options: forwarded untouched.
     """
-    gate = get_mount_gate()
+    gate = get_mount_gate(context)
     if (
         gate is not None
         and isinstance(path, PathSpec)
-        and effective_path_mode(path.virtual, *gate) == MountMode.READ
+        and effective_path_mode(path.virtual, *gate, context) == MountMode.READ
     ):
-        return _mkdir_on_read_only(stat, gate, accessor, path, parents)
+        return _mkdir_on_read_only(
+            stat, gate, accessor, path, parents, context
+        )
     return _mkdir_on_writable(fn, stat, accessor, path, parents, **options)
 
 
-def with_write_guards(fn: OperationFn) -> OperationFn:
+def with_write_guards(
+    fn: OperationFn, context: IOContext | None = None
+) -> OperationFn:
     """Guard one bare backend write the way the adapter guards a slot.
 
     For a bespoke command wired from loose functions rather than a
@@ -1231,7 +1299,7 @@ def with_write_guards(fn: OperationFn) -> OperationFn:
     Args:
         fn (OperationFn): the raw backend write.
     """
-    return _with_operation_guards(fn, "unlink")
+    return _with_operation_guards(fn, "unlink", context)
 
 
 def with_command_guards(ops: CommandIO) -> CommandIO:
@@ -1240,15 +1308,18 @@ def with_command_guards(ops: CommandIO) -> CommandIO:
     Args:
         ops (CommandIO): backend operations, including cache handling.
     """
-    walk = get_walk_probe()
+    context = ops.io_context
+    walk = get_walk_probe(context)
     special: dict[str, OperationFn] = {
-        "readdir": functools.partial(_guarded_readdir, ops.readdir),
+        "readdir": functools.partial(
+            _guarded_readdir, ops.readdir, context=context
+        ),
     }
     for slot, assume_dir in (("rename", False), ("dir_copy", True)):
         fn = getattr(ops, slot)
         if fn is not None:
             special[slot] = functools.partial(
-                _guarded_pair, fn, ops.stat, assume_dir
+                _guarded_pair, fn, ops.stat, assume_dir, context=context
             )
     if ops.rmdir is not None:
         special["rmdir"] = functools.partial(
@@ -1258,9 +1329,12 @@ def with_command_guards(ops: CommandIO) -> CommandIO:
             ops.stat,
             ops.unlink,
             ops.glob_children,
+            context=context,
         )
     if ops.mkdir is not None:
-        special["mkdir"] = functools.partial(_mode_mkdir, ops.mkdir, ops.stat)
+        special["mkdir"] = functools.partial(
+            _mode_mkdir, ops.mkdir, ops.stat, context=context
+        )
     read_stream = ops.read_stream
 
     def guarded_stream(
@@ -1271,12 +1345,12 @@ def with_command_guards(ops: CommandIO) -> CommandIO:
         # open into its own words (awk's `cannot open`) relays the stream
         # through its own handler, so a walk that already failed (a link
         # loop) must surface where it drains.
-        _check_command_paths([path], "read_stream")
+        _check_command_paths([path], "read_stream", context=context)
 
         async def admit() -> None:
             if path.walk_error is not None:
                 raise walk_refusal(path)
-            probe = walk if walk is not None else get_walk_probe()
+            probe = walk if walk is not None else get_walk_probe(context)
             if path.dotted is not None and probe is not None:
                 await _walk_admit(probe, [path], False)
 
@@ -1290,29 +1364,41 @@ def with_command_guards(ops: CommandIO) -> CommandIO:
         if fn is None or slot == "read_stream":
             continue
         guarded = functools.partial(
-            _command_call, fn, slot, check_mode=slot != "mkdir"
+            _command_call,
+            fn,
+            slot,
+            check_mode=slot != "mkdir",
+            context=context,
         )
         if slot == "exists":
-            guarded = functools.partial(_guarded_exists, guarded)
+            guarded = functools.partial(
+                _guarded_exists, guarded, context=context
+            )
         changes[slot] = functools.partial(
             _walked_call, walk, slot == "mkdir", guarded
         )
     if ops.du is not None:
         changes["du"] = DuOps(
-            functools.partial(_command_call, ops.du.size, "du"),
-            functools.partial(_command_call, ops.du.entries, "du"),
+            functools.partial(
+                _command_call, ops.du.size, "du", context=context
+            ),
+            functools.partial(
+                _command_call, ops.du.entries, "du", context=context
+            ),
         )
     if ops.search is not None:
         changes["search"] = replace(
             ops.search,
             search=functools.partial(
-                _command_call, ops.search.search, "search"
+                _command_call, ops.search.search, "search", context=context
             ),
         )
     return replace(ops, **changes)
 
 
-def with_dispatch_rule_guard(dispatch: DispatchFn) -> DispatchFn:
+def with_dispatch_rule_guard(
+    dispatch: DispatchFn, context: IOContext | None = None
+) -> DispatchFn:
     """Return ``dispatch`` marking each op with the admitted command's
     gate as ``rule_gate``, which the door judges on the paths the op
     reaches: the command's dispatcher skips its guarded slots, and the
@@ -1326,7 +1412,7 @@ def with_dispatch_rule_guard(dispatch: DispatchFn) -> DispatchFn:
     async def guarded(
         op: str, path: PathSpec, **options: Any
     ) -> tuple[Any, IOResult]:
-        gate = get_admission()
+        gate = get_admission(context)
         if gate is not None and op not in METADATA_OPS:
             options = {**options, "rule_gate": gate}
         return await dispatch(op, path, **options)
@@ -1336,11 +1422,11 @@ def with_dispatch_rule_guard(dispatch: DispatchFn) -> DispatchFn:
 
 # (policies, mount prefix, session id); the unbound spelling for a
 # registration-time wrap, which reads the live context per call.
-_PolicyScope = tuple[Policies | None, str, str]
-_UNBOUND_SCOPE: _PolicyScope = (None, "", "")
+_PolicyScope = tuple[Policies | None, str, str, IOContext | None]
+_UNBOUND_SCOPE: _PolicyScope = (None, "", "", None)
 
 
-def _op_policy_scope() -> _PolicyScope:
+def _op_policy_scope(context: IOContext | None = None) -> _PolicyScope:
     """The policies to consult for this op call, the mount prefix, and
     the session the command runs under.
 
@@ -1348,15 +1434,20 @@ def _op_policy_scope() -> _PolicyScope:
     none of them override pre_vfs, at the cost of two contextvar reads
     and one O(1) probe per slot call.
     """
-    policies = get_op_policies()
+    policies = get_op_policies(context)
     if policies is None or not policies.wants("pre_vfs"):
-        return _UNBOUND_SCOPE
-    gate = get_mount_gate()
+        return (None, "", "", context)
+    gate = get_mount_gate(context)
     sess = get_current_session()
     return (
         policies,
         gate[0] if gate is not None else "",
-        sess.session_id if sess is not None else "",
+        context.session_id
+        if context is not None
+        else sess.session_id
+        if sess is not None
+        else "",
+        context,
     )
 
 
@@ -1375,7 +1466,7 @@ def _live_policy_scope(scope: _PolicyScope) -> _PolicyScope:
     Args:
         scope (_PolicyScope): the wrap-time capture.
     """
-    if scope[0] is not None:
+    if scope[0] is not None or scope[3] is not None:
         return scope
     return _op_policy_scope()
 
@@ -1388,6 +1479,7 @@ async def _policy_admit(
     write: bool,
     first_source: bool,
     args: tuple[Any, ...],
+    context: IOContext | None = None,
 ) -> None:
     """Fire pre_vfs for each PathSpec positional of one slot call.
 
@@ -1417,6 +1509,7 @@ async def _policy_admit(
                 prefix,
                 session_id,
                 check_hidden=False,
+                io=context,
             )
             first = False
 
@@ -1447,16 +1540,27 @@ async def _policy_call(
         *args: the call's positionals, PathSpecs among them.
         **kwargs: forwarded untouched.
     """
-    policies, prefix, session_id = _live_policy_scope(scope)
+    policies, prefix, session_id, context = _live_policy_scope(scope)
     if policies is not None:
         await _policy_admit(
-            policies, prefix, session_id, op, write, first_source, args
+            policies,
+            prefix,
+            session_id,
+            op,
+            write,
+            first_source,
+            args,
+            context,
         )
     return await fn(*args, **kwargs)
 
 
 async def _policy_readdir(
-    scope: _PolicyScope, fn: OperationFn, *args: Any, **kwargs: Any
+    scope: _PolicyScope,
+    fn: OperationFn,
+    *args: Any,
+    context: IOContext | None = None,
+    **kwargs: Any,
 ) -> list[str]:
     """Readdir admitted through pre_vfs for the directory it lists.
 
@@ -1467,7 +1571,7 @@ async def _policy_readdir(
             directory being listed.
         **kwargs: forwarded untouched.
     """
-    policies, prefix, session_id = _live_policy_scope(scope)
+    policies, prefix, session_id, context = _live_policy_scope(scope)
     if policies is not None:
         parent_spec = next(a for a in args if isinstance(a, PathSpec))
         await pre_vfs_gate(
@@ -1478,6 +1582,7 @@ async def _policy_readdir(
             prefix,
             session_id,
             check_hidden=False,
+            io=context,
         )
     entries: list[str] = await fn(*args, **kwargs)
     return entries
@@ -1501,12 +1606,12 @@ def _policy_stream(
             being read.
         **kwargs: forwarded untouched.
     """
-    policies, prefix, session_id = _live_policy_scope(scope)
+    policies, prefix, session_id, context = _live_policy_scope(scope)
     spec = next((a for a in args if isinstance(a, PathSpec)), None)
     if policies is None or spec is None:
         return fn(*args, **kwargs)
     return _policy_stream_drain(
-        policies, prefix, session_id, spec, fn(*args, **kwargs)
+        policies, prefix, session_id, spec, fn(*args, **kwargs), context
     )
 
 
@@ -1516,6 +1621,7 @@ async def _policy_stream_drain(
     session_id: str,
     path: PathSpec,
     source: AsyncIterator[bytes],
+    context: IOContext | None = None,
 ) -> AsyncIterator[bytes]:
     """Drain ``source`` once the read is admitted; close it if refused.
 
@@ -1535,6 +1641,7 @@ async def _policy_stream_drain(
             prefix,
             session_id,
             check_hidden=False,
+            io=context,
         )
     except BaseException:
         close = getattr(source, "aclose", None)
@@ -1567,7 +1674,7 @@ def with_policy_guard(ops: CommandIO) -> CommandIO:
     Args:
         ops (CommandIO): the backend's IO adapter.
     """
-    scope = _op_policy_scope()
+    scope = _op_policy_scope(ops.io_context)
     changes: dict[str, Any] = {
         "readdir": functools.partial(_policy_readdir, scope, ops.readdir),
         "read_stream": functools.partial(
@@ -1615,3 +1722,46 @@ def scoped_io(
         copy=None,
         dir_copy=None,
     )
+
+
+async def _recorded_call(
+    recorder: Recorder | None, fn: OperationFn, *args: Any, **kwargs: Any
+) -> Any:
+    token = push_mount_context(
+        recorder.mount_id if recorder else None, recorder
+    )
+    try:
+        return await fn(*args, **kwargs)
+    finally:
+        reset_active_recorder(token)
+
+
+def with_recording(ops: CommandIO) -> CommandIO:
+    """Bind byte-transfer recording to each backend call and deferred stream pull."""
+    if ops.io_context is None:
+        return ops
+    recorder = ops.io_context.recorder
+    changes: dict[str, Any] = {}
+    for slot in (
+        "read_bytes",
+        "read_range",
+        "stat",
+        "exists",
+        "readdir",
+        "find",
+        *_MUTATIONS,
+    ):
+        fn = getattr(ops, slot)
+        if fn is not None:
+            changes[slot] = functools.partial(_recorded_call, recorder, fn)
+
+    def read_stream(
+        accessor: Accessor, path: PathSpec, *args: Any, **kwargs: Any
+    ) -> AsyncIterator[bytes]:
+        return with_mount_context(
+            ops.read_stream(accessor, path, *args, **kwargs),
+            recorder.mount_id if recorder else None,
+            recorder,
+        )
+
+    return replace(ops, read_stream=read_stream, **changes)

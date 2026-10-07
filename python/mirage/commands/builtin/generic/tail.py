@@ -29,6 +29,7 @@ from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import argmatch_error
+from mirage.context.types import IOContext
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
@@ -248,6 +249,7 @@ def tail_multi(
     from_byte: int | None = None,
     show_headers: bool = False,
     unread: frozenset[str] = frozenset(),
+    context: IOContext | None = None,
 ) -> AsyncIterator[bytes]:
     """Run tail over multiple already-resolved paths.
 
@@ -268,7 +270,7 @@ def tail_multi(
         unread (frozenset[str]): operands that opened but do not read (a
             directory): each prints its header and nothing else.
     """
-    cached = cache_aware_read(read)
+    cached = cache_aware_read(read, context)
     return _tail_multi(
         paths,
         read=lambda p: read(p) if is_stdin(p) else cached(p),
@@ -749,6 +751,7 @@ async def tail_generic(
             return None, io
         return tail_multi(
             opened,
+            context=opts.io_context,
             read=stream,
             n=counts.lines,
             c=counts.byte_count,

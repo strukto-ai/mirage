@@ -177,7 +177,7 @@ export async function headGeneric(
   stream: Stream,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
-  stream = stdinStream(cacheAwareStreamEager(stream), opts.stdin)
+  stream = stdinStream(cacheAwareStreamEager(stream, opts.ioContext), opts.stdin)
   const parsed = parseFlags(opts.flags)
   if (typeof parsed === 'string') {
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]

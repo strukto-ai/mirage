@@ -55,6 +55,7 @@ from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind, TSNodeLike
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.workspace.dispatcher.context import bind_redirects
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import _to_scope
 from mirage.workspace.executor.builtins.exec.constants import (
@@ -512,6 +513,7 @@ async def handle_redirect(
         if not isinstance(r.target, int)
         and r.kind not in (RedirectKind.HEREDOC, RedirectKind.HERESTRING)
     )
+    dispatch = bind_redirects(dispatch, tuple(p.virtual for p in targets))
     # A simple command opens its targets once dispatch has admitted it
     # (see set_redirect_paths); a compound one has no gate of its own and
     # opens them here, before its body runs.

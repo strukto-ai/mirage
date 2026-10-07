@@ -17,12 +17,9 @@ from typing import Any
 
 from mirage.commands.builtin.generic_bind.adapter import (
     CommandIO,
-    with_command_guards,
-    with_policy_guard,
 )
 from mirage.commands.builtin.generic_bind.factory import (
     with_probe_answers,
-    with_slash_guard,
 )
 from mirage.commands.builtin.object_store.mkdir import make_mkdir
 from mirage.commands.builtin.object_store.rm import make_rm
@@ -56,14 +53,11 @@ def make_object_store_commands(
         io (CommandIO): the backend's op table; must wire the write-side
             slots the overrides consume.
     """
-    guarded = with_command_guards(with_policy_guard(with_slash_guard(io)))
-    answered = with_command_guards(
-        with_policy_guard(with_slash_guard(with_probe_answers(io)))
-    )
+
     return [
-        make_mkdir(vfs, guarded),
-        make_rm(vfs, guarded),
-        make_stat(vfs, answered),
-        make_tee(vfs, guarded),
-        make_touch(vfs, guarded),
+        make_mkdir(vfs, io),
+        make_rm(vfs, io),
+        make_stat(vfs, with_probe_answers(io)),
+        make_tee(vfs, io),
+        make_touch(vfs, io),
     ]

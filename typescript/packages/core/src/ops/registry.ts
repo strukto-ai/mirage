@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { IOContext } from '../context/types.ts'
 import type { Accessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { BaseVFS } from '../vfs/base.ts'
@@ -20,6 +21,7 @@ import { enotsup } from '../errors/fs.ts'
 import { type MissingOpError } from '../errors/types.ts'
 
 export interface OpKwargs {
+  ioContext?: IOContext
   index?: IndexCacheStore
   filetype?: string | null
   [k: string]: unknown

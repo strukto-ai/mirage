@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invocationIo } from '../generic_bind/factory.ts'
+
 import type { GitHubAccessor } from '../../../accessor/github.ts'
 import { pathsScoped } from '../../../ops/namespace_view.ts'
-import { withCommandGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
 import { IO } from './io.ts'
 import { SCOPE_ERROR } from '../../../core/github/constants.ts'
 import { readdir as githubReaddir } from '../../../core/github/readdir.ts'
@@ -78,7 +79,7 @@ async function grep(
     }
   }
   const idx = opts.index ?? undefined
-  const io = scoped ? withCommandGuards(withPolicyGuard(IO)) : null
+  const io = scoped ? invocationIo(IO, opts) : null
   const stat = (p: PathSpec): Promise<FileStat> =>
     io !== null ? io.stat(accessor, p, idx) : githubStat(accessor, p, idx)
   const readdir = (p: PathSpec): Promise<string[]> =>

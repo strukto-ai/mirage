@@ -14,7 +14,7 @@
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
-import { record, startOp } from '../../observe/context.ts'
+import { activeRecorder, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eexist, enoent } from '../../errors/fs.ts'
 import { DropboxApiError } from './client.ts'
@@ -48,6 +48,7 @@ export async function mkdir(
   path: PathSpec,
   parents = false,
 ): Promise<void> {
+  const recorder = activeRecorder()
   const apiPath = dropboxPathOf(accessor, path)
   // The mount root always exists (the API rejects the empty path).
   if (apiPath === accessor.rootPath) {
@@ -61,7 +62,7 @@ export async function mkdir(
       throw enoent(path.virtual)
     }
   }
-  const timer = startOp()
+  const timer = startOp(recorder)
   try {
     await createFolder(accessor.tokenManager, apiPath)
   } catch (err) {

@@ -14,7 +14,7 @@
 
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
-import { record, startOp } from '../../observe/context.ts'
+import { activeRecorder, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { writeItem } from '../msgraph/drive.ts'
 import { driveLoc, resolveItem } from './resolve.ts'
@@ -30,8 +30,9 @@ import { driveLoc, resolveItem } from './resolve.ts'
  *   path: the file to create.
  */
 export async function create(accessor: SharePointAccessor, path: PathSpec): Promise<void> {
+  const recorder = activeRecorder()
   const resolved = await resolveItem(accessor, path)
-  const timer = startOp()
+  const timer = startOp(recorder)
   await writeItem(
     accessor.config,
     driveLoc(accessor.config, resolved, path.vfsPath),

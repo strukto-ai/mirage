@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PermissionsPolicy } from './builtin/permissions.ts'
+import type { IOContext } from '../context/types.ts'
 import { operandExitCode } from '../commands/spec/usage.ts'
 import { explaining, lineRunning, noteRefusal, runExplaining } from '../context/session_context.ts'
 import { eacces, erofs } from '../errors/fs.ts'
@@ -200,8 +202,9 @@ async function explainedOp(
   policies: Policies,
   ctx: VfsContext,
   decisions: Decisions | null,
+  io?: IOContext,
 ): Promise<VfsExplanation> {
-  const answers = (await policies.answers('preVfs', ctx)).filter(
+  const answers = (await policies.answers('preVfs', ctx, true, io)).filter(
     (a): a is Deny | Ask => a.kind !== 'route',
   )
   const winner = answers.find((a) => a.kind === 'deny') ?? answers[0] ?? null
@@ -276,9 +279,10 @@ export async function preVfsGate(
     checkHidden?: boolean
     decisions?: Decisions | null
     final?: boolean
+    io?: IOContext
   } = {},
 ): Promise<void> {
-  const { checkHidden = true, decisions = null, final = true, ...context } = access
+  const { checkHidden = true, decisions = null, final = true, io, ...context } = access
   const ctx: VfsContext = {
     op,
     path,
@@ -291,7 +295,9 @@ export async function preVfsGate(
   const trace = explaining()
   if (Array.isArray(trace)) {
     const noted = await runExplaining(DryRun.DECIDING, async () =>
-      checkHidden && (await policies.hides(ctx)) ? null : explainedOp(policies, ctx, decisions),
+      checkHidden && (await policies.hides(ctx, io))
+        ? null
+        : explainedOp(policies, ctx, decisions, io),
     )
     if (noted === null) throw new Explained()
     trace.push(noted)
@@ -303,7 +309,7 @@ export async function preVfsGate(
   if (!(policies.wants('preVfs') || checkHidden || (write && context.mode !== undefined))) {
     return
   }
-  let answer: Hide | Deny | Ask | null = await policies.preVfs(ctx, checkHidden)
+  let answer: Hide | Deny | Ask | null = await policies.preVfs(ctx, checkHidden, io)
   if (answer === null) return
   if (answer.kind === 'hide') throw answer.error
   if (answer.kind === 'ask') {
@@ -458,12 +464,17 @@ export class Policies {
    * so the order holds if the host edits registrations while a hook
    * awaits; changes take effect at the next gate.
    */
-  private chain(hook: Hook, placed: boolean): Policy[] {
-    let chain = [...this.policies]
+  private chain(hook: Hook, placed: boolean, io?: IOContext): Policy[] {
+    let chain = this.policies.map((policy) =>
+      hook === 'preVfs' && io !== undefined && policy instanceof PermissionsPolicy
+        ? policy.withContext(io)
+        : policy,
+    )
     if (hook === 'preExecute' && this.placement !== null && !placed) {
       chain = [this.placement, ...chain]
     }
-    if (hook === 'preVfs') chain = [...chain, this.mode]
+    if (hook === 'preVfs')
+      chain = [...chain, io === undefined ? this.mode : new MountModePolicy(io)]
     return chain
   }
 
@@ -507,10 +518,11 @@ export class Policies {
       | SessionContext,
     every: boolean,
     placed = false,
+    io?: IOContext,
   ): Promise<[(Deny | Ask | Route)[], Limit[]]> {
     const said: (Deny | Ask | Route)[] = []
     const limits: Limit[] = []
-    for (const policy of this.chain(hook, placed)) {
+    for (const policy of this.chain(hook, placed, io)) {
       const fn = policy[hook]
       if (fn === undefined) continue
       const name = policy.constructor.name || 'policy'
@@ -575,8 +587,9 @@ export class Policies {
       | ExecuteResultContext
       | SessionContext,
     placed = false,
+    io?: IOContext,
   ): Promise<[Deny | Ask | null, Limit | null, Route[]]> {
-    const [said, limits] = await this.said(hook, ctx, false, placed)
+    const [said, limits] = await this.said(hook, ctx, false, placed, io)
     const deny = said.find((a): a is Deny => a.kind === 'deny')
     if (deny !== undefined) return [deny, null, []]
     const asked = said.find((a): a is Ask => a.kind === 'ask') ?? null
@@ -603,8 +616,9 @@ export class Policies {
       | ExecuteResultContext
       | SessionContext,
     every = true,
+    io?: IOContext,
   ): Promise<(Deny | Ask | Route)[]> {
-    const [said] = await this.said(hook, ctx, every)
+    const [said] = await this.said(hook, ctx, every, false, io)
     return said
   }
 
@@ -628,8 +642,9 @@ export class Policies {
   }
 
   /** Whether the built-in hides answer the op as absent, before any policy is asked. */
-  async hides(ctx: VfsContext): Promise<boolean> {
-    return (await this.hidden.preVfs(ctx)) !== null
+  async hides(ctx: VfsContext, io?: IOContext): Promise<boolean> {
+    const hidden = io === undefined ? this.hidden : new HiddenPathsPolicy(io)
+    return (await hidden.preVfs(ctx)) !== null
   }
 
   /**
@@ -641,12 +656,16 @@ export class Policies {
    * whether or not any policy overrides the hook; `checkHidden` false
    * only for a door that has already answered the hides itself.
    */
-  async preVfs(ctx: VfsContext, checkHidden = true): Promise<Hide | Deny | Ask | null> {
+  async preVfs(
+    ctx: VfsContext,
+    checkHidden = true,
+    io?: IOContext,
+  ): Promise<Hide | Deny | Ask | null> {
     if (checkHidden) {
-      const hidden = await this.hidden.preVfs(ctx)
+      const hidden = await (io === undefined ? this.hidden : new HiddenPathsPolicy(io)).preVfs(ctx)
       if (hidden !== null) return hidden
     }
-    const [action] = await this.fire('preVfs', ctx)
+    const [action] = await this.fire('preVfs', ctx, false, io)
     return action
   }
 

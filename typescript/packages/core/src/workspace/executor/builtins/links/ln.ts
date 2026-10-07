@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { IOContext } from '../../../../context/types.ts'
+import { ioContext } from '../../../session/access.ts'
+
 import { backupControl, backupTarget } from '../../../../commands/builtin/utils/backup.ts'
 import { DEFAULT_BACKUP_SUFFIX } from '../../../../commands/builtin/utils/constants.ts'
 import { UsageError } from '../../../../commands/errors.ts'
@@ -230,14 +233,14 @@ async function listedByParent(dispatch: DispatchFn, virtual: string): Promise<bo
 // link, and every namespace read in this module has to answer the same
 // way, or a link inside hidden space leads ln out of it: into the
 // directory it points at, or to the target string a hard link would copy.
-function visibleLink(namespace: Namespace, virtual: string): boolean {
-  return pathVisible(sessionVisibility(), virtual) && namespace.isLink(virtual)
+function visibleLink(namespace: Namespace, virtual: string, context?: IOContext): boolean {
+  return pathVisible(sessionVisibility(context), virtual) && namespace.isLink(virtual)
 }
 
 // Resolve the links along a path the session may see; a hidden path
 // stays as typed. Throws CycleError as `follow` does.
-function followVisible(namespace: Namespace, virtual: string): string {
-  return pathVisible(sessionVisibility(), virtual) ? namespace.follow(virtual) : virtual
+function followVisible(namespace: Namespace, virtual: string, context?: IOContext): string {
+  return pathVisible(sessionVisibility(context), virtual) ? namespace.follow(virtual) : virtual
 }
 
 // An operand as the path the kernel reaches, its final name kept. Command
@@ -246,9 +249,14 @@ function followVisible(namespace: Namespace, virtual: string): string {
 // walked here, and every namespace read sees the name the door will. A hidden
 // path stays as typed, and a loop is left for the door to report when the
 // link is made. Mirrors Python's operand_abs.
-export function operandAbs(namespace: Namespace, arg: string | PathSpec, cwd: string): string {
+export function operandAbs(
+  namespace: Namespace,
+  arg: string | PathSpec,
+  cwd: string,
+  context?: IOContext,
+): string {
   const virtual = absPath(arg, cwd)
-  if (arg instanceof PathSpec || !pathVisible(sessionVisibility(), virtual)) return virtual
+  if (arg instanceof PathSpec || !pathVisible(sessionVisibility(context), virtual)) return virtual
   try {
     return posixNormpath(namespace.followParent(dottedSpelling(arg, cwd) ?? virtual))
   } catch (err) {
@@ -269,10 +277,11 @@ function walkVerdict(
   word: string | PathSpec,
   cwd: string,
   followLast = false,
+  context?: IOContext,
 ): FsCondition | null {
   if (wordText(word) === '') return 'ENOENT'
   const virtual = absPath(word, cwd)
-  if (!pathVisible(sessionVisibility(), virtual)) return null
+  if (!pathVisible(sessionVisibility(context), virtual)) return null
   const trimmed = rstripSlash(virtual) || '/'
   try {
     if (followLast) namespace.follow(trimmed)
@@ -305,9 +314,10 @@ async function dirAt(
   dispatch: DispatchFn,
   virtual: string,
   noDereference: boolean,
+  context?: IOContext,
 ): Promise<[string, FileStat | null]> {
   let resolved = virtual
-  if (visibleLink(namespace, virtual)) {
+  if (visibleLink(namespace, virtual, context)) {
     if (noDereference) return [virtual, null]
     try {
       resolved = namespace.follow(virtual)
@@ -349,11 +359,12 @@ export async function planLinks(
   targetDir: string | null,
   targetTyped: string | null,
   flags: LnFlags,
+  context?: IOContext,
 ): Promise<[LinkPlan[], string | null]> {
   const hint = `${usageHint('ln')}\n`
   if (targetDir !== null) {
     const typed = targetTyped ?? targetDir
-    const why = walkVerdict(namespace, typed, cwd, true)
+    const why = walkVerdict(namespace, typed, cwd, true, context)
     if (why !== null) return [[], `ln: failed to access '${typed}': ${posixPhrase(why)}\n`]
     const unwalked = await dotRefusal(
       dispatchStat(dispatch),
@@ -369,8 +380,9 @@ export async function planLinks(
     const [resolved, stat] = await dirAt(
       namespace,
       dispatch,
-      operandAbs(namespace, targetDir, cwd),
+      operandAbs(namespace, targetDir, cwd, context),
       flags.noDereference,
+      context,
     )
     if (stat === null) {
       return [
@@ -395,18 +407,24 @@ export async function planLinks(
     const link = operands[1]
     if (link === undefined) return [[], null]
     return [
-      [{ source: first, linkAbs: operandAbs(namespace, link, cwd), linkTyped: wordText(link) }],
+      [
+        {
+          source: first,
+          linkAbs: operandAbs(namespace, link, cwd, context),
+          linkTyped: wordText(link),
+        },
+      ],
       null,
     ]
   }
   const last = operands[operands.length - 1] ?? first
-  const lastAbs = operandAbs(namespace, last, cwd)
+  const lastAbs = operandAbs(namespace, last, cwd, context)
   // The empty name reads as the working directory in `lastAbs`, and it is
   // no directory to link into.
   const [resolved, stat] =
     wordText(last) === ''
       ? [lastAbs, null]
-      : await dirAt(namespace, dispatch, lastAbs, flags.noDereference)
+      : await dirAt(namespace, dispatch, lastAbs, flags.noDereference, context)
   const isDir = stat !== null && stat.type === FileType.DIRECTORY
   if (operands.length === 2 && !isDir) {
     return [[{ source: first, linkAbs: lastAbs, linkTyped: wordText(last) }], null]
@@ -416,7 +434,7 @@ export async function planLinks(
       // A link standing at the name that leads nowhere, dangling or
       // looping, is ENOENT to GNU; a loop above it is ELOOP.
       const why =
-        wordText(last) === '' || visibleLink(namespace, lastAbs)
+        wordText(last) === '' || visibleLink(namespace, lastAbs, context)
           ? 'ENOENT'
           : await missCondition(dispatch, resolved)
       return [[], `ln: target '${wordText(last)}': ${posixPhrase(why)}\n`]
@@ -434,9 +452,10 @@ async function sourceBytes(
   typed: string,
   linkTyped: string,
   flags: LnFlags,
+  context?: IOContext,
 ): Promise<[Uint8Array | null, string | null]> {
   let resolved = srcAbs
-  if (visibleLink(namespace, srcAbs)) {
+  if (visibleLink(namespace, srcAbs, context)) {
     try {
       resolved = namespace.follow(srcAbs)
     } catch (err) {
@@ -489,6 +508,7 @@ export async function makeLink(
   flags: LnFlags,
   errors: string[],
   out: string[],
+  context?: IOContext,
 ): Promise<void> {
   const kind = flags.symbolic ? 'symbolic link' : 'hard link'
   const typed = plan.linkTyped
@@ -508,13 +528,13 @@ export async function makeLink(
     return
   }
   if (!flags.symbolic) {
-    const why = walkVerdict(namespace, plan.source, cwd, flags.logical)
+    const why = walkVerdict(namespace, plan.source, cwd, flags.logical, context)
     if (why !== null) {
       errors.push(`ln: failed to access '${targetTyped}': ${posixPhrase(why)}\n`)
       return
     }
   }
-  const nameWhy = walkVerdict(namespace, typed, cwd)
+  const nameWhy = walkVerdict(namespace, typed, cwd, false, context)
   if (nameWhy !== null) {
     errors.push(refused(flags, typed, targetTyped, nameWhy))
     return
@@ -557,16 +577,16 @@ export async function makeLink(
       let linkDir = gnuDirname(plan.linkAbs)
       let targetAbs = absPath(plan.source, cwd)
       try {
-        targetAbs = followVisible(namespace, targetAbs)
-        linkDir = followVisible(namespace, linkDir)
+        targetAbs = followVisible(namespace, targetAbs, context)
+        linkDir = followVisible(namespace, linkDir, context)
       } catch (err) {
         if (!(err instanceof CycleError)) throw err
       }
       linkTarget = posixRelative(targetAbs, linkDir)
     }
   } else {
-    const srcAbs = operandAbs(namespace, plan.source, cwd)
-    if (visibleLink(namespace, srcAbs) && !flags.logical) {
+    const srcAbs = operandAbs(namespace, plan.source, cwd, context)
+    if (visibleLink(namespace, srcAbs, context) && !flags.logical) {
       linkTarget = namespace.readlink(srcAbs)
     } else {
       const [bytes, refusal] = await sourceBytes(
@@ -576,6 +596,7 @@ export async function makeLink(
         targetTyped,
         typed,
         flags,
+        context,
       )
       if (refusal !== null) {
         errors.push(refusal)
@@ -584,7 +605,10 @@ export async function makeLink(
       data = bytes
     }
   }
-  if (pathVisible(sessionVisibility(), plan.linkAbs) && namespace.isMountRoot(plan.linkAbs)) {
+  if (
+    pathVisible(sessionVisibility(context), plan.linkAbs) &&
+    namespace.isMountRoot(plan.linkAbs)
+  ) {
     errors.push(`ln: failed to create ${kind} '${typed}': File exists\n`)
     return
   }
@@ -604,7 +628,7 @@ export async function makeLink(
     // inside it in planLinks, so only a non-directory and the absent name
     // are settled here, and a plain file without a flag falls to the
     // door's "File exists" below.
-    const linked = visibleLink(namespace, plan.linkAbs)
+    const linked = visibleLink(namespace, plan.linkAbs, context)
     const behind = linked
       ? await linkTargetStat(namespace, dispatch, plan.linkAbs, null)
       : await pathStat(dispatch, plan.linkAbs)
@@ -628,8 +652,9 @@ export async function makeLink(
   if (
     flags.force &&
     !backs &&
-    operandAbs(namespace, plan.source, cwd) === plan.linkAbs &&
-    (visibleLink(namespace, plan.linkAbs) || (await pathStat(dispatch, plan.linkAbs)) !== null)
+    operandAbs(namespace, plan.source, cwd, context) === plan.linkAbs &&
+    (visibleLink(namespace, plan.linkAbs, context) ||
+      (await pathStat(dispatch, plan.linkAbs)) !== null)
   ) {
     errors.push(`ln: '${targetTyped}' and '${typed}' are the same file\n`)
     return
@@ -642,14 +667,14 @@ export async function makeLink(
   // there is what -T names, and that one is backed up.
   let occupied = false
   if (data !== null || backs) {
-    const found = visibleLink(namespace, plan.linkAbs)
+    const found = visibleLink(namespace, plan.linkAbs, context)
       ? null
       : await pathStat(dispatch, plan.linkAbs)
     if (backs && found !== null && found.type === FileType.DIRECTORY) {
       errors.push(`ln: ${typed}: cannot overwrite directory\n`)
       return
     }
-    occupied = found !== null || visibleLink(namespace, plan.linkAbs)
+    occupied = found !== null || visibleLink(namespace, plan.linkAbs, context)
   }
   if (occupied && backs) {
     const backup = await backupTarget(
@@ -774,6 +799,7 @@ export async function handleLn(
   session: SessionState,
   args: (string | PathSpec)[],
 ): Promise<Result> {
+  const context = ioContext(session)
   const spec = specOf('ln')
   const parsed = parseCommand(
     spec,
@@ -811,12 +837,13 @@ export async function handleLn(
     targetDir,
     targetTyped,
     flags,
+    context,
   )
   if (refused !== null) return fail('ln', refused)
   const errors: string[] = []
   const out: string[] = []
   for (const plan of plans) {
-    await makeLink(namespace, dispatch, session.cwd, plan, flags, errors, out)
+    await makeLink(namespace, dispatch, session.cwd, plan, flags, errors, out, context)
   }
   return result('ln', {
     out: out.length > 0 ? encodeText(out.join('')) : null,

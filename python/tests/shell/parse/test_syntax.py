@@ -18,14 +18,14 @@ from pathlib import Path
 
 import pytest
 
-from mirage.shell.bytes import decode_text
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.parse import (
     find_syntax_error,
     find_unterminated_backtick,
     parse,
     source_offsets,
 )
-from mirage.shell.parse.syntax import syntax_error_result
+from mirage.shell.parse.syntax import syntax_error_message
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
@@ -37,9 +37,10 @@ def test_partial_quoted_heredoc_end_is_not_syntax_error():
 
 def test_a_syntax_error_span_keeps_an_invalid_byte_as_typed():
     line = decode_text(b"if '\xff' then")
-    io = syntax_error_result(line, parse(line))
-    assert io.exit_code == 2
-    assert io.stderr == b"mirage: syntax error near 'if '\xff' then'\n"
+    message = syntax_error_message(line, parse(line))
+    assert (
+        encode_text(message) == b"mirage: syntax error near 'if '\xff' then'\n"
+    )
 
 
 def test_syntax_error_after_deep_command_substitution():

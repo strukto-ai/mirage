@@ -19,7 +19,7 @@ import {
   invalidateAncestors,
   invalidateSubtree,
 } from '../../cache/context.ts'
-import { record, startOp } from '../../observe/context.ts'
+import { activeRecorder, record, startOp } from '../../observe/context.ts'
 import { eisdir, enoent, enotempty } from '../../errors/fs.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -31,12 +31,13 @@ import { makeStat } from './stat.ts'
 export function makeUnlink<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): PathFn<A> {
   const stat = makeStat(driver)
   return async function unlink(accessor, path) {
+    const recorder = activeRecorder()
     // unlink(2) answers ENOENT for a missing name and EISDIR for a
     // directory; a store's delete is silent for both, and only the
     // command builders check first (see `makeRmdir`).
     if (isDir(await stat(accessor, path))) throw eisdir(path)
     const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
-    const timer = startOp()
+    const timer = startOp(recorder)
     const settle = async (): Promise<void> => {
       // Also when the delete threw: one that throws part-way has already
       // removed keys, and a pin that outlives the object it names fails

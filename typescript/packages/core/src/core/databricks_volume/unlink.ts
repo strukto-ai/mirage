@@ -15,7 +15,7 @@
 import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { record, startOp } from '../../observe/context.ts'
+import { activeRecorder, record, startOp } from '../../observe/context.ts'
 import { FileType, VFSName, type PathSpec } from '../../types.ts'
 import { dbxFetch } from './client.ts'
 import { ensurePathSpec } from './_helpers.ts'
@@ -29,13 +29,14 @@ export async function unlink(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<void> {
+  const recorder = activeRecorder()
   const p = ensurePathSpec(path)
   const fileStat = await stat(accessor, p, index)
   if (fileStat.type === FileType.DIRECTORY) {
     throw eisdir(p.virtual)
   }
   const remotePath = backendPath(accessor.config, p)
-  const timer = startOp()
+  const timer = startOp(recorder)
   try {
     await dbxFetch(accessor, 'DELETE', 'files', remotePath)
   } catch (exc) {

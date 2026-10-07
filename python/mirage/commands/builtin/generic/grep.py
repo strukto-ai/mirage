@@ -219,9 +219,9 @@ async def grep_generic(
     read_stream: Callable[..., AsyncIterator[bytes]] | None,
     stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    read_bytes = cache_aware_bound_bytes(read_bytes)
+    read_bytes = cache_aware_bound_bytes(read_bytes, opts.io_context)
     if read_stream is not None:
-        read_stream = cache_aware_bound_stream(read_stream)
+        read_stream = cache_aware_bound_stream(read_stream, opts.io_context)
     operand_stream = stdin_stream(
         read_stream if read_stream is not None else read_bytes, stdin
     )

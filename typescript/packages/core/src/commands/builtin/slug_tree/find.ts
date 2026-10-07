@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invocationIo } from '../generic_bind/factory.ts'
+
 import type { Accessor } from '../../../accessor/base.ts'
 import { pathsScoped } from '../../../ops/namespace_view.ts'
 import { makeSearchBackedFind } from '../../../core/generic/find.ts'
@@ -33,12 +35,7 @@ import type { FlagValue } from '../../spec/types.ts'
 import { treeHasMtime } from '../find_eval.ts'
 import { parseFindExpression, type FindExpr } from '../find_parse.ts'
 import { findGeneric } from '../generic/find.ts'
-import {
-  resolveGlobOf,
-  withCommandGuards,
-  withPolicyGuard,
-  type CommandIO,
-} from '../generic_bind/adapter.ts'
+import { resolveGlobOf, type CommandIO } from '../generic_bind/adapter.ts'
 import { findWalk } from '../generic_bind/builders/find.ts'
 
 const ENC = new TextEncoder()
@@ -106,15 +103,12 @@ export function makeFind<A extends Accessor>(
   statLight: StatOp<A>,
   needsFull: (expr: FindExpr) => boolean,
 ): RegisteredCommand[] {
-  const resolveGlob = resolveGlobOf(io)
   const findFull = makeSearchBackedFind<A>({ resolvePath: tree.resolve, stat, walk: tree.walk })
   const findLight = makeSearchBackedFind<A>({
     resolvePath: tree.resolve,
     stat: statLight,
     walk: tree.walk,
   })
-  const walkFull = withCommandGuards(withPolicyGuard(io))
-  const walkLight = withCommandGuards(withPolicyGuard({ ...io, stat: statLight }))
   return command({
     name: 'find',
     vfs,
@@ -125,6 +119,9 @@ export function makeFind<A extends Accessor>(
       texts: string[],
       opts: CommandOpts,
     ): Promise<CommandFnResult> => {
+      const walkFull = invocationIo(io, opts)
+      const walkLight = invocationIo({ ...io, stat: statLight }, opts)
+      const resolveGlob = resolveGlobOf(walkFull)
       const index = opts.index ?? undefined
       const resolved = paths.length > 0 ? await resolveGlob(accessor, paths, index) : []
       const searchPath = resolved[0]

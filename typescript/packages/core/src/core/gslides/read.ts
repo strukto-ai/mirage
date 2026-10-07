@@ -14,7 +14,7 @@
 
 import type { GSlidesAccessor } from '../../accessor/gslides.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { record, startOp } from '../../observe/context.ts'
+import { activeRecorder, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { slidesBase, type TokenManager, googleGet } from '../google/client.ts'
 import { resolveAppEntry } from '../google/entry.ts'
@@ -40,6 +40,7 @@ async function readFile(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<Uint8Array> {
+  const recorder = activeRecorder()
   const entry = await resolveAppEntry(
     accessor.tokenManager,
     match,
@@ -49,7 +50,7 @@ async function readFile(
     'gslides/file',
     makeFilename,
   )
-  const timer = startOp()
+  const timer = startOp(recorder)
   const data = await readPresentation(accessor.tokenManager, entry.id)
   record('read', path.virtual, 'gslides', data.length, timer, {
     fingerprint: entry.remoteTime !== '' ? entry.remoteTime : null,

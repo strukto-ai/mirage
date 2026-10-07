@@ -109,6 +109,7 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.probe import path_stat
 from mirage.workspace.mount.namespace.view import namespace_view_of
 from mirage.workspace.mount.storage import make_storage_key
+from mirage.workspace.session.access import io_context
 from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecuteLine, ExecutionNode
 
@@ -180,6 +181,7 @@ async def _finish_find(
         session.cwd,
         execute_fn=execute_fn,
         session_id=session.session_id,
+        session=session,
         ns=ns,
         stat_path=stat_path,
         dispatch=dispatch,
@@ -299,7 +301,9 @@ async def handle_command(
                     if dispatch is not None
                     else None
                 ),
-                ns=namespace_view_of(registry, namespace, dispatch, session),
+                ns=namespace_view_of(
+                    registry, namespace, dispatch, session, context.admission
+                ),
                 session_view=session_view(
                     session,
                     registry.policies,
@@ -318,7 +322,15 @@ async def handle_command(
 
     # Every op the command issues from here carries its gate to the door.
     if dispatch is not None:
-        dispatch = with_dispatch_rule_guard(dispatch)
+        dispatch = with_dispatch_rule_guard(
+            dispatch,
+            io_context(
+                session,
+                context.admission,
+                registry.policies,
+                context.frame.recorder,
+            ),
+        )
 
     if cmd_name in CWD_DEFAULT_RAW:
         operand = default_cwd_operand(
@@ -554,7 +566,9 @@ async def handle_command(
             routing_decision=routing_decision,
             execute_fn=execute_fn,
         )
-        cross_ns = namespace_view_of(registry, namespace, dispatch, session)
+        cross_ns = namespace_view_of(
+            registry, namespace, dispatch, session, context.admission
+        )
         # A per-operand native run is single-mount by construction, so a
         # traversal operand holding nested mounts has to fan out inside
         # it, exactly as the same operand would on a line of its own.
@@ -719,7 +733,9 @@ async def handle_command(
         else b""
     )
 
-    single_ns = namespace_view_of(registry, namespace, dispatch, session)
+    single_ns = namespace_view_of(
+        registry, namespace, dispatch, session, context.admission
+    )
     single_stat = (
         functools.partial(path_stat, dispatch)
         if dispatch is not None

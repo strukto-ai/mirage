@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { IOContext } from '../context/types.ts'
 import type { ProcessView } from '../process/types.ts'
 import type { Accessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/index.ts'
@@ -36,6 +37,7 @@ import type { CommandSpec, FlagValue } from './spec/types.ts'
  * output limit, which `executeCmd` applies itself instead of forwarding.
  */
 export interface ExecContext {
+  ioContext?: IOContext
   stdin?: ByteSource | null
   cwd?: string
   dispatch?: DispatchFn
@@ -62,6 +64,7 @@ export interface ExecContext {
  * fourth argument. A handler reads the fields it needs and ignores the rest.
  */
 export interface CommandOpts {
+  ioContext?: IOContext
   /** Piped standard input, if any. */
   stdin: ByteSource | null
   /** The parsed flags. Read them through a spec-bound `FlagView`. */

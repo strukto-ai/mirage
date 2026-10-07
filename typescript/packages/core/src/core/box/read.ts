@@ -17,7 +17,7 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { entryOrWarm } from '../../cache/index/warm.ts'
-import { record, recordStream, startOp } from '../../observe/context.ts'
+import { activeRecorder, record, recordStream, startOp } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import { Sha1, sha1Hex } from '../../utils/hash.ts'
 import { downloadFile, downloadFileStream } from './api.ts'
@@ -42,6 +42,7 @@ export async function read(
   index?: IndexCacheStore,
   options?: { offset?: number; size?: number },
 ): Promise<Uint8Array> {
+  const recorder = activeRecorder()
   const window = windowFor(options?.offset ?? 0, options?.size ?? null)
   const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   let p = path.virtual
@@ -61,7 +62,7 @@ export async function read(
   )
   if (entry === null) throw enoent(path.virtual)
   if (entry.resourceType === 'box/folder') throw eisdir(path.virtual)
-  const timer = startOp()
+  const timer = startOp(recorder)
   const data = await downloadFile(accessor.tokenManager, entry.id, window)
   // Only a whole read through a row with a sha1 can yield a token, so nothing
   // else is hashed. The token never depends on a recorder being bound
@@ -93,6 +94,7 @@ export async function* readStream(
   path: PathSpec,
   index?: IndexCacheStore,
 ): AsyncIterable<Uint8Array> {
+  const recorder = activeRecorder()
   const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   let p = path.virtual
   if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
@@ -111,7 +113,7 @@ export async function* readStream(
   )
   if (entry === null) throw enoent(path.virtual)
   if (entry.resourceType === 'box/folder') throw eisdir(path.virtual)
-  const rec = recordStream('read', path.virtual, 'box')
+  const rec = recordStream('read', path.virtual, 'box', {}, recorder)
   const digest = rec !== null && entryToken(entry) !== null ? new Sha1() : null
   for await (const chunk of downloadFileStream(accessor.tokenManager, entry.id)) {
     digest?.update(chunk)

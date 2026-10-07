@@ -30,6 +30,7 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.context.types import IOContext
 from mirage.io.stream import async_chain, ensure_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
@@ -141,6 +142,7 @@ def head_multi(
     show_headers: bool = False,
     zero_terminated: bool = False,
     unread: frozenset[str] = frozenset(),
+    context: IOContext | None = None,
 ) -> AsyncIterator[bytes]:
     """Run head over multiple already-resolved paths.
 
@@ -164,7 +166,7 @@ def head_multi(
         unread (frozenset[str]): operands that opened but do not read (a
             directory): each prints its header and nothing else.
     """
-    cached = cache_aware_read(read)
+    cached = cache_aware_read(read, context)
     return _head_multi(
         paths,
         read=lambda p: read(p) if is_stdin(p) else cached(p),
@@ -263,6 +265,7 @@ async def head_generic(
 
         return head_multi(
             opened,
+            context=opts.io_context,
             read=source_for,
             n=parsed.lines,
             c=parsed.bytes_,

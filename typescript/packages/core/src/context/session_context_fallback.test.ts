@@ -237,7 +237,7 @@ describe('session predicates on the fallback storage', () => {
     })
   })
 
-  it('a command view folds the live sessions as the op door does', async () => {
+  it('a command view retains its named session while another session is live', async () => {
     const hider = new SessionState({
       sessionId: 'hider',
       visibility: { paths: { paths: ['/data/x'] } },
@@ -257,7 +257,7 @@ describe('session predicates on the fallback storage', () => {
       return Promise.resolve()
     })
     await Promise.all([long, short])
-    expect(folded).toBe(false)
+    expect(folded).toBe(true)
     // A session named outside any line keeps its own view.
     const own = namespaceViewOf(registry, null, dispatch, other).visibility ?? null
     expect(pathVisible(own, '/data/x')).toBe(true)

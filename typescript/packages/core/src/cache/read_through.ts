@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { IOContext } from '../context/types.ts'
+
 import type { Accessor } from '../accessor/base.ts'
 import { type EntryGate, PathSpec, type ReadBytesFn, type ReadStreamFn } from '../types.ts'
 import type { IndexCacheStore } from './index/store.ts'
@@ -96,9 +98,9 @@ function serving(
  * The reader may be guarded, so a path the running command could be
  * refused is left to it (`serving`).
  */
-export function cacheAwareStream(raw: PathStream): PathStream {
+export function cacheAwareStream(raw: PathStream, context?: IOContext): PathStream {
   return (path) =>
-    serveStream(serving(activeCacheManager(), getAdmission(), path), path, () => raw(path))
+    serveStream(serving(activeCacheManager(), getAdmission(context), path), path, () => raw(path))
 }
 
 /**
@@ -111,9 +113,9 @@ export function cacheAwareStream(raw: PathStream): PathStream {
  * captured with it, and a path the running command could be refused is
  * left to the reader, which may be guarded (`serving`).
  */
-export function cacheAwareStreamEager(raw: PathStream): PathStream {
+export function cacheAwareStreamEager(raw: PathStream, context?: IOContext): PathStream {
   const manager = activeCacheManager()
-  const gate = getAdmission()
+  const gate = getAdmission(context)
   return (path) => serveStream(serving(manager, gate, path), path, () => raw(path))
 }
 

@@ -12,7 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { EvaluationContext } from '../evaluation.ts'
+import { CommandPreparation, ownWords } from '../executor/command/prepare.ts'
+import { bindDispatch } from '../dispatcher/context.ts'
+import { ioContext } from '../session/access.ts'
+import { EvaluationContext } from '../evaluation.ts'
 import { sessionEntry, setSessionEntry } from '../session/session.ts'
 import { seedVar, setAttr } from '../session/state.ts'
 import { TempEnv, VarAttr } from '../../shell/variable.ts'
@@ -27,35 +30,26 @@ import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { guardDispatch, mergeSignals } from '../abort.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
-import { DevVFS } from '../../vfs/dev/dev.ts'
 import { decodeText, encodeText } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
-import {
-  getCommandName,
-  getParts,
-  getProcessSubBody,
-  getProcessSubDirection,
-  getText,
-  splitEnvPrefix,
-} from '../../shell/helpers.ts'
+import { getCommandName, getParts, getText, splitEnvPrefix } from '../../shell/helpers.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
-import { ExitSignal } from '../../shell/errors.ts'
-import { NodeType as NT, ProcessSubDirection } from '../../shell/types.ts'
+import { NodeType as NT } from '../../shell/types.ts'
 import { PathSpec, wordText } from '../../types.ts'
-import { Argv, expandArgv } from '../expand/argv.ts'
+import { Argv } from '../expand/argv.ts'
 import { expandBoundaryGlobs } from '../expand/globs.ts'
-import { type ExecuteFn, expandNode, childLine } from '../expand/node.ts'
+import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import { claimantFor, evaluatedFrom } from './occurrence.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { runExternal } from '../executor/command/external.ts'
 import { handleCommand } from '../executor/command/command.ts'
-import type { ExecuteNodeOpts } from '../executor/command/types.ts'
+import type { ExecuteNodeFn, Result } from '../executor/command/types.ts'
 import {
   type AliasMark,
   aliasCommandText,
   expandingAliases,
 } from '../executor/builtins/alias/index.ts'
-import { findSyntaxError, syntaxErrorResult } from '../../shell/parse/index.ts'
+import { syntaxErrorResult } from './diagnostics.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import { INTERPRETER_NAMES } from '../lookup/constants.ts'
 import { guardIO, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
@@ -109,30 +103,14 @@ import { preSessionGate } from '../../policy/index.ts'
 import { ExecutionNode } from '../types.ts'
 import { concat } from '../../io/cachable_iterator.ts'
 
-type Result = [ByteSource | null, IOResult, ExecutionNode]
-
 /**
  * Await an expansion of the command's own words; an `ExitSignal` it raises
  * names the command, whose redirects bash had not applied. Mirrors Python's
  * _own_words.
  */
-async function ownWords<T>(node: TSNodeLike, pending: Promise<T>): Promise<T> {
-  try {
-    return await pending
-  } catch (err) {
-    if (err instanceof ExitSignal) err.expanding = node.id ?? null
-    throw err
-  }
-}
 
 export async function executeCommand(
-  recurse: (
-    n: TSNodeLike,
-    s: EvaluationContext,
-    i: ByteSource | null,
-    cs: CallStack | null,
-    opts?: ExecuteNodeOpts,
-  ) => Promise<Result>,
+  recurse: ExecuteNodeFn,
   dispatch: DispatchFn,
   registry: MountRegistry,
   namespace: Namespace,
@@ -190,22 +168,16 @@ export async function executeCommand(
       const line = source.slice(0, at) + rewritten
       const scope = parser.fork()
       try {
-        const ast = scope.parse(line)
         const own = new Map<string, readonly [number, number]>()
         for (const [alias, text] of texts) {
           own.set(alias, [at, at + text.length])
           at += text.length
         }
-        const reparse = (text: string): TSNodeLike => scope.parse(text)
-        const offending = findSyntaxError(
-          ast,
-          reparse,
-          expandingAliases(session),
-          own,
-          scope.sourceOffsets(line, ast),
-        )
-        if (offending !== null) {
-          const io = syntaxErrorResult(offending, ast)
+        const program = scope.program(line, expandingAliases(session), own)
+        const ast = program.root
+        const diagnostic = program.diagnostics[0]
+        if (diagnostic !== undefined) {
+          const io = syntaxErrorResult(diagnostic)
           const bad = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
           return [
             null,
@@ -378,12 +350,7 @@ export async function executeCommand(
 }
 
 async function runCommandBody(
-  recurse: (
-    n: TSNodeLike,
-    s: EvaluationContext,
-    i: ByteSource | null,
-    cs: CallStack | null,
-  ) => Promise<Result>,
+  recurse: ExecuteNodeFn,
   dispatch: DispatchFn,
   registry: MountRegistry,
   namespace: Namespace,
@@ -417,55 +384,28 @@ async function runCommandBody(
   const claimant = claimantFor(node, handed)
   const executeFn: ExecuteFn = (cmd, opts) => executeFnIn(cmd, { node, ...opts })
 
-  // Input substitutions are buffered virtual files, not host pipes. Each
-  // operand has its own lifetime; they never consume the caller's stdin.
-  let dev: DevVFS | null = null
-  const procSubInputs: (readonly [string, number])[] = []
-  const procSubStderr: Uint8Array[] = []
-  const cleanParts: TSNodeLike[] = []
+  const preparation = new CommandPreparation()
   try {
-    for (const p of parts) {
-      if (p.type !== NT.PROCESS_SUBSTITUTION) {
-        cleanParts.push(p)
-        continue
-      }
-      if (getProcessSubDirection(p) === ProcessSubDirection.OUTPUT) {
-        const err = encodeText('mirage: unsupported: process substitution >(...)\n')
-        return [
-          null,
-          new IOResult({ exitCode: 2, stderr: err }),
-          new ExecutionNode({ command: name || 'process_sub', exitCode: 2, stderr: err }),
-        ]
-      }
-      if (dev === null) {
-        const [candidate] = registry.resolve('/dev/null')
-        if (!(candidate instanceof DevVFS)) throw new Error('missing device filesystem')
-        dev = candidate
-      }
-      const [path, allocation] = dev.allocateInput()
-      procSubInputs.push([path, allocation])
-      const inner = getProcessSubBody(p)
-      if (inner !== '') {
-        const io = await childLine(context, executeFn, inner, p, callStack)
-        dev.setInput(path, allocation, await materialize(io.stdout))
-        procSubStderr.push(await materialize(io.stderr))
-      }
-      cleanParts.push({ type: NT.WORD, text: path, children: [], namedChildren: [] })
-    }
-
-    const argv = await ownWords(
+    const argv = await preparation.expand(
       node,
-      expandArgv(
-        cleanParts,
-        context,
-        executeFn,
-        callStack,
-        registry,
-        namespace,
-        sessionView(session, registry.policies, context.frame.diagnostics),
-        routingDecision,
-      ),
+      parts,
+      context,
+      executeFn,
+      callStack,
+      registry,
+      namespace,
+      routingDecision,
     )
+    if (argv instanceof IOResult)
+      return [
+        null,
+        argv,
+        new ExecutionNode({
+          command: name || 'process_sub',
+          exitCode: argv.exitCode,
+          stderr: await materialize(argv.stderr),
+        }),
+      ]
     seedPrefix?.(argv.name)
 
     // Limits resolve against the expanded name, so `$CMD`-style
@@ -541,32 +481,22 @@ async function runCommandBody(
         execNode.exitCode = io.exitCode
       }
     }
-    if (procSubStderr.length > 0) {
-      const stderr = await materialize(io.stderr)
-      io.stderr = concat([...procSubStderr, stderr])
+    if (preparation.diagnostics.length > 0) {
+      io.stderr = concat([...preparation.diagnostics, await materialize(io.stderr)])
       execNode.stderr = io.stderr
     }
     if (xtrace) {
       const existing = await materialize(io.stderr)
       io.stderr = concat([traceCommand([argv.name, ...argv.args]), existing])
     }
-    return [
-      procSubInputs.length > 0 && stdout !== null ? await materialize(stdout) : stdout,
-      io,
-      execNode,
-    ]
+    return [await preparation.settle(stdout), io, execNode]
   } finally {
-    for (const [path, allocation] of procSubInputs) dev?.releaseInput(path, allocation)
+    preparation.release()
   }
 }
 
 async function runArgv(
-  recurse: (
-    n: TSNodeLike,
-    s: EvaluationContext,
-    i: ByteSource | null,
-    cs: CallStack | null,
-  ) => Promise<Result>,
+  recurse: ExecuteNodeFn,
   dispatch: DispatchFn,
   registry: MountRegistry,
   namespace: Namespace,
@@ -612,7 +542,7 @@ async function runArgv(
   const refusedExternal = runtimeRefused(name, session, registry, routingDecision)
   const boundary = refusedExternal
     ? [...argv.operands]
-    : await expandBoundaryGlobs(argv.operands, registry, namespace)
+    : await expandBoundaryGlobs(argv.operands, registry, namespace, ioContext(session))
   const expandedWords = boundary.map(wordText)
   // Compared as words, not as a count: a glob that matches exactly one
   // name (`du /base/i*` where only the mount root matches) is still an
@@ -679,6 +609,11 @@ async function runArgv(
   // policies bind in the same window, whether or not a gate judged the
   // line, so the command tier's policy guard can fire preVfs for the
   // backend I/O a handler performs.
+  context = new EvaluationContext(context.session, context.frame, context.parent, admitted)
+  dispatch = bindDispatch(
+    dispatch,
+    ioContext(session, admitted, registry.policies, context.frame.recorder),
+  )
   const route = () =>
     routeArgv(
       recurse,
@@ -724,12 +659,7 @@ export function unsaid(lines: readonly string[], said: Uint8Array): string[] {
 }
 
 async function routeArgv(
-  recurse: (
-    n: TSNodeLike,
-    s: EvaluationContext,
-    i: ByteSource | null,
-    cs: CallStack | null,
-  ) => Promise<Result>,
+  recurse: ExecuteNodeFn,
   dispatchIn: DispatchFn,
   registry: MountRegistry,
   namespace: Namespace,

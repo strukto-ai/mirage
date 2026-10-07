@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ioContext } from '../../session/access.ts'
 import type { EvaluationContext } from '../../evaluation.ts'
 import { registeredSpec } from '../../../commands/spec/builtins.ts'
 import { spreadOperands } from '../../../commands/spec/flag_view.ts'
@@ -146,6 +147,7 @@ async function finishFind(
     {
       ...(executeFn !== undefined ? { executeFn } : {}),
       sessionId: session.sessionId,
+      session,
       ns: ns ?? null,
       statPath,
       dispatch,
@@ -284,7 +286,7 @@ export async function handleCommand(
           entries: registry.runtimeEntries,
           dispatch,
           statPath: (path) => pathStat(dispatch, path, null),
-          ns: namespaceViewOf(registry, namespace ?? null, dispatch, session),
+          ns: namespaceViewOf(registry, namespace ?? null, dispatch, session, context.admission),
           sessionView: sessionView(session, registry.policies, context.frame.diagnostics),
           ...(registry.processView === undefined
             ? {}
@@ -297,7 +299,10 @@ export async function handleCommand(
   }
 
   // Every op the command issues from here carries its gate to the door.
-  dispatch = withDispatchRuleGuard(dispatch)
+  dispatch = withDispatchRuleGuard(
+    dispatch,
+    ioContext(session, context.admission, registry.policies, context.frame.recorder),
+  )
 
   if (cmdName in CWD_DEFAULT_RAW) {
     const operand = defaultCwdOperand(parts, cmdName, registry, session.cwd, stdin)
@@ -528,7 +533,7 @@ export async function handleCommand(
     }
     const runSingle: RunSingle = (name, ps, ts, fk, opts) =>
       runOnMount(runCtx, name, ps, ts, fk, opts ?? {})
-    const csNs = namespaceViewOf(registry, namespace ?? null, dispatch, session)
+    const csNs = namespaceViewOf(registry, namespace ?? null, dispatch, session, context.admission)
     // A per-operand native run is single-mount by construction, so a
     // traversal operand holding nested mounts has to fan out inside it,
     // exactly as the same operand would on a line of its own.
@@ -693,7 +698,13 @@ export async function handleCommand(
       ? encodeText(parseWarnings.map((w) => `${cmdName}: ${w}\n`).join(''))
       : null
 
-  const singleNs = namespaceViewOf(registry, namespace ?? null, dispatch, session)
+  const singleNs = namespaceViewOf(
+    registry,
+    namespace ?? null,
+    dispatch,
+    session,
+    context.admission,
+  )
   const singleStat: StatPath = (path) => pathStat(dispatch, path, null)
   if (shouldFanOut(cmdName, paths, flagKwargs, registry)) {
     const [fanOut0, fanIo, fanNode] = await fanOutTraversal(

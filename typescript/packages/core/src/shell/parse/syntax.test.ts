@@ -16,14 +16,14 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { decodeText } from '../bytes.ts'
+import { decodeText, encodeText } from '../bytes.ts'
 import {
   createShellParser,
   findSyntaxError,
   findUnterminatedBacktick,
   type ShellParser,
 } from './index.ts'
-import { syntaxErrorResult } from './syntax.ts'
+import { syntaxErrorMessage } from './syntax.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -35,14 +35,13 @@ beforeAll(async () => {
   parser = await createShellParser({ engineWasm, grammarWasm })
 })
 
-describe('syntaxErrorResult', () => {
-  it('keeps an invalid byte in the span as typed', async () => {
+describe('syntaxErrorMessage', () => {
+  it('keeps an invalid byte in the span as typed', () => {
     const line = decodeText(
       new Uint8Array([0x69, 0x66, 0x20, 0x27, 0xff, 0x27, 0x20, 0x74, 0x68, 0x65, 0x6e]),
     )
-    const io = syntaxErrorResult(line, parser.parse(line))
-    expect(io.exitCode).toBe(2)
-    expect(Array.from(await io.materializeStderr())).toEqual([
+    const message = syntaxErrorMessage(line, parser.parse(line))
+    expect(Array.from(encodeText(message))).toEqual([
       ...new TextEncoder().encode("mirage: syntax error near 'if '"),
       0xff,
       ...new TextEncoder().encode("' then'\n"),

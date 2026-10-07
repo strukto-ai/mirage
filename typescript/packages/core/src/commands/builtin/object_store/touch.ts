@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invocationIo } from '../generic_bind/factory.ts'
+
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -25,17 +27,21 @@ import { UsageError } from '../../errors.ts'
 import { usageHint } from '../../spec/usage.ts'
 
 /** Build the create-if-missing touch override for one keyed store. */
-export function makeTouch<A extends Accessor>(vfs: string, io: CommandIO<A>): RegisteredCommand[] {
-  const exists = requireOp(io.exists, 'exists')
-  const writeBytes = requireOp(io.write, 'write')
-  const resolveGlob = resolveGlobOf(io)
-
+export function makeTouch<A extends Accessor>(
+  vfs: string,
+  rawIo: CommandIO<A>,
+): RegisteredCommand[] {
   async function touchCommand(
     accessor: A,
     paths: PathSpec[],
     _texts: string[],
     opts: CommandOpts,
   ): Promise<CommandFnResult> {
+    const io = invocationIo(rawIo, opts)
+    const exists = requireOp(io.exists, 'exists')
+    const writeBytes = requireOp(io.write, 'write')
+    const resolveGlob = resolveGlobOf(io)
+
     if (paths.length === 0) {
       throw new UsageError(`touch: missing file operand\n${usageHint('touch')}`, 1)
     }

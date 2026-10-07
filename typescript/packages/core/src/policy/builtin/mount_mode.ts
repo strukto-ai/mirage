@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { IOContext } from '../../context/types.ts'
 import { requirePathsWritable } from '../../context/session_context.ts'
 import type { Policy } from '../base.ts'
 import type { Deny, VfsContext } from '../types.ts'
@@ -21,10 +22,18 @@ import { posixPhrase } from '../../errors/posix.ts'
  * outside every mount carries an empty prefix and is governed by `/`, the
  * turf a profile's root mode is written under. */
 export class MountModePolicy implements Policy {
+  constructor(private readonly context?: IOContext) {}
+
   preVfs(ctx: VfsContext): Deny | null {
     if (!ctx.write || ctx.mode === undefined) return null
     try {
-      requirePathsWritable([ctx.path], ctx.prefix || '/', ctx.mode, ctx.subtree === true)
+      requirePathsWritable(
+        [ctx.path],
+        ctx.prefix || '/',
+        ctx.mode,
+        ctx.subtree === true,
+        this.context,
+      )
     } catch (error) {
       if (!(error instanceof Error)) throw error
       return { kind: 'deny', reason: posixPhrase('EROFS'), error }

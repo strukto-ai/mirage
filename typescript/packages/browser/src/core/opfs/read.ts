@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import { record, startOp } from '@struktoai/mirage-core/observe/context'
+import { activeRecorder, record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
@@ -39,10 +39,11 @@ export async function read(
   _index?: IndexCacheStore,
   options?: { offset?: number; size?: number },
 ): Promise<Uint8Array> {
+  const recorder = activeRecorder()
   const offset = options?.offset ?? 0
   const size = options?.size ?? null
   const root = await accessor.root()
-  const timer = startOp()
+  const timer = startOp(recorder)
   const key = path.mountPath
   let handle: FileSystemFileHandle
   try {

@@ -67,7 +67,6 @@ def make_rm(
             index)``.
         unlink (Callable): backend unlink ``(accessor, path, index)``.
     """
-    unlink = with_write_guards(unlink)
 
     @command("rm", vfs=vfs, spec=SPECS["rm"], write=True, path_guarded=True)
     async def rm(
@@ -76,6 +75,7 @@ def make_rm(
         texts: list[str],
         opts: CommandOpts,
     ) -> tuple[ByteSource | None, IOResult]:
+        guarded_unlink = with_write_guards(unlink, opts.io_context)
         fl = FlagView(opts.flags, spec=SPECS["rm"])
         f = fl.as_bool("f")
         v = fl.as_bool("v")
@@ -87,7 +87,7 @@ def make_rm(
         removed: dict[str, ByteSource] = {}
         for p in paths:
             try:
-                await unlink(accessor, p, opts.index)
+                await guarded_unlink(accessor, p, opts.index)
             except FS_ERRORS as exc:
                 if f and isinstance(
                     exc, (FileNotFoundError, NotADirectoryError)

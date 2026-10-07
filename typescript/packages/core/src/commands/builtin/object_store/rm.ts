@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invocationIo } from '../generic_bind/factory.ts'
+
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, type PathSpec } from '../../../types.ts'
@@ -38,76 +40,77 @@ interface RmOpts {
 }
 
 /** Build the no-real-directories rm override for one keyed store. */
-export function makeRm<A extends Accessor>(vfs: string, io: CommandIO<A>): RegisteredCommand[] {
-  const stat = io.stat
-  const readdir = io.readdir
-  const resolveGlob = resolveGlobOf(io)
-  const unlink = requireOp(io.unlink, 'unlink')
-  const rmdir = requireOp(io.rmdir, 'rmdir')
-  const rmR = requireOp(io.rmR, 'rmR')
-
-  // Remove one operand, returning a GNU stderr line on failure (null when
-  // removed, or skipped under -f) alongside the verbose lines.
-  async function rmOne(
-    accessor: A,
-    path: PathSpec,
-    opts: RmOpts,
-    index: CommandOpts['index'],
-  ): Promise<[string | null, string[]]> {
-    const label = path.rawPath
-    let isDir = false
-    try {
-      const st = await stat(accessor, path, index ?? undefined)
-      isDir = st.type === FileType.DIRECTORY
-    } catch (err) {
-      if (!isFsError(err)) throw err
-      const code = (err as { code?: string }).code
-      if (opts.force && (code === 'ENOENT' || code === 'ENOTDIR')) return [null, []]
-      return [`rm: cannot remove '${label}': ${String(fsStrerror(err))}`, []]
-    }
-    try {
-      if (isDir) {
-        if (opts.recursive) {
-          const lines = opts.verbose
-            ? removalLines(
-                await cpWalk(
-                  (dir) => readdir(accessor, dir, index ?? undefined),
-                  (spec) => stat(accessor, spec, index ?? undefined),
-                  path,
-                  index ?? undefined,
-                ),
-                path,
-              )
-            : []
-          await rmR(accessor, path)
-          return [null, lines]
-        }
-        if (opts.removeDir) {
-          const children = await readdir(accessor, path, index ?? undefined)
-          if (children.length > 0) {
-            return [`rm: cannot remove '${label}': Directory not empty`, []]
-          }
-          await rmdir(accessor, path)
-          return [null, opts.verbose ? [`removed directory '${label}'`] : []]
-        }
-        return [`rm: cannot remove '${label}': Is a directory`, []]
-      }
-      await unlink(accessor, path)
-    } catch (err) {
-      // A refused removal (a read-only region) is GNU's line for the
-      // operand, and rm goes on to the rest.
-      if (!isFsError(err)) throw err
-      return [`rm: cannot remove '${label}': ${String(fsStrerror(err))}`, []]
-    }
-    return [null, opts.verbose ? [`removed '${label}'`] : []]
-  }
-
+export function makeRm<A extends Accessor>(vfs: string, rawIo: CommandIO<A>): RegisteredCommand[] {
   async function rmCommand(
     accessor: A,
     paths: PathSpec[],
     _texts: string[],
     opts: CommandOpts,
   ): Promise<CommandFnResult> {
+    const io = invocationIo(rawIo, opts)
+    const stat = io.stat
+    const readdir = io.readdir
+    const resolveGlob = resolveGlobOf(io)
+    const unlink = requireOp(io.unlink, 'unlink')
+    const rmdir = requireOp(io.rmdir, 'rmdir')
+    const rmR = requireOp(io.rmR, 'rmR')
+
+    // Remove one operand, returning a GNU stderr line on failure (null when
+    // removed, or skipped under -f) alongside the verbose lines.
+    async function rmOne(
+      accessor: A,
+      path: PathSpec,
+      opts: RmOpts,
+      index: CommandOpts['index'],
+    ): Promise<[string | null, string[]]> {
+      const label = path.rawPath
+      let isDir = false
+      try {
+        const st = await stat(accessor, path, index ?? undefined)
+        isDir = st.type === FileType.DIRECTORY
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        const code = (err as { code?: string }).code
+        if (opts.force && (code === 'ENOENT' || code === 'ENOTDIR')) return [null, []]
+        return [`rm: cannot remove '${label}': ${String(fsStrerror(err))}`, []]
+      }
+      try {
+        if (isDir) {
+          if (opts.recursive) {
+            const lines = opts.verbose
+              ? removalLines(
+                  await cpWalk(
+                    (dir) => readdir(accessor, dir, index ?? undefined),
+                    (spec) => stat(accessor, spec, index ?? undefined),
+                    path,
+                    index ?? undefined,
+                  ),
+                  path,
+                )
+              : []
+            await rmR(accessor, path)
+            return [null, lines]
+          }
+          if (opts.removeDir) {
+            const children = await readdir(accessor, path, index ?? undefined)
+            if (children.length > 0) {
+              return [`rm: cannot remove '${label}': Directory not empty`, []]
+            }
+            await rmdir(accessor, path)
+            return [null, opts.verbose ? [`removed directory '${label}'`] : []]
+          }
+          return [`rm: cannot remove '${label}': Is a directory`, []]
+        }
+        await unlink(accessor, path)
+      } catch (err) {
+        // A refused removal (a read-only region) is GNU's line for the
+        // operand, and rm goes on to the rest.
+        if (!isFsError(err)) throw err
+        return [`rm: cannot remove '${label}': ${String(fsStrerror(err))}`, []]
+      }
+      return [null, opts.verbose ? [`removed '${label}'`] : []]
+    }
+
     const fl = new FlagView(opts.flags, specOf('rm'))
     const recursive = fl.asBool('r') || fl.asBool('R')
     const force = fl.asBool('f')

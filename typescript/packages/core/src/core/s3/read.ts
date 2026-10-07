@@ -14,7 +14,7 @@
 
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { record, revisionFor, startOp } from '../../observe/context.ts'
+import { activeRecorder, record, revisionFor, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { createS3Client, isNotFoundError, loadS3Module, s3Key, streamToBuffer } from './client.ts'
@@ -49,6 +49,7 @@ export async function read(
   _index?: IndexCacheStore,
   options: S3ReadOptions = {},
 ): Promise<Uint8Array> {
+  const recorder = activeRecorder()
   const virtual = path.virtual
   const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   const rawPath =
@@ -66,7 +67,7 @@ export async function read(
   }
   const range = rangeHeader(options.offset ?? 0, options.size ?? null)
   if (range !== null) input.Range = range
-  const timer = startOp()
+  const timer = startOp(recorder)
   try {
     const resp = (await (
       client as unknown as {

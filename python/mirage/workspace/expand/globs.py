@@ -16,6 +16,7 @@ import dataclasses
 import posixpath
 
 from mirage.context import session_visibility
+from mirage.context.types import IOContext
 from mirage.errors.constants import WALK_ERRORS
 from mirage.ops.config import NamespaceLinks
 from mirage.ops.namespace_view import child_mount_names, namespace_names
@@ -36,6 +37,7 @@ from mirage.utils.path import CycleError
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.access import io_context
 
 # How deep a `**` descends. bash has no cap, but every level here is one
 # listing per directory, so an accidental `**` over a large tree is
@@ -59,6 +61,7 @@ class GlobOptions:
             levels instead of reading as `*`.
     """
 
+    context: IOContext | None = None
     nullglob: bool = False
     failglob: bool = False
     globstar: bool = False
@@ -77,6 +80,7 @@ def glob_options(session: SessionState) -> GlobOptions:
         session (SessionState): the session holding the `shopt` table.
     """
     return GlobOptions(
+        context=io_context(session),
         nullglob=session.shopts.get("nullglob", SHOPT_DEFAULTS["nullglob"]),
         failglob=session.shopts.get("failglob", SHOPT_DEFAULTS["failglob"]),
         globstar=session.shopts.get("globstar", SHOPT_DEFAULTS["globstar"]),
@@ -88,6 +92,7 @@ def _namespace_children(
     links: NamespaceLinks | None,
     directory: str,
     pattern: str,
+    context: IOContext | None = None,
 ) -> list[str]:
     """Virtual paths a directory owes the namespace, matching a segment.
 
@@ -111,12 +116,12 @@ def _namespace_children(
     return [
         f"{base}/{name}"
         for name in namespace_names(
-            session_visibility(),
+            session_visibility(context),
             [m.prefix for m in registry.mounts()],
             links,
             directory,
         )
-        if glob_name_matches(name, matcher)
+        if glob_name_matches(name, matcher, context)
     ]
 
 
@@ -244,6 +249,7 @@ async def _level_matches(
     links: NamespaceLinks | None,
     dir_virtual: str,
     seg: str,
+    context: IOContext | None = None,
 ) -> list[str]:
     """One descent step: the owning backend's matches plus the namespace's.
 
@@ -273,7 +279,7 @@ async def _level_matches(
         resolved=False,
     )
     try:
-        matches = await owner.expand_glob([spec], prefix)
+        matches = await owner.expand_glob([spec], prefix, context)
     except OSError:
         # This parent is not a listable directory; bash skips it during
         # descent. A nested mount root or a link under it is still real.
@@ -294,7 +300,7 @@ async def _level_matches(
         )
         if v.startswith(f"{base}/")
     ]
-    out.extend(_namespace_children(registry, links, real, seg))
+    out.extend(_namespace_children(registry, links, real, seg, context))
     return out if real == dir_virtual else _respell(out, dir_virtual)
 
 
@@ -318,6 +324,7 @@ async def _descend(
     parent: str,
     spelled: str,
     depth: int,
+    context: IOContext | None = None,
 ) -> list[tuple[str, str]]:
     """Every entry under a directory, at any depth, with its spelling.
 
@@ -338,13 +345,23 @@ async def _descend(
         return []
     out: list[tuple[str, str]] = []
     for child in sorted(
-        set(await _level_matches(registry, mount, links, parent + "/", "*"))
+        set(
+            await _level_matches(
+                registry, mount, links, parent + "/", "*", context
+            )
+        )
     ):
         child_spelled = _join_spelling(spelled, child.rsplit("/", 1)[-1])
         out.append((child, child_spelled))
         out.extend(
             await _descend(
-                registry, mount, links, child, child_spelled, depth + 1
+                registry,
+                mount,
+                links,
+                child,
+                child_spelled,
+                depth + 1,
+                context,
             )
         )
     return out
@@ -356,6 +373,7 @@ async def _walk(
     registry: MountRegistry,
     links: NamespaceLinks | None,
     globstar: bool,
+    context: IOContext | None = None,
 ) -> list[PathSpec]:
     """Expand a word level by level, one segment at a time.
 
@@ -413,7 +431,7 @@ async def _walk(
                 gathered.extend(
                     (v, sp, False)
                     for v, sp in await _descend(
-                        registry, mount, links, parent, spelled, 0
+                        registry, mount, links, parent, spelled, 0, context
                     )
                 )
             else:
@@ -424,7 +442,12 @@ async def _walk(
                         False,
                     )
                     for child in await _level_matches(
-                        registry, mount, links, parent.rstrip("/") + "/", seg
+                        registry,
+                        mount,
+                        links,
+                        parent.rstrip("/") + "/",
+                        seg,
+                        context,
                     )
                 )
         # bash sorts a pathname expansion, and the backend and the
@@ -580,6 +603,7 @@ async def resolve_globs(
     if noglob:
         return [literal_word(item) for item in classified]
     opts = options if options is not None else GlobOptions()
+    context = opts.context
     result: list[str | PathSpec] = []
     for item in classified:
         if isinstance(item, PathSpec) and item.pattern:
@@ -623,7 +647,7 @@ async def resolve_globs(
                     and _has_globstar_segment(item)
                 ):
                     resolved = await _walk(
-                        item, mount, registry, links, opts.globstar
+                        item, mount, registry, links, opts.globstar, context
                     )
                 elif _listing_dir(links, directory) != directory:
                     # The parent is a symlink, so the backend holding the
@@ -633,7 +657,12 @@ async def resolve_globs(
                         sorted(
                             set(
                                 await _level_matches(
-                                    registry, mount, links, directory, pattern
+                                    registry,
+                                    mount,
+                                    links,
+                                    directory,
+                                    pattern,
+                                    context,
                                 )
                             )
                         ),
@@ -651,9 +680,13 @@ async def resolve_globs(
                     # spec has no literal to reinstate, so an empty list
                     # means no match and every spec returned is one.
                     resolved = _merge_namespace(
-                        list(await mount.expand_glob([item.dir], prefix)),
+                        list(
+                            await mount.expand_glob(
+                                [item.dir], prefix, context
+                            )
+                        ),
                         _namespace_children(
-                            registry, links, directory, pattern
+                            registry, links, directory, pattern, context
                         ),
                         directory,
                         prefix,
@@ -723,6 +756,7 @@ async def expand_boundary_globs(
     parts: list[str | PathSpec],
     registry: MountRegistry,
     links: NamespaceLinks | None,
+    context: IOContext | None = None,
 ) -> list[str | PathSpec]:
     """Expand glob words that could match across a mount boundary.
 
@@ -742,7 +776,7 @@ async def expand_boundary_globs(
         links (NamespaceLinks | None): the namespace symlink table.
     """
     prefixes = [m.prefix for m in registry.mounts()]
-    vis = session_visibility()
+    vis = session_visibility(context)
     if not any(
         isinstance(p, PathSpec)
         and p.pattern
@@ -757,7 +791,14 @@ async def expand_boundary_globs(
             and item.pattern
             and child_mount_names(vis, prefixes, _glob_head(item))
         ):
-            out.extend(await resolve_globs([item], registry, links=links))
+            out.extend(
+                await resolve_globs(
+                    [item],
+                    registry,
+                    links=links,
+                    options=GlobOptions(context=context),
+                )
+            )
         else:
             out.append(item)
     return out

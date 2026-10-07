@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invocationIo } from '../generic_bind/factory.ts'
+
 import type { Accessor } from '../../../accessor/base.ts'
 import type { PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
@@ -21,16 +23,20 @@ import { statGeneric } from '../generic/stat.ts'
 import { overlaidStat, resolveGlobOf, type CommandIO } from '../generic_bind/index.ts'
 
 /** Build the index-threaded stat override for one keyed store. */
-export function makeStat<A extends Accessor>(vfs: string, io: CommandIO<A>): RegisteredCommand[] {
-  const statCore = io.stat
-  const resolveGlob = resolveGlobOf(io)
-
+export function makeStat<A extends Accessor>(
+  vfs: string,
+  rawIo: CommandIO<A>,
+): RegisteredCommand[] {
   async function statCommand(
     accessor: A,
     paths: PathSpec[],
     _texts: string[],
     opts: CommandOpts,
   ): Promise<CommandFnResult> {
+    const io = invocationIo(rawIo, opts)
+    const statCore = io.stat
+    const resolveGlob = resolveGlobOf(io)
+
     const resolved =
       paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
     return statGeneric(

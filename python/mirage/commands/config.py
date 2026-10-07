@@ -25,6 +25,7 @@ from mirage.commands.spec.builtins import is_builtin_grammar, registered_spec
 from mirage.commands.spec.constants import OWN_OPTION_LOOP
 from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
+from mirage.context.types import IOContext
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import NamespaceView, ReaddirPath, SessionView, StatPath
@@ -55,6 +56,7 @@ class ExecContext:
     stdin: ByteSource | None = None
     cwd: str = "/"
     dispatch: DispatchFn | None = None
+    io_context: IOContext | None = None
     session_id: str | None = None
     env: dict[str, str] | None = None
     exec_allowed: bool = True
@@ -127,6 +129,7 @@ class CommandOpts:
     command: str | None = None
     index: IndexCacheStore = NULL_INDEX
     dispatch: DispatchFn | None = None
+    io_context: IOContext | None = None
     session_id: str | None = None
     env: dict[str, str] | None = None
     exec_allowed: bool = True

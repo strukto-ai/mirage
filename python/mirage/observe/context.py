@@ -61,8 +61,10 @@ class RecordingScope:
     def __init__(self, active: bool = True) -> None:
         self.records: list[OpRecord] = []
         self._token = None
+        self.recorder = _recorder.get()
         if active:
             rec = Recorder()
+            self.recorder = rec
             self.records = rec.sink
             self._token = _recorder.set(rec)
 
@@ -87,7 +89,7 @@ def reset_active_recorder(token) -> None:
     _recorder.reset(token)
 
 
-def push_mount_context(mount_id: str | None):
+def push_mount_context(mount_id: str | None, recorder: Recorder | None = None):
     """Bind the mount instance that owns records in this async frame.
 
     Task-isolated: replaces the Recorder for the current task via
@@ -99,14 +101,16 @@ def push_mount_context(mount_id: str | None):
     Args:
         mount_id (str | None): instance identity, absent outside a mount.
     """
-    rec = _recorder.get()
+    rec = recorder if recorder is not None else _recorder.get()
     return _recorder.set(
         None if rec is None else Recorder(sink=rec.sink, mount_id=mount_id)
     )
 
 
 async def with_mount_context(
-    it: AsyncIterator[bytes], mount_id: str | None = None
+    it: AsyncIterator[bytes],
+    mount_id: str | None = None,
+    recorder: Recorder | None = None,
 ) -> AsyncIterator[bytes]:
     """Wrap an async iterator so the recorder's mount_id is ``mount_id``
     during each ``__anext__`` of the underlying stream.
@@ -130,7 +134,8 @@ async def with_mount_context(
                 if mount_id is not None
                 else previous.mount_id
                 if previous
-                else None
+                else None,
+                recorder,
             )
             try:
                 chunk = await aiter.__anext__()
@@ -154,10 +159,11 @@ class OpTimer:
     at finish time, not here.
     """
 
-    __slots__ = ("_start_ms",)
+    __slots__ = ("_start_ms", "recorder")
 
     def __init__(self) -> None:
         self._start_ms = int(time.monotonic() * 1000)
+        self.recorder = _recorder.get()
 
     @property
     def elapsed_ms(self) -> int:
@@ -202,7 +208,7 @@ def finish_record(
             backend (S3 ``VersionId``, Drive ``revisionId``, Git SHA).
     """
     elapsed = timer.elapsed_ms
-    recorder = _recorder.get()
+    recorder = timer.recorder
     return OpRecord(
         op=op,
         path=path,
@@ -240,7 +246,7 @@ def record(
             backend (S3 ``VersionId``, Drive ``revisionId``, Git SHA).
             Used to pin replay reads to the exact recorded version.
     """
-    rec = _recorder.get()
+    rec = timer.recorder
     if rec is None:
         return
     rec.sink.append(

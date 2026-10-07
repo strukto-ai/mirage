@@ -40,6 +40,7 @@ from mirage.workspace.executor.builtins.condition.types import (
 from mirage.workspace.executor.builtins.links import operand_abs
 from mirage.workspace.executor.builtins.scope import _scope_path, _to_scope
 from mirage.workspace.mount.namespace.probe import resolve_path_stat
+from mirage.workspace.session.access import io_context
 from mirage.workspace.session.elements import element_is_set
 
 
@@ -126,7 +127,9 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
             ) from exc
     if op in ("-L", "-h"):
         return ctx.namespace.is_link(
-            operand_abs(ctx.namespace, val, ctx.session.cwd)
+            operand_abs(
+                ctx.namespace, val, ctx.session.cwd, io_context(ctx.session)
+            )
         )
     if op in FILE_UNARY:
         if not isinstance(val, PathSpec) and not text:

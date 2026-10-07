@@ -40,6 +40,7 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.probe import path_readdir, path_stat
 from mirage.workspace.mount.namespace.view import namespace_view_of
 from mirage.workspace.session import env_snapshot, session_view
+from mirage.workspace.session.access import io_context
 from mirage.workspace.types import ExecuteLine, ExecutionNode
 
 logger = logging.getLogger(__name__)
@@ -278,7 +279,9 @@ async def run_on_mount(
     # A traversal command's start point is statted through the dispatcher
     # so a start point under another mount answers (`find -L` follows a
     # link across mounts before the command ever runs).
-    ns = namespace_view_of(registry, namespace, dispatch, session)
+    ns = namespace_view_of(
+        registry, namespace, dispatch, session, context.admission
+    )
     stat_path = (
         functools.partial(path_stat, dispatch)
         if dispatch is not None
@@ -312,6 +315,12 @@ async def run_on_mount(
                 cwd=session.cwd,
                 dispatch=dispatch,
                 session_id=session.session_id,
+                io_context=io_context(
+                    session,
+                    context.admission,
+                    registry.policies,
+                    context.frame.recorder,
+                ),
                 env=env_snapshot(session),
                 session_view=session_view(
                     session,
@@ -321,8 +330,10 @@ async def run_on_mount(
                 processes=registry.process_view(session)
                 if registry.process_view is not None
                 else None,
-                exec_allowed=registry.is_exec_allowed(),
-                exec_path_allowed=registry.exec_allowed_at,
+                exec_allowed=registry.is_exec_allowed(io_context(session)),
+                exec_path_allowed=lambda path: registry.exec_allowed_at(
+                    path, io_context(session)
+                ),
                 runtime=line_runtime,
                 runtime_unavailable=registry.runtime_unavailable.get(cmd_name),
                 ns=ns,

@@ -32,7 +32,7 @@ export const MONGODB_GREP = command({
   spec: specOf('grep'),
   fn: (accessor: MongoDBAccessor, paths, texts, opts) =>
     runSearch<MongoDBAccessor>(
-      scanIo(IO, opts.ns, opts.mountPrefix)[0],
+      scanIo(IO, opts.ns, opts.mountPrefix, opts.ioContext)[0],
       'grep',
       accessor,
       paths,

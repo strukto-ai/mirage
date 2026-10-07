@@ -439,7 +439,7 @@ export async function tailGeneric(
   // what it is polling for is exactly the change the cached body does
   // not have yet.
   const backend = stream
-  stream = stdinStream(cacheAwareStreamEager(stream), opts.stdin)
+  stream = stdinStream(cacheAwareStreamEager(stream, opts.ioContext), opts.stdin)
   if (typeof parsed === 'string')
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]
   const { counts, quiet: qFlag, verbose: vFlag, following } = parsed

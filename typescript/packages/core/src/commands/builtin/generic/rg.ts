@@ -629,7 +629,7 @@ export async function rgGeneric(
   // Every `-` operand reads stdin through one cursor, as grep's do. With no
   // operand typed, the implicit one below is stdin's sole reader, so a search
   // that stops early closes the input.
-  stream = stdinStream(cacheAwareStream(stream), opts.stdin, paths.length === 0)
+  stream = stdinStream(cacheAwareStream(stream, opts.ioContext), opts.stdin, paths.length === 0)
   const fl = new FlagView(opts.flags, specOf('rg'))
   const f = parseFlags(fl)
   const types = new FileTypes(f.typeChanges, f.typeSelections)

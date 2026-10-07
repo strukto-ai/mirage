@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { IOContext } from '../context/types.ts'
 import { dotglobActive, sessionVisibility } from '../context/session_context.ts'
 import { pathVisible } from './hidden.ts'
 import type { ChildMounts } from '../ops/types.ts'
@@ -382,9 +383,10 @@ export async function resolveGlobWith<A, I>(
   children?: ChildMounts,
   stat?: (accessor: A, path: PathSpec, index?: I) => Promise<FileStat>,
   targetStat?: TargetStat,
+  context?: IOContext,
 ): Promise<PathSpec[]> {
   const result: PathSpec[] = []
-  const vis = sessionVisibility()
+  const vis = sessionVisibility(context)
   for (const p of paths) {
     if (p.resolved) {
       result.push(p)
@@ -414,8 +416,8 @@ export async function resolveGlobWith<A, I>(
       // before the empty-match test so an all-hidden match set reads as
       // no matches and falls back to the literal word, exactly what bash
       // prints when nothing matched.
-      let matched = (await expandPattern(readdir, accessor, word, index, children)).filter((m) =>
-        pathVisible(vis, m.virtual),
+      let matched = (await expandPattern(readdir, accessor, word, index, children, context)).filter(
+        (m) => pathVisible(vis, m.virtual),
       )
       if (dirsOnly) {
         const kept: PathSpec[] = []
@@ -470,8 +472,8 @@ export async function resolveGlobWith<A, I>(
  * Pathname expansion's rule alone; `find -name` and `case` match through
  * `fnmatch` directly.
  */
-export function globNameMatches(name: string, pattern: string): boolean {
-  if (name.startsWith('.') && !pattern.startsWith('.') && !dotglobActive()) return false
+export function globNameMatches(name: string, pattern: string, context?: IOContext): boolean {
+  if (name.startsWith('.') && !pattern.startsWith('.') && !dotglobActive(context)) return false
   return fnmatch(name, pattern)
 }
 
@@ -491,6 +493,7 @@ export async function expandPattern<A, I>(
   path: PathSpec,
   index?: I,
   children?: ChildMounts,
+  context?: IOContext,
 ): Promise<PathSpec[]> {
   const prefix = path.virtual.slice(0, rstripSlash(path.virtual).length - path.vfsPath.length)
   const segments = path.vfsPath === '' ? [] : path.vfsPath.split('/')
@@ -533,14 +536,14 @@ export async function expandPattern<A, I>(
       // dropbox); the marker is not part of the name.
       for (const e of entries) {
         const entry = rstripSlash(e)
-        if (globNameMatches(entry.split('/').pop() ?? '', matcher)) nextLevel.push(entry)
+        if (globNameMatches(entry.split('/').pop() ?? '', matcher, context)) nextLevel.push(entry)
       }
       if (children !== undefined) {
         // A nested mount root or a link is a real child of this parent
         // whether or not the backend could list it.
         const baseDir = rstripSlash(parent)
         for (const name of children(`${baseDir}/`)) {
-          if (globNameMatches(name, matcher)) nextLevel.push(`${baseDir}/${name}`)
+          if (globNameMatches(name, matcher, context)) nextLevel.push(`${baseDir}/${name}`)
         }
       }
     }
@@ -575,7 +578,18 @@ export function makeResolveGlob<A extends Accessor = Accessor>(
   children?: ChildMounts,
   stat?: StatOp<A>,
   targetStat?: TargetStat,
+  context?: IOContext,
 ): ResolveGlobOp<A> {
   return async (accessor, paths, index) =>
-    resolveGlobWith(readdir, accessor, paths, index, maxGlobMatches, children, stat, targetStat)
+    resolveGlobWith(
+      readdir,
+      accessor,
+      paths,
+      index,
+      maxGlobMatches,
+      children,
+      stat,
+      targetStat,
+      context,
+    )
 }
