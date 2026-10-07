@@ -14,6 +14,7 @@
 
 import type { SyntaxDiagnostic } from './types.ts'
 import { cleanDelimiter, delimiterQuoted } from './heredoc/delimiter.ts'
+import type { HeredocPlan } from './heredoc/types.ts'
 
 import { IOResult } from '../../io/types.ts'
 import { encodeText } from '../bytes.ts'
@@ -148,6 +149,24 @@ export function checkSyntax(
     .map((line) => `${mirageWording(line)}\n`)
     .join('')
   return { offending: first.offending, message, status: last.status }
+}
+
+/** The heredocs bash reads in a line: each one's `<<` and where its body
+ * starts and ends, in the order bash reads the bodies (those a substitution
+ * carries out first), and each substitution that closes with bodies still to
+ * read. `null` when bash refuses the line, whose heredocs nothing reads. */
+export function heredocPlan(command: string): HeredocPlan | null {
+  const reader = new LineReader(command, new Set(), new Map())
+  try {
+    if (reader.refusals().length > 0) return null
+  } catch (err) {
+    if (!(err instanceof RangeError)) throw err
+    return null
+  }
+  return {
+    order: [...reader.bodies].map(([at, [start, end]]) => [at, start, end] as const),
+    closes: reader.closes,
+  }
 }
 
 /** The result of a line that cannot run: its diagnostic and status. */
@@ -346,7 +365,8 @@ type ReaderState = readonly [
  * is read as bash reads its input: a newline ends the input if none does, a
  * trailing backslash quotes the end of it, and each heredoc body is skipped
  * after the newline that ends its command. `frames` tracks the arrays and
- * substitutions being read, which decide the status of an error inside them.
+ * substitutions being read, which decide the status of an error inside them;
+ * `bodies` and `closes` keep the heredoc plan (see `heredocPlan`).
  */
 class LineReader {
   private readonly n: number
@@ -365,6 +385,9 @@ class LineReader {
   private nesting = 0
   private braces = 0
   private readonly subs = new Map<string, readonly [number, readonly Heredoc[]]>()
+  readonly bodies = new Map<number, readonly [number, number]>()
+  readonly closes: (readonly [number, readonly number[]])[] = []
+  private readonly warned = new Set<number>()
 
   constructor(
     private readonly text: string,
@@ -684,6 +707,11 @@ class LineReader {
     this.nesting -= 1
     this.frames.pop()
     const pending = this.heredocs
+    const fresh = pending.map((heredoc) => heredoc.at).filter((at) => !this.warned.has(at))
+    if (fresh.length > 0) {
+      this.closes.push([tok.start, fresh])
+      for (const at of fresh) this.warned.add(at)
+    }
     this.restore(state)
     this.pend(pending, true)
     this.subs.set(key, [tok.end, pending])
@@ -786,7 +814,7 @@ class LineReader {
     this.pos = tok.end
     if (tok.kind === 'newline') {
       if (tok.start === tok.end) this.ended = true
-      else if (this.heredocs.length > 0) this.pos = this.heredocBodies(tok.end)
+      if (this.heredocs.length > 0) this.pos = this.heredocBodies(tok.end)
     }
   }
 
@@ -799,7 +827,8 @@ class LineReader {
     const text = this.text
     const n = this.n
     const nested = this.frames.includes('sub')
-    for (const { delimiter, strip, quoted } of this.heredocs) {
+    for (const { at, delimiter, strip, quoted } of this.heredocs) {
+      const start = i
       while (i < n) {
         let end = text.indexOf('\n', i)
         if (end < 0) end = n
@@ -820,12 +849,15 @@ class LineReader {
           body.startsWith(delimiter) &&
           closesSubstitution(body.slice(delimiter.length))
         ) {
+          const resume = i + line.length - body.length + delimiter.length
+          if (!this.bodies.has(at)) this.bodies.set(at, [start, resume])
           this.heredocs = []
           this.carried = 0
-          return i + line.length - body.length + delimiter.length
+          return resume
         }
         i = Math.min(end + 1, n)
       }
+      if (!this.bodies.has(at)) this.bodies.set(at, [start, i])
     }
     this.heredocs = []
     this.carried = 0

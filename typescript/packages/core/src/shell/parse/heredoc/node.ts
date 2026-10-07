@@ -90,27 +90,66 @@ export class HeredocNode implements WrappedNode {
   get offsets(): readonly number[] {
     return this.source.offsets
   }
+  /** The node's own text in the line as typed: its heredoc bodies included
+   * where they sit inside it, not those it carries out. */
   get sourceText(): string {
     if (this.node.parent === null) return this.source.original
     if (!this.source.documents.some(([start]) => this.startIndex <= start && start < this.endIndex))
       return this.node.text
-    const positions = this.source.offsets.slice(this.startIndex, this.endIndex)
-    if (positions.length === 0) return ''
-    let start = this.source.original.length
-    let end = 0
-    for (const offset of positions) {
-      start = Math.min(start, offset)
-      end = Math.max(end, offset + 1)
-    }
-    return this.source.original.slice(start, end)
+    if (this.endIndex <= this.startIndex) return ''
+    const first = this.source.offsets[this.startIndex] ?? 0
+    const last = this.source.offsets[this.endIndex - 1] ?? first
+    return this.source.original.slice(first, last + 1)
   }
+  /** The node's own text with each heredoc body the line reads after a
+   * substitution in it moved inside that substitution, just before its `)`:
+   * the same command to bash, and what a substitution's line runs as, carrying
+   * no heredoc out of itself. `undefined` when no substitution in the node
+   * carries one out. */
+  get inlined(): string | undefined {
+    if (this.node.parent === null || this.endIndex <= this.startIndex) return undefined
+    const first = this.source.offsets[this.startIndex] ?? 0
+    const last = this.source.offsets[this.endIndex - 1] ?? first
+    const closes = this.source.closes.filter(([close]) => first <= close && close <= last)
+    if (closes.length === 0) return undefined
+    const docs = new Map(this.source.documents.map(([, doc]) => [doc.operatorStart, doc]))
+    let out = this.sourceText
+    for (const [close, opened] of [...closes].sort((a, b) => b[0] - a[0])) {
+      let bodies = '\n'
+      for (const at of opened) {
+        const doc = docs.get(at)
+        if (doc === undefined) continue
+        bodies += this.source.original.slice(doc.bodyStart, doc.end)
+        if (!bodies.endsWith('\n')) bodies += '\n'
+        if (!doc.terminated) bodies += `${doc.delimiter}\n`
+      }
+      out = out.slice(0, close - first) + bodies + out.slice(close - first)
+    }
+    return out
+  }
+  /** What bash warns of while it reads the line's heredocs, in the order it
+   * reads them: a substitution closing with bodies still to read, on the line
+   * its reader stands on then, and a body the input ends inside. */
   get warnings(): string {
-    return this.source.documents
-      .filter(([, doc]) => !doc.terminated)
-      .map(
-        ([, doc]) =>
-          `mirage: line ${String(doc.eofLine)}: warning: here-document at line ${String(doc.line)} delimited by end-of-file (wanted \`${doc.delimiter}')\n`,
-      )
-      .join('')
+    const original = this.source.original
+    const lineOf = (offset: number) => original.slice(0, offset).split('\n').length
+    const closes = new Map(this.source.closes.map((close) => [close[1][0], close]))
+    let out = ''
+    let previous: Heredoc | null = null
+    for (const doc of this.source.documents
+      .map(([, doc]) => doc)
+      .sort((a, b) => a.bodyStart - b.bodyStart)) {
+      const close = closes.get(doc.operatorStart)
+      if (close !== undefined) {
+        let line = lineOf(close[0])
+        if (previous !== null) line = Math.max(line, lineOf(previous.end - 1))
+        const count = close[1].length
+        out += `mirage: line ${String(line)}: warning: command substitution: ${String(count)} unterminated here-document${count > 1 ? 's' : ''}\n`
+      }
+      if (!doc.terminated)
+        out += `mirage: line ${String(doc.eofLine)}: warning: here-document at line ${String(doc.line)} delimited by end-of-file (wanted \`${doc.delimiter}')\n`
+      previous = doc
+    }
+    return out
   }
 }

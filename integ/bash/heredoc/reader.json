@@ -2262,6 +2262,192 @@
         "gdrive",
         "gdrive-folder"
       ]
+    },
+    {
+      "id": "heredoc_reader_carried_out_of_a_substitution",
+      "command": "x=$(cat <<EOF)\nhello\nEOF\necho \"[$x]\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "[hello]\n",
+        "stderr": "mirage: line 1: warning: command substitution: 1 unterminated here-document\n"
+      },
+      "seq": 509973,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ]
+    },
+    {
+      "id": "heredoc_reader_carried_bodies_are_read_first",
+      "command": "cat <<A; echo $(cat <<B); cat <<C\nb\nB\na\nA\nc\nC",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\nc\n",
+        "stderr": "mirage: line 1: warning: command substitution: 1 unterminated here-document\n"
+      },
+      "seq": 509974,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ]
+    },
+    {
+      "id": "heredoc_reader_carried_through_nested_quoted_substitutions",
+      "command": "echo \"$(echo $(cat <<EOF))\"\nhi\nEOF",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\n",
+        "stderr": "mirage: line 1: warning: command substitution: 1 unterminated here-document\n"
+      },
+      "seq": 509975,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ]
+    },
+    {
+      "id": "heredoc_reader_carried_out_of_two_substitutions",
+      "command": "echo $(cat <<A <<B) $(cat <<C)\na\nA\nb\nB\nc\nC",
+      "expect": {
+        "exit": 0,
+        "stdout": "b c\n",
+        "stderr": "mirage: line 1: warning: command substitution: 2 unterminated here-documents\nmirage: line 5: warning: command substitution: 1 unterminated here-document\n"
+      },
+      "seq": 509976,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ]
+    },
+    {
+      "id": "heredoc_reader_carried_out_of_a_process_substitution",
+      "command": "cat <(cat <<EOF)\nhi\nEOF",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\n",
+        "stderr": "mirage: line 1: warning: command substitution: 1 unterminated here-document\n"
+      },
+      "seq": 509977,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ]
+    },
+    {
+      "id": "heredoc_reader_carried_in_a_function_body",
+      "command": "f() { echo $(cat <<EOF)\nhi\nEOF\n}; f; f",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\nhi\n",
+        "stderr": "mirage: line 1: warning: command substitution: 1 unterminated here-document\n"
+      },
+      "seq": 509978,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ]
     }
   ]
 }

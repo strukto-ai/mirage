@@ -54,6 +54,7 @@ from mirage.shell.parse.heredoc.delimiter import (
     clean_delimiter,
     delimiter_quoted,
 )
+from mirage.shell.parse.heredoc.types import HeredocPlan
 from mirage.shell.parse.types import SyntaxDiagnostic
 from mirage.shell.types import TSNodeLike
 
@@ -169,6 +170,42 @@ def check_syntax(
         for line in refusal.lines
     )
     return SyntaxDiagnostic(found[0].offending, message, found[-1].status)
+
+
+def heredoc_plan(command: str) -> HeredocPlan | None:
+    """The heredocs bash reads in a line: each one's ``<<`` and where its
+    body starts and ends, in the order bash reads the bodies (those a
+    substitution carries out first), and each substitution that closes
+    with bodies still to read.
+
+    Args:
+        command (str): the line.
+
+    Returns:
+        HeredocPlan | None: offsets in UTF-8 bytes; None when bash refuses
+        the line, whose heredocs nothing reads.
+    """
+    reader = _LineReader(command, frozenset(), {})
+    try:
+        if reader.refusals():
+            return None
+    except RecursionError:
+        logger.debug("line nested past the host's stack, no heredoc plan")
+        return None
+
+    def byte(at: int) -> int:
+        return len(encode_text(command[:at]))
+
+    return HeredocPlan(
+        tuple(
+            (byte(at), byte(start), byte(end))
+            for at, (start, end) in reader.bodies.items()
+        ),
+        tuple(
+            (byte(close), tuple(byte(at) for at in opened))
+            for close, opened in reader.closes
+        ),
+    )
 
 
 def syntax_error_result(found: SyntaxDiagnostic) -> IOResult:
@@ -418,7 +455,8 @@ class _LineReader:
     none does, a trailing backslash quotes the end of it, and each heredoc
     body is skipped after the newline that ends its command. ``frames``
     tracks the arrays and substitutions being read, which decide the
-    status of an error inside them.
+    status of an error inside them; ``bodies`` and ``closes`` keep the
+    heredoc plan (see ``heredoc_plan``).
 
     Args:
         text (str): the line.
@@ -440,6 +478,9 @@ class _LineReader:
         self.subs: dict[
             tuple[int, int | None], tuple[int, tuple[_Heredoc, ...]]
         ] = {}
+        self.bodies: dict[int, tuple[int, int]] = {}
+        self.closes: list[tuple[int, tuple[int, ...]]] = []
+        self.warned: set[int] = set()
         self.reset(0)
 
     def reset(self, pos: int) -> None:
@@ -846,7 +887,11 @@ class _LineReader:
                 self.fail_token(tok)
         self.nesting -= 1
         self.frames.pop()
-        pending = self.heredocs
+        pending: tuple[_Heredoc, ...] = self.heredocs
+        fresh = tuple(h.at for h in pending if h.at not in self.warned)
+        if fresh:
+            self.closes.append((tok.start, fresh))
+            self.warned.update(fresh)
         self.restore(state)
         self.pend(pending, carried=True)
         self.subs[(j, self.limit)] = (tok.end, pending)
@@ -959,7 +1004,7 @@ class _LineReader:
         if tok.kind == "newline":
             if tok.start == tok.end:
                 self.ended = True
-            elif self.heredocs:
+            if self.heredocs:
                 self.pos = self.heredoc_bodies(tok.end)
 
     def heredoc_bodies(self, i: int) -> int:
@@ -976,7 +1021,8 @@ class _LineReader:
         """
         text, n = self.text, self.n
         nested = "sub" in self.frames
-        for _, delimiter, strip, quoted in self.heredocs:
+        for at, delimiter, strip, quoted in self.heredocs:
+            start = i
             while i < n:
                 end = text.find("\n", i, n)
                 end = n if end < 0 else end
@@ -999,9 +1045,12 @@ class _LineReader:
                     and body.startswith(delimiter)
                     and _closes_substitution(body[len(delimiter) :])
                 ):
+                    resume = i + len(line) - len(body) + len(delimiter)
+                    self.bodies.setdefault(at, (start, resume))
                     self.heredocs, self.carried = (), 0
-                    return i + len(line) - len(body) + len(delimiter)
+                    return resume
                 i = min(end + 1, n)
+            self.bodies.setdefault(at, (start, i))
         self.heredocs, self.carried = (), 0
         return i
 

@@ -23,7 +23,10 @@ from mirage.shell.parse.heredoc.lower import (
     rebase_source,
 )
 from mirage.shell.parse.heredoc.node import HeredocNode
-from mirage.shell.parse.heredoc.reader import discover_heredocs
+from mirage.shell.parse.heredoc.reader import (
+    discover_heredocs,
+    read_planned,
+)
 from mirage.shell.parse.heredoc.types import HeredocSource
 from mirage.shell.parse.program import ParsedProgram
 from mirage.shell.parse.recovery import (
@@ -41,6 +44,7 @@ from mirage.shell.parse.source import (
     join_continuations,
     source_offsets,
 )
+from mirage.shell.parse.syntax import heredoc_plan
 from mirage.shell.parse.timing import lower_timing, wrap_timing
 from mirage.shell.types import TSNodeLike
 
@@ -77,14 +81,22 @@ def parse(command: str) -> TSNodeLike:
     original = encode_text(command)
     source = None
     if b"<<" in original:
-        # The operators are read off a tree that lexes `0<<EOF` as one.
-        hinted = TS_PARSER.parse(original).root_node
-        lexed = operator_source(original, hinted)
-        if lexed != original:
-            hinted = TS_PARSER.parse(lexed).root_node
-        documents = discover_heredocs(original, heredoc_operators(hinted))
+        # bash's reading of the line names its heredocs and the order of
+        # their bodies; a line it refuses falls back to the grammar's.
+        plan = heredoc_plan(command)
+        if plan is not None:
+            documents = read_planned(original, plan)
+        else:
+            # The operators are read off a tree that lexes `0<<EOF` as one.
+            hinted = TS_PARSER.parse(original).root_node
+            lexed = operator_source(original, hinted)
+            if lexed != original:
+                hinted = TS_PARSER.parse(lexed).root_node
+            documents = discover_heredocs(original, heredoc_operators(hinted))
         if documents:
-            source = lower_heredocs(original, documents)
+            source = lower_heredocs(
+                original, documents, () if plan is None else plan.closes
+            )
     if source is not None:
         source = drop_source_bytes(source, continuation_bytes(source.source))
     data = (

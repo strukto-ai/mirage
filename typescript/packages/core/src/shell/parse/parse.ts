@@ -20,7 +20,8 @@ import { Language, Parser } from 'web-tree-sitter'
 import type { ShellParserConfig } from './config.ts'
 import { heredocOperators } from './heredoc/index.ts'
 import { lowerTiming, wrapTiming, type TimingMark } from './timing.ts'
-import { discoverHeredocs } from './heredoc/reader.ts'
+import { discoverHeredocs, readPlanned } from './heredoc/reader.ts'
+import { heredocPlan } from './syntax.ts'
 import { dropSourceChars, lowerHeredocs, rebaseSource } from './heredoc/lower.ts'
 import { HeredocNode } from './heredoc/node.ts'
 import { continuationIndices, joinContinuations, sourceOffsets } from './source.ts'
@@ -129,14 +130,23 @@ function toUint8(bytes: Uint8Array | ArrayBuffer): Uint8Array {
 }
 
 function parseRoot(parser: NativeParser, command: string): ShellNode {
-  let hinted = command.includes('<<') ? (parser.parse(command)?.rootNode ?? null) : null
+  // bash's reading of the line names its heredocs and the order of their
+  // bodies; a line it refuses falls back to the grammar's.
+  const plan = command.includes('<<') ? heredocPlan(command) : null
+  let hinted =
+    command.includes('<<') && plan === null ? (parser.parse(command)?.rootNode ?? null) : null
   if (hinted !== null) {
     // The operators are read off a tree that lexes `0<<EOF` as one.
     const lexed = operatorSource(parser, command, hinted)
     if (lexed !== command) hinted = parser.parse(lexed)?.rootNode ?? hinted
   }
-  const documents = hinted === null ? [] : discoverHeredocs(command, heredocOperators(hinted))
-  const lowered = documents.length > 0 ? lowerHeredocs(command, documents) : null
+  const documents =
+    plan !== null
+      ? readPlanned(command, plan)
+      : hinted === null
+        ? []
+        : discoverHeredocs(command, heredocOperators(hinted))
+  const lowered = documents.length > 0 ? lowerHeredocs(command, documents, plan?.closes) : null
   let heredocs =
     lowered === null ? null : dropSourceChars(lowered, continuationIndices(parser, lowered.source))
   let input = heredocs?.source ?? joinContinuations(parser, command)
@@ -148,6 +158,7 @@ function parseRoot(parser: NativeParser, command: string): ShellNode {
         source: command,
         offsets: Array.from({ length: command.length + 1 }, (_, i) => i),
         documents: [],
+        closes: [],
       },
       continuationIndices(parser, command),
     )

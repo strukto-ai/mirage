@@ -15,7 +15,7 @@
 import { COMMENT_PRECEDERS, QUOTE_OPENERS } from './constants.ts'
 import { cleanDelimiter, delimiterQuoted } from './delimiter.ts'
 import { constructCloser, constructEnd, operatorLineEnd, quoteEnd } from './line.ts'
-import type { BodyRead, Heredoc, HeredocOperator } from './types.ts'
+import type { BodyRead, Heredoc, HeredocOperator, HeredocPlan } from './types.ts'
 
 export function delimiterEnd(text: string, start: number): number | null {
   let index = start
@@ -126,6 +126,53 @@ export function readHeredocs(text: string, operators: HeredocOperator[]): Heredo
       terminated: result.terminated,
       line,
       eofLine,
+    })
+  }
+  return documents
+}
+
+/** Read the bodies the syntax reader found, where it found them and in its
+ * order, which is bash's. A body the reader ended at a substitution's `)`
+ * after its delimiter holds the lines before that one. */
+export function readPlanned(text: string, plan: HeredocPlan): Heredoc[] {
+  const documents: Heredoc[] = []
+  for (const [at, start, end] of plan.order) {
+    const dash = text.charAt(at + 2) === '-'
+    let word = at + (dash ? 3 : 2)
+    while (text.charAt(word) === ' ' || text.charAt(word) === '\t' || text.startsWith('\\\n', word))
+      word += text.charAt(word) === '\\' ? 2 : 1
+    const wordEnd = delimiterEnd(text, word)
+    if (wordEnd === null) continue
+    const token = text.slice(word, wordEnd)
+    const delimiter = cleanDelimiter(token)
+    const quoted = delimiterQuoted(token)
+    let result = readBody(text, start, delimiter, quoted, dash)
+    if (result.end > end) {
+      const cut = text.lastIndexOf('\n', end - 1) + 1
+      result = {
+        ...readBody(text.slice(0, cut), start, delimiter, quoted, dash),
+        end,
+        terminated: true,
+      }
+    }
+    const previous = documents.at(-1)
+    let line = text.slice(0, wordEnd).split('\n').length
+    if (previous?.end === start)
+      line = previous.terminated
+        ? text.slice(0, Math.max(0, start - 1)).split('\n').length
+        : previous.eofLine
+    documents.push({
+      operatorStart: at,
+      wordEnd,
+      delimiter,
+      quoted,
+      bodyStart: start,
+      end: result.end,
+      body: result.body,
+      offsets: result.offsets,
+      terminated: result.terminated,
+      line,
+      eofLine: Math.max(result.eofLine, line),
     })
   }
   return documents

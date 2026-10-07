@@ -176,6 +176,7 @@ export function sourceOffsets(
       source: command,
       offsets: Array.from({ length: command.length + 1 }, (_, i) => i),
       documents: [],
+      closes: [],
     },
     continuationIndices(parser, command),
   )

@@ -83,15 +83,41 @@ class HeredocNode:
 
     @property
     def warnings(self) -> bytes:
-        return encode_text(
-            "".join(
-                f"mirage: line {doc.eof_line}: warning: here-document at "
-                f"line {doc.line} delimited by end-of-file (wanted "
-                f"`{doc.delimiter}')\n"
-                for _, doc in self._source.documents
-                if not doc.terminated
-            )
-        )
+        """What bash warns of while it reads the line's heredocs, in the
+        order it reads them: a substitution closing with bodies still to
+        read, on the line its reader stands on then, and a body the input
+        ends inside."""
+        original = self._source.original
+        closes = {
+            opened[0]: (close, opened) for close, opened in self._source.closes
+        }
+        out: list[str] = []
+        previous: Heredoc | None = None
+        for doc in sorted(
+            (doc for _, doc in self._source.documents),
+            key=lambda doc: doc.body_start,
+        ):
+            if doc.operator_start in closes:
+                close, opened = closes[doc.operator_start]
+                line = original.count(b"\n", 0, close) + 1
+                if previous is not None:
+                    line = max(
+                        line, original.count(b"\n", 0, previous.end - 1) + 1
+                    )
+                count = len(opened)
+                plural = "s" if count > 1 else ""
+                out.append(
+                    f"mirage: line {line}: warning: command substitution: "
+                    f"{count} unterminated here-document{plural}\n"
+                )
+            if not doc.terminated:
+                out.append(
+                    f"mirage: line {doc.eof_line}: warning: here-document at "
+                    f"line {doc.line} delimited by end-of-file (wanted "
+                    f"`{doc.delimiter}')\n"
+                )
+            previous = doc
+        return encode_text("".join(out))
 
     @property
     def offsets(self) -> tuple[int, ...]:
@@ -99,6 +125,8 @@ class HeredocNode:
 
     @property
     def source_text(self) -> bytes:
+        """The node's own text in the line as typed: its heredoc bodies
+        included where they sit inside it, not those it carries out."""
         if self._node.parent is None:
             return self._source.original
         if not any(
@@ -106,7 +134,38 @@ class HeredocNode:
             for start, _ in self._source.documents
         ):
             return self._node.text or b""
-        positions = self._source.offsets[self.start_byte : self.end_byte]
-        if not positions:
+        if self.end_byte <= self.start_byte:
             return b""
-        return self._source.original[min(positions) : max(positions) + 1]
+        offsets = self._source.offsets
+        start, end = offsets[self.start_byte], offsets[self.end_byte - 1]
+        return self._source.original[start : end + 1]
+
+    @property
+    def inlined(self) -> bytes:
+        """The node's own text with each heredoc body the line reads after
+        a substitution in it moved inside that substitution, just before
+        its ``)``: the same command to bash, and what a substitution's line
+        runs as, carrying no heredoc out of itself. Empty when no
+        substitution in the node carries one out."""
+        if self._node.parent is None or self.end_byte <= self.start_byte:
+            return b""
+        offsets, original = self._source.offsets, self._source.original
+        first, last = offsets[self.start_byte], offsets[self.end_byte - 1]
+        closes = [c for c in self._source.closes if first <= c[0] <= last]
+        if not closes:
+            return b""
+        docs = {doc.operator_start: doc for _, doc in self._source.documents}
+        out = bytearray(self.source_text)
+        for close, opened in sorted(closes, reverse=True):
+            bodies = bytearray(b"\n")
+            for at in opened:
+                doc = docs.get(at)
+                if doc is None:
+                    continue
+                bodies += original[doc.body_start : doc.end]
+                if not bodies.endswith(b"\n"):
+                    bodies += b"\n"
+                if not doc.terminated:
+                    bodies += encode_text(doc.delimiter) + b"\n"
+            out[close - first : close - first] = bodies
+        return bytes(out)

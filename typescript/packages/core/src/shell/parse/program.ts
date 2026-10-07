@@ -108,6 +108,9 @@ export class ProgramNode implements ShellNode {
   get sourceText() {
     return this.node.sourceText ?? this.node.text
   }
+  get inlined() {
+    return this.node.inlined
+  }
   get type(): string {
     return this.node.type
   }
