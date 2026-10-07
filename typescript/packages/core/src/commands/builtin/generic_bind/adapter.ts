@@ -12,7 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { MkdirOp, ReadBytesOp, ResolveGlobOp, SearchQuery, StatOp } from '../../../vfs/types.ts'
+import type {
+  MkdirOp,
+  ReadBytesOp,
+  ResolveGlobOp,
+  SearchQuery,
+  StatOp,
+} from '../../../vfs/types.ts'
 import type { BaseVFS, FindOptions } from '../../../vfs/base.ts'
 import { getExtension } from '../../resolve.ts'
 import { streamFromBytes } from '../utils/wrap.ts'
@@ -23,7 +29,6 @@ import {
   effectivePathMode,
   getAdmission,
   getCurrentSession,
-  getOpPolicies,
   hiddenRefusal,
   mountGateFor,
   sessionVisibility,
@@ -31,7 +36,7 @@ import {
 } from '../../../context/session_context.ts'
 import { pathsScoped } from '../../../ops/namespace_view.ts'
 import { METADATA_OPS } from '../../../policy/constants.ts'
-import { preVfsGate, type Policies } from '../../../policy/policies.ts'
+import { preVfsGate, type Policies, getOpPolicies } from '../../../policy/policies.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { hasAborted, makeAbortError } from '../../../workspace/abort.ts'
 import { hiddenUnder, moveReveals, pathVisible } from '../../../utils/hidden.ts'

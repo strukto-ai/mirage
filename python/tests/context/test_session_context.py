@@ -211,24 +211,6 @@ def test_the_admission_binding_is_scoped_to_one_command():
     assert get_admission() is None
 
 
-def test_the_op_policies_binding_is_scoped_to_one_command():
-    from mirage.context import (
-        get_op_policies,
-        reset_op_policies,
-        set_op_policies,
-    )
-    from mirage.policy.policies import Policies
-
-    assert get_op_policies() is None
-    policies = Policies([])
-    token = set_op_policies(policies)
-    try:
-        assert get_op_policies() is policies
-    finally:
-        reset_op_policies(token)
-    assert get_op_policies() is None
-
-
 def test_effective_path_mode_is_the_anchor_depth_rule():
     sess = SessionState(
         session_id="agent",

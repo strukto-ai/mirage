@@ -26,6 +26,7 @@ import { MountRootPolicy } from './builtin/mount_root.ts'
 import { PolicyDenied } from './errors.ts'
 import {
   Policies,
+  getOpPolicies,
   postExecuteGate,
   postVfsGate,
   preVfsGate,
@@ -34,6 +35,7 @@ import {
   refusalOf,
   renderDeny,
   renderPending,
+  runWithOpPolicies,
 } from './policies.ts'
 import { RulePolicy } from './rule.ts'
 import type { RouteContext } from '../runtime/routing/index.ts'
@@ -894,4 +896,16 @@ it('removes by identity, refreshes hooks and preserves an admission in progress'
   expect(policies.wants('preCommand')).toBe(false)
   expect(policies.remove(first)).toBe(false)
   expect(await policies.preCommand(ctx('weird'))).toBeNull()
+})
+
+describe('the op-policies binding', () => {
+  it('is scoped to one command', async () => {
+    expect(getOpPolicies()).toBeNull()
+    const policies = new Policies([])
+    await runWithOpPolicies(policies, () => {
+      expect(getOpPolicies()).toBe(policies)
+      return Promise.resolve()
+    })
+    expect(getOpPolicies()).toBeNull()
+  })
 })

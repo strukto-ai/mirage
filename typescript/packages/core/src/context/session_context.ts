@@ -14,17 +14,17 @@
 
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { ContextCall } from '../utils/async_context.ts'
-import type { SessionManager } from '../workspace/session/manager.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import { rstripSlash, stripSlash } from '../utils/slash.ts'
 import { anchorDepth, isGlob, pathVisible, showHead, shownMode } from '../utils/hidden.ts'
 import { eacces, enoent, erofs } from '../errors/fs.ts'
 import { parent } from '../utils/path.ts'
-import type { Decisions } from '../policy/decisions.ts'
-import type { Policies } from '../policy/policies.ts'
-import type { DryRun, HandOff, VfsExplanation } from '../policy/types.ts'
+import type { DryRun, VfsExplanation } from '../policy/types.ts'
 import type { EntryGate, PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
 import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
+
+/** Whoever binds sessions: one per workspace, compared by identity. */
+export abstract class SessionOwner {}
 
 /**
  * The session bound to one async context, and whose it is: `owner` is
@@ -32,7 +32,7 @@ import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
  */
 interface SessionBinding {
   session: SessionState
-  owner: SessionManager | null
+  owner: SessionOwner | null
   ancestors?: readonly SessionState[]
   restoreExecution?: ContextCall
 }
@@ -49,7 +49,7 @@ const sessionStorage = createAsyncContext<SessionBinding>()
 export function runWithSession<T>(
   session: SessionState,
   fn: () => Promise<T>,
-  owner?: SessionManager,
+  owner?: SessionOwner,
   ancestors?: readonly SessionState[],
   restoreExecution?: ContextCall,
 ): Promise<T> {
@@ -91,7 +91,7 @@ export function liveSessions(): SessionState[] {
  * concurrent workspace's bind shadowing the newest frame must not hide
  * this owner's own session.
  */
-export function getCurrentSessionFor(owner: SessionManager): SessionState | null {
+export function getCurrentSessionFor(owner: SessionOwner): SessionState | null {
   const bindings = sessionStorage.liveStores()
   for (let at = bindings.length - 1; at >= 0; at--) {
     const binding = bindings[at]
@@ -111,7 +111,7 @@ export function getCurrentSessionFor(owner: SessionManager): SessionState | null
  * binding that names no owner is a deliberate placement (a kernel
  * mount, a guest runtime, an embedder binding by hand) and is kept.
  */
-export function getCurrentSessionUnlessForeign(owner: SessionManager): SessionState | null {
+export function getCurrentSessionUnlessForeign(owner: SessionOwner): SessionState | null {
   const binding = sessionStorage.getStore()
   if (binding === undefined) return null
   if (binding.owner !== null && binding.owner !== owner) return null
@@ -288,41 +288,6 @@ export function getAdmission(): EntryGate | null {
   }
 }
 
-const opPoliciesStorage = createAsyncContext<Policies | null>()
-
-/**
- * Bind the workspace's admission policies for the duration of `fn`:
- * the run of one command.
- *
- * Bound by command dispatch around routing, the same window the
- * admission gate binds in, so the command tier's policy guard can fire
- * `preVfs` for the backend I/O a handler performs. Read at wrap or
- * call time by `withPolicyGuard`; unset outside a dispatched command
- * (a generic invoked directly in a test), where the guard is inert.
- */
-export function runWithOpPolicies<T>(policies: Policies, fn: () => Promise<T>): Promise<T> {
-  return Promise.resolve(opPoliciesStorage.run(policies, fn))
-}
-
-/**
- * The policies bound to the running command, null outside one.
- *
- * The newest live armed set. On an isolating runtime the live set is
- * the innermost binding, so a suspension answers null exactly as
- * bound. On the fallback storage a suspension yields to any
- * concurrently armed frame, because disarming another command's op
- * doors is the worse failure: find's delegated `rm` then double-admits
- * its removal (an over-count, failing closed) instead of a concurrent
- * command's ops running unguarded.
- */
-export function getOpPolicies(): Policies | null {
-  let armed: Policies | null = null
-  for (const policies of opPoliciesStorage.liveStores()) {
-    if (policies !== null) armed = policies
-  }
-  return armed
-}
-
 const mountGateStorage = createAsyncContext<readonly [string, MountMode]>()
 
 /**
@@ -406,33 +371,6 @@ export function runWithRefusalSink<T>(sink: RefusalSink, fn: () => Promise<T>): 
  */
 export function lineRunning(): boolean {
   return refusalSinkStorage.getStore() !== undefined
-}
-
-const opCallStorage = createAsyncContext<readonly [Decisions, HandOff]>()
-
-/**
- * Run one call made outside a line (a file tool's), the unit an op-level
- * answer covers: a grant one of its ops is answered by is claimed on
- * `handed` for the call's other ops on that path. `owner` is the ledger
- * the call runs under, the only one that claims on `handed` and spends
- * it. Mirrors Python's `set_op_call`.
- */
-export function runWithOpCall<T>(
-  owner: Decisions,
-  handed: HandOff,
-  fn: () => Promise<T>,
-): Promise<T> {
-  return Promise.resolve(opCallStorage.run([owner, handed], fn))
-}
-
-/**
- * The call made outside a line running in this context under `owner`'s
- * ledger, null for a bare op or for a call another ledger runs (a host
- * callback reaching a second workspace mid-call).
- */
-export function getOpCall(owner: Decisions): HandOff | null {
-  const call = opCallStorage.getStore()
-  return call?.[0] === owner ? call[1] : null
 }
 
 const explainingStorage = createAsyncContext<VfsExplanation[] | DryRun | null>()
@@ -547,10 +485,7 @@ export function runWithRedirectPaths<T>(
 const programStorage = createAsyncContext<SessionState | null>()
 
 /** Capture all command admission state for a deferred workspace callback. */
-export function captureSessionContext(
-  session?: SessionState,
-  owner?: SessionManager,
-): ContextCall[] {
+export function captureSessionContext(session?: SessionState, owner?: SessionOwner): ContextCall[] {
   const bound = sessionStorage.getStore()
   const inherited = session === undefined || session === bound?.session ? bound : undefined
   const sessionScope: ContextCall =
@@ -562,7 +497,6 @@ export function captureSessionContext(
     sessionScope,
     ...(restoreExecution === undefined ? [] : [restoreExecution]),
     admissionStorage.capture(),
-    opPoliciesStorage.capture(),
     mountGateStorage.capture(),
     walkProbeStorage.capture(),
     redirectStorage.capture(),

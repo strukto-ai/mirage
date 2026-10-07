@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { operandExitCode } from '../commands/spec/usage.ts'
+import { createAsyncContext, type ContextCall } from '../utils/async_context.ts'
 import { explaining, lineRunning, noteRefusal, runExplaining } from '../context/session_context.ts'
 import { eacces, erofs } from '../errors/fs.ts'
 import { fsErrorLine } from '../errors/render.ts'
@@ -667,4 +668,44 @@ export class Policies {
     const [action] = await this.fire('preSession', ctx)
     return denyOnly('preSession', action)
   }
+}
+
+const opPoliciesStorage = createAsyncContext<Policies | null>()
+
+/**
+ * Bind the workspace's admission policies for the duration of `fn`:
+ * the run of one command.
+ *
+ * Bound by command dispatch around routing, the same window the
+ * admission gate binds in, so the command tier's policy guard can fire
+ * `preVfs` for the backend I/O a handler performs. Read at wrap or
+ * call time by `withPolicyGuard`; unset outside a dispatched command
+ * (a generic invoked directly in a test), where the guard is inert.
+ */
+export function runWithOpPolicies<T>(policies: Policies, fn: () => Promise<T>): Promise<T> {
+  return Promise.resolve(opPoliciesStorage.run(policies, fn))
+}
+
+/**
+ * The policies bound to the running command, null outside one.
+ *
+ * The newest live armed set. On an isolating runtime the live set is
+ * the innermost binding, so a suspension answers null exactly as
+ * bound. On the fallback storage a suspension yields to any
+ * concurrently armed frame, because disarming another command's op
+ * doors is the worse failure: find's delegated `rm` then double-admits
+ * its removal (an over-count, failing closed) instead of a concurrent
+ * command's ops running unguarded.
+ */
+export function getOpPolicies(): Policies | null {
+  let armed: Policies | null = null
+  for (const policies of opPoliciesStorage.liveStores()) {
+    if (policies !== null) armed = policies
+  }
+  return armed
+}
+
+/** Capture the running command's policies for a deferred workspace callback. */
+export function captureOpPolicies(): ContextCall[] {
+  return [opPoliciesStorage.capture()]
 }

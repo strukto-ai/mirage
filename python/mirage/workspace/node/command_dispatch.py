@@ -25,13 +25,12 @@ from mirage.context import (
     redirect_opener_for,
     redirect_paths_for,
     reset_admission,
-    reset_op_policies,
     set_admission,
-    set_op_policies,
 )
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.policy import PolicyDenied, resolve_limit, resolve_producer
+from mirage.policy.policies import reset_op_policies, set_op_policies
 from mirage.policy.types import Claimant, HandOff, SessionContext
 from mirage.runtime.routing import RouteDecision
 from mirage.shell.bytes import decode_text, encode_text

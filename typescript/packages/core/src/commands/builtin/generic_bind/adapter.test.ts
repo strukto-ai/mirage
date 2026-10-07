@@ -17,12 +17,11 @@ import type { Accessor } from '../../../accessor/base.ts'
 import {
   runWithAdmission,
   runWithMountGate,
-  runWithOpPolicies,
   runWithSession,
 } from '../../../context/session_context.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { Policy } from '../../../policy/base.ts'
-import { Policies } from '../../../policy/policies.ts'
+import { Policies, runWithOpPolicies } from '../../../policy/policies.ts'
 import type { Action, VfsContext } from '../../../policy/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import {

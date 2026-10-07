@@ -17,6 +17,7 @@ import copy
 from collections.abc import Mapping
 from typing import Any
 
+from mirage.context.session_context import SessionOwner
 from mirage.policy.profile import CompiledProfile
 from mirage.policy.types import (
     AdmissionRules,
@@ -70,7 +71,7 @@ def _merge_seed_vars(
             session.vars[name] = var
 
 
-class SessionManager:
+class SessionManager(SessionOwner):
     """Owns the live session table over a storage-agnostic SessionStore.
 
     Mirrors the Namespace/NamespaceStore split: sessions are worked on

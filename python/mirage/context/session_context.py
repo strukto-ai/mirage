@@ -15,9 +15,10 @@
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from mirage.errors.fs import eacces, enoent, erofs
+from mirage.policy.types import DryRun, VfsExplanation
 from mirage.types import (
     MOUNT_MODE_RANK,
     EntryGate,
@@ -36,13 +37,11 @@ from mirage.utils.hidden import (
     shown_mode,
 )
 from mirage.utils.path import parent
+from mirage.workspace.session.session import SessionState
 
-if TYPE_CHECKING:
-    from mirage.policy.decisions import Decisions
-    from mirage.policy.policies import Policies
-    from mirage.policy.types import DryRun, HandOff, VfsExplanation
-    from mirage.workspace.session.manager import SessionManager
-    from mirage.workspace.session.session import SessionState
+
+class SessionOwner:
+    """Whoever binds sessions: one per workspace, compared by identity."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,14 +50,14 @@ class SessionBinding:
 
     Args:
         session (SessionState | None): the live session.
-        owner (SessionManager | None): the session manager the session
+        owner (SessionOwner | None): the session manager the session
             belongs to, which is one per workspace. None when the
             binder did not name one.
     """
 
-    session: "SessionState | None"
-    owner: "SessionManager | None"
-    ancestors: "tuple[SessionState, ...]" = ()
+    session: SessionState | None
+    owner: SessionOwner | None
+    ancestors: tuple[SessionState, ...] = ()
 
 
 _current_session: ContextVar[SessionBinding | None] = ContextVar(
@@ -68,16 +67,16 @@ _current_session: ContextVar[SessionBinding | None] = ContextVar(
 
 
 def set_current_session(
-    session: "SessionState | None",
-    owner: "SessionManager | None" = None,
+    session: SessionState | None,
+    owner: SessionOwner | None = None,
     *,
-    ancestors: "tuple[SessionState, ...]" = (),
+    ancestors: tuple[SessionState, ...] = (),
 ) -> Token[Any]:
     """Bind ``session`` to the current async context.
 
     Args:
         session (SessionState | None): the session to bind.
-        owner (SessionManager | None): the manager the session belongs
+        owner (SessionOwner | None): the manager the session belongs
             to. None keeps the owner already bound, so a nested bind
             inside a line (a background job's fork) stays attributed to
             the workspace running it.
@@ -98,13 +97,13 @@ def reset_current_session(token: Token[Any]) -> None:
     _current_session.reset(token)
 
 
-def get_current_session() -> "SessionState | None":
+def get_current_session() -> SessionState | None:
     """Return the session bound to the current async context, if any."""
     binding = _current_session.get()
     return binding.session if binding is not None else None
 
 
-def get_current_session_for(owner: "SessionManager") -> "SessionState | None":
+def get_current_session_for(owner: SessionOwner) -> SessionState | None:
     """Return the bound session only when ``owner`` published it.
 
     A session carries one workspace's cwd, env and mount grants, so a
@@ -112,7 +111,7 @@ def get_current_session_for(owner: "SessionManager") -> "SessionState | None":
     rather than adopt this one.
 
     Args:
-        owner (SessionManager): the asking workspace's session manager.
+        owner (SessionOwner): the asking workspace's session manager.
     """
     binding = _current_session.get()
     if binding is None or binding.owner is not owner:
@@ -121,8 +120,8 @@ def get_current_session_for(owner: "SessionManager") -> "SessionState | None":
 
 
 def get_current_session_unless_foreign(
-    owner: "SessionManager",
-) -> "SessionState | None":
+    owner: SessionOwner,
+) -> SessionState | None:
     """The bound session, unless another owner published it.
 
     An op door keeps the session it is reached under, so it never
@@ -135,7 +134,7 @@ def get_current_session_unless_foreign(
     is kept.
 
     Args:
-        owner (SessionManager): the asking workspace's session manager.
+        owner (SessionOwner): the asking workspace's session manager.
     """
     binding = _current_session.get()
     if binding is None or (
@@ -150,7 +149,7 @@ def _norm_prefix(mount_prefix: str) -> str:
     return "/" + stripped if stripped else "/"
 
 
-def _session_mode(mount_prefix: str) -> "MountMode":
+def _session_mode(mount_prefix: str) -> MountMode:
     """The current session's mode cap for this mount.
 
     ``MountMode.EXEC`` (no narrowing) when no session is bound, when the
@@ -245,13 +244,13 @@ def hidden_refusal(
     return enoent(virtual)
 
 
-_current_admission: ContextVar["EntryGate | None"] = ContextVar(
+_current_admission: ContextVar[EntryGate | None] = ContextVar(
     "mirage_current_admission",
     default=None,
 )
 
 
-def set_admission(gate: "EntryGate") -> Token[Any]:
+def set_admission(gate: EntryGate) -> Token[Any]:
     """Bind the admitted command's entry gate to the current async
     context, for the run of that one command.
 
@@ -272,44 +271,11 @@ def reset_admission(token: Token[Any]) -> None:
     _current_admission.reset(token)
 
 
-def get_admission() -> "EntryGate | None":
+def get_admission() -> EntryGate | None:
     """The entry gate of the command running in this context, None
     when no admitted command is bound (a command constructed outside
     the dispatcher, or a line no gate judged)."""
     return _current_admission.get()
-
-
-_op_policies: ContextVar["Policies | None"] = ContextVar(
-    "mirage_op_policies",
-    default=None,
-)
-
-
-def set_op_policies(policies: "Policies") -> Token[Any]:
-    """Bind the workspace's admission policies to the current async
-    context, for the run of one command.
-
-    Set by command dispatch around routing, the same window the
-    admission gate binds in, so the command tier's policy guard can
-    fire ``pre_vfs`` for the backend I/O a handler performs. Read at
-    call time by ``with_policy_guard``; unset outside a dispatched
-    command (a generic invoked directly in a test), where the guard
-    is inert.
-
-    Args:
-        policies (Policies): the workspace's admission policies.
-    """
-    return _op_policies.set(policies)
-
-
-def reset_op_policies(token: Token[Any]) -> None:
-    """Restore the previous policies binding."""
-    _op_policies.reset(token)
-
-
-def get_op_policies() -> "Policies | None":
-    """The policies bound to the running command, None outside one."""
-    return _op_policies.get()
 
 
 _current_mount_gate: ContextVar[tuple[str, MountMode] | None] = ContextVar(
@@ -385,50 +351,14 @@ def line_running() -> bool:
     return _refusal_sink.get() is not None
 
 
-_op_call: ContextVar["tuple[Decisions, HandOff] | None"] = ContextVar(
-    "mirage_op_call",
-    default=None,
-)
-
-
-def set_op_call(owner: "Decisions", handed: "HandOff") -> Token[Any]:
-    """Bind one call made outside a line (a file tool's), the unit an
-    op-level answer covers: a grant one of its ops is answered by is
-    claimed on ``handed`` for the call's other ops on that path.
-
-    Args:
-        owner (Decisions): the ledger the call runs under, the only one
-            that claims on ``handed`` and spends it.
-        handed (HandOff): the call's hand-off, spent when it ends.
-    """
-    return _op_call.set((owner, handed))
-
-
-def reset_op_call(token: Token[Any]) -> None:
-    """Restore the previous call binding."""
-    _op_call.reset(token)
-
-
-def get_op_call(owner: "Decisions") -> "HandOff | None":
-    """The call made outside a line running in this context under
-    ``owner``'s ledger, None for a bare op or for a call another ledger
-    runs (a host callback reaching a second workspace mid-call).
-
-    Args:
-        owner (Decisions): the ledger asking.
-    """
-    call = _op_call.get()
-    return call[1] if call is not None and call[0] is owner else None
-
-
-_explaining: ContextVar["list[VfsExplanation] | DryRun | None"] = ContextVar(
+_explaining: ContextVar[list[VfsExplanation] | DryRun | None] = ContextVar(
     "mirage_explaining",
     default=None,
 )
 
 
 def set_explaining(
-    trace: "list[VfsExplanation] | DryRun | None",
+    trace: list[VfsExplanation] | DryRun | None,
 ) -> Token[Any]:
     """Make the calls in this context a dry run: the op gate notes on
     ``trace`` what it would answer and stops the op before any backend
@@ -448,7 +378,7 @@ def reset_explaining(token: Token[Any]) -> None:
     _explaining.reset(token)
 
 
-def explaining() -> "list[VfsExplanation] | DryRun | None":
+def explaining() -> list[VfsExplanation] | DryRun | None:
     """The dry run's trace when the calls in this context only explain,
     DECIDING while its policies decide, None when they run."""
     return _explaining.get()
@@ -569,12 +499,12 @@ def redirect_opener_for(node_id: int) -> RedirectOpener | None:
     return bound[2]
 
 
-_program_invocation: ContextVar["SessionState | None"] = ContextVar(
+_program_invocation: ContextVar[SessionState | None] = ContextVar(
     "mirage_program_invocation", default=None
 )
 
 
-def set_program_invocation(session: "SessionState") -> Token[Any]:
+def set_program_invocation(session: SessionState) -> Token[Any]:
     """Mark the line about to run in a session as a program run.
 
     ``find -exec`` hands its words to ``execvp``, so the head it runs is
@@ -602,7 +532,7 @@ def reset_program_invocation(token: Token[Any]) -> None:
     _program_invocation.reset(token)
 
 
-def program_invocation(session: "SessionState") -> bool:
+def program_invocation(session: SessionState) -> bool:
     """Whether the line running in this session is a program run.
 
     Args:
@@ -717,7 +647,7 @@ def _reaches_under(head: str, prefix: str) -> bool:
 
 
 def strongest_under_session(
-    sess: "SessionState", mount_prefix: str, mount_mode: MountMode
+    sess: SessionState, mount_prefix: str, mount_mode: MountMode
 ) -> MountMode:
     """The strongest mode one session reaches anywhere under a mount:
     its mount-wide mode, or a deeper show grant, still capped by the

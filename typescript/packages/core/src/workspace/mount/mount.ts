@@ -21,6 +21,7 @@ import {
   runWithWalkProbe,
   strongestModeUnder,
 } from '../../context/session_context.ts'
+import { captureOpPolicies } from '../../policy/policies.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { coerceReadPolicy } from './read_policy.ts'
 import { KeyLock } from '../../cache/lock.ts'
@@ -1126,6 +1127,7 @@ function wrapMountStreams(
   const seen = new Map<ByteSource, ByteSource>()
   const scope = new ContextScope([
     ...captureSessionContext(),
+    ...captureOpPolicies(),
     ...captureRecordingContext(),
     captureCacheContext(),
     captureCommandScope(),

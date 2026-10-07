@@ -23,7 +23,6 @@ import {
   getAdmission,
   getCurrentSessionFor,
   getCurrentSession,
-  getOpPolicies,
   isProgramInvocation,
   mountGateFor,
   sessionVisibility,
@@ -33,7 +32,6 @@ import {
   runAsProgram,
   runWithAdmission,
   runWithMountGate,
-  runWithOpPolicies,
   runWithRedirectPaths,
   runWithSession,
   sessionUmask,
@@ -46,7 +44,7 @@ import type { EntryGate } from '../types.ts'
 import { MountMode, PathSpec } from '../types.ts'
 import type { CommandRule } from '../policy/types.ts'
 import type { Policy } from '../policy/base.ts'
-import type { Policies } from '../policy/policies.ts'
+import { type Policies, runWithOpPolicies, getOpPolicies } from '../policy/policies.ts'
 import type { SessionManager } from '../workspace/session/manager.ts'
 import { SessionState } from '../workspace/session/session.ts'
 import { parseSessionProfile } from '../policy/profile.ts'

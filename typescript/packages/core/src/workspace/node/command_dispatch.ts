@@ -21,8 +21,8 @@ import {
   redirectOpenerFor,
   redirectPathsFor,
   runWithAdmission,
-  runWithOpPolicies,
 } from '../../context/session_context.ts'
+import { runWithOpPolicies } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { guardDispatch, mergeSignals } from '../abort.ts'

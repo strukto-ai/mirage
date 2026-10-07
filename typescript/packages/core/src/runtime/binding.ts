@@ -14,6 +14,7 @@
 
 import type { ProcessView } from '../process/types.ts'
 import { captureSessionContext } from '../context/session_context.ts'
+import { captureOpPolicies } from '../policy/policies.ts'
 import { captureRecordingContext } from '../observe/context.ts'
 import type { NamespaceView, SessionView } from '../ops/types.ts'
 import { PathSpec } from '../types.ts'
@@ -44,7 +45,11 @@ export function captureBinding(
     cwd?: PathSpec
     env?: Readonly<Record<string, string>>
   } = {},
-  scope = new ContextScope([...captureSessionContext(), ...captureRecordingContext()]),
+  scope = new ContextScope([
+    ...captureSessionContext(),
+    ...captureOpPolicies(),
+    ...captureRecordingContext(),
+  ]),
 ): RuntimeContext {
   const source = views.ns ?? {}
   const links = source.links

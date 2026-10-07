@@ -130,6 +130,7 @@ import { rstripSlash } from '../../utils/slash.ts'
 import type { WatchRuntime } from '../../watch/base.ts'
 import { resolveControlStores } from './build.ts'
 import { executeLine, type ExecuteEnv } from './execute.ts'
+import { captureOpPolicies } from '../../policy/policies.ts'
 import { closeWorkspace } from './lifecycle.ts'
 import { WorkspaceMeta } from './meta.ts'
 import { normalizeMounts, prepareAddedMount, unmountPrefix } from './mounts.ts'
@@ -584,6 +585,7 @@ export class Workspace {
     const session = sessionId === undefined ? this.opSession() : this.sessionManager.get(sessionId)
     const scope = new ContextScope([
       ...captureSessionContext(session, this.sessionManager),
+      ...captureOpPolicies(),
       ...captureRecordingContext(),
     ])
     return captureBinding(
@@ -654,6 +656,7 @@ export class Workspace {
     child.terminalOutput = true
     const scope = new ContextScope([
       ...captureSessionContext(child, this.sessionManager),
+      ...captureOpPolicies(),
       ...captureRecordingContext(),
     ])
     const input = new ProcessInput(),

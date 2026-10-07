@@ -36,7 +36,6 @@ from mirage.context import (
     get_admission,
     get_current_session,
     get_mount_gate,
-    get_op_policies,
     get_walk_probe,
     hidden_refusal,
     session_visibility,
@@ -63,7 +62,7 @@ from mirage.ops.types import (
     StatOverlay,
 )
 from mirage.policy.constants import METADATA_OPS
-from mirage.policy.policies import Policies, pre_vfs_gate
+from mirage.policy.policies import Policies, get_op_policies, pre_vfs_gate
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec, WalkProbe
 from mirage.utils.hidden import hidden_under, move_reveals, path_visible

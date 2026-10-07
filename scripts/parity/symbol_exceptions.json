@@ -1,6 +1,11 @@
 {
  "baseline": 4012,
  "modules": {
+  "policy/policies": {
+   "typescript_only": {
+    "captureOpPolicies": "A deferred TypeScript callback restores each async-local store it needs, as captureSessionContext and captureRecordingContext do; a Python contextvar travels with the copied context."
+   }
+  },
   "core/github/tree": {
    "python_only": {
     "_match_tree_to_index": "TypeScript makes the same tree-older-than-index check inline in ensureTree."
