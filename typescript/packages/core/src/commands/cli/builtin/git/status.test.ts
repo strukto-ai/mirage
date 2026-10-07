@@ -32,7 +32,7 @@ import { IOResult } from '../../../../io/types.ts'
 import { OpsRegistry } from '../../../../ops/registry.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
-import { MountMode } from '../../../../types.ts'
+import { MountMode, PathSpec } from '../../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
 import { ensureDir } from './io.ts'
@@ -98,7 +98,7 @@ async function stage(setup: Setup): Promise<[Workspace, string]> {
   ]
   for (const rel of walk(repo)) {
     const target = `/repo/${rel}`
-    await ensureDir(dispatch, target.slice(0, target.lastIndexOf('/')))
+    await ensureDir(dispatch, PathSpec.fromStrPath(target).parent)
     await ws.dispatch('write', target, [new Uint8Array(readFileSync(join(repo, rel)))])
     // The mode rides along, because git tracks the owner's execute bit and a
     // mirror that dropped it would make a `chmod +x` invisible to the copy under

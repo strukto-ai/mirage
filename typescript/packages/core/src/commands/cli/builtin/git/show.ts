@@ -242,7 +242,7 @@ export async function show(inv: CLIInvocation): Promise<CommandFnResult> {
     const names = revisions.length > 0 ? revisions : [HEAD]
     const objects: [string, GitObject][] = []
     for (const name of names) objects.push([name, await resolveObject(repo, name)])
-    const pathspecs = pathspecPatterns(repo.location, startPoint(fl), paths)
+    const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, paths)
     const parsed = {
       ...base,
       mailmap,
@@ -313,7 +313,7 @@ export async function diffTree(inv: CLIInvocation): Promise<CommandFnResult> {
     )
     const [revisions, paths] = splitMarked(inv.texts, inv.argv)
     const commit = await commitFacts(repo, await resolveCommit(repo, revisionArg(revisions)))
-    const pathspecs = pathspecPatterns(repo.location, startPoint(fl), paths)
+    const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, paths)
     const bodies = await commitOutput(repo, commit, { ...parsed, pathspecs }, fl.asBool('r'), false)
     const out = bodies
       .filter((body) => body !== null)

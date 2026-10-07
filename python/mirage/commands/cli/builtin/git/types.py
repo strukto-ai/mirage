@@ -21,7 +21,8 @@ from dulwich.index import ConflictedIndexEntry, IndexEntry
 
 from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.types import CLIInvocation
-from mirage.types import FileStat
+from mirage.ops.types import NamespaceView
+from mirage.types import FileStat, PathSpec
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,20 +60,22 @@ class RepoLocation:
     is why one field carried both until worktrees turned up.
 
     Args:
-        gitdir (str): absolute virtual path of this checkout's git
+        gitdir (PathSpec): absolute virtual path of this checkout's git
             directory, which holds HEAD and the index.
-        commondir (str): absolute virtual path of the shared git
+        commondir (PathSpec): absolute virtual path of the shared git
             directory, which holds objects and branches. Equal to
             ``gitdir`` unless this is a linked worktree.
-        worktree (str): absolute virtual path of the working tree root.
-        mount_root (str): the mount prefix both live under, which
+        worktree (PathSpec): absolute virtual path of the working tree root.
+        mount_root (PathSpec): the mount prefix both live under, which
             bounded the discovery walk.
+        ns (NamespaceView | None): session namespace for repository entry views.
     """
 
-    gitdir: str
-    commondir: str
-    worktree: str
-    mount_root: str
+    gitdir: PathSpec
+    commondir: PathSpec
+    worktree: PathSpec
+    mount_root: PathSpec
+    ns: NamespaceView | None = None
 
 
 # git's refusal for a verb a read-only mount turned down, built from the

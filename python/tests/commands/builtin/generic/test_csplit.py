@@ -43,6 +43,19 @@ async def _no_unlink(path: PathSpec) -> None:
             ),
             ["/data/sub/cs00", "/data/sub/cs01"],
         ),
+        *[
+            (
+                "/data",
+                PathSpec.from_str_path(prefix, cwd="/data"),
+                [f"/data/{stem}00", f"/data/{stem}01"],
+            )
+            for prefix, stem in [
+                ("d/..", "d/.."),
+                ("d/.", "d/."),
+                ("d/", "d/"),
+                (".", "."),
+            ]
+        ],
     ],
 )
 async def test_stdin_outputs_are_named_on_the_executing_mount(

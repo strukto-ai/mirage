@@ -12,10 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { PathSpec } from '../../../types.ts'
+
 export const USAGE = "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]"
 
 export interface AwkFlags {
   readonly fieldSeparator: string | null
   readonly assignments: readonly string[]
-  readonly programFiles: readonly string[]
+  readonly programFiles: readonly PathSpec[]
 }

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { visibleEntries, matched, repoRelative } from './pathspec.ts'
+import { type PathSpec, FileType } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -27,8 +29,8 @@ import {
   RemovePathError,
 } from './errors.ts'
 import { readIndex, updateIndex } from './index_file.ts'
-import { removeEmptyParents, removeFile, under } from './io.ts'
-import { matched, repoRelative } from './pathspec.ts'
+import { removeEmptyParents, removeFile } from './io.ts'
+
 import type { Repo } from './repo.ts'
 import { opened } from './session.ts'
 import type { TreeEntry } from './tree.ts'
@@ -36,7 +38,6 @@ import type { Dispatch, IndexEntry, RepoLocation, WorkTree } from './types.ts'
 import { checkSwitches, fatal, startPoint } from './util.ts'
 import { scan, UNTRACKED_NO } from './worktree.ts'
 import type { LinkView, MountView, StatPath } from '../../../../ops/types.ts'
-import { FileType } from '../../../../types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
@@ -120,7 +121,7 @@ export function select(
  */
 export async function shadowed(
   links: LinkView | null,
-  worktree: string,
+  worktree: PathSpec,
   paths: readonly string[],
   missing: ReadonlyMap<string, string>,
 ): Promise<Set<string>> {
@@ -128,9 +129,9 @@ export async function shadowed(
   if (links === null) return found
   for (const path of paths) {
     if (missing.get(path) !== DELETED) continue
-    const absolute = under(worktree, path)
-    if (links.resolve(absolute) === absolute) continue
-    if (await links.exists(absolute)) found.add(path)
+    const absolute = worktree.join(path)
+    if (links.resolve(absolute.virtual) === absolute.virtual) continue
+    if (await links.exists(absolute.virtual)) found.add(path)
   }
   return found
 }
@@ -211,7 +212,7 @@ export async function refuseLostWork(
 export async function clearWorktree(
   dispatch: Dispatch,
   statPath: StatPath,
-  worktree: string,
+  worktree: PathSpec,
   selected: readonly string[],
   lines: string,
   links: LinkView | null,
@@ -219,8 +220,8 @@ export async function clearWorktree(
 ): Promise<void> {
   let removed = false
   for (const path of selected) {
-    const absolute = under(worktree, path)
-    if ((links?.statAt(absolute) ?? null) === null) {
+    const absolute = worktree.join(path)
+    if ((links?.statAt(absolute.virtual) ?? null) === null) {
       const info = await statPath(absolute)
       if (info !== null && info.type === FileType.DIRECTORY) {
         if (!removed) throw new RemovePathError(path, lines)
@@ -258,8 +259,11 @@ export async function rm(inv: CLIInvocation): Promise<CommandFnResult> {
     if (texts.length === 0) throw new NoPathspecRemoveError()
     const repo = await opened(fl, doors, !flags.cached)
     const state = await readIndex(repo, dispatch)
-    const tracked = new Set([...state.entries.keys(), ...state.conflicts.keys()])
-    selected = select(repo.location, startPoint(fl), texts, tracked, flags)
+    const tracked = new Set([
+      ...visibleEntries(repo.location, state.entries).keys(),
+      ...visibleEntries(repo.location, state.conflicts).keys(),
+    ])
+    selected = select(repo.location, startPoint(fl).virtual, texts, tracked, flags)
     if (!flags.force) {
       const checkable = selected.filter((path) => state.entries.has(path))
       const found = await scan(

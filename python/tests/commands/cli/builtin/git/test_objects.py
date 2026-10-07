@@ -24,9 +24,7 @@ from mirage.commands.cli.builtin.git.objects import (
     load_packs,
 )
 
-from .conftest import mounted, pack_everything
-
-GITDIR = "/repo/.git"
+from .conftest import GITDIR, mounted, pack_everything
 
 
 async def loose_of(workspace) -> LooseObjects:

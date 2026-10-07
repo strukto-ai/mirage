@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
 import re
 from collections.abc import Iterable
 
@@ -484,7 +483,7 @@ def _on_disk(repo: BaseRepo, path: str) -> bool:
     """
     if not path or not isinstance(repo, Repo):
         return False
-    where = posixpath.join(repo.location.worktree, path)
+    where = repo.location.worktree.join(path)
     try:
         return run_async_from_sync(exists(repo.dispatch, where), repo.loop)
     except NotADirectoryError:

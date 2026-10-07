@@ -14,6 +14,8 @@
 
 import git from 'isomorphic-git'
 
+import { visibleEntries, matched, repoRelative } from './pathspec.ts'
+
 import { IOResult } from '../../../../io/types.ts'
 import type { LinkView, StatPath } from '../../../../ops/types.ts'
 import { FileType, type FileStat } from '../../../../types.ts'
@@ -28,11 +30,10 @@ import {
   PathspecError,
   UnknownPathspecError,
 } from './errors.ts'
-import type { IgnoreStack } from './ignore.ts'
-import { loadIgnores } from './ignore.ts'
+import { type IgnoreStack, loadIgnores } from './ignore.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
-import { entryBytes, under } from './io.ts'
-import { matched, repoRelative } from './pathspec.ts'
+import { entryBytes } from './io.ts'
+
 import { repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { EXECUTABLE, OWNER_EXECUTE, REGULAR, SYMLINK } from './constants.ts'
@@ -165,7 +166,7 @@ async function resolve(
       for (const path of gone) remove.add(path)
       continue
     }
-    const info = await statPath(under(location.worktree, target))
+    const info = await statPath(location.worktree.join(target))
     if (info === null || info.type === FileType.DIRECTORY) throw new PathspecError(operand)
     found.files.set(target, info)
     stage.add(target)
@@ -196,7 +197,7 @@ export async function stageChanges(
   for (const path of [...stage].sort(compareCodePoints)) {
     const info = found.files.get(path)
     if (info === undefined) continue
-    const data = await entryBytes(dispatch, under(repo.location.worktree, path), info)
+    const data = await entryBytes(dispatch, repo.location.worktree.join(path), info)
     const oid = await git.writeBlob({ ...repoArgs(repo), blob: data })
     const entry = stagedEntry(oid, info, data.length)
     const before = entries.get(path)
@@ -230,7 +231,7 @@ export async function stageTracked(
   state: IndexState,
   links: LinkView | null,
 ): Promise<[Map<string, StagedEntry>, Set<string>]> {
-  const tracked = new Set(state.entries.keys())
+  const tracked = new Set(visibleEntries(repo.location, state.entries).keys())
   const found = await scan(dispatch, statPath, repo.location, tracked, UNTRACKED_NO, links)
   const present = new Set(found.files.keys())
   const kept = new Set([...tracked].filter((path) => present.has(path)))
@@ -268,7 +269,7 @@ export async function add(inv: CLIInvocation): Promise<CommandFnResult> {
     if (texts.length === 0 && !parsed.every && !parsed.update) throw new NothingSpecifiedError()
     const repo: Repo = await opened(fl, doors, true)
     const state = await readIndex(repo, dispatch)
-    const tracked = new Set(state.entries.keys())
+    const tracked = new Set(visibleEntries(repo.location, state.entries).keys())
     const found = await scan(
       dispatch,
       statPath,
@@ -284,7 +285,7 @@ export async function add(inv: CLIInvocation): Promise<CommandFnResult> {
     if (parsed.update) {
       const scope =
         texts.length > 0
-          ? updateScope(repo.location, startPoint(fl), texts, tracked, present)
+          ? updateScope(repo.location, startPoint(fl).virtual, texts, tracked, present)
           : tracked
       stage = new Set([...scope].filter((path) => present.has(path)))
       remove = new Set([...scope].filter((path) => !present.has(path)))
@@ -295,7 +296,7 @@ export async function add(inv: CLIInvocation): Promise<CommandFnResult> {
       ;[stage, remove] = await resolve(
         statPath,
         repo.location,
-        startPoint(fl),
+        startPoint(fl).virtual,
         texts,
         found,
         tracked,

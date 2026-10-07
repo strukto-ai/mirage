@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
 from dataclasses import dataclass
 
 from dulwich.index import IndexEntry
@@ -36,7 +35,11 @@ from mirage.commands.cli.builtin.git.ignore import IgnoreStack, load_ignores
 from mirage.commands.cli.builtin.git.index_file import read_index, write_index
 from mirage.commands.cli.builtin.git.io import entry_bytes
 from mirage.commands.cli.builtin.git.objects import store_blob
-from mirage.commands.cli.builtin.git.pathspec import matched, repo_relative
+from mirage.commands.cli.builtin.git.pathspec import (
+    matched,
+    repo_relative,
+    visible_entries,
+)
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import (
     IndexState,
@@ -236,7 +239,7 @@ async def _resolve(
             stage |= hits if force else keep_addable(hits, tracked, ignores)
             remove |= gone
             continue
-        info = await stat_path(posixpath.join(location.worktree, target))
+        info = await stat_path(location.worktree.join(target))
         if info is None or info.type is FileType.DIRECTORY:
             raise PathspecError(operand)
         found.files[target] = info
@@ -273,9 +276,7 @@ async def stage_changes(
     added: list[str] = []
     for path in sorted(stage):
         data = await entry_bytes(
-            dispatch,
-            posixpath.join(location.worktree, path),
-            found.files[path],
+            dispatch, location.worktree.join(path), found.files[path]
         )
         sha = await store_blob(dispatch, location.commondir, data)
         entry = staged_entry(sha, found.files[path], len(data))
@@ -314,7 +315,8 @@ async def stage_tracked(
         links (LinkView | None): the namespace's symlink table.
     """
     tracked = {
-        path.decode("utf-8", errors="replace") for path in state.entries
+        path.decode("utf-8", errors="replace")
+        for path in visible_entries(location, state.entries)
     }
     found = await scan(
         dispatch, stat_path, location, tracked, UNTRACKED_NO, links
@@ -359,7 +361,8 @@ async def add(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         _repo, location = await opened(fl, doors, work_tree=True)
         state = await read_index(dispatch, location.gitdir)
         tracked = {
-            path.decode("utf-8", errors="replace") for path in state.entries
+            path.decode("utf-8", errors="replace")
+            for path in visible_entries(location, state.entries)
         }
         found = await scan(
             dispatch,
@@ -375,7 +378,11 @@ async def add(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         if parsed.update:
             scope = (
                 _update_scope(
-                    location, start_point(fl), tracked, set(found.files), texts
+                    location,
+                    start_point(fl).virtual,
+                    tracked,
+                    set(found.files),
+                    texts,
                 )
                 if texts
                 else tracked
@@ -389,7 +396,7 @@ async def add(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             stage, remove = await _resolve(
                 stat_path,
                 location,
-                start_point(fl),
+                start_point(fl).virtual,
                 texts,
                 found,
                 tracked,

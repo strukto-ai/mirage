@@ -12,9 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ShellValue } from '../shell/variable.ts'
-import type { VarAttr } from '../shell/variable.ts'
-import type { FileStat, Visibility } from '../types.ts'
+import { type ShellValue, type VarAttr } from '../shell/variable.ts'
+import type { FileStat, PathSpec, Visibility } from '../types.ts'
 
 export type StatOverlay = (path: string, stat: FileStat) => FileStat
 
@@ -22,7 +21,7 @@ export type StatOverlay = (path: string, stat: FileStat) => FileStat
 // a path under another mount still answers; null when nothing is there.
 // What a traversal command asks about its own start point, which decides
 // whether a walk is possible at all.
-export type StatPath = (path: string) => Promise<FileStat | null>
+export type StatPath = (path: string | PathSpec) => Promise<FileStat | null>
 // readdir one virtual path through the workspace rather than one backend.
 // What a walker whose output is a single document (tree) reads once it
 // reaches a mount boundary, since the subtree below it lives in another

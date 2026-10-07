@@ -12,10 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../../../types.ts'
+import { CycleError, posixNormpath } from '../../../../utils/path.ts'
 import { byteView } from '../../../../shell/bytes.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
-import { posixNormpath } from '../../../../utils/path.ts'
 import { EmptyPathspecError, OutsideRepositoryError, UnsupportedPathspecError } from './errors.ts'
+import { pathVisible } from '../../../../utils/hidden.ts'
 import type { RepoLocation } from './types.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 
@@ -51,7 +53,7 @@ function absoluteOperand(start: string, operand: string): string {
  * @param operand the operand as the user spelled it
  */
 export function repoRelative(location: RepoLocation, start: string, operand: string): string {
-  const root = rstripSlash(location.worktree) || '/'
+  const root = rstripSlash(location.worktree.virtual) || '/'
   const prefix = root.endsWith('/') ? root : `${root}/`
   const base = start === root || start.startsWith(prefix) ? start : root
   const absolute = absoluteOperand(base, operand)
@@ -142,4 +144,32 @@ function selects(path: string, pattern: string, directory: boolean): boolean {
   if (under(path, stem) || path === pattern) return true
   if (directory && (path === stem || under(stem, path))) return true
   return fnmatch(byteView(path), byteView(pattern))
+}
+
+/** Whether a repository entry belongs to the session's visible tree. */
+export function visiblePath(location: RepoLocation, relative: string): boolean {
+  const ns = location.ns
+  if (ns?.visibility === undefined) return true
+  const path = location.worktree.join(relative)
+  if (!pathVisible(ns.visibility, path.virtual)) return false
+  let parent: string
+  try {
+    parent = ns.links?.resolve(path.directory) ?? path.directory
+  } catch (err) {
+    if (!(err instanceof CycleError)) throw err
+    console.debug('Index visibility uses the stored path for a link cycle')
+    return true
+  }
+  const followed = PathSpec.fromStrPath(parent, undefined, '/').join(
+    path.virtual.slice(path.virtual.lastIndexOf('/') + 1),
+  )
+  return pathVisible(ns.visibility, followed.virtual)
+}
+
+/** A session view of Git entries; the persistent mapping stays intact. */
+export function visibleEntries<T>(
+  location: RepoLocation,
+  entries: ReadonlyMap<string, T>,
+): Map<string, T> {
+  return new Map([...entries].filter(([path]) => visiblePath(location, path)))
 }

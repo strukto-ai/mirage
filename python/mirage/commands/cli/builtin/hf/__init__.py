@@ -258,7 +258,7 @@ HF = CLISpec(
                 EXCLUDE,
                 Option(
                     long="--cache-dir",
-                    type="str",
+                    type="path",
                     metavar="CACHE_DIR",
                     description=(
                         "Workspace directory to hold the cache; "
@@ -274,7 +274,7 @@ HF = CLISpec(
                 ),
                 Option(
                     long="--local-dir",
-                    type="str",
+                    type="path",
                     metavar="LOCAL_DIR",
                     description=(
                         "Download straight into this directory, "

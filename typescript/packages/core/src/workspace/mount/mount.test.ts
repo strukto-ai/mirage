@@ -404,11 +404,15 @@ describe('Mount.executeCmd', () => {
     if (plain === undefined || typed === undefined) throw new Error('missing')
     m.register(plain)
     m.register(typed)
-    const statPath = (p: string): Promise<FileStat | null> =>
+    const statPath = (p: string | PathSpec): Promise<FileStat | null> =>
       Promise.resolve(
-        p.endsWith('dir.tally')
-          ? new FileStat({ name: p, type: FileType.DIRECTORY })
-          : new FileStat({ name: p, type: FileType.FILE, size: 4 }),
+        (typeof p === 'string' ? p : p.virtual).endsWith('dir.tally')
+          ? new FileStat({ name: typeof p === 'string' ? p : p.virtual, type: FileType.DIRECTORY })
+          : new FileStat({
+              name: typeof p === 'string' ? p : p.virtual,
+              type: FileType.FILE,
+              size: 4,
+            }),
       )
 
     await m.executeCmd('cat', [PathSpec.fromStrPath('/dir.tally')], [], {}, { statPath })

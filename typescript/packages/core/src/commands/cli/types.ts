@@ -16,19 +16,12 @@ import type { ProcessView } from '../../process/types.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
 import type { Limit, PathSpec } from '../../types.ts'
 import type { NamespaceView, SessionView, StatPath } from '../../ops/types.ts'
-import type { ScriptSource } from '../../runtime/types.ts'
+import { type ScriptSource, type DispatchFn } from '../../runtime/types.ts'
 import type { CommandFnResult } from '../config.ts'
-import type { DispatchFn } from '../../runtime/types.ts'
 import type { ZodObject, ZodRawShape } from 'zod'
 import { validateCli } from './compile.ts'
 
-import {
-  CommandSpec,
-  type CommandSpecInit,
-  type FlagValue,
-  type ParsedFlagValue,
-  UsageStyle,
-} from '../spec/types.ts'
+import { CommandSpec, type CommandSpecInit, type FlagValue, UsageStyle } from '../spec/types.ts'
 
 /**
  * One door per state plane, for the CLI verb that needs one.
@@ -228,11 +221,12 @@ export class CLISpec extends CommandSpec {
   }
 }
 
-export type WalkFlagBag = Record<string, ParsedFlagValue>
+export type WalkFlagBag = Record<string, FlagValue>
 
 export interface WalkResultInit {
   leaf?: CLISpec | null
   path?: readonly string[]
+  operandBases?: readonly PathSpec[]
   groupFlags?: WalkFlagBag
   argv?: readonly string[]
   output?: Uint8Array
@@ -251,6 +245,7 @@ export interface WalkResultInit {
 export class WalkResult {
   readonly leaf: CLISpec | null
   readonly path: readonly string[]
+  readonly operandBases: readonly PathSpec[]
   readonly groupFlags: WalkFlagBag
   readonly argv: readonly string[]
   readonly output: Uint8Array
@@ -261,6 +256,7 @@ export class WalkResult {
     this.leaf = init.leaf ?? null
     this.path = Object.freeze([...(init.path ?? [])])
     this.groupFlags = init.groupFlags ?? {}
+    this.operandBases = init.operandBases ?? []
     this.argv = Object.freeze([...(init.argv ?? [])])
     this.output = init.output ?? new Uint8Array(0)
     this.stream = init.stream ?? 'stdout'

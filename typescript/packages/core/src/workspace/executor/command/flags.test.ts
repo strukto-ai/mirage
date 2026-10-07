@@ -305,3 +305,19 @@ describe('an empty attached path value', () => {
     expect(file instanceof PathSpec ? file.walkError : null).toBe('ENOENT')
   })
 })
+
+it('keeps dots on synthesized attached and environment PATH flags', () => {
+  const spec = new CommandSpec({
+    options: [new Option({ long: '--file', type: 'path', env: 'INPUT' })],
+  })
+  for (const [argv, env] of [
+    [['--file=hidden/../public'], {}],
+    [[], { INPUT: 'hidden/../public' }],
+  ] as const) {
+    const parsed = parseFlags([...argv], spec, 'reader', '/repo', env)
+    const path = new FlagView(parsed.flagKwargs).asPath('file')
+    expect(path?.virtual).toBe('/repo/public')
+    expect(path?.rawPath).toBe('hidden/../public')
+    expect(path?.dotted).toBe('/repo/hidden/../public')
+  }
+})

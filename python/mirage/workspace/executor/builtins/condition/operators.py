@@ -14,11 +14,7 @@
 
 from functools import partial
 
-from mirage.commands.builtin.utils.paths import (
-    dispatch_stat,
-    dot_refusal,
-    typed_spec,
-)
+from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
 from mirage.errors.types import FileTooLargeError
 from mirage.io.types import materialize
 from mirage.shell.bytes import encode_text
@@ -78,7 +74,7 @@ async def path_kind(
         ctx (CondContext): evaluation context.
         val (str | PathSpec): operand as typed or classified.
     """
-    walk = typed_spec(val, ctx.session.cwd)
+    walk = PathSpec.from_str_path(val, cwd=ctx.session.cwd)
     if (
         await dot_refusal(
             partial(dispatch_stat, ctx.dispatch), walk, ctx.namespace.follow

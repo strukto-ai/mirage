@@ -228,7 +228,7 @@ export const HF = new CLISpec({
         EXCLUDE,
         new Option({
           long: '--cache-dir',
-          type: 'str',
+          type: 'path',
           metavar: 'CACHE_DIR',
           description:
             'Workspace directory to hold the cache; defaults to HF_HUB_CACHE or HF_HOME/hub from the session',
@@ -239,7 +239,7 @@ export const HF = new CLISpec({
         }),
         new Option({
           long: '--local-dir',
-          type: 'str',
+          type: 'path',
           metavar: 'LOCAL_DIR',
           description: 'Download straight into this directory, with no cache in between',
         }),

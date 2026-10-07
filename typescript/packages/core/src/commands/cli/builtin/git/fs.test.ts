@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec, MountMode } from '../../../../types.ts'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -23,8 +24,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { IOResult } from '../../../../io/types.ts'
 import { OpsRegistry } from '../../../../ops/registry.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
-import { MountMode } from '../../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
+
 import { configValues, gitFs } from './fs.ts'
 import { ensureDir } from './io.ts'
 import type { Dispatch } from './types.ts'
@@ -72,7 +73,7 @@ beforeAll(async () => {
   ]
   for (const rel of walk(repo)) {
     const target = `/repo/${rel}`
-    await ensureDir(dispatch, target.slice(0, target.lastIndexOf('/')))
+    await ensureDir(dispatch, PathSpec.fromStrPath(target).parent)
     await ws.dispatch('write', target, [new Uint8Array(readFileSync(join(repo, rel)))])
   }
   fs = gitFs(dispatch)
@@ -130,15 +131,15 @@ describe('gitFs', () => {
 
 describe('configValues', () => {
   it("reads every value as written, below isomorphic-git's own casts", async () => {
-    await ensureDir(dispatch, '/repo/cfg')
+    await ensureDir(dispatch, PathSpec.fromStrPath('/repo/cfg'))
     const text =
       '[core]\n\tbare = 1\n[Core]\n\tBare = yes\n\tbare\n\tbare =\n[core "sub"]\n\tbare = no\n'
     await ws.dispatch('write', '/repo/cfg/config', [new TextEncoder().encode(text)])
     const location = {
-      gitdir: '/repo/cfg',
-      commondir: '/repo/cfg',
-      worktree: '/repo',
-      mountRoot: '/repo',
+      gitdir: PathSpec.fromStrPath('/repo/cfg'),
+      commondir: PathSpec.fromStrPath('/repo/cfg'),
+      worktree: PathSpec.fromStrPath('/repo'),
+      mountRoot: PathSpec.fromStrPath('/repo'),
     }
     expect(await configValues(dispatch, location, 'core.bare')).toEqual(['1', 'yes', 'true', ''])
     expect(await configValues(dispatch, location, 'CORE.Bare')).toEqual(['1', 'yes', 'true', ''])
@@ -148,7 +149,36 @@ describe('configValues', () => {
     ])
     expect(await configValues(dispatch, location, 'branch.q"x.remote')).toEqual(['origin'])
     expect(await configValues(dispatch, location, 'core.worktree')).toEqual([])
-    const nowhere = { ...location, gitdir: '/repo/none', commondir: '/repo/none' }
+    const nowhere = {
+      ...location,
+      gitdir: PathSpec.fromStrPath('/repo/none'),
+      commondir: PathSpec.fromStrPath('/repo/none'),
+    }
     expect(await configValues(dispatch, nowhere, 'core.bare')).toEqual([])
   })
+})
+
+it('restores typed repository roots across the library string boundary', async () => {
+  const seen: PathSpec[] = []
+  const source: Dispatch = (_op, path) => {
+    seen.push(path)
+    return Promise.resolve([new Uint8Array(), new IOResult()])
+  }
+  const fs = gitFs(source, {
+    gitdir: PathSpec.fromStrPath('/hidden/../checkout', undefined, '/'),
+    commondir: PathSpec.fromStrPath('/blocked/../shared', undefined, '/'),
+    worktree: PathSpec.fromStrPath('/private/../work', undefined, '/'),
+    mountRoot: PathSpec.fromStrPath('/'),
+  })
+  const read = fs.promises.readFile as unknown as (path: string) => Promise<unknown>
+  await read('/checkout/HEAD')
+  await read('/checkout/objects/pack/data')
+  await read('/checkout/refs/worktree/local')
+  await read('/work/file')
+  expect(seen.map((path) => path.dotted)).toEqual([
+    '/hidden/../checkout/HEAD',
+    '/blocked/../shared/objects/pack/data',
+    '/hidden/../checkout/refs/worktree/local',
+    '/private/../work/file',
+  ])
 })

@@ -144,7 +144,8 @@ async def test_unified_headers_read_the_time_the_namespace_keeps():
             modified="2026-10-05T00:00:00Z",
         )
 
-    async def stat_path(virtual: str) -> FileStat | None:
+    async def stat_path(path: str | PathSpec) -> FileStat | None:
+        virtual = path.virtual if isinstance(path, PathSpec) else path
         return FileStat(
             name=virtual, type=FileType.FILE, modified="2021-06-15T12:00:00Z"
         )
@@ -166,7 +167,8 @@ async def test_unified_headers_read_in_the_tz_zone_with_every_digit():
     async def read(path: PathSpec) -> bytes:
         return b"x\n"
 
-    async def stat_path(virtual: str) -> FileStat | None:
+    async def stat_path(path: str | PathSpec) -> FileStat | None:
+        virtual = path.virtual if isinstance(path, PathSpec) else path
         return FileStat(
             name=virtual,
             type=FileType.FILE,

@@ -25,6 +25,7 @@ from mirage.core.hf_hub.cache import (
     snapshot_path,
 )
 from mirage.core.hf_hub.tree_entry import TreeEntry
+from mirage.types import PathSpec
 
 
 def entry(path: str, oid: str = "oid1", lfs: str = "") -> TreeEntry:
@@ -68,12 +69,19 @@ def test_etag_prefers_the_lfs_sha():
 
 def test_layout_paths():
     folder = repo_folder_name("acme/w", "model")
-    assert blob_path("/c", folder, "e1") == "/c/models--acme--w/blobs/e1"
-    assert ref_path("/c", folder, "main") == "/c/models--acme--w/refs/main"
+    root = PathSpec.from_str_path("/hidden/../c", cwd="/")
+    blob = blob_path(root, folder, "e1")
+    assert blob.virtual == "/c/models--acme--w/blobs/e1"
+    assert blob.dotted == "/hidden/../c/models--acme--w/blobs/e1"
     assert (
-        snapshot_dir("/c", folder, "sha") == "/c/models--acme--w/snapshots/sha"
+        ref_path(root, folder, "main").virtual
+        == "/c/models--acme--w/refs/main"
     )
-    assert snapshot_path("/c", folder, "sha", "sub/b.json") == (
+    assert (
+        snapshot_dir(root, folder, "sha").virtual
+        == "/c/models--acme--w/snapshots/sha"
+    )
+    assert snapshot_path(root, folder, "sha", "sub/b.json").virtual == (
         "/c/models--acme--w/snapshots/sha/sub/b.json"
     )
 
@@ -90,7 +98,12 @@ def test_link_target_is_relative_to_the_entry(repo_path, expected):
     """Relative because upstream's cache is relocatable: the whole
     directory can be moved and every link still resolves."""
     folder = repo_folder_name("acme/w", "model")
-    assert link_target("/c", folder, "sha", repo_path, "e1") == expected
+    assert (
+        link_target(
+            PathSpec.from_str_path("/c"), folder, "sha", repo_path, "e1"
+        )
+        == expected
+    )
 
 
 def test_cache_root_reads_upstream_order():

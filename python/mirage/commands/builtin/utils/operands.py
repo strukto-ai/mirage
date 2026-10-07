@@ -122,7 +122,7 @@ async def operand_stat(
             and (links is None or not links.subtree(path.virtual))
         ):
             raise
-        fallback = None if stat_path is None else await stat_path(path.virtual)
+        fallback = None if stat_path is None else await stat_path(path)
         if fallback is None:
             raise
         return fallback

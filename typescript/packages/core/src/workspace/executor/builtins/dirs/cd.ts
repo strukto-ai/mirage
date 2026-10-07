@@ -12,25 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { dispatchStat, dotRefusal, typedSpec } from '../../../../commands/builtin/utils/paths.ts'
-import { dottedSpelling, resolvePath } from '../../../../utils/path.ts'
+import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
+import { dottedSpelling, resolvePath, CycleError, posixNormpath } from '../../../../utils/path.ts'
 import { fsStrerror } from '../../../../errors/fs.ts'
 import { IOResult } from '../../../../io/types.ts'
-import { PathSpec, type StatFn } from '../../../../types.ts'
-import { FileType } from '../../../../types.ts'
-import { CycleError } from '../../../../utils/path.ts'
-import { posixNormpath } from '../../../../utils/path.ts'
+import { PathSpec, type StatFn, FileType } from '../../../../types.ts'
 import type { SessionState } from '../../../session/session.ts'
-import { changeDir, logicalCwd } from '../../../session/shell_dirs.ts'
+import { changeDir, logicalCwd, homeDir } from '../../../session/shell_dirs.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { toScope, scopePath } from '../scope.ts'
-import { joinPath, resolveTarget, typedPath } from './dirs.ts'
+import { joinPath, resolveTarget, typedPath, splitModeOptions } from './dirs.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { CD_OPTIONS, CD_USAGE } from './constants.ts'
-import { splitModeOptions } from './dirs.ts'
 import { classifyBarePath } from '../../../expand/classify/index.ts'
-import { homeDir } from '../../../session/shell_dirs.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
 function cdpathSearchable(target: string): boolean {
@@ -102,7 +97,7 @@ export async function handleCd(
     // front of one is proved a directory, the check its own
     // canonicalization makes; `cd nope/..` does not reach the cwd.
     if (dotted !== null) {
-      const walk = typedSpec(dotted, '/')
+      const walk = PathSpec.fromStrPath(dotted, undefined, '/')
       let refusal: Error | null
       try {
         refusal = await dotRefusal(linkedStat(dispatch, table), walk)

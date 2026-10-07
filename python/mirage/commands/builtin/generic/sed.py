@@ -26,7 +26,7 @@ from mirage.commands.builtin.sed_script import (
     compile_script,
     looks_ahead,
 )
-from mirage.commands.builtin.utils.paths import dispatch_stat, typed_spec
+from mirage.commands.builtin.utils.paths import dispatch_stat
 from mirage.commands.builtin.utils.stream import (
     read_stdin_async,
     stdin_bytes,
@@ -77,7 +77,7 @@ class _Doors:
     def spec(self, name: str) -> PathSpec:
         resolved = resolve_path(name, self.cwd)
         if self.dispatch is not None:
-            return typed_spec(name, self.cwd)
+            return PathSpec.from_str_path(name, cwd=self.cwd)
         slash = resolved.rfind("/")
         return PathSpec(
             virtual=resolved,
@@ -540,7 +540,8 @@ async def sed_generic(
         paths (list[PathSpec]): The path operands, unresolved.
         texts (list[str]): Positional words (script, or files under -e/-f).
         opts (CommandOpts): Flags, stdin and cwd from the dispatcher.
-        resolve_glob (Callable): Expands globs against the backend.
+        resolve_glob (Callable[..., Awaitable[list[PathSpec]]]):
+            Expands globs against the backend.
         read_bytes (ReadBytes): Bound whole-file reader.
         write_bytes (WriteBytes | None): Bound writer, None when the
             backend is read-only.

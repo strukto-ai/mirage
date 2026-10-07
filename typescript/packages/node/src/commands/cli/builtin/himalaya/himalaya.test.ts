@@ -21,9 +21,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cliSpecFor } from '@struktoai/mirage-core/commands/cli/specs'
 import type { CLIDoors } from '@struktoai/mirage-core/commands/cli/types'
-import { materialize } from '@struktoai/mirage-core/io/types'
-import type { IOResult } from '@struktoai/mirage-core/io/types'
-import type { PathSpec } from '@struktoai/mirage-core/types'
+import { materialize, type IOResult } from '@struktoai/mirage-core/io/types'
+import { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { EmailAccessor } from '../../../../accessor/email.ts'
 import { EmailVFS } from '../../../../vfs/email/email.ts'
@@ -495,7 +494,7 @@ describe('himalaya verbs', () => {
           to: 'a@b.com',
           subject: 'files',
           body: 'see attached',
-          attach: ['/scratch/note.txt'],
+          attach: [PathSpec.fromStrPath('/scratch/note.txt')],
         },
         stdin: null,
         env: {},
@@ -520,7 +519,7 @@ describe('himalaya verbs', () => {
           argv: [],
           paths: [],
           texts: [],
-          flags: { to: 'a@b.com', body: 'yo', attach: ['/scratch/gone.txt'] },
+          flags: { to: 'a@b.com', body: 'yo', attach: [PathSpec.fromStrPath('/scratch/gone.txt')] },
           stdin: null,
           env: {},
           doors,
@@ -537,7 +536,7 @@ describe('himalaya verbs', () => {
           argv: [],
           paths: [],
           texts: [],
-          flags: { to: 'a@b.com', body: 'yo', attach: ['/scratch/note.txt'] },
+          flags: { to: 'a@b.com', body: 'yo', attach: [PathSpec.fromStrPath('/scratch/note.txt')] },
           stdin: null,
           env: {},
         }),

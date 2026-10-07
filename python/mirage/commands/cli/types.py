@@ -19,12 +19,8 @@ from typing import Any, Callable, Generic, Literal, TypeVar
 from pydantic import BaseModel
 
 from mirage.commands.cli.compile import validate_cli
-from mirage.commands.spec.types import (
-    CommandSpec,
-    FlagValue,
-    ParsedFlagValue,
-    UsageStyle,
-)
+from mirage.commands.spec.flag_view import FlagBag
+from mirage.commands.spec.types import CommandSpec, FlagValue, UsageStyle
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import NamespaceView, SessionView, StatPath
 from mirage.process.types import ProcessView
@@ -33,7 +29,7 @@ from mirage.types import Limit, PathSpec
 
 # The group-level flag bag the walk accumulates, keyed by canonical
 # dashed spelling like ParsedArgs.flags.
-WalkFlagBag = dict[str, ParsedFlagValue]
+WalkFlagBag = FlagBag[FlagValue]
 
 ConfigT = TypeVar("ConfigT")
 
@@ -256,7 +252,8 @@ class WalkResult:
 
     leaf: "CLISpec | None" = None
     path: tuple[str, ...] = ()
-    group_flags: WalkFlagBag = field(default_factory=dict)
+    group_flags: WalkFlagBag = field(default_factory=FlagBag)
+    operand_bases: tuple[PathSpec, ...] = ()
     argv: tuple[str, ...] = ()
     output: bytes = b""
     stream: Literal["stdout", "stderr"] = "stdout"

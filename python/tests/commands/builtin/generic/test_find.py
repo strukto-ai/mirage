@@ -822,8 +822,8 @@ async def test_find_without_stat_path_walks_as_before():
 
 
 def _stat_map(stats: dict[str, FileStat | None]):
-    async def fn(virtual: str) -> FileStat | None:
-        return stats.get(virtual)
+    async def fn(path: str | PathSpec) -> FileStat | None:
+        return stats.get(path.virtual if isinstance(path, PathSpec) else path)
 
     return fn
 

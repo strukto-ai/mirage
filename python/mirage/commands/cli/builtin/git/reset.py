@@ -28,7 +28,11 @@ from mirage.commands.cli.builtin.git.errors import (
     RevisionResetError,
 )
 from mirage.commands.cli.builtin.git.index_file import read_index, write_index
-from mirage.commands.cli.builtin.git.pathspec import matched, repo_relative
+from mirage.commands.cli.builtin.git.pathspec import (
+    matched,
+    repo_relative,
+    visible_entries,
+)
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import (
@@ -122,16 +126,20 @@ async def reset(
             raise NoWorkspaceError()
         check_switches(inv, texts)
         repo, location = await opened(fl, doors)
-        named = fl.as_str("work_tree") is not None
+        named = fl.as_path("work_tree") is not None
         if not named and await is_bare(dispatch, location):
             raise BareResetError()
         await require_work_tree(dispatch, stat_path, location, named)
         state = await read_index(dispatch, location.gitdir)
         tree = await asyncio.to_thread(head_entries, repo) or {}
-        start = start_point(fl)
-        names = {path.decode("utf-8", errors="replace") for path in tree}
+        start = start_point(fl).virtual
+        names = {
+            path.decode("utf-8", errors="replace")
+            for path in visible_entries(location, tree)
+        }
         names |= {
-            path.decode("utf-8", errors="replace") for path in state.entries
+            path.decode("utf-8", errors="replace")
+            for path in visible_entries(location, state.entries)
         }
         if texts:
             selected: set[str] = set()
@@ -152,7 +160,8 @@ async def reset(
                     ObjectID(recorded[1]), recorded[0]
                 )
         if not texts:
-            state.conflicts.clear()
+            for key in visible_entries(location, state.conflicts):
+                state.conflicts.pop(key)
         await write_index(dispatch, location.gitdir, state)
         found = await scan(
             dispatch,
@@ -163,7 +172,10 @@ async def reset(
             links_of(doors),
         )
         unstaged = await work_changes(
-            dispatch, location.worktree, state.entries, found
+            dispatch,
+            location.worktree,
+            visible_entries(location, state.entries),
+            found,
         )
     except GitError as exc:
         return fatal(exc)

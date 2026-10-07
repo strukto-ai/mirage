@@ -1774,15 +1774,17 @@ class InitReadOnlyError(GitError):
 
 
 class CannotMkdirError(GitError):
-    """``init`` refused the directory its operand names by a read-only
-    mount.
+    """``init`` could not create the directory its operand names.
 
     Args:
         path (str): the directory as typed.
+        reason (str): filesystem failure, read-only by default.
     """
 
-    def __init__(self, path: str) -> None:
-        super().__init__(f"cannot mkdir {path}: Read-only file system")
+    def __init__(
+        self, path: str, reason: str = "Read-only file system"
+    ) -> None:
+        super().__init__(f"cannot mkdir {path}: {reason}")
 
 
 class ConfigLockError(GitError):

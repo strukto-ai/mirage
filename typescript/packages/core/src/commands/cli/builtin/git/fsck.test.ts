@@ -1,3 +1,4 @@
+import { PathSpec, MountMode, FileStat, FileType } from '../../../../types.ts'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import {
@@ -16,14 +17,12 @@ import { join } from 'node:path'
 import { beforeAll, expect, it } from 'vitest'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
-import { MountMode } from '../../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { checkPack } from './fsck.ts'
 import { GitError } from './errors.ts'
 import type { Dispatch } from './types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { eacces } from '../../../../errors/fs.ts'
-import { FileStat, FileType } from '../../../../types.ts'
 import { GIT } from './index.ts'
 
 const require = createRequire(import.meta.url)
@@ -167,7 +166,11 @@ it.each([32, (1 << 18) + 5, (1 << 19) + 20])(
         reads.push([offset, count])
         return Promise.resolve([data.subarray(offset, offset + count), new IOResult()])
       }
-      await checkPack(dispatch, '/repo/.git/objects/pack/large.pack', checksum)
+      await checkPack(
+        dispatch,
+        PathSpec.fromStrPath('/repo/.git/objects/pack/large.pack'),
+        checksum,
+      )
       expect(reads.length).toBeGreaterThanOrEqual(Math.ceil(data.length / (1 << 18)))
       expect(
         reads.reduce((sum, [offset, count]) => sum + Math.min(count, data.length - offset), 0),
@@ -183,7 +186,9 @@ it.each(['stat', 'read'])('preserves the path on pack permission errors (%s)', a
       new IOResult(),
     ])
   }
-  await expect(checkPack(dispatch, '/repo/denied.pack', new Uint8Array(20))).rejects.toMatchObject({
+  await expect(
+    checkPack(dispatch, PathSpec.fromStrPath('/repo/denied.pack'), new Uint8Array(20)),
+  ).rejects.toMatchObject({
     message: 'cannot read pack /repo/denied.pack: Permission denied',
     code: new GitError('').code,
   })

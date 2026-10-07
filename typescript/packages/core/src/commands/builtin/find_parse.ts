@@ -342,6 +342,8 @@ export function parseFindExpression(tokens: string[]): FindExpr {
   let depth = 0
   // Parentheses and negations enclosing the current token.
   let nested = 0
+  // An action in the top-level -a chain, which no later test may follow.
+  let chainAction = false
   let inOr = false
   const shape = { positional: false, depthOption: false }
   let mtimeSeen = false
@@ -358,6 +360,7 @@ export function parseFindExpression(tokens: string[]): FindExpr {
   // than the chain running them all in order.
   const actionNode = (kind: ActionKind, batch = false): PredNode => {
     if (nested > 0) shape.positional = true
+    else chainAction = true
     return batch ? { op: 'action', kind, batch } : { op: 'action', kind }
   }
   // Fold one mtime window into the expression's single window. The flat
@@ -444,15 +447,16 @@ export function parseFindExpression(tokens: string[]): FindExpr {
     if (tok === undefined) throw new FindParseError('find: expected predicate')
     if (
       g.actions.length > 0 &&
-      nested === 0 &&
+      (nested === 0 || chainAction) &&
       !inOr &&
       (tok === '-empty' ||
         tok === '-prune' ||
         (FIND_VALUE_PREDICATES.has(tok) && !['-printf', '-maxdepth', '-mindepth'].includes(tok)))
     ) {
       // Along a top-level -a chain the actions run in order on every row
-      // the tree kept, so a test after one would apply to the actions
-      // before it too. Elsewhere the tree itself decides (checkPositional).
+      // the tree kept, so a test after one, even under ! or parentheses,
+      // would apply to the actions before it too. Elsewhere the tree itself
+      // decides (checkPositional).
       throw new FindParseError(`find: ${tok}: tests after actions are not supported`)
     }
     if (FIND_VALUE_PREDICATES.has(tok)) {

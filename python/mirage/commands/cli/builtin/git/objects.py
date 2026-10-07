@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import posixpath
 from io import BytesIO
 from typing import IO, Iterator, cast
 
@@ -35,6 +34,7 @@ from mirage.commands.cli.builtin.git.io import (
 )
 from mirage.commands.cli.builtin.git.lazyfile import LazyFile
 from mirage.runtime.types import DispatchFn
+from mirage.types import PathSpec
 
 OBJECTS_DIR = "objects"
 PACK_DIR = "objects/pack"
@@ -45,7 +45,7 @@ SHA_LEN = 40
 HEX_DIGITS = frozenset(b"0123456789abcdef")
 
 
-def loose_path(commondir: str, oid: ObjectID) -> str:
+def loose_path(commondir: PathSpec, oid: ObjectID) -> PathSpec:
     """Where an object id lives when it is loose.
 
     A pure function of the id, which is why a loose object never has to
@@ -53,18 +53,16 @@ def loose_path(commondir: str, oid: ObjectID) -> str:
     loose.
 
     Args:
-        commondir (str): absolute virtual path of the shared git
+        commondir (PathSpec): absolute virtual path of the shared git
             directory, which owns the object database.
         oid (ObjectID): hex object id.
     """
     name = oid.decode()
-    return posixpath.join(
-        commondir, OBJECTS_DIR, name[:FANOUT_LEN], name[FANOUT_LEN:]
-    )
+    return commondir.join(OBJECTS_DIR, name[:FANOUT_LEN], name[FANOUT_LEN:])
 
 
 async def store_blob(
-    dispatch: DispatchFn, commondir: str, data: bytes
+    dispatch: DispatchFn, commondir: PathSpec, data: bytes
 ) -> ObjectID:
     """Write file contents into the object database as a blob.
 
@@ -76,7 +74,7 @@ async def store_blob(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        commondir (str): absolute virtual path of the shared git
+        commondir (PathSpec): absolute virtual path of the shared git
             directory.
         data (bytes): the file's contents.
     """
@@ -97,23 +95,23 @@ class LooseObjects:
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        gitdir (str): absolute virtual path of the ``.git`` directory.
+        gitdir (PathSpec): absolute virtual path of the ``.git`` directory.
         loop (asyncio.AbstractEventLoop): the loop serving the mount.
     """
 
     def __init__(
         self,
         dispatch: DispatchFn,
-        gitdir: str,
+        gitdir: PathSpec,
         loop: asyncio.AbstractEventLoop,
     ) -> None:
         self._dispatch = dispatch
         self._gitdir = gitdir
-        self._root = posixpath.join(gitdir, OBJECTS_DIR)
+        self._root = gitdir.join(OBJECTS_DIR)
         self._loop = loop
         self._cache: dict[ObjectID, ShaFile | None] = {}
 
-    def _path(self, oid: ObjectID) -> str:
+    def _path(self, oid: ObjectID) -> PathSpec:
         """Where an object id lives when it is loose.
 
         Args:
@@ -143,8 +141,7 @@ class LooseObjects:
             fanout (str): the two-character directory name.
         """
         names = run_async_from_sync(
-            read_names(self._dispatch, posixpath.join(self._root, fanout)),
-            self._loop,
+            read_names(self._dispatch, self._root.join(fanout)), self._loop
         )
         found = []
         for entry in names:
@@ -362,7 +359,7 @@ class VfsObjectStore(PackCapableObjectStore):
 
 
 async def load_packs(
-    dispatch: DispatchFn, gitdir: str, loop: asyncio.AbstractEventLoop
+    dispatch: DispatchFn, gitdir: PathSpec, loop: asyncio.AbstractEventLoop
 ) -> list[Pack]:
     """Open every packfile under ``.git/objects/pack``.
 
@@ -375,19 +372,19 @@ async def load_packs(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        gitdir (str): absolute virtual path of the ``.git`` directory.
+        gitdir (PathSpec): absolute virtual path of the ``.git`` directory.
         loop (asyncio.AbstractEventLoop): the loop serving the mount.
     """
-    root = posixpath.join(gitdir, PACK_DIR)
+    root = gitdir.join(PACK_DIR)
     packs: list[Pack] = []
     for entry in await read_names(dispatch, root):
         name = basename(entry)
         if not name.endswith(IDX_SUFFIX):
             continue
         stem = name[: -len(IDX_SUFFIX)]
-        idx_bytes = await read_file(dispatch, posixpath.join(root, name))
+        idx_bytes = await read_file(dispatch, root.join(name))
         index = load_pack_index_file(name, BytesIO(idx_bytes), SHA1)
-        pack_path = posixpath.join(root, f"{stem}{PACK_SUFFIX}")
+        pack_path = root.join(f"{stem}{PACK_SUFFIX}")
         size = await file_size(dispatch, pack_path)
         if size is None:
             raw = await read_file(dispatch, pack_path)
@@ -404,13 +401,13 @@ async def load_packs(
 
 
 async def load_object_store(
-    dispatch: DispatchFn, gitdir: str
+    dispatch: DispatchFn, gitdir: PathSpec
 ) -> VfsObjectStore:
     """Assemble the object database for one repository.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        gitdir (str): absolute virtual path of the ``.git`` directory.
+        gitdir (PathSpec): absolute virtual path of the ``.git`` directory.
     """
     loop = asyncio.get_running_loop()
     return VfsObjectStore(
@@ -433,7 +430,7 @@ def _index_pack(data: bytes) -> tuple[bytes, bytes]:
 
 
 async def store_pack(
-    dispatch: DispatchFn, commondir: str, data: bytes
+    dispatch: DispatchFn, commondir: PathSpec, data: bytes
 ) -> None:
     """Keep a fetched pack whole, beside the index git reads it through.
 
@@ -443,16 +440,20 @@ async def store_pack(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        commondir (str): absolute virtual path of the shared git
+        commondir (PathSpec): absolute virtual path of the shared git
             directory, which owns the object database.
         data (bytes): the packfile; empty stores nothing.
     """
     if not data:
         return
     index, checksum = await asyncio.to_thread(_index_pack, data)
-    stem = posixpath.join(commondir, PACK_DIR, f"pack-{checksum.hex()}")
-    await write_once(dispatch, f"{stem}{PACK_SUFFIX}", data)
-    await write_once(dispatch, f"{stem}{IDX_SUFFIX}", index)
+    stem = f"pack-{checksum.hex()}"
+    await write_once(
+        dispatch, commondir.join(PACK_DIR, f"{stem}{PACK_SUFFIX}"), data
+    )
+    await write_once(
+        dispatch, commondir.join(PACK_DIR, f"{stem}{IDX_SUFFIX}"), index
+    )
 
 
 def abbrev_for(repo: BaseRepo) -> int:

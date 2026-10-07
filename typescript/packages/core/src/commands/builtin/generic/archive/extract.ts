@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../../../../types.ts'
-import { type FileStat, FileType } from '../../../../types.ts'
+import { PathSpec, type FileStat, FileType } from '../../../../types.ts'
 
 export type StatDoor = (p: PathSpec) => Promise<FileStat>
 export type MkdirDoor = (p: PathSpec, parents?: boolean) => Promise<void>
@@ -21,14 +20,13 @@ export type MkdirDoor = (p: PathSpec, parents?: boolean) => Promise<void>
 /**
  * Where extraction lands: the explicit operand, else the cwd.
  *
- * The explicit operand is tar's last -C or unzip's -d; both arrive as
- * resolved virtual-path strings in the TypeScript flag bag, and the cwd
- * is virtual too, so no per-door-space split exists here the way it
- * does in Python (whose accessor doors speak mount-relative paths).
+ * The explicit operand is tar's last -C or unzip's -d, already validated
+ * before extracting any members. TypeScript doors use virtual paths;
+ * Python accessor doors use mount-relative paths.
  */
-export function extractDest(explicit: string | null, cwd: string): string {
+export function extractDest(explicit: PathSpec | string | null, cwd: string): string {
   const target = explicit ?? cwd
-  return target !== '' ? target : '/'
+  return target instanceof PathSpec ? target.virtual : target || '/'
 }
 
 async function dirExists(stat: StatDoor, level: PathSpec): Promise<boolean> {

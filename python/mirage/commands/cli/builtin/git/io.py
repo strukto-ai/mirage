@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-import posixpath
 
 from mirage.commands.cli.builtin.git.constants import PERMISSION_BITS, SYMLINK
 from mirage.commands.cli.builtin.git.errors import MountInWayError
@@ -26,19 +25,19 @@ from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
 logger = logging.getLogger(__name__)
 
 
-async def read_file(dispatch: DispatchFn, path: str) -> bytes:
+async def read_file(dispatch: DispatchFn, path: PathSpec) -> bytes:
     """Read one virtual path through the workspace dispatcher.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str): absolute virtual path.
+        path (PathSpec): absolute virtual path.
     """
-    data, _ = await dispatch("read", PathSpec.from_str_path(path))
+    data, _ = await dispatch("read", path)
     return data if isinstance(data, bytes) else bytes(data)
 
 
 async def entry_bytes(
-    dispatch: DispatchFn, path: str, info: FileStat
+    dispatch: DispatchFn, path: PathSpec, info: FileStat
 ) -> bytes:
     """The bytes git stores for one working-tree entry.
 
@@ -51,7 +50,7 @@ async def entry_bytes(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str): absolute virtual path.
+        path (PathSpec): absolute virtual path.
         info (FileStat): what the walk saw at that path, lstat-style.
     """
     if info.type is FileType.SYMLINK:
@@ -63,7 +62,7 @@ async def entry_bytes(
 
 async def restore_entry(
     dispatch: DispatchFn,
-    path: str,
+    path: PathSpec,
     mode: int,
     blob: bytes,
     links: LinkView | None = None,
@@ -100,36 +99,32 @@ async def restore_entry(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str): absolute virtual path to materialize at.
+        path (PathSpec): absolute virtual path to materialize at.
         mode (int): the tree entry's mode.
         blob (bytes): the entry's blob content.
         links (LinkView | None): the name plane's link facts, None when
             no namespace is wired.
     """
-    linked = links is not None and links.stat_at(path) is not None
+    linked = links is not None and links.stat_at(path.virtual) is not None
     if mode == SYMLINK:
         await remove_file(dispatch, path)
         # symlink(2) needs the directory above the entry, as the write
         # below does, so a link alone in a new directory gets one too.
-        await ensure_dir(dispatch, posixpath.dirname(path))
+        await ensure_dir(dispatch, path.parent)
         await dispatch(
-            "symlink",
-            PathSpec.from_str_path(path),
-            target=blob.decode("utf-8", errors="replace"),
+            "symlink", path, target=blob.decode("utf-8", errors="replace")
         )
         return
     if linked:
         await remove_file(dispatch, path)
     await write_file(dispatch, path, blob)
-    await dispatch(
-        "setattr", PathSpec.from_str_path(path), mode=mode & PERMISSION_BITS
-    )
+    await dispatch("setattr", path, mode=mode & PERMISSION_BITS)
 
 
 async def keep_gitlink(
     dispatch: DispatchFn,
     stat_path: StatPath,
-    path: str,
+    path: PathSpec,
     links: LinkView | None,
 ) -> None:
     """Leave a submodule's working tree alone, but make sure it has one.
@@ -148,11 +143,11 @@ async def keep_gitlink(
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
         stat_path (StatPath): the data plane's stat, which dereferences.
-        path (str): absolute virtual path of the submodule.
+        path (PathSpec): absolute virtual path of the submodule.
         links (LinkView | None): the name plane's link facts, None when
             no namespace is wired.
     """
-    linked = links is not None and links.stat_at(path) is not None
+    linked = links is not None and links.stat_at(path.virtual) is not None
     info = None if linked else await stat_path(path)
     if info is not None and info.type is FileType.DIRECTORY:
         return
@@ -164,7 +159,7 @@ async def keep_gitlink(
 async def drop_gitlink(
     dispatch: DispatchFn,
     stat_path: StatPath,
-    path: str,
+    path: PathSpec,
     name: str,
     links: LinkView | None,
 ) -> str | None:
@@ -183,7 +178,7 @@ async def drop_gitlink(
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
         stat_path (StatPath): the data plane's stat, which dereferences.
-        path (str): absolute virtual path of the submodule.
+        path (PathSpec): absolute virtual path of the submodule.
         name (str): the path as git prints it, repository-relative.
         links (LinkView | None): the name plane's link facts, None when
             no namespace is wired.
@@ -195,7 +190,7 @@ async def drop_gitlink(
     # A link is answered before the stat, which dereferences: rmdir
     # never follows one, so a link to a directory is ENOTDIR here even
     # though stat would call it a directory.
-    if links is not None and links.stat_at(path) is not None:
+    if links is not None and links.stat_at(path.virtual) is not None:
         return f"warning: unable to rmdir '{name}': Not a directory\n"
     info = await stat_path(path)
     if info is None:
@@ -204,39 +199,37 @@ async def drop_gitlink(
         return f"warning: unable to rmdir '{name}': Not a directory\n"
     if await read_names(dispatch, path):
         return f"warning: unable to rmdir '{name}': Directory not empty\n"
-    await dispatch("rmdir", PathSpec.from_str_path(path))
+    await dispatch("rmdir", path)
     return None
 
 
 async def read_range(
-    dispatch: DispatchFn, path: str, offset: int, size: int
+    dispatch: DispatchFn, path: PathSpec, offset: int, size: int
 ) -> bytes:
     """Read a byte range of one virtual path.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str): absolute virtual path.
+        path (PathSpec): absolute virtual path.
         offset (int): first byte to read.
         size (int): how many bytes to read.
     """
-    data, _ = await dispatch(
-        "read", PathSpec.from_str_path(path), offset=offset, size=size
-    )
+    data, _ = await dispatch("read", path, offset=offset, size=size)
     return data if isinstance(data, bytes) else bytes(data)
 
 
-async def file_size(dispatch: DispatchFn, path: str) -> int | None:
+async def file_size(dispatch: DispatchFn, path: PathSpec) -> int | None:
     """A path's byte length, or None when the backend does not know it.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str): absolute virtual path.
+        path (PathSpec): absolute virtual path.
     """
-    stat, _ = await dispatch("stat", PathSpec.from_str_path(path))
+    stat, _ = await dispatch("stat", path)
     return getattr(stat, "size", None)
 
 
-async def read_optional(dispatch: DispatchFn, path: str) -> bytes | None:
+async def read_optional(dispatch: DispatchFn, path: PathSpec) -> bytes | None:
     """Read a path that a repository may legitimately not have.
 
     ``packed-refs`` and ``HEAD``-adjacent files are absent in perfectly
@@ -244,7 +237,7 @@ async def read_optional(dispatch: DispatchFn, path: str) -> bytes | None:
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str): absolute virtual path.
+        path (PathSpec): absolute virtual path.
     """
     try:
         return await read_file(dispatch, path)
@@ -252,15 +245,15 @@ async def read_optional(dispatch: DispatchFn, path: str) -> bytes | None:
         return None
 
 
-async def read_names(dispatch: DispatchFn, path: str) -> list[str]:
+async def read_names(dispatch: DispatchFn, path: PathSpec) -> list[str]:
     """List a directory, empty when it does not exist.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str): absolute virtual path of the directory.
+        path (PathSpec): absolute virtual path of the directory.
     """
     try:
-        entries, _ = await dispatch("readdir", PathSpec.from_str_path(path))
+        entries, _ = await dispatch("readdir", path)
     except MISS_ERRORS:
         return []
     return list(entries or [])
@@ -279,7 +272,7 @@ def basename(entry: str) -> str:
     return entry.rstrip("/").rsplit("/", 1)[-1]
 
 
-async def ensure_dir(dispatch: DispatchFn, path: str) -> None:
+async def ensure_dir(dispatch: DispatchFn, path: PathSpec) -> None:
     """Create a directory and every missing directory above it.
 
     Written out rather than delegated to ``mkdir -p`` because the
@@ -295,48 +288,50 @@ async def ensure_dir(dispatch: DispatchFn, path: str) -> None:
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str): absolute virtual path of the directory.
+        path (PathSpec): absolute virtual path of the directory.
     """
-    missing: list[str] = []
-    current = path.rstrip("/")
-    while current and current != "/":
+    missing: list[PathSpec] = []
+    current = path
+    while current.virtual != "/":
         try:
-            await dispatch("stat", PathSpec.from_str_path(current))
+            await dispatch("stat", current)
             break
         except MISS_ERRORS:
             missing.append(current)
-            current = posixpath.dirname(current)
+            current = current.parent
     for target in reversed(missing):
-        await dispatch("mkdir", PathSpec.from_str_path(target))
+        await dispatch("mkdir", target)
 
 
-async def exists(dispatch: DispatchFn, path: str) -> bool:
+async def exists(dispatch: DispatchFn, path: PathSpec) -> bool:
     """Whether a point lookup finds anything at a path.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str): absolute virtual path.
+        path (PathSpec): absolute virtual path.
     """
     try:
-        await dispatch("stat", PathSpec.from_str_path(path))
+        await dispatch("stat", path)
     except MISS_ERRORS:
         return False
     return True
 
 
-async def write_file(dispatch: DispatchFn, path: str, data: bytes) -> None:
+async def write_file(
+    dispatch: DispatchFn, path: PathSpec, data: bytes
+) -> None:
     """Write one virtual path, creating the directories above it.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str): absolute virtual path.
+        path (PathSpec): absolute virtual path.
         data (bytes): the whole contents.
     """
-    await ensure_dir(dispatch, posixpath.dirname(path))
-    await dispatch("write", PathSpec.from_str_path(path), data=data)
+    await ensure_dir(dispatch, path.parent)
+    await dispatch("write", path, data=data)
 
 
-async def take_lock(dispatch: DispatchFn, path: str) -> None:
+async def take_lock(dispatch: DispatchFn, path: PathSpec) -> None:
     """Take a file's lock and let it go, as git does before rewriting it.
 
     git creates ``<path>.lock`` before it rewrites the index or the
@@ -350,19 +345,23 @@ async def take_lock(dispatch: DispatchFn, path: str) -> None:
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str): absolute virtual path of the file the lock guards.
+        path (PathSpec): absolute virtual path of the file the lock guards.
 
     Raises:
         FileExistsError: the lock is already there.
     """
-    lock = f"{path}.lock"
+    lock = PathSpec.from_str_path(
+        f"{path.dotted or path.virtual}.lock", cwd="/"
+    )
     if await exists(dispatch, lock):
         raise eexist(lock)
-    await dispatch("write", PathSpec.from_str_path(lock), data=b"")
+    await dispatch("write", lock, data=b"")
     await remove_file(dispatch, lock)
 
 
-async def write_once(dispatch: DispatchFn, path: str, data: bytes) -> None:
+async def write_once(
+    dispatch: DispatchFn, path: PathSpec, data: bytes
+) -> None:
     """Write a path only if nothing is there yet.
 
     For content-addressed files, which is every object in the database:
@@ -374,7 +373,7 @@ async def write_once(dispatch: DispatchFn, path: str, data: bytes) -> None:
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str): absolute virtual path.
+        path (PathSpec): absolute virtual path.
         data (bytes): the whole contents.
     """
     if await exists(dispatch, path):
@@ -383,8 +382,8 @@ async def write_once(dispatch: DispatchFn, path: str, data: bytes) -> None:
 
 
 async def blocking_ancestor(
-    stat_path: StatPath, worktree: str, name: str, links: LinkView | None
-) -> str | None:
+    stat_path: StatPath, worktree: PathSpec, name: str, links: LinkView | None
+) -> PathSpec | None:
     """The nearest component above an entry that is not a directory.
 
     An entry's path is only a way through the working tree while every
@@ -407,19 +406,19 @@ async def blocking_ancestor(
 
     Args:
         stat_path (StatPath): the data plane's stat, which dereferences.
-        worktree (str): absolute virtual path of the working tree root.
+        worktree (PathSpec): absolute virtual path of the working tree root.
         name (str): the entry, repository-relative.
         links (LinkView | None): the name plane's link facts, None when
             no namespace is wired.
 
     Returns:
-        str | None: absolute virtual path of the nearest such component,
+        PathSpec | None: absolute virtual path of the nearest such component,
         None when every component above the entry is a directory.
     """
     current = worktree
     for part in name.split("/")[:-1]:
-        current = posixpath.join(current, part)
-        if links is not None and links.stat_at(current) is not None:
+        current = current.join(part)
+        if links is not None and links.stat_at(current.virtual) is not None:
             return current
         info = await stat_path(current)
         if info is not None and info.type is not FileType.DIRECTORY:
@@ -427,7 +426,7 @@ async def blocking_ancestor(
     return None
 
 
-async def remove_file(dispatch: DispatchFn, path: str) -> None:
+async def remove_file(dispatch: DispatchFn, path: PathSpec) -> None:
     """Delete one virtual path, tolerating one that is already gone.
 
     A miss is an answer rather than an error for every caller here:
@@ -436,15 +435,17 @@ async def remove_file(dispatch: DispatchFn, path: str) -> None:
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str): absolute virtual path.
+        path (PathSpec): absolute virtual path.
     """
     try:
-        await dispatch("unlink", PathSpec.from_str_path(path))
+        await dispatch("unlink", path)
     except MISS_ERRORS as exc:
         logger.debug("nothing to remove at %s: %s", path, exc)
 
 
-async def rename_path(dispatch: DispatchFn, source: str, target: str) -> None:
+async def rename_path(
+    dispatch: DispatchFn, source: PathSpec, target: PathSpec
+) -> None:
     """Move one virtual path, file or directory, to another name.
 
     The mount's own rename, so a directory moves with everything under
@@ -454,17 +455,13 @@ async def rename_path(dispatch: DispatchFn, source: str, target: str) -> None:
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        source (str): absolute virtual path to move.
-        target (str): absolute virtual path to move it to.
+        source (PathSpec): absolute virtual path to move.
+        target (PathSpec): absolute virtual path to move it to.
     """
-    await dispatch(
-        "rename",
-        PathSpec.from_str_path(source),
-        dst=PathSpec.from_str_path(target),
-    )
+    await dispatch("rename", source, dst=target)
 
 
-def refuse_mount(mounts: MountView | None, path: str) -> None:
+def refuse_mount(mounts: MountView | None, path: PathSpec) -> None:
     """Refuse a removal that would take a nested mount with it.
 
     A mount nested inside the working tree is served by another
@@ -484,21 +481,21 @@ def refuse_mount(mounts: MountView | None, path: str) -> None:
     Args:
         mounts (MountView | None): the name plane's mount boundaries,
             None when no namespace is wired.
-        path (str): absolute virtual path about to be removed.
+        path (PathSpec): absolute virtual path about to be removed.
     """
     if mounts is None:
         return
-    if mounts.is_root(path):
-        raise MountInWayError(path, path)
-    if not mounts.descendants(path):
+    if mounts.is_root(path.virtual):
+        raise MountInWayError(path.virtual, path.virtual)
+    if not mounts.descendants(path.virtual):
         return
-    named = sorted(mounts.visible_descendants(path))
-    raise MountInWayError(path, named[0] if named else None)
+    named = sorted(mounts.visible_descendants(path.virtual))
+    raise MountInWayError(path.virtual, named[0] if named else None)
 
 
 async def refuse_replaced_mounts(
     stat_path: StatPath,
-    worktree: str,
+    worktree: PathSpec,
     names: list[str],
     links: LinkView | None,
     mounts: MountView | None,
@@ -516,7 +513,7 @@ async def refuse_replaced_mounts(
 
     Args:
         stat_path (StatPath): the data plane's stat, which dereferences.
-        worktree (str): absolute virtual path of the working tree root.
+        worktree (PathSpec): absolute virtual path of the working tree root.
         names (list[str]): repository-relative paths about to be
             written.
         links (LinkView | None): the name plane's link facts, None when
@@ -527,8 +524,8 @@ async def refuse_replaced_mounts(
     if mounts is None:
         return
     for name in sorted(names):
-        where = posixpath.join(worktree, name)
-        if links is not None and links.stat_at(where) is not None:
+        where = worktree.join(name)
+        if links is not None and links.stat_at(where.virtual) is not None:
             continue
         info = await stat_path(where)
         if info is not None and info.type is FileType.DIRECTORY:
@@ -537,7 +534,7 @@ async def refuse_replaced_mounts(
 
 async def remove_tree(
     dispatch: DispatchFn,
-    path: str,
+    path: PathSpec,
     links: LinkView | None,
     mounts: MountView | None,
 ) -> None:
@@ -565,7 +562,7 @@ async def remove_tree(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str): absolute virtual path to clear.
+        path (PathSpec): absolute virtual path to clear.
         links (LinkView | None): the name plane's link facts, None when
             no namespace is wired.
         mounts (MountView | None): the name plane's mount boundaries,
@@ -582,13 +579,13 @@ async def remove_tree(
         name = basename(entry)
         if not name:
             continue
-        child = posixpath.join(path, name)
-        if links is not None and links.stat_at(child) is not None:
+        child = path.join(name)
+        if links is not None and links.stat_at(child.virtual) is not None:
             await remove_file(dispatch, child)
             continue
         await remove_tree(dispatch, child, links, mounts)
     try:
-        await dispatch("rmdir", PathSpec.from_str_path(path))
+        await dispatch("rmdir", path)
     except MISS_ERRORS as exc:
         # Not a directory, or already gone: the path is whatever one file
         # it is, and remove_file tolerates an absent one. A directory the
@@ -599,7 +596,10 @@ async def remove_tree(
 
 
 async def remove_empty_parents(
-    dispatch: DispatchFn, path: str, stop: str, mounts: MountView | None
+    dispatch: DispatchFn,
+    path: PathSpec,
+    stop: PathSpec,
+    mounts: MountView | None,
 ) -> None:
     """Drop the directories a deletion left empty, up to a root.
 
@@ -610,26 +610,26 @@ async def remove_empty_parents(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str): absolute virtual path of the file that was removed.
-        stop (str): absolute virtual path of the working tree root.
+        path (PathSpec): absolute virtual path of the file that was removed.
+        stop (PathSpec): absolute virtual path of the working tree root.
         mounts (MountView | None): the name plane's mount boundaries,
             None when no namespace is wired.
     """
-    root = stop.rstrip("/") or "/"
-    current = posixpath.dirname(path)
-    while current != root and current.startswith(root):
+    root = stop.virtual.rstrip("/") or "/"
+    current = path.parent
+    while current.virtual != root and current.virtual.startswith(root):
         # A mount root is not a directory git made, and an empty one is
         # still a whole backend: removing it here would destroy the
         # store behind it as a side effect of tidying up. The walk
         # stops rather than refusing, because nothing the caller asked
         # for has failed.
-        if mounts is not None and mounts.is_root(current):
+        if mounts is not None and mounts.is_root(current.virtual):
             return
         if await read_names(dispatch, current):
             return
         try:
-            await dispatch("rmdir", PathSpec.from_str_path(current))
+            await dispatch("rmdir", current)
         except MISS_ERRORS as exc:
             logger.debug("no directory to remove at %s: %s", current, exc)
             return
-        current = posixpath.dirname(current)
+        current = current.parent

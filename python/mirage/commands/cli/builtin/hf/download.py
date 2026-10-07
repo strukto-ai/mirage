@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-import posixpath
 from fnmatch import fnmatch
 
 from mirage.accessor.hf_hub import HfHubAccessor
@@ -99,7 +98,7 @@ def selected(
     return files
 
 
-async def ensure_dir(dispatch: DispatchFn, path: str) -> None:
+async def ensure_dir(dispatch: DispatchFn, path: PathSpec) -> None:
     """Create a directory and every missing directory above it.
 
     Written out rather than delegated to ``mkdir -p`` because the
@@ -109,20 +108,20 @@ async def ensure_dir(dispatch: DispatchFn, path: str) -> None:
 
     Args:
         dispatch (DispatchFn): the workspace op dispatcher.
-        path (str): absolute virtual path of the directory.
+        path (PathSpec): absolute virtual path of the directory.
     """
-    missing: list[str] = []
-    current = path.rstrip("/")
-    while current and current != "/":
+    missing: list[PathSpec] = []
+    current = path
+    while current.virtual != "/":
         try:
-            await dispatch("stat", PathSpec.from_str_path(current))
+            await dispatch("stat", current)
             break
         except MISS_ERRORS:
             missing.append(current)
-            current = posixpath.dirname(current)
+            current = current.parent
     for target in reversed(missing):
         try:
-            await dispatch("mkdir", PathSpec.from_str_path(target))
+            await dispatch("mkdir", target)
         except FileExistsError:
             # A parallel download fans out over files that share parents,
             # so two workers can read the same parent as missing and then
@@ -136,7 +135,7 @@ async def write_file(
     dispatch: DispatchFn,
     accessor: HfHubAccessor,
     repo_path: str,
-    local_dir: str,
+    local_dir: PathSpec,
 ) -> str:
     """Fetch one file and store it under the workspace directory.
 
@@ -157,17 +156,17 @@ async def write_file(
         repo_path,
     )
     data = await hub_bytes(accessor.token, url, session=accessor.pool)
-    target = posixpath.join(local_dir, repo_path)
-    await ensure_dir(dispatch, posixpath.dirname(target))
-    await dispatch("write", PathSpec.from_str_path(target), data=data)
-    return target
+    target = local_dir.join(repo_path)
+    await ensure_dir(dispatch, target.parent)
+    await dispatch("write", target, data=data)
+    return target.virtual
 
 
 async def fetch_all(
     dispatch: DispatchFn,
     accessor: HfHubAccessor,
     paths: list[str],
-    local_dir: str,
+    local_dir: PathSpec,
     workers: int,
 ) -> list[str]:
     """Download every selected file, a bounded number at a time.
@@ -195,7 +194,7 @@ async def fetch_all(
     return await bounded_map(paths, one, workers)
 
 
-async def path_exists(dispatch: DispatchFn, path: str) -> bool:
+async def path_exists(dispatch: DispatchFn, path: PathSpec) -> bool:
     """Whether anything is at a virtual path.
 
     Args:
@@ -206,7 +205,7 @@ async def path_exists(dispatch: DispatchFn, path: str) -> bool:
         bool: whether a point lookup found something.
     """
     try:
-        await dispatch("stat", PathSpec.from_str_path(path))
+        await dispatch("stat", path)
     except MISS_ERRORS:
         return False
     return True
@@ -216,7 +215,7 @@ async def cache_file(
     dispatch: DispatchFn,
     accessor: HfHubAccessor,
     entry: TreeEntry,
-    cache_dir: str,
+    cache_dir: PathSpec,
     folder: str,
     sha: str,
     force: bool,
@@ -253,18 +252,18 @@ async def cache_file(
             entry.path,
         )
         data = await hub_bytes(accessor.token, url, session=accessor.pool)
-        await ensure_dir(dispatch, posixpath.dirname(blob))
-        await dispatch("write", PathSpec.from_str_path(blob), data=data)
+        await ensure_dir(dispatch, blob.parent)
+        await dispatch("write", blob, data=data)
     link = snapshot_path(cache_dir, folder, sha, entry.path)
     if force or not await path_exists(dispatch, link):
-        await ensure_dir(dispatch, posixpath.dirname(link))
+        await ensure_dir(dispatch, link.parent)
         target = link_target(cache_dir, folder, sha, entry.path, etag)
         try:
-            await dispatch("unlink", PathSpec.from_str_path(link))
+            await dispatch("unlink", link)
         except MISS_ERRORS:
             pass
-        await dispatch("symlink", PathSpec.from_str_path(link), target=target)
-    return link
+        await dispatch("symlink", link, target=target)
+    return link.virtual
 
 
 async def fetch_into_cache(
@@ -272,7 +271,7 @@ async def fetch_into_cache(
     accessor: HfHubAccessor,
     tree: dict[str, TreeEntry],
     paths: list[str],
-    cache_dir: str,
+    cache_dir: PathSpec,
     force: bool,
     workers: int,
 ) -> tuple[str, list[str]]:
@@ -301,8 +300,8 @@ async def fetch_into_cache(
     # binary never leaves behind.
     if accessor.revision != sha:
         ref = ref_path(cache_dir, folder, accessor.revision)
-        await ensure_dir(dispatch, posixpath.dirname(ref))
-        await dispatch("write", PathSpec.from_str_path(ref), data=sha.encode())
+        await ensure_dir(dispatch, ref.parent)
+        await dispatch("write", ref, data=sha.encode())
 
     async def one(path: str) -> str:
         return await cache_file(
@@ -310,7 +309,7 @@ async def fetch_into_cache(
         )
 
     written = await bounded_map(paths, one, workers)
-    return snapshot_dir(cache_dir, folder, sha), written
+    return snapshot_dir(cache_dir, folder, sha).virtual, written
 
 
 def refuse_variadic(names: list[str], flag: str, patterns: list[str]) -> None:
@@ -411,8 +410,13 @@ async def download_cmd(
     """
     require_operands(inv, ["repo_id"])
     fl = FlagView(inv.flags)
-    local_dir = fl.as_str("local_dir")
-    cache_dir = fl.as_str("cache_dir") or cache_root(dict(inv.env))
+    local_dir = fl.as_path("local_dir")
+    cache_word = cache_root(dict(inv.env))
+    cache_dir = fl.as_path("cache_dir") or (
+        PathSpec.from_str_path(cache_word, cwd=inv.env.get("PWD", "/"))
+        if cache_word
+        else None
+    )
     if not local_dir and not cache_dir:
         raise UsageError(
             "nothing to download into: pass --local-dir, or --cache-dir "
@@ -449,9 +453,9 @@ async def download_cmd(
             # A named local directory downloads straight into it, with no
             # cache in between; that is what upstream does too, which is why
             # --force-download only means anything in cache mode.
-            base = local_dir.rstrip("/")
+            base = local_dir.virtual
             written = await fetch_all(
-                inv.doors.dispatch, accessor, paths, base, workers
+                inv.doors.dispatch, accessor, paths, local_dir, workers
             )
         else:
             base, written = await fetch_into_cache(
@@ -459,7 +463,7 @@ async def download_cmd(
                 accessor,
                 tree,
                 paths,
-                (cache_dir or "").rstrip("/"),
+                cache_dir or PathSpec.from_str_path("/"),
                 bool(fl.as_bool("force_download")),
                 workers,
             )

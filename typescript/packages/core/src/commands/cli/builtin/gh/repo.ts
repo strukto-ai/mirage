@@ -34,6 +34,7 @@ import {
 import type { CommandFnResult } from '../../../config.ts'
 import { UsageError } from '../../../errors.ts'
 import { IOResult } from '../../../../io/types.ts'
+import { PathSpec } from '../../../../types.ts'
 import type { CLIInvocation } from '../../types.ts'
 import {
   camel,
@@ -462,7 +463,7 @@ export async function cloneCmd(inv: CLIInvocation): Promise<CommandFnResult> {
     argv: ['clone', ...words],
     paths: [],
     texts: parsed.args.map(([word]) => word),
-    flags: { ...parseToKwargs(parsed), C: cwd },
+    flags: { ...parseToKwargs(parsed), C: PathSpec.fromStrPath(cwd, undefined, '/') },
     stdin: inv.stdin,
     env: inv.env,
     ...(inv.doors !== undefined ? { doors: inv.doors } : {}),
