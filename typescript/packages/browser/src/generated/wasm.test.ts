@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
@@ -25,6 +26,10 @@ function decode(b64: string): Uint8Array {
   const out = new Uint8Array(bin.length)
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
   return out
+}
+
+function sha256(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex')
 }
 
 describe('generated/wasm', () => {
@@ -44,23 +49,26 @@ describe('generated/wasm', () => {
 
   // The package ships both modules inside dist, so it must ship their MIT
   // notices too: THIRD_PARTY_NOTICES, built from licenses/third_party/, has to
-  // name the version embed-wasm.mjs embeds and carry its LICENSE verbatim.
-  it.each(['web-tree-sitter/web-tree-sitter.wasm', 'tree-sitter-bash/tree-sitter-bash.wasm'])(
-    'ships the notice of the %s it embeds',
-    (wasm) => {
-      const notices = readFileSync(new URL('../../THIRD_PARTY_NOTICES', import.meta.url), 'utf8')
-      const root = dirname(require.resolve(wasm))
-      const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
-        name: string
-        version: string
-      }
-      const notice = readFileSync(
-        new URL(`../../../../../licenses/third_party/${manifest.name}.txt`, import.meta.url),
-        'utf8',
-      )
-      expect(notice).toContain(`${manifest.name} ${manifest.version}`)
-      expect(notice).toContain(readFileSync(join(root, 'LICENSE'), 'utf8'))
-      expect(notices).toContain(notice)
-    },
-  )
+  // name the version embed-wasm.mjs embeds and carry its LICENSE verbatim, and
+  // the checked-in module has to be that version's bytes.
+  it.each([
+    ['web-tree-sitter/web-tree-sitter.wasm', ENGINE_WASM_BASE64],
+    ['tree-sitter-bash/tree-sitter-bash.wasm', GRAMMAR_WASM_BASE64],
+  ])('ships the notice of the %s it embeds', (wasm, embedded) => {
+    const file = require.resolve(wasm)
+    expect(sha256(decode(embedded))).toBe(sha256(readFileSync(file)))
+    const notices = readFileSync(new URL('../../THIRD_PARTY_NOTICES', import.meta.url), 'utf8')
+    const root = dirname(file)
+    const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
+      name: string
+      version: string
+    }
+    const notice = readFileSync(
+      new URL(`../../../../../licenses/third_party/${manifest.name}.txt`, import.meta.url),
+      'utf8',
+    )
+    expect(notice).toContain(`${manifest.name} ${manifest.version}`)
+    expect(notice).toContain(readFileSync(join(root, 'LICENSE'), 'utf8'))
+    expect(notices).toContain(notice)
+  })
 })
