@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import {
   parseFlags,
   refuseMissingPattern,
@@ -20,7 +19,7 @@ import {
   rgMatcher,
   rgSyntax,
 } from '@struktoai/mirage-core/commands/builtin/generic/rg'
-import { resolveGlobOf } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import { resolveGlobOf, scanIo } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import { patternArg } from '@struktoai/mirage-core/commands/builtin/grep_pattern'
 import { pushdownOperand, searchQuery } from '@struktoai/mirage-core/commands/builtin/grep_pushdown'
 import { grepLines } from '@struktoai/mirage-core/commands/builtin/grep_scan'
@@ -34,25 +33,12 @@ import { VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { EmailAccessor } from '../../../accessor/email.ts'
-import { read as emailRead } from '../../../core/email/read.ts'
-import { readdir as emailReaddir } from '../../../core/email/readdir.ts'
-import { stat as emailStat } from '../../../core/email/stat.ts'
 import { detectScope, NATIVE_KINDS } from '../../../core/email/scope.ts'
 import { searchAndFormat } from '../../../core/email/search.ts'
 import { IO } from './io.ts'
 import { RG_SEARCH_HONORED, messageLines } from './grep.ts'
 
-const resolveGlob = resolveGlobOf(IO)
-
 const ENC = new TextEncoder()
-
-async function* emailStream(
-  accessor: EmailAccessor,
-  p: PathSpec,
-  index: IndexCacheStore | undefined,
-): AsyncIterable<Uint8Array> {
-  yield await emailRead(accessor, p, index)
-}
 
 async function rg(
   accessor: EmailAccessor,
@@ -76,7 +62,8 @@ async function rg(
 
   // Same gate as email grep, from the same table, and it reads the scope the
   // same way: a line the push-down cannot answer takes the generic scan.
-  const operand = pushdownOperand(paths, opts.flags, pattern, RG_SEARCH_HONORED)
+  const [scan, scoped] = scanIo(IO, opts.ns, paths)
+  const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, RG_SEARCH_HONORED)
   // The server is asked for the literal every match must contain, never
   // the regex's own spelling: IMAP TEXT is a substring search.
   const query = pattern === null ? null : searchQuery(pattern, f.fixedString, rgSyntax(f))
@@ -109,12 +96,12 @@ async function rg(
   }
 
   const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  const stat = (p: PathSpec): Promise<FileStat> => emailStat(accessor, p, opts.index ?? undefined)
+    paths.length > 0 ? await resolveGlobOf(scan)(accessor, paths, opts.index ?? undefined) : []
+  const stat = (p: PathSpec): Promise<FileStat> => scan.stat(accessor, p, opts.index ?? undefined)
   const readdir = (p: PathSpec): Promise<string[]> =>
-    emailReaddir(accessor, p, opts.index ?? undefined)
+    scan.readdir(accessor, p, opts.index ?? undefined)
   return rgGeneric(resolved, texts, opts, stat, readdir, (p) =>
-    emailStream(accessor, p, opts.index ?? undefined),
+    scan.readStream(accessor, p, opts.index ?? undefined),
   )
 }
 

@@ -354,6 +354,21 @@ def test_scoped_io_sets_a_content_index_aside():
     assert scoped.content_search is None
 
 
+def test_scan_io_guards_only_a_judged_command():
+    # A bespoke search scans the raw adapter when nothing under its
+    # operands is hidden or refused, and the guarded one when anything is,
+    # where it must not hand the service's own search the answer either.
+    io = make_io()
+    roots = [_spec("/data")]
+    free = NamespaceView(scoped=lambda _virtual: False)
+    judged = NamespaceView(scoped=lambda virtual: virtual == "/data")
+    for ns in (free, None):
+        scan, scoped = adapter.scan_io(io, ns, roots)
+        assert scan is io and not scoped
+    scan, scoped = adapter.scan_io(io, judged, roots)
+    assert scan is not io and scoped
+
+
 @pytest.mark.asyncio
 async def test_dispatch_rule_guard_marks_an_op_with_the_bound_gate():
     from mirage.commands.builtin.generic_bind.adapter import (

@@ -669,6 +669,57 @@
         "stdout": "/mail/INBOX/2026-01-07/Server_alert_worker-3__msg0003.gmail.json:{\"id\":\"msg0003\",\"thread_id\":\"msg0003\",\"from\":{\"name\":\"\",\"email\":\"ops@example.com\"},\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[{\"name\":\"\",\"email\":\"marcus@example.com\"}],\"subject\":\"Server alert: worker-3\",\"date\":\"Wed, 07 Jan 2026 03:15:00 +0000\",\"body_text\":\"disk usage at 91 percent on worker-3\",\"snippet\":\"disk usage at 91 percent on worker-3\",\"labels\":[\"INBOX\",\"UNREAD\"],\"attachments\":[]}\n/mail/INBOX/2026-01-05/Standup_notes__msg0002.gmail.json:{\"id\":\"msg0002\",\"thread_id\":\"msg0002\",\"from\":{\"name\":\"\",\"email\":\"marcus@example.com\"},\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[],\"subject\":\"Standup notes\",\"date\":\"Mon, 05 Jan 2026 14:00:00 +0000\",\"body_text\":\"yesterday shipped the parser\\ntoday reviewing the budget forecast\",\"snippet\":\"yesterday shipped the parser today reviewing the budget forecast\",\"labels\":[\"INBOX\"],\"attachments\":[]}\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gmail_search_keeps_a_hidden_day_out",
+      "seq": 530209,
+      "targets": [
+        "gmail"
+      ],
+      "command": "grep -rlw Budget /mail/INBOX; echo grepw=$?; rg -lw Budget /mail/INBOX; echo rgw=$?; find /mail/INBOX -name '*Budget*'; echo find=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grepw=1\nrgw=1\nfind=0\n",
+        "stderr": ""
+      },
+      "session": "gmail-hide",
+      "session_profiles": {
+        "gmail-hide": {
+          "paths": {
+            "hide": [
+              "/mail/INBOX/2026-01-05"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "gmail_search_refuses_a_denied_day",
+      "seq": 530210,
+      "targets": [
+        "gmail"
+      ],
+      "command": "grep -rlw Budget /mail/INBOX 2>/dev/null; echo grepw=$?; find /mail/INBOX -name '*Budget*' 2>/dev/null; echo find=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grepw=2\n/mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001\n/mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001.gmail.json\nfind=1\n",
+        "stderr": ""
+      },
+      "session": "gmail-deny",
+      "session_profiles": {
+        "gmail-deny": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/mail/INBOX/2026-01-05/*"
+                ]
+              }
+            ]
+          }
+        }
+      }
     }
   ]
 }

@@ -17,6 +17,7 @@ import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import { VFSName } from '../../../types.ts'
 import { command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { scanIo } from '../generic_bind/index.ts'
 import { runSearch } from '../generic_bind/search.ts'
 
 import { IO } from './io.ts'
@@ -26,5 +27,5 @@ export const MONGODB_RG = command({
   vfs: VFSName.MONGODB,
   spec: specOf('rg'),
   fn: (accessor: MongoDBAccessor, paths, texts, opts) =>
-    runSearch<MongoDBAccessor>(IO, 'rg', accessor, paths, texts, opts),
+    runSearch<MongoDBAccessor>(scanIo(IO, opts.ns, paths)[0], 'rg', accessor, paths, texts, opts),
 })

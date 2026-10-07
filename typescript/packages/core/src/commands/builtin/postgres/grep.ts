@@ -17,6 +17,7 @@ import type { PostgresAccessor } from '../../../accessor/postgres.ts'
 import { VFSName } from '../../../types.ts'
 import { command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { scanIo } from '../generic_bind/index.ts'
 import { runSearch } from '../generic_bind/search.ts'
 
 import { IO } from './io.ts'
@@ -29,5 +30,12 @@ export const POSTGRES_GREP = command({
   vfs: VFSName.POSTGRES,
   spec: specOf('grep'),
   fn: (accessor: PostgresAccessor, paths, texts, opts) =>
-    runSearch<PostgresAccessor>(IO, 'grep', accessor, paths, texts, opts),
+    runSearch<PostgresAccessor>(
+      scanIo(IO, opts.ns, paths)[0],
+      'grep',
+      accessor,
+      paths,
+      texts,
+      opts,
+    ),
 })

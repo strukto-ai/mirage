@@ -42,6 +42,7 @@ import {
   dirAwareStat,
   dirAwareStream,
   resolveGlobOf,
+  scanIo,
   scopedIo,
   withDirGuard,
   type CommandIO,
@@ -472,6 +473,23 @@ describe('scopedIo', () => {
     expect(scopedIo(io, free, roots, '/data/').contentSearch).toBe(index)
     expect(scopedIo(io, undefined, roots, '/data/').contentSearch).toBe(index)
     expect(scopedIo(io, judged, roots, '/data/').contentSearch).toBeUndefined()
+  })
+})
+
+describe('scanIo', () => {
+  it('guards only a judged command', () => {
+    // A bespoke search scans the raw adapter when nothing under its
+    // operands is hidden or refused, and the guarded one when anything is,
+    // where it must not hand the service's own search the answer either.
+    const io: CommandIO = dirOps([])
+    const roots = [PathSpec.fromStrPath('/data')]
+    const free = { scoped: () => false }
+    const judged = { scoped: (virtual: string) => virtual === '/data' }
+    expect(scanIo(io, free, roots)).toEqual([io, false])
+    expect(scanIo(io, undefined, roots)).toEqual([io, false])
+    const [scan, scoped] = scanIo(io, judged, roots)
+    expect(scan).not.toBe(io)
+    expect(scoped).toBe(true)
   })
 })
 

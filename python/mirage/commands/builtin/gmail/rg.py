@@ -18,23 +18,23 @@ from mirage.commands.builtin.generic.rg import (
     refuse_missing_pattern,
     rg_generic,
 )
-from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.builtin.generic_bind.adapter import (
+    bound_op,
+    scan_io,
+)
 from mirage.commands.builtin.gmail.grep import (
     RG_SEARCH_HONORED,
     SEARCH_MAX_RESULTS,
 )
-from mirage.commands.builtin.gmail.io import resolve_glob
+from mirage.commands.builtin.gmail.io import IO
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import pushdown_operand
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.gmail.read import read as gmail_read
-from mirage.core.gmail.readdir import readdir as _readdir
 from mirage.core.gmail.scope import NATIVE_KINDS, detect_scope
 from mirage.core.gmail.search import format_grep_results, search_messages
-from mirage.core.gmail.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
@@ -52,8 +52,13 @@ async def rg(
     refuse_missing_pattern(pattern_str, fl, parse_flags(fl))
     # Same gate as gmail grep, from the same table: only a lone concrete
     # operand with no reshaping flag may be answered by the search API.
-    operand = pushdown_operand(
-        paths, opts.flags, pattern_str, RG_SEARCH_HONORED
+    scan, scoped = scan_io(IO, opts.ns, paths)
+    operand = (
+        None
+        if scoped
+        else pushdown_operand(
+            paths, opts.flags, pattern_str, RG_SEARCH_HONORED
+        )
     )
     if (
         operand is not None
@@ -79,14 +84,16 @@ async def rg(
                 return b"", IOResult(exit_code=1)
             return format_records(lines), IOResult()
 
-    resolved = await resolve_glob(accessor, paths, opts.index) if paths else []
+    resolved = (
+        await scan.resolve_glob(accessor, paths, opts.index) if paths else []
+    )
     return await rg_generic(
         resolved,
         texts,
         opts,
-        readdir=bound_op(_readdir, accessor, opts.index),
-        stat=bound_op(_stat, accessor, opts.index),
-        read_bytes=bound_op(gmail_read, accessor, opts.index),
+        readdir=bound_op(scan.readdir, accessor, opts.index),
+        stat=bound_op(scan.stat, accessor, opts.index),
+        read_bytes=bound_op(scan.read_bytes, accessor, opts.index),
         read_stream=None,
         stdin=opts.stdin,
     )

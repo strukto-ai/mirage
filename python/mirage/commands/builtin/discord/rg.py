@@ -19,13 +19,16 @@ from mirage.commands.builtin.discord.grep import (
     RG_SEARCH_HONORED,
     SEARCH_MAX_RESULTS,
 )
-from mirage.commands.builtin.discord.io import resolve_glob
+from mirage.commands.builtin.discord.io import IO
 from mirage.commands.builtin.generic.rg import (
     parse_flags,
     refuse_missing_pattern,
     rg_generic,
 )
-from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.builtin.generic_bind.adapter import (
+    bound_op,
+    scan_io,
+)
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import pushdown_operand
 from mirage.commands.builtin.utils.output import format_records
@@ -34,11 +37,8 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.discord.channels import list_channels
 from mirage.core.discord.entry import channel_dirname
-from mirage.core.discord.read import read as discord_read
-from mirage.core.discord.readdir import readdir as _readdir
 from mirage.core.discord.scope import NATIVE_KINDS, detect_scope
 from mirage.core.discord.search import format_grep_results, search_guild
-from mirage.core.discord.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
@@ -60,8 +60,13 @@ async def rg(
     pushdown_warnings: list[str] = []
     # Output-shaping flags, a glob operand and a multi-operand line all need
     # the generic scan; see SEARCH_HONORED above.
-    operand = pushdown_operand(
-        paths, opts.flags, pattern_str, RG_SEARCH_HONORED
+    scan, scoped = scan_io(IO, opts.ns, paths)
+    operand = (
+        None
+        if scoped
+        else pushdown_operand(
+            paths, opts.flags, pattern_str, RG_SEARCH_HONORED
+        )
     )
     if (
         operand is not None
@@ -117,15 +122,17 @@ async def rg(
                 )
 
     resolved = (
-        await resolve_glob(accessor, paths, index=opts.index) if paths else []
+        await scan.resolve_glob(accessor, paths, index=opts.index)
+        if paths
+        else []
     )
     stdout, io = await rg_generic(
         resolved,
         texts,
         opts,
-        readdir=bound_op(_readdir, accessor, opts.index),
-        stat=bound_op(_stat, accessor, opts.index),
-        read_bytes=bound_op(discord_read, accessor, opts.index),
+        readdir=bound_op(scan.readdir, accessor, opts.index),
+        stat=bound_op(scan.stat, accessor, opts.index),
+        read_bytes=bound_op(scan.read_bytes, accessor, opts.index),
         read_stream=None,
         stdin=opts.stdin,
     )

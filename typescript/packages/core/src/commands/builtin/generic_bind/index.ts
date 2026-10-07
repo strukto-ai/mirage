@@ -19,6 +19,7 @@ export {
   overlaidStat,
   rangeOf,
   resolveGlobOf,
+  scanIo,
 } from './adapter.ts'
 export { type DuOps, type ResolveGlobOp } from '../../../vfs/types.ts'
 export { type MakeGenericCommandsOptions, makeGenericCommands } from './factory.ts'

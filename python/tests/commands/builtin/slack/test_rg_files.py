@@ -12,18 +12,32 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import RAMIndexCacheStore
+from mirage.commands.builtin.slack.io import IO as SLACK_IO
 from mirage.commands.builtin.slack.rg import rg
 from mirage.commands.config import CommandOpts
 from mirage.core.slack.config import SlackConfig
 from mirage.io.stream import materialize
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
+
+
+def _io(**slots: Callable[..., Any]) -> SimpleNamespace:
+    """The command's IO with the given slots faked; the rest stay real."""
+    real = {
+        "readdir": SLACK_IO.readdir,
+        "stat": SLACK_IO.stat,
+        "read_bytes": SLACK_IO.read_bytes,
+    }
+    return SimpleNamespace(**{**real, **slots})
 
 
 @pytest.fixture
@@ -51,9 +65,8 @@ async def test_rg_chat_jsonl_scans_the_named_day(accessor, index):
             new_callable=AsyncMock,
         ) as mock_files,
         patch(
-            "mirage.commands.builtin.slack.rg.resolve_glob",
-            new_callable=AsyncMock,
-            return_value=[],
+            "mirage.commands.builtin.slack.rg.IO",
+            _io(resolve_glob=AsyncMock(return_value=[])),
         ),
         patch(
             "mirage.commands.builtin.slack.rg.rg_generic",
@@ -128,9 +141,8 @@ async def test_grep_chat_jsonl_scans_the_named_day(accessor, index):
             new_callable=AsyncMock,
         ) as mock_files,
         patch(
-            "mirage.commands.builtin.slack.grep.resolve_glob",
-            new_callable=AsyncMock,
-            return_value=[],
+            "mirage.commands.builtin.slack.grep.IO",
+            _io(resolve_glob=AsyncMock(return_value=[])),
         ),
         patch(
             "mirage.commands.builtin.slack.grep.grep_generic",
@@ -169,6 +181,7 @@ async def test_grep_files_dir_redirects_to_per_file_scan(accessor, index):
         virtual="/channels/general__C001/2026-04-10/files/report.txt",
         directory="/channels/general__C001/2026-04-10/files/report.txt",
     )
+    mock_read = AsyncMock(return_value=b"foo line\nbar\n")
     with (
         patch(
             "mirage.commands.builtin.slack.grep.search_messages",
@@ -179,20 +192,17 @@ async def test_grep_files_dir_redirects_to_per_file_scan(accessor, index):
             new_callable=AsyncMock,
         ) as mock_files,
         patch(
-            "mirage.commands.builtin.slack.grep.resolve_glob",
-            new_callable=AsyncMock,
-            return_value=[blob],
-        ),
-        patch(
-            "mirage.commands.builtin.slack.grep.slack_read",
-            new_callable=AsyncMock,
-            return_value=b"foo line\nbar\n",
-        ) as mock_read,
-        patch(
-            "mirage.commands.builtin.slack.grep._stat",
-            new_callable=AsyncMock,
-            return_value=FileStat(
-                name="report.txt", type=FileType.FILE, content=ContentType.TEXT
+            "mirage.commands.builtin.slack.grep.IO",
+            _io(
+                resolve_glob=AsyncMock(return_value=[blob]),
+                read_bytes=mock_read,
+                stat=AsyncMock(
+                    return_value=FileStat(
+                        name="report.txt",
+                        type=FileType.FILE,
+                        content=ContentType.TEXT,
+                    )
+                ),
             ),
         ),
     ):

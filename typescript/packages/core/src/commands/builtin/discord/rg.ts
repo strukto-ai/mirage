@@ -14,13 +14,9 @@
 
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { DiscordAccessor } from '../../../accessor/discord.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { DiscordApiError } from '../../../core/discord/client.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
+import { resolveGlobOf, scanIo } from '../generic_bind/index.ts'
 import { IO } from './io.ts'
-import { read as discordRead } from '../../../core/discord/read.ts'
-import { readdir as discordReaddir } from '../../../core/discord/readdir.ts'
-import { stat as discordStat } from '../../../core/discord/stat.ts'
 import { detectScope, NATIVE_KINDS } from '../../../core/discord/scope.ts'
 import { listChannels } from '../../../core/discord/channels.ts'
 import { formatGrepResults, searchGuild } from '../../../core/discord/search.ts'
@@ -34,17 +30,7 @@ import { parseFlags, refuseMissingPattern, rgGeneric } from '../generic/rg.ts'
 import { RG_SEARCH_HONORED, SEARCH_MAX_RESULTS } from './grep.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 
-const resolveDiscordGlob = resolveGlobOf(IO)
-
 const ENC = new TextEncoder()
-
-async function* discordStream(
-  accessor: DiscordAccessor,
-  p: PathSpec,
-  index: IndexCacheStore | undefined,
-): AsyncIterable<Uint8Array> {
-  yield await discordRead(accessor, p, index)
-}
 
 async function rg(
   accessor: DiscordAccessor,
@@ -60,7 +46,8 @@ async function rg(
   const pushdownWarnings: string[] = []
   // Same gate as discord grep, from the same table: only a lone concrete
   // operand with no reshaping flag may be answered by the search API.
-  const operand = pushdownOperand(paths, opts.flags, pattern, RG_SEARCH_HONORED)
+  const [scan, scoped] = scanIo(IO, opts.ns, paths)
+  const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, RG_SEARCH_HONORED)
   if (operand !== null && pattern !== null && fl.asBool('word_regexp')) {
     const match = detectScope(operand)
     if (!accessor.timeRange.bounded && NATIVE_KINDS.has(match.kind)) {
@@ -112,12 +99,12 @@ async function rg(
   }
 
   const resolved =
-    paths.length > 0 ? await resolveDiscordGlob(accessor, paths, opts.index ?? undefined) : []
-  const stat = (p: PathSpec): Promise<FileStat> => discordStat(accessor, p, opts.index ?? undefined)
+    paths.length > 0 ? await resolveGlobOf(scan)(accessor, paths, opts.index ?? undefined) : []
+  const stat = (p: PathSpec): Promise<FileStat> => scan.stat(accessor, p, opts.index ?? undefined)
   const readdir = (p: PathSpec): Promise<string[]> =>
-    discordReaddir(accessor, p, opts.index ?? undefined)
+    scan.readdir(accessor, p, opts.index ?? undefined)
   const result = await rgGeneric(resolved, texts, opts, stat, readdir, (p) =>
-    discordStream(accessor, p, opts.index ?? undefined),
+    scan.readStream(accessor, p, opts.index ?? undefined),
   )
   if (result !== null && pushdownWarnings.length > 0) {
     result[1].stderr = ENC.encode(pushdownWarnings.join('\n') + '\n')

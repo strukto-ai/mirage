@@ -1589,6 +1589,29 @@ def with_policy_guard(ops: CommandIO) -> CommandIO:
     return replace(ops, **changes)
 
 
+def scan_io(
+    ops: CommandIO,
+    ns: NamespaceView | None,
+    paths: list[PathSpec],
+) -> tuple[CommandIO, bool]:
+    """The adapter a bespoke search command scans through, and whether a
+    hide, a path rule or a coded pre_vfs policy judges its paths.
+
+    A judged command must not hand the service's own search the answer,
+    since the service sees every entry, and its scan reads through the
+    guards the generic builders bind; an unjudged one scans the raw
+    adapter.
+
+    Args:
+        ops (CommandIO): the backend's raw IO adapter.
+        ns (NamespaceView | None): the command's namespace view.
+        paths (list[PathSpec]): the command's path operands.
+    """
+    if not paths_scoped(ns, paths):
+        return ops, False
+    return with_command_guards(with_policy_guard(ops)), True
+
+
 def scoped_io(
     ops: CommandIO,
     ns: NamespaceView | None,

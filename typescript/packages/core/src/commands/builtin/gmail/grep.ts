@@ -14,14 +14,10 @@
 
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { GmailAccessor } from '../../../accessor/gmail.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
+import { resolveGlobOf, scanIo } from '../generic_bind/index.ts'
 import { IO } from './io.ts'
-import { read as gmailRead } from '../../../core/gmail/read.ts'
-import { readdir as gmailReaddir } from '../../../core/gmail/readdir.ts'
 import { detectScope, NATIVE_KINDS } from '../../../core/gmail/scope.ts'
 import { formatGrepResults, searchMessages } from '../../../core/gmail/search.ts'
-import { stat as gmailStat } from '../../../core/gmail/stat.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { type FileStat, type PathSpec, VFSName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
@@ -30,8 +26,6 @@ import { grepGeneric } from '../generic/grep.ts'
 import { patternArg } from '../grep_pattern.ts'
 import { pushdownOperand, textSearchResults } from '../grep_pushdown.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-
-const resolveGlob = resolveGlobOf(IO)
 
 // Gmail search answers with whole messages and the push-down prints that
 // answer verbatim, so it can stand in for a scan only when the line names one
@@ -45,14 +39,6 @@ export const SEARCH_MAX_RESULTS = 50
 
 const ENC = new TextEncoder()
 
-async function* gmailStream(
-  accessor: GmailAccessor,
-  p: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  yield await gmailRead(accessor, p, index)
-}
-
 async function grep(
   accessor: GmailAccessor,
   paths: PathSpec[],
@@ -63,7 +49,8 @@ async function grep(
   const fl = new FlagView(opts.flags, specOf('grep'))
   // Output-shaping flags, a glob operand and a multi-operand line all need
   // the generic grep over rendered files; see SEARCH_HONORED above.
-  const operand = pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
+  const [scan, scoped] = scanIo(IO, opts.ns, paths)
+  const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
   if (pattern !== null && operand !== null && fl.asBool('w')) {
     const match = detectScope(operand)
     if (NATIVE_KINDS.has(match.kind)) {
@@ -86,12 +73,12 @@ async function grep(
   }
 
   const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  const stat = (p: PathSpec): Promise<FileStat> => gmailStat(accessor, p, opts.index ?? undefined)
+    paths.length > 0 ? await resolveGlobOf(scan)(accessor, paths, opts.index ?? undefined) : []
+  const stat = (p: PathSpec): Promise<FileStat> => scan.stat(accessor, p, opts.index ?? undefined)
   const readdir = (p: PathSpec): Promise<string[]> =>
-    gmailReaddir(accessor, p, opts.index ?? undefined)
+    scan.readdir(accessor, p, opts.index ?? undefined)
   return grepGeneric('grep', resolved, texts, opts, stat, readdir, (p) =>
-    gmailStream(accessor, p, opts.index ?? undefined),
+    scan.readStream(accessor, p, opts.index ?? undefined),
   )
 }
 

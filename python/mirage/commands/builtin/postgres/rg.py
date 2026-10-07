@@ -12,17 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
-
 from mirage.accessor.postgres import PostgresAccessor
+from mirage.commands.builtin.generic_bind.adapter import scan_io
 from mirage.commands.builtin.generic_bind.search import run_search
 from mirage.commands.builtin.postgres.io import IO
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-_search = partial(run_search, IO, "rg")
 
 
 @command("rg", vfs="postgres", spec=SPECS["rg"])
@@ -32,4 +29,5 @@ async def rg(
     texts: list[str],
     opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
-    return await _search(accessor, paths, texts, opts)
+    scan, _ = scan_io(IO, opts.ns, paths)
+    return await run_search(scan, "rg", accessor, paths, texts, opts)

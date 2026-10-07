@@ -12,18 +12,33 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.gmail.grep import grep
+from mirage.commands.builtin.gmail.io import IO as GMAIL_IO
 from mirage.commands.builtin.gmail.rg import rg
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.io.types import IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+
+
+def _io(**slots: Callable[..., Any]) -> SimpleNamespace:
+    """The command's IO with the given slots faked; the rest stay real."""
+    real = {
+        "readdir": GMAIL_IO.readdir,
+        "stat": GMAIL_IO.stat,
+        "read_bytes": GMAIL_IO.read_bytes,
+    }
+    return SimpleNamespace(**{**real, **slots})
+
 
 ROWS = [
     {
@@ -59,8 +74,8 @@ async def test_grep_without_word_flag_skips_native_search():
             new=AsyncMock(return_value=ROWS),
         ) as spy,
         patch(
-            "mirage.commands.builtin.gmail.grep.resolve_glob",
-            new=AsyncMock(return_value=[]),
+            "mirage.commands.builtin.gmail.grep.IO",
+            _io(resolve_glob=AsyncMock(return_value=[])),
         ),
     ):
         _, io = await grep(
@@ -85,8 +100,8 @@ async def test_rg_without_word_flag_skips_native_search():
             new=AsyncMock(return_value=ROWS),
         ) as spy,
         patch(
-            "mirage.commands.builtin.gmail.rg.resolve_glob",
-            new=AsyncMock(return_value=[]),
+            "mirage.commands.builtin.gmail.rg.IO",
+            _io(resolve_glob=AsyncMock(return_value=[])),
         ),
     ):
         with pytest.raises(UsageError):
@@ -108,8 +123,8 @@ async def test_binary_search_snippet_uses_rendered_file_scan():
             new=AsyncMock(return_value=rows),
         ),
         patch(
-            "mirage.commands.builtin.gmail.grep.resolve_glob",
-            new=AsyncMock(return_value=[_label_scope()]),
+            "mirage.commands.builtin.gmail.grep.IO",
+            _io(resolve_glob=AsyncMock(return_value=[_label_scope()])),
         ),
         patch(
             "mirage.commands.builtin.gmail.grep.grep_generic",

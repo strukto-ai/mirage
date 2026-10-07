@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { findGeneric } from '@struktoai/mirage-core/commands/builtin/generic/find'
-import { resolveGlobOf } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import { findWalk } from '@struktoai/mirage-core/commands/builtin/generic_bind/builders/find'
+import { resolveGlobOf, scanIo } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import { command } from '@struktoai/mirage-core/commands/config'
 import type { CommandFnResult, CommandOpts } from '@struktoai/mirage-core/commands/config'
 import { specOf } from '@struktoai/mirage-core/commands/spec/index'
@@ -21,11 +22,7 @@ import { walkFind } from '@struktoai/mirage-core/core/generic/find'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { EmailAccessor } from '../../../accessor/email.ts'
-import { readdir as emailReaddir } from '../../../core/email/readdir.ts'
-import { stat as emailStat } from '../../../core/email/stat.ts'
 import { IO } from './io.ts'
-
-const resolveGlob = resolveGlobOf(IO)
 
 // Routed through the shared generic walk instead of a bespoke tree walk:
 // the generic owns every flag (-type, -size, -mtime, -empty, -path) and
@@ -39,9 +36,13 @@ async function find(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const idx = opts.index ?? undefined
-  const resolved = await resolveGlob(accessor, paths, idx)
+  const [scan, scoped] = scanIo(IO, opts.ns, paths)
+  const resolved = await resolveGlobOf(scan)(accessor, paths, idx)
+  // Under a hide or a rule the walk is the generic builder's, which names
+  // an entry it cannot open where GNU find does.
+  if (scoped) return findWalk(scan, accessor, resolved, texts, opts)
   const dirEmpty = async (spec: PathSpec): Promise<boolean> =>
-    (await emailReaddir(accessor, spec, idx)).length === 0
+    (await scan.readdir(accessor, spec, idx)).length === 0
   return findGeneric(
     resolved,
     texts,
@@ -50,9 +51,9 @@ async function find(
       walkFind(
         root,
         {
-          readdir: (spec, i) => emailReaddir(accessor, spec, i),
+          readdir: (spec, i) => scan.readdir(accessor, spec, i),
           stat: async (spec, i) => {
-            const st = await emailStat(accessor, spec, i)
+            const st = await scan.stat(accessor, spec, i)
             const overlay = opts.ns?.statOverlay
             return overlay !== undefined ? overlay(spec.virtual, st) : st
           },

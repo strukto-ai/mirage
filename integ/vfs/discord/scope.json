@@ -182,6 +182,57 @@
         "stdout": "{\"id\":\"1510934682009\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "discord_grep_keeps_a_hidden_channel_out",
+      "seq": 690214,
+      "targets": [
+        "discord"
+      ],
+      "command": "grep -rw released '/discord/Mirage HQ__100000000000000001/channels'; echo grepw=$?; rg -w released '/discord/Mirage HQ__100000000000000001/channels'; echo rgw=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grepw=1\nrgw=1\n",
+        "stderr": ""
+      },
+      "session": "discord-hide",
+      "session_profiles": {
+        "discord-hide": {
+          "paths": {
+            "hide": [
+              "/discord/Mirage HQ__100000000000000001/channels/releases__200000000000000002"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "discord_grep_refuses_a_denied_channel",
+      "seq": 690215,
+      "targets": [
+        "discord"
+      ],
+      "command": "grep -rw released '/discord/Mirage HQ__100000000000000001/channels' 2>/dev/null; echo grepw=$?; rg -w released '/discord/Mirage HQ__100000000000000001/channels' 2>/dev/null; echo rgw=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grepw=2\nrgw=2\n",
+        "stderr": ""
+      },
+      "session": "discord-deny",
+      "session_profiles": {
+        "discord-deny": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/discord/Mirage HQ__100000000000000001/channels/releases__200000000000000002/*"
+                ]
+              }
+            ]
+          }
+        }
+      }
     }
   ]
 }

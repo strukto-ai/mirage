@@ -14,16 +14,12 @@
 
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { DiscordAccessor } from '../../../accessor/discord.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { DiscordApiError } from '../../../core/discord/client.ts'
 import { listChannels } from '../../../core/discord/channels.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
+import { resolveGlobOf, scanIo } from '../generic_bind/index.ts'
 import { IO } from './io.ts'
-import { read as discordRead } from '../../../core/discord/read.ts'
-import { readdir as discordReaddir } from '../../../core/discord/readdir.ts'
 import { detectScope, NATIVE_KINDS } from '../../../core/discord/scope.ts'
 import { formatGrepResults, searchGuild } from '../../../core/discord/search.ts'
-import { stat as discordStat } from '../../../core/discord/stat.ts'
 import { IOResult } from '../../../io/types.ts'
 import { type FileStat, type PathSpec, VFSName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
@@ -33,8 +29,6 @@ import { patternArg } from '../grep_pattern.ts'
 import { pushdownOperand, textSearchResults } from '../grep_pushdown.ts'
 import { prependStderr } from '../utils/output.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-
-const resolveDiscordGlob = resolveGlobOf(IO)
 
 const ENC = new TextEncoder()
 
@@ -55,14 +49,6 @@ export const SEARCH_HONORED = ['w'] as const
 export const RG_SEARCH_HONORED = ['word_regexp'] as const
 export const SEARCH_MAX_RESULTS = 100
 
-async function* discordStream(
-  accessor: DiscordAccessor,
-  p: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  yield await discordRead(accessor, p, index)
-}
-
 async function grep(
   accessor: DiscordAccessor,
   paths: PathSpec[],
@@ -75,7 +61,8 @@ async function grep(
   const pushdownWarnings: string[] = []
   // Output-shaping flags, a glob operand and a multi-operand line all need
   // the generic scan; see SEARCH_HONORED above.
-  const operand = pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
+  const [scan, scoped] = scanIo(IO, opts.ns, paths)
+  const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
   if (pattern !== null && operand !== null && fl.asBool('w')) {
     const match = detectScope(operand)
     if (!accessor.timeRange.bounded && NATIVE_KINDS.has(match.kind)) {
@@ -127,12 +114,12 @@ async function grep(
   }
 
   const resolved =
-    paths.length > 0 ? await resolveDiscordGlob(accessor, paths, opts.index ?? undefined) : []
-  const stat = (p: PathSpec): Promise<FileStat> => discordStat(accessor, p, opts.index ?? undefined)
+    paths.length > 0 ? await resolveGlobOf(scan)(accessor, paths, opts.index ?? undefined) : []
+  const stat = (p: PathSpec): Promise<FileStat> => scan.stat(accessor, p, opts.index ?? undefined)
   const readdir = (p: PathSpec): Promise<string[]> =>
-    discordReaddir(accessor, p, opts.index ?? undefined)
+    scan.readdir(accessor, p, opts.index ?? undefined)
   const result = await grepGeneric('grep', resolved, texts, opts, stat, readdir, (p) =>
-    discordStream(accessor, p, opts.index ?? undefined),
+    scan.readStream(accessor, p, opts.index ?? undefined),
   )
   if (result === null) return result
   if (pushdownWarnings.length > 0) await prependStderr(result[1], pushdownWarnings)

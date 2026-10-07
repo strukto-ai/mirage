@@ -168,6 +168,57 @@
         "stderr": ""
       },
       "seq": 620069
+    },
+    {
+      "id": "mongodb_grep_keeps_a_hidden_table_out",
+      "seq": 620077,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "grep -r epsilon /mongodb/mirage_integ/collections; echo grep=$?; grep -rF epsilon /mongodb/mirage_integ/collections; echo grepF=$?; rg -F epsilon /mongodb/mirage_integ/collections; echo rgF=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grep=1\ngrepF=1\nrgF=1\n",
+        "stderr": ""
+      },
+      "session": "mongodb-hide",
+      "session_profiles": {
+        "mongodb-hide": {
+          "paths": {
+            "hide": [
+              "/mongodb/mirage_integ/collections/books"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "mongodb_grep_refuses_a_denied_table",
+      "seq": 620078,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "grep -r epsilon /mongodb/mirage_integ/collections 2>/dev/null; echo grep=$?; grep -rF epsilon /mongodb/mirage_integ/collections 2>/dev/null; echo grepF=$?; rg -F epsilon /mongodb/mirage_integ/collections 2>/dev/null; echo rgF=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grep=2\ngrepF=2\nrgF=2\n",
+        "stderr": ""
+      },
+      "session": "mongodb-deny",
+      "session_profiles": {
+        "mongodb-deny": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/mongodb/mirage_integ/collections/books/*"
+                ]
+              }
+            ]
+          }
+        }
+      }
     }
   ]
 }
