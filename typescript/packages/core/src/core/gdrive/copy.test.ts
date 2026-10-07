@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as ContextModule from '../../cache/context.ts'
 import type * as DriveModule from '../google/drive.ts'
 
 vi.mock('../google/drive.ts', async () => {
@@ -21,6 +22,16 @@ vi.mock('../google/drive.ts', async () => {
   return driveModuleMock(actual)
 })
 
+vi.mock('../../cache/context.ts', async () => {
+  const actual = await vi.importActual<typeof ContextModule>('../../cache/context.ts')
+  return {
+    ...actual,
+    invalidateAfterWrite: vi.fn(() => Promise.resolve()),
+    invalidateSubtree: vi.fn(() => Promise.resolve()),
+  }
+})
+
+import { invalidateAfterWrite, invalidateSubtree } from '../../cache/context.ts'
 import { PathSpec } from '../../types.ts'
 import type { FakeDrive } from './_test_util.ts'
 import { makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
@@ -98,5 +109,94 @@ describe('gdrive copy', () => {
     await expect(copy(accessor, spec('/missing.txt'), spec('/dst.txt'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
+  })
+
+  it.each<[string, boolean, 'file' | 'folder' | null, boolean, string | null, string[][]]>([
+    [
+      'file-ok',
+      false,
+      null,
+      false,
+      null,
+      [
+        ['copyFile', 'dst.txt'],
+        ['write', '/dst.txt'],
+      ],
+    ],
+    [
+      'file-fails',
+      false,
+      'file',
+      true,
+      'copy failed',
+      [['deleteFile'], ['copyFile', 'dst.txt'], ['write', '/dst.txt']],
+    ],
+    [
+      'folder-ok',
+      true,
+      null,
+      false,
+      null,
+      [
+        ['copyFile', 'f.txt'],
+        ['subtree', '/dst'],
+      ],
+    ],
+    [
+      'folder-fails',
+      true,
+      'folder',
+      true,
+      'copy failed',
+      [
+        ['copyFile', 'f.txt'],
+        ['subtree', '/dst'],
+      ],
+    ],
+    ['refused', true, 'file', false, 'ENOTDIR', [['subtree', '/dst']]],
+  ])('a copy evicts after it ends: %s', async (_row, folder, dstKind, fails, raised, expected) => {
+    let srcPath = '/src.txt'
+    let dstPath = '/dst.txt'
+    if (folder) {
+      const src = fake.folder('src')
+      fake.add('f.txt', src, undefined, ENC.encode('new'))
+      srcPath = '/src'
+      dstPath = '/dst'
+    } else {
+      fake.add('src.txt', 'root', undefined, ENC.encode('new'))
+    }
+    const dstName = dstPath.slice(1)
+    if (dstKind === 'file') fake.add(dstName, 'root', undefined, ENC.encode('old'))
+    else if (dstKind === 'folder') fake.folder(dstName)
+    const events: string[][] = []
+    const copyFile = fake.copyFile.bind(fake)
+    vi.spyOn(fake, 'copyFile').mockImplementation((tm, fileId, name, parentId) => {
+      events.push(['copyFile', name])
+      if (fails) return Promise.reject(new Error('copy failed'))
+      return copyFile(tm, fileId, name, parentId)
+    })
+    const deleteFile = fake.deleteFile.bind(fake)
+    vi.spyOn(fake, 'deleteFile').mockImplementation((tm, fileId) => {
+      events.push(['deleteFile'])
+      return deleteFile(tm, fileId)
+    })
+    vi.mocked(invalidateAfterWrite).mockImplementation((path) => {
+      events.push(['write', typeof path === 'string' ? path : path.virtual])
+      return Promise.resolve()
+    })
+    vi.mocked(invalidateSubtree).mockImplementation((path) => {
+      events.push(['subtree', typeof path === 'string' ? path : path.virtual])
+      return Promise.resolve()
+    })
+    try {
+      const copied = copy(accessor, spec(srcPath), spec(dstPath))
+      if (raised === 'copy failed') await expect(copied).rejects.toThrow(raised)
+      else if (raised !== null) await expect(copied).rejects.toMatchObject({ code: raised })
+      else await copied
+      expect(events).toEqual(expected)
+    } finally {
+      vi.mocked(invalidateAfterWrite).mockImplementation(() => Promise.resolve())
+      vi.mocked(invalidateSubtree).mockImplementation(() => Promise.resolve())
+    }
   })
 })

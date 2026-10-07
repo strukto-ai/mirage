@@ -108,6 +108,12 @@ hours. File reads go through the standard read cache
 (`caches_reads = True`). Writes invalidate the affected listings so subsequent
 reads see the new state.
 
+## Writes
+
+A write records the `sha1` its upload reply names, so a `fresh` read
+right after a `tee` or `sed -i` downloads nothing. See
+[Writes](/home/cache#writes).
+
 ## Reads under `fresh`
 
 A Box mount accepts `read: fresh`. The token is the file's `sha1`, which a

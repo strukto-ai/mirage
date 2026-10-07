@@ -12,15 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Awaitable, Callable
 from functools import partial
 
 from mirage.accessor.email import EmailAccessor
-from mirage.commands.builtin.email.io import resolve_glob
+from mirage.commands.builtin.email.io import IO
 from mirage.commands.builtin.generic.find import (
+    find_walk_generic,
     is_link,
     parse_find_args,
     resolve_start,
 )
+from mirage.commands.builtin.generic_bind.adapter import overlaid_stat
+from mirage.commands.builtin.generic_bind.factory import scan_io
 from mirage.commands.builtin.grep_pushdown import lone_operand
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts, command
@@ -28,12 +32,10 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.email.client import fetch_headers
 from mirage.core.email.readdir import _date_bucket, _msg_filename
-from mirage.core.email.readdir import readdir as _readdir
 from mirage.core.email.search import search_messages
-from mirage.core.email.stat import stat as _stat
 from mirage.core.generic.find import walk_find
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import mount_prefix_of
 
@@ -81,7 +83,8 @@ async def find(
     path = fl.as_str("path")
     mindepth = fl.as_str("mindepth")
     empty = fl.as_bool("empty")
-    paths = await resolve_glob(accessor, paths, opts.index)
+    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
+    paths = await scan.resolve_glob(accessor, paths, opts.index)
     # A pure -name search at folder level pushes the subject query down to
     # IMAP search instead of walking every message; any other predicate
     # falls through to the local walk so nothing is silently dropped.
@@ -96,6 +99,22 @@ async def find(
         or maxdepth
         or empty
     )
+    if scoped:
+        # Under a hide or a rule the walk is the generic builder's, which
+        # names an entry it cannot open where GNU find does.
+        walk_stat: Callable[..., Awaitable[FileStat]] = partial(
+            scan.stat, accessor
+        )
+        overlay = opts.ns.stat_overlay if opts.ns is not None else None
+        if overlay is not None:
+            walk_stat = partial(overlaid_stat, walk_stat, overlay)
+        return await find_walk_generic(
+            paths,
+            list(texts),
+            opts,
+            readdir=partial(scan.readdir, accessor),
+            stat=walk_stat,
+        )
     if name and name_only:
         operand = _folder_operand(paths)
         if operand is not None:
@@ -131,8 +150,8 @@ async def find(
         results.extend(
             await walk_find(
                 search,
-                readdir=partial(_readdir, accessor),
-                stat=partial(_stat, accessor),
+                readdir=partial(scan.readdir, accessor),
+                stat=partial(scan.stat, accessor),
                 index=opts.index,
                 args=args,
                 links=links,

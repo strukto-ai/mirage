@@ -14,7 +14,7 @@
 
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.builtin.email.grep import RG_SEARCH_HONORED
-from mirage.commands.builtin.email.io import resolve_glob
+from mirage.commands.builtin.email.io import IO
 from mirage.commands.builtin.generic.rg import (
     parse_flags,
     refuse_missing_pattern,
@@ -23,6 +23,7 @@ from mirage.commands.builtin.generic.rg import (
     rg_syntax,
 )
 from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.builtin.generic_bind.factory import scan_io
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import (
     pushdown_operand,
@@ -34,12 +35,9 @@ from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.email.client import fetch_message
-from mirage.core.email.read import read as email_read
-from mirage.core.email.readdir import readdir as _readdir
 from mirage.core.email.render import message_json_text
 from mirage.core.email.scope import NATIVE_KINDS, detect_scope
 from mirage.core.email.search import _build_vfs_path, search_messages
-from mirage.core.email.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
@@ -63,8 +61,13 @@ async def rg(
     # way: a line the push-down cannot answer takes the generic scan below.
     # It used to return exit 1 instead, reporting "nothing matched" for a
     # search it had not run.
-    operand = pushdown_operand(
-        paths, opts.flags, pattern_str, RG_SEARCH_HONORED
+    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
+    operand = (
+        None
+        if scoped
+        else pushdown_operand(
+            paths, opts.flags, pattern_str, RG_SEARCH_HONORED
+        )
     )
     # The server is asked for the literal every match must contain, never
     # the regex's own spelling: IMAP TEXT is a substring search.
@@ -123,14 +126,16 @@ async def rg(
             return b"", IOResult(exit_code=1)
         return format_records(all_results), IOResult()
 
-    resolved = await resolve_glob(accessor, paths, opts.index) if paths else []
+    resolved = (
+        await scan.resolve_glob(accessor, paths, opts.index) if paths else []
+    )
     return await rg_generic(
         resolved,
         texts,
         opts,
-        readdir=bound_op(_readdir, accessor, opts.index),
-        stat=bound_op(_stat, accessor, opts.index),
-        read_bytes=bound_op(email_read, accessor, opts.index),
+        readdir=bound_op(scan.readdir, accessor, opts.index),
+        stat=bound_op(scan.stat, accessor, opts.index),
+        read_bytes=bound_op(scan.read_bytes, accessor, opts.index),
         read_stream=None,
         stdin=opts.stdin,
     )

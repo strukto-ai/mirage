@@ -33,7 +33,7 @@ def test_day_dir():
     match = detect_scope("/INBOX/2026-04-12")
     assert match.kind == "day"
     assert match.slots == {"label": "INBOX", "day": "2026-04-12"}
-    assert "day" in NATIVE_KINDS
+    assert "day" not in NATIVE_KINDS
 
 
 def test_non_date_under_label_is_invalid():

@@ -49,7 +49,13 @@ function segments(path: string): string[] {
  * the content route answers the bytes itself and logs `content:{id}` then
  * `dl:{id}`, the two lines the redirect leaves in python's ledger. Every
  * write keeps `modified_at`, so two same-size edits land in one second and
- * only `sha1` tells them apart, as on the real service. An id in `forbidden`
+ * only `sha1` tells them apart, as on the real service. The two upload
+ * routes, `POST /2.0/files/content` (new, logged `upload:{parent_id}`) and
+ * `POST /2.0/files/{id}/content` (version, logged `upload:{file_id}`), are
+ * dispatched by method before the content route and answer
+ * `{total_count: 1, entries: [file]}` with the file rendered by `row`, the
+ * renderer listings and info use, so an upload reply's sha1 and a later
+ * stat's cannot disagree. An id in `forbidden`
  * answers `GET /files/{id}` with a 403; an id in `unhashed` renders with no
  * `sha1`.
  */
@@ -274,10 +280,66 @@ export class InlineBox {
     })
   }
 
+  // The multipart body split by hand, binary-safe: each part's headers end at
+  // the first blank line and its body runs to the CRLF before the next
+  // boundary.
+  private static async form(
+    req: Request,
+  ): Promise<[{ name?: string; parent?: { id?: string } }, Uint8Array]> {
+    const boundary = /boundary="?([^";]+)"?/.exec(req.headers.get('content-type') ?? '')?.[1]
+    if (boundary === undefined) throw new Error('box upload with no multipart boundary')
+    const body = Buffer.from(await req.arrayBuffer())
+    const parts = new Map<string, Buffer>()
+    const delimiter = Buffer.from(`--${boundary}`)
+    let start = body.indexOf(delimiter)
+    while (start !== -1) {
+      const next = body.indexOf(delimiter, start + delimiter.length)
+      if (next === -1) break
+      const part = body.subarray(start + delimiter.length + 2, next - 2)
+      const split = part.indexOf('\r\n\r\n')
+      const name = /name="([^"]+)"/.exec(part.subarray(0, split).toString('latin1'))?.[1]
+      if (name !== undefined) parts.set(name, part.subarray(split + 4))
+      start = next
+    }
+    const file = parts.get('file')
+    if (file === undefined) throw new Error('box upload with no file part')
+    const attributes = JSON.parse(parts.get('attributes')?.toString('utf8') ?? '{}') as {
+      name?: string
+      parent?: { id?: string }
+    }
+    return [attributes, new Uint8Array(file)]
+  }
+
+  private uploaded(item: Item, status: number): Response {
+    return InlineBox.json({ total_count: 1, entries: [this.row(item)] }, status)
+  }
+
+  private async uploadNew(req: Request): Promise<Response> {
+    const [attributes, data] = await InlineBox.form(req)
+    const parentId = attributes.parent?.id ?? ''
+    this.log.push(`upload:${parentId}`)
+    return this.uploaded(this.mint(attributes.name ?? '', parentId, false, data), 201)
+  }
+
+  private async uploadVersion(fileId: string, req: Request): Promise<Response> {
+    const [, data] = await InlineBox.form(req)
+    this.log.push(`upload:${fileId}`)
+    const item = this.items.get(fileId)
+    if (item === undefined) throw new Error(`box upload to unknown file ${fileId}`)
+    item.data = data
+    return this.uploaded(item, 200)
+  }
+
   readonly fetch = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const req = new Request(input, init)
     const url = new URL(req.url)
     const route = url.pathname
+    if (req.method === 'POST') {
+      if (route === '/2.0/files/content') return this.uploadNew(req)
+      const v = /^\/2\.0\/files\/([^/]+)\/content$/.exec(route)
+      if (v?.[1] !== undefined) return this.uploadVersion(v[1], req)
+      return Promise.resolve(InlineBox.json({ code: `no route POST ${route}` }, 404))
+    }
     let m = /^\/2\.0\/folders\/([^/]+)\/items$/.exec(route)
     if (m?.[1] !== undefined)
       return Promise.resolve(this.folderItems(m[1], url.searchParams.get('fields')))

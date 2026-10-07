@@ -47,6 +47,14 @@ Which backends version their listings:
 
 One check answers for a whole command: later listings of the same mount (or, on disk, the same folder) in that command reuse it, and concurrent commands share a check only when it was sent after they started. Outside a command, a matching check is trusted for the same one-second window as a listing. A moved version, a missing path or a check that fails all re-list; the stored listing is kept for the re-list to compare against, never cleared. `bounded` mounts never check.
 
+### Writes
+
+A command that writes a file and reports the bytes it wrote, such as `tee`, `sed -i`, `sort -o`, `uniq` or `xxd`, keeps those bytes in the file cache, so the next read needs no download. The cached copy carries the token the upload reply names: the ETag on an object store, the md5 (else the head revision) on Google Drive, the `sha1` on Box, the `content_hash` on Dropbox. That is the kind of token `stat` reports, so under `read: fresh` the next read checks it and downloads nothing.
+
+The bytes are kept only when that command made the last change to the file on the line. When something else changed it later on the same line (`sed -n 'w file'`, a script, a concurrent pipeline stage, `xargs -P`, a background job, `truncate`), nothing is cached and the next read downloads the file. In the browser, where concurrent commands cannot be told apart, a later write of the same size is not noticed.
+
+OneDrive and SharePoint record no token for a write: SharePoint can change an Office file after the upload, so the reply's `cTag` cannot vouch for the bytes sent, and under `fresh` the next read downloads the file. Nextcloud, Databricks volumes, SSH and Hugging Face buckets record none either.
+
 ## Stores
 
 Each layer is a pluggable store with two built-ins:

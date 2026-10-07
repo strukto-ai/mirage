@@ -16,6 +16,7 @@ import type { LangfuseAccessor } from '../../../accessor/langfuse.ts'
 import { VFSName } from '../../../types.ts'
 import { command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { scanIo } from '../generic_bind/index.ts'
 import { runSearch } from '../generic_bind/search.ts'
 
 import { IO } from './io.ts'
@@ -25,5 +26,5 @@ export const LANGFUSE_RG = command({
   vfs: VFSName.LANGFUSE,
   spec: specOf('rg'),
   fn: (accessor: LangfuseAccessor, paths, texts, opts) =>
-    runSearch(IO, 'rg', accessor, paths, texts, opts),
+    runSearch(scanIo(IO, opts.ns, opts.mountPrefix)[0], 'rg', accessor, paths, texts, opts),
 })

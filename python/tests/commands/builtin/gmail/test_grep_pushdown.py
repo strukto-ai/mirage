@@ -12,18 +12,33 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.gmail.grep import grep
+from mirage.commands.builtin.gmail.io import IO as GMAIL_IO
 from mirage.commands.builtin.gmail.rg import rg
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.io.types import IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+
+
+def _io(**slots: Callable[..., Any]) -> SimpleNamespace:
+    """The command's IO with the given slots faked; the rest stay real."""
+    real = {
+        "readdir": GMAIL_IO.readdir,
+        "stat": GMAIL_IO.stat,
+        "read_bytes": GMAIL_IO.read_bytes,
+    }
+    return SimpleNamespace(**{**real, **slots})
+
 
 ROWS = [
     {
@@ -53,15 +68,13 @@ async def test_grep_without_word_flag_skips_native_search():
     # Falling through to the per-message scan is the point. The stubbed
     # glob resolves to no files, which leaves the generic command an empty
     # stdin and no match; what matters is that the native path was not taken.
-    with (
-        patch(
-            "mirage.commands.builtin.gmail.grep.search_messages",
-            new=AsyncMock(return_value=ROWS),
-        ) as spy,
-        patch(
-            "mirage.commands.builtin.gmail.grep.resolve_glob",
-            new=AsyncMock(return_value=[]),
-        ),
+    spy = AsyncMock(return_value=ROWS)
+    with patch.dict(
+        grep.__wrapped__.__globals__,
+        {
+            "search_messages": spy,
+            "IO": _io(resolve_glob=AsyncMock(return_value=[])),
+        },
     ):
         _, io = await grep(
             accessor,
@@ -79,15 +92,13 @@ async def test_rg_without_word_flag_skips_native_search():
     # Falling through to the per-message scan is the point. The stubbed
     # glob resolves to no files, which the generic command reports as a
     # usage error; what matters is that the native path was not taken.
-    with (
-        patch(
-            "mirage.commands.builtin.gmail.rg.search_messages",
-            new=AsyncMock(return_value=ROWS),
-        ) as spy,
-        patch(
-            "mirage.commands.builtin.gmail.rg.resolve_glob",
-            new=AsyncMock(return_value=[]),
-        ),
+    spy = AsyncMock(return_value=ROWS)
+    with patch.dict(
+        rg.__wrapped__.__globals__,
+        {
+            "search_messages": spy,
+            "IO": _io(resolve_glob=AsyncMock(return_value=[])),
+        },
     ):
         with pytest.raises(UsageError):
             await rg(
@@ -102,19 +113,14 @@ async def test_rg_without_word_flag_skips_native_search():
 @pytest.mark.asyncio
 async def test_binary_search_snippet_uses_rendered_file_scan():
     rows = [{**ROWS[0], "snippet": "hello\0tail", "subject": ""}]
-    with (
-        patch(
-            "mirage.commands.builtin.gmail.grep.search_messages",
-            new=AsyncMock(return_value=rows),
-        ),
-        patch(
-            "mirage.commands.builtin.gmail.grep.resolve_glob",
-            new=AsyncMock(return_value=[_label_scope()]),
-        ),
-        patch(
-            "mirage.commands.builtin.gmail.grep.grep_generic",
-            new=AsyncMock(return_value=(b"", IOResult())),
-        ) as generic,
+    generic = AsyncMock(return_value=(b"", IOResult()))
+    with patch.dict(
+        grep.__wrapped__.__globals__,
+        {
+            "search_messages": AsyncMock(return_value=rows),
+            "IO": _io(resolve_glob=AsyncMock(return_value=[_label_scope()])),
+            "grep_generic": generic,
+        },
     ):
         await grep(
             AsyncMock(),

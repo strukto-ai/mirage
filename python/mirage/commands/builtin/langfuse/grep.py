@@ -12,17 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
-
 from mirage.accessor.langfuse import LangfuseAccessor
+from mirage.commands.builtin.generic_bind.factory import scan_io
 from mirage.commands.builtin.generic_bind.search import run_search
 from mirage.commands.builtin.langfuse.io import IO
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-_search = partial(run_search, IO, "grep")
 
 
 @command("grep", vfs="langfuse", spec=SPECS["grep"])
@@ -32,4 +29,5 @@ async def grep(
     texts: list[str],
     opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
-    return await _search(accessor, paths, texts, opts)
+    scan, _ = scan_io(IO, opts.ns, opts.mount_prefix)
+    return await run_search(scan, "grep", accessor, paths, texts, opts)

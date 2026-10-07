@@ -53,15 +53,9 @@ export const SCOPES: readonly Scope[] = [
 
 export const detectScope = makeDetectScope(SCOPES)
 
-// Kinds the guild search push-down may answer for. A chat.jsonl operand is
-// deliberately absent: `searchGuild` takes a channel but no date, so serving
-// a one-day file from a channel-wide search would report messages the line
-// did not ask for. Same doctrine for `file_blob` and `member`, whose bytes
-// the message search does not carry.
-export const NATIVE_KINDS: ReadonlySet<string> = new Set([
-  'guild',
-  'channels_dir',
-  'channel',
-  'day',
-  'files',
-])
+// Kinds the guild search push-down may answer for. A day, its chat.jsonl
+// and its files are deliberately absent: `searchGuild` takes a channel but
+// no date, so serving one day from a channel-wide search would report
+// messages the line did not ask for. Same doctrine for `file_blob` and
+// `member`, whose bytes the message search does not carry.
+export const NATIVE_KINDS: ReadonlySet<string> = new Set(['guild', 'channels_dir', 'channel'])

@@ -35,6 +35,7 @@ from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.errors.fs import eisdir
+from mirage.ops.types import NamespaceView
 from mirage.types import PathSpec
 
 
@@ -101,6 +102,34 @@ def with_read_cache(ops: CommandIO) -> CommandIO:
         ),
         read_bytes=read_bytes,
     )
+
+
+def scan_io(
+    ops: CommandIO,
+    ns: NamespaceView | None,
+    prefix: str,
+) -> tuple[CommandIO, bool]:
+    """The adapter a bespoke search command scans through, and whether a
+    hide, a path rule or a coded pre_vfs policy judges anything on its
+    mount.
+
+    The mount, not the operands: a service's own search answers for more
+    than the operand it is given (a whole folder for one of its days,
+    every channel under a container). A judged command must not hand the
+    service's search the answer, since the service sees every entry, and
+    its scan reads the operands through the guards the generic builders
+    bind, over the read cache as theirs is, so a warm copy is served only
+    once the path is admitted; an unjudged one scans the raw adapter.
+
+    Args:
+        ops (CommandIO): the backend's raw IO adapter.
+        ns (NamespaceView | None): the command's namespace view.
+        prefix (str): the prefix of the mount running the command.
+    """
+    scoped = ns.scoped if ns is not None else None
+    if scoped is None or not scoped(prefix.rstrip("/") or "/"):
+        return ops, False
+    return with_command_guards(with_policy_guard(with_read_cache(ops))), True
 
 
 async def _slash_checked_write(

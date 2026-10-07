@@ -64,8 +64,8 @@ export const SCOPES: readonly Scope[] = [
 export const detectScope = makeDetectScope(SCOPES)
 
 // Kinds the workspace search push-down may answer for. Slack search is
-// workspace-wide, so the root qualifies; a chat.jsonl or blob operand names
-// one day's file, which a channel-wide search cannot stand in for, and the
+// workspace-wide, so the root qualifies; a day, its chat.jsonl or a blob
+// names one day, which a channel-wide search cannot stand in for, and the
 // files directory is excluded because search.files has no per-day filter
 // either.
 export const NATIVE_KINDS: ReadonlySet<string> = new Set([
@@ -73,7 +73,6 @@ export const NATIVE_KINDS: ReadonlySet<string> = new Set([
   'channels_root',
   'dms_root',
   'channel',
-  'day',
 ])
 
 /** The channel coordinates a search push-down carries. */

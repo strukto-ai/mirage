@@ -38,7 +38,7 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 logger = logging.getLogger(__name__)
 
 
-def _stat_from_item(item: dict[str, Any]) -> FileStat:
+def stat_from_item(item: dict[str, Any]) -> FileStat:
     vfs_name = item["name"]
     rt = resource_type_for(item)
     if rt == "box/folder":
@@ -98,7 +98,7 @@ async def _point_stat(
         return None
     if not names_this_path(accessor, item, path):
         return None
-    return _stat_from_item(item)
+    return stat_from_item(item)
 
 
 async def stat(
@@ -155,7 +155,7 @@ async def stat(
                 # Weblinks are hidden from listings; a direct lookup must
                 # not resurface a sizeless, unreadable entry.
                 raise enoent(virtual)
-            return _stat_from_item(item)
+            return stat_from_item(item)
     if result.entry.resource_type == "box/folder":
         return FileStat(
             name=result.entry.vfs_name or result.entry.name,

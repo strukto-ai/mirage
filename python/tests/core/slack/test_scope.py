@@ -67,7 +67,7 @@ def test_day_dir():
     match = detect_scope("/channels/general__C001/2024-04-10")
     assert match.kind == "day"
     assert match.slots["day"] == "2024-04-10"
-    assert "day" in NATIVE_KINDS
+    assert "day" not in NATIVE_KINDS
 
 
 def test_non_date_under_channel_is_invalid():

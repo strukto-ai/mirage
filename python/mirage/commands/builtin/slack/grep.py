@@ -17,12 +17,13 @@ import logging
 from mirage.accessor.slack import SlackAccessor
 from mirage.commands.builtin.generic.grep import grep_generic
 from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.builtin.generic_bind.factory import scan_io
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import (
     pushdown_operand,
     text_search_results,
 )
-from mirage.commands.builtin.slack.io import resolve_glob
+from mirage.commands.builtin.slack.io import IO
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
@@ -32,15 +33,12 @@ from mirage.core.slack.formatters import (
     format_file_grep_results,
     format_grep_results,
 )
-from mirage.core.slack.read import read as slack_read
-from mirage.core.slack.readdir import readdir as _readdir
 from mirage.core.slack.scope import NATIVE_KINDS, detect_scope, search_target
 from mirage.core.slack.search import (
     search_available,
     search_files,
     search_messages,
 )
-from mirage.core.slack.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
@@ -79,7 +77,12 @@ async def grep(
 
     # Output-shaping flags, a glob operand and a multi-operand line all need
     # the per-message scan; see SEARCH_HONORED above.
-    operand = pushdown_operand(paths, opts.flags, pattern, SEARCH_HONORED)
+    scan, scoped = scan_io(IO, opts.ns, opts.mount_prefix)
+    operand = (
+        None
+        if scoped
+        else pushdown_operand(paths, opts.flags, pattern, SEARCH_HONORED)
+    )
     if pattern is not None and operand is not None and fl.as_bool("w"):
         match = detect_scope(operand)
         if (
@@ -130,14 +133,16 @@ async def grep(
                     err,
                 )
 
-    resolved = await resolve_glob(accessor, paths, opts.index) if paths else []
+    resolved = (
+        await scan.resolve_glob(accessor, paths, opts.index) if paths else []
+    )
     return await grep_generic(
         resolved,
         texts,
         opts,
-        readdir=bound_op(_readdir, accessor, opts.index),
-        stat=bound_op(_stat, accessor, opts.index),
-        read_bytes=bound_op(slack_read, accessor, opts.index),
+        readdir=bound_op(scan.readdir, accessor, opts.index),
+        stat=bound_op(scan.stat, accessor, opts.index),
+        read_bytes=bound_op(scan.read_bytes, accessor, opts.index),
         read_stream=None,
         stdin=opts.stdin,
     )

@@ -19,7 +19,14 @@ from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.cache.context import CacheInvalidator, active_cache_manager
-from mirage.types import PathSpec, PolymorphicReadFn, ReadBytesFn, ReadStreamFn
+from mirage.context.session_context import get_admission
+from mirage.types import (
+    EntryGate,
+    PathSpec,
+    PolymorphicReadFn,
+    ReadBytesFn,
+    ReadStreamFn,
+)
 
 
 async def _serve_stream(
@@ -41,6 +48,27 @@ async def _serve_stream(
         close = getattr(source, "aclose", None)
         if close is not None:
             await close()
+
+
+def _serving(
+    manager: CacheInvalidator | None, gate: EntryGate | None, path: PathSpec
+) -> CacheInvalidator | None:
+    """The manager a generic's own read may serve a warm copy from.
+
+    None where anything could refuse the path for the running command
+    (a rule in force, or a coded or scripted pre_vfs policy, which only
+    the guarded reader asks): that reader answers instead, and the
+    factory's cache beneath its guards serves the copy once the path is
+    admitted.
+
+    Args:
+        manager (CacheInvalidator | None): the mount's cache manager.
+        gate (EntryGate | None): the running command's admission gate.
+        path (PathSpec): the path being read.
+    """
+    if gate is not None and gate.scopes(path.virtual):
+        return None
+    return manager
 
 
 def cache_aware_read_stream(raw: ReadStreamFn) -> ReadStreamFn:
@@ -79,7 +107,8 @@ def cache_aware_bound_stream(raw: ReadStreamFn) -> ReadStreamFn:
 
     For readers injected into the generics, which arrive with accessor
     and index already bound (``bound_op``) and are called as
-    ``read(path)``.
+    ``read(path)``. These readers may be guarded, so a path the running
+    command could be refused is left to them (``_serving``).
 
     Args:
         raw (ReadStreamFn): a bound ``read_stream`` reader.
@@ -88,7 +117,7 @@ def cache_aware_bound_stream(raw: ReadStreamFn) -> ReadStreamFn:
     def reader(
         path: PathSpec, *args: Any, **kwargs: Any
     ) -> AsyncIterator[bytes]:
-        manager = active_cache_manager()
+        manager = _serving(active_cache_manager(), get_admission(), path)
         return _serve_stream(
             manager, partial(raw, path, *args, **kwargs), path
         )
@@ -128,14 +157,15 @@ def cache_aware_bound_bytes(raw: ReadBytesFn) -> ReadBytesFn:
 
     For readers injected into the generics, which arrive with accessor
     and index already bound (``bound_op``) and are called as
-    ``read(path)``.
+    ``read(path)``. These readers may be guarded, so a path the running
+    command could be refused is left to them (``_serving``).
 
     Args:
         raw (ReadBytesFn): a bound ``read_bytes`` reader.
     """
 
     async def reader(path: PathSpec, *args: Any, **kwargs: Any) -> bytes:
-        manager = active_cache_manager()
+        manager = _serving(active_cache_manager(), get_admission(), path)
         if manager is not None:
             cached = await manager.cached_bytes(path)
             if cached is not None:
@@ -163,16 +193,20 @@ def cache_aware_read(raw: PolymorphicReadFn) -> PolymorphicReadFn:
     cache-manager scope is gone, so reading the contextvar at drain time
     would always miss. Apply this wrapper inside the command's scope
     (which the consumers do) so the captured manager travels with the
-    stream, mirroring :func:`cache_aware_read_stream`.
+    stream, mirroring :func:`cache_aware_read_stream`. The admission
+    gate is captured with it, and a path the running command could be
+    refused is left to the reader, which may be guarded (``_serving``).
 
     Args:
         raw (PolymorphicReadFn): bound bytes / awaitable / stream reader.
     """
-    manager = active_cache_manager()
+    bound = active_cache_manager()
+    gate = get_admission()
 
     async def reader(
         path: PathSpec, *args: Any, **kwargs: Any
     ) -> bytes | AsyncIterator[bytes]:
+        manager = _serving(bound, gate, path)
         if manager is not None:
             cached = await manager.cached_bytes(path)
             if cached is not None:

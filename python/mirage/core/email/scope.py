@@ -49,7 +49,9 @@ SCOPES = (
 
 detect_scope = make_detect_scope(SCOPES)
 
-# Kinds the mailbox search push-down may answer for: one folder or one
-# of its days. IMAP search selects a folder, so the mount root cannot
-# push down, and a message or attachment names one node.
-NATIVE_KINDS = frozenset({"folder", "day"})
+# Kinds the mailbox search push-down may answer for: one folder. IMAP
+# search selects a folder, so the mount root cannot push down, and a day
+# is absent because the search answers for the whole folder, which would
+# report the other days' messages too; a message or attachment names one
+# node.
+NATIVE_KINDS = frozenset({"folder"})

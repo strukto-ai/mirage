@@ -714,6 +714,34 @@ describe('op hooks bind at the op doors and the command tier', () => {
     expect(stdoutStr(found)).toContain('/a/secret.txt')
   })
 
+  it('preVfs holds warm reads', async () => {
+    // The read cache is shared by every session, so a copy an earlier
+    // read warmed is still the policy's to admit: each command that reads
+    // through the cache answers as it would cold.
+    const parser = await getTestParser()
+    const vfs = new RAMVFS()
+    ;(vfs as unknown as { cachesReads: boolean }).cachesReads = true
+    vfs.store.files.set('/secret.txt', ENC.encode('sealed\n'))
+    vfs.store.files.set('/ok.txt', ENC.encode('has sealed word\n'))
+    const ws = new Workspace({ '/a': vfs }, { mode: MountMode.WRITE, shellParser: parser })
+    open.push(ws)
+    for (const line of ['cat /a/secret.txt', 'cat /a/ok.txt'])
+      expect((await ws.shell(line)).exitCode).toBe(0)
+    ws.policies.add(new SealedPaths())
+    for (const line of [
+      'grep sealed /a/secret.txt',
+      'rg sealed /a/secret.txt',
+      'head -c 3 /a/secret.txt',
+      'tail -c 3 /a/secret.txt',
+      'wc -c /a/secret.txt',
+    ]) {
+      const io = await ws.shell(line)
+      expect([line, stdoutStr(io), io.exitCode !== 0]).toEqual([line, '', true])
+    }
+    const fine = await ws.shell('grep sealed /a/ok.txt')
+    expect(stdoutStr(fine)).toBe('has sealed word\n')
+  })
+
   it('shell rm -r admits through preVfs', async () => {
     // The cascade asymmetry closed: an ops-door rmdir cascade always
     // admitted per deletion while a shell rm -r admitted nothing. The

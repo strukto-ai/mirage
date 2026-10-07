@@ -33,7 +33,7 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 logger = logging.getLogger(__name__)
 
 
-def _stat_from_entry(entry: dict[str, Any]) -> FileStat:
+def stat_from_entry(entry: dict[str, Any]) -> FileStat:
     modified = (
         entry.get("server_modified") or entry.get("client_modified") or ""
     )
@@ -80,7 +80,7 @@ async def _stat_from_api(
         raise
     if entry.get("name") != posixpath.basename(path.vfs_path.strip("/")):
         raise enoent(path.virtual)
-    return _stat_from_entry(entry)
+    return stat_from_entry(entry)
 
 
 async def stat(

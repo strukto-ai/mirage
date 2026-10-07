@@ -52,9 +52,10 @@ function stamp(n: number): string {
  * a live URL can tell a token read before the bytes from one read after;
  * `/content` answers 200 so no client has to follow a 302; and
  * `/versions/{id}/content` serves the bytes that version was written with, so
- * a pinned read after a rewrite gets the old content. A real server
- * rather than a stubbed fetch, because the hf rows beside it in the contract
- * use the real fetch.
+ * a pinned read after a rewrite gets the old content. A `PUT` to `/content`
+ * stores the body as a content write; it is logged as `upload`, never as a
+ * fetch. A real server rather than a stubbed fetch, because the hf rows
+ * beside it in the contract use the real fetch.
  */
 export class FakeGraph {
   readonly log: [string, string, string][] = []
@@ -214,6 +215,14 @@ export class FakeGraph {
   }
 
   private handle(req: IncomingMessage, res: ServerResponse): void {
+    if (req.method === 'PUT') {
+      const chunks: Buffer[] = []
+      req.on('data', (chunk: Buffer) => chunks.push(chunk))
+      req.on('end', () => {
+        this.put(req, res, new Uint8Array(Buffer.concat(chunks)))
+      })
+      return
+    }
     const url = new URL(req.url ?? '/', 'http://x')
     const query = url.search.startsWith('?') ? decodeURIComponent(url.search.slice(1)) : ''
     const raw = url.pathname.replace(/^\/v1\.0\//, '')
@@ -252,6 +261,40 @@ export class FakeGraph {
       return
     }
     this.unrouted(res, raw, query)
+  }
+
+  private put(req: IncomingMessage, res: ServerResponse, body: Uint8Array): void {
+    const url = new URL(req.url ?? '/', 'http://x')
+    const query = url.search.startsWith('?') ? decodeURIComponent(url.search.slice(1)) : ''
+    const raw = url.pathname.replace(/^\/v1\.0\//, '')
+    const parts = raw.split('/').map(decodeURIComponent)
+    let drive: string
+    let rest: string
+    if (parts[0] === 'me' && parts[1] === 'drive') {
+      drive = ME
+      rest = parts.slice(2).join('/')
+    } else if (parts[0] === 'drives' && parts.length >= 2) {
+      drive = parts[1] ?? ''
+      rest = parts.slice(2).join('/')
+    } else {
+      this.unrouted(res, raw, query)
+      return
+    }
+    if (!rest.startsWith('root:/')) {
+      this.unrouted(res, rest, query)
+      return
+    }
+    const tail = rest.slice('root:/'.length)
+    const colon = tail.indexOf(':')
+    const action = colon === -1 ? '' : tail.slice(colon + 1)
+    if (action !== '/content') {
+      this.unrouted(res, rest, query)
+      return
+    }
+    const path = tail.slice(0, colon)
+    this.log.push(['upload', path, query])
+    this.write(drive, path, body)
+    json(res, 200, {})
   }
 
   private unrouted(res: ServerResponse, tail: string, query: string): void {

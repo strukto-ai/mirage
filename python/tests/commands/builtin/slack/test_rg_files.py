@@ -12,18 +12,33 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import RAMIndexCacheStore
+from mirage.commands.builtin.slack.grep import grep
+from mirage.commands.builtin.slack.io import IO as SLACK_IO
 from mirage.commands.builtin.slack.rg import rg
 from mirage.commands.config import CommandOpts
 from mirage.core.slack.config import SlackConfig
 from mirage.io.stream import materialize
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
+
+
+def _io(**slots: Callable[..., Any]) -> SimpleNamespace:
+    """The command's IO with the given slots faked; the rest stay real."""
+    real = {
+        "readdir": SLACK_IO.readdir,
+        "stat": SLACK_IO.stat,
+        "read_bytes": SLACK_IO.read_bytes,
+    }
+    return SimpleNamespace(**{**real, **slots})
 
 
 @pytest.fixture
@@ -41,25 +56,17 @@ async def test_rg_chat_jsonl_scans_the_named_day(accessor, index):
     # One day's chat.jsonl used to be widened to a channel-wide search
     # (`coalesce_scopes`), which answered with every day the channel ever
     # had. It is one file: read it and grep it.
-    with (
-        patch(
-            "mirage.commands.builtin.slack.rg.search_messages",
-            new_callable=AsyncMock,
-        ) as mock_msgs,
-        patch(
-            "mirage.commands.builtin.slack.rg.search_files",
-            new_callable=AsyncMock,
-        ) as mock_files,
-        patch(
-            "mirage.commands.builtin.slack.rg.resolve_glob",
-            new_callable=AsyncMock,
-            return_value=[],
-        ),
-        patch(
-            "mirage.commands.builtin.slack.rg.rg_generic",
-            new_callable=AsyncMock,
-            return_value=(b"", None),
-        ) as mock_generic,
+    mock_msgs = AsyncMock()
+    mock_files = AsyncMock()
+    mock_generic = AsyncMock(return_value=(b"", None))
+    with patch.dict(
+        rg.__wrapped__.__globals__,
+        {
+            "search_messages": mock_msgs,
+            "search_files": mock_files,
+            "IO": _io(resolve_glob=AsyncMock(return_value=[])),
+            "rg_generic": mock_generic,
+        },
     ):
         await rg(
             accessor,
@@ -82,20 +89,16 @@ async def test_rg_chat_jsonl_scans_the_named_day(accessor, index):
 
 @pytest.mark.asyncio
 async def test_rg_files_dir_redirects_to_generic_scan(accessor, index):
-    with (
-        patch(
-            "mirage.commands.builtin.slack.rg.search_messages",
-            new_callable=AsyncMock,
-        ) as mock_msgs,
-        patch(
-            "mirage.commands.builtin.slack.rg.search_files",
-            new_callable=AsyncMock,
-        ) as mock_files,
-        patch(
-            "mirage.commands.builtin.slack.rg.rg_generic",
-            new_callable=AsyncMock,
-            return_value=(b"", None),
-        ) as mock_generic,
+    mock_msgs = AsyncMock()
+    mock_files = AsyncMock()
+    mock_generic = AsyncMock(return_value=(b"", None))
+    with patch.dict(
+        rg.__wrapped__.__globals__,
+        {
+            "search_messages": mock_msgs,
+            "search_files": mock_files,
+            "rg_generic": mock_generic,
+        },
     ):
         await rg(
             accessor,
@@ -118,28 +121,18 @@ async def test_rg_files_dir_redirects_to_generic_scan(accessor, index):
 
 @pytest.mark.asyncio
 async def test_grep_chat_jsonl_scans_the_named_day(accessor, index):
-    with (
-        patch(
-            "mirage.commands.builtin.slack.grep.search_messages",
-            new_callable=AsyncMock,
-        ) as mock_msgs,
-        patch(
-            "mirage.commands.builtin.slack.grep.search_files",
-            new_callable=AsyncMock,
-        ) as mock_files,
-        patch(
-            "mirage.commands.builtin.slack.grep.resolve_glob",
-            new_callable=AsyncMock,
-            return_value=[],
-        ),
-        patch(
-            "mirage.commands.builtin.slack.grep.grep_generic",
-            new_callable=AsyncMock,
-            return_value=(b"", None),
-        ) as mock_generic,
+    mock_msgs = AsyncMock()
+    mock_files = AsyncMock()
+    mock_generic = AsyncMock(return_value=(b"", None))
+    with patch.dict(
+        grep.__wrapped__.__globals__,
+        {
+            "search_messages": mock_msgs,
+            "search_files": mock_files,
+            "IO": _io(resolve_glob=AsyncMock(return_value=[])),
+            "grep_generic": mock_generic,
+        },
     ):
-        from mirage.commands.builtin.slack.grep import grep
-
         await grep(
             accessor,
             [
@@ -169,35 +162,27 @@ async def test_grep_files_dir_redirects_to_per_file_scan(accessor, index):
         virtual="/channels/general__C001/2026-04-10/files/report.txt",
         directory="/channels/general__C001/2026-04-10/files/report.txt",
     )
-    with (
-        patch(
-            "mirage.commands.builtin.slack.grep.search_messages",
-            new_callable=AsyncMock,
-        ) as mock_msgs,
-        patch(
-            "mirage.commands.builtin.slack.grep.search_files",
-            new_callable=AsyncMock,
-        ) as mock_files,
-        patch(
-            "mirage.commands.builtin.slack.grep.resolve_glob",
-            new_callable=AsyncMock,
-            return_value=[blob],
-        ),
-        patch(
-            "mirage.commands.builtin.slack.grep.slack_read",
-            new_callable=AsyncMock,
-            return_value=b"foo line\nbar\n",
-        ) as mock_read,
-        patch(
-            "mirage.commands.builtin.slack.grep._stat",
-            new_callable=AsyncMock,
-            return_value=FileStat(
-                name="report.txt", type=FileType.FILE, content=ContentType.TEXT
+    mock_read = AsyncMock(return_value=b"foo line\nbar\n")
+    mock_msgs = AsyncMock()
+    mock_files = AsyncMock()
+    with patch.dict(
+        grep.__wrapped__.__globals__,
+        {
+            "search_messages": mock_msgs,
+            "search_files": mock_files,
+            "IO": _io(
+                resolve_glob=AsyncMock(return_value=[blob]),
+                read_bytes=mock_read,
+                stat=AsyncMock(
+                    return_value=FileStat(
+                        name="report.txt",
+                        type=FileType.FILE,
+                        content=ContentType.TEXT,
+                    )
+                ),
             ),
-        ),
+        },
     ):
-        from mirage.commands.builtin.slack.grep import grep
-
         out, io = await grep(
             accessor,
             [
