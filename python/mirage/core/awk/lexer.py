@@ -56,32 +56,33 @@ KEYWORDS = frozenset(
     }
 )
 
-BUILTIN_FUNCS = frozenset(
-    {
-        "atan2",
-        "close",
-        "cos",
-        "exp",
-        "fflush",
-        "gsub",
-        "index",
-        "int",
-        "length",
-        "log",
-        "match",
-        "rand",
-        "sin",
-        "split",
-        "sprintf",
-        "sqrt",
-        "srand",
-        "sub",
-        "substr",
-        "system",
-        "tolower",
-        "toupper",
-    }
-)
+# mawk 1.3.4's builtin functions, each with the fewest and the most
+# arguments it takes. A word named here lexes as a builtin, and the
+# parser counts its arguments against the bounds.
+BUILTIN_ARITY: dict[str, tuple[int, int]] = {
+    "atan2": (2, 2),
+    "close": (1, 1),
+    "cos": (1, 1),
+    "exp": (1, 1),
+    "fflush": (0, 1),
+    "gsub": (2, 3),
+    "index": (2, 2),
+    "int": (1, 1),
+    "length": (0, 1),
+    "log": (1, 1),
+    "match": (2, 2),
+    "rand": (0, 0),
+    "sin": (1, 1),
+    "split": (2, 3),
+    "sprintf": (1, 255),
+    "sqrt": (1, 1),
+    "srand": (0, 1),
+    "sub": (2, 3),
+    "substr": (2, 3),
+    "system": (1, 1),
+    "tolower": (1, 1),
+    "toupper": (1, 1),
+}
 
 THREE_CHAR_OPS = ("**=",)
 
@@ -277,7 +278,7 @@ class Lexer:
         word = self.src[start : self.pos]
         if word in KEYWORDS:
             return Token(TokKind.KEYWORD, word, word)
-        if word in BUILTIN_FUNCS:
+        if word in BUILTIN_ARITY:
             return Token(TokKind.BUILTIN, word, word)
         # A NAME glued directly to `(` is a call; a space makes it
         # concatenation with a parenthesised expression instead.
@@ -356,7 +357,7 @@ def tokenize(src: str) -> list[Token]:
 
 
 __all__ = [
-    "BUILTIN_FUNCS",
+    "BUILTIN_ARITY",
     "KEYWORDS",
     "Lexer",
     "TokKind",
