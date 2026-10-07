@@ -320,12 +320,12 @@ def _missing_quote(node: TSNodeLike) -> str | None:
 
 def find_syntax_error(
     node: TSNodeLike,
+    parse_fn: Callable[[str], TSNodeLike] | None = None,
     aliases: frozenset[str] = frozenset(),
     own: Mapping[str, tuple[int, int]] | None = None,
     offsets: Sequence[int] | None = None,
-    parse_fn: Callable[[str], TSNodeLike] | None = None,
 ) -> str | None:
-    found = find_syntax_issue(node, aliases, own, offsets, parse_fn)
+    found = find_syntax_issue(node, parse_fn, aliases, own, offsets)
     return None if found is None else found.offending
 
 
@@ -339,10 +339,10 @@ def _issue(node: TSNodeLike, offending: str | None) -> SyntaxIssue | None:
 
 def find_syntax_issue(
     node: TSNodeLike,
+    parse_fn: Callable[[str], TSNodeLike] | None = None,
     aliases: frozenset[str] = frozenset(),
     own: Mapping[str, tuple[int, int]] | None = None,
     offsets: Sequence[int] | None = None,
-    parse_fn: Callable[[str], TSNodeLike] | None = None,
 ) -> SyntaxIssue | None:
     """Locate structural errors and missing tokens throughout a parsed AST.
 
@@ -354,6 +354,9 @@ def find_syntax_issue(
 
     Args:
         node (TSNodeLike): root node from parse().
+        parse_fn (Callable[[str], TSNodeLike] | None): parses the body of
+            a ``$(...)`` substitution so its own syntax is judged too;
+            None leaves substitution bodies unchecked.
         aliases (frozenset[str]): alias names the shell would expand where
             a command starts; a reserved word among them is a command.
         own (Mapping[str, tuple[int, int]] | None): each alias whose own
@@ -362,9 +365,6 @@ def find_syntax_issue(
         offsets (Sequence[int] | None): where each byte the parser read
             sits in that line (``source_offsets``); None where the two are
             the same.
-        parse_fn (Callable[[str], TSNodeLike] | None): parses the body of
-            a ``$(...)`` substitution so its own syntax is judged too;
-            None leaves substitution bodies unchecked.
 
     Returns:
         SyntaxIssue | None: the offending region's text and span, or None
@@ -394,9 +394,7 @@ def find_syntax_issue(
             and source.startswith("$(")
             and source.endswith(")")
         ):
-            nested = find_syntax_issue(
-                parse_fn(source[2:-1]), parse_fn=parse_fn
-            )
+            nested = find_syntax_issue(parse_fn(source[2:-1]), parse_fn)
             return None if nested is None else _issue(node, nested.offending)
     stray = min(
         chain(
@@ -444,7 +442,7 @@ def find_syntax_issue(
             text = child.text
             return _issue(child, decode_text(text) if text else "")
         if child.type != "ERROR":
-            nested = find_syntax_issue(child, aliases, own, offsets, parse_fn)
+            nested = find_syntax_issue(child, parse_fn, aliases, own, offsets)
             if nested is not None:
                 return nested
         if child.is_named:

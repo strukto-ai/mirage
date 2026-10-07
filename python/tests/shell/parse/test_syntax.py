@@ -410,7 +410,7 @@ def test_a_reserved_word_the_shell_expands_as_an_alias_is_a_command(
 ):
     # Pinned against bash 5.2.37, which takes the reserved word first
     # inside `$(...)` and a process substitution.
-    assert find_syntax_error(parse(command), frozenset({alias})) == word
+    assert find_syntax_error(parse(command), parse, frozenset({alias})) == word
 
 
 @pytest.mark.parametrize(
@@ -430,4 +430,4 @@ def test_an_alias_name_is_reserved_inside_its_own_text(line, own, word):
     # Spans are in the line as typed, which a continuation shifts.
     root = parse(line)
     offsets = source_offsets(line, root)
-    assert find_syntax_error(root, frozenset(own), own, offsets) == word
+    assert find_syntax_error(root, None, frozenset(own), own, offsets) == word

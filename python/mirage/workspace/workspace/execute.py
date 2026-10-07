@@ -607,17 +607,19 @@ async def run_prepared_line(
         )
         # Syntax gates before policy, mirroring the TS order and
         # bash: an unparsable line exits 2 and the policy is never
-        # consulted about it.
+        # consulted about it. tree-sitter accepts an unclosed backtick
+        # as a complete command, so the region is scanned separately.
         aliases = expanding_aliases(effective_session)
-        issue = find_syntax_issue(ast, aliases, parse_fn=parse_scope.parse)
-        offending = None if issue is None else issue.offending
-        issue_end = None if issue is None else issue.span.end
-        if offending is None and argv is None:
-            # tree-sitter accepts an unclosed backtick as a complete
-            # command, so the region is scanned separately.
-            offending = find_unterminated_backtick(
-                decode_text(ast.text or b"")
+        issue = None
+        offending = None
+        if argv is None:
+            issue = find_syntax_issue(ast, parse_scope.parse, aliases)
+            offending = (
+                find_unterminated_backtick(decode_text(ast.text or b""))
+                if issue is None
+                else issue.offending
             )
+        issue_end = None if issue is None else issue.span.end
         if offending is not None:
             io = syntax_error_result(
                 offending, ast, aliases, issue_end=issue_end

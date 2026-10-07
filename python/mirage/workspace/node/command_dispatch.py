@@ -196,7 +196,7 @@ async def execute_command(
                 aliases = expanding_aliases(session)
                 offsets = source_offsets(line, ast)
                 issue = find_syntax_issue(
-                    ast, aliases, own, offsets, parse_fn=scope.parse
+                    ast, scope.parse, aliases, own, offsets
                 )
                 if issue is not None:
                     io = syntax_error_result(

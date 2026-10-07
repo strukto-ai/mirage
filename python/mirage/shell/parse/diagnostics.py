@@ -25,7 +25,7 @@ def diagnose(
             body so its own syntax is judged.
         aliases (frozenset[str]): alias names the shell would expand.
     """
-    found = find_syntax_issue(root, aliases, parse_fn=parse_fn)
+    found = find_syntax_issue(root, parse_fn, aliases)
     unclosed = find_unterminated_backtick(decode_text(root.text or b""))
     if found is None and unclosed is not None:
         found = SyntaxIssue(
