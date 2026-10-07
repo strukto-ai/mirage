@@ -23,7 +23,7 @@ import {
   findUnterminatedBacktick,
   type ShellParser,
 } from './index.ts'
-import { syntaxErrorResult } from './syntax.ts'
+import { endsInsideConstruct, syntaxErrorResult } from './syntax.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -33,6 +33,26 @@ let parser: ShellParser
 
 beforeAll(async () => {
   parser = await createShellParser({ engineWasm, grammarWasm })
+})
+
+describe('endsInsideConstruct', () => {
+  it.each([
+    ['if true', true],
+    ['case x', true],
+    ['f() {', true],
+    ['( ( echo a', true],
+    ['echo a |', true],
+    ['if true; then echo a; else', true],
+    ['if then', false],
+    ['if ;', false],
+    ['if }', false],
+    ['echo x (', false],
+    ['( then', false],
+    ['if true; then else', false],
+    ['for i in 1; do ;', false],
+  ])('%s: %s', (line, unfinished) => {
+    expect(endsInsideConstruct(parser.parse(line))).toBe(unfinished)
+  })
 })
 
 describe('syntaxErrorResult', () => {

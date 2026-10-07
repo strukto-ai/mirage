@@ -82,10 +82,11 @@ QUOTE_TOKENS = frozenset({"'", '"', "`"})
 
 # The compound commands an ERROR can leave open, by the token closing
 # each. Input ending inside one is bash's `syntax error: unexpected end
-# of file`, not an unexpected token. An unclosed subshell parses with its
-# `)` missing instead, and a `(` an ERROR holds is unexpected (`echo x (`).
+# of file`, not an unexpected token. A `(` after a command's words opens
+# nothing: it is unexpected (`echo x (`) unless `()` defines a function.
 COMPOUND_CLOSERS: dict[str, str] = {
     "{": "}",
+    "(": ")",
     "if": "fi",
     "case": "esac",
     "while": "done",
@@ -114,6 +115,19 @@ SEPARATOR_TOKENS = frozenset({";", "&", "|", "&&", "||"})
 # statement separators, so `true;;s` parses without an ERROR node; bash
 # only accepts them inside a case item.
 CASE_TERMINATORS = frozenset({";;", ";&", ";;&"})
+
+# Every list operator. Where a command or a word must come, one is the
+# token bash reports as unexpected.
+LIST_OPERATORS = SEPARATOR_TOKENS | CASE_TERMINATORS | {"|&"}
+
+# The tokens a command must follow (a keyword or operator that opens
+# one) and those a word must follow (the subject of `case`, the name of
+# `for`, `select` and `function`).
+COMMAND_FOLLOWS = frozenset(
+    {"if", "elif", "while", "until", "then", "do", "else", "{", "(", "!"}
+    | {"|", "|&", "&&", "||"}
+)
+NAME_FOLLOWS = frozenset({"case", "for", "select", "function"})
 
 # Where a `variable_name` node is a write target rather than a read:
 # the assignment's name and the for loop's variable. Everything else --

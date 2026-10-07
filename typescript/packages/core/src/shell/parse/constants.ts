@@ -82,10 +82,11 @@ export const QUOTE_TOKENS: ReadonlySet<string> = new Set(["'", '"', '`'])
 
 // The compound commands an ERROR can leave open, by the token closing
 // each. Input ending inside one is bash's `syntax error: unexpected end
-// of file`, not an unexpected token. An unclosed subshell parses with its
-// `)` missing instead, and a `(` an ERROR holds is unexpected (`echo x (`).
+// of file`, not an unexpected token. A `(` after a command's words opens
+// nothing: it is unexpected (`echo x (`) unless `()` defines a function.
 export const COMPOUND_CLOSERS: ReadonlyMap<string, string> = new Map([
   ['{', '}'],
+  ['(', ')'],
   ['if', 'fi'],
   ['case', 'esac'],
   ['while', 'done'],
@@ -114,6 +115,35 @@ export const SEPARATOR_TOKENS: ReadonlySet<string> = new Set([';', '&', '|', '&&
 // statement separators, so `true;;s` parses without an ERROR node; bash
 // only accepts them inside a case item.
 export const CASE_TERMINATORS: ReadonlySet<string> = new Set([';;', ';&', ';;&'])
+
+// Every list operator. Where a command or a word must come, one is the
+// token bash reports as unexpected.
+export const LIST_OPERATORS: ReadonlySet<string> = new Set([
+  ...SEPARATOR_TOKENS,
+  ...CASE_TERMINATORS,
+  '|&',
+])
+
+// The tokens a command must follow (a keyword or operator that opens
+// one) and those a word must follow (the subject of `case`, the name of
+// `for`, `select` and `function`).
+export const COMMAND_FOLLOWS: ReadonlySet<string> = new Set([
+  'if',
+  'elif',
+  'while',
+  'until',
+  'then',
+  'do',
+  'else',
+  '{',
+  '(',
+  '!',
+  '|',
+  '|&',
+  '&&',
+  '||',
+])
+export const NAME_FOLLOWS: ReadonlySet<string> = new Set(['case', 'for', 'select', 'function'])
 
 // Where a `variable_name` node is a write target rather than a read:
 // the assignment's name and the for loop's variable. Everything else --

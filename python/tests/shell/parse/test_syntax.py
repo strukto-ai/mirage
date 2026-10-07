@@ -25,7 +25,10 @@ from mirage.shell.parse import (
     parse,
     source_offsets,
 )
-from mirage.shell.parse.syntax import syntax_error_result
+from mirage.shell.parse.syntax import (
+    ends_inside_construct,
+    syntax_error_result,
+)
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
@@ -33,6 +36,28 @@ from mirage.workspace import Workspace
 def test_partial_quoted_heredoc_end_is_not_syntax_error():
     root = parse("cat <<EN'D'\n$v\nEND")
     assert find_syntax_error(root) is None
+
+
+@pytest.mark.parametrize(
+    ("line", "unfinished"),
+    [
+        ("if true", True),
+        ("case x", True),
+        ("f() {", True),
+        ("( ( echo a", True),
+        ("echo a |", True),
+        ("if true; then echo a; else", True),
+        ("if then", False),
+        ("if ;", False),
+        ("if }", False),
+        ("echo x (", False),
+        ("( then", False),
+        ("if true; then else", False),
+        ("for i in 1; do ;", False),
+    ],
+)
+def test_only_input_bash_took_whole_ends_inside_a_construct(line, unfinished):
+    assert ends_inside_construct(parse(line)) is unfinished
 
 
 def test_a_syntax_error_span_keeps_an_invalid_byte_as_typed():

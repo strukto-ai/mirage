@@ -21,8 +21,11 @@ from mirage.shell.parse.constants import (
     BASH_KEYWORDS,
     CASE_TERMINATORS,
     CLOSING_TOKENS,
+    COMMAND_FOLLOWS,
     COMPOUND_CLOSERS,
     CONSTRUCT_CLOSERS,
+    LIST_OPERATORS,
+    NAME_FOLLOWS,
     OPENER_CLOSERS,
     QUOTE_TOKENS,
     SEPARATOR_TOKENS,
@@ -507,44 +510,114 @@ def _innermost_unclosed(children: Sequence[TSNodeLike]) -> str | None:
 def ends_inside_construct(node: TSNodeLike) -> bool:
     """Whether the input ends inside a compound command or after an operator.
 
-    bash reads such a line as unfinished: the grammar marks the token it
-    still needed missing at the end (``(echo a``, ``echo a |``), or an
-    ERROR reaching the end leaves a compound open (``{ echo a``, ``if
-    true; then``, ``case a in``).
+    bash reads such a line as unfinished when it took every token where
+    it stood and still wants more: the grammar marks the token it needed
+    missing at the end (``(echo a``, ``echo a |``), or an ERROR reaching
+    the end leaves a compound open (``{ echo a``, ``if true; then``,
+    ``case a in``). A token it could not take (``if then``, ``if ;``,
+    ``( then``) is the error bash reports instead.
 
     Args:
         node (TSNodeLike): the parsed line.
     """
+    stray = chain(
+        _stray_case_terminators(node),
+        _empty_compounds(node),
+        _stray_reserved_words(node, frozenset(), {}, None),
+    )
+    if any(text for _, text in stray):
+        return False
     end = node.start_byte + len((node.text or b"").rstrip())
-    stack = [node]
+    unfinished = False
+    stack: list[tuple[TSNodeLike, TSNodeLike | None]] = [(node, None)]
     while stack:
-        current = stack.pop()
-        if current.is_missing and current.start_byte >= end:
-            return True
-        if (
-            current.type == "ERROR"
-            and current.end_byte >= end
-            and _leaves_open(current.children)
-        ):
-            return True
-        stack.extend(current.children)
-    return False
+        current, before = stack.pop()
+        if current.type == "ERROR":
+            opened = _open_compound(current, before)
+            if opened is None:
+                return False
+            unfinished = unfinished or (opened and current.end_byte >= end)
+        elif current.is_missing and current.start_byte >= end:
+            unfinished = True
+        previous = None
+        for child in current.children:
+            stack.append((child, previous))
+            previous = child
+    return unfinished
 
 
-def _leaves_open(children: Sequence[TSNodeLike]) -> bool:
-    """Whether an ERROR's tokens open a compound they never close.
+def _open_compound(
+    error: TSNodeLike, before: TSNodeLike | None
+) -> bool | None:
+    """Read an ERROR's tokens as bash does: whether they leave a compound
+    open, or None at the first token bash cannot take where it stands.
+
+    A command must follow the tokens in ``COMMAND_FOLLOWS`` and a word
+    those in ``NAME_FOLLOWS``: a list operator there is unexpected, as is
+    a closing reserved word where a command starts, and a list operator
+    right after another. After a command's words a ``(`` is unexpected
+    unless ``()`` makes the command a function definition. Text the
+    grammar skipped is unexpected too. A nested ERROR's tokens are read
+    in line, as tokens the grammar could not group.
 
     Args:
-        children (Sequence[TSNodeLike]): the ERROR node's children.
+        error (TSNodeLike): the ERROR node.
+        before (TSNodeLike | None): its previous sibling; after a
+            command, the node starts among that command's words.
     """
+    text = error.text or b""
+    children = list(_error_tokens(error))
+    expect = "words" if before is not None and before.type == "command" else ""
     pending: list[str] = []
-    for child in children:
-        closer = COMPOUND_CLOSERS.get(child.type)
+    cursor = error.start_byte
+    for i, child in enumerate(children):
+        kind = child.type
+        skipped = text[
+            cursor - error.start_byte : child.start_byte - error.start_byte
+        ]
+        word = decode_text(child.text or b"") if child.is_named else kind
+        if (
+            skipped.strip()
+            or (
+                expect in ("command", "name", "list")
+                and kind in LIST_OPERATORS
+            )
+            or (expect == "command" and word in _RESERVED_CLOSERS)
+        ):
+            return None
+        call = expect == "words" and kind == "("
+        if call and (i + 1 == len(children) or children[i + 1].type != ")"):
+            return None
+        closer = None if call else COMPOUND_CLOSERS.get(kind)
         if closer is not None:
             pending.append(closer)
-        elif pending and child.type == pending[-1]:
+        elif pending and kind == pending[-1]:
             pending.pop()
+        if kind in COMMAND_FOLLOWS:
+            expect = "command"
+        elif kind in NAME_FOLLOWS:
+            expect = "name"
+        elif kind in LIST_OPERATORS:
+            expect = "list"
+        else:
+            expect = "words"
+        cursor = child.end_byte
+    if text[cursor - error.start_byte :].strip():
+        return None
     return bool(pending)
+
+
+def _error_tokens(error: TSNodeLike) -> Iterator[TSNodeLike]:
+    """An ERROR's children, a nested ERROR's read in line.
+
+    Args:
+        error (TSNodeLike): the ERROR node.
+    """
+    for child in error.children:
+        if child.type == "ERROR":
+            yield from _error_tokens(child)
+        else:
+            yield child
 
 
 def syntax_error_result(

@@ -22,8 +22,11 @@ import {
   BASH_KEYWORDS,
   CASE_TERMINATORS,
   CLOSING_TOKENS,
+  COMMAND_FOLLOWS,
   COMPOUND_CLOSERS,
   CONSTRUCT_CLOSERS,
+  LIST_OPERATORS,
+  NAME_FOLLOWS,
   OPENER_CLOSERS,
   QUOTE_TOKENS,
   SEPARATOR_TOKENS,
@@ -96,31 +99,90 @@ function innermostUnclosed(children: readonly TSNodeLike[]): string | null {
   return pending.at(-1)?.[1] ?? null
 }
 
-/** Whether the input ends inside a compound command or after an operator:
- * the grammar marks the token it still needed missing at the end (`(echo a`,
- * `echo a |`), or an ERROR reaching the end leaves a compound open
- * (`{ echo a`, `if true; then`, `case a in`). Mirrors Python. */
+/** Whether the input ends inside a compound command or after an operator.
+ * bash reads such a line as unfinished when it took every token where it
+ * stood and still wants more: the grammar marks the token it needed missing
+ * at the end (`(echo a`, `echo a |`), or an ERROR reaching the end leaves a
+ * compound open (`{ echo a`, `if true; then`, `case a in`). A token it could
+ * not take (`if then`, `if ;`, `( then`) is the error bash reports instead.
+ * Mirrors Python. */
 export function endsInsideConstruct(node: TSNodeLike): boolean {
+  const stray = [
+    ...strayCaseTerminators(node),
+    ...emptyCompounds(node),
+    ...strayReservedWords(node, new Set(), new Map(), undefined),
+  ]
+  if (stray.some(([, text]) => text !== '')) return false
   const end = (node.startIndex ?? 0) + node.text.trimEnd().length
-  const stack: TSNodeLike[] = [node]
-  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
-    if (current.isMissing && (current.startIndex ?? 0) >= end) return true
-    if (current.type === 'ERROR' && (current.endIndex ?? 0) >= end && leavesOpen(current.children))
-      return true
-    stack.push(...current.children)
+  let unfinished = false
+  const stack: [TSNodeLike, TSNodeLike | null][] = [[node, null]]
+  for (let top = stack.pop(); top !== undefined; top = stack.pop()) {
+    const [current, before] = top
+    if (current.type === 'ERROR') {
+      const opened = openCompound(current, before)
+      if (opened === null) return false
+      unfinished ||= opened && (current.endIndex ?? 0) >= end
+    } else if (current.isMissing && (current.startIndex ?? 0) >= end) {
+      unfinished = true
+    }
+    let previous: TSNodeLike | null = null
+    for (const child of current.children) {
+      stack.push([child, previous])
+      previous = child
+    }
   }
-  return false
+  return unfinished
 }
 
-/** Whether an ERROR's tokens open a compound they never close. */
-function leavesOpen(children: readonly TSNodeLike[]): boolean {
+/** Read an ERROR's tokens as bash does: whether they leave a compound open,
+ * or null at the first token bash cannot take where it stands. A command
+ * must follow the tokens in `COMMAND_FOLLOWS` and a word those in
+ * `NAME_FOLLOWS`: a list operator there is unexpected, as is a closing
+ * reserved word where a command starts, and a list operator right after
+ * another. After a command's words (`before` is that command) a `(` is
+ * unexpected unless `()` makes the command a function definition. Text the
+ * grammar skipped is unexpected too. A nested ERROR's tokens are read in
+ * line, as tokens the grammar could not group. Mirrors Python. */
+function openCompound(error: TSNodeLike, before: TSNodeLike | null): boolean | null {
+  const origin = error.startIndex ?? 0
+  const children = [...errorTokens(error)]
+  let expect = before?.type === 'command' ? 'words' : ''
   const pending: string[] = []
-  for (const child of children) {
-    const closer = COMPOUND_CLOSERS.get(child.type)
+  let cursor = origin
+  for (const [i, child] of children.entries()) {
+    const kind = child.type
+    const start = child.startIndex ?? cursor
+    const word = child.isNamed === true ? child.text : kind
+    if (
+      error.text.slice(cursor - origin, start - origin).trim() !== '' ||
+      (['command', 'name', 'list'].includes(expect) && LIST_OPERATORS.has(kind)) ||
+      (expect === 'command' && RESERVED_CLOSERS.has(word))
+    )
+      return null
+    const call = expect === 'words' && kind === '('
+    if (call && children[i + 1]?.type !== ')') return null
+    const closer = call ? undefined : COMPOUND_CLOSERS.get(kind)
     if (closer !== undefined) pending.push(closer)
-    else if (pending.length > 0 && child.type === pending.at(-1)) pending.pop()
+    else if (pending.length > 0 && kind === pending.at(-1)) pending.pop()
+    expect = COMMAND_FOLLOWS.has(kind)
+      ? 'command'
+      : NAME_FOLLOWS.has(kind)
+        ? 'name'
+        : LIST_OPERATORS.has(kind)
+          ? 'list'
+          : 'words'
+    cursor = child.endIndex ?? start
   }
+  if (error.text.slice(cursor - origin).trim() !== '') return null
   return pending.length > 0
+}
+
+/** An ERROR's children, a nested ERROR's read in line. */
+function* errorTokens(error: TSNodeLike): Generator<TSNodeLike> {
+  for (const child of error.children) {
+    if (child.type === 'ERROR') yield* errorTokens(child)
+    else yield child
+  }
 }
 
 /** Exit 2 with the bash-style diagnostic for an unparsable line. */

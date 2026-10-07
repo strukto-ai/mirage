@@ -287,6 +287,192 @@
         "stderr": "mirage: syntax error: unexpected end of file\n"
       },
       "flags": []
+    },
+    {
+      "id": "syntax_unfinished_else_body",
+      "seq": 1338226,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; if true; then echo a; else",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error: unexpected end of file\n"
+      }
+    },
+    {
+      "id": "syntax_unfinished_nested_subshell",
+      "seq": 1338227,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; ( ( echo a",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error: unexpected end of file\n"
+      }
+    },
+    {
+      "id": "syntax_unexpected_then_after_if",
+      "seq": 1338228,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; if then",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error near 'echo ran; if then'\n"
+      }
+    },
+    {
+      "id": "syntax_unexpected_separator_after_if",
+      "seq": 1338229,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; if ;",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error near 'echo ran; if ;'\n"
+      }
+    },
+    {
+      "id": "syntax_unexpected_paren_after_words",
+      "seq": 1338230,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; echo x (",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error near '('\n"
+      }
+    },
+    {
+      "id": "syntax_unexpected_else_in_empty_then",
+      "seq": 1338231,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo ran; if true; then else",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error near 'else'\n"
+      }
     }
   ]
 }
