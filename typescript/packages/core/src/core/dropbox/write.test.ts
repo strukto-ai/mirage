@@ -284,9 +284,12 @@ describe('dropbox write records the upload reply', () => {
     return records.map((r) => [r.op, r.path, r.bytes, r.fingerprint, r.revision])
   }
 
-  it('records the reply token', async () => {
+  it.each([
+    ['agrees', fileMetadata(), 'h5'],
+    ['empty reply', null, null],
+  ])('records the reply token (%s)', async (_name, reply, token) => {
     // 'h5' is a token no local hash produces.
-    expect(await writeRecorded(fileMetadata())).toEqual([['write', '/note.txt', 5, 'h5', null]])
+    expect(await writeRecorded(reply)).toEqual([['write', '/note.txt', 5, token, null]])
     // Recorded before the eviction, so the record exists when the cache
     // reacts to the write.
     expect(H.order).toEqual(['record', 'invalidate'])

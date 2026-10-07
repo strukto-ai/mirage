@@ -167,6 +167,22 @@ async def test_write_records_the_reply_token(
 
 
 @pytest.mark.asyncio
+async def test_a_write_whose_reply_is_empty_still_records_it(
+    fake_drive, gdrive_accessor, monkeypatch
+):
+    # The upload landed, so the write counts even without a token: an
+    # earlier write's claim on the path must not win.
+    async def _empty(*args, **kwargs):
+        await fake_drive.upload_file(*args, **kwargs)
+
+    monkeypatch.setattr(write_mod, "upload_file", _empty)
+    rows, _ = await _write_recorded(
+        gdrive_accessor, "/f.txt", b"hello", monkeypatch
+    )
+    assert rows == [("write", "/f.txt", 5, None, None)]
+
+
+@pytest.mark.asyncio
 async def test_a_write_whose_reply_fails_still_evicts_the_path(
     fake_drive, gdrive_accessor, monkeypatch
 ):

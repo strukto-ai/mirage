@@ -47,8 +47,9 @@ export async function write(
     if (parentId === null) throw enoent(path.virtual)
     upload = () => uploadNewFile(tm, parentId, parts[parts.length - 1] ?? '', data)
   }
-  await evictAfter(upload, async (reply) => {
-    if (reply !== undefined) {
+  await evictAfter(
+    async () => {
+      const reply = await upload()
       const entries: unknown =
         typeof reply === 'object' && reply !== null && !Array.isArray(reply)
           ? (reply as { entries?: unknown }).entries
@@ -56,7 +57,7 @@ export async function write(
       const first = Array.isArray(entries) ? (entries[0] as BoxItem | undefined) : undefined
       const token = uploadToken(first, statFromItem, path.virtual)
       record('write', path.virtual, 'box', data.length, timer, { fingerprint: token })
-    }
-    await invalidateAfterWrite(path)
-  })
+    },
+    () => invalidateAfterWrite(path),
+  )
 }

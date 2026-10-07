@@ -143,10 +143,15 @@ async def test_a_write_whose_reply_fails_still_evicts_the_path():
 
 
 @pytest.mark.asyncio
-async def test_write_records_the_reply_token():
+@pytest.mark.parametrize(
+    ("reply", "token"),
+    [(_file_metadata(), "h5"), (None, None)],
+    ids=["agrees", "empty-reply"],
+)
+async def test_write_records_the_reply_token(reply, token):
     # "h5" is a token no local hash produces.
-    rows, order = await _write_recorded(_file_metadata())
-    assert rows == [("write", "/note.txt", 5, "h5", None)]
+    rows, order = await _write_recorded(reply)
+    assert rows == [("write", "/note.txt", 5, token, None)]
     # Recorded before the eviction, so the record exists when the cache
     # reacts to the write.
     assert order == [("invalidate", 1)]

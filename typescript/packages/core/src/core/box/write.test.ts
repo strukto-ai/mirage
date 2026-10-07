@@ -419,6 +419,7 @@ const BOX_REPLY_ROWS: [string, unknown, string | null][] = [
   ['agrees', uploadReply(), 's5'],
   ['no entries', { total_count: 0, entries: [] }, null],
   ['non-dict reply', ['not', 'a', 'dict'], null],
+  ['empty reply', null, null],
 ]
 
 describe.each([

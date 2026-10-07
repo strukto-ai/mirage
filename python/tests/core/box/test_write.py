@@ -667,8 +667,9 @@ _BOX_REPLY_ROWS = [
     ({"total_count": 1, "entries": [_file_entry()]}, "s5"),
     ({"total_count": 0, "entries": []}, None),
     (["not", "a", "dict"], None),
+    (None, None),
 ]
-_BOX_REPLY_IDS = ["agrees", "no-entries", "non-dict"]
+_BOX_REPLY_IDS = ["agrees", "no-entries", "non-dict", "empty-reply"]
 
 
 async def _box_write_recorded(accessor, virtual: str, reply):

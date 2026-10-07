@@ -25,7 +25,7 @@ from mirage.core.gdrive.stat import stat_from_item
 from mirage.core.google.drive import update_file_content, upload_file
 from mirage.errors.fs import eacces, eisdir
 from mirage.observe.context import record, start_op
-from mirage.types import JsonValue, PathSpec
+from mirage.types import PathSpec
 from mirage.utils.upload import upload_token
 
 
@@ -62,12 +62,8 @@ async def write(accessor: GDriveAccessor, path: PathSpec, data: bytes) -> None:
             token_manager, posixpath.basename(key), parent_id, data
         )
 
-    async def settle(item: JsonValue) -> None:
-        if item is not None:
-            token = upload_token(item, stat_from_item, virtual)
-            record(
-                "write", virtual, "gdrive", len(data), timer, fingerprint=token
-            )
-        await invalidate_after_write(path)
+    async def send() -> None:
+        token = upload_token(await upload, stat_from_item, virtual)
+        record("write", virtual, "gdrive", len(data), timer, fingerprint=token)
 
-    await evict_after(upload, settle)
+    await evict_after(send(), lambda _: invalidate_after_write(path))

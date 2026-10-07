@@ -171,6 +171,13 @@ describe.each([
   })
 })
 
+it('a gdrive write whose reply is empty still records it', async () => {
+  // The upload landed, so the write counts even without a token: an earlier
+  // write's claim on the path must not win.
+  replyWith(() => null)
+  expect(await writeRecorded()).toEqual([['write', '/f.txt', 5, null, null]])
+})
+
 it('a gdrive write whose reply fails still evicts the path', async () => {
   // Drive may have stored the bytes before the reply broke off, so the cached
   // copy is stale either way.

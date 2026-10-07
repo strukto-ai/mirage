@@ -19,7 +19,7 @@ from mirage.core.box.resolve import path_parts, resolve_item, resolve_parent_id
 from mirage.core.box.stat import stat_from_item
 from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import record, start_op
-from mirage.types import JsonValue, PathSpec
+from mirage.types import PathSpec
 from mirage.utils.upload import upload_token
 
 
@@ -52,21 +52,13 @@ async def write(accessor: BoxAccessor, path: PathSpec, data: bytes) -> None:
             raise enoent(path.virtual)
         upload = upload_new_file(tm, parent_id, parts[-1], data)
 
-    async def settle(reply: JsonValue) -> None:
-        if reply is not None:
-            entries = reply.get("entries") if isinstance(reply, dict) else None
-            item = (
-                entries[0] if isinstance(entries, list) and entries else None
-            )
-            token = upload_token(item, stat_from_item, path.virtual)
-            record(
-                "write",
-                path.virtual,
-                "box",
-                len(data),
-                timer,
-                fingerprint=token,
-            )
-        await invalidate_after_write(path)
+    async def send() -> None:
+        reply = await upload
+        entries = reply.get("entries") if isinstance(reply, dict) else None
+        item = entries[0] if isinstance(entries, list) and entries else None
+        token = upload_token(item, stat_from_item, path.virtual)
+        record(
+            "write", path.virtual, "box", len(data), timer, fingerprint=token
+        )
 
-    await evict_after(upload, settle)
+    await evict_after(send(), lambda _: invalidate_after_write(path))

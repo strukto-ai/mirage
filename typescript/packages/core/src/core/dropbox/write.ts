@@ -32,12 +32,12 @@ export async function write(
 ): Promise<void> {
   const timer = startOp()
   await evictAfter(
-    () => dropboxUpload(accessor.tokenManager, dropboxPathOf(accessor, path), data),
-    async (entry) => {
-      if (entry !== undefined) {
-        const token = uploadToken(entry as DropboxEntry | null, statFromEntry, path.virtual)
-        record('write', path.virtual, 'dropbox', data.byteLength, timer, { fingerprint: token })
-      }
+    async () => {
+      const entry = await dropboxUpload(accessor.tokenManager, dropboxPathOf(accessor, path), data)
+      const token = uploadToken(entry as DropboxEntry | null, statFromEntry, path.virtual)
+      record('write', path.virtual, 'dropbox', data.byteLength, timer, { fingerprint: token })
+    },
+    async () => {
       await invalidateAfterWrite(path)
       await invalidateAncestors(path)
     },

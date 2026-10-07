@@ -22,7 +22,7 @@ from mirage.core.dropbox.client import dropbox_upload
 from mirage.core.dropbox.paths import dropbox_path_of
 from mirage.core.dropbox.stat import stat_from_entry
 from mirage.observe.context import record, start_op
-from mirage.types import JsonValue, PathSpec
+from mirage.types import PathSpec
 from mirage.utils.upload import upload_token
 
 
@@ -42,23 +42,22 @@ async def write(
     """
     timer = start_op()
 
-    async def settle(entry: JsonValue) -> None:
-        if entry is not None:
-            token = upload_token(entry, stat_from_entry, path.virtual)
-            record(
-                "write",
-                path.virtual,
-                "dropbox",
-                len(data),
-                timer,
-                fingerprint=token,
-            )
+    async def send() -> None:
+        entry = await dropbox_upload(
+            accessor.token_manager, dropbox_path_of(accessor, path), data
+        )
+        token = upload_token(entry, stat_from_entry, path.virtual)
+        record(
+            "write",
+            path.virtual,
+            "dropbox",
+            len(data),
+            timer,
+            fingerprint=token,
+        )
+
+    async def evict(_: None) -> None:
         await invalidate_after_write(path)
         await invalidate_ancestors(path)
 
-    await evict_after(
-        dropbox_upload(
-            accessor.token_manager, dropbox_path_of(accessor, path), data
-        ),
-        settle,
-    )
+    await evict_after(send(), evict)

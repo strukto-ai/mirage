@@ -48,13 +48,13 @@ async function writeImpl(
     const basename = key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key
     upload = () => uploadFile(tm, basename, parentId, data)
   }
-  await evictAfter(upload, async (reply) => {
-    if (reply !== undefined) {
-      const token = uploadToken(reply, statFromItem, path.virtual)
+  await evictAfter(
+    async () => {
+      const token = uploadToken(await upload(), statFromItem, path.virtual)
       record('write', path.virtual, 'gdrive', data.length, timer, { fingerprint: token })
-    }
-    await invalidateAfterWrite(path)
-  })
+    },
+    () => invalidateAfterWrite(path),
+  )
 }
 
 export const write = eaccesOnDenied(writeImpl)
