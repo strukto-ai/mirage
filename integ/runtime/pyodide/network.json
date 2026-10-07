@@ -1,0 +1,26 @@
+{
+  "cases": [
+    {
+      "id": "guest_sockets_refuse",
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ]
+      },
+      "hosts": [
+        "typescript"
+      ],
+      "steps": [
+        {
+          "command": "python3 - <<'PY'\nimport socket\nimport urllib.request\n\n\ndef show(label, attempt):\n    try:\n        attempt()\n        print(label, 'ok')\n    except OSError as e:\n        print(label, type(e).__name__, e)\n\n\nshow('connect', lambda: socket.create_connection(('127.0.0.1', 9), timeout=3))\nshow('connect by name', lambda: socket.create_connection(('example.com', 80), timeout=3))\nquiet = socket.socket()\nquiet.setblocking(False)\nshow('non-blocking connect', lambda: quiet.connect(('127.0.0.1', 9)))\nshow('udp sendto', lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(b'x', ('127.0.0.1', 9)))\nshow('http', lambda: urllib.request.urlopen('http://127.0.0.1:9/', timeout=3))\nshow('https', lambda: urllib.request.urlopen('https://example.com/', timeout=3))\ntcp = socket.socket()\nshow('tcp bind', lambda: tcp.bind(('127.0.0.1', 0)))\nshow('tcp listen', tcp.listen)\nshow('udp bind', lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM).bind(('127.0.0.1', 0)))\nshow('socketpair', socket.socketpair)\nPY",
+          "expect": {
+            "exit": 0,
+            "stdout": "connect OSError [Errno 40] Network unreachable\nconnect by name OSError [Errno 40] Network unreachable\nnon-blocking connect OSError [Errno 40] Network unreachable\nudp sendto OSError [Errno 40] Network unreachable\nhttp URLError <urlopen error [Errno 40] Network unreachable>\nhttps URLError <urlopen error [Errno 40] Network unreachable>\ntcp bind ok\ntcp listen OSError [Errno 38] Network is down\nudp bind OSError [Errno 38] Network is down\nsocketpair OSError [Errno 38] Network is down\n",
+            "stderr": ""
+          }
+        }
+      ]
+    }
+  ]
+}

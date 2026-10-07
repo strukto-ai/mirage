@@ -98,6 +98,22 @@ See [Python command usage](/typescript/python#reading-and-writing-mirage-mounts-
 for examples, or run the
 [Pyodide VFS example](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/pyodide/vfs.ts).
 
+### Sockets
+
+Emscripten would carry a guest socket over a WebSocket to the host, so
+Mirage makes that socket layer refuse: `connect` and `sendto` raise
+`OSError: [Errno 40] Network unreachable`, and `listen`, a UDP `bind` and
+`socket.socketpair()` raise `[Errno 38] Network is down`. Ordinary socket
+code therefore fails fast instead of opening a host connection, and
+`urllib.request.urlopen` fails with
+`URLError: <urlopen error [Errno 40] Network unreachable>` for `http` and
+`https` alike. The numbers are Emscripten's (musl's), so compare against
+`errno.ENETUNREACH` rather than a literal. `socket.socket()`, a TCP `bind`
+and name lookups still answer; lookups come from Emscripten's offline
+resolver, which hands out placeholder addresses. An `initModule` that
+calls Pyodide's `useNodeSockFS()` installs real sockets and, like any
+initializer, makes the runtime's reach `process`.
+
 ## Monty
 
 Monty runs each execution in a crash-isolated worker with microsecond
