@@ -22,14 +22,35 @@ interface Case {
 }
 interface Job {
   jobId: string
+  workspaceId: string
   command: string
   status: string
   sessionId: string
+  revision: number
+  cancelRequested: boolean
+  submittedAt: number
   startedAt: number | null
+  finishedAt: number | null
+  result?: Result | null
+  error?: string | null
 }
 interface Result {
   stdout: string
+  stderr: string
   exitCode: number
+  refusal: { kind: string; reason: string; askId: string | null } | null
+}
+interface TrackingCase {
+  id: string
+  command: string
+  profile?: string
+  record?: boolean
+  expect: {
+    stdout: string
+    stderr: string
+    exit_code: number
+    refusal: { kind: string; reason: string } | null
+  }
 }
 interface Session {
   sessionId: string
@@ -39,6 +60,9 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '../..')
 const cases = JSON.parse(await readFile(join(here, 'cases.json'), 'utf8')) as Case[]
 const montyCases = JSON.parse(await readFile(join(here, 'monty.json'), 'utf8')) as Case[]
+const trackingCases = JSON.parse(
+  await readFile(join(here, 'tracking.json'), 'utf8'),
+) as TrackingCase[]
 
 function normalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalize)
@@ -154,6 +178,155 @@ async function run(
       await request('POST', `/v1/workspaces/${wid}/shell`, { command: 'true' })
     }
     await request('POST', '/v1/workspaces/a/sessions', { sessionId: 'other' }, 201)
+
+    for (const scenario of trackingCases) {
+      for (const background of [false, true]) {
+        const wid = `tracking-${scenario.id}-${background ? 'background' : 'foreground'}`
+        const path = `/v1/workspaces/${wid}`
+        await request(
+          'POST',
+          '/v1/workspaces',
+          {
+            id: wid,
+            config: {
+              mode: 'write',
+              mounts: { '/work': { vfs: 'ram', mode: 'write' } },
+              runtimes: [],
+              profiles: {
+                denied: { commands: { deny: [{ commands: ['rm'], reason: 'no deletes' }] } },
+                approval: { commands: { ask: [{ commands: ['rm'], reason: 'needs approval' }] } },
+              },
+            },
+          },
+          201,
+        )
+        try {
+          await request('POST', `${path}/shell`, {
+            command: 'echo kept > /work/keep',
+            record: false,
+          })
+          await request(
+            'POST',
+            `${path}/sessions`,
+            {
+              sessionId: 'agent',
+              ...(scenario.profile === undefined ? {} : { profile: scenario.profile }),
+            },
+            201,
+          )
+          const shell = `${path}/shell?session_id=agent&background=${background}`
+          const submitted = await request<Job | Result>(
+            'POST',
+            shell,
+            {
+              command: scenario.command,
+              record: scenario.record ?? true,
+            },
+            background ? 202 : 200,
+          )
+          const listing = await request<Job[]>('GET', `/v1/jobs?workspace_id=${wid}`)
+          const matching = listing.filter((job) => job.sessionId === 'agent')
+          assert.equal(matching.length, 1)
+          const listed = matching[0]!
+          assert.equal(listed.command, scenario.command)
+          assert.equal(Object.hasOwn(listed, 'result'), false, 'job lists omit result payloads')
+          if ('jobId' in submitted) assert.equal(listed.jobId, submitted.jobId)
+          const jobPath = `/v1/jobs/${listed.jobId}`
+          const done = await request<Job>('POST', `${jobPath}/wait`, {})
+          assert.equal(done.workspaceId, wid)
+          assert.equal(done.sessionId, 'agent')
+          assert.equal(
+            done.status,
+            'done',
+            'a shell refusal or nonzero exit is a completed execution',
+          )
+          assert.equal(done.error, null)
+          assert.equal(done.cancelRequested, false)
+          assert(done.revision > 0)
+          assert(done.startedAt !== null && done.finishedAt !== null)
+          assert(done.submittedAt <= done.startedAt && done.startedAt <= done.finishedAt)
+          assert(done.result)
+          const result = done.result
+          assert.deepEqual(
+            {
+              exit_code: result.exitCode,
+              stdout: result.stdout,
+              stderr: result.stderr,
+              refusal:
+                result.refusal === null
+                  ? null
+                  : {
+                      kind: result.refusal.kind,
+                      reason: result.refusal.reason,
+                    },
+            },
+            scenario.expect,
+          )
+          if (!background) assert.deepEqual(result, submitted)
+          assert.deepEqual(await request('GET', jobPath), done)
+          assert.equal((await request<{ canceled: boolean }>('DELETE', jobPath)).canceled, false)
+
+          if (scenario.profile !== undefined) {
+            const kept = await request<Result>('POST', `${path}/shell`, {
+              command: 'cat /work/keep',
+              record: false,
+            })
+            assert.equal(
+              kept.stdout,
+              'kept\n',
+              'refused execution must leave the backend unchanged',
+            )
+          }
+          let attempts = 1
+          if (result.refusal?.kind === 'pending') {
+            const asks = await request<{ id: string; sessionId: string }[]>('GET', `${path}/asks`)
+            assert.equal(asks.length, 1)
+            assert.equal(asks[0]!.id, result.refusal.askId)
+            assert.equal(asks[0]!.sessionId, 'agent')
+            await request('POST', `${path}/asks/${result.refusal.askId}`, { answer: 'allow' })
+            const retry = await request<Job>(
+              'POST',
+              `${path}/shell?session_id=agent&background=true`,
+              {
+                command: scenario.command,
+              },
+              202,
+            )
+            assert.notEqual(retry.jobId, done.jobId)
+            const allowed = await request<Job>('POST', `/v1/jobs/${retry.jobId}/wait`, {})
+            assert.equal(allowed.status, 'done')
+            assert.equal(allowed.result?.exitCode, 0)
+            assert.equal(allowed.result.refusal, null)
+            assert.deepEqual(await request('GET', `${path}/asks`), [])
+            const removed = await request<Result>('POST', `${path}/shell`, {
+              command: 'test ! -e /work/keep',
+              record: false,
+            })
+            assert.equal(removed.exitCode, 0)
+            attempts++
+          }
+          const history = await request<Result>('POST', `${path}/shell?session_id=agent`, {
+            command: 'cat /.bash_history',
+            record: false,
+          })
+          assert.equal(history.exitCode, 0)
+          assert.equal(
+            history.stdout.replace(/^#\d+\n/gm, ''),
+            scenario.record === false ? '' : `${scenario.command}\n`.repeat(attempts),
+          )
+          assert.deepEqual(
+            await request('GET', jobPath),
+            done,
+            'later activity cannot rewrite a completed execution',
+          )
+          console.log(
+            `ok ${host}/${wid}: stored result, policy outcome, observer history, immutable completion`,
+          )
+        } finally {
+          await request('DELETE', path)
+        }
+      }
+    }
 
     for (const scenario of [...cases, ...(mounts === undefined ? [] : montyCases)]) {
       const mounted = scenario.gate !== undefined
