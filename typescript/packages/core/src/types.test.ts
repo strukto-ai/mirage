@@ -252,6 +252,40 @@ describe('FileStat', () => {
 })
 
 describe('PathSpec.fromStrPath', () => {
+  it.each([
+    ['file', '/repo', '/repo/file', null, null],
+    ['../file', '/repo/sub', '/repo/file', null, null],
+    ['hidden/../file', '/repo', '/repo/file', '/repo/hidden/../file', null],
+    ['dir/', '/repo', '/repo/dir', '/repo/dir/', null],
+    ['', '/repo', '/repo', null, 'ENOENT'],
+    [
+      'file',
+      PathSpec.fromStrPath('/hidden/../repo', undefined, '/'),
+      '/repo/file',
+      '/hidden/../repo/file',
+      null,
+    ],
+    ['/other', PathSpec.fromStrPath('/hidden/../repo', undefined, '/'), '/other', null, null],
+    ['file', PathSpec.fromStrPath('', undefined, '/repo'), '/repo/file', null, 'ENOENT'],
+    ['/other', PathSpec.fromStrPath('', undefined, '/repo'), '/other', null, null],
+  ] as const)(
+    'resolves %s against %s while retaining the walk',
+    (word, cwd, virtual, dotted, error) => {
+      const path = PathSpec.fromStrPath(word, undefined, cwd)
+      expect([path.virtual, path.rawPath, path.dotted, path.walkError]).toEqual([
+        virtual,
+        word,
+        dotted,
+        error,
+      ])
+      expect(PathSpec.fromStrPath(path, undefined, '/elsewhere')).toBe(path)
+      const keyed = PathSpec.fromStrPath(word, 'backend/key', cwd)
+      expect(keyed.vfsPath).toBe('backend/key')
+      expect([keyed.rawPath, keyed.dotted, keyed.walkError]).toEqual([word, dotted, error])
+      expect(PathSpec.fromStrPath(path, 'backend/key')).toEqual(keyed)
+    },
+  )
+
   it('splits a nested path into directory + original', () => {
     const p = PathSpec.fromStrPath('/a/b/c.txt')
     expect(p.virtual).toBe('/a/b/c.txt')
@@ -436,4 +470,25 @@ describe('wordText', () => {
     })
     expect(wordText(p)).toBe('a.txt')
   })
+})
+
+it.each([
+  ['/hidden/../repo', ['.git', 'HEAD'], '/repo/.git/HEAD', '/hidden/../repo/.git/HEAD', null],
+  ['/hidden/../repo', ['unused', '/other', 'file'], '/other/file', null, null],
+  ['/repo', [], '/repo', null, null],
+  ['/repo', [''], '/repo', null, null],
+  ['', ['file'], '/file', null, 'ENOENT'],
+  ['', ['/other'], '/other', null, null],
+] as const)(
+  'derives paths from %s and %j without losing the walk',
+  (base, parts, virtual, dotted, error) => {
+    const child = PathSpec.fromStrPath(base, undefined, '/').join(...parts)
+    expect([child.virtual, child.dotted, child.walkError]).toEqual([virtual, dotted, error])
+    expect(PathSpec.fromStrPath(child, undefined, '/elsewhere')).toBe(child)
+  },
+)
+
+it('keeps spelled ancestors in a parent path', () => {
+  const child = PathSpec.fromStrPath('/hidden/../repo', undefined, '/').join('.git', 'HEAD')
+  expect(child.parent.dotted).toBe('/hidden/../repo/.git')
 })

@@ -27,6 +27,7 @@ from mirage.commands.cli.constants import CLI_CONFIG_ENV, GIT_LONG_OPTIONS
 from mirage.commands.cli.refusal import (
     CLAP_EXIT,
     clap_missing_operands,
+    directory_refusal,
     leaf_refusal,
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation, CLISpec
@@ -40,6 +41,7 @@ from mirage.commands.spec import flag_kwarg_name
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import FlagValue, Operand, UsageStyle
 from mirage.concurrency.limiter import run_blocking
+from mirage.errors.types import FsCondition
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, CommandOutput
@@ -51,11 +53,12 @@ from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.routing import runtime_for_language
 from mirage.runtime.types import CodeExecution, DispatchFn, ScriptSource
 from mirage.shell.bytes import encode_text
-from mirage.types import Limit, PathSpec, Producer, word_text
+from mirage.types import FileType, Limit, PathSpec, Producer, word_text
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.run import exec_node
 from mirage.workspace.lookup.lookup import verb_visible
+from mirage.workspace.mount.namespace.probe import miss_condition
 from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.types import ExecutionNode
 
@@ -352,6 +355,25 @@ async def handle_cli(
                 command=cmd_str, exit_code=result.exit_code, stderr=stderr
             ),
         )
+
+    if stat_path is not None and dispatch is not None:
+        for base in result.operand_bases:
+            info = await stat_path(base)
+            if info is not None and info.type is FileType.DIRECTORY:
+                continue
+            reason = (
+                await miss_condition(dispatch, base)
+                if info is None
+                else FsCondition.ENOTDIR
+            )
+            stderr, code = directory_refusal(
+                install.name, base.raw_path, reason, install.spec.usage_style
+            )
+            return (
+                None,
+                IOResult(exit_code=code, stderr=stderr),
+                ExecutionNode(command=cmd_str, exit_code=code, stderr=stderr),
+            )
 
     prog = " ".join((install.name,) + result.path)
     leaf = result.leaf

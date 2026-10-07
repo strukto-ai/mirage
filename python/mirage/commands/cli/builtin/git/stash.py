@@ -26,7 +26,7 @@ async def stash_list(
         _, location = await opened(FlagView(inv.flags), doors)
         assert doors.dispatch is not None
         data = await read_optional(
-            doors.dispatch, f"{location.commondir}/logs/refs/stash"
+            doors.dispatch, location.commondir.join("logs/refs/stash")
         )
         lines = (data or b"").splitlines()
         text = b"".join(
@@ -54,7 +54,7 @@ async def stash_show(
         match = re.fullmatch(r"(?:stash@\{(\d+)\}|(\d+))", selector)
         if match is not None:
             data = await read_optional(
-                doors.dispatch, f"{location.commondir}/logs/refs/stash"
+                doors.dispatch, location.commondir.join("logs/refs/stash")
             )
             rows = list(reversed((data or b"").splitlines()))
             index = int(match.group(1) or match.group(2))

@@ -12,7 +12,7 @@ from typing import Any
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.awk_types import USAGE, AwkFlags
-from mirage.commands.builtin.utils.paths import dispatch_stat, typed_spec
+from mirage.commands.builtin.utils.paths import dispatch_stat
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
 from mirage.commands.constants import ROOT_CWD
 from mirage.commands.errors import UsageError
@@ -170,7 +170,7 @@ class AwkStreams:
     async def read_path(self, name: str | PathSpec) -> AsyncIterator[bytes]:
         if self.dispatch is None:
             raise AwkIOError(posix_phrase(FsCondition.ENOENT))
-        path = typed_spec(name, self.cwd.virtual)
+        path = PathSpec.from_str_path(name, cwd=self.cwd.virtual)
         # A keyed store reads a directory as nothing at all, and other
         # backends fail it in their own words, so the stat goes first to
         # fail it the way a POSIX read does.
@@ -211,7 +211,7 @@ class AwkStreams:
         """
         if self.dispatch is None:
             raise AwkRuntimeError("awk: file output requires a workspace")
-        path = typed_spec(text_view(name), self.cwd.virtual)
+        path = PathSpec.from_str_path(text_view(name), cwd=self.cwd.virtual)
         try:
             await self.dispatch(
                 "append" if append else "write",

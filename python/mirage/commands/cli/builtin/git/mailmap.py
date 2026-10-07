@@ -94,7 +94,7 @@ async def load_mailmap(
         dispatch (DispatchFn): op dispatcher.
         location (RepoLocation): discovered repository.
     """
-    data = await read_optional(dispatch, f"{location.worktree}/.mailmap")
+    data = await read_optional(dispatch, location.worktree.join(".mailmap"))
     return parse_mailmap((data or b"").decode("utf-8", "replace"))
 
 

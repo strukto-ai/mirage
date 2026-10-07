@@ -17,14 +17,14 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from mirage.shell.variable import ShellValue, VarAttr
-from mirage.types import FileStat, Visibility
+from mirage.types import FileStat, PathSpec, Visibility
 
 StatOverlay = Callable[[str, FileStat], FileStat]
 # Stat one virtual path through the workspace rather than one backend, so
 # a path under another mount still answers; None when nothing is there.
 # What a traversal command asks about its own start point, which decides
 # whether a walk is possible at all.
-StatPath = Callable[[str], Awaitable["FileStat | None"]]
+StatPath = Callable[[str | PathSpec], Awaitable["FileStat | None"]]
 # readdir one virtual path through the workspace rather than one backend.
 # What a walker whose output is a single document (tree) reads once it
 # reaches a mount boundary, since the subtree below it lives in another
@@ -54,7 +54,7 @@ LinkResolve = Callable[[str], str]
 # rather than one backend, so a link across mounts answers correctly.
 LinkExists = Callable[[str], Awaitable[bool]]
 # The stat of what a link points at, None when it dangles or loops.
-LinkTargetStat = Callable[[str], Awaitable["FileStat | None"]]
+LinkTargetStat = Callable[[str | PathSpec], Awaitable["FileStat | None"]]
 # Child names the namespace owes a directory: nested mounts AND links,
 # session-filtered. A nested mount is invisible to the parent mount's
 # backend and a link is invisible to every backend, so a listing command

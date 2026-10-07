@@ -13,13 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { humanScaled, humanSize } from '../../../../commands/builtin/utils/formatting.ts'
-import { CapacityState } from '../../../../types.ts'
-import type { CapacityResult, PathSpec } from '../../../../types.ts'
-import {
-  dispatchStat,
-  nearestAncestor,
-  typedSpec,
-} from '../../../../commands/builtin/utils/paths.ts'
+import { CapacityState, type CapacityResult, PathSpec } from '../../../../types.ts'
+import { dispatchStat, nearestAncestor } from '../../../../commands/builtin/utils/paths.ts'
+
 import {
   enoent,
   enotdir,
@@ -177,7 +173,7 @@ async function targetMounts(
   session: SessionState,
   operands: (string | PathSpec)[],
 ): Promise<[MountEntry[], string[]]> {
-  const ordered = [...registry.allMounts()]
+  const ordered = [...registry.visibleMounts()]
     .filter((m) => pathVisible(session.visibility, m.prefix.replace(/\/+$/, '') || '/'))
     .sort((a, b) => compareCodePoints(a.prefix, b.prefix))
   if (operands.length === 0) return [ordered, []]
@@ -185,7 +181,7 @@ async function targetMounts(
   const out: MountEntry[] = []
   const errors: string[] = []
   for (const op of operands) {
-    const spec = typedSpec(op, session.cwd)
+    const spec = PathSpec.fromStrPath(op, undefined, session.cwd)
     if (spec.walkError !== null) {
       // The empty name reads as the working directory in `virtual`, which
       // may well be a mount root, and a link loop reaches no filesystem

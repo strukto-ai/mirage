@@ -18,7 +18,6 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-from mirage.utils.path import resolve_path
 
 USAGE = (
     b"Usage: getconf [-v specification] variable_name [pathname]\n"
@@ -412,9 +411,8 @@ async def path_exists(opts: CommandOpts, word: str) -> bool:
     """
     if opts.stat_path is None:
         return True
-    return (
-        await opts.stat_path(resolve_path(word, opts.cwd.virtual)) is not None
-    )
+    spec = PathSpec.from_str_path(word, cwd=opts.cwd)
+    return await opts.stat_path(spec) is not None
 
 
 @command("getconf", vfs=None, spec=SPECS["getconf"])

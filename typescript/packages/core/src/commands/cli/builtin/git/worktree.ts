@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { type PathSpec, FileType, type FileStat } from '../../../../types.ts'
 import type { LinkView, StatPath } from '../../../../ops/types.ts'
 import { GIT_DIR } from './constants.ts'
-import { FileType, type FileStat } from '../../../../types.ts'
-import type { IgnoreStack } from './ignore.ts'
-import { loadIgnores } from './ignore.ts'
-import { basename, readNames, readOptional, under } from './io.ts'
+import { type IgnoreStack, loadIgnores } from './ignore.ts'
+import { basename, readNames, readOptional } from './io.ts'
+
 import type { Dispatch, RepoLocation, WorkTree } from './types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -62,7 +62,7 @@ class Scanner {
   constructor(
     private readonly dispatch: Dispatch,
     private readonly statPath: StatPath,
-    private readonly worktree: string,
+    private readonly worktree: PathSpec,
     private readonly tracked: ReadonlySet<string>,
     private readonly mode: string,
     private readonly links: LinkView | null,
@@ -72,8 +72,8 @@ class Scanner {
   }
 
   /** The virtual path a repository-relative path names. */
-  private absolute(relative: string): string {
-    return relative === '' ? this.worktree : under(this.worktree, relative)
+  private absolute(relative: string): PathSpec {
+    return relative === '' ? this.worktree : this.worktree.join(relative)
   }
 
   /**
@@ -88,7 +88,7 @@ class Scanner {
    */
   private async entryStat(relative: string): Promise<FileStat | null> {
     const absolute = this.absolute(relative)
-    const link = this.links?.statAt(absolute) ?? null
+    const link = this.links?.statAt(absolute.virtual) ?? null
     if (link !== null) return link
     return this.statPath(absolute)
   }
@@ -123,7 +123,7 @@ class Scanner {
   /** The ignore rules inside a directory, given the ones outside. */
   private async descend(relative: string, ignores: IgnoreStack): Promise<IgnoreStack> {
     if (relative === '') return ignores
-    const local = await readOptional(this.dispatch, under(this.absolute(relative), GITIGNORE))
+    const local = await readOptional(this.dispatch, this.absolute(relative).join(GITIGNORE))
     return local === null ? ignores : ignores.push(relative, local)
   }
 

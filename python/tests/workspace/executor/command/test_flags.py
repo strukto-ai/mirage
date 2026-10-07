@@ -277,3 +277,19 @@ def test_an_empty_attached_path_value_names_nothing():
     # Cannot open: No such file or directory`).
     assert synthesize_path_spec("/data", "").walk_error == "ENOENT"
     assert synthesize_path_spec("/data/a", "a").walk_error is None
+
+
+def test_synthesized_path_flags_keep_dots_from_attached_and_env_values():
+    spec = CommandSpec(
+        options=(Option(long="--file", type="path", env="INPUT"),)
+    )
+    for argv, env in [
+        (["--file=hidden/../public"], {}),
+        ([], {"INPUT": "hidden/../public"}),
+    ]:
+        parsed = parse_flags(argv, spec, "reader", "/repo", env=env)
+        path = FlagView(parsed.flag_kwargs).as_path("file")
+        assert path is not None
+        assert path.virtual == "/repo/public"
+        assert path.raw_path == "hidden/../public"
+        assert path.dotted == "/repo/hidden/../public"

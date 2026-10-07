@@ -673,7 +673,7 @@ export async function unzipGeneric(
       return [listing, new IOResult({ exitCode, stderr })]
     }
     const mountPrefix = relay ? '' : mountPrefixOf(archivePath.virtual, archivePath.vfsPath)
-    const destRaw = extractDest(fl.asStr('d') ?? null, opts.cwd)
+    const destRaw = extractDest(fl.asPath('d') ?? null, opts.cwd)
     const dest =
       mountPrefix !== '' && destRaw.startsWith(mountPrefix + '/')
         ? destRaw.slice(mountPrefix.length)
@@ -747,7 +747,7 @@ export async function unzipGeneric(
     // Info-ZIP names an extracted path as the -d directory was typed
     // followed by the member, or the bare member; the archive heads the
     // listing as it was typed too. Mirrors unzip.py.
-    const typedDest = fl.asPaths('d')[0]?.rawPath ?? fl.asStr('d') ?? ''
+    const typedDest = fl.asPath('d')?.rawPath ?? ''
     const shown = (path: string): string => {
       const rel = lstripSlash(path.slice(base.length))
       return typedDest !== '' ? `${rstripSlash(typedDest)}/${rel}` : rel
@@ -947,7 +947,7 @@ export async function unzipGeneric(
   const writesNothing = zipinfoMode || testMode || pipeMode || listMode || verbose
   const caution =
     (parsed.overwrite && parsed.neverOverwrite ? NO_AND_O : '') +
-    (fl.asStr('d') !== undefined && writesNothing ? D_IGNORED : '')
+    (fl.asPath('d') !== undefined && writesNothing ? D_IGNORED : '')
   const onStderr = testMode && !zipinfoMode ? '' : warning
   if ((caution === '' && onStderr === '' && slack === 0) || result === null) return result
   const [out, io] = result

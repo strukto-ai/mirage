@@ -18,7 +18,6 @@ import { CommandName } from '../../spec/types.ts'
 import { missingOperandError } from '../../spec/usage.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
-import { resolvePath } from '../../../utils/path.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -155,10 +154,7 @@ export async function csplitGeneric(
   // suffix, wherever the input lives: GNU writes `xx00` to the cwd, names it
   // as it formed it (`csplit: xx00`), and stops at the first one it cannot
   // create, -k or not. Mirrors csplit.py.
-  const prefixSpec = fl.asPaths('prefix')[0]
-  const prefixWord = fl.asStr('prefix') ?? 'xx'
-  const prefixVirtual = prefixSpec?.virtual ?? resolvePath(prefixWord, opts.cwd)
-  const typedPrefix = prefixSpec?.rawPath ?? prefixWord
+  const typedPrefix = fl.asPath('prefix')?.rawPath ?? 'xx'
   const mountPrefix = opts.mountPrefix ?? ''
   const digitsValue = fl.asStr('digits')
   const suffixValue = fl.asStr('suffix_format')
@@ -195,8 +191,15 @@ export async function csplitGeneric(
     const suffix = formatSuffix(sizes.length, digits, suffixFormat)
     const name = typedPrefix + suffix
     const data = part.length > 0 ? ENC.encode(part.join('\n') + '\n') : new Uint8Array(0)
-    const virtual = prefixVirtual + suffix
-    const spec = PathSpec.fromStrPath(virtual, mountKey(virtual, mountPrefix))
+    const scope = PathSpec.fromStrPath(name, undefined, opts.cwd)
+    const spec = new PathSpec({
+      virtual: scope.virtual,
+      directory: scope.directory,
+      dotted: scope.dotted,
+      walkError: scope.walkError,
+      vfsPath: mountKey(scope.virtual, mountPrefix),
+      rawPath: name,
+    })
     try {
       await write(spec, data)
     } catch (err) {

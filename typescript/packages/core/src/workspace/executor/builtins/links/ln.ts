@@ -16,9 +16,8 @@ import { backupControl, backupTarget } from '../../../../commands/builtin/utils/
 import { DEFAULT_BACKUP_SUFFIX } from '../../../../commands/builtin/utils/constants.ts'
 import { UsageError } from '../../../../commands/errors.ts'
 import { specOf } from '../../../../commands/spec/builtins.ts'
-import { parseCommand, parseToKwargs } from '../../../../commands/spec/parser.ts'
+import { parseCommand, parseToKwargs, type ParsedArgs } from '../../../../commands/spec/parser.ts'
 import { FlagView } from '../../../../commands/spec/flag_view.ts'
-import { type ParsedArgs } from '../../../../commands/spec/parser.ts'
 import {
   ambiguousOptionError,
   missingValueError,
@@ -32,8 +31,14 @@ import {
   absentDestError,
   dispatchStat,
   dotRefusal,
-  typedSpec,
 } from '../../../../commands/builtin/utils/paths.ts'
+import {
+  CycleError,
+  dottedSpelling,
+  gnuBasename,
+  gnuDirname,
+  posixNormpath,
+} from '../../../../utils/path.ts'
 import {
   fsStrerror,
   isEacces,
@@ -43,13 +48,6 @@ import {
   isEnotdir,
   isErofs,
 } from '../../../../errors/fs.ts'
-import {
-  CycleError,
-  dottedSpelling,
-  gnuBasename,
-  gnuDirname,
-  posixNormpath,
-} from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { PolicyDenied } from '../../../../policy/index.ts'
 import { sessionVisibility } from '../../../../context/session_context.ts'
@@ -357,8 +355,10 @@ export async function planLinks(
     const typed = targetTyped ?? targetDir
     const why = walkVerdict(namespace, typed, cwd, true)
     if (why !== null) return [[], `ln: failed to access '${typed}': ${posixPhrase(why)}\n`]
-    const unwalked = await dotRefusal(dispatchStat(dispatch), typedSpec(typed, cwd), (v) =>
-      namespace.follow(v),
+    const unwalked = await dotRefusal(
+      dispatchStat(dispatch),
+      PathSpec.fromStrPath(typed, undefined, cwd),
+      (v) => namespace.follow(v),
     )
     if (unwalked !== null) {
       return [
@@ -520,8 +520,10 @@ export async function makeLink(
     return
   }
   if (!flags.symbolic) {
-    const unwalked = await dotRefusal(walker, typedSpec(plan.source, cwd), (v) =>
-      namespace.follow(v),
+    const unwalked = await dotRefusal(
+      walker,
+      PathSpec.fromStrPath(plan.source, undefined, cwd),
+      (v) => namespace.follow(v),
     )
     if (unwalked !== null) {
       errors.push(
@@ -535,7 +537,7 @@ export async function makeLink(
   const replaces = flags.force || (flags.backup !== null && flags.backup !== 'none')
   const unwalked = await dotRefusal(
     walker,
-    typedSpec(typed, cwd),
+    PathSpec.fromStrPath(typed, undefined, cwd),
     (v) => namespace.follow(v),
     !replaces,
   )

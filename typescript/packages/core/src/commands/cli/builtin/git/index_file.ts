@@ -16,7 +16,8 @@ import { GitIndexManager } from 'isomorphic-git/managers'
 import { FileSystem } from 'isomorphic-git/models'
 
 import { ResolveIndexError } from './errors.ts'
-import { exists, under } from './io.ts'
+import { exists } from './io.ts'
+
 import type { Repo } from './repo.ts'
 import type { ConflictedEntry, Dispatch, IndexEntry, IndexState } from './types.ts'
 
@@ -77,7 +78,7 @@ async function withIndex<T>(
   // methods (`lstat`, `readdir` returning null on a miss) rather than the plain
   // ones the plugin declares.
   return GitIndexManager.acquire(
-    { fs: new FileSystem(repo.fs) as never, gitdir: repo.location.gitdir, cache: {} },
+    { fs: new FileSystem(repo.fs) as never, gitdir: repo.location.gitdir.virtual, cache: {} },
     closure as never,
   ) as Promise<T>
 }
@@ -94,7 +95,7 @@ async function withIndex<T>(
  * already says.
  */
 export async function readIndex(repo: Repo, dispatch: Dispatch): Promise<IndexState> {
-  const merging = await exists(dispatch, under(repo.location.gitdir, MERGE_HEAD))
+  const merging = await exists(dispatch, repo.location.gitdir.join(MERGE_HEAD))
   const entries = new Map<string, IndexEntry>()
   const conflicts = new Map<string, ConflictedEntry>()
   const rows = await withIndex(repo, (index) => index.entriesFlat.map(toEntry))

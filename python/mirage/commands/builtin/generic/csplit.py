@@ -1,5 +1,6 @@
 import re
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import read_stdin_async
@@ -10,7 +11,6 @@ from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
-from mirage.utils.path import resolve_path
 
 
 def _is_regex(pattern: str) -> bool:
@@ -148,10 +148,7 @@ async def csplit_generic(
         raise missing_operand_error(
             CommandName.CSPLIT, paths[-1].raw_path if paths else None
         )
-    if isinstance(prefix, PathSpec):
-        prefix_virtual, typed_prefix = prefix.virtual, prefix.raw_path
-    else:
-        prefix_virtual, typed_prefix = resolve_path(prefix, cwd), prefix
+    typed_prefix = prefix.raw_path if isinstance(prefix, PathSpec) else prefix
     suffix_fmt = suffix_format if suffix_format else f"%0{digits}d"
     # `-` is stdin. /dev/stdin would run csplit on the /dev mount, which
     # is where its pieces would land, so it stays a path.
@@ -175,10 +172,8 @@ async def csplit_generic(
         suffix = suffix_fmt % len(sizes)
         name = typed_prefix + suffix
         data = ("\n".join(part) + "\n").encode() if part else b""
-        virtual = prefix_virtual + suffix
-        spec = PathSpec.from_str_path(
-            virtual, mount_key(virtual, mount_prefix)
-        )
+        spec = PathSpec.from_str_path(name, cwd=cwd)
+        spec = replace(spec, vfs_path=mount_key(spec.virtual, mount_prefix))
         try:
             await write_bytes(spec, data)
         except FS_ERRORS as exc:

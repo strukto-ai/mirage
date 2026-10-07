@@ -31,14 +31,13 @@ import { PolicyDenied } from '../../policy/errors.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { type ByteSource, materialize } from '../../io/types.ts'
 import { getCurrentSession, runAsProgram } from '../../context/session_context.ts'
-import type { FileStat, PathSpec } from '../../types.ts'
+import { type FileStat, type PathSpec, FileType } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { SHELL_ONLY_BUILTINS } from '../lookup/constants.ts'
 import { lookupAll } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import type { NamespaceView, StatPath } from '../../ops/types.ts'
 import { SharedStdin } from '../../io/stream.ts'
-import { FileType } from '../../types.ts'
 import {
   execActions,
   type FindExpr,
@@ -200,7 +199,7 @@ async function deleteRow(
   }
   try {
     const link = (ns?.links?.statAt(ps.virtual) ?? null) !== null
-    const st = link || statPath === null ? null : await statPath(ps.virtual)
+    const st = link || statPath === null ? null : await statPath(ps)
     if (!link && statPath !== null && st === null) throw enoent(ps)
     const op = st !== null && st.type === FileType.DIRECTORY ? 'rmdir' : 'unlink'
     await dispatch(op, ps)
@@ -249,7 +248,7 @@ async function rowStat(
   const link = ns?.links?.statAt(ps.virtual) ?? null
   let st: FileStat | null
   try {
-    st = link ?? (await statPath(ps.virtual))
+    st = link ?? (await statPath(ps))
   } catch (err) {
     errors.push(encodeText(`find: '${path}': ${refusalWhy(err)}\n`))
     return null

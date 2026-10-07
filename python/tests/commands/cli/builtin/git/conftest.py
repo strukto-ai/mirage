@@ -24,8 +24,11 @@ from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.constants import GITLINK
+from mirage.commands.cli.builtin.git.discover import discover
+from mirage.commands.cli.builtin.git.repo import open_repo
+from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.types import CLIDoors
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
 from mirage.workspace.mount.namespace.probe import path_stat
@@ -38,6 +41,9 @@ from mirage.workspace.session.state import session_view
 
 AUTHOR = b"Test Author <test@example.com>"
 MOUNT = "/repo/"
+REPO = PathSpec.from_str_path("/repo")
+GITDIR = PathSpec.from_str_path("/repo/.git")
+LOCATION = RepoLocation(GITDIR, GITDIR, REPO, REPO)
 
 
 def commit_file(
@@ -301,19 +307,19 @@ def git_rw(repo_path: Path):
         yield ws
 
 
-def repo_facts(ws):
-    """The three discovery facts the dispatcher offers a git leaf.
-
-    In the order ``discover`` takes them, so a call site can spread them.
+async def open_mounted(ws):
+    """Discover and open the repository mounted at /repo.
 
     Args:
         ws (Workspace): the workspace under test.
     """
-    return (
+    location = await discover(
         ws.dispatch,
         functools.partial(path_stat, ws.dispatch),
         functools.partial(mount_root_of, ws._registry),
+        REPO,
     )
+    return await open_repo(ws.dispatch, location)
 
 
 def repo_doors(ws) -> CLIDoors:

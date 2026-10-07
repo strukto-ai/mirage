@@ -18,10 +18,21 @@ from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.constants import OPERAND, REFUSED
 from mirage.commands.spec.flag_view import FlagBag, FlagView, spec_flag_names
 from mirage.commands.spec.types import CommandSpec, Option
+from mirage.types import PathSpec
 
 
 def test_flag_view_typed_reads():
-    fl = FlagView({"i": True, "m": "5", "type": "py", "e": ["a", "b"]})
+    path = PathSpec.from_str_path("hidden/../file", cwd="/repo")
+    fl = FlagView(
+        {
+            "i": True,
+            "m": "5",
+            "type": "py",
+            "e": ["a", "b"],
+            "file": path,
+            "files": [path],
+        }
+    )
     assert fl.as_bool("i") is True
     assert fl.as_bool("v") is False
     assert fl.as_int("m") == 5
@@ -30,6 +41,10 @@ def test_flag_view_typed_reads():
     assert fl.as_str("glob") is None
     assert fl.as_list("e") == ["a", "b"]
     assert fl.as_list("f") == []
+    assert fl.as_path("file") is path
+    assert fl.as_paths("files") == [path]
+    assert fl.as_str("file") is None
+    assert fl.as_list("files") == []
 
 
 def test_flag_view_list_coerces_single_string():

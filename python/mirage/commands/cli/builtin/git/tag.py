@@ -390,7 +390,7 @@ def tag_read_only(
     """
     fl = FlagView(inv.flags)
     ref = f"{TAG_PREFIX}{inv.texts[0] if inv.texts else ''}"
-    root = location.commondir if location is not None else ".git"
+    root = location.commondir.virtual if location is not None else ".git"
     path = posixpath.join(root, ref)
     if fl.as_bool("delete"):
         return RefDeleteReadOnlyError(ref, path)

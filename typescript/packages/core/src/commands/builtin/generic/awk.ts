@@ -16,9 +16,8 @@ import { byteView, decodeText, fromByteView, textView } from '../../../shell/byt
 import { isStdin, resolveSource } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { FileType, PathSpec } from '../../../types.ts'
+import { PathSpec, FileType } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import {
@@ -34,7 +33,8 @@ import {
   type CommandRun,
 } from '../../../core/awk/index.ts'
 import { USAGE, type AwkFlags } from './awk_types.ts'
-import { dispatchStat, typedSpec } from '../utils/paths.ts'
+import { dispatchStat } from '../utils/paths.ts'
+
 import {
   eisdir,
   fsStrerror,
@@ -43,7 +43,6 @@ import {
   isMissingPath,
   isWalkError,
 } from '../../../errors/fs.ts'
-import { resolvePath } from '../../../utils/path.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 
@@ -56,7 +55,7 @@ type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 function parseFlags(opts: CommandOpts): AwkFlags {
   const fl = new FlagView(opts.flags, specOf('awk'))
   const assignments = fl.asList('v')
-  const programFiles = fl.asList('f')
+  const programFiles = fl.asPaths('f')
   return {
     fieldSeparator: fl.asStr('F') ?? null,
     assignments,
@@ -138,7 +137,7 @@ export class AwkStreams implements AwkHost {
   private async *readPath(name: string | PathSpec): AsyncIterable<Uint8Array> {
     const dispatch = this.opts.dispatch
     if (dispatch === undefined) throw new AwkIOError(posixPhrase('ENOENT'))
-    const path = typedSpec(name, this.opts.cwd)
+    const path = PathSpec.fromStrPath(name, undefined, this.opts.cwd)
     // A keyed store reads a directory as nothing at all, and other backends
     // fail it in their own words, so the stat goes first to fail it the way
     // a POSIX read does.
@@ -169,7 +168,7 @@ export class AwkStreams implements AwkHost {
   async writeFile(name: string, body: string, append: boolean): Promise<void> {
     const dispatch = this.opts.dispatch
     if (dispatch === undefined) throw new AwkRuntimeError('awk: file output requires a workspace')
-    const path = typedSpec(textView(name), this.opts.cwd)
+    const path = PathSpec.fromStrPath(textView(name), undefined, this.opts.cwd)
     try {
       await dispatch(append ? 'append' : 'write', path, [fromByteView(body)])
     } catch (error) {
@@ -266,23 +265,15 @@ export async function awkGeneric(
   const streams = new AwkStreams(paths, stream, opts)
   let program: string
   if (f.programFiles.length > 0) {
-    const mountPrefix =
-      (paths[0] === undefined ? undefined : mountPrefixOf(paths[0].virtual, paths[0].vfsPath)) ??
-      opts.mountPrefix ??
-      ''
     const pieces: string[] = []
     for (const programFile of f.programFiles) {
-      // A relative -f resolves against the cwd, like the shell classifier
-      // resolves python's PathSpec flag values.
-      const virtual = resolvePath(programFile, opts.cwd)
-      const programSpec = PathSpec.fromStrPath(virtual, mountKey(virtual, mountPrefix))
       try {
-        pieces.push(decodeText(await materialize(streams.programSource(programSpec))))
+        pieces.push(decodeText(await materialize(streams.programSource(programFile))))
       } catch (err) {
         // GNU awk exits 2 when a -f program file cannot be opened;
         // anything that is not absence keeps propagating.
         if (!isMissingPath(err) && !isEnotdir(err)) throw err
-        const msg = `awk: ${programFile}: ${fsStrerror(err) ?? posixPhrase('ENOENT')}`
+        const msg = `awk: ${programFile.rawPath}: ${fsStrerror(err) ?? posixPhrase('ENOENT')}`
         return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]
       }
     }

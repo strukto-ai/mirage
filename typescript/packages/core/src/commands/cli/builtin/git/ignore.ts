@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readOptional, under } from './io.ts'
+import type { PathSpec } from '../../../../types.ts'
+import { readOptional } from './io.ts'
+
 import type { Dispatch } from './types.ts'
 
 const GITIGNORE = '.gitignore'
@@ -209,13 +211,13 @@ export class IgnoreStack {
  */
 export async function loadIgnores(
   dispatch: Dispatch,
-  commondir: string,
-  worktree: string,
+  commondir: PathSpec,
+  worktree: PathSpec,
 ): Promise<IgnoreStack> {
   let stack = new IgnoreStack()
-  const private_ = await readOptional(dispatch, under(commondir, INFO_EXCLUDE))
+  const private_ = await readOptional(dispatch, commondir.join(INFO_EXCLUDE))
   if (private_ !== null) stack = stack.push('', private_)
-  const root = await readOptional(dispatch, under(worktree, GITIGNORE))
+  const root = await readOptional(dispatch, worktree.join(GITIGNORE))
   if (root !== null) stack = stack.push('', root)
   return stack
 }

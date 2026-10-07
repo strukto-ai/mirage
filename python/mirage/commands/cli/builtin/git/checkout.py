@@ -389,7 +389,7 @@ async def switch_to(
     notes: list[str] = []
     for path in sorted(set(before) - set(after)):
         name = path.decode("utf-8", errors="replace")
-        where = posixpath.join(location.worktree, name)
+        where = location.worktree.join(name)
         # A gitlink the target tree drops is a directory, not a file:
         # git rmdirs it and warns rather than failing when something is
         # still in it, where the unlink here died on it with the
@@ -408,10 +408,7 @@ async def switch_to(
         mode, sha = after[path]
         if mode == GITLINK:
             await keep_gitlink(
-                dispatch,
-                stat_path,
-                posixpath.join(location.worktree, name),
-                links,
+                dispatch, stat_path, location.worktree.join(name), links
             )
             continue
         # Whatever the removals above did not take, a component above
@@ -425,7 +422,7 @@ async def switch_to(
         )
         if above is not None:
             await remove_file(dispatch, above)
-        where = posixpath.join(location.worktree, name)
+        where = location.worktree.join(name)
         # And the same thing standing on the name itself rather than
         # above it: a directory holding only ignored files is in no
         # collision list either, since the check that refuses one is
@@ -433,7 +430,7 @@ async def switch_to(
         # files by default and takes the whole directory with it. A
         # link is left to restore_entry, which retargets it; following
         # one to a directory here would delete a tree no branch named.
-        if links is None or links.stat_at(where) is None:
+        if links is None or links.stat_at(where.virtual) is None:
             info = await stat_path(where)
             if info is not None and info.type is FileType.DIRECTORY:
                 await remove_tree(dispatch, where, links, mounts)
@@ -513,7 +510,7 @@ async def _attach(
     when = int(time.time())
     if creating and ref is not None:
         await write_ref(dispatch, location.commondir, ref.decode(), commit.id)
-        log = posixpath.join(location.commondir, "logs", ref.decode())
+        log = location.commondir.join("logs", ref.decode())
         if await logged(dispatch, location, ref.decode(), log):
             line = log_entry(
                 ZERO,
@@ -802,7 +799,7 @@ async def _checkout_paths(
         location,
         doors,
         paths,
-        start_point(fl),
+        start_point(fl).virtual,
         source,
         treeish is not None,
         True,
@@ -904,7 +901,7 @@ async def checkout(
                 if detach:
                     raise DetachPathError(target) from exc
                 if await _names_path(
-                    dispatch, location, start_point(fl), target
+                    dispatch, location, start_point(fl).virtual, target
                 ):
                     return await _checkout_paths(
                         repo, location, doors, fl, None, list(texts), True
@@ -1016,5 +1013,5 @@ def checkout_read_only(
     if not FlagView(inv.flags).as_bool("b") or not inv.texts:
         return index_locked(inv, location)
     ref = f"{BRANCH_PREFIX}{inv.texts[0]}"
-    root = location.commondir if location is not None else ".git"
+    root = location.commondir.virtual if location is not None else ".git"
     return RefReadOnlyError(ref, posixpath.join(root, ref))

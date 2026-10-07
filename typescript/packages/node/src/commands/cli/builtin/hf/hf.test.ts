@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType } from '@struktoai/mirage-core/types'
+import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { cliSpecFor } from '@struktoai/mirage-core/commands/cli/specs'
 import type * as CommitModule from '../../../../core/hf_hub/commit.ts'
@@ -304,7 +304,14 @@ describe('why nothing was selected', () => {
     fetchTreeMock.mockResolvedValue(new Map())
     classifyAbsenceMock.mockResolvedValue(absence)
     await expect(
-      downloadCmd(inv(['acme/widget', ...names], { local_dir: '/work/out' }, CONFIG, doors)),
+      downloadCmd(
+        inv(
+          ['acme/widget', ...names],
+          { local_dir: PathSpec.fromStrPath('/work/out') },
+          CONFIG,
+          doors,
+        ),
+      ),
     ).rejects.toThrow(expected)
   })
 })
@@ -323,14 +330,18 @@ describe('a tree the Hub refuses', () => {
     fetchTreeMock.mockRejectedValue(new HfHubError('nope', status, code))
     classifyAbsenceMock.mockResolvedValue(Absence.REPO)
     await expect(
-      downloadCmd(inv(['acme/widget'], { local_dir: '/work/out' }, CONFIG, doors)),
+      downloadCmd(
+        inv(['acme/widget'], { local_dir: PathSpec.fromStrPath('/work/out') }, CONFIG, doors),
+      ),
     ).rejects.toThrow('Repository Not Found')
   })
 
   it('lets a server failure through', async () => {
     fetchTreeMock.mockRejectedValue(new HfHubError('boom', 500))
     await expect(
-      downloadCmd(inv(['acme/widget'], { local_dir: '/work/out' }, CONFIG, doors)),
+      downloadCmd(
+        inv(['acme/widget'], { local_dir: PathSpec.fromStrPath('/work/out') }, CONFIG, doors),
+      ),
     ).rejects.toThrow('boom')
     expect(classifyAbsenceMock).not.toHaveBeenCalled()
   })

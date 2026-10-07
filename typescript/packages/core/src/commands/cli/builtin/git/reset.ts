@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { visibleEntries, matched, repoRelative } from './pathspec.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -26,7 +27,6 @@ import {
   RevisionResetError,
 } from './errors.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
-import { matched, repoRelative } from './pathspec.ts'
 import type { Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { resolveCommit } from './revparse.ts'
@@ -91,13 +91,16 @@ export async function reset(inv: CLIInvocation): Promise<CommandFnResult> {
     }
     checkSwitches(inv, texts)
     const repo = await opened(fl, doors)
-    const named = fl.asStr('work_tree') !== undefined
+    const named = fl.asPath('work_tree') !== undefined
     if (!named && (await isBare(dispatch, repo.location))) throw new BareResetError()
     await requireWorkTree(dispatch, statPath, repo.location, named)
     const state = await readIndex(repo, dispatch)
     const tree = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
-    const start = startPoint(fl)
-    const names = new Set([...tree.keys(), ...state.entries.keys()])
+    const start = startPoint(fl).virtual
+    const names = new Set([
+      ...visibleEntries(repo.location, tree).keys(),
+      ...visibleEntries(repo.location, state.entries).keys(),
+    ])
     let selected: Set<string>
     if (texts.length > 0) {
       selected = new Set()
@@ -116,18 +119,24 @@ export async function reset(inv: CLIInvocation): Promise<CommandFnResult> {
       if (recorded === undefined) removed.push(name)
       else staged.set(name, restored(recorded.oid, Number.parseInt(recorded.mode, 8)))
     }
-    if (texts.length === 0) removed.push(...state.conflicts.keys())
+    if (texts.length === 0) removed.push(...visibleEntries(repo.location, state.conflicts).keys())
     await updateIndex(repo, staged, removed)
     const after = await readIndex(repo, dispatch)
     const found = await scan(
       dispatch,
       statPath,
       repo.location,
-      new Set(after.entries.keys()),
+      new Set(visibleEntries(repo.location, after.entries).keys()),
       UNTRACKED_NO,
       doors.ns?.links ?? null,
     )
-    unstaged = await workChanges(repo, dispatch, repo.location.worktree, after.entries, found)
+    unstaged = await workChanges(
+      repo,
+      dispatch,
+      repo.location.worktree,
+      visibleEntries(repo.location, after.entries),
+      found,
+    )
   } catch (err) {
     if (err instanceof GitError) return fatal(err)
     throw err

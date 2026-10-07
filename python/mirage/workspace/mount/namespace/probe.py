@@ -72,7 +72,9 @@ async def resolve_path_stat(
     )
 
 
-async def path_stat(dispatch: DispatchFn, virtual: str) -> FileStat | None:
+async def path_stat(
+    dispatch: DispatchFn, virtual: str | PathSpec
+) -> FileStat | None:
     """Stat one virtual path through the workspace, None when absent.
 
     Resolves through the op dispatcher rather than one backend, so a path
@@ -82,17 +84,15 @@ async def path_stat(dispatch: DispatchFn, virtual: str) -> FileStat | None:
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        virtual (str): absolute virtual path.
+        virtual (str | PathSpec): absolute virtual path.
     """
-    spec = PathSpec(
-        virtual=virtual,
-        directory=virtual[: virtual.rfind("/") + 1] or "/",
-        vfs_path="",
-    )
+    spec = PathSpec.from_str_path(virtual, cwd="/")
     return await resolve_path_stat(dispatch, spec)
 
 
-async def miss_condition(dispatch: DispatchFn, virtual: str) -> FsCondition:
+async def miss_condition(
+    dispatch: DispatchFn, virtual: str | PathSpec
+) -> FsCondition:
     """The condition a diagnostic names for a path ``path_stat`` found
     nothing at.
 
@@ -104,10 +104,10 @@ async def miss_condition(dispatch: DispatchFn, virtual: str) -> FsCondition:
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        virtual (str): absolute virtual path.
+        virtual (str | PathSpec): absolute virtual path.
     """
     try:
-        await dispatch("stat", PathSpec.from_str_path(virtual))
+        await dispatch("stat", PathSpec.from_str_path(virtual, cwd="/"))
     except NotADirectoryError:
         return FsCondition.ENOTDIR
     except MISS_ERRORS:
@@ -117,7 +117,9 @@ async def miss_condition(dispatch: DispatchFn, virtual: str) -> FsCondition:
     return FsCondition.ENOENT
 
 
-async def path_readdir(dispatch: DispatchFn, virtual: str) -> list[str]:
+async def path_readdir(
+    dispatch: DispatchFn, virtual: str | PathSpec
+) -> list[str]:
     """List one virtual path through the workspace, as virtual paths.
 
     Resolves through the op dispatcher rather than one backend, so a
@@ -127,23 +129,19 @@ async def path_readdir(dispatch: DispatchFn, virtual: str) -> list[str]:
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        virtual (str): absolute virtual path of the directory.
+        virtual (str | PathSpec): absolute virtual path of the directory.
     """
-    spec = PathSpec(
-        virtual=virtual,
-        directory=virtual[: virtual.rfind("/") + 1] or "/",
-        vfs_path="",
-    )
+    spec = PathSpec.from_str_path(virtual, cwd="/")
     entries, _ = await dispatch("readdir", spec)
     return list(entries)
 
 
-async def path_exists(dispatch: DispatchFn, virtual: str) -> bool:
+async def path_exists(dispatch: DispatchFn, virtual: str | PathSpec) -> bool:
     """Whether a resolved virtual path names something that exists.
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        virtual (str): absolute virtual path.
+        virtual (str | PathSpec): absolute virtual path.
     """
     try:
         return await path_stat(dispatch, virtual) is not None

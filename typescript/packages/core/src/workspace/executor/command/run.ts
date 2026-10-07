@@ -13,8 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { EvaluationContext } from '../../evaluation.ts'
-import type { ByteSource } from '../../../io/types.ts'
-import { IOResult } from '../../../io/types.ts'
+import { type ByteSource, IOResult } from '../../../io/types.ts'
 import { wrapCachableStreams } from '../../../io/stream.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
@@ -31,8 +30,7 @@ import type { RouteDecision } from '../../../runtime/routing/index.ts'
 import type { SessionState } from '../../session/session.ts'
 import type { DispatchFn, ShellFn } from '../../../runtime/types.ts'
 import type { ExecuteFn } from '../../expand/node.ts'
-import { CommandTimeoutError } from '../../../commands/errors.ts'
-import { UsageError } from '../../../commands/errors.ts'
+import { CommandTimeoutError, UsageError } from '../../../commands/errors.ts'
 import { readFailExitCode } from '../../../commands/spec/usage.ts'
 import { formatFsError } from '../../../errors/render.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -241,7 +239,7 @@ export async function runOnMount(
   // A traversal command's start point is statted through the dispatcher so
   // a start point under another mount answers (`find -L` follows a link
   // across mounts before the command ever runs).
-  const statPath: StatPath = (path: string) => pathStat(dispatch, path, statOverlay)
+  const statPath: StatPath = (path) => pathStat(dispatch, path, statOverlay)
   // The same door for a listing: a walker whose output is one document
   // (tree) reads the subtree under a nested mount through here, because
   // that subtree lives in a VFS its own accessor cannot open.

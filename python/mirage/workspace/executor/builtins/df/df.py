@@ -16,11 +16,7 @@ import math
 from functools import partial
 
 from mirage.commands.builtin.utils.formatting import human_scaled, human_size
-from mirage.commands.builtin.utils.paths import (
-    dispatch_stat,
-    nearest_ancestor,
-    typed_spec,
-)
+from mirage.commands.builtin.utils.paths import dispatch_stat, nearest_ancestor
 from mirage.errors.fs import enoent, enotdir, walk_refusal
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import DotWalkError
@@ -248,7 +244,7 @@ async def _target_mounts(
     ordered = sorted(
         (
             m
-            for m in registry.mounts()
+            for m in registry.visible_mounts()
             if path_visible(session.visibility, m.prefix.rstrip("/") or "/")
         ),
         key=lambda m: m.prefix,
@@ -259,7 +255,7 @@ async def _target_mounts(
     out: list[MountEntry] = []
     errors: list[str] = []
     for op in operands:
-        spec = typed_spec(op, session.cwd)
+        spec = PathSpec.from_str_path(op, cwd=session.cwd)
         if spec.walk_error is not None:
             # The empty name reads as the working directory in `virtual`,
             # which may well be a mount root, and a link loop reaches no

@@ -27,7 +27,6 @@ from mirage.utils.key_prefix import rekey
 from mirage.utils.path import (
     CycleError,
     dot_prefixes,
-    dotted_spelling,
     norm,
     parent,
     resolve_path,
@@ -60,17 +59,7 @@ def resolve_script(name: str, cwd: PathSpec | str | None) -> PathSpec:
             ``CommandOpts.cwd`` carries it; None resolves against the
             root.
     """
-    base = cwd.virtual if isinstance(cwd, PathSpec) else (cwd or "/")
-    path = resolve_path(name, base)
-    last_slash = path.rfind("/")
-    directory = path[: last_slash + 1] if last_slash >= 0 else "/"
-    return PathSpec(
-        vfs_path=path.strip("/"),
-        virtual=path,
-        directory=directory,
-        resolved=True,
-        raw_path=name,
-    )
+    return PathSpec.from_str_path(name, cwd=cwd or "/")
 
 
 def default_paths(
@@ -108,31 +97,6 @@ async def dispatch_stat(dispatch: DispatchFn, path: PathSpec) -> FileStat:
     return stat
 
 
-def typed_spec(word: str | PathSpec, cwd: str) -> PathSpec:
-    """The PathSpec an operand names, its dotted spelling kept.
-
-    A classified operand already is one. A word a builtin resolves itself
-    (a relative ``ln`` name, a ``[`` operand) arrives as text, and
-    resolving it with :func:`resolve_path` alone would simplify away the
-    dots its walk has to prove.
-
-    Args:
-        word (str | PathSpec): the operand as the builtin received it.
-        cwd (str): the directory a relative word resolves against.
-    """
-    if isinstance(word, PathSpec):
-        return word
-    virtual = resolve_path(word, cwd)
-    return PathSpec(
-        virtual=virtual,
-        directory=virtual[: virtual.rfind("/") + 1] or "/",
-        vfs_path=virtual.strip("/"),
-        raw_path=word,
-        dotted=dotted_spelling(word, cwd),
-        walk_error="ENOENT" if word == "" else None,
-    )
-
-
 async def stat_or_enoent(stat_path: StatPath, path: PathSpec) -> FileStat:
     """A dispatcher lookup in the shape a chain walk reads.
 
@@ -144,7 +108,7 @@ async def stat_or_enoent(stat_path: StatPath, path: PathSpec) -> FileStat:
         stat_path (StatPath): dispatcher-backed lookup of one path.
         path (PathSpec): the path to stat.
     """
-    row = await stat_path(path.virtual)
+    row = await stat_path(path)
     if row is None:
         raise enoent(path)
     return row

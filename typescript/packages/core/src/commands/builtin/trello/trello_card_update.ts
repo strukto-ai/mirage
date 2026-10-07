@@ -55,13 +55,12 @@ async function trelloCardUpdate(
   }
   const name = fl.asStr('name') ?? null
   const inlineDesc = fl.asStr('desc') ?? null
-  const descFile = fl.asStr('desc_file') ?? null
+  const descFile = fl.asPath('desc_file') ?? null
   let desc: string | undefined
   if (inlineDesc !== null || descFile !== null || opts.stdin !== null) {
     desc = await resolveTextInput(accessor, {
       inlineText: inlineDesc,
       filePath: descFile,
-      mountPrefix: opts.mountPrefix ?? '',
       stdin: opts.stdin,
       errorMessage: 'desc is required',
     })

@@ -41,6 +41,20 @@
         "stdout": "2\n2\n2\n3\n2\n",
         "stderr": "Usage: getconf [-v specification] variable_name [pathname]\n       getconf -a [pathname]\nUsage: getconf [-v specification] variable_name [pathname]\n       getconf -a [pathname]\nUsage: getconf [-v specification] variable_name [pathname]\n       getconf -a [pathname]\ngetconf: pathconf: /data/no-such-dir: No such file or directory\ngetconf: Unrecognized variable `-a'\ngetconf: Unrecognized variable `NO_SUCH_VAR'\n"
       }
+    },
+    {
+      "id": "getconf_path_walks_each_component",
+      "seq": 16100224,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "getconf NAME_MAX /data/no-such-dir/..; echo $?; getconf NAME_MAX ''; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n3\n",
+        "stderr": "getconf: pathconf: /data/no-such-dir/..: No such file or directory\ngetconf: pathconf: : No such file or directory\n"
+      }
     }
   ]
 }

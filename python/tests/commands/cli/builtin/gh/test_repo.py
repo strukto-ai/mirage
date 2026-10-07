@@ -4,9 +4,11 @@ from mirage.commands.cli.builtin.gh import GH, repo
 from mirage.commands.cli.types import CLIInvocation
 from mirage.core.github.config import GhConfig
 from mirage.io.types import IOResult
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+
+WORK = PathSpec.from_str_path("/w")
 
 
 @pytest.fixture
@@ -43,25 +45,25 @@ async def _run(line: str, base: str | None = None) -> IOResult:
             "cd /w && gh repo clone o/r",
             None,
             ("https://github.com/o/r.git", "r"),
-            {"C": "/w"},
+            {"C": WORK},
         ),
         (
             "cd /w && gh repo clone https://github.com/o/r.git dest",
             None,
             ("https://github.com/o/r.git", "dest"),
-            {"C": "/w"},
+            {"C": WORK},
         ),
         (
             "cd /w && gh repo clone mine -- -q --branch dev",
             None,
             ("https://github.com/alice/mine.git", "mine"),
-            {"quiet": True, "branch": "dev", "C": "/w"},
+            {"quiet": True, "branch": "dev", "C": WORK},
         ),
         (
             "cd /w && gh repo clone ghe.test/o/r",
             "https://ghe.test/api/v3",
             ("https://ghe.test/o/r.git", "r"),
-            {"C": "/w"},
+            {"C": WORK},
         ),
     ],
 )

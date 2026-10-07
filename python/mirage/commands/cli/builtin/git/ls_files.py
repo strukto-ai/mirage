@@ -20,6 +20,7 @@ from mirage.commands.cli.builtin.git.pathspec import (
     pathspec_patterns,
     pathspec_selects,
     repo_relative,
+    visible_path,
 )
 from mirage.commands.cli.builtin.git.render import quote_path
 from mirage.commands.cli.builtin.git.repo import config_bool
@@ -57,7 +58,7 @@ async def ls_files(
             doors.dispatch, location, b"core", b"quotepath", True
         )
         state = await read_index(doors.dispatch, location.gitdir)
-        start = start_point(fl)
+        start = start_point(fl).virtual
         prefix = repo_relative(location, start, ".")
         patterns = pathspec_patterns(location, start, inv.texts)
         rows = [(path, 0, entry) for path, entry in state.entries.items()]
@@ -73,7 +74,9 @@ async def ls_files(
         out = []
         for path, stage, entry in sorted(rows, key=lambda row: row[:2]):
             name = path.decode("utf-8", "surrogateescape")
-            if not pathspec_selects(name, patterns or (prefix,)):
+            if not visible_path(location, name) or not pathspec_selects(
+                name, patterns or (prefix,)
+            ):
                 continue
             relative = posixpath.relpath(name, prefix or ".")
             label = relative if nul else quote_path(relative, False, fully)

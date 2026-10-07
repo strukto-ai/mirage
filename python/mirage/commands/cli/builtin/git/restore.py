@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import posixpath
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
@@ -49,6 +48,7 @@ from mirage.commands.cli.builtin.git.pathspec import (
     matched,
     repo_relative,
     under,
+    visible_entries,
 )
 from mirage.commands.cli.builtin.git.refs import BRANCH_PREFIX
 from mirage.commands.cli.builtin.git.reset import restored
@@ -227,7 +227,7 @@ async def restore(
             location,
             doors,
             texts,
-            start_point(fl),
+            start_point(fl).virtual,
             source,
             flags.staged,
             flags.worktree,
@@ -290,9 +290,11 @@ async def restore_paths(
     # source holding it put it back, stages and all, and what lets
     # the refusal below name it when none does.
     names = (
-        decoded(tree)
+        decoded(visible_entries(location, tree))
         if overlay and source is not None
-        else decoded(held) | decoded(tree) | decoded(state.conflicts)
+        else decoded(visible_entries(location, held))
+        | decoded(visible_entries(location, tree))
+        | decoded(visible_entries(location, state.conflicts))
     )
     selected: set[str] = set()
     for operand in operands:
@@ -365,7 +367,7 @@ async def restore_paths(
         # sits. Nothing is read back from the working tree, so
         # emptying it first is free.
         for name in dropped:
-            path = posixpath.join(location.worktree, name)
+            path = location.worktree.join(name)
             # A component above the entry that is not a directory
             # is not a way through to it: the unlink would resolve
             # past it and delete a file inside whatever it points
@@ -393,7 +395,7 @@ async def restore_paths(
             )
         for name in sorted(present):
             mode, sha = tree[name.encode()]
-            where = posixpath.join(location.worktree, name)
+            where = location.worktree.join(name)
             if mode == GITLINK:
                 await keep_gitlink(dispatch, stat_path, where, links)
                 continue
@@ -418,7 +420,7 @@ async def restore_paths(
             # retargets it; following one to a directory here
             # would delete a tree no branch named.
             current: bytes | None = None
-            if links is None or links.stat_at(where) is None:
+            if links is None or links.stat_at(where.virtual) is None:
                 info = await stat_path(where)
                 if info is not None and info.type is FileType.DIRECTORY:
                     await remove_tree(dispatch, where, links, mounts)

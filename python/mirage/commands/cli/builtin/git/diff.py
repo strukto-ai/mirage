@@ -41,7 +41,10 @@ from mirage.commands.cli.builtin.git.index_file import (
     read_index,
     refuse_unresolved,
 )
-from mirage.commands.cli.builtin.git.pathspec import pathspec_patterns
+from mirage.commands.cli.builtin.git.pathspec import (
+    pathspec_patterns,
+    visible_entries,
+)
 from mirage.commands.cli.builtin.git.repo import config_bool
 from mirage.commands.cli.builtin.git.revparse import (
     merge_bases,
@@ -234,9 +237,13 @@ async def diff(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 before = staged_entries(state) if old is None else old
             else:
                 before, after = old or {}, new
+        before = visible_entries(location, before)
+        after = visible_entries(location, after)
         parsed = replace(
             parsed,
-            pathspecs=pathspec_patterns(location, start_point(fl), paths),
+            pathspecs=pathspec_patterns(
+                location, start_point(fl).virtual, paths
+            ),
         )
         body = await asyncio.to_thread(_output, repo, before, after, parsed)
     except GitError as exc:

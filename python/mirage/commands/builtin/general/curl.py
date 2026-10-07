@@ -81,23 +81,7 @@ DATA_STRIPPED = b"\r\n\0"
 
 
 def resolve_target(o: str | PathSpec, cwd: PathSpec | str | None) -> PathSpec:
-    if isinstance(o, PathSpec):
-        return o
-    if o.startswith("/"):
-        path = o
-    else:
-        base = (
-            cwd.virtual if isinstance(cwd, PathSpec) else (cwd or "")
-        ).rstrip("/")
-        path = f"{base}/{o}" if base else f"/{o}"
-    last_slash = path.rfind("/")
-    directory = path[: last_slash + 1] if last_slash >= 0 else "/"
-    return PathSpec(
-        vfs_path=(path).strip("/"),
-        virtual=path,
-        directory=directory,
-        resolved=True,
-    )
+    return PathSpec.from_str_path(o, cwd=cwd or "/")
 
 
 def header_lines(

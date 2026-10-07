@@ -16,6 +16,7 @@ import type { IndexCacheStore } from './cache/index/store.ts'
 import type { CommandRule } from './policy/types.ts'
 import type { FindOptions } from './vfs/base.ts'
 import { rstripSlash, stripSlash } from './utils/slash.ts'
+import { dottedSpelling, resolvePath } from './utils/path.ts'
 
 // Any value that survives a JSON round trip: what a decoded payload holds,
 // what jq evaluates over, what an API field hands back. The mirror of
@@ -1001,15 +1002,67 @@ export class PathSpec {
     return `${rstripSlash(this.virtual)}/${name}`
   }
 
-  // Wrap a path string; defaults to a root-mounted vfsPath (the path
-  // is assumed to carry no mount prefix).
-  static fromStrPath(path: string, vfsPath?: string): PathSpec {
-    const idx = path.lastIndexOf('/')
-    const directory = path.slice(0, idx + 1) || '/'
+  /** Join components for workspace dispatch, preserving the unproven walk. */
+  join(...parts: string[]): PathSpec {
+    let word = ''
+    for (const part of parts) word = part.startsWith('/') ? part : word ? `${word}/${part}` : part
+    const path = PathSpec.fromStrPath(word || '.', undefined, this)
     return new PathSpec({
-      virtual: path,
-      directory,
-      vfsPath: vfsPath ?? stripSlash(path),
+      virtual: path.virtual,
+      directory: path.directory,
+      vfsPath: path.vfsPath,
+      rawPath: path.dotted ?? path.virtual,
+      dotted: path.dotted,
+      walkError: path.walkError,
+    })
+  }
+
+  /** Lexical parent with its spelled ancestors, for workspace dispatch. */
+  get parent(): PathSpec {
+    const spelled = rstripSlash(this.dotted ?? this.virtual)
+    return PathSpec.fromStrPath(spelled.slice(0, spelled.lastIndexOf('/')) || '/', undefined, '/')
+  }
+
+  /**
+   * Wrap a resolved path, or resolve a supplied spelling against cwd.
+   * Existing specs retain their metadata; vfsPath can override the backend key.
+   * Supply cwd for relative strings, dotted walks and inherited walk errors;
+   * omit it for an already resolved virtual path.
+   */
+  static fromStrPath(path: string | PathSpec, vfsPath?: string, cwd?: string | PathSpec): PathSpec {
+    if (path instanceof PathSpec) {
+      return vfsPath === undefined
+        ? path
+        : new PathSpec({
+            virtual: path.virtual,
+            directory: path.directory,
+            vfsPath,
+            rawPath: path.rawPath,
+            pattern: path.pattern,
+            resolved: path.resolved,
+            dotted: path.dotted,
+            walkError: path.walkError,
+          })
+    }
+    const base = cwd instanceof PathSpec ? (cwd.dotted ?? cwd.virtual) : cwd
+    const virtual = base === undefined ? path : resolvePath(path, base)
+    let dotted: string | null = null
+    let walkError: WalkErrno | null = null
+    if (base !== undefined) {
+      dotted =
+        cwd instanceof PathSpec && cwd.dotted !== null
+          ? dottedSpelling(path.startsWith('/') ? path : `${base}/${path}`)
+          : dottedSpelling(path, base)
+      if (path === '') walkError = 'ENOENT'
+      else if (cwd instanceof PathSpec && !path.startsWith('/')) walkError = cwd.walkError
+    }
+    return new PathSpec({
+      virtual,
+      directory: virtual.slice(0, virtual.lastIndexOf('/') + 1) || '/',
+      vfsPath: vfsPath ?? stripSlash(virtual),
+      rawPath: path,
+      dotted,
+      walkError,
     })
   }
 }

@@ -170,6 +170,8 @@ class _State:
     depth: int = 0
     # Parentheses and negations enclosing the current token.
     nested: int = 0
+    # An action in the top-level -a chain, which no later test may follow.
+    chain_action: bool = False
     in_or: bool = False
     positional: bool = False
     depth_option: bool = False
@@ -330,6 +332,8 @@ def _action_node(
     """
     if state.nested > 0:
         state.positional = True
+    else:
+        state.chain_action = True
     return Action(kind, batch)
 
 
@@ -535,7 +539,7 @@ def _parse_primary(state: _State) -> PredNode:
         raise FindParseError("find: expected predicate")
     if (
         state.expr.actions
-        and state.nested == 0
+        and (state.nested == 0 or state.chain_action)
         and not state.in_or
         and (
             tok in ("-empty", "-prune")
@@ -545,9 +549,9 @@ def _parse_primary(state: _State) -> PredNode:
         )
     ):
         # Along a top-level -a chain the actions run in order on every
-        # row the tree kept, so a test after one would apply to the
-        # actions before it too. Elsewhere the tree itself decides
-        # (`_check_positional`).
+        # row the tree kept, so a test after one, even under ! or
+        # parentheses, would apply to the actions before it too.
+        # Elsewhere the tree itself decides (`_check_positional`).
         raise FindParseError(
             f"find: {tok}: tests after actions are not supported"
         )

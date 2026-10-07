@@ -12,13 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { dispatchStat, dotRefusal, typedSpec } from '../../../../commands/builtin/utils/paths.ts'
-import { materialize } from '../../../../io/types.ts'
-import { ArithError, ExitSignal } from '../../../../shell/errors.ts'
-import type { ByteSource } from '../../../../io/types.ts'
-import type { FileStat } from '../../../../types.ts'
-import { FileType, PathSpec } from '../../../../types.ts'
+import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
 import { CycleError, dottedSpelling, resolvePath, resolveSymlinks } from '../../../../utils/path.ts'
+import { materialize, type ByteSource } from '../../../../io/types.ts'
+import { ArithError, ExitSignal } from '../../../../shell/errors.ts'
+import { type FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { isoTimestamp } from '../../../../utils/dates.ts'
 import { isEfbig } from '../../../../errors/fs.ts'
 import { operandAbs } from '../links/index.ts'
@@ -26,8 +24,7 @@ import { resolvePathStat } from '../../../mount/namespace/probe.ts'
 import { toScope, scopePath } from '../scope.ts'
 import { elementIsSet } from '../../../session/elements.ts'
 import { FILE_PAIR_BINARY, FILE_UNARY, INT_COMPARATORS, UNSUPPORTED_UNARY } from './constants.ts'
-import { CondError } from './types.ts'
-import type { CondContext } from './types.ts'
+import { CondError, type CondContext } from './types.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
@@ -53,7 +50,7 @@ async function pathKind(
 ): Promise<['dir' | 'file' | 'char' | null, FileStat | null]> {
   // A path whose `.` and `..` do not resolve names nothing, which is what
   // every file test reads as false.
-  const walk = typedSpec(val, ctx.session.cwd)
+  const walk = PathSpec.fromStrPath(val, undefined, ctx.session.cwd)
   if (
     (await dotRefusal(dispatchStat(ctx.dispatch), walk, (v) => ctx.namespace.follow(v))) !== null
   ) {

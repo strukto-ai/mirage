@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
 import re
 from io import BytesIO
 
@@ -33,6 +32,7 @@ from mirage.commands.cli.builtin.git.types import (
     SymbolicEnd,
 )
 from mirage.runtime.types import DispatchFn
+from mirage.types import PathSpec
 
 HEAD_FILE = "HEAD"
 PACKED_REFS = "packed-refs"
@@ -44,7 +44,7 @@ MAX_SYMREF_DEPTH = 5
 SAFE_ONE_LEVEL = re.compile(r"[A-Z_]+")
 
 
-async def read_head(dispatch: DispatchFn, gitdir: str) -> HeadRef:
+async def read_head(dispatch: DispatchFn, gitdir: PathSpec) -> HeadRef:
     """Resolve ``.git/HEAD`` to a branch name or a detached commit.
 
     HEAD holds either a symbolic ref (``ref: refs/heads/main``) or a raw
@@ -54,9 +54,9 @@ async def read_head(dispatch: DispatchFn, gitdir: str) -> HeadRef:
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        gitdir (str): absolute virtual path of the ``.git`` directory.
+        gitdir (PathSpec): absolute virtual path of the ``.git`` directory.
     """
-    raw = await read_file(dispatch, posixpath.join(gitdir, HEAD_FILE))
+    raw = await read_file(dispatch, gitdir.join(HEAD_FILE))
     text = raw.decode("utf-8", errors="replace").strip()
     if not text.startswith(SYMREF_PREFIX):
         return HeadRef(branch=None, ref=None, commit=text or None)
@@ -68,7 +68,7 @@ async def read_head(dispatch: DispatchFn, gitdir: str) -> HeadRef:
 
 
 async def _walk_loose_refs(
-    dispatch: DispatchFn, root: str, prefix: str, refs: dict[Ref, bytes]
+    dispatch: DispatchFn, root: PathSpec, prefix: str, refs: dict[Ref, bytes]
 ) -> None:
     """Collect loose refs under one directory into the ref table.
 
@@ -78,7 +78,7 @@ async def _walk_loose_refs(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        root (str): absolute virtual path of the directory to walk.
+        root (PathSpec): absolute virtual path of the directory to walk.
         prefix (str): ref-name prefix accumulated so far.
         refs (dict[Ref, bytes]): ref table, updated in place.
     """
@@ -86,7 +86,7 @@ async def _walk_loose_refs(
         name = basename(entry)
         if not name:
             continue
-        child = posixpath.join(root, name)
+        child = root.join(name)
         data = await read_optional(dispatch, child)
         if data is None:
             await _walk_loose_refs(dispatch, child, f"{prefix}/{name}", refs)
@@ -97,7 +97,7 @@ async def _walk_loose_refs(
 
 
 async def write_ref(
-    dispatch: DispatchFn, commondir: str, ref: str, sha: bytes
+    dispatch: DispatchFn, commondir: PathSpec, ref: str, sha: bytes
 ) -> None:
     """Point one ref at an object id, as a loose ref file.
 
@@ -112,12 +112,12 @@ async def write_ref(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        commondir (str): absolute virtual path of the shared git
+        commondir (PathSpec): absolute virtual path of the shared git
             directory.
         ref (str): full ref name, e.g. ``refs/heads/main``.
         sha (bytes): hex object id the ref should name.
     """
-    await write_file(dispatch, posixpath.join(commondir, ref), sha + b"\n")
+    await write_file(dispatch, commondir.join(ref), sha + b"\n")
 
 
 def without_packed(data: bytes, ref: str) -> bytes | None:
@@ -153,7 +153,9 @@ def without_packed(data: bytes, ref: str) -> bytes | None:
     return b"\n".join(kept) if found else None
 
 
-async def delete_ref(dispatch: DispatchFn, commondir: str, ref: str) -> None:
+async def delete_ref(
+    dispatch: DispatchFn, commondir: PathSpec, ref: str
+) -> None:
     """Remove a ref, loose copy and packed copy alike.
 
     Both are removed because either alone can be what holds the ref,
@@ -164,12 +166,12 @@ async def delete_ref(dispatch: DispatchFn, commondir: str, ref: str) -> None:
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        commondir (str): absolute virtual path of the shared git
+        commondir (PathSpec): absolute virtual path of the shared git
             directory.
         ref (str): full ref name.
     """
-    await remove_file(dispatch, posixpath.join(commondir, ref))
-    path = posixpath.join(commondir, PACKED_REFS)
+    await remove_file(dispatch, commondir.join(ref))
+    path = commondir.join(PACKED_REFS)
     data = await read_optional(dispatch, path)
     if data is None:
         return
@@ -178,36 +180,38 @@ async def delete_ref(dispatch: DispatchFn, commondir: str, ref: str) -> None:
         await write_file(dispatch, path, rewritten)
 
 
-async def set_head(dispatch: DispatchFn, gitdir: str, ref: str) -> None:
+async def set_head(dispatch: DispatchFn, gitdir: PathSpec, ref: str) -> None:
     """Point HEAD at a branch, symbolically.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        gitdir (str): absolute virtual path of this checkout's git
+        gitdir (PathSpec): absolute virtual path of this checkout's git
             directory, which owns HEAD.
         ref (str): full ref name to attach to.
     """
     await write_file(
         dispatch,
-        posixpath.join(gitdir, HEAD_FILE),
+        gitdir.join(HEAD_FILE),
         f"{SYMREF_PREFIX}{ref}\n".encode(),
     )
 
 
-async def detach_head(dispatch: DispatchFn, gitdir: str, sha: bytes) -> None:
+async def detach_head(
+    dispatch: DispatchFn, gitdir: PathSpec, sha: bytes
+) -> None:
     """Point HEAD straight at a commit, detaching it from any branch.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        gitdir (str): absolute virtual path of this checkout's git
+        gitdir (PathSpec): absolute virtual path of this checkout's git
             directory.
         sha (bytes): hex object id to check out.
     """
-    await write_file(dispatch, posixpath.join(gitdir, HEAD_FILE), sha + b"\n")
+    await write_file(dispatch, gitdir.join(HEAD_FILE), sha + b"\n")
 
 
 async def load_refs(
-    dispatch: DispatchFn, gitdir: str, commondir: str | None = None
+    dispatch: DispatchFn, gitdir: PathSpec, commondir: PathSpec | None = None
 ) -> DictRefsContainer:
     """Read every ref a repository publishes, packed and loose.
 
@@ -232,27 +236,23 @@ async def load_refs(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        gitdir (str): absolute virtual path of this checkout's git
+        gitdir (PathSpec): absolute virtual path of this checkout's git
             directory, which owns HEAD.
-        commondir (str | None): absolute virtual path of the shared git
+        commondir (PathSpec | None): absolute virtual path of the shared git
             directory, which owns the branches. None means it is the
             same directory, which is every ordinary checkout.
     """
     shared = commondir or gitdir
     refs: dict[Ref, bytes] = {}
-    packed = await read_optional(dispatch, posixpath.join(shared, PACKED_REFS))
+    packed = await read_optional(dispatch, shared.join(PACKED_REFS))
     if packed is not None:
         for sha, name, _peeled in read_packed_refs_with_peeled(
             BytesIO(packed)
         ):
             refs[name] = sha
-    await _walk_loose_refs(
-        dispatch, posixpath.join(shared, REFS_DIR), REFS_DIR, refs
-    )
-    if gitdir != shared:
-        await _walk_loose_refs(
-            dispatch, posixpath.join(gitdir, REFS_DIR), REFS_DIR, refs
-        )
+    await _walk_loose_refs(dispatch, shared.join(REFS_DIR), REFS_DIR, refs)
+    if gitdir.virtual != shared.virtual:
+        await _walk_loose_refs(dispatch, gitdir.join(REFS_DIR), REFS_DIR, refs)
     head = await read_head(dispatch, gitdir)
     if head.ref is not None:
         refs[HEAD_REF] = f"{SYMREF_PREFIX}{head.ref}".encode()
@@ -342,7 +342,7 @@ def whole_ref_name(name: str) -> bool:
 
 
 async def raw_ref(
-    dispatch: DispatchFn, gitdir: str, table: DictRefsContainer, name: str
+    dispatch: DispatchFn, gitdir: PathSpec, table: DictRefsContainer, name: str
 ) -> str | None:
     """A ref's raw value, an object id or ``ref: <target>``, None for none.
 
@@ -352,7 +352,7 @@ async def raw_ref(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        gitdir (str): this checkout's git directory.
+        gitdir (PathSpec): this checkout's git directory.
         table (DictRefsContainer): every ref, as load_refs reads them.
         name (str): the full ref name.
     """
@@ -361,13 +361,13 @@ async def raw_ref(
         return known.decode("utf-8", errors="replace")
     if name.startswith(f"{REFS_DIR}/"):
         return None
-    data = await read_optional(dispatch, posixpath.join(gitdir, name))
+    data = await read_optional(dispatch, gitdir.join(name))
     return None if data is None else data.decode(errors="replace").strip()
 
 
 async def resolve_symbolic(
     dispatch: DispatchFn,
-    gitdir: str,
+    gitdir: PathSpec,
     table: DictRefsContainer,
     name: str,
     recurse: bool,
@@ -382,7 +382,7 @@ async def resolve_symbolic(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        gitdir (str): this checkout's git directory.
+        gitdir (PathSpec): this checkout's git directory.
         table (DictRefsContainer): every ref, as load_refs reads them.
         name (str): the full ref name to start from.
         recurse (bool): follow every hop rather than the first.

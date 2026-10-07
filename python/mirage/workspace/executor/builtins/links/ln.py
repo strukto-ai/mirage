@@ -22,7 +22,6 @@ from mirage.commands.builtin.utils.paths import (
     absent_dest_error,
     dispatch_stat,
     dot_refusal,
-    typed_spec,
 )
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS, parse_command
@@ -462,7 +461,7 @@ async def plan_links(
             return [], f"ln: failed to access '{typed}': {posix_phrase(why)}\n"
         unwalked = await dot_refusal(
             partial(dispatch_stat, dispatch),
-            typed_spec(typed, cwd),
+            PathSpec.from_str_path(typed, cwd=cwd),
             namespace.follow,
         )
         if unwalked is not None:
@@ -646,7 +645,9 @@ async def make_link(
         return
     if not flags.symbolic:
         unwalked = await dot_refusal(
-            walker, typed_spec(plan.source, cwd), namespace.follow
+            walker,
+            PathSpec.from_str_path(plan.source, cwd=cwd),
+            namespace.follow,
         )
         if unwalked is not None:
             errors.append(
@@ -659,7 +660,7 @@ async def make_link(
     replaces = flags.force or flags.backup not in (None, "none")
     unwalked = await dot_refusal(
         walker,
-        typed_spec(typed, cwd),
+        PathSpec.from_str_path(typed, cwd=cwd),
         namespace.follow,
         creates=not replaces,
     )

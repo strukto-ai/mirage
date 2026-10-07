@@ -32,7 +32,7 @@ from mirage.commands.spec.help import (
 )
 from mirage.commands.spec.types import CommandSpec, UsageStyle
 from mirage.shell.bytes import encode_text
-from mirage.utils.path import resolve_path
+from mirage.types import PathSpec
 
 
 def _verb_display(child: CLISpec) -> str:
@@ -456,11 +456,8 @@ def _record_value(
 ) -> None:
     """Record a value occurrence under its canonical dashed spelling.
 
-    The node's ``operand_base`` option moves the way a chdir does, as the
-    flat parser's does for tar: each occurrence lands relative to the one
-    before it, so ``git -C /repo -C docs`` is ``/repo/docs``. The
-    composed path may stay relative until ``_resolve_group_paths`` puts
-    it against the working directory.
+    Directory changes are resolved in occurrence order by
+    ``_resolve_group_paths`` after the node has been scanned.
 
     Args:
         flags (WalkFlagBag): accumulated group flags.
@@ -469,13 +466,11 @@ def _record_value(
         value (str): the flag's value.
     """
     dest = cs.dest_of(spelling)
-    previous = flags.get(dest)
-    if dest == cs.base_dest and isinstance(previous, str):
-        flags[dest] = resolve_path(value, previous) if previous else value
-    elif dest in cs.multiple_dests:
+    flags.occurrences.append((dest, value))
+    if dest in cs.multiple_dests:
         prev = flags.get(dest)
         if isinstance(prev, list):
-            prev.append(value)
+            flags[dest] = [*prev, value]
         else:
             flags[dest] = [value]
     else:
@@ -563,7 +558,7 @@ def _expand_group_long(
 
 
 def _resolve_group_paths(
-    cs: CompiledSpec, flags: WalkFlagBag, cwd: str
+    cs: CompiledSpec, flags: WalkFlagBag, cwd: str, bases: list[PathSpec]
 ) -> None:
     """Resolve PATH-typed group values against the working directory.
 
@@ -574,23 +569,41 @@ def _resolve_group_paths(
     relative ``-C build`` becomes absolute; do the same here rather than
     handing a leaf a raw relative string it has no cwd to interpret.
 
-    Resolved to absolute strings, not PathSpec: a group flag never picks
-    a mount (CLI dispatch consults none), so the routing half of the
-    leaf's PATH recovery has nothing to do here.
+    Keep the typed spelling and its walk verdict, just as leaf PATH
+    values do. The operand base resolves first; other path options are
+    relative to it, including environment-supplied values.
 
     Args:
         cs (CompiledSpec): the node's compiled tables.
         flags (WalkFlagBag): accumulated group flags, updated in place.
         cwd (str): current working directory.
+        bases (list[PathSpec]): ordered directory changes to validate.
     """
+    base: str | PathSpec = cwd
+    if cs.base_dest is not None:
+        value = flags.get(cs.base_dest)
+        if isinstance(value, str):
+            values = [
+                word
+                for name, word in flags.occurrences
+                if name == cs.base_dest and isinstance(word, str)
+            ]
+            scope = PathSpec.from_str_path(".", cwd=cwd)
+            for word in values or [value]:
+                scope = PathSpec.from_str_path(word or ".", cwd=scope)
+                bases.append(scope)
+            flags[cs.base_dest] = scope
+            base = scope
     for dest, kind in cs.kind_by_dest.items():
-        if kind != "path" or dest not in flags:
+        if kind != "path" or dest not in flags or dest == cs.base_dest:
             continue
         value = flags[dest]
         if isinstance(value, list):
-            flags[dest] = [resolve_path(part, cwd) for part in value]
+            flags[dest] = [
+                PathSpec.from_str_path(part, cwd=base) for part in value
+            ]
         elif isinstance(value, str):
-            flags[dest] = resolve_path(value, cwd)
+            flags[dest] = PathSpec.from_str_path(value, cwd=base)
 
 
 def _finish_node(
@@ -600,6 +613,7 @@ def _finish_node(
     flags: WalkFlagBag,
     cwd: str,
     style: UsageStyle,
+    bases: list[PathSpec],
     env: Mapping[str, str] | None = None,
 ) -> WalkResult | None:
     """Apply a node's declarative option rules after its scan.
@@ -638,7 +652,7 @@ def _finish_node(
                 flags[dest] = [default]
             else:
                 flags[dest] = default
-    _resolve_group_paths(cs, flags, cwd)
+    _resolve_group_paths(cs, flags, cwd, bases)
     # Numeric-typed values before choices, argparse's order; wording is
     # git's parse-options refusal (`--depth` on a non-integer), one
     # phrase for int and float alike.
@@ -654,7 +668,7 @@ def _finish_node(
                 else ([value] if isinstance(value, str) else [])
             )
             for part in candidates:
-                if not pattern.match(part):
+                if isinstance(part, str) and not pattern.match(part):
                     return _usage_error(
                         name,
                         node,
@@ -666,14 +680,15 @@ def _finish_node(
         candidates = (
             value
             if isinstance(value, list)
-            else ([value] if isinstance(value, str) else [])
+            else ([value] if isinstance(value, (str, PathSpec)) else [])
         )
         for part in candidates:
-            if part not in allowed:
+            choice = part.virtual if isinstance(part, PathSpec) else part
+            if choice not in allowed:
                 return _usage_error(
                     name,
                     node,
-                    f"error: invalid argument '{part}' for '{dest}'",
+                    f"error: invalid argument '{choice}' for '{dest}'",
                     style,
                 )
     for dest in cs.required_dests:
@@ -721,7 +736,8 @@ def walk(
     # one voice at every level, so a subcommand cannot pick its own.
     style = spec.usage_style
     path: tuple[str, ...] = ()
-    flags: WalkFlagBag = {}
+    flags: WalkFlagBag = WalkFlagBag()
+    bases: list[PathSpec] = []
     i = 0
 
     def shown(child: str) -> bool:
@@ -733,7 +749,11 @@ def walk(
         # validation, then passes to the program verbatim.
         if node.fn is not None or node.script is not None:
             return WalkResult(
-                leaf=node, path=path, group_flags=flags, argv=tuple(argv[i:])
+                leaf=node,
+                path=path,
+                group_flags=flags,
+                operand_bases=tuple(bases),
+                argv=tuple(argv[i:]),
             )
         name = " ".join((head,) + path)
         cs = compile_spec(node)
@@ -752,7 +772,9 @@ def walk(
                 else None
             )
             if alias is not None and token in alias.aliases:
-                refused = _finish_node(name, node, cs, flags, cwd, style, env)
+                refused = _finish_node(
+                    name, node, cs, flags, cwd, style, bases, env
+                )
                 if refused is not None:
                     return refused
                 node = alias
@@ -909,7 +931,9 @@ def walk(
                     )
                 i += 1
                 continue
-            refused = _finish_node(name, node, cs, flags, cwd, style, env)
+            refused = _finish_node(
+                name, node, cs, flags, cwd, style, bases, env
+            )
             if refused is not None:
                 return refused
             # An alias resolves to its canonical node; the path records
@@ -925,7 +949,7 @@ def walk(
             break
         if descended:
             continue
-        refused = _finish_node(name, node, cs, flags, cwd, style, env)
+        refused = _finish_node(name, node, cs, flags, cwd, style, bases, env)
         if refused is not None:
             return refused
         return WalkResult(

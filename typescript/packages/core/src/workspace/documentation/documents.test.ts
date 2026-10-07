@@ -18,17 +18,22 @@ import { MountMode } from '../../types.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { applyStateDict, toStateDict } from '../snapshot/state.ts'
+import { getTestParser } from '../fixtures/workspace_fixture.ts'
 
-function workspace(): Workspace {
+async function workspace(): Promise<Workspace> {
   return new Workspace(
     { '/data': new RAMVFS(), '/secret': new RAMVFS() },
-    { mode: MountMode.WRITE, profiles: { reader: { paths: { hide: ['/secret'] } } } },
+    {
+      mode: MountMode.WRITE,
+      profiles: { reader: { paths: { hide: ['/secret'] } } },
+      shellParser: await getTestParser(),
+    },
   )
 }
 
 describe('generated documents', () => {
   it('previews a profile without a session, and renders for each reader', async () => {
-    const ws = workspace()
+    const ws = await workspace()
     await ws.session('a', { profile: 'reader' })
     await ws.session('b')
     const preview = await ws.vfsMd(undefined, { profile: 'reader' })
@@ -44,7 +49,7 @@ describe('generated documents', () => {
     await ws.close()
   })
   it('checks exact paths, existing parents and collisions without backend writes', async () => {
-    const ws = workspace()
+    const ws = await workspace()
     await ws.vfs.mkdir('/data/guides')
     await ws.vfs.write('/data/exists', 'keep')
     await expect(ws.vfsMd('/data/exists')).rejects.toThrow()
@@ -64,9 +69,17 @@ describe('generated documents', () => {
     await ws.close()
   })
   it('does not grant an old session view to a reused id', async () => {
-    const ws = workspace()
+    const ws = await workspace()
     const a = await ws.session('a')
     await a.vfsMd('/VFS.md')
+    await ws.session('b')
+    const [owner, other] = await Promise.all(
+      ['a', 'b'].map(async (sessionId) =>
+        new TextDecoder().decode((await ws.shell('df', { sessionId })).stdout),
+      ),
+    )
+    expect(owner).toContain(' /VFS.md\n')
+    expect(other).not.toContain('/VFS.md')
     await ws.closeSession('a')
     await ws.session('a')
     await expect(ws.vfs.read('/VFS.md', {}, 'a')).rejects.toThrow()
@@ -75,7 +88,7 @@ describe('generated documents', () => {
 })
 
 it('releases document paths after unmount and the last session closes', async () => {
-  const ws = workspace()
+  const ws = await workspace()
   const a = await ws.session('a')
   const b = await ws.session('b')
   await a.vfsMd('/guide.md')
@@ -91,7 +104,7 @@ it('releases document paths after unmount and the last session closes', async ()
 })
 
 it('omits unrestricted backend guidance with subtree mode overrides', async () => {
-  const ws = workspace()
+  const ws = await workspace()
   await ws.setSessionProfile(
     ws.defaultSessionId,
     parseSessionProfile({ paths: { show: { '/data/public': 'r' } } }),
@@ -116,7 +129,7 @@ it('excludes live documents from a workspace copy', async () => {
 })
 
 it('binds where a read lands when a link sits above the name', async () => {
-  const ws = workspace()
+  const ws = await workspace()
   await ws.vfs.mkdir('/data/guides')
   await ws.vfs.symlink('/guides', '/data/guides')
   const markdown = await ws.vfsMd('/guides/VFS.md')

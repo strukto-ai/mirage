@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
 
 from mirage.commands.cli.builtin.git.constants import GIT_DIR
 from mirage.commands.cli.builtin.git.ignore import (
@@ -28,7 +27,7 @@ from mirage.commands.cli.builtin.git.io import (
 from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
 from mirage.ops.types import LinkView, StatPath
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, FileType
+from mirage.types import FileStat, FileType, PathSpec
 
 # git's three untracked modes. "normal" names an untracked directory
 # once instead of everything inside it, "all" names every file, and "no"
@@ -64,7 +63,7 @@ class Scanner:
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
         stat_path (StatPath): dispatcher-backed stat, both channels.
-        worktree (str): absolute virtual path of the working tree root.
+        worktree (PathSpec): absolute virtual path of the working tree root.
         tracked (set[str]): repository-relative paths the index holds.
         mode (str): which untracked files to report, one of
             ``UNTRACKED_NO`` / ``UNTRACKED_NORMAL`` / ``UNTRACKED_ALL``.
@@ -76,7 +75,7 @@ class Scanner:
         self,
         dispatch: DispatchFn,
         stat_path: StatPath,
-        worktree: str,
+        worktree: PathSpec,
         tracked: set[str],
         mode: str,
         links: LinkView | None,
@@ -92,17 +91,13 @@ class Scanner:
         self._show_ignored = show_ignored
         self.found = WorkTree()
 
-    def _absolute(self, relative: str) -> str:
+    def _absolute(self, relative: str) -> PathSpec:
         """The virtual path a repository-relative path names.
 
         Args:
             relative (str): repository-relative path, empty at the root.
         """
-        return (
-            posixpath.join(self._worktree, relative)
-            if relative
-            else self._worktree
-        )
+        return self._worktree.join(relative) if relative else self._worktree
 
     async def _entry_stat(self, relative: str) -> FileStat | None:
         """What the walk sees at one path, without following a link.
@@ -120,7 +115,7 @@ class Scanner:
         """
         absolute = self._absolute(relative)
         if self._links is not None:
-            link = self._links.stat_at(absolute)
+            link = self._links.stat_at(absolute.virtual)
             if link is not None:
                 return link
         return await self._stat_path(absolute)
@@ -173,7 +168,7 @@ class Scanner:
         if not relative:
             return ignores
         local = await read_optional(
-            self._dispatch, posixpath.join(self._absolute(relative), GITIGNORE)
+            self._dispatch, self._absolute(relative).join(GITIGNORE)
         )
         return ignores if local is None else ignores.push(relative, local)
 

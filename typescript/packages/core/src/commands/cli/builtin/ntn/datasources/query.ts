@@ -21,7 +21,6 @@ import {
   queryDataSourcePage,
 } from '../../../../../core/notion/pages.ts'
 import { IOResult } from '../../../../../io/types.ts'
-import { PathSpec } from '../../../../../types.ts'
 import type { CommandFnResult } from '../../../../config.ts'
 import type { CLIInvocation } from '../../../types.ts'
 import {
@@ -112,11 +111,11 @@ async function filterBody(
 ): Promise<Record<string, unknown> | null> {
   const inline = fl.asStr('filter')
   if (inline !== undefined && inline !== '') return parseJsonText(inline, '--filter')
-  const source = fl.asStr('filter_file')
-  if (source === undefined || source === '') return null
+  const source = fl.asPath('filter_file')
+  if (source === undefined) return null
   const dispatch = doors?.dispatch
   if (dispatch === undefined) throw new Error('--filter-file needs a workspace to read files from')
-  const [data] = await dispatch('read', PathSpec.fromStrPath(source))
+  const [data] = await dispatch('read', source)
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBufferLike)
   return parseJsonText(DEC.decode(bytes), '--filter-file')
 }

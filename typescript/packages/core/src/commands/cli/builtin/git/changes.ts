@@ -12,15 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { type PathSpec, FileType, type FileStat } from '../../../../types.ts'
 import git from 'isomorphic-git'
 
+import { visibleEntries } from './pathspec.ts'
+
 import type { LinkView, StatPath } from '../../../../ops/types.ts'
-import { FileType, type FileStat } from '../../../../types.ts'
 import { isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import { entryMode } from './add.ts'
 import { GITLINK_MODE, SYMLINK } from './constants.ts'
 import { readIndex } from './index_file.ts'
-import { entryBytes, under } from './io.ts'
+import { entryBytes } from './io.ts'
+
 import { readBlobBytes, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import { similarityScore } from './similarity.ts'
@@ -330,7 +333,7 @@ function modeDiffers(entry: IndexEntry, info: FileStat): boolean {
 async function differs(
   repo: Repo,
   dispatch: Dispatch,
-  worktree: string,
+  worktree: PathSpec,
   path: string,
   entry: IndexEntry,
   info: FileStat,
@@ -339,7 +342,7 @@ async function differs(
   if (info.size !== null && entry.size !== 0 && info.size !== entry.size) return true
   let data: Uint8Array
   try {
-    data = await entryBytes(dispatch, under(worktree, path), info)
+    data = await entryBytes(dispatch, worktree.join(path), info)
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return true
     throw err
@@ -352,7 +355,7 @@ async function differs(
 export async function workChanges(
   repo: Repo,
   dispatch: Dispatch,
-  worktree: string,
+  worktree: PathSpec,
   entries: ReadonlyMap<string, IndexEntry>,
   found: WorkTree,
 ): Promise<Map<string, string>> {
@@ -418,7 +421,7 @@ export async function workEntries(
       entries.delete(path)
       continue
     }
-    const data = await entryBytes(dispatch, under(repo.location.worktree, path), info)
+    const data = await entryBytes(dispatch, repo.location.worktree.join(path), info)
     const { oid } = await git.hashBlob({ object: data })
     repo.held.set(oid, data)
     entries.set(path, { oid, mode: entryMode(info).toString(8).padStart(6, '0') })
@@ -482,12 +485,15 @@ export async function collect(
   showIgnored = false,
 ): Promise<[StatusEntry[], IndexState, boolean]> {
   const state = await readIndex(repo, dispatch)
-  const head = await headEntries(repo)
-  const staged = await stageChanges(repo, head, state.entries, new Set(state.conflicts.keys()))
-  const tracked = new Set([...state.entries.keys(), ...state.conflicts.keys()])
+  const allHead = await headEntries(repo)
+  const head = allHead === null ? null : visibleEntries(repo.location, allHead)
+  const entries = visibleEntries(repo.location, state.entries)
+  const conflicts = visibleEntries(repo.location, state.conflicts)
+  const staged = await stageChanges(repo, head, entries, new Set(conflicts.keys()))
+  const tracked = new Set([...entries.keys(), ...conflicts.keys()])
   const found = await scan(dispatch, statPath, repo.location, tracked, mode, links, showIgnored)
-  const unstaged = await workChanges(repo, dispatch, repo.location.worktree, state.entries, found)
-  const rows = merge(staged, unstaged, conflictCodes(state.conflicts), found.untracked)
+  const unstaged = await workChanges(repo, dispatch, repo.location.worktree, entries, found)
+  const rows = merge(staged, unstaged, conflictCodes(conflicts), found.untracked)
   rows.push(
     ...[...found.ignored]
       .sort(compareCodePoints)

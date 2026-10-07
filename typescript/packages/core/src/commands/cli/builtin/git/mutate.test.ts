@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec, MountMode } from '../../../../types.ts'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import {
@@ -34,7 +35,6 @@ import { IOResult } from '../../../../io/types.ts'
 import { OpsRegistry } from '../../../../ops/registry.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
-import { MountMode } from '../../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
 import { blockingRef } from './refs.ts'
@@ -85,11 +85,11 @@ function walkDisk(root: string, base = root): string[] {
 /** Every file under a mounted directory, as repository-relative paths. */
 async function walkMount(dispatch: Dispatch, root: string, base = root): Promise<string[]> {
   const out: string[] = []
-  for (const entry of await readNames(dispatch, root)) {
+  for (const entry of await readNames(dispatch, PathSpec.fromStrPath(root))) {
     const name = rstripSlash(entry).split('/').pop() ?? ''
     if (name === '') continue
     const full = `${root}/${name}`
-    const data = await readOptional(dispatch, full)
+    const data = await readOptional(dispatch, PathSpec.fromStrPath(full))
     if (data === null) out.push(...(await walkMount(dispatch, full, base)))
     else out.push(full.slice(base.length + 1))
   }
@@ -101,6 +101,8 @@ interface Harness {
   dispatch: Dispatch
   repo: string
   run(line: string): Promise<[number, string, string]>
+  /** The bytes at a mount path, null when nothing is there. */
+  read(path: string): Promise<Uint8Array | null>
   /** Copy the mount back to disk so the real binary can read what mirage wrote. */
   drain(): Promise<string>
 }
@@ -151,7 +153,7 @@ async function harness(prepare?: (repo: string) => void, nested?: string): Promi
   }
   for (const rel of walkDisk(repo)) {
     const target = `/repo/${rel}`
-    await ensureDir(dispatch, target.slice(0, target.lastIndexOf('/')))
+    await ensureDir(dispatch, PathSpec.fromStrPath(target).parent)
     await ws.dispatch('write', target, [new Uint8Array(readFileSync(join(repo, rel)))])
     await ws.dispatch('setattr', target, [], { mode: statSync(join(repo, rel)).mode })
   }
@@ -165,6 +167,7 @@ async function harness(prepare?: (repo: string) => void, nested?: string): Promi
       const result = await ws.shell(`git -C /repo ${line}`)
       return [result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]
     },
+    read: (path) => readOptional(dispatch, PathSpec.fromStrPath(path)),
     async drain() {
       // The real binary is the reader of record: a mutation that produced a
       // repository git itself cannot make sense of has not worked, however
@@ -172,7 +175,7 @@ async function harness(prepare?: (repo: string) => void, nested?: string): Promi
       const out = mkdtempSync(join(tmp, 'drain-'))
       roots.push(out)
       for (const rel of await walkMount(dispatch, '/repo')) {
-        const data = await readOptional(dispatch, `/repo/${rel}`)
+        const data = await readOptional(dispatch, PathSpec.fromStrPath(`/repo/${rel}`))
         if (data === null) continue
         mkdirSync(dirname(join(out, rel)), { recursive: true })
         writeFileSync(join(out, rel), data)
@@ -249,7 +252,7 @@ function gitlinkBranch(repo: string, branch: string, path: string): void {
 /** Write into the mount, which is where the verbs under test read from. */
 async function write(h: Harness, path: string, text: string): Promise<void> {
   const target = `/repo/${path}`
-  await ensureDir(h.dispatch, target.slice(0, target.lastIndexOf('/')))
+  await ensureDir(h.dispatch, PathSpec.fromStrPath(target).parent)
   await h.ws.dispatch('write', target, [new TextEncoder().encode(text)])
 }
 
@@ -1362,7 +1365,7 @@ describe('git tag', () => {
 describe('a name that escapes the ref tree', () => {
   it('is refused by switch -c, leaving the config alone', async () => {
     const h = await harness()
-    const before = await readOptional(h.dispatch, '/repo/.git/config')
+    const before = await h.read('/repo/.git/config')
     expect(await h.run('switch -c ../../config')).toEqual([
       128,
       '',
@@ -1370,7 +1373,7 @@ describe('a name that escapes the ref tree', () => {
         'hint: See `man git check-ref-format`\n' +
         'hint: Disable this message with "git config set advice.refSyntax false"\n',
     ])
-    expect(await readOptional(h.dispatch, '/repo/.git/config')).toEqual(before)
+    expect(await h.read('/repo/.git/config')).toEqual(before)
   })
 
   it('is refused by branch, before its start point resolves', async () => {
@@ -1478,9 +1481,7 @@ describe('a ref that lives only in packed-refs', () => {
     expect((await h.run('tag -d lw'))[0]).toBe(0)
     expect((await h.run('tag -d ann'))[0]).toBe(0)
     expect(await h.run('tag')).toEqual([0, '', ''])
-    const packed = DEC.decode(
-      (await readOptional(h.dispatch, '/repo/.git/packed-refs')) ?? undefined,
-    )
+    const packed = DEC.decode((await h.read('/repo/.git/packed-refs')) ?? undefined)
     expect(packed).not.toContain('refs/tags/')
     expect(packed).not.toContain('^')
     expect(packed).toContain('refs/heads/main')
@@ -1830,7 +1831,7 @@ describe('a working-tree removal that would take a mount with it', () => {
       128,
       "fatal: cannot remove '/repo/slot': '/repo/slot/data' is a mount root\n",
     ])
-    expect(await readOptional(h.dispatch, '/repo/slot/data/precious.md')).not.toBeNull()
+    expect(await h.read('/repo/slot/data/precious.md')).not.toBeNull()
   })
 
   it('leaves a mount root alone when pruning empty parents', async () => {
@@ -1841,7 +1842,7 @@ describe('a working-tree removal that would take a mount with it', () => {
     expect((await h.run('add slot/data/x.md'))[0]).toBe(0)
     expect((await h.run('commit -m inside'))[0]).toBe(0)
     expect((await h.run('rm slot/data/x.md'))[0]).toBe(0)
-    expect(await readNames(h.dispatch, '/repo/slot/data')).toEqual([])
+    expect(await readNames(h.dispatch, PathSpec.fromStrPath('/repo/slot/data'))).toEqual([])
   })
 })
 
@@ -1856,29 +1857,29 @@ describe('a gitlink in the tree', () => {
       gitlinkIndex(repo, 'sub')
     })
     expect(await h.run('restore sub')).toEqual([0, '', ''])
-    expect(await readOptional(h.dispatch, '/repo/sub/keep.md')).not.toBeNull()
+    expect(await h.read('/repo/sub/keep.md')).not.toBeNull()
   })
 
   it('makes a directory when nothing is there', async () => {
     const h = await harness((repo) => {
       gitlinkIndex(repo, 'sub')
     })
-    await removeTree(h.dispatch, '/repo/sub', null, null)
+    await removeTree(h.dispatch, PathSpec.fromStrPath('/repo/sub'), null, null)
     expect(await h.run('restore sub')).toEqual([0, '', ''])
-    expect(await readNames(h.dispatch, '/repo/sub')).toEqual([])
+    expect(await readNames(h.dispatch, PathSpec.fromStrPath('/repo/sub'))).toEqual([])
     // A directory, not a file: readNames answers empty for both, so the write
     // that used to land here is ruled out by asking for the file back.
-    expect(await readOptional(h.dispatch, '/repo/sub')).toBeNull()
+    expect(await h.read('/repo/sub')).toBeNull()
   })
 
   it('replaces a regular file standing at the name', async () => {
     const h = await harness((repo) => {
       gitlinkIndex(repo, 'sub')
     })
-    await removeTree(h.dispatch, '/repo/sub', null, null)
+    await removeTree(h.dispatch, PathSpec.fromStrPath('/repo/sub'), null, null)
     await h.ws.shell("printf 'i am a file\\n' > /repo/sub")
     expect(await h.run('restore sub')).toEqual([0, '', ''])
-    expect(await readOptional(h.dispatch, '/repo/sub')).toBeNull()
+    expect(await h.read('/repo/sub')).toBeNull()
   })
 
   it('keeps a child the restored source drops', async () => {
@@ -1891,7 +1892,7 @@ describe('a gitlink in the tree', () => {
     await write(h, 'sub/child.md', 'child\n')
     expect((await h.run('add sub/child.md'))[0]).toBe(0)
     expect(await h.run('restore --staged --worktree sub')).toEqual([0, '', ''])
-    expect(await readOptional(h.dispatch, '/repo/sub/child.md')).not.toBeNull()
+    expect(await h.read('/repo/sub/child.md')).not.toBeNull()
     const drained = await h.drain()
     expect(git(drained, ['ls-files', 'sub/child.md'])).toBe('')
   })
@@ -1905,7 +1906,7 @@ describe('a gitlink in the tree', () => {
     })
     await write(h, 'sub/keep.md', 'keep\n')
     expect((await h.run('checkout linked'))[0]).toBe(0)
-    expect(await readOptional(h.dispatch, '/repo/sub/keep.md')).not.toBeNull()
+    expect(await h.read('/repo/sub/keep.md')).not.toBeNull()
   })
 
   it('rmdirs an empty one the source drops', async () => {
@@ -1931,7 +1932,7 @@ describe('a gitlink in the tree', () => {
       '',
       "warning: unable to rmdir 'sub': Directory not empty\n",
     ])
-    expect(await readOptional(h.dispatch, '/repo/sub/keep.md')).not.toBeNull()
+    expect(await h.read('/repo/sub/keep.md')).not.toBeNull()
   })
 
   it('rmdirs one a branch switch drops', async () => {
@@ -1956,7 +1957,7 @@ describe('a gitlink in the tree', () => {
       0,
       "warning: unable to rmdir 'sub': Directory not empty\nSwitched to branch 'plain'\n",
     ])
-    expect(await readOptional(h.dispatch, '/repo/sub/keep.md')).not.toBeNull()
+    expect(await h.read('/repo/sub/keep.md')).not.toBeNull()
   })
 
   it('still refuses an untracked file where it lands', async () => {
@@ -2046,14 +2047,14 @@ describe('a mount met halfway through a worktree pass', () => {
     // write loop is what would meet the mount.
     await h.ws.dispatch('mkdir', '/repo/slot')
     await h.ws.shell("printf 'x\\n' > /repo/slot/ignored.txt")
-    const before = await readOptional(h.dispatch, '/repo/numbers.txt')
+    const before = await h.read('/repo/numbers.txt')
     const [code, , err] = await h.run('checkout slotted')
     expect([code, err]).toEqual([
       128,
       "fatal: cannot remove '/repo/slot': '/repo/slot/data' is a mount root\n",
     ])
     // Nothing moved: the earlier path still holds what it held.
-    expect(await readOptional(h.dispatch, '/repo/numbers.txt')).toEqual(before)
+    expect(await h.read('/repo/numbers.txt')).toEqual(before)
     expect(await h.run('status --porcelain')).toEqual([0, '', ''])
   })
 
@@ -2078,7 +2079,7 @@ describe('a mount met halfway through a worktree pass', () => {
       "fatal: cannot remove '/repo/slot': '/repo/slot/data' is a mount root\n",
     ])
     expect((await h.run('status --porcelain'))[1]).toBe(before)
-    expect(await readOptional(h.dispatch, '/repo/slot/data/precious.md')).not.toBeNull()
+    expect(await h.read('/repo/slot/data/precious.md')).not.toBeNull()
   })
 
   it('lets --staged through, since it never touches the working tree', async () => {
@@ -2118,7 +2119,7 @@ describe('git rm meeting a link above the tracked path', () => {
         '    slot/child\n' +
         '(use --cached to keep the file, or -f to force removal)\n',
     ])
-    expect(await readOptional(h.dispatch, '/repo/away/child')).not.toBeNull()
+    expect(await h.read('/repo/away/child')).not.toBeNull()
   })
 
   it('removes it when the link points past it', async () => {
@@ -2188,9 +2189,7 @@ describe('a restore source spelled as a tree expression', () => {
       git(repo, ['commit', '-m', 'nested'])
     })
     expect(await h.run('restore --source=HEAD:sub letters.txt')).toEqual([0, '', ''])
-    expect(DEC.decode((await readOptional(h.dispatch, '/repo/letters.txt')) ?? undefined)).toBe(
-      'nested\n',
-    )
+    expect(DEC.decode((await h.read('/repo/letters.txt')) ?? undefined)).toBe('nested\n')
   })
 
   it('names the object by its id when it is no tree', async () => {
@@ -2225,7 +2224,7 @@ describe('a restore writing a file over an occupied directory', () => {
     await h.run('add letters.txt/child')
     await write(h, 'letters.txt/keep', 'untracked\n')
     expect(await h.run(`restore --source=${tree} -SW letters.txt`)).toEqual([0, '', ''])
-    expect(DEC.decode((await readOptional(h.dispatch, '/repo/letters.txt')) ?? undefined)).toBe(
+    expect(DEC.decode((await h.read('/repo/letters.txt')) ?? undefined)).toBe(
       'alpha\nbeta\ngamma\ndelta\n',
     )
   })
@@ -2433,7 +2432,7 @@ describe('a tag target spelled as an object expression', () => {
  * about lives.
  */
 async function headOf(h: Harness): Promise<string> {
-  const raw = await readOptional(h.dispatch, '/repo/.git/HEAD')
+  const raw = await h.read('/repo/.git/HEAD')
   return raw === null ? '' : DEC.decode(raw).trim()
 }
 
@@ -2456,8 +2455,8 @@ describe('git switch on an unborn HEAD', () => {
     expect(await headOf(h)).toBe('ref: refs/heads/topic')
     // No ref and no reflog: a branch with no commit is a name and nothing
     // else, which is why git can make one here at all.
-    expect(await readOptional(h.dispatch, '/repo/.git/refs/heads/topic')).toBe(null)
-    expect(await readOptional(h.dispatch, '/repo/.git/logs/HEAD')).toBe(null)
+    expect(await h.read('/repo/.git/refs/heads/topic')).toBe(null)
+    expect(await h.read('/repo/.git/logs/HEAD')).toBe(null)
   })
 
   it('refuses a start point', async () => {
@@ -2620,7 +2619,7 @@ describe('removeTree meeting a link', () => {
 
   it('unlinks it without descending', async () => {
     const { calls, dispatch } = recorder()
-    await removeTree(dispatch, '/repo/slot', links, null)
+    await removeTree(dispatch, PathSpec.fromStrPath('/repo/slot'), links, null)
     expect(calls).toContainEqual(['unlink', '/repo/slot/link'])
     // The whole point: readdir dereferences, so listing the link at all is the
     // walk stepping outside the directory being replaced.
@@ -2630,7 +2629,7 @@ describe('removeTree meeting a link', () => {
 
   it('has nothing to ask without a namespace', async () => {
     const { calls, dispatch } = recorder()
-    await removeTree(dispatch, '/repo/slot', null, null)
+    await removeTree(dispatch, PathSpec.fromStrPath('/repo/slot'), null, null)
     expect(calls).toContainEqual(['readdir', '/repo/slot/link'])
   })
 })
@@ -2650,13 +2649,13 @@ describe('a removal meeting a mount boundary', () => {
 
   it('refuses the mount root itself', () => {
     expect(() => {
-      refuseMount(mountsOver(['/repo/slot']), '/repo/slot')
+      refuseMount(mountsOver(['/repo/slot']), PathSpec.fromStrPath('/repo/slot'))
     }).toThrow("cannot remove '/repo/slot': it is a mount root")
   })
 
   it('names a nested mount, in order', () => {
     expect(() => {
-      refuseMount(mountsOver(['/repo/slot/z', '/repo/slot/a']), '/repo/slot')
+      refuseMount(mountsOver(['/repo/slot/z', '/repo/slot/a']), PathSpec.fromStrPath('/repo/slot'))
     }).toThrow("cannot remove '/repo/slot': '/repo/slot/a' is a mount root")
   })
 
@@ -2664,16 +2663,19 @@ describe('a removal meeting a mount boundary', () => {
     // Avoiding a boundary and naming one are two different questions, and a
     // hidden mount's name is what the hide exists to withhold.
     expect(() => {
-      refuseMount(mountsOver(['/repo/slot/data'], ['/repo/slot/data']), '/repo/slot')
+      refuseMount(
+        mountsOver(['/repo/slot/data'], ['/repo/slot/data']),
+        PathSpec.fromStrPath('/repo/slot'),
+      )
     }).toThrow("cannot remove '/repo/slot': it holds a mount root")
   })
 
   it('lets an unobstructed path through', () => {
     expect(() => {
-      refuseMount(mountsOver(['/other/mount']), '/repo/slot')
+      refuseMount(mountsOver(['/other/mount']), PathSpec.fromStrPath('/repo/slot'))
     }).not.toThrow()
     expect(() => {
-      refuseMount(null, '/repo/slot')
+      refuseMount(null, PathSpec.fromStrPath('/repo/slot'))
     }).not.toThrow()
   })
 
@@ -2689,7 +2691,12 @@ describe('a removal meeting a mount boundary', () => {
       return { calls: seen, dispatch: fn }
     })()
     await expect(
-      removeTree(dispatch, '/repo/slot', null, mountsOver(['/repo/slot/data'])),
+      removeTree(
+        dispatch,
+        PathSpec.fromStrPath('/repo/slot'),
+        null,
+        mountsOver(['/repo/slot/data']),
+      ),
     ).rejects.toThrow('is a mount root')
     // Nothing at all: the refusal is the first thing the walk does, so the
     // directory is still whole when the caller hears about it.
@@ -2706,8 +2713,8 @@ describe('a removal meeting a mount boundary', () => {
     }) as unknown as Dispatch
     await removeEmptyParents(
       dispatch,
-      '/repo/slot/data/x.txt',
-      '/repo',
+      PathSpec.fromStrPath('/repo/slot/data/x.txt'),
+      PathSpec.fromStrPath('/repo'),
       mountsOver(['/repo/slot/data']),
     )
     expect(calls).not.toContainEqual(['rmdir', '/repo/slot/data'])
@@ -2722,7 +2729,12 @@ describe('a removal meeting a mount boundary', () => {
       if (op === 'readdir') return Promise.resolve([[], new IOResult()])
       return Promise.resolve([null, new IOResult()])
     }) as unknown as Dispatch
-    await removeEmptyParents(dispatch, '/repo/docs/x.txt', '/repo', mountsOver([]))
+    await removeEmptyParents(
+      dispatch,
+      PathSpec.fromStrPath('/repo/docs/x.txt'),
+      PathSpec.fromStrPath('/repo'),
+      mountsOver([]),
+    )
     expect(calls).toContainEqual(['rmdir', '/repo/docs'])
   })
 })
@@ -2933,7 +2945,7 @@ describe('git rm over a directory', () => {
     expect(code).toBe(128)
     expect(err).toBe("fatal: git rm: 'letters.txt': Is a directory\n")
     // numbers.txt is never reached, in the working tree or the index.
-    expect(await readOptional(h.dispatch, '/repo/numbers.txt')).not.toBeNull()
+    expect(await h.read('/repo/numbers.txt')).not.toBeNull()
   })
 
   it('unstages a directory under --cached without touching it', async () => {
@@ -2941,7 +2953,7 @@ describe('git rm over a directory', () => {
     await h.ws.shell('rm /repo/numbers.txt && mkdir /repo/numbers.txt')
     await write(h, 'numbers.txt/keep', 'k\n')
     expect(await h.run('rm --cached numbers.txt')).toEqual([0, "rm 'numbers.txt'\n", ''])
-    expect(await readOptional(h.dispatch, '/repo/numbers.txt/keep')).not.toBeNull()
+    expect(await h.read('/repo/numbers.txt/keep')).not.toBeNull()
   })
 
   it('removes a tracked link to a directory as the link it is', async () => {
@@ -2951,7 +2963,7 @@ describe('git rm over a directory', () => {
     expect((await h.run('commit -m linked'))[0]).toBe(0)
     expect(await h.run('rm slot')).toEqual([0, "rm 'slot'\n", ''])
     // The link went; the directory it pointed at stayed.
-    expect(await readOptional(h.dispatch, '/repo/docs/readme.md')).not.toBeNull()
+    expect(await h.read('/repo/docs/readme.md')).not.toBeNull()
   })
 })
 
@@ -2964,9 +2976,9 @@ describe('restore across a symlink ancestor', () => {
     expect(await h.run('restore docs/readme.md')).toEqual([0, '', ''])
     // Writing through the link would have landed the content in
     // elsewhere/readme.md, a file no branch named, and left the link.
-    const restored = await readOptional(h.dispatch, '/repo/docs/readme.md')
+    const restored = await h.read('/repo/docs/readme.md')
     expect(restored === null ? '' : DEC.decode(restored)).toBe('notes\n')
-    const other = await readOptional(h.dispatch, '/repo/elsewhere/readme.md')
+    const other = await h.read('/repo/elsewhere/readme.md')
     expect(other === null ? '' : DEC.decode(other)).toBe('old\n')
     // A link is namespace state, so whether it is gone is a question
     // for the namespace rather than for the drained copy.
@@ -2983,7 +2995,7 @@ describe('restore across a symlink ancestor', () => {
     // whatever it points at. git checks the leading path and removes
     // nothing, link and target both left as they stand.
     expect(await h.run('restore --source=HEAD~2 docs/readme.md')).toEqual([0, '', ''])
-    const other = await readOptional(h.dispatch, '/repo/elsewhere/readme.md')
+    const other = await h.read('/repo/elsewhere/readme.md')
     expect(other === null ? '' : DEC.decode(other)).toBe('old\n')
     const told = await h.ws.shell('readlink /repo/docs')
     expect([told.exitCode, DEC.decode(told.stdout)]).toEqual([0, 'elsewhere\n'])
@@ -3011,7 +3023,7 @@ describe('a tag named by a bare id', () => {
     // The id names the tag object itself, which is no tree-ish; a
     // source unwraps it, so this reads what `--source=v1` reads.
     expect(await h.run(`restore --source=${held} letters.txt`)).toEqual([0, '', ''])
-    const back = await readOptional(h.dispatch, '/repo/letters.txt')
+    const back = await h.read('/repo/letters.txt')
     expect(back === null ? '' : DEC.decode(back)).toBe('alpha\nbeta\ngamma\ndelta\n')
   })
 })
@@ -3131,7 +3143,7 @@ describe('a component on the way that is not a directory', () => {
     const h = await harness()
     await h.ws.shell('rm -r /repo/docs && echo untracked > /repo/docs')
     expect(await h.run('restore docs/readme.md')).toEqual([0, '', ''])
-    const back = await readOptional(h.dispatch, '/repo/docs/readme.md')
+    const back = await h.read('/repo/docs/readme.md')
     expect(back === null ? '' : DEC.decode(back)).toBe('notes\n')
   })
 
@@ -3141,7 +3153,7 @@ describe('a component on the way that is not a directory', () => {
     const h = await harness()
     await h.ws.shell('rm -r /repo/docs && echo untracked > /repo/docs')
     expect(await h.run('restore --source=HEAD~2 docs/readme.md')).toEqual([0, '', ''])
-    const kept = await readOptional(h.dispatch, '/repo/docs')
+    const kept = await h.read('/repo/docs')
     expect(kept === null ? '' : DEC.decode(kept)).toBe('untracked\n')
   })
 })
@@ -3164,10 +3176,10 @@ describe('a switch onto a branch recording a directory', () => {
     await write(h, 'away/child', 'outside\n')
     await h.ws.shell('ln -s /repo/away /repo/slot')
     expect((await h.run('switch other'))[0]).toBe(0)
-    const kid = await readOptional(h.dispatch, '/repo/slot/child')
+    const kid = await h.read('/repo/slot/child')
     expect(kid === null ? '' : DEC.decode(kid)).toBe('kid\n')
     // The link's target tree is untouched, and the link itself is gone.
-    const other = await readOptional(h.dispatch, '/repo/away/child')
+    const other = await h.read('/repo/away/child')
     expect(other === null ? '' : DEC.decode(other)).toBe('outside\n')
     expect((await h.ws.shell('readlink /repo/slot')).exitCode).not.toBe(0)
   })
@@ -3184,7 +3196,7 @@ describe('a switch onto a branch recording a directory', () => {
     expect((await h.run('switch main'))[0]).toBe(0)
     await write(h, 'slot', 'ignored\n')
     expect((await h.run('switch other'))[0]).toBe(0)
-    const kid = await readOptional(h.dispatch, '/repo/slot/child')
+    const kid = await h.read('/repo/slot/child')
     expect(kid === null ? '' : DEC.decode(kid)).toBe('kid\n')
     expect((await h.run('status --short'))[1]).toBe('')
   })
@@ -3206,7 +3218,7 @@ describe('a switch onto a branch recording a directory', () => {
         '\tslot\n' +
         'Please move or remove them before you switch branches.\nAborting\n',
     ])
-    const kept = await readOptional(h.dispatch, '/repo/slot')
+    const kept = await h.read('/repo/slot')
     expect(kept === null ? '' : DEC.decode(kept)).toBe('untracked\n')
   })
 
@@ -3249,7 +3261,7 @@ describe('a directory standing where the target records a file', () => {
     expect((await h.run('switch main'))[0]).toBe(0)
     await write(h, 'slot/keep', 'keep\n')
     expect((await h.run('switch other'))[0]).toBe(0)
-    const landed = await readOptional(h.dispatch, '/repo/slot')
+    const landed = await h.read('/repo/slot')
     expect(landed === null ? '' : DEC.decode(landed)).toBe('asfile\n')
   })
 
@@ -3269,7 +3281,7 @@ describe('a directory standing where the target records a file', () => {
       'error: Updating the following directories would lose untracked files in them:\n' +
         '\tslot\n\nAborting\n',
     ])
-    const kept = await readOptional(h.dispatch, '/repo/slot/keep')
+    const kept = await h.read('/repo/slot/keep')
     expect(kept === null ? '' : DEC.decode(kept)).toBe('keep\n')
   })
 })

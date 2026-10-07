@@ -16,6 +16,7 @@ import posixpath
 
 from mirage.core.hf_hub.constants import REPO_ID_SEPARATOR
 from mirage.core.hf_hub.tree_entry import TreeEntry
+from mirage.types import PathSpec
 
 
 def repo_folder_name(repo_id: str, repo_type: str) -> str:
@@ -56,30 +57,30 @@ def etag_of(entry: TreeEntry) -> str:
     return entry.lfs_oid or entry.oid
 
 
-def blob_path(cache_dir: str, folder: str, etag: str) -> str:
+def blob_path(cache_dir: PathSpec, folder: str, etag: str) -> PathSpec:
     """Where one file's bytes live, shared across every snapshot."""
-    return posixpath.join(cache_dir, folder, "blobs", etag)
+    return cache_dir.join(folder, "blobs", etag)
 
 
-def snapshot_dir(cache_dir: str, folder: str, sha: str) -> str:
+def snapshot_dir(cache_dir: PathSpec, folder: str, sha: str) -> PathSpec:
     """The directory one commit's tree is rendered under."""
-    return posixpath.join(cache_dir, folder, "snapshots", sha)
+    return cache_dir.join(folder, "snapshots", sha)
 
 
 def snapshot_path(
-    cache_dir: str, folder: str, sha: str, repo_path: str
-) -> str:
+    cache_dir: PathSpec, folder: str, sha: str, repo_path: str
+) -> PathSpec:
     """Where one file appears within a commit's rendered tree."""
-    return posixpath.join(snapshot_dir(cache_dir, folder, sha), repo_path)
+    return snapshot_dir(cache_dir, folder, sha).join(repo_path)
 
 
-def ref_path(cache_dir: str, folder: str, revision: str) -> str:
+def ref_path(cache_dir: PathSpec, folder: str, revision: str) -> PathSpec:
     """The file recording which commit a branch or tag points at."""
-    return posixpath.join(cache_dir, folder, "refs", revision)
+    return cache_dir.join(folder, "refs", revision)
 
 
 def link_target(
-    cache_dir: str, folder: str, sha: str, repo_path: str, etag: str
+    cache_dir: PathSpec, folder: str, sha: str, repo_path: str, etag: str
 ) -> str:
     """The relative target a snapshot entry points at.
 
@@ -100,7 +101,8 @@ def link_target(
     """
     entry = snapshot_path(cache_dir, folder, sha, repo_path)
     return posixpath.relpath(
-        blob_path(cache_dir, folder, etag), posixpath.dirname(entry)
+        blob_path(cache_dir, folder, etag).virtual,
+        posixpath.dirname(entry.virtual),
     )
 
 

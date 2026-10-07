@@ -704,7 +704,7 @@ def text_lines(data: bytes) -> list[str]:
 async def renames_enabled(
     dispatch: DispatchFn, location: RepoLocation
 ) -> bool:
-    data = await read_optional(dispatch, f"{location.commondir}/config")
+    data = await read_optional(dispatch, location.commondir.join("config"))
     if data is None:
         return True
     cfg = ConfigFile.from_file(BytesIO(data))

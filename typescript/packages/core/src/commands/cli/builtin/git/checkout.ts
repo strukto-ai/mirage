@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../../../types.ts'
 import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
@@ -55,8 +56,8 @@ import {
   removeFile,
   removeTree,
   restoreEntry,
-  under,
 } from './io.ts'
+
 import { append, entry, IDENTITY, logged, record, ZERO } from './reflog.ts'
 import {
   BRANCH_PREFIX,
@@ -297,7 +298,7 @@ export async function switchTo(
   const notes: string[] = []
   for (const path of [...before.keys()].sort(compareCodePoints)) {
     if (after.has(path)) continue
-    const where = under(repo.location.worktree, path)
+    const where = repo.location.worktree.join(path)
     // A gitlink the target tree drops is a directory, not a file: git rmdirs
     // it and warns rather than failing when something is still in it, where
     // the unlink here died on it with the removals ahead of it already
@@ -314,7 +315,7 @@ export async function switchTo(
     const entry = changed.get(path)
     if (entry === undefined) continue
     if (entry.mode === GITLINK_MODE) {
-      await keepGitlink(dispatch, statPath, under(repo.location.worktree, path), links)
+      await keepGitlink(dispatch, statPath, repo.location.worktree.join(path), links)
       continue
     }
     const { blob } = await git.readBlob({ ...repoArgs(repo), oid: entry.oid })
@@ -325,14 +326,14 @@ export async function switchTo(
     // keeps a link's target tree, a path no branch named, out of the way.
     const above = await blockingAncestor(statPath, repo.location.worktree, path, links)
     if (above !== null) await removeFile(dispatch, above)
-    const where = under(repo.location.worktree, path)
+    const where = repo.location.worktree.join(path)
     // And the same thing standing on the name itself rather than above it: a
     // directory holding only ignored files is in no collision list either,
     // since the check that refuses one is about the untracked files it would
     // lose. git updates ignored files by default and takes the whole directory
     // with it. A link is left to restoreEntry, which retargets it; following
     // one to a directory here would delete a tree no branch named.
-    if ((links?.statAt(where) ?? null) === null) {
+    if ((links?.statAt(where.virtual) ?? null) === null) {
       const info = await statPath(where)
       if (info !== null && info.type === FileType.DIRECTORY) {
         await removeTree(dispatch, where, links, mounts)
@@ -393,7 +394,7 @@ async function attach(
   const when = Math.floor(Date.now() / 1000)
   if (creating && ref !== null) {
     await writeRef(dispatch, repo.location.commondir, ref, oid)
-    const log = under(repo.location.commondir, 'logs', ref)
+    const log = repo.location.commondir.join('logs', ref)
     if (await logged(dispatch, repo.location, ref, log)) {
       const line = entry(ZERO, oid, IDENTITY, when, `branch: Created from ${from}`)
       await append(dispatch, repo.location.commondir, `logs/${ref}`, line)
@@ -623,7 +624,7 @@ async function checkoutPaths(
     repo,
     doors,
     paths,
-    lineStart(fl),
+    lineStart(fl).virtual,
     source,
     treeish !== null,
     true,
@@ -695,7 +696,7 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
         named = await resolveCommit(repo, target)
       } catch {
         if (detach) throw new DetachPathError(target)
-        if (await namesPath(repo, dispatch, lineStart(fl), target)) {
+        if (await namesPath(repo, dispatch, lineStart(fl).virtual, target)) {
           return await checkoutPaths(repo, doors, fl, null, texts, true)
         }
         guessed = await remoteBranch(repo, target)
@@ -801,5 +802,8 @@ export const checkoutReadOnly: ReadOnlyRefusal = (inv, location) => {
   const name = inv.texts[0]
   if (!new FlagView(inv.flags).asBool('b') || name === undefined) return indexLocked(inv, location)
   const ref = `${BRANCH_PREFIX}${name}`
-  return new RefReadOnlyError(ref, under(location?.commondir ?? '.git', ref))
+  return new RefReadOnlyError(
+    ref,
+    (location?.commondir ?? PathSpec.fromStrPath('/.git')).join(ref).virtual,
+  )
 }

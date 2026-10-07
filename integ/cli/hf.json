@@ -298,6 +298,19 @@
         "stdout": "Authenticated through private endpoint: http://127.0.0.1:5086\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "hf_relative_workspace_paths_follow_cwd",
+      "seq": 960124,
+      "targets": [
+        "cli-hf"
+      ],
+      "command": "(cd /scratch && printf pathspec > hf-pathspec.txt && hf upload integ/repo-cli hf-pathspec.txt pathspec.txt --quiet && hf download integ/repo-cli pathspec.txt --local-dir hf-pathspec-back --quiet && cat hf-pathspec-back/pathspec.txt)",
+      "expect": {
+        "exit": 0,
+        "stdout": "http://127.0.0.1:5086/integ/repo-cli/tree/main/pathspec.txt\n/scratch/hf-pathspec-back\npathspec",
+        "stderr": ""
+      }
     }
   ]
 }

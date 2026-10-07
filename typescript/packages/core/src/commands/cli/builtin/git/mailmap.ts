@@ -78,7 +78,7 @@ export async function loadMailmap(
   dispatch: Dispatch,
   location: RepoLocation,
 ): Promise<readonly MailmapEntry[]> {
-  const data = await readOptional(dispatch, `${location.worktree}/.mailmap`)
+  const data = await readOptional(dispatch, location.worktree.join(`.mailmap`))
   return parseMailmap(new TextDecoder().decode(data ?? new Uint8Array()))
 }
 

@@ -40,7 +40,7 @@ const mktemp: BuilderFn = (ops, accessor, _paths, texts, opts) => {
       else await write(accessor, local(p), d)
     },
     async (p) => {
-      if (opts.statPath !== undefined) return (await opts.statPath(p.virtual)) !== null
+      if (opts.statPath !== undefined) return (await opts.statPath(p)) !== null
       return pathExists((at) => ops.stat(accessor, at), local(p))
     },
   )

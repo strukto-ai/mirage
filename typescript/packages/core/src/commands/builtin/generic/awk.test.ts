@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
+
 import { awkGeneric } from './awk.ts'
 
 const ENC = new TextEncoder()
@@ -31,10 +32,7 @@ function spec(path: string): PathSpec {
   })
 }
 
-function opts(
-  flags: Record<string, string | boolean | number | string[]> = {},
-  stdin: Uint8Array | null = null,
-): CommandOpts {
+function opts(flags: CommandOpts['flags'] = {}, stdin: Uint8Array | null = null): CommandOpts {
   return { stdin, flags, filetypeFns: null, cwd: '/', vfs: {} } as CommandOpts
 }
 
@@ -98,7 +96,12 @@ describe('awkGeneric', () => {
       '6\n',
     ],
   ])('runs the -f program %j over the data paths', async (f, files, data, expected) => {
-    const [out] = await run(data.map(spec), [], opts({ f }), files)
+    const [out] = await run(
+      data.map(spec),
+      [],
+      opts({ f: (Array.isArray(f) ? f : [f]).map(spec) }),
+      files,
+    )
     expect(out).toBe(expected)
   })
 
@@ -106,7 +109,7 @@ describe('awkGeneric', () => {
     const result = await awkGeneric(
       [spec('/data.txt')],
       [],
-      opts({ f: '/missing.awk' }),
+      opts({ f: spec('/missing.awk') }),
       makeStream({ '/data.txt': 'x\n' }),
     )
     const [stdout, io] = result ?? [null, new IOResult()]
@@ -123,13 +126,16 @@ describe('awkGeneric', () => {
       throw raw
     }
     await expect(
-      awkGeneric([spec('/data.txt')], [], opts({ f: '/prog.awk' }), stream),
+      awkGeneric([spec('/data.txt')], [], opts({ f: spec('/prog.awk') }), stream),
     ).rejects.toThrow('403 Forbidden')
   })
 
   it('resolves a relative -f program file against the cwd', async () => {
     const files = { '/data/prog.awk': '{print $1}\n', '/data/in.txt': 'hey there\n' }
-    const o = { ...opts({ f: 'prog.awk' }), cwd: '/data' } as CommandOpts
+    const o = {
+      ...opts({ f: PathSpec.fromStrPath('prog.awk', undefined, '/data') }),
+      cwd: '/data',
+    } as CommandOpts
     const result = await awkGeneric([spec('/data/in.txt')], [], o, makeStream(files))
     const [stdout] = result ?? [null, new IOResult()]
     expect(DEC.decode(await materialize(stdout))).toBe('hey\n')
@@ -155,7 +161,7 @@ describe('awk fatal paths', () => {
 async function runStdin(
   program: string,
   stdin: string,
-  flags: Record<string, string | boolean | number | string[]> = {},
+  flags: CommandOpts['flags'] = {},
 ): Promise<string> {
   const [out] = await run([], [program], opts(flags, ENC.encode(stdin)))
   return out

@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../../../types.ts'
+import { PathSpec } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
-import { resolvePath } from '../../../utils/path.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -398,7 +397,7 @@ function variable(name: string): readonly [string, string | null] | undefined {
 /** Whether the PATH operand names something pathconf could open. */
 async function pathExists(opts: CommandOpts, word: string): Promise<boolean> {
   if (opts.statPath === undefined) return true
-  return (await opts.statPath(resolvePath(word, opts.cwd))) !== null
+  return (await opts.statPath(PathSpec.fromStrPath(word, undefined, opts.cwd))) !== null
 }
 
 // glibc `getconf`: one variable's value, or `-a` for all of them. A pathconf
