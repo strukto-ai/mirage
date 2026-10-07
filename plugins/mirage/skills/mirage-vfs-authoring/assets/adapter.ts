@@ -5,6 +5,10 @@ import {
 
 const enc = new TextEncoder()
 
+function keyOf(path: PathSpec): string {
+  return path.vfsPath.split('/').filter(Boolean).join('/')
+}
+
 class ResourceClient extends Accessor {
   readonly files = new Map([['hello.txt', enc.encode('Hello from my resource!\n')]])
 }
@@ -15,7 +19,7 @@ class ResourceVFS extends BaseVFS<ResourceClient> {
   }
 
   override async read(path: PathSpec): Promise<Uint8Array> {
-    const key = path.vfsPath.replace(/^\/+|\/+$/g, '')
+    const key = keyOf(path)
     if (key === '') throw eisdir(path)
     const data = this.accessor.files.get(key)
     if (data === undefined) throw enoent(path)
@@ -23,17 +27,16 @@ class ResourceVFS extends BaseVFS<ResourceClient> {
   }
 
   override async readdir(path: PathSpec): Promise<string[]> {
-    if (path.vfsPath.replace(/^\/+|\/+$/g, '') !== '') {
+    if (keyOf(path) !== '') {
       await this.read(path)
       throw enotdir(path)
     }
-    const parent = path.virtual.replace(/\/+$/, '')
-    return [...this.accessor.files.keys()].sort().map(name => `${parent}/${name}`)
+    return [...this.accessor.files.keys()].sort().map(name => path.child(name))
   }
 
   override async stat(path: PathSpec): Promise<FileStat> {
-    const name = path.virtual.replace(/\/+$/, '').split('/').pop() || '/'
-    if (path.vfsPath.replace(/^\/+|\/+$/g, '') === '') return new FileStat({ name, type: FileType.DIRECTORY })
+    const name = path.virtual.split('/').filter(Boolean).pop() ?? '/'
+    if (keyOf(path) === '') return new FileStat({ name, type: FileType.DIRECTORY })
     const data = await this.read(path)
     return new FileStat({ name, type: FileType.FILE, size: data.length })
   }

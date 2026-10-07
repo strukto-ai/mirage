@@ -24,7 +24,10 @@ import type { PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
 import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
 
 /** Whoever binds sessions: one per workspace, compared by identity. */
-export abstract class SessionOwner {}
+export abstract class SessionOwner {
+  /** The session this owner holds under `sessionId`. */
+  abstract get(sessionId: string): SessionState
+}
 
 /**
  * The session bound to one async context, and whose it is: `owner` is

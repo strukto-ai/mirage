@@ -45,8 +45,7 @@ class ResourceVFS(BaseVFS):
         if path.vfs_path.strip("/"):
             await self.read(path, index)
             raise NotADirectoryError(path.virtual)
-        parent = path.virtual.rstrip("/")
-        return [f"{parent}/{name}" for name in sorted(self.accessor.files)]
+        return [path.child(name) for name in sorted(self.accessor.files)]
 
     async def stat(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

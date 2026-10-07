@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
@@ -39,8 +40,16 @@ from mirage.utils.path import parent
 from mirage.workspace.session.session import SessionState
 
 
-class SessionOwner:
+class SessionOwner(ABC):
     """Whoever binds sessions: one per workspace, compared by identity."""
+
+    @abstractmethod
+    def get(self, session_id: str) -> SessionState:
+        """The session this owner holds under ``session_id``.
+
+        Args:
+            session_id (str): the session's id.
+        """
 
 
 @dataclass(frozen=True, slots=True)

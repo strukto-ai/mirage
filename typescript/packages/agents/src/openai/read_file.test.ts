@@ -1,5 +1,4 @@
 import { RunContext } from '@openai/agents'
-import { OpsRegistry } from '@struktoai/mirage-core/ops/registry'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-node'
@@ -8,9 +7,7 @@ import { mirageReadFileTool, type MirageReadFileOutput } from './read_file.ts'
 
 function mkWs(): Workspace {
   const ram = new RAMVFS()
-  const ops = new OpsRegistry()
-  for (const op of ram.ops()) ops.register(op)
-  return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+  return new Workspace({ '/': ram }, { mode: MountMode.WRITE })
 }
 
 async function invokeReadFile(ws: Workspace, path: string): Promise<MirageReadFileOutput> {

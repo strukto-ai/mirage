@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '@struktoai/mirage-core/ops/registry'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import type { Action, CommandContext, Policy } from '@struktoai/mirage-core/policy/index'
 import { MountMode } from '@struktoai/mirage-core/types'
@@ -23,9 +22,7 @@ import { mirageOperations } from './operations.ts'
 
 function mkWs(policies: Policy[] = []): Workspace {
   const ram = new RAMVFS()
-  const ops = new OpsRegistry()
-  for (const op of ram.ops()) ops.register(op)
-  return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops, policies })
+  return new Workspace({ '/': ram }, { mode: MountMode.WRITE, policies })
 }
 
 async function streamed(ws: Workspace, command: string): Promise<[string, number | null]> {

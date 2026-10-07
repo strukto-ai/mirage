@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { OpsRegistry } from '@struktoai/mirage-core/ops/registry'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -68,9 +67,7 @@ describe('checked and answered', () => {
 
   it('runs or explains a VFS call as JSON', async () => {
     const ram = new RAMVFS()
-    const ops = new OpsRegistry()
-    for (const op of ram.ops()) ops.register(op)
-    const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+    const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE })
     const session = new Session(ws, null)
     const args = await checked(byName('write'), { path: '/a', data_base64: 'aGk=' })
     expect(args).toEqual({ path: '/a', data: new Uint8Array([104, 105]) })

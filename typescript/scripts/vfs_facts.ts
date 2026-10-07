@@ -422,7 +422,7 @@ function stringCapability(
 function resolveIdentifier(
   source: ts.SourceFile,
   name: string,
-): number | boolean | string | undefined {
+): CapabilityValue | undefined {
   for (const statement of source.statements) {
     if (ts.isVariableStatement(statement)) {
       for (const decl of statement.declarationList.declarations) {
