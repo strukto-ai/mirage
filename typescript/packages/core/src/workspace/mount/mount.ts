@@ -545,31 +545,7 @@ export class MountEntry {
     context: ExecContext = {},
   ): Promise<[ByteSource | null, IOResult]> {
     return this.use(async (): Promise<[ByteSource | null, IOResult]> => {
-      let extension =
-        paths.length > 0 && paths[0] !== undefined ? getExtension(paths[0].virtual) : null
-      // A filetype handler is selected from the operand's NAME, and a
-      // directory can carry any extension, so the cascade would hand a
-      // renderer a directory to read. One stat settles it, and only when a
-      // handler for this exact extension exists, so a mount with no
-      // filetype registrations never reaches the probe. The built-in is
-      // what a directory should get: it owns GNU's `Is a directory`
-      // wording, and the renderer owns nothing but its own format.
-      // The DISPATCHER's stat, not the backend's, so a mount root and a
-      // namespace-only directory answer too; null means neither plane saw
-      // anything, in which case the renderer reports its own miss.
-      const first = paths[0]
-      if (
-        extension !== null &&
-        extension !== '' &&
-        first !== undefined &&
-        context.statPath !== undefined &&
-        this.cmds.has(cmdKey(cmdName, extension))
-      ) {
-        const entry = await context.statPath(first)
-        if (entry !== null && entry.type === FileType.DIRECTORY) extension = null
-      }
-
-      const handlers = this.resolveCascade(cmdName, extension, this.cmds, this.generalCmds)
+      const [handlers, extension] = await this.pickHandlers(cmdName, paths, context)
       if (handlers.length === 0) {
         return [
           null,
@@ -579,199 +555,286 @@ export class MountEntry {
           }),
         ]
       }
-
-      const mountPrefix = rstripSlash(this.prefix)
-      const filetypeFns = this.filetypeHandlers(cmdName)
-      const isFiletypeCmd =
-        extension !== null && extension !== '' && this.cmds.has(cmdKey(cmdName, extension))
-
-      const stamp = (p: PathSpec): PathSpec =>
-        new PathSpec({
-          virtual: p.virtual,
-          directory: p.directory,
-          pattern: p.pattern,
-          resolved: p.resolved,
-          vfsPath: mountKey(p.virtual, mountPrefix),
-          rawPath: p.rawPath,
-          dotted: p.dotted,
-          walkError: p.walkError,
-        })
-      // A stdin `-` routed nowhere, so it rides on whichever mount runs the
-      // line, beside the operands that chose it.
-      const stdinSlots = STDIN_DASH_COMMANDS.has(cmdName)
-        ? (STDIN_DASH_LEADING.get(cmdName) ?? paths.length)
-        : 0
-      const prefixedPaths = paths.map((p, index) =>
-        index < stdinSlots && p.rawPath === '-'
-          ? new PathSpec({
-              virtual: `${mountPrefix}/-`,
-              directory: p.directory,
-              resolved: p.resolved,
-              vfsPath: '-',
-              rawPath: p.rawPath,
-            })
-          : stamp(p),
-      )
-      // Stamp this mount's backend key onto path-shaped flag values so
-      // backend reads can address them: a single PathSpec (awk -f, tar -f)
-      // or a list (repeated grep -f, jq's --rawfile pairs). Everything else
-      // passes through unchanged. Mirrors Python's execute_cmd.
-      const stampedFlags: Record<string, FlagValue> = { ...flags }
-      flagOccurrences(stampedFlags).push(...flagOccurrences(flags))
-      for (const [key, value] of Object.entries(flags)) {
-        if (value instanceof PathSpec) stampedFlags[key] = stamp(value)
-        else if (Array.isArray(value) && value.some((item) => item instanceof PathSpec)) {
-          const items: readonly (string | PathSpec)[] = value
-          stampedFlags[key] = items.map((item) => (item instanceof PathSpec ? stamp(item) : item))
+      const keyedPaths = this.keyedPaths(cmdName, paths)
+      const cmdOpts = this.commandOpts(cmdName, extension, this.keyedFlags(flags), context)
+      return this.inCommandScope(context, async (): Promise<[ByteSource | null, IOResult]> => {
+        for (const cmd of handlers) {
+          const refusal = this.readOnlyRefusal(cmdName, cmd, flags)
+          if (refusal !== null) return [null, refusal]
+          const result = await this.runHandler(cmdName, cmd, keyedPaths, texts, cmdOpts, context)
+          if (result !== null) return this.wrapOutput(cmdName, cmd, keyedPaths, result)
         }
-      }
-
-      // A pattern operand travels to the handler whole. The handler
-      // resolves it once, through the shared adapter, which is where the
-      // namespace facts (links, nested mount roots, a trailing slash) are
-      // in view; the VFS's glob hook serves the shell tier and cannot
-      // see them, so expanding here would lose what the handler needs.
-      // Python's dispatcher never expands either.
-
-      const accessor = this.vfs.accessor
-      const cmdOpts: CommandOpts = {
-        stdin: context.stdin ?? null,
-        flags: stampedFlags,
-        filetypeFns: isFiletypeCmd ? null : filetypeFns,
-        mountPrefix,
-        command: cmdName,
-        cwd: context.cwd ?? ROOT_CWD,
-        index: this.index,
-        ...(context.dispatch !== undefined ? { dispatch: context.dispatch } : {}),
-        ...(context.sessionId !== undefined ? { sessionId: context.sessionId } : {}),
-        ...(context.env !== undefined ? { env: context.env } : {}),
-        ...(context.sessionView !== undefined ? { sessionView: context.sessionView } : {}),
-        ...(context.processes !== undefined ? { processes: context.processes } : {}),
-        ...(context.execAllowed !== undefined ? { execAllowed: context.execAllowed } : {}),
-        ...(context.execPathAllowed !== undefined
-          ? { execPathAllowed: context.execPathAllowed }
-          : {}),
-        ...(context.runtime !== undefined ? { runtime: context.runtime } : {}),
-        ...(context.ns !== undefined ? { ns: context.ns } : {}),
-        ...(context.statPath !== undefined ? { statPath: context.statPath } : {}),
-        ...(context.readdirPath !== undefined ? { readdirPath: context.readdirPath } : {}),
-        ...(context.shell !== undefined ? { shell: context.shell } : {}),
-        ...(context.argv !== undefined ? { argv: context.argv } : {}),
-      }
-
-      // What the command tier's mode guard reads: each write the handler
-      // makes is held to its own region's mode.
-      return runWithMountGate(this.prefix, this.mode, () =>
-        withWalkProbe(this.prefix, context.dispatch, context.ns?.links, () =>
-          runWithMountContext(
-            () =>
-              runWithCacheManager(this.cacheManager, () =>
-                runWithRevisions(
-                  this.revisions.size > 0 ? this.revisions : null,
-                  async (): Promise<[ByteSource | null, IOResult]> => {
-                    for (const cmd of handlers) {
-                      // Only wrapper-owned responses bypass the write guard.
-                      const infoOnly =
-                        flags.help === true ||
-                        (flags.version === true && hasInjectedVersion(cmd.spec))
-                      // A command whose I/O runs under the path guards is
-                      // refused where it writes, because only the write knows
-                      // whether a line writes: `gzip -c`, `tar -t` and
-                      // `split -n 1/2` read a read-only mount like any reader,
-                      // and `gzip f` is refused at the write of `f.gz`, in
-                      // gzip's own GNU voice. A write command that reaches its
-                      // service some other way (trello's id-addressed card
-                      // writes, a custom backend's own verb) is refused here,
-                      // before it runs, because no door would see its write.
-                      // strongestModeUnder, not effectiveMode: a mount whose
-                      // only writable region is a show entry still runs it.
-                      // The trailing newline is load-bearing: stderr
-                      // accumulates across a line.
-                      if (
-                        cmd.write &&
-                        !cmd.pathGuarded &&
-                        !infoOnly &&
-                        strongestModeUnder(this.prefix, this.mode) === MountMode.READ
-                      ) {
-                        return [
-                          null,
-                          new IOResult({
-                            exitCode: 1,
-                            stderr: encodeText(`${cmdName}: read-only mount at ${this.prefix}\n`),
-                          }),
-                        ]
-                      }
-                      // The dispatch-level guard only sees default limits
-                      // (the mount is unknown before routing), so the
-                      // mount-resolved timeout must also bound the command
-                      // body: eager commands do their work inside cmd.fn,
-                      // where the stream-consumption guard never runs.
-                      // limitOverride is the caller's profile, mount and
-                      // workspace entry; a null one is "no opinion" and must
-                      // not shadow this mount's own table.
-                      const resolvedLimit = resolveLimit(
-                        cmdName,
-                        [],
-                        cmd.limit,
-                        context.limitOverride ?? this.commandLimits.get(cmdName) ?? null,
-                      )
-                      const cmdTimeout =
-                        resolvedLimit !== null ? resolvedLimit.timeoutSeconds : null
-                      // runWithTimeout abandons the promise, it cannot cancel
-                      // it; the aborted signal lets a runtime kill what it
-                      // spawned (python cancels the task instead). The ambient
-                      // context.signal is a background job's kill channel, folded
-                      // into the same wire. timeoutSeconds rides along so an
-                      // engine that executes on the event loop (quickjs) can
-                      // interrupt itself when the timer cannot fire.
-                      const guard =
-                        cmdTimeout !== null && cmdTimeout > 0 ? new AbortController() : null
-                      const runSignal = mergeSignals(guard?.signal, context.signal)
-                      const runOpts =
-                        runSignal !== undefined
-                          ? {
-                              ...cmdOpts,
-                              signal: runSignal,
-                              ...(cmdTimeout !== null && cmdTimeout > 0
-                                ? { timeoutSeconds: cmdTimeout }
-                                : {}),
-                            }
-                          : cmdOpts
-                      let result: CommandFnResult
-                      try {
-                        result = await runWithTimeout(
-                          Promise.resolve(cmd.fn(accessor, prefixedPaths, texts, runOpts)),
-                          cmdTimeout,
-                          cmdName,
-                        )
-                      } catch (err) {
-                        if (guard !== null && err instanceof CommandTimeoutError) guard.abort()
-                        throw err
-                      }
-                      if (result !== null) {
-                        result[1].producer = {
-                          command: cmdName,
-                          prefixes: [this.prefix],
-                          declared: cmd.limit ?? null,
-                        }
-                        const [stdout, io] = wrapMountStreams(result, this.mountId, this.activity)
-                        return [
-                          stdout !== null && !(stdout instanceof Uint8Array)
-                            ? commandOutput(stdout, io, cmdName, prefixedPaths)
-                            : stdout,
-                          io,
-                        ]
-                      }
-                    }
-                    return [null, new IOResult()]
-                  },
-                ),
-              ),
-            this.mountId,
-          ),
-        ),
-      )
+        return [null, new IOResult()]
+      })
     })
+  }
+
+  /**
+   * The handlers to try in order, and the extension that chose them.
+   *
+   * A filetype handler is selected from the operand's NAME, and a
+   * directory can carry any extension, so the cascade would hand a
+   * renderer a directory to read. One stat settles it, and only when a
+   * handler for this exact extension exists, so a mount with no filetype
+   * registrations never reaches the probe. The built-in is what a
+   * directory should get: it owns GNU's `Is a directory` wording, and the
+   * renderer owns nothing but its own format. The DISPATCHER's stat, not
+   * the backend's, so a mount root and a namespace-only directory answer
+   * too; null means neither plane saw anything, in which case the renderer
+   * reports its own miss. Mirrors Python's MountEntry._pick_handlers.
+   */
+  private async pickHandlers(
+    cmdName: string,
+    paths: PathSpec[],
+    context: ExecContext,
+  ): Promise<[RegisteredCommand[], string | null]> {
+    let extension =
+      paths.length > 0 && paths[0] !== undefined ? getExtension(paths[0].virtual) : null
+    const first = paths[0]
+    if (
+      extension !== null &&
+      extension !== '' &&
+      first !== undefined &&
+      context.statPath !== undefined &&
+      this.cmds.has(cmdKey(cmdName, extension))
+    ) {
+      const entry = await context.statPath(first)
+      if (entry !== null && entry.type === FileType.DIRECTORY) extension = null
+    }
+    return [this.resolveCascade(cmdName, extension, this.cmds, this.generalCmds), extension]
+  }
+
+  /** `p` with this mount's backend key stamped on. */
+  private keyed(p: PathSpec): PathSpec {
+    return new PathSpec({
+      virtual: p.virtual,
+      directory: p.directory,
+      pattern: p.pattern,
+      resolved: p.resolved,
+      vfsPath: mountKey(p.virtual, rstripSlash(this.prefix)),
+      rawPath: p.rawPath,
+      dotted: p.dotted,
+      walkError: p.walkError,
+    })
+  }
+
+  /**
+   * Stamp this mount's backend key onto each path operand. A stdin `-`
+   * routed nowhere, so it rides on whichever mount runs the line, beside
+   * the operands that chose it. Mirrors Python's MountEntry._keyed_paths.
+   */
+  private keyedPaths(cmdName: string, paths: PathSpec[]): PathSpec[] {
+    const mountPrefix = rstripSlash(this.prefix)
+    const stdinSlots = STDIN_DASH_COMMANDS.has(cmdName)
+      ? (STDIN_DASH_LEADING.get(cmdName) ?? paths.length)
+      : 0
+    return paths.map((p, index) =>
+      index < stdinSlots && p.rawPath === '-'
+        ? new PathSpec({
+            virtual: `${mountPrefix}/-`,
+            directory: p.directory,
+            resolved: p.resolved,
+            vfsPath: '-',
+            rawPath: p.rawPath,
+          })
+        : this.keyed(p),
+    )
+  }
+
+  /**
+   * Stamp this mount's backend key onto path-shaped flag values so backend
+   * reads can address them: a single PathSpec (awk -f, tar -f) or a list
+   * (repeated grep -f, jq's --rawfile pairs). Everything else passes
+   * through unchanged. Mirrors Python's MountEntry._keyed_flags.
+   */
+  private keyedFlags(flags: Record<string, FlagValue>): Record<string, FlagValue> {
+    const stampedFlags: Record<string, FlagValue> = { ...flags }
+    flagOccurrences(stampedFlags).push(...flagOccurrences(flags))
+    for (const [key, value] of Object.entries(flags)) {
+      if (value instanceof PathSpec) stampedFlags[key] = this.keyed(value)
+      else if (Array.isArray(value) && value.some((item) => item instanceof PathSpec)) {
+        const items: readonly (string | PathSpec)[] = value
+        stampedFlags[key] = items.map((item) =>
+          item instanceof PathSpec ? this.keyed(item) : item,
+        )
+      }
+    }
+    return stampedFlags
+  }
+
+  /**
+   * The one typed bag a handler reads, built here and nowhere else.
+   *
+   * A pattern operand travels to the handler whole. The handler resolves it
+   * once, through the shared adapter, which is where the namespace facts
+   * (links, nested mount roots, a trailing slash) are in view; the VFS's
+   * glob hook serves the shell tier and cannot see them, so expanding here
+   * would lose what the handler needs. Python's dispatcher never expands
+   * either. Mirrors Python's MountEntry._command_opts.
+   */
+  private commandOpts(
+    cmdName: string,
+    extension: string | null,
+    flags: Record<string, FlagValue>,
+    context: ExecContext,
+  ): CommandOpts {
+    const isFiletypeCmd =
+      extension !== null && extension !== '' && this.cmds.has(cmdKey(cmdName, extension))
+    return {
+      stdin: context.stdin ?? null,
+      flags,
+      filetypeFns: isFiletypeCmd ? null : this.filetypeHandlers(cmdName),
+      mountPrefix: rstripSlash(this.prefix),
+      command: cmdName,
+      cwd: context.cwd ?? ROOT_CWD,
+      index: this.index,
+      ...(context.dispatch !== undefined ? { dispatch: context.dispatch } : {}),
+      ...(context.sessionId !== undefined ? { sessionId: context.sessionId } : {}),
+      ...(context.env !== undefined ? { env: context.env } : {}),
+      ...(context.sessionView !== undefined ? { sessionView: context.sessionView } : {}),
+      ...(context.processes !== undefined ? { processes: context.processes } : {}),
+      ...(context.execAllowed !== undefined ? { execAllowed: context.execAllowed } : {}),
+      ...(context.execPathAllowed !== undefined
+        ? { execPathAllowed: context.execPathAllowed }
+        : {}),
+      ...(context.runtime !== undefined ? { runtime: context.runtime } : {}),
+      ...(context.ns !== undefined ? { ns: context.ns } : {}),
+      ...(context.statPath !== undefined ? { statPath: context.statPath } : {}),
+      ...(context.readdirPath !== undefined ? { readdirPath: context.readdirPath } : {}),
+      ...(context.shell !== undefined ? { shell: context.shell } : {}),
+      ...(context.argv !== undefined ? { argv: context.argv } : {}),
+    }
+  }
+
+  /**
+   * Run `fn` with what a handler's backend calls read bound: the mode the
+   * command tier's mode guard holds each write to (its own region's mode),
+   * what the command tier's walk guard proves an operand's `.` and `..`
+   * with, the recorder's mount, the mount's cache manager and the snapshot
+   * revision pins. Mirrors Python's MountEntry._command_scope.
+   */
+  private inCommandScope<T>(context: ExecContext, fn: () => Promise<T>): Promise<T> {
+    return runWithMountGate(this.prefix, this.mode, () =>
+      withWalkProbe(this.prefix, context.dispatch, context.ns?.links, () =>
+        runWithMountContext(
+          () =>
+            runWithCacheManager(this.cacheManager, () =>
+              runWithRevisions(this.revisions.size > 0 ? this.revisions : null, fn),
+            ),
+          this.mountId,
+        ),
+      ),
+    )
+  }
+
+  /**
+   * Refuse a write command no door would see, on a read-only mount.
+   *
+   * A command whose I/O runs under the path guards is refused where it
+   * writes, because only the write knows whether a line writes: `gzip -c`,
+   * `tar -t` and `split -n 1/2` read a read-only mount like any reader, and
+   * `gzip f` is refused at the write of `f.gz`, in gzip's own GNU voice. A
+   * write command that reaches its service some other way (trello's
+   * id-addressed card writes, a custom backend's own verb) is refused here,
+   * before it runs, because no door would see its write. strongestModeUnder,
+   * not effectiveMode: a mount whose only writable region is a show entry
+   * still runs it. Only wrapper-owned responses (help, an injected version)
+   * bypass it. The trailing newline is load-bearing: stderr accumulates
+   * across a line. Mirrors Python's MountEntry._read_only_refusal.
+   */
+  private readOnlyRefusal(
+    cmdName: string,
+    cmd: RegisteredCommand,
+    flags: Record<string, FlagValue>,
+  ): IOResult | null {
+    const infoOnly = flags.help === true || (flags.version === true && hasInjectedVersion(cmd.spec))
+    if (
+      cmd.write &&
+      !cmd.pathGuarded &&
+      !infoOnly &&
+      strongestModeUnder(this.prefix, this.mode) === MountMode.READ
+    ) {
+      return new IOResult({
+        exitCode: 1,
+        stderr: encodeText(`${cmdName}: read-only mount at ${this.prefix}\n`),
+      })
+    }
+    return null
+  }
+
+  /**
+   * Run one handler under the mount-resolved timeout.
+   *
+   * The dispatch-level guard only sees default limits (the mount is unknown
+   * before routing), so the mount-resolved timeout must also bound the
+   * command body: eager commands do their work inside cmd.fn, where the
+   * stream-consumption guard never runs. limitOverride is the caller's
+   * profile, mount and workspace entry; a null one is "no opinion" and must
+   * not shadow this mount's own table. runWithTimeout abandons the promise,
+   * it cannot cancel it; the aborted signal lets a runtime kill what it
+   * spawned (python cancels the task instead). The ambient context.signal
+   * is a background job's kill channel, folded into the same wire.
+   * timeoutSeconds rides along so an engine that executes on the event loop
+   * (quickjs) can interrupt itself when the timer cannot fire. Mirrors
+   * Python's MountEntry._run_handler.
+   */
+  private async runHandler(
+    cmdName: string,
+    cmd: RegisteredCommand,
+    paths: PathSpec[],
+    texts: string[],
+    cmdOpts: CommandOpts,
+    context: ExecContext,
+  ): Promise<CommandFnResult> {
+    const resolvedLimit = resolveLimit(
+      cmdName,
+      [],
+      cmd.limit,
+      context.limitOverride ?? this.commandLimits.get(cmdName) ?? null,
+    )
+    const cmdTimeout = resolvedLimit !== null ? resolvedLimit.timeoutSeconds : null
+    const guard = cmdTimeout !== null && cmdTimeout > 0 ? new AbortController() : null
+    const runSignal = mergeSignals(guard?.signal, context.signal)
+    const runOpts =
+      runSignal !== undefined
+        ? {
+            ...cmdOpts,
+            signal: runSignal,
+            ...(cmdTimeout !== null && cmdTimeout > 0 ? { timeoutSeconds: cmdTimeout } : {}),
+          }
+        : cmdOpts
+    try {
+      return await runWithTimeout(
+        Promise.resolve(cmd.fn(this.vfs.accessor, paths, texts, runOpts)),
+        cmdTimeout,
+        cmdName,
+      )
+    } catch (err) {
+      if (guard !== null && err instanceof CommandTimeoutError) guard.abort()
+      throw err
+    }
+  }
+
+  /** Frame a handler's answer as this mount's command output. Mirrors
+   * Python's MountEntry._wrap_output. */
+  private wrapOutput(
+    cmdName: string,
+    cmd: RegisteredCommand,
+    paths: PathSpec[],
+    result: NonNullable<CommandFnResult>,
+  ): [ByteSource | null, IOResult] {
+    result[1].producer = {
+      command: cmdName,
+      prefixes: [this.prefix],
+      declared: cmd.limit ?? null,
+    }
+    const [stdout, io] = wrapMountStreams(result, this.mountId, this.activity)
+    return [
+      stdout !== null && !(stdout instanceof Uint8Array)
+        ? commandOutput(stdout, io, cmdName, paths)
+        : stdout,
+      io,
+    ]
   }
 
   async executeOp(

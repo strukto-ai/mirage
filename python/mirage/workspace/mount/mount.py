@@ -17,8 +17,8 @@ import dataclasses
 import functools
 import inspect
 import logging
-from collections.abc import AsyncIterator, Awaitable, Iterable
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Awaitable, Iterable, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from typing import Any, Callable
 
 from mirage.cache.context import push_cache_manager
@@ -62,6 +62,7 @@ from mirage.observe.context import (
     with_revisions,
 )
 from mirage.ops.registry import RegisteredOp
+from mirage.ops.types import StatPath
 from mirage.policy import resolve_limit
 from mirage.runtime.python.host.host_io import host_io, with_host_io
 from mirage.shell.bytes import encode_text
@@ -692,8 +693,8 @@ class MountEntry:
         """Execute a command on this mount's VFS.
 
         Pure dispatch — flag parsing is done upstream in
-        executor/command.py. This method just resolves the
-        command handler and calls it.
+        executor/command.py. This method picks the handler, builds its
+        options, runs it in this mount's scope and wraps what it returns.
 
         Args:
             cmd_name (str): command name.
@@ -709,230 +710,345 @@ class MountEntry:
                 is kept here.
         """
         async with self.use():
-            stdin = context.stdin
-            cwd = context.cwd
-            stat_path = context.stat_path
-            extension = get_extension(paths[0].virtual) if paths else None
-            # A filetype handler is selected from the operand's NAME, and a
-            # directory can carry any extension, so the cascade would hand a
-            # renderer a directory to read. One stat settles it, and only when
-            # a handler for this exact extension exists, so a mount with no
-            # filetype registrations never reaches the probe. The built-in is
-            # what a directory should get: it owns GNU's `Is a directory`
-            # wording, and the renderer owns nothing but its own format.
-            # The DISPATCHER's stat, not the backend's, so a mount root and a
-            # namespace-only directory answer too; None means neither plane
-            # saw anything, in which case the renderer reports its own miss.
-            if (
-                extension is not None
-                and paths
-                and stat_path is not None
-                and (cmd_name, extension) in self._cmds
-            ):
-                entry = await stat_path(paths[0].virtual)
-                if entry is not None and entry.type == FileType.DIRECTORY:
-                    extension = None
-
-            handlers = self._resolve_cascade(
-                cmd_name, extension, self._cmds, self._general_cmds
+            handlers, extension = await self._pick_handlers(
+                cmd_name, paths, context.stat_path
             )
             if not handlers:
                 return None, IOResult(
                     exit_code=127,
                     stderr=encode_text(f"{cmd_name}: command not found"),
                 )
-
-            mount_prefix = self.prefix.rstrip("/")
-            filetype_fns = self.filetype_handlers(cmd_name)
-            is_filetype_cmd = (
-                extension is not None and (cmd_name, extension) in self._cmds
-            )
-
-            # A stdin `-` routed nowhere, so it rides on whichever mount
-            # runs the line, beside the operands that chose it.
-            stdin_slots = (
-                STDIN_DASH_LEADING.get(cmd_name, len(paths))
-                if cmd_name in STDIN_DASH_COMMANDS
-                else 0
-            )
-            paths = [
-                dataclasses.replace(
-                    p, virtual=f"{mount_prefix}/-", vfs_path="-"
-                )
-                if isinstance(p, PathSpec)
-                and index < stdin_slots
-                and p.raw_path == "-"
-                else dataclasses.replace(
-                    p, vfs_path=mount_key(p.virtual, mount_prefix)
-                )
-                if isinstance(p, PathSpec)
-                else p
-                for index, p in enumerate(paths)
-            ]
-
-            # Stamp this mount's backend key onto path-shaped flag values so
-            # backend reads can address them: a single PathSpec (e.g. awk -f,
-            # single grep -f) or a list of PathSpec (multiple grep -f).
-            # Everything else (bools, strings, list[str] like repeated -e) is
-            # not a path and passes through unchanged.
-            flags: dict[str, FlagValue] = FlagBag(flag_kwargs)
-            for k, v in flag_kwargs.items():
-                if isinstance(v, PathSpec):
-                    flags[k] = dataclasses.replace(
-                        v, vfs_path=mount_key(v.virtual, mount_prefix)
-                    )
-                elif (
-                    isinstance(v, list)
-                    and v
-                    and all(isinstance(item, PathSpec) for item in v)
-                ):
-                    specs = [item for item in v if isinstance(item, PathSpec)]
-                    flags[k] = [
-                        dataclasses.replace(
-                            item,
-                            vfs_path=mount_key(item.virtual, mount_prefix),
-                        )
-                        for item in specs
-                    ]
-                else:
-                    flags[k] = v
-            # One typed bag, constructed here and nowhere else; a handler
-            # reads the fields it wants and ignores the rest, so there is no
-            # opt-in registry (mirrors Mount.executeCmd building CommandOpts).
-            opts = CommandOpts(
-                command=cmd_name,
-                stdin=stdin,
-                flags=flags,
-                cwd=PathSpec(
-                    virtual=cwd,
-                    directory=cwd,
-                    resolved=False,
-                    vfs_path=mount_key(cwd, mount_prefix),
-                ),
-                mount_prefix=mount_prefix,
-                filetype_fns=(filetype_fns if not is_filetype_cmd else None),
-                index=self.index,
-                dispatch=context.dispatch,
-                session_id=context.session_id,
-                env=context.env,
-                exec_allowed=context.exec_allowed,
-                exec_path_allowed=context.exec_path_allowed,
-                runtime=context.runtime,
-                runtime_unavailable=context.runtime_unavailable,
-                ns=context.ns,
-                stat_path=stat_path,
-                readdir_path=context.readdir_path,
-                session_view=context.session_view,
-                processes=context.processes,
-                shell=context.shell,
-                argv=context.argv,
-            )
-
-            recording_token = push_mount_context(self.mount_id)
-            revs_token = push_revisions(self.revisions or None)
-            prev_manager = push_cache_manager(self.cache_manager)
-            # What the command tier's mode guard reads: each write the
-            # handler makes is held to its own region's mode.
-            gate_token = set_mount_gate(self.prefix, self.mode)
-            # What the command tier's walk guard proves an operand's `.`
-            # and `..` with: the handler reaches its backend past the
-            # door, so the door's stat and link follow are bound here.
-            links = context.ns.links if context.ns is not None else None
-            walk_token = (
-                set_walk_probe(
-                    WalkProbe(
-                        stat=functools.partial(
-                            dispatch_stat, context.dispatch
-                        ),
-                        follow=link_follow(links),
-                    )
-                )
-                if context.dispatch is not None
-                else None
-            )
-            try:
+            paths = self._keyed_paths(cmd_name, paths)
+            flags = self._keyed_flags(flag_kwargs)
+            opts = self._command_opts(cmd_name, extension, flags, context)
+            with self._command_scope(context):
                 for cmd in handlers:
-                    # Only wrapper-owned responses bypass the write guard.
-                    info_only = flags.get("help") is True or (
-                        flags.get("version") is True
-                        and has_injected_version(cmd.spec)
+                    refusal = self._read_only_refusal(cmd_name, cmd, flags)
+                    if refusal is not None:
+                        return None, refusal
+                    result = await self._run_handler(
+                        cmd_name, cmd, paths, texts, opts, context
                     )
-                    # A command whose I/O runs under the path guards is
-                    # refused where it writes, because only the write
-                    # knows whether a line writes: `gzip -c`, `tar -t` and
-                    # `split -n 1/2` read a read-only mount like any
-                    # reader, and `gzip f` is refused at the write of
-                    # `f.gz`, in gzip's own GNU voice. A write command
-                    # that reaches its service some other way (trello's
-                    # id-addressed card writes, a custom backend's own
-                    # verb) is refused here, before it runs, because no
-                    # door would see its write. strongest_mode_under, not
-                    # effective_mode: a mount whose only writable region
-                    # is a show entry still runs it. The trailing newline
-                    # is load-bearing: stderr accumulates across a line.
-                    if (
-                        cmd.write
-                        and not cmd.path_guarded
-                        and not info_only
-                        and strongest_mode_under(self.prefix, self.mode)
-                        == MountMode.READ
-                    ):
-                        return None, IOResult(
-                            exit_code=1,
-                            stderr=encode_text(
-                                f"{cmd_name}: read-only mount "
-                                f"at {self.prefix}\n"
-                            ),
-                        )
-                    # The dispatch-level guard only sees default limits
-                    # (the mount is unknown before routing), so the
-                    # mount-resolved timeout must also bound the command
-                    # body: eager commands do their work inside cmd.fn,
-                    # where the stream-consumption guard never runs.
-                    resolved_limit = resolve_limit(
-                        cmd_name,
-                        command_default=cmd.limit,
-                        mount_override=context.limit_override
-                        or self.command_limits.get(cmd_name),
-                    )
-                    cmd_timeout = (
-                        resolved_limit.timeout_seconds
-                        if resolved_limit is not None
-                        else None
-                    )
-                    with host_io():
-                        result = await run_with_timeout(
-                            cmd.fn(self.vfs.accessor, paths, texts, opts),
-                            cmd_timeout,
-                            cmd_name,
-                        )
                     if result is not None:
-                        stream, io = _wrap_mount_streams(
-                            result,
-                            self.revisions or None,
-                            self.mount_id,
-                            self.activity,
-                        )
-                        io.producer = Producer(
-                            command=cmd_name,
-                            prefixes=(self.prefix,),
-                            declared=cmd.limit,
-                        )
-                        if stream is not None and not isinstance(
-                            stream, bytes
-                        ):
-                            stream = _command_output(
-                                stream, io, cmd_name, paths
-                            )
-                        return stream, io
+                        return self._wrap_output(cmd_name, cmd, paths, result)
                 return None, IOResult()
-            finally:
-                if walk_token is not None:
-                    reset_walk_probe(walk_token)
-                reset_mount_gate(gate_token)
-                reset_revisions(revs_token)
-                reset_active_recorder(recording_token)
-                push_cache_manager(prev_manager)
+
+    async def _pick_handlers(
+        self,
+        cmd_name: str,
+        paths: list[PathSpec],
+        stat_path: StatPath | None,
+    ) -> tuple[list[RegisteredCommand], str | None]:
+        """The handlers to try in order, and the extension that chose them.
+
+        A filetype handler is selected from the operand's NAME, and a
+        directory can carry any extension, so the cascade would hand a
+        renderer a directory to read. One stat settles it, and only when
+        a handler for this exact extension exists, so a mount with no
+        filetype registrations never reaches the probe. The built-in is
+        what a directory should get: it owns GNU's `Is a directory`
+        wording, and the renderer owns nothing but its own format. The
+        DISPATCHER's stat, not the backend's, so a mount root and a
+        namespace-only directory answer too; None means neither plane
+        saw anything, in which case the renderer reports its own miss.
+
+        Args:
+            cmd_name (str): command name.
+            paths (list[PathSpec]): positional path args.
+            stat_path (StatPath | None): the dispatcher's stat.
+        """
+        extension = get_extension(paths[0].virtual) if paths else None
+        if (
+            extension is not None
+            and paths
+            and stat_path is not None
+            and (cmd_name, extension) in self._cmds
+        ):
+            entry = await stat_path(paths[0].virtual)
+            if entry is not None and entry.type == FileType.DIRECTORY:
+                extension = None
+        handlers = self._resolve_cascade(
+            cmd_name, extension, self._cmds, self._general_cmds
+        )
+        return handlers, extension
+
+    def _keyed_paths(
+        self, cmd_name: str, paths: list[PathSpec]
+    ) -> list[PathSpec]:
+        """Stamp this mount's backend key onto each path operand.
+
+        A stdin `-` routed nowhere, so it rides on whichever mount runs
+        the line, beside the operands that chose it.
+
+        Args:
+            cmd_name (str): command name.
+            paths (list[PathSpec]): positional path args.
+        """
+        mount_prefix = self.prefix.rstrip("/")
+        stdin_slots = (
+            STDIN_DASH_LEADING.get(cmd_name, len(paths))
+            if cmd_name in STDIN_DASH_COMMANDS
+            else 0
+        )
+        return [
+            dataclasses.replace(p, virtual=f"{mount_prefix}/-", vfs_path="-")
+            if isinstance(p, PathSpec)
+            and index < stdin_slots
+            and p.raw_path == "-"
+            else dataclasses.replace(
+                p, vfs_path=mount_key(p.virtual, mount_prefix)
+            )
+            if isinstance(p, PathSpec)
+            else p
+            for index, p in enumerate(paths)
+        ]
+
+    def _keyed_flags(
+        self, flag_kwargs: dict[str, FlagValue]
+    ) -> dict[str, FlagValue]:
+        """Stamp this mount's backend key onto path-shaped flag values.
+
+        Backend reads can then address them: a single PathSpec (e.g. awk
+        -f, single grep -f) or a list of PathSpec (multiple grep -f).
+        Everything else (bools, strings, list[str] like repeated -e) is
+        not a path and passes through unchanged.
+
+        Args:
+            flag_kwargs (dict[str, FlagValue]): parsed flags from upstream.
+        """
+        mount_prefix = self.prefix.rstrip("/")
+        flags: dict[str, FlagValue] = FlagBag(flag_kwargs)
+        for k, v in flag_kwargs.items():
+            if isinstance(v, PathSpec):
+                flags[k] = dataclasses.replace(
+                    v, vfs_path=mount_key(v.virtual, mount_prefix)
+                )
+            elif (
+                isinstance(v, list)
+                and v
+                and all(isinstance(item, PathSpec) for item in v)
+            ):
+                specs = [item for item in v if isinstance(item, PathSpec)]
+                flags[k] = [
+                    dataclasses.replace(
+                        item, vfs_path=mount_key(item.virtual, mount_prefix)
+                    )
+                    for item in specs
+                ]
+            else:
+                flags[k] = v
+        return flags
+
+    def _command_opts(
+        self,
+        cmd_name: str,
+        extension: str | None,
+        flags: dict[str, FlagValue],
+        context: ExecContext,
+    ) -> CommandOpts:
+        """The one typed bag a handler reads, built here and nowhere else.
+
+        A handler reads the fields it wants and ignores the rest, so there
+        is no opt-in registry (mirrors Mount.executeCmd building
+        CommandOpts).
+
+        Args:
+            cmd_name (str): command name.
+            extension (str | None): the extension that chose the handler.
+            flags (dict[str, FlagValue]): the keyed flags.
+            context (ExecContext): the invocation's execution context.
+        """
+        mount_prefix = self.prefix.rstrip("/")
+        cwd = context.cwd
+        is_filetype_cmd = (
+            extension is not None and (cmd_name, extension) in self._cmds
+        )
+        return CommandOpts(
+            command=cmd_name,
+            stdin=context.stdin,
+            flags=flags,
+            cwd=PathSpec(
+                virtual=cwd,
+                directory=cwd,
+                resolved=False,
+                vfs_path=mount_key(cwd, mount_prefix),
+            ),
+            mount_prefix=mount_prefix,
+            filetype_fns=(
+                self.filetype_handlers(cmd_name)
+                if not is_filetype_cmd
+                else None
+            ),
+            index=self.index,
+            dispatch=context.dispatch,
+            session_id=context.session_id,
+            env=context.env,
+            exec_allowed=context.exec_allowed,
+            exec_path_allowed=context.exec_path_allowed,
+            runtime=context.runtime,
+            runtime_unavailable=context.runtime_unavailable,
+            ns=context.ns,
+            stat_path=context.stat_path,
+            readdir_path=context.readdir_path,
+            session_view=context.session_view,
+            processes=context.processes,
+            shell=context.shell,
+            argv=context.argv,
+        )
+
+    @contextmanager
+    def _command_scope(self, context: ExecContext) -> Iterator[None]:
+        """Bind what a handler's backend calls read from the context.
+
+        The recorder's mount, the snapshot revision pins and the mount's
+        cache manager; the mode the command tier's mode guard holds each
+        write to (its own region's mode); and what the command tier's
+        walk guard proves an operand's `.` and `..` with: the handler
+        reaches its backend past the door, so the door's stat and link
+        follow are bound here.
+
+        Args:
+            context (ExecContext): the invocation's execution context.
+        """
+        recording_token = push_mount_context(self.mount_id)
+        revs_token = push_revisions(self.revisions or None)
+        prev_manager = push_cache_manager(self.cache_manager)
+        gate_token = set_mount_gate(self.prefix, self.mode)
+        links = context.ns.links if context.ns is not None else None
+        walk_token = (
+            set_walk_probe(
+                WalkProbe(
+                    stat=functools.partial(dispatch_stat, context.dispatch),
+                    follow=link_follow(links),
+                )
+            )
+            if context.dispatch is not None
+            else None
+        )
+        try:
+            yield
+        finally:
+            if walk_token is not None:
+                reset_walk_probe(walk_token)
+            reset_mount_gate(gate_token)
+            reset_revisions(revs_token)
+            reset_active_recorder(recording_token)
+            push_cache_manager(prev_manager)
+
+    def _read_only_refusal(
+        self,
+        cmd_name: str,
+        cmd: RegisteredCommand,
+        flags: dict[str, FlagValue],
+    ) -> IOResult | None:
+        """Refuse a write command no door would see, on a read-only mount.
+
+        A command whose I/O runs under the path guards is refused where
+        it writes, because only the write knows whether a line writes:
+        `gzip -c`, `tar -t` and `split -n 1/2` read a read-only mount like
+        any reader, and `gzip f` is refused at the write of `f.gz`, in
+        gzip's own GNU voice. A write command that reaches its service
+        some other way (trello's id-addressed card writes, a custom
+        backend's own verb) is refused here, before it runs, because no
+        door would see its write. strongest_mode_under, not
+        effective_mode: a mount whose only writable region is a show
+        entry still runs it. Only wrapper-owned responses (help, an
+        injected version) bypass it. The trailing newline is
+        load-bearing: stderr accumulates across a line.
+
+        Args:
+            cmd_name (str): command name.
+            cmd (RegisteredCommand): the handler about to run.
+            flags (dict[str, FlagValue]): the keyed flags.
+        """
+        info_only = flags.get("help") is True or (
+            flags.get("version") is True and has_injected_version(cmd.spec)
+        )
+        if (
+            cmd.write
+            and not cmd.path_guarded
+            and not info_only
+            and strongest_mode_under(self.prefix, self.mode) == MountMode.READ
+        ):
+            return IOResult(
+                exit_code=1,
+                stderr=encode_text(
+                    f"{cmd_name}: read-only mount at {self.prefix}\n"
+                ),
+            )
+        return None
+
+    async def _run_handler(
+        self,
+        cmd_name: str,
+        cmd: RegisteredCommand,
+        paths: list[PathSpec],
+        texts: list[str],
+        opts: CommandOpts,
+        context: ExecContext,
+    ) -> Any:
+        """Run one handler under the mount-resolved timeout.
+
+        The dispatch-level guard only sees default limits (the mount is
+        unknown before routing), so the mount-resolved timeout must also
+        bound the command body: eager commands do their work inside
+        cmd.fn, where the stream-consumption guard never runs.
+
+        Args:
+            cmd_name (str): command name.
+            cmd (RegisteredCommand): the handler to run.
+            paths (list[PathSpec]): the keyed path operands.
+            texts (list[str]): positional text args.
+            opts (CommandOpts): the handler's options.
+            context (ExecContext): the invocation's execution context.
+        """
+        resolved_limit = resolve_limit(
+            cmd_name,
+            command_default=cmd.limit,
+            mount_override=context.limit_override
+            or self.command_limits.get(cmd_name),
+        )
+        cmd_timeout = (
+            resolved_limit.timeout_seconds
+            if resolved_limit is not None
+            else None
+        )
+        with host_io():
+            return await run_with_timeout(
+                cmd.fn(self.vfs.accessor, paths, texts, opts),
+                cmd_timeout,
+                cmd_name,
+            )
+
+    def _wrap_output(
+        self,
+        cmd_name: str,
+        cmd: RegisteredCommand,
+        paths: list[PathSpec],
+        result: Any,
+    ) -> tuple[ByteSource | None, IOResult]:
+        """Frame a handler's answer as this mount's command output.
+
+        Args:
+            cmd_name (str): command name.
+            cmd (RegisteredCommand): the handler that answered.
+            paths (list[PathSpec]): the keyed path operands.
+            result (Any): the handler's ``(stream, io)`` answer.
+        """
+        stream, io = _wrap_mount_streams(
+            result,
+            self.revisions or None,
+            self.mount_id,
+            self.activity,
+        )
+        io.producer = Producer(
+            command=cmd_name,
+            prefixes=(self.prefix,),
+            declared=cmd.limit,
+        )
+        if stream is not None and not isinstance(stream, bytes):
+            stream = _command_output(stream, io, cmd_name, paths)
+        return stream, io
 
     def supports_op(self, op_name: str, path: str) -> bool:
         """Report whether an op would resolve for a path on this mount.
