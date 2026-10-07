@@ -137,6 +137,10 @@ const REDIRECT_CHAIN: ReadonlySet<string> = new Set([
   NodeType.NEGATED_COMMAND,
 ])
 
+// Why the gate refuses, under a rule, a command that runs lines it cannot
+// see into: a sourced file, a script, a bash option mirage does not read.
+export const UNREADABLE_LINES = 'runs lines the gate cannot read'
+
 /**
  * A command the gate let through, and what its own I/O may touch.
  *
@@ -509,7 +513,8 @@ function refuse(name: string, reason: string): Refused {
   return { stderr, exitCode, refusal: refusalOf(deny) }
 }
 
-function unreadable(raw: string): string {
+/** Why the gate refuses a word only the runtime can expand. */
+export function unreadable(raw: string): string {
   return `cannot read ${raw} before the runtime expands it`
 }
 
@@ -623,7 +628,7 @@ async function admitWords(
   }
   for (const inner of innerLines(name, words.slice(1))) {
     if (!innerReadable(inner)) {
-      if (hasRules(rules)) return refuse(name, 'runs lines the gate cannot read')
+      if (hasRules(rules)) return refuse(name, UNREADABLE_LINES)
       continue
     }
     let innerRefusal: Refused | null

@@ -764,6 +764,31 @@ describe('prejudge', () => {
     }
   })
 
+  it('explains a line the gate cannot read as refused', async () => {
+    // Under a rule, a whole-line runtime's gate refuses a command whose lines
+    // it cannot see into (a sourced file, a bash option mirage does not
+    // read), and explain says exactly what the run says.
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: await getTestParser(),
+        profiles: { r: parseSessionProfile({ commands: { allow: ['bash', 'source', 'rm'] } }) },
+        runtimes: [new LineBox(), 'workspace'],
+      },
+    )
+    open.push(w)
+    w.createSession('s', { profile: 'r' })
+    for (const line of ['source /data/f.sh', "bash --restricted -c 'rm /data/x'"]) {
+      const said = await judged(w, line, 's', true)
+      const ran = await w.shell(line, { sessionId: 's' })
+      expect(ran.exitCode).toBe(126)
+      expect(said.filter((e) => e.exitCode !== 0).map((e) => [e.exitCode, e.stderr])).toEqual([
+        [126, DEC.decode(ran.stderr)],
+      ])
+    }
+  })
+
   it('leaves a path the pass cannot read to the gate', async () => {
     // Read as typed in the cwd the pass last knew, `$F` and a relative
     // word after `cd "$d"` matched the rule's glob, refusing whole lines

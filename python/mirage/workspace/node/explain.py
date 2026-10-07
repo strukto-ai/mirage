@@ -56,6 +56,7 @@ from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import (
+    UNREADABLE_LINES,
     Refused,
     admit,
     classified_words,
@@ -63,6 +64,7 @@ from mirage.workspace.node.admission import (
     is_pending_refusal,
     redirect_paths,
     statement_redirects,
+    unreadable,
 )
 from mirage.workspace.node.inner_lines import Word, inner_lines
 from mirage.workspace.node.occurrence import (
@@ -79,8 +81,6 @@ from mirage.workspace.node.occurrence import (
 )
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.shell_dirs import home_dir
-
-UNREADABLE = "cannot read {raw} before the runtime expands it"
 
 # How the explanation tree names a parse node that shapes a line; a node
 # not here (a redirected or negated statement) is read through.
@@ -163,17 +163,17 @@ class Judgment:
     operands: tuple[ShellOperand, ...] = ()
 
 
-def _unreadable(raw: str) -> Judgment:
-    """The explanation of a word only the runtime can expand.
+def _denied(command: str, reason: str) -> Judgment:
+    """The explanation of a command the gate refuses outright.
 
     Args:
-        raw (str): the word as typed.
+        command (str): the command's name as typed.
+        reason (str): why the gate refuses it.
     """
-    reason = UNREADABLE.format(raw=raw)
     deny = Deny(reason)
-    err, code = render_deny(raw, deny)
+    err, code = render_deny(command, deny)
     return Judgment(
-        command=raw,
+        command=command,
         outcome=Outcome.DENY,
         reason=reason,
         exit_code=code,
@@ -416,7 +416,11 @@ async def _judge_words(
     head = words[0]
     if head.text is None:
         if whole_line and has_rules(session.commands):
-            return [Judged(_unreadable(head.raw), occurrence, False)]
+            return [
+                Judged(
+                    _denied(head.raw, unreadable(head.raw)), occurrence, False
+                )
+            ]
         return []
     stated = stated and all(
         w.text is not None for w in [*words, *redirect_words]
@@ -478,6 +482,17 @@ async def _judge_words(
     ]
     for inner in inner_lines(name, words[1:]):
         if not inner.readable:
+            if whole_line and has_rules(session.commands):
+                return [
+                    Judged(
+                        _with_operands(
+                            _denied(name, UNREADABLE_LINES), operands
+                        ),
+                        occurrence,
+                        stated,
+                        intrinsic,
+                    )
+                ]
             continue
         if inner.line is not None:
             out.extend(

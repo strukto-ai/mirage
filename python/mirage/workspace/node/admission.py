@@ -109,6 +109,10 @@ from mirage.workspace.session.shell_dirs import home_dir
 # last one: `! cat < f` parses as redirected(negated(cat), < f).
 REDIRECT_CHAIN = frozenset({NT.LIST, NT.PIPELINE, NT.NEGATED_COMMAND})
 
+# Why the gate refuses, under a rule, a command that runs lines it cannot
+# see into: a sourced file, a script, a bash option mirage does not read.
+UNREADABLE_LINES = "runs lines the gate cannot read"
+
 
 @dataclass(frozen=True, slots=True)
 class Refused:
@@ -572,7 +576,12 @@ def _refuse(name: str, reason: str) -> Refused:
     return Refused(err, code, refusal_of(deny))
 
 
-def _unreadable(raw: str) -> str:
+def unreadable(raw: str) -> str:
+    """Why the gate refuses a word only the runtime can expand.
+
+    Args:
+        raw (str): the word as typed.
+    """
     return f"cannot read {raw} before the runtime expands it"
 
 
@@ -702,7 +711,7 @@ async def _admit_words(
     """
     head = words[0]
     if head.text is None and has_rules(rules):
-        return _refuse(head.raw, _unreadable(head.raw))
+        return _refuse(head.raw, unreadable(head.raw))
     name = head.value
     args = [w.value for w in words[1:]]
     line = [name, *args]
@@ -740,14 +749,14 @@ async def _admit_words(
     if (unread is not None or open_) and reads_args(rules, name):
         return _refuse(
             name,
-            _unreadable(unread)
+            unreadable(unread)
             if unread is not None
             else "runs on operands the gate cannot read",
         )
     for inner in inner_lines(name, words[1:]):
         if not inner.readable:
             if has_rules(rules):
-                return _refuse(name, "runs lines the gate cannot read")
+                return _refuse(name, UNREADABLE_LINES)
             continue
         if inner.line is not None:
             frame = (
