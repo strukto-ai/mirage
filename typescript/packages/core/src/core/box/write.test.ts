@@ -99,7 +99,7 @@ function spec(virtual: string): PathSpec {
 }
 
 // Box's upload reply: a one-entry collection of the stored file.
-function uploadReply(fields: Record<string, unknown> = {}): unknown {
+function uploadReply(): unknown {
   const entry = {
     type: 'file',
     id: '500',
@@ -108,7 +108,6 @@ function uploadReply(fields: Record<string, unknown> = {}): unknown {
     sha1: 's5',
     modified_at: '2026-01-01T00:00:00Z',
     etag: '1',
-    ...fields,
   }
   return { total_count: 1, entries: [entry] }
 }
@@ -414,13 +413,12 @@ describe('box write ops', () => {
   })
 })
 
-// [name, upload reply, expected bytes, expected fingerprint] for 5 written
-// bytes. 's5' is a token no local hash produces.
-const BOX_REPLY_ROWS: [string, unknown, number, string | null][] = [
-  ['agrees', uploadReply(), 5, 's5'],
-  ['stored size differs', uploadReply({ size: 9 }), 9, 's5'],
-  ['no entries', { total_count: 0, entries: [] }, 5, null],
-  ['non-dict reply', ['not', 'a', 'dict'], 5, null],
+// [name, upload reply, expected fingerprint] for 5 written bytes. 's5' is a
+// token no local hash produces; a reply holding no file entry records none.
+const BOX_REPLY_ROWS: [string, unknown, string | null][] = [
+  ['agrees', uploadReply(), 's5'],
+  ['no entries', { total_count: 0, entries: [] }, null],
+  ['non-dict reply', ['not', 'a', 'dict'], null],
 ]
 
 describe.each([
@@ -447,10 +445,21 @@ describe.each([
     return records.map((r) => [r.op, r.path, r.bytes, r.fingerprint, r.revision])
   }
 
-  it.each(BOX_REPLY_ROWS)('%s', async (_name, reply, bytes, token) => {
-    expect(await writeRecorded(reply)).toEqual([['write', virtual, bytes, token, null]])
+  it.each(BOX_REPLY_ROWS)('%s', async (_name, reply, token) => {
+    expect(await writeRecorded(reply)).toEqual([['write', virtual, 5, token, null]])
     // Recorded before the eviction, so the record exists when the cache
     // reacts to the write.
     expect(H.order).toEqual(['record', 'invalidate'])
+  })
+
+  it('a write whose reply fails still evicts the path', async () => {
+    // Box may have stored the bytes before the reply broke off, so the cached
+    // copy is stale either way.
+    vi.mocked(api.uploadNewFile).mockRejectedValue(new Error('reply cut off'))
+    vi.mocked(api.uploadFileVersion).mockRejectedValue(new Error('reply cut off'))
+    await expect(
+      write(makeAccessor(), spec(virtual), new TextEncoder().encode('hello')),
+    ).rejects.toThrow('reply cut off')
+    expect(H.order).toEqual(['invalidate'])
   })
 })

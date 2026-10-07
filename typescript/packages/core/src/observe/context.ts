@@ -168,8 +168,7 @@ export function startOp(): OpTimer {
  * The one place an op's duration and wall-clock stamp are read, shared
  * by the recorder sink ({@link record}) and by the `Ops` facade's own
  * ledger, so the two cannot disagree about what a duration measures.
- * `path` is stored as given. `nbytes`: bytes transferred, as
- * `OpRecord.bytes` describes them.
+ * `path` is stored as given.
  */
 export function finishRecord(
   op: string,
@@ -196,9 +195,7 @@ export function finishRecord(
 /**
  * Append a finished record to the active recording, if any.
  *
- * `path`: the full virtual path. `nbytes`: bytes transferred; for a
- * `write`, the size the backend reports storing, falling back to the bytes
- * sent.
+ * `path`: the full virtual path.
  */
 export function record(
   op: string,

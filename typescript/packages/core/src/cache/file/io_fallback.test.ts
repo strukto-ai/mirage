@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { IOResult, type ByteSource } from '../../io/types.ts'
+import { IOResult } from '../../io/types.ts'
 import { OpRecord } from '../../observe/record.ts'
 import { applyIo } from './io.ts'
 import { RAMFileCacheStore } from './ram.ts'
@@ -30,41 +30,21 @@ vi.mock('../../utils/async_context.ts', async (importOriginal) => {
 
 const ENC = new TextEncoder()
 
-function writeRecord(nbytes: number, claimed: ByteSource | null): OpRecord {
-  return new OpRecord({
-    op: 'write',
-    path: '/s3/f.txt',
-    source: 's3',
-    bytes: nbytes,
-    timestamp: 0,
-    durationMs: 0,
-    fingerprint: 'etag-put-2',
-    claimed,
-  })
-}
-
-async function applyWritten(
-  cache: RAMFileCacheStore,
-  nbytes: number,
-  claim: boolean,
-): Promise<void> {
-  const written = ENC.encode('new')
-  const io = new IOResult({ writes: { '/s3/f.txt': written }, cache: ['/s3/f.txt'] })
-  await applyIo(cache, io, undefined, [writeRecord(nbytes, claim ? written : null)])
-}
-
 describe('applyIo on storage that does not isolate tasks', () => {
   it('keeps written bytes whose newest write looks unclaimed, with the token', async () => {
     const cache = new RAMFileCacheStore()
-    await applyWritten(cache, 3, false)
+    const io = new IOResult({ writes: { '/s3/f.txt': ENC.encode('new') }, cache: ['/s3/f.txt'] })
+    const unclaimed = new OpRecord({
+      op: 'write',
+      path: '/s3/f.txt',
+      source: 's3',
+      bytes: 3,
+      timestamp: 0,
+      durationMs: 0,
+      fingerprint: 'etag-put-2',
+    })
+    await applyIo(cache, io, undefined, [unclaimed])
     expect(await cache.get('/s3/f.txt')).toEqual(ENC.encode('new'))
     expect(await cache.isFresh('/s3/f.txt', 'etag-put-2')).toBe(true)
-  })
-
-  it('still drops written bytes stored at another size', async () => {
-    const cache = new RAMFileCacheStore()
-    await cache.set('/s3/f.txt', ENC.encode('old'))
-    await applyWritten(cache, 9, true)
-    expect(await cache.get('/s3/f.txt')).toBeNull()
   })
 })

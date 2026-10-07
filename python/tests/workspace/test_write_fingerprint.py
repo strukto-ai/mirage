@@ -179,11 +179,14 @@ def test_read_then_write_on_one_line_keeps_the_read_token():
 
 
 def test_write_then_truncate_on_one_line_does_not_pin_stale_bytes():
-    """`truncate` records its own token but hands the cache no bytes, so
-    the entry would otherwise hold tee's content under truncate's token
-    and serve it for the life of the entry."""
+    """`truncate` hands the cache no bytes and claims nothing, so a
+    truncate after tee drops tee's bytes. Bounded, where a kept copy
+    would serve unchecked."""
     store: dict[str, bytes] = {}
-    with _workspace(store, ReadSpec(policy=ReadPolicy.FRESH)) as (ws, _client):
+    with _workspace(store, ReadSpec(policy=ReadPolicy.BOUNDED)) as (
+        ws,
+        _client,
+    ):
 
         async def run() -> bytes:
             try:
@@ -316,6 +319,10 @@ def test_chained_in_place_edits_serve_from_cache():
         pytest.param(
             "x=$(echo aaaa | tee /s3/f; echo bbbb | sed -n 'w /s3/f')",
             id="substitution",
+        ),
+        pytest.param(
+            "x=$(printf 'bbbb\\nzz' | tee /s3/f; truncate -s 5 /s3/f)",
+            id="substitution-truncate",
         ),
     ],
 )

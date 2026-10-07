@@ -106,7 +106,9 @@
         "sharepoint",
         "sharepoint-prefix",
         "ssh",
-        "gdrive"
+        "gdrive",
+        "hf",
+        "hf-prefix"
       ],
       "read": "bounded",
       "ttl": 600,

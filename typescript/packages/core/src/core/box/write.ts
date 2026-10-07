@@ -13,15 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../accessor/box.ts'
-import { invalidateAfterWrite } from '../../cache/context.ts'
+import { evictAfter, invalidateAfterWrite } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
-import { uploadReceipt } from '../../utils/sizes.ts'
+import { uploadToken } from '../../utils/upload.ts'
 import { type BoxItem, uploadFileVersion, uploadNewFile } from './api.ts'
 import { pathParts, resolveItem, resolveParentId } from './resolve.ts'
 import { statFromItem } from './stat.ts'
 
+/**
+ * Upload a new file, or a new version of an existing one. A failed upload
+ * still evicts the path: Box may have stored the bytes before its reply
+ * broke off.
+ */
 export async function write(
   accessor: BoxAccessor,
   path: PathSpec,
@@ -32,22 +37,26 @@ export async function write(
   const tm = accessor.tokenManager
   const timer = startOp()
   const existing = await resolveItem(accessor, parts)
-  let reply: unknown
+  let upload: () => Promise<unknown>
   if (existing !== null && existing.type === 'file') {
     // Overwrite uploads a new version under the same id, keeping Box's own
     // name so a box-native file isn't renamed with the vfs suffix.
-    reply = await uploadFileVersion(tm, existing.id, existing.name, data)
+    upload = () => uploadFileVersion(tm, existing.id, existing.name, data)
   } else {
     const parentId = await resolveParentId(accessor, parts)
     if (parentId === null) throw enoent(path.virtual)
-    reply = await uploadNewFile(tm, parentId, parts[parts.length - 1] ?? '', data)
+    upload = () => uploadNewFile(tm, parentId, parts[parts.length - 1] ?? '', data)
   }
-  const entries: unknown =
-    typeof reply === 'object' && reply !== null && !Array.isArray(reply)
-      ? (reply as { entries?: unknown }).entries
-      : undefined
-  const first = Array.isArray(entries) ? (entries[0] as BoxItem | undefined) : undefined
-  const [nbytes, token] = uploadReceipt(first, statFromItem, data.length, path.virtual)
-  record('write', path.virtual, 'box', nbytes, timer, { fingerprint: token })
-  await invalidateAfterWrite(path)
+  await evictAfter(upload, async (reply) => {
+    if (reply !== undefined) {
+      const entries: unknown =
+        typeof reply === 'object' && reply !== null && !Array.isArray(reply)
+          ? (reply as { entries?: unknown }).entries
+          : undefined
+      const first = Array.isArray(entries) ? (entries[0] as BoxItem | undefined) : undefined
+      const token = uploadToken(first, statFromItem, path.virtual)
+      record('write', path.virtual, 'box', data.length, timer, { fingerprint: token })
+    }
+    await invalidateAfterWrite(path)
+  })
 }

@@ -33,7 +33,7 @@ from mirage.io.types import ByteSource
 # backends that record one stamp no token.
 # `truncate` would also need its record's `bytes` corrected before it
 # could join: it reports 0 while its token describes `length` bytes, so
-# the stored-size check in `written_verdict` would refuse every one.
+# the size check in `written_verdict` would refuse every one.
 READ_FINGERPRINT_OPS = frozenset({"read"})
 WRITE_FINGERPRINT_OPS = frozenset({"write"})
 
@@ -73,10 +73,7 @@ class OpRecord:
         op (str): Operation type ("read", "write", "stat", "readdir", etc.).
         path (str): Virtual path, mount prefix included.
         source (str): VFS name ("s3", "ram", "disk").
-        bytes (int): Bytes transferred (0 for metadata ops). A ``write``
-            a backend writer records (a shell line's) carries the size the
-            backend reports storing, falling back to the bytes sent; one
-            the ``Ops`` facade records (``ws.ops``, FUSE) the bytes sent.
+        bytes (int): Bytes transferred (0 for metadata ops).
         timestamp (int): UTC epoch milliseconds.
         duration_ms (int): Wall-clock duration.
         fingerprint (str | None): On a read, on an object store's

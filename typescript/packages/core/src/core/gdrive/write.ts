@@ -13,15 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { invalidateAfterWrite } from '../../cache/context.ts'
+import { evictAfter, invalidateAfterWrite } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eacces, eisdir } from '../../errors/fs.ts'
-import { uploadReceipt } from '../../utils/sizes.ts'
+import { uploadToken } from '../../utils/upload.ts'
 import { type DriveFile, updateFileContent, uploadFile } from '../google/drive.ts'
 import { statFromItem } from './stat.ts'
 import { eaccesOnDenied, isFolder, isNative, resolveKey, resolveParent } from './resolve.ts'
 
+/**
+ * Upload a new file, or new content for an existing one. A failed upload
+ * still evicts the path: Drive may have stored the bytes before its reply
+ * broke off.
+ */
 async function writeImpl(
   accessor: GDriveAccessor,
   path: PathSpec,
@@ -35,17 +40,21 @@ async function writeImpl(
   if (node !== null && isFolder(node)) throw eisdir(path)
   // Google-native files are written through the gws commands, not raw bytes.
   if (node !== null && isNative(node)) throw eacces(path)
-  let reply: DriveFile
+  let upload: () => Promise<DriveFile>
   if (node !== null) {
-    reply = await updateFileContent(tm, node.id, data)
+    upload = () => updateFileContent(tm, node.id, data)
   } else {
     const [parentId] = await resolveParent(accessor, path)
     const basename = key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key
-    reply = await uploadFile(tm, basename, parentId, data)
+    upload = () => uploadFile(tm, basename, parentId, data)
   }
-  const [nbytes, token] = uploadReceipt(reply, statFromItem, data.length, path.virtual)
-  record('write', path.virtual, 'gdrive', nbytes, timer, { fingerprint: token })
-  await invalidateAfterWrite(path)
+  await evictAfter(upload, async (reply) => {
+    if (reply !== undefined) {
+      const token = uploadToken(reply, statFromItem, path.virtual)
+      record('write', path.virtual, 'gdrive', data.length, timer, { fingerprint: token })
+    }
+    await invalidateAfterWrite(path)
+  })
 }
 
 export const write = eaccesOnDenied(writeImpl)

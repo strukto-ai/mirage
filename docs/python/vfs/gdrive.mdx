@@ -115,13 +115,9 @@ a write mount can still hold items you may not edit. A mutation the
 API denies fails with `EACCES` (Permission denied) on that operand,
 like a real filesystem; the rest of the mount keeps working.
 
-A write records the `md5Checksum` (else the `headRevisionId`) and the size
-that the upload reply names for the stored file. A command that reports
-the bytes it wrote, such as `tee` or `sed -i`, keeps them in the file
-cache under that token, so a fresh read right after the write checks that
-token and downloads nothing. When the reply reports a size other than the
-bytes sent, nothing is cached and the next read downloads the file. See
-[Writes](/home/cache#writes).
+A write records the `md5Checksum` (else the `headRevisionId`) its upload
+reply names, so a `fresh` read right after a `tee` or `sed -i` downloads
+nothing. See [Writes](/home/cache#writes).
 
 ### Writing inside a Shared Drive
 

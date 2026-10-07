@@ -115,13 +115,12 @@ const HAPPY: Record<string, unknown> = {
 }
 
 // [name, overrides on the fake's public() reply (null removes), expected
-// bytes, expected fingerprint] for 5 written bytes. The literal tokens are
-// ones no local hash produces.
-const REPLY_ROWS: [string, Record<string, unknown>, number, string | null][] = [
-  ['agrees', {}, 5, 'm5'],
-  ['stored size differs', { size: '9' }, 9, 'm5'],
-  ['no md5 takes the head revision', { md5Checksum: null }, 5, 'r5'],
-  ['no mimeType counts as non-native', { mimeType: null }, 5, 'm5'],
+// fingerprint] for 5 written bytes. The literal tokens are ones no local hash
+// produces.
+const REPLY_ROWS: [string, Record<string, unknown>, string | null][] = [
+  ['agrees', {}, 'm5'],
+  ['no md5 takes the head revision', { md5Checksum: null }, 'r5'],
+  ['no mimeType counts as non-native', { mimeType: null }, 'm5'],
 ]
 
 function withOverrides(
@@ -163,11 +162,19 @@ describe.each([
     if (existing) fake.add('f.txt', 'root', undefined, ENC.encode('old'))
   })
 
-  it.each(REPLY_ROWS)('%s', async (_name, overrides, bytes, token) => {
+  it.each(REPLY_ROWS)('%s', async (_name, overrides, token) => {
     replyWith((reply) => withOverrides(reply, overrides))
-    expect(await writeRecorded()).toEqual([['write', '/f.txt', bytes, token, null]])
+    expect(await writeRecorded()).toEqual([['write', '/f.txt', 5, token, null]])
     // Recorded before the eviction, so the record exists when the cache
     // reacts to the write.
     expect(H.order).toEqual(['record', 'invalidate'])
   })
+})
+
+it('a gdrive write whose reply fails still evicts the path', async () => {
+  // Drive may have stored the bytes before the reply broke off, so the cached
+  // copy is stale either way.
+  vi.spyOn(fake, 'uploadFile').mockRejectedValue(new Error('reply cut off'))
+  await expect(writeRecorded()).rejects.toThrow('reply cut off')
+  expect(H.order).toEqual(['invalidate'])
 })

@@ -32,7 +32,7 @@ import { VFSName } from '../types.ts'
 // backends that record one stamp no token.
 // `truncate` would also need its record's `bytes` corrected before it
 // could join: it reports 0 while its token describes `length` bytes, so
-// the stored-size check in `writtenVerdict` would refuse every one.
+// the size check in `writtenVerdict` would refuse every one.
 export const READ_FINGERPRINT_OPS: ReadonlySet<string> = new Set(['read'])
 export const WRITE_FINGERPRINT_OPS: ReadonlySet<string> = new Set(['write'])
 
@@ -81,12 +81,6 @@ export interface OpRecordInit {
   op: string
   path: string
   source: string
-  /**
-   * Bytes transferred (0 for metadata ops). A `write` a backend writer
-   * records (a shell line's) carries the size the backend reports storing,
-   * falling back to the bytes sent; one the `Ops` facade records
-   * (`ws.ops`, FUSE) the bytes sent.
-   */
   bytes: number
   timestamp: number
   durationMs: number

@@ -49,20 +49,11 @@ One check answers for a whole command: later listings of the same mount (or, on 
 
 ### Writes
 
-A command that writes a file and reports the bytes it wrote, such as `tee`, `sed -i`, `sort -o`, `uniq` or `xxd`, keeps those bytes in the file cache, so the next read on the mount needs no download. The cached copy carries the token the backend's own upload reply names for what it stored: the ETag on an object store, the md5 (else the head revision) on Google Drive, the `sha1` on Box, the `content_hash` on Dropbox. That is the same kind of token the backend's `stat` reports, so under `read: fresh` the next read's probe matches it and the copy is served without a download. A shell line's write record also carries the size the reply reports storing, falling back to the bytes sent, and that is the byte count the observer log and `network_bytes` (`networkBytes` in TypeScript) show for it; a write through `ws.ops` or FUSE records the bytes sent.
+A command that writes a file and reports the bytes it wrote, such as `tee`, `sed -i`, `sort -o`, `uniq` or `xxd`, keeps those bytes in the file cache, so the next read needs no download. The cached copy carries the token the upload reply names: the ETag on an object store, the md5 (else the head revision) on Google Drive, the `sha1` on Box, the `content_hash` on Dropbox. That is the kind of token `stat` reports, so under `read: fresh` the next read checks it and downloads nothing.
 
-The bytes are kept only when the newest `write` recorded for that path on the line is the reporting command's own, and the backend reports storing exactly that many bytes. "Newest" is the order the backend's replies arrived in, and only `write` operations are compared: a `truncate` of the path later on the line is not seen, so `echo aaaa | tee F; truncate -s 2 F` keeps tee's bytes. (A `>>` append takes the path out of what the line caches, so it is dropped.) Otherwise nothing is cached and the next read downloads what the backend holds:
+The bytes are kept only when that command made the last change to the file on the line. When something else changed it later on the same line (`sed -n 'w file'`, a script, a concurrent pipeline stage, `xargs -P`, a background job, `truncate`), nothing is cached and the next read downloads the file. In the browser, where concurrent commands cannot be told apart, a later write of the same size is not noticed.
 
-- Another writer reached the same path later on the line without reporting its bytes: `sed -n 'w file'`, an `awk` redirect, a script runtime, or a second command in a concurrent pipeline stage, an `xargs -P` run or a background job.
-- The reply reports a different stored size from the bytes sent, so the file the backend stores is not the file that was sent.
-
-In the browser, where concurrent commands cannot be told apart, the first check is skipped: the reported bytes are kept with the newest write's token whenever the size matches, even if another writer to the same path landed last.
-
-A rewrite is detected only through that size, so a rewrite that keeps the file's length leaves the sent bytes cached.
-
-OneDrive and SharePoint record no token for a write. Graph's `cTag` can move after the upload reply, when SharePoint promotes document properties into an Office file it stores, so the reply's `cTag` cannot vouch for the bytes that were sent. A written OneDrive or SharePoint file is cached with no token: under `fresh` the next read downloads it. Promotion itself is not handled: `bounded` serves the bytes sent until the `ttl` expires, even when SharePoint rewrote them.
-
-Nextcloud, Databricks volumes, SSH and Hugging Face buckets record no token for a write either, so a written file is cached without one there: `bounded` serves it until the `ttl` expires, and where the mount accepts `fresh` the next read downloads it.
+OneDrive and SharePoint record no token for a write: SharePoint can change an Office file after the upload, so the reply's `cTag` cannot vouch for the bytes sent, and under `fresh` the next read downloads the file. Nextcloud, Databricks volumes, SSH and Hugging Face buckets record none either.
 
 ## Stores
 

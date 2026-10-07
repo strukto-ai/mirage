@@ -220,5 +220,5 @@ async def test_an_upload_hands_back_the_stored_file_metadata():
 @pytest.mark.asyncio
 async def test_an_upload_with_a_non_json_body_hands_it_back_unchecked():
     # The upload has landed; an unreadable reply must not raise. The
-    # writer's upload_receipt reads it as no metadata.
+    # writer's upload_token reads it as no metadata.
     assert await _upload(b"not json", "text/plain") == "not json"

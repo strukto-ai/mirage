@@ -36,7 +36,7 @@ def make_accessor(root_path: str = "/") -> DropboxAccessor:
     return DropboxAccessor(config, DropboxTokenManager(config))
 
 
-def _file_metadata(**fields) -> dict:
+def _file_metadata() -> dict:
     # Dropbox's upload reply: the stored file's FileMetadata.
     return {
         ".tag": "file",
@@ -46,7 +46,6 @@ def _file_metadata(**fields) -> dict:
         "server_modified": "2026-01-01T00:00:00Z",
         "size": 5,
         "content_hash": "h5",
-        **fields,
     }
 
 
@@ -72,16 +71,6 @@ async def test_create_uploads_empty_bytes():
         await create(make_accessor(), PathSpec.from_str_path("/new.txt"))
     assert upload.await_args.args[1] == "/new.txt"
     assert upload.await_args.args[2] == b""
-
-
-# (upload reply, expected (bytes, fingerprint)) for 5 written bytes. "h5"
-# is a token no local hash produces.
-_REPLY_ROWS = [
-    (_file_metadata(), (5, "h5")),
-    # The stored size is the reply's, not the bytes sent.
-    (_file_metadata(size=9), (9, "h5")),
-]
-_REPLY_IDS = ["agrees", "stored-size-differs"]
 
 
 async def _write_recorded(reply):
@@ -121,7 +110,7 @@ async def _write_recorded(reply):
 @pytest.mark.asyncio
 async def test_a_write_whose_reply_fails_still_evicts_the_path():
     # Dropbox may have stored the bytes before the reply broke off, so the
-    # cached copy is stale either way; nothing vouches for a write record.
+    # cached copy is stale either way.
     scope = RecordingScope()
     evicted: list[str] = []
 
@@ -154,11 +143,10 @@ async def test_a_write_whose_reply_fails_still_evicts_the_path():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("reply", "expected"), _REPLY_ROWS, ids=_REPLY_IDS)
-async def test_write_records_the_reply_token_and_stored_size(reply, expected):
-    rows, order = await _write_recorded(reply)
-    nbytes, token = expected
-    assert rows == [("write", "/note.txt", nbytes, token, None)]
+async def test_write_records_the_reply_token():
+    # "h5" is a token no local hash produces.
+    rows, order = await _write_recorded(_file_metadata())
+    assert rows == [("write", "/note.txt", 5, "h5", None)]
     # Recorded before the eviction, so the record exists when the cache
     # reacts to the write.
     assert order == [("invalidate", 1)]

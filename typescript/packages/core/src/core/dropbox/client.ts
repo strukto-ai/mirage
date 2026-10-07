@@ -150,7 +150,7 @@ export async function dropboxRpc(
  * Upload one file, overwriting, and return the reply as decoded.
  *
  * The reply is the stored FileMetadata; it is not checked here, since the
- * upload has landed once the call returns and the writer's `uploadReceipt`
+ * upload has landed once the call returns and the writer's `uploadToken`
  * reads it without throwing.
  */
 export async function dropboxUpload(

@@ -105,7 +105,7 @@ beforeEach(() => {
 })
 
 // Dropbox's upload reply: the stored file's FileMetadata.
-function fileMetadata(fields: Record<string, unknown> = {}): Record<string, unknown> {
+function fileMetadata(): Record<string, unknown> {
   return {
     '.tag': 'file',
     name: 'note.txt',
@@ -114,7 +114,6 @@ function fileMetadata(fields: Record<string, unknown> = {}): Record<string, unkn
     server_modified: '2026-01-01T00:00:00Z',
     size: 5,
     content_hash: 'h5',
-    ...fields,
   }
 }
 
@@ -272,13 +271,6 @@ describe('dropbox exists', () => {
   })
 })
 
-// [name, upload reply, expected bytes, expected fingerprint] for 5 written
-// bytes. 'h5' is a token no local hash produces.
-const REPLY_ROWS: [string, unknown, number, string | null][] = [
-  ['agrees', fileMetadata(), 5, 'h5'],
-  ['stored size differs', fileMetadata({ size: 9 }), 9, 'h5'],
-]
-
 describe('dropbox write records the upload reply', () => {
   beforeEach(() => {
     H.order = []
@@ -292,8 +284,9 @@ describe('dropbox write records the upload reply', () => {
     return records.map((r) => [r.op, r.path, r.bytes, r.fingerprint, r.revision])
   }
 
-  it.each(REPLY_ROWS)('%s', async (_name, reply, bytes, token) => {
-    expect(await writeRecorded(reply)).toEqual([['write', '/note.txt', bytes, token, null]])
+  it('records the reply token', async () => {
+    // 'h5' is a token no local hash produces.
+    expect(await writeRecorded(fileMetadata())).toEqual([['write', '/note.txt', 5, 'h5', null]])
     // Recorded before the eviction, so the record exists when the cache
     // reacts to the write.
     expect(H.order).toEqual(['record', 'invalidate'])
@@ -301,7 +294,7 @@ describe('dropbox write records the upload reply', () => {
 
   it('a write whose reply fails still evicts the path', async () => {
     // Dropbox may have stored the bytes before the reply broke off, so the
-    // cached copy is stale either way; nothing vouches for a write record.
+    // cached copy is stale either way.
     vi.mocked(client.dropboxUpload).mockRejectedValue(new Error('reply cut off'))
     await expect(
       write(makeAccessor(), spec('/note.txt'), new TextEncoder().encode('hello')),

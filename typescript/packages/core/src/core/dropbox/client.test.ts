@@ -160,7 +160,7 @@ describe('dropboxUpload', () => {
 
   it('hands a non-JSON body back unchecked, without raising', async () => {
     // The upload has landed; an unreadable reply must not raise. The
-    // writer's uploadReceipt reads it as no metadata.
+    // writer's uploadToken reads it as no metadata.
     expect(await upload('not json', 'text/plain')).toBe('not json')
   })
 })

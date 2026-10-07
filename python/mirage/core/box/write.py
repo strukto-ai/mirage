@@ -13,17 +13,27 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.box import BoxAccessor
-from mirage.cache.context import invalidate_after_write
+from mirage.cache.context import evict_after, invalidate_after_write
 from mirage.core.box.api import upload_file_version, upload_new_file
 from mirage.core.box.resolve import path_parts, resolve_item, resolve_parent_id
 from mirage.core.box.stat import stat_from_item
 from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import record, start_op
-from mirage.types import PathSpec
-from mirage.utils.sizes import upload_receipt
+from mirage.types import JsonValue, PathSpec
+from mirage.utils.upload import upload_token
 
 
 async def write(accessor: BoxAccessor, path: PathSpec, data: bytes) -> None:
+    """Upload a new file, or a new version of an existing one.
+
+    A failed upload still evicts the path: Box may have stored the bytes
+    before its reply broke off.
+
+    Args:
+        accessor (BoxAccessor): Box accessor.
+        path (PathSpec): target path.
+        data (bytes): file content.
+    """
     parts = path_parts(path)
     if not parts:
         raise eisdir(path.virtual)
@@ -33,18 +43,30 @@ async def write(accessor: BoxAccessor, path: PathSpec, data: bytes) -> None:
     if existing is not None and existing.get("type") == "file":
         # Overwrite uploads a new version under the same id, keeping Box's
         # own name so a box-native file isn't renamed with the vfs suffix.
-        reply = await upload_file_version(
+        upload = upload_file_version(
             tm, existing["id"], existing["name"], data
         )
     else:
         parent_id = await resolve_parent_id(accessor, parts)
         if parent_id is None:
             raise enoent(path.virtual)
-        reply = await upload_new_file(tm, parent_id, parts[-1], data)
-    entries = reply.get("entries") if isinstance(reply, dict) else None
-    item = entries[0] if isinstance(entries, list) and entries else None
-    nbytes, token = upload_receipt(
-        item, stat_from_item, len(data), path.virtual
-    )
-    record("write", path.virtual, "box", nbytes, timer, fingerprint=token)
-    await invalidate_after_write(path)
+        upload = upload_new_file(tm, parent_id, parts[-1], data)
+
+    async def settle(reply: JsonValue) -> None:
+        if reply is not None:
+            entries = reply.get("entries") if isinstance(reply, dict) else None
+            item = (
+                entries[0] if isinstance(entries, list) and entries else None
+            )
+            token = upload_token(item, stat_from_item, path.virtual)
+            record(
+                "write",
+                path.virtual,
+                "box",
+                len(data),
+                timer,
+                fingerprint=token,
+            )
+        await invalidate_after_write(path)
+
+    await evict_after(upload, settle)

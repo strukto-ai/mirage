@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import { CachableAsyncIterator } from '../../io/cachable_iterator.ts'
@@ -527,31 +526,6 @@ describe('the token describes the bytes stored', () => {
 
 // ── writtenVerdict: which written bytes a line keeps ─────────────────────
 
-const VERDICT_FIXTURE = new URL(
-  '../../../../../../integ/fixtures/cache/written_verdict.json',
-  import.meta.url,
-)
-
-interface VerdictRow {
-  op: string
-  path: string
-  fingerprint: string | null
-  bytes: number
-  claimed: string | null
-}
-
-interface VerdictCase {
-  name: string
-  path: string
-  records: VerdictRow[] | null
-  nbytes: number
-  expect: { keep: boolean; token: string | null }
-}
-
-const VERDICT_CASES = (
-  JSON.parse(readFileSync(VERDICT_FIXTURE, 'utf-8')) as { cases: VerdictCase[] }
-).cases
-
 describe('latestFingerprint', () => {
   it('reads only reads', () => {
     // A write's token labels written bytes through writtenVerdict; here it
@@ -567,46 +541,21 @@ describe('latestFingerprint', () => {
 })
 
 describe('writtenVerdict', () => {
-  it('reads a non-empty corpus', () => {
-    expect(VERDICT_CASES.length).toBeGreaterThan(0)
+  // The workspace tests pin what a shell line shows. These rows are the rest:
+  // an unrecorded apply, a claim that is an equal copy rather than the very
+  // value cached, and a claim whose bytes or size differ. Mirrors python's
+  // test_written_verdict_where_no_shell_line_reaches.
+  const written = ENC.encode('abc')
+  it.each<[string, [Uint8Array, number][] | undefined, [boolean, string | null]]>([
+    ['unrecorded', undefined, [true, null]],
+    ['equal copy', [[written.slice(), 3]], [true, 'Ta']],
+    ['last byte differs', [[ENC.encode('abd'), 3]], [false, null]],
+    ['shorter prefix', [[ENC.encode('ab'), 3]], [false, null]],
+    ['other size', [[written, 9]], [false, null]],
+  ])('%s', (_name, rows, expected) => {
+    const records = rows?.map(([claimed, n]) => opRecord('write', '/f', 'Ta', n, claimed))
+    expect(writtenVerdict(records, '/f', written, 3)).toEqual(expected)
   })
-
-  it.each(VERDICT_CASES.map((c) => [c.name, c] as const))(
-    'matches the shared fixture: %s',
-    (_name, c) => {
-      // integ/fixtures/cache/written_verdict.json is the contract: the python
-      // suite (tests/cache/file/test_io.py) asserts the same rows. W is the
-      // very value being cached, so a claimed W is the same object; W= is an
-      // equal copy that is not W; X is other bytes of the same length; W~
-      // differs from W only in its last byte; W< is a shorter prefix of W.
-      const written = ENC.encode('abc')
-      const equalCopy = written.slice()
-      const values = new Map<string | null, ByteSource | null>([
-        ['W', written],
-        ['W=', equalCopy],
-        ['X', ENC.encode('xyz')],
-        ['W~', ENC.encode('abd')],
-        ['W<', ENC.encode('ab')],
-        [null, null],
-      ])
-      const records =
-        c.records === null
-          ? undefined
-          : c.records.map((row) =>
-              opRecord(
-                row.op,
-                row.path,
-                row.fingerprint,
-                row.bytes,
-                values.get(row.claimed) ?? null,
-              ),
-            )
-      expect(writtenVerdict(records, c.path, written, c.nbytes)).toEqual([
-        c.expect.keep,
-        c.expect.token,
-      ])
-    },
-  )
 
   it.each([
     ['unfinished', false],

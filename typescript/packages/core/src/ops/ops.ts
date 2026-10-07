@@ -143,11 +143,6 @@ export class Ops {
     return this.records.filter((r) => !r.isCache)
   }
 
-  /**
-   * Total bytes transferred over the network. A shell line's `write` counts
-   * the size the backend reports storing, falling back to the bytes sent; a
-   * `write` through this facade counts the bytes sent.
-   */
   get networkBytes(): number {
     let total = 0
     for (const r of this.records) if (!r.isCache) total += r.bytes

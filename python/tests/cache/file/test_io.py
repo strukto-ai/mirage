@@ -13,8 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import json
-from pathlib import Path
 
 import pytest
 
@@ -25,15 +23,6 @@ from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
 from mirage.observe.record import OpRecord
 from mirage.types import CacheFacts
-
-_VERDICT_FIXTURE = (
-    Path(__file__).parents[4]
-    / "integ"
-    / "fixtures"
-    / "cache"
-    / "written_verdict.json"
-)
-_VERDICT_CASES = json.loads(_VERDICT_FIXTURE.read_text())["cases"]
 
 
 def _record(
@@ -629,52 +618,34 @@ async def test_apply_io_does_not_size_check_a_read(cache):
 # ── written_verdict: which written bytes a line keeps ───────────────────
 
 
-def _verdict_record(
-    row: dict, values: dict[str | None, ByteSource | None]
-) -> OpRecord:
-    return _record(
-        row["op"],
-        row["path"],
-        row["fingerprint"],
-        row["bytes"],
-        values[row["claimed"]],
-    )
-
-
-def test_written_verdict_corpus_is_not_empty():
-    assert _VERDICT_CASES
+_WRITTEN = b"abc"
 
 
 @pytest.mark.parametrize(
-    "case", _VERDICT_CASES, ids=[c["name"] for c in _VERDICT_CASES]
+    ("records", "expected"),
+    [
+        pytest.param(None, (True, None), id="unrecorded"),
+        pytest.param(
+            [(bytes(bytearray(_WRITTEN)), 3)], (True, "Ta"), id="equal-copy"
+        ),
+        pytest.param([(b"abd", 3)], (False, None), id="last-byte-differs"),
+        pytest.param([(b"ab", 3)], (False, None), id="shorter-prefix"),
+        pytest.param([(_WRITTEN, 9)], (False, None), id="other-size"),
+    ],
 )
-def test_written_verdict_matches_the_shared_fixture(case):
-    # integ/fixtures/cache/written_verdict.json is the contract: the
-    # TypeScript suite (packages/core/src/cache/file/io.test.ts) asserts the
-    # same rows. W is the very value being cached, so a claimed W is the
-    # same object; W= is an equal copy that is not W; X is other bytes of
-    # the same length; W~ differs from W only in its last byte; W< is a
-    # shorter prefix of W.
-    written = b"abc"
-    equal_copy = bytes(bytearray(written))
-    assert equal_copy is not written
-    values: dict[str | None, ByteSource | None] = {
-        "W": written,
-        "W=": equal_copy,
-        "X": b"xyz",
-        "W~": b"abd",
-        "W<": b"ab",
-        None: None,
-    }
-    records = (
+def test_written_verdict_where_no_shell_line_reaches(records, expected):
+    # The workspace tests pin what a shell line shows. These rows are the
+    # rest: an unrecorded apply, a claim that is an equal copy rather than
+    # the very value cached, and a claim whose bytes or size differ.
+    # Mirrors the TypeScript writtenVerdict table.
+    recs = (
         None
-        if case["records"] is None
-        else [_verdict_record(row, values) for row in case["records"]]
+        if records is None
+        else [
+            _record("write", "/f", "Ta", n, claimed) for claimed, n in records
+        ]
     )
-    expected = case["expect"]
-    assert cache_io.written_verdict(
-        records, case["path"], written, case["nbytes"]
-    ) == (expected["keep"], expected["token"])
+    assert cache_io.written_verdict(recs, "/f", _WRITTEN, 3) == expected
 
 
 @pytest.mark.asyncio

@@ -66,14 +66,15 @@ export function latestFingerprint(
 /**
  * Whether a line keeps the bytes it wrote to `path`, and their token.
  *
- * Only the newest `write` record of the path counts. Its `claimed` value is
- * what the command that made it put in `IOResult.writes`, so it vouches for
- * `written` only when it is that very value, or equal bytes. Any other
- * value means another writer landed last (a concurrent pipeline stage, an
- * `xargs -P` run, a background job, a door write that claims nothing), and
- * neither the cached bytes nor the pre-write entry are the file. A stored
- * size other than `nbytes` means the backend stored other bytes than it was
- * sent. A line with no write record for the path keeps its bytes untokened.
+ * Only the newest `write` or `truncate` record of the path counts. Its
+ * `claimed` value is what the command that made it put in `IOResult.writes`,
+ * so it vouches for `written` only when it is that very value, or equal
+ * bytes. Any other value means another writer landed last (a concurrent
+ * pipeline stage, an `xargs -P` run, a background job, a door write that
+ * claims nothing, a `truncate`), and neither the cached bytes nor the
+ * pre-write entry are the file. A size other than `nbytes` means the write
+ * moved other bytes than the command claims. A line with no write record
+ * for the path keeps its bytes untokened.
  *
  * `written` is the original `IOResult.writes` value, never bytes joined
  * from it. On storage that does not isolate tasks (the browser host) a
@@ -90,9 +91,15 @@ export function writtenVerdict(
   let newest: OpRecord | undefined
   for (let i = records.length - 1; i >= 0 && newest === undefined; i--) {
     const rec = records[i]
-    if (rec !== undefined && WRITE_FINGERPRINT_OPS.has(rec.op) && rec.path === path) newest = rec
+    if (
+      rec !== undefined &&
+      (WRITE_FINGERPRINT_OPS.has(rec.op) || rec.op === 'truncate') &&
+      rec.path === path
+    )
+      newest = rec
   }
   if (newest === undefined) return [true, null]
+  if (newest.op === 'truncate') return [false, null]
   if (asyncContextIsolatesTasks) {
     const claimed = newest.claimed
     let same = claimed === written

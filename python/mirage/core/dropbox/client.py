@@ -152,7 +152,7 @@ async def dropbox_upload(
 
     The reply is the stored FileMetadata; it is not checked here, since
     the upload has landed once the call returns and the writer's
-    :func:`upload_receipt` reads it without raising.
+    :func:`upload_token` reads it without raising.
 
     Args:
         tm (DropboxTokenManager): token manager.

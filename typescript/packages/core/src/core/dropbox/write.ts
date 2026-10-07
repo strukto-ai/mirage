@@ -13,20 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { evictAfter, invalidateAfterWrite } from '../../cache/context.ts'
+import { evictAfter, invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { uploadReceipt } from '../../utils/sizes.ts'
+import { uploadToken } from '../../utils/upload.ts'
 import type { DropboxEntry } from './api.ts'
 import { dropboxUpload } from './client.ts'
-import { invalidateAncestors } from '../../cache/context.ts'
 import { dropboxPathOf } from './paths.ts'
 import { statFromEntry } from './stat.ts'
 
 // Single-call upload; Dropbox caps it at ~150 MB (larger files need
 // upload sessions, not supported here). A failed upload still evicts the
-// path: Dropbox may have stored the bytes before its reply broke off, and
-// nothing vouches for a record.
+// path: Dropbox may have stored the bytes before its reply broke off.
 export async function write(
   accessor: DropboxAccessor,
   path: PathSpec,
@@ -34,18 +32,11 @@ export async function write(
 ): Promise<void> {
   const timer = startOp()
   await evictAfter(
-    async (): Promise<[unknown]> => [
-      await dropboxUpload(accessor.tokenManager, dropboxPathOf(accessor, path), data),
-    ],
-    async (landed) => {
-      if (landed !== undefined) {
-        const [nbytes, token] = uploadReceipt(
-          landed[0] as DropboxEntry | null,
-          statFromEntry,
-          data.byteLength,
-          path.virtual,
-        )
-        record('write', path.virtual, 'dropbox', nbytes, timer, { fingerprint: token })
+    () => dropboxUpload(accessor.tokenManager, dropboxPathOf(accessor, path), data),
+    async (entry) => {
+      if (entry !== undefined) {
+        const token = uploadToken(entry as DropboxEntry | null, statFromEntry, path.virtual)
+        record('write', path.virtual, 'dropbox', data.byteLength, timer, { fingerprint: token })
       }
       await invalidateAfterWrite(path)
       await invalidateAncestors(path)

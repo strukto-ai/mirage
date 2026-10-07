@@ -15,6 +15,7 @@
 import errno
 from unittest.mock import AsyncMock, patch
 
+import aiohttp
 import pytest
 
 from mirage.core.box.client import BoxApiError
@@ -648,7 +649,7 @@ async def test_a_copy_evicts_after_it_ends(
     assert events == expected
 
 
-def _file_entry(**fields) -> dict:
+def _file_entry() -> dict:
     return {
         "type": "file",
         "id": "500",
@@ -657,26 +658,17 @@ def _file_entry(**fields) -> dict:
         "sha1": "s5",
         "modified_at": "2026-01-01T00:00:00Z",
         "etag": "1",
-        **fields,
     }
 
 
-# (upload reply, expected (bytes, fingerprint)) for 5 written bytes. "s5"
-# is a token no local hash produces.
+# (upload reply, expected fingerprint) for 5 written bytes. "s5" is a
+# token no local hash produces; a reply holding no file entry records none.
 _BOX_REPLY_ROWS = [
-    ({"total_count": 1, "entries": [_file_entry()]}, (5, "s5")),
-    # The stored size is the reply's, not the bytes sent.
-    ({"total_count": 1, "entries": [_file_entry(size=9)]}, (9, "s5")),
-    # Totality: shapes that hold no file entry fall back to the bytes sent.
-    ({"total_count": 0, "entries": []}, (5, None)),
-    (["not", "a", "dict"], (5, None)),
+    ({"total_count": 1, "entries": [_file_entry()]}, "s5"),
+    ({"total_count": 0, "entries": []}, None),
+    (["not", "a", "dict"], None),
 ]
-_BOX_REPLY_IDS = [
-    "agrees",
-    "stored-size-differs",
-    "no-entries",
-    "non-dict",
-]
+_BOX_REPLY_IDS = ["agrees", "no-entries", "non-dict"]
 
 
 async def _box_write_recorded(accessor, virtual: str, reply):
@@ -716,14 +708,41 @@ async def _box_write_recorded(accessor, virtual: str, reply):
     "virtual", ["/data/new.txt", "/data/a.txt"], ids=["new", "version"]
 )
 @pytest.mark.parametrize(
-    ("reply", "expected"), _BOX_REPLY_ROWS, ids=_BOX_REPLY_IDS
+    ("reply", "token"), _BOX_REPLY_ROWS, ids=_BOX_REPLY_IDS
 )
-async def test_write_records_the_reply_token_and_stored_size(
-    root_accessor, virtual, reply, expected
+async def test_write_records_the_reply_token(
+    root_accessor, virtual, reply, token
 ):
     rows, order = await _box_write_recorded(root_accessor, virtual, reply)
-    nbytes, token = expected
-    assert rows == [("write", virtual, nbytes, token, None)]
+    assert rows == [("write", virtual, 5, token, None)]
     # Recorded before the eviction, so the record exists when the cache
     # reacts to the write.
     assert order == [("invalidate", 1)]
+
+
+@pytest.mark.asyncio
+async def test_a_write_whose_reply_fails_still_evicts_the_path(root_accessor):
+    # Box may have stored the bytes before the reply broke off, so the
+    # cached copy is stale either way.
+    scope = RecordingScope()
+    evicted: list[str] = []
+
+    async def _spy(path):
+        evicted.append(path.virtual)
+
+    try:
+        with (
+            patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+            patch(
+                "mirage.core.box.write.upload_file_version",
+                new_callable=AsyncMock,
+                side_effect=aiohttp.ClientPayloadError("reply cut off"),
+            ),
+            patch("mirage.core.box.write.invalidate_after_write", new=_spy),
+            pytest.raises(aiohttp.ClientPayloadError),
+        ):
+            await write(root_accessor, _spec("/data/a.txt"), b"hello")
+    finally:
+        scope.close()
+    assert evicted == ["/data/a.txt"]
+    assert scope.records == []

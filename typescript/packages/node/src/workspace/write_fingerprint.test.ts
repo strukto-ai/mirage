@@ -137,10 +137,10 @@ describe('object-store write fingerprint (mocked S3)', () => {
   })
 
   it('write then truncate on one line does not pin stale bytes', async () => {
-    // `truncate` records its own token but hands the cache no bytes, so
-    // the entry would otherwise hold tee's content under truncate's
-    // token and serve it for the life of the entry.
-    const ws = makeWorkspace(FRESH)
+    // `truncate` hands the cache no bytes and claims nothing, so a truncate
+    // after tee drops tee's bytes. Bounded, where a kept copy would serve
+    // unchecked.
+    const ws = makeWorkspace(BOUNDED)
     try {
       await ws.shell('echo hello | tee /s3/f.txt && truncate -s 2 /s3/f.txt')
       const read = await ws.shell('cat /s3/f.txt')
@@ -241,6 +241,7 @@ describe('object-store write fingerprint (mocked S3)', () => {
   it.each([
     ['eval', `eval "echo aaaa | tee /s3/f; echo bbbb | sed -n 'w /s3/f'"`],
     ['substitution', `x=$(echo aaaa | tee /s3/f; echo bbbb | sed -n 'w /s3/f')`],
+    ['substitution truncate', "x=$(printf 'bbbb\\nzz' | tee /s3/f; truncate -s 5 /s3/f)"],
   ])('a nested line drops bytes a later unclaimed write replaced: %s', async (_, line) => {
     const got = await writeThenRead([line], BOUNDED)
     expect(got.stored).toBe('bbbb\n')

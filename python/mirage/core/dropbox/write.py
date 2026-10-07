@@ -23,7 +23,7 @@ from mirage.core.dropbox.paths import dropbox_path_of
 from mirage.core.dropbox.stat import stat_from_entry
 from mirage.observe.context import record, start_op
 from mirage.types import JsonValue, PathSpec
-from mirage.utils.sizes import upload_receipt
+from mirage.utils.upload import upload_token
 
 
 async def write(
@@ -33,7 +33,7 @@ async def write(
     need upload sessions, not supported here).
 
     A failed upload still evicts the path: Dropbox may have stored the
-    bytes before its reply broke off, and nothing vouches for a record.
+    bytes before its reply broke off.
 
     Args:
         accessor (DropboxAccessor): Dropbox accessor.
@@ -42,27 +42,23 @@ async def write(
     """
     timer = start_op()
 
-    async def upload() -> tuple[JsonValue]:
-        return (
-            await dropbox_upload(
-                accessor.token_manager, dropbox_path_of(accessor, path), data
-            ),
-        )
-
-    async def settle(landed: tuple[JsonValue] | None) -> None:
-        if landed is not None:
-            nbytes, token = upload_receipt(
-                landed[0], stat_from_entry, len(data), path.virtual
-            )
+    async def settle(entry: JsonValue) -> None:
+        if entry is not None:
+            token = upload_token(entry, stat_from_entry, path.virtual)
             record(
                 "write",
                 path.virtual,
                 "dropbox",
-                nbytes,
+                len(data),
                 timer,
                 fingerprint=token,
             )
         await invalidate_after_write(path)
         await invalidate_ancestors(path)
 
-    await evict_after(upload(), settle)
+    await evict_after(
+        dropbox_upload(
+            accessor.token_manager, dropbox_path_of(accessor, path), data
+        ),
+        settle,
+    )

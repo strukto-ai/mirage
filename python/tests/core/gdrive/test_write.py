@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import aiohttp
 import pytest
 
 import mirage.core.gdrive.write as write_mod
@@ -87,22 +88,15 @@ _HAPPY = {
     "headRevisionId": "r5",
     "mimeType": "text/plain",
 }
-# (overrides on the fake's `public()` reply, expected (bytes, fingerprint))
-# for 5 written bytes. The literal tokens are ones no local hash produces.
+# (overrides on the fake's `public()` reply, expected fingerprint) for 5
+# written bytes. The literal tokens are ones no local hash produces.
 _REPLY_ROWS = [
-    ({}, (5, "m5")),
-    # The stored size is the reply's, not the bytes sent.
-    ({"size": "9"}, (9, "m5")),
-    ({"md5Checksum": None}, (5, "r5")),
+    ({}, "m5"),
+    ({"md5Checksum": None}, "r5"),
     # A missing mimeType counts as a non-native file.
-    ({"mimeType": None}, (5, "m5")),
+    ({"mimeType": None}, "m5"),
 ]
-_REPLY_IDS = [
-    "agrees",
-    "stored-size-differs",
-    "no-md5-takes-head-revision",
-    "no-mimetype",
-]
+_REPLY_IDS = ["agrees", "no-md5-takes-head-revision", "no-mimetype"]
 
 
 def _replying(fn, overrides):
@@ -156,11 +150,9 @@ def _patch_replies(fake_drive, monkeypatch, overrides) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("existing", [False, True], ids=["create", "update"])
-@pytest.mark.parametrize(
-    ("overrides", "expected"), _REPLY_ROWS, ids=_REPLY_IDS
-)
-async def test_write_records_the_reply_token_and_stored_size(
-    fake_drive, gdrive_accessor, monkeypatch, existing, overrides, expected
+@pytest.mark.parametrize(("overrides", "token"), _REPLY_ROWS, ids=_REPLY_IDS)
+async def test_write_records_the_reply_token(
+    fake_drive, gdrive_accessor, monkeypatch, existing, overrides, token
 ):
     if existing:
         fake_drive.add("f.txt", content=b"old")
@@ -168,8 +160,33 @@ async def test_write_records_the_reply_token_and_stored_size(
     rows, order = await _write_recorded(
         gdrive_accessor, "/f.txt", b"hello", monkeypatch
     )
-    nbytes, token = expected
-    assert rows == [("write", "/f.txt", nbytes, token, None)]
+    assert rows == [("write", "/f.txt", 5, token, None)]
     # Recorded before the eviction, so the record exists when the cache
     # reacts to the write.
     assert order == [("invalidate", 1)]
+
+
+@pytest.mark.asyncio
+async def test_a_write_whose_reply_fails_still_evicts_the_path(
+    fake_drive, gdrive_accessor, monkeypatch
+):
+    # Drive may have stored the bytes before the reply broke off, so the
+    # cached copy is stale either way.
+    evicted: list[str] = []
+
+    async def _cut_off(*args, **kwargs):
+        raise aiohttp.ClientPayloadError("reply cut off")
+
+    async def _spy(path):
+        evicted.append(path.virtual)
+
+    monkeypatch.setattr(write_mod, "upload_file", _cut_off)
+    monkeypatch.setattr(write_mod, "invalidate_after_write", _spy)
+    scope = RecordingScope()
+    try:
+        with pytest.raises(aiohttp.ClientPayloadError):
+            await write(gdrive_accessor, spec("/f.txt"), b"hello")
+    finally:
+        scope.close()
+    assert evicted == ["/f.txt"]
+    assert scope.records == []
