@@ -414,7 +414,7 @@ def _is_test_close(tok: _Token) -> bool:
 
 
 _ReaderState = tuple[
-    int, tuple[int, int, _Token] | None, tuple[_Heredoc, ...], bool
+    int, tuple[int, int, _Token] | None, tuple[_Heredoc, ...], int, bool
 ]
 
 
@@ -456,6 +456,7 @@ class _LineReader:
         self.floor = 0
         self.frames: list[str] = []
         self.heredocs: tuple[_Heredoc, ...] = ()
+        self.carried = 0
         self.peeked: tuple[int, int, _Token] | None = None
         self.after = False
         self.matching = False
@@ -804,10 +805,10 @@ class _LineReader:
     # -- nested reads -------------------------------------------------------
 
     def save(self) -> _ReaderState:
-        return (self.pos, self.peeked, self.heredocs, self.after)
+        return (self.pos, self.peeked, self.heredocs, self.carried, self.after)
 
     def restore(self, state: _ReaderState) -> None:
-        self.pos, self.peeked, self.heredocs, self.after = state
+        self.pos, self.peeked, self.heredocs, self.carried, self.after = state
 
     def substitution(self, opened: int, j: int) -> int:
         """Parse a substitution's command list; the index past its ``)``.
@@ -822,13 +823,14 @@ class _LineReader:
         """
         known = self.subs.get((j, self.limit))
         if known is not None:
-            self.pend(known[1])
+            self.pend(known[1], carried=True)
             return known[0]
         if self.nesting >= MAX_NESTING:
             opener = self.text[opened:j].replace("\\\n", "")
             self.fail_token(_Token("op", opener, opened, j))
         state = self.save()
-        self.pos, self.peeked, self.heredocs = j, None, ()
+        self.pos, self.peeked = j, None
+        self.heredocs, self.carried = (), 0
         self.frames.append("sub")
         self.nesting += 1
         self.linebreak()
@@ -853,7 +855,7 @@ class _LineReader:
         self.frames.pop()
         pending = self.heredocs
         self.restore(state)
-        self.pend(pending)
+        self.pend(pending, carried=True)
         self.subs[(j, self.limit)] = (tok.end, pending)
         return tok.end
 
@@ -896,7 +898,7 @@ class _LineReader:
         self.frames.pop()
         opened = [heredoc for heredoc in self.heredocs if heredoc.at > i]
         self.restore(state)
-        self.pend(opened)
+        self.pend(opened, carried=True)
         return tok.end
 
     # -- tokens ---------------------------------------------------------------
@@ -1004,21 +1006,32 @@ class _LineReader:
                     and body.startswith(delimiter)
                     and _closes_substitution(body[len(delimiter) :])
                 ):
-                    self.heredocs = ()
+                    self.heredocs, self.carried = (), 0
                     return i + len(line) - len(body) + len(delimiter)
                 i = min(end + 1, n)
-        self.heredocs = ()
+        self.heredocs, self.carried = (), 0
         return i
 
-    def pend(self, heredocs: Iterable[_Heredoc]) -> None:
+    def pend(
+        self, heredocs: Iterable[_Heredoc], carried: bool = False
+    ) -> None:
         """Add heredocs whose bodies the next newline reads, each once: a
-        word read again in another mode opens the same ones again.
+        word read again in another mode opens the same ones again. bash
+        reads the ones carried out of a substitution first, in the order
+        their substitutions close, then the ones opened directly.
 
         Args:
             heredocs (Iterable[_Heredoc]): the heredocs, by where they open.
+            carried (bool): they come out of a substitution.
         """
         known = {heredoc.at for heredoc in self.heredocs}
-        self.heredocs += tuple(h for h in heredocs if h.at not in known)
+        new = tuple(h for h in heredocs if h.at not in known)
+        if not carried:
+            self.heredocs += new
+            return
+        at = self.carried
+        self.heredocs = self.heredocs[:at] + new + self.heredocs[at:]
+        self.carried += len(new)
 
     def joined(self, i: int) -> int:
         """Where the next character is once continued lines are joined, as

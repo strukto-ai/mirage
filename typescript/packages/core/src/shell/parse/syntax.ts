@@ -343,6 +343,7 @@ type ReaderState = readonly [
   number,
   readonly [number, number, Token] | null,
   readonly Heredoc[],
+  number,
   boolean,
 ]
 
@@ -362,6 +363,7 @@ class LineReader {
   private floor = 0
   private frames: string[] = []
   private heredocs: readonly Heredoc[] = []
+  private carried = 0
   private peeked: readonly [number, number, Token] | null = null
   private after = false
   private matching = false
@@ -387,6 +389,7 @@ class LineReader {
     this.floor = 0
     this.frames = []
     this.heredocs = []
+    this.carried = 0
     this.peeked = null
     this.after = false
     this.matching = false
@@ -642,11 +645,11 @@ class LineReader {
   // -- nested reads ------------------------------------------------------------
 
   save(): ReaderState {
-    return [this.pos, this.peeked, this.heredocs, this.after]
+    return [this.pos, this.peeked, this.heredocs, this.carried, this.after]
   }
 
   restore(state: ReaderState): void {
-    ;[this.pos, this.peeked, this.heredocs, this.after] = state
+    ;[this.pos, this.peeked, this.heredocs, this.carried, this.after] = state
   }
 
   /** Parse a substitution's command list, opened at `opened` and starting at
@@ -657,7 +660,7 @@ class LineReader {
     const key = `${String(j)}:${String(this.limit)}`
     const known = this.subs.get(key)
     if (known !== undefined) {
-      this.pend(known[1])
+      this.pend(known[1], true)
       return known[0]
     }
     if (this.nesting >= MAX_NESTING)
@@ -666,6 +669,7 @@ class LineReader {
     this.pos = j
     this.peeked = null
     this.heredocs = []
+    this.carried = 0
     this.frames.push('sub')
     this.nesting += 1
     this.linebreak()
@@ -687,7 +691,7 @@ class LineReader {
     this.frames.pop()
     const pending = this.heredocs
     this.restore(state)
-    this.pend(pending)
+    this.pend(pending, true)
     this.subs.set(key, [tok.end, pending])
     return tok.end
   }
@@ -727,7 +731,7 @@ class LineReader {
     this.frames.pop()
     const opened = this.heredocs.filter((heredoc) => heredoc.at > i)
     this.restore(state)
-    this.pend(opened)
+    this.pend(opened, true)
     return tok.end
   }
 
@@ -823,20 +827,31 @@ class LineReader {
           closesSubstitution(body.slice(delimiter.length))
         ) {
           this.heredocs = []
+          this.carried = 0
           return i + line.length - body.length + delimiter.length
         }
         i = Math.min(end + 1, n)
       }
     }
     this.heredocs = []
+    this.carried = 0
     return i
   }
 
   /** Add heredocs whose bodies the next newline reads, each once: a word read
-   * again in another mode opens the same ones again. */
-  pend(heredocs: readonly Heredoc[]): void {
+   * again in another mode opens the same ones again. bash reads the ones
+   * `carried` out of a substitution first, in the order their substitutions
+   * close, then the ones opened directly. */
+  pend(heredocs: readonly Heredoc[], carried = false): void {
     const known = new Set(this.heredocs.map((heredoc) => heredoc.at))
-    this.heredocs = [...this.heredocs, ...heredocs.filter((heredoc) => !known.has(heredoc.at))]
+    const added = heredocs.filter((heredoc) => !known.has(heredoc.at))
+    if (!carried) {
+      this.heredocs = [...this.heredocs, ...added]
+      return
+    }
+    const at = this.carried
+    this.heredocs = [...this.heredocs.slice(0, at), ...added, ...this.heredocs.slice(at)]
+    this.carried += added.length
   }
 
   /** Where the next character is once continued lines are joined, as bash
