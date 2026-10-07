@@ -448,7 +448,9 @@
     "active_lost": "The running line's lost paths ride Python's Recorder, which is still bound when apply_io runs, so the dispatcher reads them from the context. TypeScript applies a line's results after its recording scope ends, so it keys them by the line's records instead (lostPaths/lostByLine)."
    },
    "typescript_only": {
-    "lostByLine": "TypeScript keys a line's lost paths by its records array, because applyIo runs after runWithRecording returns; Python keeps them on the Recorder (active_lost)."
+    "lostByLine": "TypeScript keys a line's lost paths by its records array, because applyIo runs after runWithRecording returns; Python keeps them on the Recorder (active_lost).",
+    "recordIndex": "TypeScript keys a line's version index by its records array, as it does the line's lost paths (lostPaths); Python keeps the index on the Recorder (Recorder.index), which push_mount_context carries.",
+    "indexByLine": "The WeakMap behind recordIndex, keyed by a line's records array; Python keeps the index on the Recorder (Recorder.index)."
    }
   },
   "core/s3/client": {
