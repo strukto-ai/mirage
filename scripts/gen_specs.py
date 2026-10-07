@@ -26,7 +26,6 @@ from typing import Any
 from pydantic import BaseModel
 
 import mirage.commands.builtin
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import CommandSpec, Operand, Option
@@ -43,12 +42,35 @@ OUT = (
 )
 VFS_COMMANDS = OUT.parent / "vfs_commands"
 
-BUILTIN = Path(mirage.commands.builtin.__file__).resolve().parent
-
-# Slots holding a configuration value rather than an operation. Everything
-# else on the adapter is a wired operation, reported by name.
-IO_VALUE_FIELDS = frozenset(
-    {"local", "streams_bytes", "max_glob_matches", "max_du_entries"}
+# The functions a backend may define, as BaseVFS declares them. Which ones
+# a class overrides decides what its mount and its commands can do.
+VFS_FUNCTIONS = (
+    "readdir",
+    "read",
+    "stat",
+    "read_stream",
+    "exists",
+    "find",
+    "du_size",
+    "du_entries",
+    "write",
+    "append",
+    "pwrite",
+    "create",
+    "mkdir",
+    "unlink",
+    "rmdir",
+    "rm_r",
+    "rename",
+    "copy",
+    "dir_copy",
+    "truncate",
+    "setattr",
+    "search",
+    "search_many",
+    "narrow_paths",
+    "content_search_enabled",
+    "is_mounted",
 )
 
 
@@ -304,6 +326,10 @@ def _capabilities() -> dict[str, dict[str, Any]]:
     agent; the text is prose each side words for itself, but its absence is
     not: node's GitHubVFS carried no prompt, so its file prompt left every
     GitHub mount out while python and the browser described theirs.
+    ``functions`` lists the ``BaseVFS`` functions the class overrides: a
+    backend that drops ``du_size`` or ``find`` quietly falls back to the
+    capped readdir walk while its twin pushes the work down to the API,
+    and the list turns that omission into a spec diff.
     """
     out: dict[str, dict[str, Any]] = {}
     for name in sorted(REGISTRY):
@@ -320,36 +346,15 @@ def _capabilities() -> dict[str, dict[str, Any]]:
             "capacity": cls.capacity is not BaseVFS.capacity,
             "has_prompt": bool(cls.prompt),
             "has_write_prompt": bool(cls.write_prompt),
-        }
-    return out
-
-
-def _command_io() -> dict[str, dict[str, Any]]:
-    """The wired ``CommandIO`` slots per backend command package.
-
-    The adapter's slot set is a hand-filled literal that no gate reads, so
-    a backend can omit ``du`` or ``find`` and quietly fall back to the
-    capped readdir walk while its twin pushes the work down to the API.
-    Dumping the key set turns that omission into a spec diff.
-    """
-    out: dict[str, dict[str, Any]] = {}
-    for path in sorted(BUILTIN.glob("*/io.py")):
-        backend = path.parent.name
-        mod = importlib.import_module(f"mirage.commands.builtin.{backend}.io")
-        io = getattr(mod, "IO", None)
-        if not isinstance(io, CommandIO):
-            continue
-        slots = sorted(
-            f.name
-            for f in fields(CommandIO)
-            if f.name not in IO_VALUE_FIELDS
-            and getattr(io, f.name) is not None
-        )
-        out[backend] = {
-            "slots": slots,
-            "local": io.local,
-            "max_glob_matches": io.max_glob_matches,
-            "max_du_entries": io.max_du_entries,
+            "functions": [
+                fn
+                for fn in sorted(VFS_FUNCTIONS)
+                if getattr(cls, fn) is not getattr(BaseVFS, fn)
+            ],
+            "reads_ranges": cls.reads_ranges,
+            "local": cls.local,
+            "max_glob_matches": cls.max_glob_matches,
+            "max_du_entries": cls.max_du_entries,
         }
     return out
 
@@ -416,7 +421,6 @@ def _emit_vfs_names(registry: dict[str, list[RegisteredCommand]]) -> None:
         "registry": sorted(REGISTRY),
         "command_vfs_names": sorted(command_vfs_names),
         "capabilities": _capabilities(),
-        "command_io": _command_io(),
         "configs": _configs(),
     }
     path = OUT.parent / "vfs.json"

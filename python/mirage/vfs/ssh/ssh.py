@@ -183,9 +183,6 @@ class SSHVFS(BaseVFS):
             mtime=mtime,
         )
 
-    def is_mounted(self) -> bool:
-        return self.accessor.root is not None
-
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)
 

@@ -375,6 +375,12 @@ class BaseVFS:
     ) -> DuEntries:
         """Every stored file under ``path`` with its size, natively.
 
+        A native answer comes from one pass over the stored files, so a
+        directory holding no file never appears in the entries and gets no
+        row, where the shared readdir walk prints its ``0`` row. The
+        difference is accepted for the speed and pinned in
+        ``integ/unix/du/empty.json``.
+
         Args:
             path (PathSpec): the path.
             index (IndexCacheStore): the mount's index.

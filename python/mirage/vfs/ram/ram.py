@@ -177,9 +177,6 @@ class RAMVFS(BaseVFS):
             mtime=mtime,
         )
 
-    def is_mounted(self) -> bool:
-        return self.accessor.store is not None
-
     def get_state(self) -> dict[str, Any]:
         return {
             "type": self.name,

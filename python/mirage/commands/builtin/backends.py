@@ -74,8 +74,8 @@ def mount_commands(vfs: BaseVFS) -> list[RegisteredCommand]:
     in its hierarchy that has one; a command registered under that
     class's name is registered under the VFS's own instead, so an
     S3-compatible alias serves S3's commands as itself. Any other VFS
-    serves the generic set less what it overrides. The commands the VFS
-    was handed come last, so they win.
+    serves the generic set. Either set loses what the VFS overrides, and
+    the commands the VFS was handed come last, so they win.
 
     Args:
         vfs (BaseVFS): the VFS being mounted.
@@ -97,4 +97,5 @@ def mount_commands(vfs: BaseVFS) -> list[RegisteredCommand]:
         found = registered_commands(
             make_generic_commands(vfs.name, overrides=vfs.overrides)
         )
-    return [*found, *registered_commands(vfs.commands())]
+    kept = [rc for rc in found if rc.name not in vfs.overrides]
+    return [*kept, *registered_commands(vfs.commands())]

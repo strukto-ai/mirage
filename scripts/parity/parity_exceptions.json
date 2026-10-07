@@ -1,8 +1,4 @@
 {
-  "command_io": {},
-  "command_io_aliases": {
-    "python": {}
-  },
   "commands": {},
   "config_fields": {
     "dropbox": {
@@ -73,7 +69,6 @@
     }
   },
   "variant_vfs_facts": {
-    "capabilities": {},
-    "command_io": {}
+    "capabilities": {}
   }
 }

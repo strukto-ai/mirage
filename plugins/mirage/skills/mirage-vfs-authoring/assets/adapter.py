@@ -1,14 +1,14 @@
 import asyncio
 
 from mirage import (
+    NULL_INDEX,
     Accessor,
     BaseVFS,
     FileStat,
     FileType,
+    IndexCacheStore,
     PathSpec,
     ReadFixture,
-    ReadOps,
-    VFSAdapter,
     Workspace,
     check_read_contract,
 )
@@ -19,43 +19,47 @@ class ResourceClient(Accessor):
         self.files = {"hello.txt": b"Hello from my resource!\n"}
 
 
-async def read_bytes(
-    client: ResourceClient, path: PathSpec, index=None
-) -> bytes:
-    key = path.vfs_path.strip("/")
-    if not key:
-        raise IsADirectoryError(path.virtual)
-    if key not in client.files:
-        raise FileNotFoundError(path.virtual)
-    return client.files[key]
+class ResourceVFS(BaseVFS):
+    accessor: ResourceClient
 
+    def __init__(self, client: ResourceClient) -> None:
+        super().__init__(name="resource", accessor=client)
 
-async def readdir(
-    client: ResourceClient, path: PathSpec, index=None
-) -> list[str]:
-    if path.vfs_path.strip("/"):
-        await read_bytes(client, path, index)
-        raise NotADirectoryError(path.virtual)
-    return [
-        f"{path.virtual.rstrip('/')}/{name}" for name in sorted(client.files)
-    ]
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        key = path.vfs_path.strip("/")
+        if not key:
+            raise IsADirectoryError(path.virtual)
+        if key not in self.accessor.files:
+            raise FileNotFoundError(path.virtual)
+        return self.accessor.files[key]
 
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        if path.vfs_path.strip("/"):
+            await self.read(path, index)
+            raise NotADirectoryError(path.virtual)
+        parent = path.virtual.rstrip("/")
+        return [f"{parent}/{name}" for name in sorted(self.accessor.files)]
 
-async def stat(client: ResourceClient, path: PathSpec, index=None) -> FileStat:
-    name = path.virtual.rstrip("/").rsplit("/", 1)[-1] or "/"
-    if not path.vfs_path.strip("/"):
-        return FileStat(name=name, type=FileType.DIRECTORY)
-    data = await read_bytes(client, path, index)
-    return FileStat(name=name, type=FileType.FILE, size=len(data))
-
-
-ADAPTER = VFSAdapter(
-    read=ReadOps(readdir=readdir, read_bytes=read_bytes, stat=stat)
-)
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        name = path.virtual.rstrip("/").rsplit("/", 1)[-1] or "/"
+        if not path.vfs_path.strip("/"):
+            return FileStat(name=name, type=FileType.DIRECTORY)
+        data = await self.read(path, index)
+        return FileStat(name=name, type=FileType.FILE, size=len(data))
 
 
 async def main() -> None:
-    client = ResourceClient()
+    vfs = ResourceVFS(ResourceClient())
     fixture = ReadFixture(
         file=PathSpec(
             virtual="/resource/hello.txt",
@@ -68,12 +72,10 @@ async def main() -> None:
             directory="/resource",
             vfs_path="missing",
         ),
-        content=client.files["hello.txt"],
+        content=vfs.accessor.files["hello.txt"],
     )
-    await check_read_contract(ADAPTER, client, fixture)
-    ws = Workspace(
-        {"/resource": BaseVFS(name="resource", accessor=client, io=ADAPTER)}
-    )
+    await check_read_contract(vfs, fixture)
+    ws = Workspace({"/resource": vfs})
     try:
         result = await ws.shell("cat /resource/hello.txt")
         assert result.exit_code == 0

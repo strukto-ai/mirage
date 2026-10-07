@@ -7,11 +7,11 @@ description: Ship your own backend with BaseVFS, or contribute a builtin VFS usi
 A VFS maps an external system to Mirage's filesystem operations and shell commands. There are two paths:
 
 - **Ship your own backend**: a single TypeScript file in your own project or package, built on `BaseVFS`. No Mirage fork, no edits to Mirage source.
-- **Contribute a builtin**: the four-layer layout inside the Mirage repo, mirrored in Python.
+- **Contribute a builtin**: the three-layer layout inside the Mirage repo, mirrored in Python.
 
 ## Ship Your Own Backend
 
-Write the core functions over your data source, group the three required reads in a `VFSAdapter`, and `BaseVFS` wires the full generic command set (`ls`, `cat`, `grep`, `find`, `head`, `wc`, ...) plus glob resolution and the VFS/FUSE ops:
+Extend `BaseVFS` and define the functions your data source supports. `readdir`, `read` and `stat` are enough for the full generic command set (`ls`, `cat`, `grep`, `find`, `head`, `wc`, ...) plus glob resolution and the VFS/FUSE ops:
 
 ```ts
 import {
@@ -20,7 +20,6 @@ import {
   FileStat,
   MountMode,
   type PathSpec,
-  VFSAdapter,
   Workspace,
 } from '@struktoai/mirage-node'
 import { parseConfigWithSchema, secretStr, z } from '@struktoai/mirage-core/vfs/secrets'
@@ -34,20 +33,19 @@ class JiraAccessor extends Accessor {
   }
 }
 
-declare function readdir(accessor: JiraAccessor, path: PathSpec): Promise<string[]>
-declare function readBytes(accessor: JiraAccessor, path: PathSpec): Promise<Uint8Array>
-declare function stat(accessor: JiraAccessor, path: PathSpec): Promise<FileStat>
-
 class JiraVFS extends BaseVFS<JiraAccessor> {
   constructor(input: Record<string, unknown>) {
     const config = parseConfigWithSchema(JiraConfigSchema, input)
     super({
       name: 'jira',
       accessor: new JiraAccessor(makeClient(config)),
-      io: new VFSAdapter({ read: { readdir, readBytes, stat } }),
       prompt: 'Issues rendered as .json files.',
     })
   }
+
+  override async readdir(path: PathSpec): Promise<string[]> { ... }
+  override async read(path: PathSpec): Promise<Uint8Array> { ... }
+  override async stat(path: PathSpec): Promise<FileStat> { ... }
 
   override async close(): Promise<void> {
     if (this.isClosed) return
@@ -62,66 +60,70 @@ class JiraVFS extends BaseVFS<JiraAccessor> {
 const ws = new Workspace({ '/jira/': new JiraVFS(cfg) }, { mode: MountMode.READ })
 ```
 
-The accessor is a type parameter, so the table is checked against the accessor your core functions actually take: wiring `readdir` where `stat` belongs, or an accessor from another backend, is a compile error rather than a runtime one.
+The accessor is a type parameter, so `this.accessor` is the client your functions actually take, and `override` makes a misspelled function a compile error rather than one that is silently never called.
 
 For a smaller runnable example, see `examples/typescript/other/basevfs_views.ts`.
 Its read-only `NotesVFS` connects to a nested mount, a namespace symlink,
 a CLI using namespace and session views, and the filesystem and runtime APIs.
 
-The driver never sees the mount it runs under. The index store, the registered tables and the `vfs:` reference it was built from all live on the mount, built when the driver is placed and shared with any alias of the same instance. The loader recognizes a driver by the `VFS_BRAND` symbol `BaseVFS` stamps, so a script file that loaded its own copy of the package still mounts.
+The driver never sees the mount it runs under. The index store and the `vfs:` reference it was built from live on the mount, built when the driver is placed and shared with any alias of the same instance. The loader recognizes a driver by the `VFS_BRAND` symbol `BaseVFS` stamps, so a script file that loaded its own copy of the package still mounts.
 
-### Add capabilities as the resource grows
+### Add functions as the resource grows
 
-Only `readdir`, `readBytes`, and `stat` are required. The adapter derives a
-stream from `readBytes`, existence checks from `stat`, and defaults to a remote
-resource that is available. Range reads fall back to reading and slicing.
-A derived stream still fetches the entire file; use a native stream for large files.
+Only `readdir`, `read`, and `stat` are required. Mirage derives a stream from
+`read`, existence checks from `stat`, and treats the resource as remote and
+available. A window of a file is cut from the whole `read` unless the class
+sets `readsRanges` true; then `read(path, index, offset, size)` receives the
+window (`size === null` means through EOF) and fetches only that. A derived
+stream still fetches the entire file; define `readStream` for large files.
 
-```ts
-import {
-  type NativeReadOps,
-  type ReadOps,
-  type WriteOps,
-  VFSAdapter,
-} from '@struktoai/mirage-node'
+Every other function is optional, and each stands alone:
 
-const read: ReadOps<JiraAccessor> = { readdir, readBytes, stat }
-const native: NativeReadOps<JiraAccessor> = { readStream, readRange }
-const writes: WriteOps<JiraAccessor> = { write, unlink }
-const adapter = new VFSAdapter({ read, native, writes })
-```
+| Functions | Purpose |
+| --- | --- |
+| `readdir`, `read`, `stat` | Required filesystem behavior. |
+| `readStream`, `exists`, `find`, `duSize` with `duEntries` | Optional equivalent fast paths. |
+| `write`, `append`, `pwrite`, `create`, `mkdir`, `unlink`, `rmdir`, `rmR`, `rename`, `copy`, `dirCopy`, `truncate`, `setattr` | Individually supported mutations. |
+| `search`, `searchMany` | Optional resource search. |
 
-Each callback above is implemented by your backend. Leave out `native` and
-`writes` for a minimal read-only adapter. These groups are independent:
+`pwrite` receives `(path, data, offset)` and keeps every byte outside the
+window, as pwrite(2) does. A VFS with `write` and no `append` or `pwrite` gets
+both built from `read` and `write`, so define them only when the backend writes
+a range natively. Use `FileStat.size=null` when rendered size is unknown.
+`duSize` and `duEntries` come as a pair: the generic derives its per-directory
+rows from the entries, so one without the other is not served. All functions
+enforce the same resource scope, including direct reads of known IDs. A partial
+listing cannot prove an omitted resource absent.
 
-| Group | Operations | Purpose |
-| --- | --- | --- |
-| `ReadOps` | `readdir`, `readBytes`, `stat` | Required filesystem behavior. |
-| `NativeReadOps` | `readStream`, `readRange`, `exists`, `find`, `du` | Optional equivalent fast paths. |
-| `WriteOps` | `write`, `append`, `pwrite`, `create`, `mkdir`, `unlink`, `rmdir`, `rmR`, `rename`, `copy`, `dirCopy`, `truncate`, `setAttrs` | Individually supported mutations. |
-
-A native range receives `(accessor, path, index, offset, size)`; `size=null`
-means through EOF. Its write twin, `pwrite`, receives `(accessor, path, data,
-offset)` and keeps every byte outside the window, as pwrite(2) does. A table
-with `write` and no `append` or `pwrite` gets both built from `readBytes` and
-`write`, so supply them only when the backend writes a range natively. Use `FileStat.size=null` when rendered size is unknown.
-`du` supplies both size and entry enumeration. All operations enforce the same
-resource scope, including direct reads of known IDs. A partial listing cannot
-prove an omitted resource absent.
-
-Supplying a write callback does not enable deletion or rename. Every generic
-command is registered either way: `gzip -c` and `tar -t` run as readers, a line
-that needs a missing operation answers `Operation not supported` at that
-operation, and mount mode still controls whether a supported mutation may run. Set `local: true` only for host-local data;
-`isMounted` can override the default availability check.
-
-`adapter.toCommandIO()` assembles the single `CommandIO` used by commands and
-filesystem ops. Builtins compile `VFSAdapter` into this table; advanced integrations can also
-supply `CommandIO` directly. The escape hatches remain:
+Defining `write` does not enable deletion or rename. Every generic command is
+registered either way: `gzip -c` and `tar -t` run as readers, a line that needs
+a function the VFS does not define answers `Operation not supported` at that
+function, and mount mode still controls whether a defined mutation may run. Set
+`local` true only for host-local data; `isMounted` can override the default
+availability check. `vfs.supports('write')` says whether a class defines a
+function. The escape hatches remain:
 
 - `overrides` drops a generic command you replace, and `commands` supplies the replacement (or any bespoke verb) from `command({...})`.
-- `ops` layers an irregular VFS/FUSE handler over the derived set; one carrying no `filetype` shadows the derived op of the same name. `autoOps: false` opts out of deriving any. A verb the op table does not carry is not served: the mount answers `Operation not supported` for it, so a backend can be partial.
 - `sizesAlwaysKnown` declares that `stat` sizes every file without fetching it, which is also what makes the mount legal on FSKit. `supportsSnapshot` declares that `stat` fills `FileStat.fingerprint`; setting it without that is not drift detection.
+
+The dispatcher reaches the same functions by name (`ws.dispatch('read', path)`)
+and wraps them the same way for every backend: a read takes a window, `append`
+and `pwrite` are rewrites when the VFS does not define them, `mkdir` refuses a
+taken name first, and `glob` walks `readdir`. A function only your class
+declares is reachable by name once it is marked with what it does to the mount:
+
+```ts
+import { Effect, vfsCall } from '@struktoai/mirage-node'
+
+class JiraVFS extends BaseVFS<JiraAccessor> {
+  @vfsCall({ effect: Effect.READ })
+  searchIssues(scope: PathSpec, jql: string): Promise<string[]> { ... }
+}
+```
+
+`await ws.dispatch('searchIssues', '/jira/', ['project = OPS'])` then runs
+through every check the door runs: hidden paths, path rules, the mount's mode
+and admission policies. A subclass overriding a marked function keeps the mark.
 
 ### How the driver connects to a workspace
 
@@ -130,56 +132,49 @@ supply `CommandIO` directly. The escape hatches remain:
 
 | Consumer | Connection |
 | --- | --- |
-| Shell and coreutils | `commands()` derives generic commands from the adapter; the shell supplies expansion, pipes, redirects and session policy. |
-| Filesystem calls | `ops()` supplies the dispatcher's operations used by `ws.vfs`. |
+| Shell and coreutils | The mount builds the generic commands over the VFS's functions; the shell supplies expansion, pipes, redirects and session policy. |
+| Filesystem calls | `ws.vfs` and `ws.dispatch` reach the same functions through the dispatcher. |
 | CLIs | The host registers a `CLISpec` with `registerCli`. File-oriented handlers use `inv.doors.dispatch` and `inv.doors.ns`; mounting a driver does not install an account CLI. |
 | Runtimes | Runtimes wired to `RuntimeVFS` reach the same dispatcher. A process or remote runtime needs its configured mount bridge. |
 | Namespace | The workspace owns symlinks, nested mounts and metadata overlays; the backend implements its own tree. |
 
 Use `path.vfsPath` to address your backend and `path.virtual` for workspace
-paths. Use the index passed to callbacks: the mount scopes it for ownership
-and freshness. Put shared behavior in the adapter callbacks; an explicit
-`ops` override changes that operation, while a `commands` override changes
-that shell command. Optional mutations remain optional, and unsupported
-operations report `Operation not supported`.
+paths. Use the index passed to each function: the mount scopes it for
+ownership and freshness. Put shared behavior in the functions; a `commands`
+override changes that shell command only. Optional mutations remain optional,
+and a function the VFS does not define reports `Operation not supported`.
 
 ### Native search and backend-specific core functions
 
-Builtin backends use the same `VFSAdapter` groups. Operation types live in
-`vfs/types`; `CommandIO` extends them with command context. Wire compatible core
-functions directly, and wrap incompatible client functions to resolve `PathSpec`
-and normalize their results. All callbacks are checked against the adapter's
-accessor type.
+Builtin backends define the same functions; their shared types live in
+`vfs/types`. A method calls a core function that already accepts the contract
+directly. Otherwise, the method resolves the `PathSpec`, calls the resource
+API, and normalizes the result.
 
 ```ts
-import { type SearchOps, type SearchQuery, type DuOps } from '@struktoai/mirage-node'
+import { type SearchQuery } from '@struktoai/mirage-node'
 
-declare function search(
-  accessor: JiraAccessor,
-  path: PathSpec,
-  query: SearchQuery,
-): Promise<string[] | null>
-
-const searchOps: SearchOps<JiraAccessor> = { search }
-const adapter = new VFSAdapter({ read, search: searchOps })
-
-// Native size queries require both total size and leaf enumeration.
-const du: DuOps<JiraAccessor> = { size, entries }
+class JiraVFS extends BaseVFS<JiraAccessor> {
+  override async search(path: PathSpec, query: SearchQuery): Promise<string[] | null> {
+    // Interpret query.query and validate the options your resource supports.
+  }
+}
 ```
 
 `SearchQuery` contains `query` and optional `options`, for example
 `{ query: 'recent deployments', options: { limit: 20 } }`. Options can hold
-filters, limits, or other JSON values. `SearchOps.meta` is optional static
-capability metadata. Regex support and grep compatibility are not required.
-Omitting `search` entirely also works: MIRAGE implements grep and rg by reading
-files.
+filters, limits, or other JSON values. The `searchMeta` member is optional
+static capability metadata. Regex support and grep compatibility are not
+required. Leaving `search` undefined also works: MIRAGE implements grep and rg
+by reading files.
 
 A resource search is not automatically used by grep or rg. Opt into that
-integration with `{ search, meta: { grep: { mode: 'literal' } } }`, or use
-`mode: 'regex'` when the backend honors regex semantics. Only that integration
-interprets the `grep` namespace. Requests put `ignore_case`, `fixed_string`,
-`whole_word`, and `basic` booleans in `query.options.grep`; these JSON keys are
-snake_case in both languages. Other options and metadata belong to your resource.
+integration with `override readonly searchMeta = { grep: { mode: 'literal' } }`,
+or use `mode: 'regex'` when the backend honors regex semantics. Only that
+integration interprets the `grep` namespace. Requests put `ignore_case`,
+`fixed_string`, `whole_word`, and `basic` booleans in `query.options.grep`;
+these JSON keys are snake_case in both languages. Other options and metadata
+belong to your resource.
 
 Return text records: `[]` means no matches and `null` declines the request.
 Errors propagate. Under the grep integration, records must be complete rendered
@@ -189,17 +184,17 @@ semantics, including Langfuse's summary search. Never report truncated results
 as complete.
 
 MIRAGE scans for unsupported flags, multiple operands, declined requests, and
-visibility restrictions. Set `meta: { grep: { mode: 'regex', stream: true } }`
+visibility restrictions. Set `searchMeta = { grep: { mode: 'regex', stream: true } }`
 to enable native streaming for fallback scans. The hierarchy kit's
 `makeSearchOp(detectScope, SEARCHERS, stat?)` adapts scope-specific callbacks;
 PostgreSQL, MongoDB and Langfuse use it. Custom resources can implement `search`
 directly. Expose semantic or service-specific queries through a custom command
-that calls the same callback with its own options. Native traversal and size
-enumeration remain independent capabilities.
+that calls the same function with its own options. Native traversal (`find`)
+and size enumeration (`duSize` with `duEntries`) remain independent functions.
 
-`examples/typescript/other/basevfs_views.ts` wires the same literal search callback
-to both commands. Its counters verify that `grep -F` and `rg -F` avoid file reads,
-line numbers and regexes scan, and `-i` scans after the callback returns `null`.
+`examples/typescript/other/basevfs_views.ts` defines one literal `search` for
+both commands. Its counters verify that `grep -F` and `rg -F` avoid file reads,
+line numbers and regexes scan, and `-i` scans after `search` returns `null`.
 The example accelerates single-page searches; directory searches also decline.
 
 To make the backend constructible by name (workspace config, snapshots, the daemon), register a factory:
@@ -236,9 +231,9 @@ See `examples/typescript/other/custom_vfs.ts` for a complete runnable backend in
 
 ## Contribute a Builtin VFS
 
-Builtins live inside the Mirage repo: one backend is four layers with one name (accessor, core, ops, VFS) plus its commands, and every layer has a Python twin. Change both languages in the same PR; where they disagree, the more correct side wins.
+Builtins live inside the Mirage repo: one backend is three layers with one name (accessor, core, VFS) plus its commands, and every layer has a Python twin. Change both languages in the same PR; where they disagree, the more correct side wins.
 
-Pick the package by runtime, not by preference: `packages/core` for a backend that works in both the browser and Node, `packages/node` for one that needs Node APIs, `packages/browser` for one that needs a browser transport. Paths are always `PathSpec` values inside the VFS; never pass a path as a raw string.
+Pick the package by runtime, not by preference: `packages/core` for a backend that works in both the browser and Node, `packages/node` for one that needs Node APIs, `packages/browser` for one that needs a browser transport. A backend whose transport differs by runtime keeps its functions in a core base class (`SlackVFSBase` in `core/src/vfs/slack/slack.ts`) that the node and browser classes extend with their own transport. Paths are always `PathSpec` values inside the VFS; never pass a path as a raw string.
 
 Most of a backend is already written as a kit. Reach for one before writing a layer by hand:
 
@@ -262,13 +257,13 @@ typescript/packages/<core|node|browser>/src/
     pathing.ts                 # <label>__<id> names (sanitizeName, makeIdName)
     normalize.ts               # the JSON a file renders
     readdir.ts stat.ts read.ts
-  ops/<name>/index.ts          # ops derived from the CommandIO table
   commands/builtin/<name>/
-    io.ts                      # VFSAdapter compiled to the shared IO table
     index.ts                   # <NAME>_COMMANDS
     <bespoke commands>.ts      # push-downs and verbs
+  commands/builtin/backends.ts # the command set of each VFS class
   vfs/<name>/
-    config.ts prompt.ts <name>.ts
+    config.ts prompt.ts
+    <name>.ts                  # the VFS class and its functions
 ```
 
 Tests are colocated: `<name>.test.ts` beside the source it covers.
@@ -281,9 +276,9 @@ Config keys arrive snake_case from YAML shared with Python and are mapped by `no
 
 Keep every import at module scope. If that would create a cycle, change the dependency direction instead of adding a lazy import inside a function.
 
-## 2. Core VFS Operations
+## 2. Core Functions
 
-Implement only the operations the backend supports. A read-only API-backed VFS usually starts with:
+Implement only the operations the backend supports, as pure functions over the accessor. A read-only API-backed VFS usually starts with:
 
 - `readdir(accessor, path, index?)` returning child paths.
 - `read(accessor, path, index?)` returning bytes.
@@ -298,41 +293,50 @@ A hierarchy backend writes its tree once, as the scope table in `core/<name>/sco
 
 `FileStat.size` must be the rendered content's byte length or `null`, never a storage-side number: a confidently wrong size makes `wc -c` and `ls -l` lie over FUSE, while `null` rides the unknown-size machinery. Put the storage number in `extra` if it is worth reporting. Set `sizesAlwaysKnown` only when every listed size is computed from the same payload a read renders.
 
-Glob resolution is not a per-backend file: `makeGenericOps` derives a `glob` op from the table's `readdir`, capped by its `maxGlobMatches`, and the mount expands patterns through it.
+Glob resolution is not a per-backend file: the mount derives `glob` from the VFS's `readdir`, capped by its `maxGlobMatches`, and expands patterns through it.
 
-## 3. Ops Layer
+## 3. VFS Functions
 
-Build `IO = new VFSAdapter({ read, native, writes }).toCommandIO()` in `commands/builtin/<name>/io.ts`, omitting groups the backend does not implement.
-
-Ops are the workspace dispatcher's typed adapters onto the core functions, and they are generated, not hand-written:
+The VFS class defines the functions, each a thin call into the core:
 
 ```ts
-import { IO } from '../../commands/builtin/qdrant/io.ts'
-import { VFSName } from '../../types.ts'
-import { makeGenericOps } from '../generic/factory.ts'
-import type { RegisteredOp } from '../registry.ts'
+import { readdir as myReaddir } from '../../core/my_vfs/readdir.ts'
 
-export const QDRANT_OPS: readonly RegisteredOp[] = makeGenericOps(VFSName.QDRANT, IO)
+export class MyVFS extends BaseVFS<MyAccessor> {
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return myReaddir(this.accessor, path, index)
+  }
+}
 ```
 
-Write an op by hand only for an irregular handler, and pass its name through `overrides` so the derived set skips it. Mark every mutation `write: true`.
+The mount serves exactly what the class defines: commands and the dispatcher
+reach the same functions, and one the class leaves undefined answers
+`Operation not supported`. Set `readsRanges` true when `read` fetches only the
+asked window. Backend semantics stay in the method body, e.g. Databricks's
+`mkdir` passes the caller's `parents` to the core. Mark a function only this
+class declares with `@vfsCall({ effect })`, `Effect.WRITE` for a mutation, so
+a read-only mount remains a real boundary; the base functions carry their
+marks already.
 
 ## 4. Commands
 
-Build the standard set with `makeGenericCommands(VFSName.X, X_IO, { overrides })` over the same table; the generic command owns flag interpretation, so a backend wrapper is wiring only. `overrides` names the builders a bespoke command replaces, and a name no builder has is refused. Export the result as `<NAME>_COMMANDS` from `commands/builtin/<name>/index.ts`.
+Build the standard set with `makeGenericCommands(VFSName.X, { overrides })`; each command runs over the functions of the mount it runs on (`opts.io`), and the generic command owns flag interpretation, so a backend wrapper is wiring only. `overrides` names the builders a bespoke command replaces, and a name no builder has is refused. Export the result as `<NAME>_COMMANDS` from `commands/builtin/<name>/index.ts`, and register it for the VFS class in the package's `commands/builtin/backends.ts` with `registerBackendCommands(MyVFS, () => MY_VFS_COMMANDS)`. The registry is keyed by the class itself, so a minified bundle still finds it, and a subclass serves its base's commands.
 
-- Declare native text search in `new VFSAdapter({ read, search })`. Generic grep/rg builders consume it only when `search.meta.grep` opts in; semantic search does not opt in. The hierarchy kit supplies `makeSearchOp` for scope-based core functions; unsupported requests fall back to scanning. Existing wrappers may call `runSearch(X_IO, name, ...)` when preserving a custom registration.
+- Declare native text search by defining `search` on the VFS. Generic grep/rg builders use it only when `searchMeta.grep` opts in; semantic search does not opt in. The hierarchy kit supplies `makeSearchOp` for scope-based core functions; unsupported requests fall back to scanning.
 - A verb (`trello card create`) declares its own `new CommandSpec({...})` with every id as a flag, reads flags through `new FlagView(opts.flags, SPEC)` (never `flags.get(...)`), registers `write: true` for a mutation, and calls `requireMountWritable(...)` before the client. Specs declared inline are dumped to `.cache/spec/typescript/<node|browser>/vfs_commands/` and compared with Python's, and a prompt that teaches the verbs is pinned against their specs (`vfs/trello/prompt.test.ts`).
 - A handler that reads its `accessor` directly is trusted host code. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands.
 
 ## 5. VFS Class
 
-Extend `BaseVFS`, declare the facts as members, and return the command and op arrays from `commands()` and `ops()`. Core functions stay independent of the VFS class:
+Extend `BaseVFS`, declare the facts as members, and define the functions over the core. Core functions stay independent of the VFS class:
 
 ```ts
+import { read as myRead } from '../../core/my_vfs/read.ts'
+import { readdir as myReaddir } from '../../core/my_vfs/readdir.ts'
+import { stat as myStat } from '../../core/my_vfs/stat.ts'
 import { BaseVFS } from '../base.ts'
 
-export class MyVFS extends BaseVFS {
+export class MyVFS extends BaseVFS<MyAccessor> {
   override readonly name: string = VFSName.MY_VFS
   override readonly cachesReads: boolean = true
   override readonly prompt: string = MY_PROMPT
@@ -344,17 +348,21 @@ export class MyVFS extends BaseVFS {
     this.accessor = new MyAccessor(this.config)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return MY_VFS_OPS
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return myReaddir(this.accessor, path, index)
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return MY_VFS_COMMANDS
+  override read(path: PathSpec, index?: IndexCacheStore): Promise<Uint8Array> {
+    return myRead(this.accessor, path, index)
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return myStat(this.accessor, path, index)
   }
 }
 ```
 
-The mount registers both arrays when the driver is placed; a driver never registers anything onto itself.
+The mount builds the commands and the dispatcher's door from the class when the driver is placed; a driver never registers anything onto itself.
 
 Set `cachesReads` true only for stable, read-mostly content. `BaseVFS` supplies a no-op `loadState()` and a 600 s `indexTtl`, so declare one only to change it. A mount's read `ttl` caps listing lifetimes. Override `getState()` to carry the (redacted) config, and `close()` to release any client handles, calling `super.close()`. The index store is the mount's, built when the driver is placed, so a driver never sees or closes one.
 
@@ -408,18 +416,32 @@ Exercise a custom backend at a nested prefix, with globs, unknown file sizes, a 
 
 ## Updating Existing Backends
 
-### From `GenericVFS` and the `VFS` interface
+### From `VFSAdapter` and the op tables
 
-`BaseVFS` is now the one driver contract, and a driver serves only through
-the tables `ops()` and `commands()` return. Nothing keeps the old spelling
-alive, so a custom backend written against it changes in these places:
+A VFS now owns its functions: they are methods on `BaseVFS`, and the
+commands, the dispatcher and FUSE all call the same ones. Nothing keeps the
+adapter spelling alive, so a backend written against it changes in these
+places:
 
 | Before | Now |
 | --- | --- |
-| `new GenericVFS({ name, accessor, io, index })` | `new BaseVFS({ name, accessor, io })`; `io` takes a `VFSAdapter` or a `CommandIO`, and the index moves to `Workspace` or `Mount` `index` |
+| `new BaseVFS({ name, accessor, io: new VFSAdapter({ read: { readdir, readBytes, stat } }) })` | a `BaseVFS` subclass defining `readdir`, `read` and `stat` |
+| `readBytes` and `readRange` | one `read(path, index, offset, size)`; set `readsRanges` true when it fetches only the window |
+| `NativeReadOps`, `WriteOps`, `SearchOps`, `DuOps` | the same functions as methods (`readStream`, `exists`, `find`, `duSize` and `duEntries`, `write`, ..., `search`, `searchMany`); `SearchOps.meta` is the `searchMeta` member |
+| `ops()`, `makeGenericOps`, `RegisteredOp`, `OPS` tables, `autoOps` | nothing to declare: the mount serves the functions; mark a custom one `@vfsCall({ effect })` |
+| `commands()` returning a builtin set, `commands/builtin/<name>/io.ts` | `registerBackendCommands(cls, ...)` in `commands/builtin/backends.ts`; `commands()` returns only the commands the VFS was handed |
+| `new DriverOps(vfs)` and `checkDriverContract(vfs, fixture)` | call the functions on the VFS directly; `checkReadContract(vfs, fixture)` |
+
+### From `GenericVFS` and the `VFS` interface
+
+An older spelling changes in these places:
+
+| Before | Now |
+| --- | --- |
+| `new GenericVFS({ name, accessor, io, index })` | a `BaseVFS` subclass that defines the functions; the index moves to `Workspace` or `Mount` `index` |
 | `implements VFS`, `readonly kind` | `extends BaseVFS`, `override readonly name` |
 | `open()` | gone: reach the service lazily on the first request, or set up in a `static async create` |
-| `readFile`, `readdir`, `stat`, `glob` and the other per-driver methods, `opsMap` | `new DriverOps(vfs)` outside a workspace, `ws.dispatch(...)` inside one |
+| `readFile`, `glob` and the other per-driver methods, `opsMap` | the functions on the VFS outside a workspace, `ws.dispatch(...)` inside one |
 | `vfs.index`, `setIndex(...)` | the mount's store, `ws.mount(prefix).indexStore` |
 | `storageId()`, `statfs()` | `storageLocation()`, which may return `null`, and `capacity()` |
 | `recordVfsRef(vfs, ref)`, `vfsRefOf(vfs)` | the mount's `vfsRef` |
@@ -432,12 +454,14 @@ Mount configs now reject unknown fields. Remove PostgreSQL's `default_search_lim
 PostgreSQL whole-file reads check a bounded result’s database JSON byte size before transferring rows, then check the rendered JSONL size. Database formatting can make the first check conservative; use an explicit row window when that guard refuses a read.
 
 
-### Check the adapter contract
+### Check the read contract
 
-The read-contract helper accepts either an adapter or its compiled I/O table.
-Supply a small known file, its parent directory, an absent sibling, and the
-expected bytes. It checks listing, metadata, reads, streams, native ranges,
-existence, and missing-path errors without mutating the resource.
+The read-contract helper takes the VFS. Supply a small known file, its parent
+directory, an absent sibling, and the expected bytes. It checks listing,
+metadata, reads, streams where the VFS defines them, native windows where it
+reads ranges, existence, and missing-path errors without mutating the
+resource. Every function gets one RAM index store; pass a third argument to
+supply your own.
 
 ```ts
 import { checkReadContract, type ReadFixture } from '@struktoai/mirage-node'
@@ -448,41 +472,27 @@ const fixture: ReadFixture = {
   missing: missingPath,
   content: new TextEncoder().encode('known fixture bytes'),
 }
-await checkReadContract(adapter, accessor, fixture)
+await checkReadContract(vfs, fixture)
 ```
 
-`checkDriverContract(vfs, fixture)` runs the same read checks against a whole
-driver, through the op table `vfs.ops()` serves, the one channel a mount
-dispatches to. It checks a builtin-shaped subclass as readily as a driver built
-from an adapter, and always probes the `read` op's byte window. `DriverOps` is
-the table it drives: it calls a driver's ops the way a mount does, with the
-accessor bound and one index store per instance, which is also how to script a
-driver outside a workspace.
-
-```ts
-import { checkDriverContract, DriverOps } from '@struktoai/mirage-node'
-
-await new DriverOps(vfs).write(filePath, new TextEncoder().encode('known fixture bytes'))
-await checkDriverContract(vfs, fixture)
-```
+To script a VFS outside a workspace, call its functions directly:
+`await vfs.write(filePath, new TextEncoder().encode('known fixture bytes'))`.
 
 Use disposable fixtures to test supported writes and verify read-only mounts
 refuse mutations. Resource-specific tests should cover pagination, scope,
 authorization failures, and query options.
 
-Builtin VFS classes and a `BaseVFS` built from an adapter serve through the
-same two tables: commands, filesystem ops, and glob expansion all come from the
-backend's I/O table, and a driver carries no direct verb methods beside them.
-Backend classes keep configuration, client lifecycle, storage location, watch
-hooks, and snapshot behavior.
+Builtin VFS classes and your own serve through the same functions: commands,
+filesystem ops, and glob expansion all come from them. Backend classes also
+keep configuration, client lifecycle, storage location, watch hooks, and
+snapshot behavior.
 
 ### Batch resource search
 
-`{ search: searchOne, searchMany }` optionally supplies a batch callback with
-`(accessor, paths, query, index)`. Use it when ranking and `top_k` must apply once
-across several paths. The single-path callback remains required. The shared
-`searchResources` helper uses the batch callback when provided and otherwise
-concatenates single-path results; a declined request reports an error rather
+A VFS may also define `searchMany(paths, query, index?)`. Use it when ranking
+and `top_k` must apply once across several paths. `search` remains required.
+Resource search commands use `searchMany` when it is defined and otherwise
+concatenate single-path results; a declined request reports an error rather
 than no matches.
 
 Chroma, Dify, Qdrant, LanceDB, and Mem0 use this capability for their existing
@@ -492,7 +502,7 @@ resource search commands. Their options remain backend-specific: for example,
 ### Start from a packaged example
 
 The `mirage-vfs-authoring` skill in the Mirage plugin includes self-contained
-Python and TypeScript starters and `scripts/new_adapter.py`. It creates an
-adapter file in your project, refuses to overwrite existing files, and includes
+Python and TypeScript starters and `scripts/new_adapter.py`. It creates a
+VFS file in your project, refuses to overwrite existing files, and includes
 the contract check plus a mounted shell smoke test. Replace its fixture client
-with your resource API, then expand capabilities as needed.
+with your resource API, then define more functions as needed.

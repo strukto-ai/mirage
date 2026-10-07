@@ -60,3 +60,12 @@ def test_handed_commands_come_after_the_generic_set_they_override():
     assert [rc.fn for rc in cats] == [
         rc.fn for rc in registered_commands([cat])
     ]
+
+
+def test_a_builtin_loses_the_commands_it_overrides():
+    class Searchless(RAMVFS):
+        overrides = frozenset({"grep", "rg"})
+
+    names = {rc.name for rc in mount_commands(Searchless())}
+    assert "cat" in names
+    assert not {"grep", "rg"} & names

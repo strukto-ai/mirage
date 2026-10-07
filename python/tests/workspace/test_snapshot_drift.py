@@ -13,15 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import ExitStack
+from typing import Any
 
 import pytest
 
-from mirage.cache.index import IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.commands.cli.types import CLISpec
 from mirage.io import IOResult
 from mirage.observe.context import RecordingScope, record, start_op
-from mirage.ops.registry import op
 from mirage.types import DriftPolicy, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
@@ -414,17 +415,33 @@ async def test_snapshot_fingerprints_keep_read_mount_ownership(
 
 @pytest.mark.asyncio
 async def test_snapshot_rejects_fingerprint_from_retired_lazy_op():
-    vfs = RAMVFS()
-    vfs.supports_snapshot = True
     payload = b"old"
 
-    @op("read", vfs="ram")
-    async def lazy_read(accessor, scope, **kwargs):
-        record("read", scope.virtual, "ram", 3, start_op(), fingerprint="old")
-        yield payload
+    # A read that answers with a stream, recorded only as it is drained.
+    class LazyRAMVFS(RAMVFS):
+        async def read(
+            self,
+            path: PathSpec,
+            index: IndexCacheStore = NULL_INDEX,
+            offset: int = 0,
+            size: int | None = None,
+        ) -> Any:
+            async def lazy() -> AsyncIterator[bytes]:
+                record(
+                    "read",
+                    path.virtual,
+                    "ram",
+                    3,
+                    start_op(),
+                    fingerprint="old",
+                )
+                yield payload
 
+            return lazy()
+
+    vfs = LazyRAMVFS()
+    vfs.supports_snapshot = True
     ws = Workspace({"/data": vfs})
-    ws.mount("/data").register_fns([lazy_read])
     scope = RecordingScope()
     try:
         stream, _ = await ws.dispatch(

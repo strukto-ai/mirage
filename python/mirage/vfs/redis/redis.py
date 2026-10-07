@@ -184,9 +184,6 @@ class RedisVFS(BaseVFS):
             mtime=mtime,
         )
 
-    def is_mounted(self) -> bool:
-        return self.accessor.store is not None
-
     def storage_location(self) -> str:
         # The server URL (host, port and db) plus the key prefix pin the
         # keyspace two mounts would share. The prefix is joined path-like
