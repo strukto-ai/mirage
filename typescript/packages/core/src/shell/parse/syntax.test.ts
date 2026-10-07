@@ -59,6 +59,7 @@ describe('failsInArray', () => {
     ['x=(1 $(echo', true],
     ['x=(1 2) ; y=(', true],
     ['x=(1 (2', true],
+    ['x=((1 2', true],
     ['echo $(echo', false],
   ])('%s: %s', (line, inside) => {
     const root = parser.parse(line)

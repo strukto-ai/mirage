@@ -27,7 +27,9 @@ from mirage.shell.parse.constants import (
     CONSTRUCT_CLOSERS,
     LIST_OPERATORS,
     NAME_FOLLOWS,
+    NESTED_CLOSERS,
     OPENER_CLOSERS,
+    OPERATOR_CHARS,
     QUOTE_TOKENS,
     SEPARATOR_TOKENS,
     STRUCTURAL_TOKENS,
@@ -482,7 +484,9 @@ def _unfinished(node: TSNodeLike) -> tuple[str, str, int, bool] | None:
     Args:
         node (TSNodeLike): the parsed command being refused.
     """
-    end = node.start_byte + len((node.text or b"").rstrip())
+    cut = _array_cut(node)
+    if cut is not None:
+        return cut[0], NT.ARRAY, cut[1], True
     stack: list[tuple[TSNodeLike, bool, int | None]] = [(node, False, None)]
     while stack:
         current, visited, quoted = stack.pop()
@@ -490,20 +494,13 @@ def _unfinished(node: TSNodeLike) -> tuple[str, str, int, bool] | None:
             # Diagnose an ERROR span only after its children, as before.
             if not current.children and (current.text or b"").startswith(b"'"):
                 return "'", "'", current.start_byte, False
-            found = _unclosed(current.children)
-            if found is not None and found[0]:
-                pending, cut = found
-                if cut is not None:
-                    return cut, pending[0][2], pending[0][3], True
+            pending = _unclosed(current.children)
+            if pending:
                 return pending[-1][1], pending[0][2], pending[0][3], False
             continue
         if current.is_missing and current.type in QUOTE_TOKENS:
             opened = current.parent if current.parent is not None else current
             return current.type, current.type, opened.start_byte, False
-        if current.type == NT.ARRAY:
-            cut = _array_cut(current, node, end)
-            if cut is not None:
-                return cut, NT.ARRAY, current.start_byte, True
         closer = CONSTRUCT_CLOSERS.get(current.type)
         if closer is not None and any(
             child.is_missing and child.type in CLOSING_TOKENS
@@ -535,17 +532,16 @@ def _unfinished(node: TSNodeLike) -> tuple[str, str, int, bool] | None:
 
 def _unclosed(
     children: Sequence[TSNodeLike],
-) -> tuple[list[tuple[str, str, str, int]], str | None] | None:
-    """The constructs an ERROR's tokens leave open, outermost first (each
+) -> list[tuple[str, str, str, int]] | None:
+    """The constructs an ERROR's tokens leave open, outermost first: each
     one's closing token, the character bash names for it, its opener and
-    its start), and the operator that cut an array short, if one did.
+    its start.
 
     A double quote or a backtick nests inside a substitution as bash reads
     it (``"$("`` waits for a quote), a lone ``)`` inside ``$((`` groups
-    rather than closes, a ``(`` right after an assignment's ``=`` opens an
-    array, and a ``(`` inside one cuts it short. Any other closer that
-    does not match the innermost opener is an unexpected token rather than
-    the end of input: None.
+    rather than closes, and a ``(`` right after an assignment's ``=``
+    opens an array. Any other closer that does not match the innermost
+    opener is an unexpected token rather than the end of input: None.
 
     Args:
         children (Sequence[TSNodeLike]): the ERROR node's children, in order.
@@ -568,63 +564,69 @@ def _unclosed(
             and previous.type in ASSIGNMENT_OPERATORS
         ):
             pending.append((")", ")", NT.ARRAY, start))
-        elif kind == "(" and pending and pending[-1][2] == NT.ARRAY:
-            return pending, kind
         elif kind in CLOSING_TOKENS and pending:
             if not (kind == ")" and pending[-1][0] == "))"):
                 if kind != pending[-1][0]:
                     return None
                 pending.pop()
         previous = child
-    return pending, None
+    return pending
 
 
-def _array_cut(array: TSNodeLike, root: TSNodeLike, end: int) -> str | None:
-    """The operator that cut an array assignment's ``(`` short: bash reads
-    only words up to its ``)`` and reports the first other token, one the
-    grammar refused inside the array (``>``), or the one after the ``)``
-    it marks missing before the input ends (``;``).
+def _array_cut(node: TSNodeLike) -> tuple[str, int] | None:
+    """The token that cuts the first array assignment short, and where the
+    array opens.
+
+    bash reads only words from ``name=(`` or ``name+=(`` up to the
+    matching ``)``, so a token made of operator characters there is the
+    error it reports (``x=(1 2; fi``, ``x=((1+2))``). The tokens are read
+    off the parse in order, whatever grouping its error recovery chose. A
+    substitution reads arrays of its own; inside a quote, an expansion or
+    arithmetic nothing opens or cuts one.
 
     Args:
-        array (TSNodeLike): the array.
-        root (TSNodeLike): the parsed line.
-        end (int): where the line's text ends.
+        node (TSNodeLike): the parsed line.
     """
-    stack = list(reversed(array.children))
-    while stack:
-        current = stack.pop()
-        if current.type == "ERROR":
-            return _token_after(current, current.start_byte)
-        if current.type not in CONSTRUCT_CLOSERS and current.type != NT.STRING:
-            stack.extend(reversed(current.children))
-    closer = array.children[-1] if array.children else None
-    if closer is None or not closer.is_missing or closer.start_byte >= end:
-        return None
-    return _token_after(root, closer.start_byte)
+    frames: list[tuple[str | None, int | None]] = [(None, None)]
+    previous: TSNodeLike | None = None
+    for token in _tokens(node):
+        kind = token.type
+        closer, opened = frames[-1]
+        if opened is not None and kind == ")":
+            frames[-1] = (closer, None)
+        elif kind == closer:
+            frames.pop()
+        elif kind in NESTED_CLOSERS:
+            frames.append((NESTED_CLOSERS[kind], None))
+        elif closer in (None, ")"):
+            if opened is not None and set(kind) <= OPERATOR_CHARS:
+                return decode_text(token.text or b""), opened
+            if (
+                kind == "("
+                and previous is not None
+                and previous.type in ASSIGNMENT_OPERATORS
+                and previous.end_byte == token.start_byte
+            ):
+                frames[-1] = (closer, token.start_byte)
+        previous = token
+    return None
 
 
-def _token_after(node: TSNodeLike, at: int) -> str | None:
-    """The first token of a parse from a byte on, comments aside: what
-    bash reads next there.
+def _tokens(node: TSNodeLike) -> Iterator[TSNodeLike]:
+    """A parse's tokens in reading order, missing tokens and comments aside.
 
     Args:
         node (TSNodeLike): the parse.
-        at (int): the byte.
     """
     stack = [node]
     while stack:
         current = stack.pop()
-        if (
-            current.end_byte <= at
-            or current.is_missing
-            or current.type == "comment"
-        ):
+        if current.is_missing or current.type == "comment":
             continue
         if current.children:
             stack.extend(reversed(current.children))
-        elif current.start_byte >= at:
-            return decode_text(current.text or b"")
-    return None
+        else:
+            yield current
 
 
 def fails_in_array(node: TSNodeLike, issue_end: int | None = None) -> bool:

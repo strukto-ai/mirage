@@ -83,6 +83,26 @@ ASSIGNMENT_OPERATORS = frozenset({"=", "+="})
 # The quotes an input can end inside; bash reads on looking for the match.
 QUOTE_TOKENS = frozenset({"'", '"', "`"})
 
+# The characters bash builds its operators from: a token made of nothing
+# else is an operator, never a word.
+OPERATOR_CHARS = frozenset(";&|()<>")
+
+# What each token opening a nested construct waits for while bash reads an
+# array's words. A substitution (closed by ``)``) reads a command list of
+# its own; inside the others (quotes, expansions, arithmetic) no operator
+# cuts anything.
+NESTED_CLOSERS: dict[str, str] = {
+    "$(": ")",
+    "<(": ")",
+    ">(": ")",
+    "$((": "))",
+    "((": "))",
+    "${": "}",
+    "$[": "]",
+    '"': '"',
+    "`": "`",
+}
+
 # The compound commands an ERROR can leave open, by the token closing
 # each. Input ending inside one is bash's `syntax error: unexpected end
 # of file`, not an unexpected token. A `(` after a command's words opens

@@ -83,6 +83,26 @@ export const ASSIGNMENT_OPERATORS: ReadonlySet<string> = new Set(['=', '+='])
 // The quotes an input can end inside; bash reads on looking for the match.
 export const QUOTE_TOKENS: ReadonlySet<string> = new Set(["'", '"', '`'])
 
+// The characters bash builds its operators from: a token made of nothing
+// else is an operator, never a word.
+export const OPERATOR_CHARS: ReadonlySet<string> = new Set(';&|()<>')
+
+// What each token opening a nested construct waits for while bash reads an
+// array's words. A substitution (closed by `)`) reads a command list of its
+// own; inside the others (quotes, expansions, arithmetic) no operator cuts
+// anything.
+export const NESTED_CLOSERS: ReadonlyMap<string, string> = new Map([
+  ['$(', ')'],
+  ['<(', ')'],
+  ['>(', ')'],
+  ['$((', '))'],
+  ['((', '))'],
+  ['${', '}'],
+  ['$[', ']'],
+  ['"', '"'],
+  ['`', '`'],
+])
+
 // The compound commands an ERROR can leave open, by the token closing
 // each. Input ending inside one is bash's `syntax error: unexpected end
 // of file`, not an unexpected token. A `(` after a command's words opens

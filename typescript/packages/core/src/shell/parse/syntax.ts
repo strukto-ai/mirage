@@ -28,7 +28,9 @@ import {
   CONSTRUCT_CLOSERS,
   LIST_OPERATORS,
   NAME_FOLLOWS,
+  NESTED_CLOSERS,
   OPENER_CLOSERS,
+  OPERATOR_CHARS,
   QUOTE_TOKENS,
   SEPARATOR_TOKENS,
   STRUCTURAL_TOKENS,
@@ -378,7 +380,8 @@ export function findUnterminatedQuote(node: TSNodeLike): string | null {
  * `(` takes only words up to its `)` (`arrayCut`). Mirrors Python's
  * _unfinished. */
 function unfinished(node: TSNodeLike): [string, string, number, boolean] | null {
-  const end = (node.startIndex ?? 0) + node.text.trimEnd().length
+  const cut = arrayCut(node)
+  if (cut !== null) return [cut[0], NT.ARRAY, cut[1], true]
   const stack: [TSNodeLike, boolean, number | null][] = [[node, false, null]]
   for (let entry = stack.pop(); entry !== undefined; entry = stack.pop()) {
     const [current, visited, quoted] = entry
@@ -387,21 +390,14 @@ function unfinished(node: TSNodeLike): [string, string, number, boolean] | null 
       // Diagnose an ERROR span only after its children, as before.
       if (current.children.length === 0 && current.text.startsWith("'"))
         return ["'", "'", start, false]
-      const [pending, cut] = unclosed(current.children) ?? [[], null]
-      const [outer] = pending
-      const inner = pending.at(-1)
-      if (outer !== undefined && inner !== undefined)
-        return cut !== null
-          ? [cut, outer[2], outer[3], true]
-          : [inner[1], outer[2], outer[3], false]
+      const pending = unclosed(current.children)
+      const [outer] = pending ?? []
+      const inner = pending?.at(-1)
+      if (outer !== undefined && inner !== undefined) return [inner[1], outer[2], outer[3], false]
       continue
     }
     if (current.isMissing && QUOTE_TOKENS.has(current.type))
       return [current.type, current.type, current.parent?.startIndex ?? start, false]
-    if (current.type === NT.ARRAY) {
-      const cut = arrayCut(current, node, end)
-      if (cut !== null) return [cut, NT.ARRAY, start, true]
-    }
     const closer = CONSTRUCT_CLOSERS.get(current.type)
     // Inside a double-quoted string, bash reads the string's own closing
     // quote into the construct, where it opens another.
@@ -429,18 +425,15 @@ function unfinished(node: TSNodeLike): [string, string, number, boolean] | null 
   return null
 }
 
-/** The constructs an ERROR's tokens leave open, outermost first (each one's
+/** The constructs an ERROR's tokens leave open, outermost first: each one's
  * closing token, the character bash names for it, its opener and its
- * start), and the operator that cut an array short, if one did. A double
- * quote or a backtick nests inside a substitution as bash reads it (`"$("`
- * waits for a quote), a lone `)` inside `$((` groups rather than closes, a
- * `(` right after an assignment's `=` or `+=` opens an array, and a `(`
- * inside one cuts it short. Any other closer that does not match the
- * innermost opener is an unexpected token rather than the end of input:
- * null. Mirrors Python's _unclosed. */
-function unclosed(
-  children: readonly TSNodeLike[],
-): [[string, string, string, number][], string | null] | null {
+ * start. A double quote or a backtick nests inside a substitution as bash
+ * reads it (`"$("` waits for a quote), a lone `)` inside `$((` groups rather
+ * than closes, and a `(` right after an assignment's `=` or `+=` opens an
+ * array. Any other closer that does not match the innermost opener is an
+ * unexpected token rather than the end of input: null. Mirrors Python's
+ * _unclosed. */
+function unclosed(children: readonly TSNodeLike[]): [string, string, string, number][] | null {
   const pending: [string, string, string, number][] = []
   let previous: TSNodeLike | null = null
   for (const child of children) {
@@ -453,7 +446,6 @@ function unclosed(
     } else if (opened !== undefined) pending.push([opened[0], opened[1], kind, start])
     else if (kind === '(' && previous !== null && ASSIGNMENT_OPERATORS.has(previous.type))
       pending.push([')', ')', NT.ARRAY, start])
-    else if (kind === '(' && pending.at(-1)?.[2] === NT.ARRAY) return [pending, kind]
     else if (CLOSING_TOKENS.has(kind) && pending.length > 0) {
       if (!(kind === ')' && pending.at(-1)?.[0] === '))')) {
         if (kind !== pending.at(-1)?.[0]) return null
@@ -462,35 +454,52 @@ function unclosed(
     }
     previous = child
   }
-  return [pending, null]
+  return pending
 }
 
-/** The operator that cut an array assignment's `(` short: bash reads only
- * words up to its `)` and reports the first other token, one the grammar
- * refused inside the array (`>`), or the one after the `)` it marks missing
- * before the input ends (`;`). Mirrors Python's _array_cut. */
-function arrayCut(array: TSNodeLike, root: TSNodeLike, end: number): string | null {
-  const stack = [...array.children].reverse()
-  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
-    if (current.type === 'ERROR') return tokenAfter(current, current.startIndex ?? 0)
-    if (!CONSTRUCT_CLOSERS.has(current.type) && current.type !== NT.STRING)
-      stack.push(...[...current.children].reverse())
-  }
-  const closer = array.children.at(-1)
-  if (closer?.isMissing !== true || (closer.startIndex ?? 0) >= end) return null
-  return tokenAfter(root, closer.startIndex ?? 0)
-}
-
-/** The first token of a parse from an offset on, comments aside: what bash
- * reads next there. Mirrors Python's _token_after. */
-function tokenAfter(node: TSNodeLike, at: number): string | null {
-  const stack = [node]
-  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
-    if ((current.endIndex ?? 0) <= at || current.isMissing || current.type === 'comment') continue
-    if (current.children.length > 0) stack.push(...[...current.children].reverse())
-    else if ((current.startIndex ?? 0) >= at) return current.text
+/** The token that cuts the first array assignment short, and where the
+ * array opens. bash reads only words from `name=(` or `name+=(` up to the
+ * matching `)`, so a token made of operator characters there is the error
+ * it reports (`x=(1 2; fi`, `x=((1+2))`). The tokens are read off the parse
+ * in order, whatever grouping its error recovery chose. A substitution reads
+ * arrays of its own; inside a quote, an expansion or arithmetic nothing
+ * opens or cuts one. Mirrors Python's _array_cut. */
+function arrayCut(node: TSNodeLike): [string, number] | null {
+  const frames: [string | null, number | null][] = [[null, null]]
+  let previous: TSNodeLike | null = null
+  for (const token of tokens(node)) {
+    const kind = token.type
+    const frame = frames.at(-1) ?? [null, null]
+    const [closer, opened] = frame
+    const nested = NESTED_CLOSERS.get(kind)
+    if (opened !== null && kind === ')') frame[1] = null
+    else if (kind === closer) frames.pop()
+    else if (nested !== undefined) frames.push([nested, null])
+    else if (closer === null || closer === ')') {
+      if (opened !== null && Array.from(kind).every((ch) => OPERATOR_CHARS.has(ch)))
+        return [token.text, opened]
+      if (
+        kind === '(' &&
+        previous !== null &&
+        ASSIGNMENT_OPERATORS.has(previous.type) &&
+        previous.endIndex === token.startIndex
+      )
+        frame[1] = token.startIndex ?? 0
+    }
+    previous = token
   }
   return null
+}
+
+/** A parse's tokens in reading order, missing tokens and comments aside.
+ * Mirrors Python's _tokens. */
+function* tokens(node: TSNodeLike): Generator<TSNodeLike> {
+  const stack = [node]
+  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
+    if (current.isMissing === true || current.type === 'comment') continue
+    if (current.children.length > 0) stack.push(...[...current.children].reverse())
+    else yield current
+  }
 }
 
 /** Whether the first error bash reads is inside an array assignment's `(`,

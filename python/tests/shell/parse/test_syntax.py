@@ -60,6 +60,7 @@ def test_only_input_bash_took_whole_ends_inside_a_construct(line, unfinished):
         ("x=(1 $(echo", True),
         ("x=(1 2) ; y=(", True),
         ("x=(1 (2", True),
+        ("x=((1 2", True),
         ("echo $(echo", False),
     ],
 )
