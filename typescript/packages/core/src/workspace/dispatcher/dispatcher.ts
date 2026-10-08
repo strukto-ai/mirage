@@ -232,6 +232,67 @@ function served(report: OpReport | undefined, result: unknown): void {
   report?.served(null, result instanceof Uint8Array ? result.byteLength : null)
 }
 
+/**
+ * Stamp the caller's report when a streamed read ends. A stream completes when
+ * its last chunk is pulled or it is closed, so that is when it is stamped,
+ * with the bytes it carried; one whose first pull failed moved nothing and is
+ * not stamped. Mirrors Python's `_reported`.
+ */
+async function* reported(
+  stream: AsyncIterable<Uint8Array>,
+  report: OpReport | undefined,
+): AsyncGenerator<Uint8Array> {
+  let moved = 0
+  let started = false
+  const iterator = stream[Symbol.asyncIterator]()
+  try {
+    for (;;) {
+      const next = await iterator.next()
+      started = true
+      if (next.done === true) return
+      moved += next.value.byteLength
+      yield next.value
+    }
+  } finally {
+    await iterator.return?.()
+    if (started) report?.served(null, moved)
+  }
+}
+
+/**
+ * Pull a stream's first chunk now and answer the stream from there, so a read
+ * that fails at its start fails at the call, where the door handles it, rather
+ * than in the hands of whoever pulls it later. Mirrors Python's `_primed`.
+ */
+async function primed(stream: AsyncIterable<Uint8Array>): Promise<AsyncIterable<Uint8Array>> {
+  const iterator = stream[Symbol.asyncIterator]()
+  let first: IteratorResult<Uint8Array>
+  try {
+    first = await iterator.next()
+  } catch (err) {
+    await iterator.return?.()
+    throw err
+  }
+  return resumed(first.done === true ? [] : [first.value], iterator)
+}
+
+/** The chunks already pulled, then the rest of the stream. */
+async function* resumed(
+  head: readonly Uint8Array[],
+  iterator: AsyncIterator<Uint8Array>,
+): AsyncGenerator<Uint8Array> {
+  try {
+    yield* head
+    for (;;) {
+      const next = await iterator.next()
+      if (next.done === true) return
+      yield next.value
+    }
+  } finally {
+    await iterator.return?.()
+  }
+}
+
 /** The door's link follow of one path, the final name too (`last`) or
  * only the names above it, with a loop thrown as ELOOP rather than the
  * namespace's CycleError. */
@@ -277,6 +338,8 @@ interface Call {
    * walk, and from the VFS's own declaration at admission.
    */
   write: boolean
+  /** Whether a read is answered as it is pulled. */
+  stream: boolean
 }
 
 /** Whether the caller asked for the stored bytes, no renderer. */
@@ -364,8 +427,12 @@ export class Dispatcher {
     // withDispatchRuleGuard's mark, never forwarded to an op.
     const { ruleGate, ...unmarked } = (stripped ?? {}) as { ruleGate?: EntryGate | null }
     kwargs = ruleGate === undefined ? stripped : unmarked
+    // The door's own keyword: a read answered as it is pulled.
+    const { stream, ...unstreamed } = (kwargs ?? {}) as { stream?: unknown }
+    if (name === 'read' && stream !== undefined) kwargs = unstreamed
     await this.prepare()
     const call = await this.walk(name, path, args, kwargs, ruleGate ?? null, report, issuer)
+    call.stream = name === 'read' && stream === true
     await this.refuseRename(call)
     if (this.tableAnswers(name, call.path.virtual, call.kwargs)) {
       return [
@@ -533,6 +600,7 @@ export class Dispatcher {
       issuer,
       noFollow,
       write: POLICY_WRITE_OPS.has(name),
+      stream: false,
     }
   }
 
@@ -718,6 +786,43 @@ export class Dispatcher {
     return bare.complete(call.name, call.path, call.write, fallback)
   }
 
+  /**
+   * Whether a read is answered as it is pulled. A whole read of stored bytes
+   * streams through the VFS's own `readStream`. A window, a rendering, a VFS
+   * with no stream and a postVfs policy that may read the result each get the
+   * whole bytes instead, which are a stream of one chunk. Mirrors Python's
+   * Dispatcher._streams.
+   */
+  private streams(call: Call, mount: MountEntry, vfs: BaseVFS): boolean {
+    const [offset, size] = readWindow(call.kwargs)
+    return (
+      call.stream &&
+      offset === 0 &&
+      size === null &&
+      vfs.supports('readStream') &&
+      !this.rendersRead(call, mount) &&
+      !this.policies.readsResults()
+    )
+  }
+
+  /**
+   * Open a streamed read, its first chunk pulled before it returns. A cold
+   * read fills the cache as it is pulled. Mirrors Python's
+   * Dispatcher._open_stream.
+   */
+  private async openStream(
+    call: Call,
+    mount: MountEntry,
+    scope: PathSpec,
+    filler: CacheManager | null,
+  ): Promise<AsyncIterable<Uint8Array>> {
+    let stream = mount.readStream(scope)
+    if (filler !== null) {
+      stream = filler.fillStream(call.path, stream, () => !this.rendersRead(call, mount))
+    }
+    return await primed(reported(stream, call.report))
+  }
+
   /** Whether a filetype renderer answers this read on `vfs`; asked each
    * time, since a renderer can land while the read runs. */
   private rendersRead(call: Call, mount: MountEntry): boolean {
@@ -841,6 +946,9 @@ export class Dispatcher {
     const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
     let result
     try {
+      if (this.streams(call, mount, vfs)) {
+        return [await this.openStream(call, mount, scope, filler), renameDst, fullArgs]
+      }
       const run = (opKwargs: OpKwargs, onCall?: (call: Promise<unknown>) => void) =>
         mount.use(async () => {
           const answer = await runWithMountContext(

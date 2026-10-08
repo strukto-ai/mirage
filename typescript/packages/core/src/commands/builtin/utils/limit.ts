@@ -124,6 +124,36 @@ async function* withTimeout(
   }
 }
 
+/**
+ * Give each pull of a streamed op its own timeout. An op's timeout bounds a
+ * backend call, and a streamed op calls the backend once per pull, so each
+ * pull gets the whole budget and a consumer that pauses between pulls spends
+ * none of it. Mirrors Python's `with_pull_timeout`.
+ */
+export async function* withPullTimeout(
+  src: AsyncIterable<Uint8Array>,
+  seconds: number | null,
+  name: string,
+): AsyncIterableIterator<Uint8Array> {
+  const iterator = src[Symbol.asyncIterator]()
+  let pulling = false
+  try {
+    for (;;) {
+      pulling = true
+      const next = await runWithTimeout(iterator.next(), seconds, name)
+      pulling = false
+      if (next.done === true) return
+      yield next.value
+    }
+  } finally {
+    const closing = iterator.return?.()
+    if (closing !== undefined) {
+      if (pulling) void closing.catch(() => undefined)
+      else await closing
+    }
+  }
+}
+
 export function maybeWithTimeout(
   stream: ByteSource | null,
   limit: Limit | null,
@@ -281,13 +311,26 @@ export async function guardOutput(
   return [data, io.stderr, io.exitCode]
 }
 
+/**
+ * A streamed op result cut at its cap as it is pulled. Nothing past the cap is
+ * pulled from `src`: TRUNCATE ends the stream there, ERROR throws
+ * LimitExceededError at the pull that crossed it. Mirrors Python's `_capped`.
+ */
+async function* capped(src: ByteSource, limit: Limit): AsyncIterableIterator<Uint8Array> {
+  const io = new IOResult()
+  yield* boundedStream(src, io, limit)
+  if (io.exitCode !== 0) {
+    throw new LimitExceededError(DEC.decode(await materialize(io.stderr)).trim())
+  }
+}
+
 export async function limitResult(result: unknown, limit: Limit | null): Promise<unknown> {
   if (limit === null) return result
   if (limit.maxBytes === null && limit.maxLines === null) return result
-  const isBytes = result instanceof Uint8Array
   const isStream = result !== null && typeof result === 'object' && Symbol.asyncIterator in result
-  if (!isBytes && !isStream) return result
-  const [data, sgIo] = await applyLimit(result as ByteSource, limit)
+  if (isStream) return capped(result as ByteSource, limit)
+  if (!(result instanceof Uint8Array)) return result
+  const [data, sgIo] = await applyLimit(result, limit)
   if (sgIo.exitCode !== 0) {
     const message = sgIo.stderr instanceof Uint8Array ? DEC.decode(sgIo.stderr) : 'limit exceeded'
     throw new LimitExceededError(message.trim())

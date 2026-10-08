@@ -17,7 +17,8 @@ import { activeRecords } from '../observe/context.ts'
 import { DEFAULT_READ_TTL, type FileStat, PathSpec } from '../types.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
-import type { FileCache } from './file/mixin.ts'
+import { drainBudget, type FileCache } from './file/mixin.ts'
+import { concat } from '../io/cachable_iterator.ts'
 import type { IndexCacheStore } from './index/store.ts'
 import type { Evicted, IndexEntry } from './index/config.ts'
 import { CHECKED_LIMIT, LISTING_TRUST_WINDOW, PROBED_LIMIT } from './index/constants.ts'
@@ -472,21 +473,153 @@ export class CacheManager {
     if (!(data instanceof Uint8Array)) return data
     const cache = this.readableCache(key)
     if (cache !== null) {
-      await withCacheMutation(cache, async () => {
-        if (
-          this.ownsPath(key) &&
-          generation === this.readGeneration &&
-          (keep === undefined || keep())
-        ) {
-          let fingerprint = latestFingerprint(records?.slice(start), key)
-          if (facts.length > 0) {
-            fingerprint = facts.every((fp) => fp === facts[0]) ? (facts[0] ?? null) : null
-          }
-          await cache.set(key, data, { fingerprint, ttl: this.readTtl })
-        }
-      })
+      await this.keepRead(cache, key, data, generation, keep, () =>
+        facts.length > 0
+          ? facts.every((fp) => fp === facts[0])
+            ? (facts[0] ?? null)
+            : null
+          : latestFingerprint(records?.slice(start), key),
+      )
     }
     return data
+  }
+
+  /**
+   * Pass a cold streamed read through and keep its bytes for the next one.
+   *
+   * The streamed twin of `fill`: the bytes are kept once the last chunk is
+   * pulled, under the same rules (a write that lands while the stream runs
+   * retires the generation, `keep` has the last say, and the token the
+   * backend recorded for them labels them). A file larger than the cache's
+   * drain budget passes through and none of it is kept, so a stream never
+   * holds more than the cache could. A caller that stops early leaves the
+   * rest to a background drain within that budget, as a command's abandoned
+   * read gets. Mirrors Python's `fill_stream`.
+   */
+  fillStream(
+    path: PathSpec,
+    source: AsyncIterable<Uint8Array>,
+    keep?: () => boolean,
+  ): AsyncIterable<Uint8Array> {
+    const key = this.cacheKey(path)
+    const cache = this.readableCache(key)
+    if (cache === null) return source
+    return this.filling(cache, key, source, keep)
+  }
+
+  private async *filling(
+    cache: FileCache,
+    key: string,
+    source: AsyncIterable<Uint8Array>,
+    keep: (() => boolean) | undefined,
+  ): AsyncGenerator<Uint8Array> {
+    const generation = this.readGeneration
+    const records = activeRecords()
+    const start = records?.length ?? 0
+    const token = (): string | null => latestFingerprint(records?.slice(start), key)
+    const budget = drainBudget(cache)
+    let chunks: Uint8Array[] | null = []
+    let size = 0
+    const iterator = source[Symbol.asyncIterator]()
+    let state = 'open' as 'open' | 'ended' | 'failed'
+    try {
+      for (;;) {
+        let next: IteratorResult<Uint8Array>
+        try {
+          next = await iterator.next()
+        } catch (err) {
+          state = 'failed'
+          throw err
+        }
+        if (next.done === true) {
+          state = 'ended'
+          break
+        }
+        if (chunks !== null) {
+          size += next.value.byteLength
+          chunks = size <= budget ? chunks : null
+          chunks?.push(next.value)
+        }
+        yield next.value
+      }
+    } finally {
+      const tasks = cache.drainTasks
+      if (state === 'ended' && chunks !== null) {
+        await this.keepRead(cache, key, concat(chunks), generation, keep, token)
+      } else if (state === 'open' && chunks !== null && tasks !== undefined && !tasks.has(key)) {
+        const rest = chunks
+        const task: Promise<void> = this.drain(
+          cache,
+          key,
+          iterator,
+          rest,
+          size,
+          generation,
+          token,
+          () => tasks.get(key) === task && (keep === undefined || keep()),
+        )
+        tasks.set(key, task)
+        void task.finally(() => {
+          if (tasks.get(key) === task) tasks.delete(key)
+        })
+      } else if (state !== 'ended') {
+        await iterator.return?.()
+      }
+    }
+  }
+
+  /**
+   * Read the rest of an abandoned stream and keep it, within budget. A write
+   * to the path drops this drain, and a drain no longer registered for the
+   * path keeps nothing (`keep` asks; a promise cannot be cancelled).
+   */
+  private async drain(
+    cache: FileCache,
+    key: string,
+    iterator: AsyncIterator<Uint8Array>,
+    chunks: Uint8Array[],
+    size: number,
+    generation: number,
+    token: () => string | null,
+    keep: () => boolean,
+  ): Promise<void> {
+    try {
+      for (;;) {
+        const next = await iterator.next()
+        if (next.done === true) break
+        size += next.value.byteLength
+        if (size > drainBudget(cache)) {
+          console.debug(`cache drain budget exceeded for ${key}, not kept`)
+          return
+        }
+        chunks.push(next.value)
+      }
+      await this.keepRead(cache, key, concat(chunks), generation, keep, token)
+    } catch (err) {
+      console.debug(`background drain failed for ${key}: ${String(err)}`)
+    } finally {
+      await iterator.return?.()
+    }
+  }
+
+  /** Store a cold read's bytes unless something since made them stale. */
+  private async keepRead(
+    cache: FileCache,
+    key: string,
+    data: Uint8Array,
+    generation: number,
+    keep: (() => boolean) | undefined,
+    token: () => string | null,
+  ): Promise<void> {
+    await withCacheMutation(cache, async () => {
+      if (
+        this.ownsPath(key) &&
+        generation === this.readGeneration &&
+        (keep === undefined || keep())
+      ) {
+        await cache.set(key, data, { fingerprint: token(), ttl: this.readTtl })
+      }
+    })
   }
 
   /**
