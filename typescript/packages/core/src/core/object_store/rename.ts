@@ -135,15 +135,19 @@ export function makeRename<A extends Accessor, C>(
         sent = cond?.ifMatch ?? null
       } else if (key === srcKey) {
         lost = src
-        sent = source
+        sent = err.versions.get(key) ?? source
       } else {
         lost = kp.keyPath(src, kpfx, key)
         sent = err.versions.get(key) ?? null
       }
       await keepLost(src, kpfx, err, key)
-      // A landed copy left the destination unsure; a refused one kept it.
+      // A landed copy left the destination unsure; a refused one left both
+      // ends as they were, and the untouched one keeps the version the agent
+      // read.
       if (err.landed) await dropCached(dst)
-      else if (lost !== dst && cond?.ifMatch !== undefined) await dropCached(dst, cond.ifMatch)
+      else if (lost === dst) {
+        if (source !== null && source !== '') await dropCached(src, source)
+      } else if (cond?.ifMatch !== undefined) await dropCached(dst, cond.ifMatch)
       throw await stale(lost, err.landed, err.gone, sent)
     }
     if (!moved) throw enoent(src)

@@ -308,19 +308,25 @@ async def _delete_if(conn: S3Conn, key: str, cond: WriteCondition) -> None:
 
 
 async def _copy_loser(
-    conn: S3Conn, src_key: str, dst_key: str, cond: WriteCondition
+    conn: S3Conn,
+    src_key: str,
+    dst_key: str,
+    cond: WriteCondition,
+    source: str,
 ) -> ConditionLost:
     """Which end of a refused copy changed: the destination or the source.
 
     S3 answers 412 for either condition, so the destination is looked up:
     one no longer at the version sent is the end that lost; otherwise the
-    source's pin did. Only a refusal pays for the lookup.
+    source's pin did. Only a refusal pays for the lookup. The end named
+    carries the version it lost on, none when it is gone.
 
     Args:
         conn (S3Conn): the open connection.
         src_key (str): the source key, pinned by ``CopySourceIfMatch``.
         dst_key (str): the destination key.
         cond (WriteCondition): the destination's condition.
+        source (str): the source's pin.
     """
     try:
         if cond.if_match is not None:
@@ -328,14 +334,32 @@ async def _copy_loser(
             if meta is None or _quoted(meta.fingerprint or "") != _quoted(
                 cond.if_match
             ):
-                return ConditionLost([dst_key], gone=meta is None)
-        return ConditionLost(
-            [src_key], gone=await _head(conn, src_key) is None
-        )
+                return _lost_on(dst_key, cond.if_match, gone=meta is None)
+        gone = await _head(conn, src_key) is None
+        return _lost_on(src_key, source, gone=gone)
     except Exception:
         # Unknown which end changed: name the source; both keep versions.
         logger.debug("copy loser lookup failed for %s", dst_key, exc_info=True)
-        return ConditionLost([src_key])
+        return _lost_on(src_key, source)
+
+
+def _lost_on(
+    key: str, version: str, gone: bool = False, landed: bool = False
+) -> ConditionLost:
+    """A refusal of ``key``, keeping the version it lost on unless gone.
+
+    Args:
+        key (str): the key whose condition lost.
+        version (str): the version it was measured on.
+        gone (bool): the key no longer exists.
+        landed (bool): the move's copy landed before the loss.
+    """
+    return ConditionLost(
+        [key],
+        landed=landed,
+        gone=gone,
+        versions={} if gone else {key: _quoted(version)},
+    )
 
 
 async def _move_file_if(
@@ -363,7 +387,7 @@ async def _move_file_if(
     except Exception as exc:
         if not _lost_condition(exc, matched=True):
             raise
-        raise await _copy_loser(conn, src_key, dst_key, cond) from exc
+        raise await _copy_loser(conn, src_key, dst_key, cond, source) from exc
     try:
         await _guarded(
             src_key,
@@ -373,7 +397,7 @@ async def _move_file_if(
             matched=True,
         )
     except ConditionLost as exc:
-        raise ConditionLost(exc.keys, landed=True, gone=exc.gone) from exc
+        raise _lost_on(src_key, source, gone=exc.gone, landed=True) from exc
     return True
 
 

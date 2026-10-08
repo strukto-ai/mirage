@@ -310,27 +310,42 @@ async function deleteIf(conn: S3Conn, key: string, cond: WriteCondition): Promis
  * Which end of a refused copy changed: S3 answers 412 for either condition,
  * so the destination is looked up, and one no longer at the version sent is
  * the end that lost; otherwise the source's pin did. Only a refusal pays for
- * the lookup. Mirrors python's `_copy_loser`.
+ * the lookup. The end named carries the version it lost on, none when it is
+ * gone. Mirrors python's `_copy_loser`.
  */
 async function copyLoser(
   conn: S3Conn,
   srcKey: string,
   dstKey: string,
   cond: WriteCondition,
+  source: string,
 ): Promise<ConditionLost> {
   try {
     if (cond.ifMatch !== undefined) {
       const meta = await head(conn, dstKey)
       if (meta === null || quoted(meta.fingerprint ?? '') !== quoted(cond.ifMatch)) {
-        return new ConditionLost([dstKey], false, meta === null)
+        return lostOn(dstKey, cond.ifMatch, meta === null)
       }
     }
-    return new ConditionLost([srcKey], false, (await head(conn, srcKey)) === null)
+    return lostOn(srcKey, source, (await head(conn, srcKey)) === null)
   } catch (err) {
     // Unknown which end changed: the source is named, and both keep their versions.
     console.debug(`copy loser lookup failed for ${dstKey}: ${String(err)}`)
-    return new ConditionLost([srcKey])
+    return lostOn(srcKey, source)
   }
+}
+
+/**
+ * A refusal of `key`, keeping the version it lost on unless gone. Mirrors
+ * python's `_lost_on`.
+ */
+function lostOn(key: string, version: string, gone = false, landed = false): ConditionLost {
+  return new ConditionLost(
+    [key],
+    landed,
+    gone,
+    gone ? new Map() : new Map([[key, quoted(version)]]),
+  )
 }
 
 async function moveFileIf(
@@ -360,7 +375,7 @@ async function moveFileIf(
     )
   } catch (err) {
     if (!lostCondition(err, true)) throw err
-    throw await copyLoser(conn, srcKey, dstKey, cond)
+    throw await copyLoser(conn, srcKey, dstKey, cond, match)
   }
   try {
     await guarded(
@@ -375,7 +390,7 @@ async function moveFileIf(
       true,
     )
   } catch (err) {
-    if (err instanceof ConditionLost) throw new ConditionLost(err.keys, true, err.gone)
+    if (err instanceof ConditionLost) throw lostOn(srcKey, match, err.gone, true)
     throw err
   }
   return true

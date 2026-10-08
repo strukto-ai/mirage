@@ -405,6 +405,24 @@ describe('conditional writes on an S3 mount', () => {
       'mv /s3/d /s3/e',
       'echo z > /s3/d/b',
     ],
+    [
+      'mv unread source, removal lost',
+      '',
+      'DeleteObject',
+      ['f'],
+      'f',
+      'mv /s3/f /s3/g',
+      'echo z > /s3/f',
+    ],
+    [
+      'mv destination, untouched source',
+      'cat /s3/f /s3/g',
+      'CopyObject',
+      ['g'],
+      'f',
+      'mv /s3/f /s3/g',
+      'echo z > /s3/f',
+    ],
   ] as const)(
     'keeps every version a refusal was measured on: %s',
     async (_name, setup, op, changed, key, refused, line) => {

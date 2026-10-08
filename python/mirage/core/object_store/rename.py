@@ -149,17 +149,20 @@ def make_rename(
                     lost = dst_spec
                     sent = cond.if_match if cond is not None else None
                 elif key == src_key:
-                    lost, sent = src_spec, source
+                    lost, sent = src_spec, exc.versions.get(key, source)
                 else:
                     lost = kp.key_path(src_spec, kpfx, key)
                     sent = exc.versions.get(key)
                 await keep_lost(src_spec, kpfx, exc, key)
-                # A landed copy left the destination unsure; a refused one kept it.
+                # A landed copy left the destination unsure; a refused one
+                # left both ends as they were, and the untouched one keeps
+                # the version the agent read.
                 if exc.landed:
                     await drop_cached(dst_spec)
-                elif (
-                    lost is not dst_spec and cond is not None and cond.if_match
-                ):
+                elif lost is dst_spec:
+                    if source:
+                        await drop_cached(src_spec, source)
+                elif cond is not None and cond.if_match:
                     await drop_cached(dst_spec, cond.if_match)
                 raise await stale(
                     lost, landed=exc.landed, gone=exc.gone, version=sent

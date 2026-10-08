@@ -517,12 +517,28 @@ async def test_a_refused_write_stays_refused_until_a_read(
             "mv /s3/d /s3/e",
             "echo z > /s3/d/b",
         ),
+        (
+            "",
+            ("delete_object", ("f",)),
+            "f",
+            "mv /s3/f /s3/g",
+            "echo z > /s3/f",
+        ),
+        (
+            "cat /s3/f /s3/g",
+            ("copy_object", ("g",)),
+            "f",
+            "mv /s3/f /s3/g",
+            "echo z > /s3/f",
+        ),
     ],
     ids=[
         "mv source, untouched destination",
         "same line",
         "rm -r, every lost key",
         "dir mv, every lost key",
+        "mv unread source, removal lost",
+        "mv destination, untouched source",
     ],
 )
 async def test_a_refusal_keeps_every_version_it_was_measured_on(
