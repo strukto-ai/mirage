@@ -697,7 +697,7 @@ class Workspace:
 
     @property
     def vfs(self) -> Files:
-        """The op facade: read/write/stat/readdir/... against the mounts.
+        """The file API: read/write/stat/readdir/... against the mounts.
 
         Named as TypeScript names it (`ws.vfs`), so one host API reads the
         same in both languages.
@@ -2115,7 +2115,7 @@ class Workspace:
         self, name: str, path: PathSpec, /, **kwargs: Any
     ) -> tuple[Any, IOResult]:
         # The door owns pre-dispatch initialization (namespace load,
-        # pending drift checks), so FUSE and the ops facade get it too.
+        # pending drift checks), so FUSE and `ws.vfs` get it too.
         # Runs as the default session unless one is bound, like ws.vfs.
         return await self._bind_session(
             None, partial(self._dispatcher.dispatch, name, path, **kwargs)
@@ -2408,7 +2408,7 @@ class Workspace:
 class Session:
     """One session's doors, bound together.
 
-    ``shell`` runs a line as the session, ``vfs`` is the op facade run
+    ``shell`` runs a line as the session, ``vfs`` is the file API run
     as it, ``tools`` the agent tools over both and ``explain`` the same
     doors as a dry run, so a host holds one
     object per agent and every door answers under the same profile:
@@ -2448,7 +2448,7 @@ class Session:
 
     @property
     def vfs(self) -> Files:
-        """The op facade run as this session."""
+        """The file API run as this session."""
         if self._id is None:
             return self._ws.vfs
         return self._ws.vfs._for_session(self._id)

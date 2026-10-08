@@ -76,7 +76,7 @@ class MountCore:
     error codes with ``mirage.fuse.errors.classify_error``.
 
     Args:
-        files (Files): the workspace op facade every filesystem call routes to.
+        files (Files): the workspace's ``ws.vfs`` every filesystem call routes to.
         root_prefix (str): mount root; non-empty scopes the tree to one mount.
         session (SessionState | None): bind every op to this session's mount
             grants, exactly as a shell command in that session would run.
@@ -212,7 +212,7 @@ class MountCore:
     ) -> dict[str, Any]:
         """Fold merged stat attributes into a POSIX attr dict.
 
-        The ops stat already carries the namespace overlay (chmod bits,
+        ``Files.stat`` already carries the namespace overlay (chmod bits,
         chown ids, touched mtime), so honoring these fields here is what
         makes metadata ops visible through a mount. String uid/gid (names)
         are skipped: the kernel wants numeric ids and there is no user db
@@ -220,7 +220,7 @@ class MountCore:
 
         Args:
             entry (dict): base attr dict from dir_stat/file_stat.
-            s (FileStat): the merged stat returned by the ops facade.
+            s (FileStat): the merged stat returned by ``ws.vfs``.
 
         Returns:
             dict: the attr dict with overlay fields applied.
@@ -402,7 +402,7 @@ class MountCore:
         name = path.rsplit("/", 1)[-1]
         if is_macos_metadata(name):
             raise enoent(path)
-        # Link check must precede the ops stat: the ops facade follows
+        # Link check must precede `Files.stat`: `ws.vfs` follows
         # namespace links, so stat on a link path reports the target.
         target = self.link_target(path)
         if target is not None:
@@ -435,7 +435,7 @@ class MountCore:
         Raises:
             FileNotFoundError: no such directory and nothing virtual there.
         """
-        # The ops facade merges namespace structure (child mounts and
+        # `ws.vfs` merges namespace structure (child mounts and
         # symlinks) into readdir and answers structure-only directories
         # itself, so the core only normalizes entry shapes and drops
         # macOS metadata names.

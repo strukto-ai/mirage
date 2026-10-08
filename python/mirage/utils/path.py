@@ -79,7 +79,7 @@ def owner_prefix(prefixes: Iterable[str], path: str) -> str | None:
     """The longest mount prefix owning ``path``, or None.
 
     The one longest-prefix rule dispatch resolves a path by, shared so a
-    registry, an ops facade, a runtime routing table and a link filter
+    registry, a file API, a runtime routing table and a link filter
     cannot drift: a prefix owns its own root (with or without a trailing
     slash) and everything at a path boundary below it, so ``/a/`` owns
     ``/a`` and ``/a/b`` but never ``/ab``. The winner is returned in its

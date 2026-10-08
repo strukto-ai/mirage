@@ -142,7 +142,7 @@ export class LangchainWorkspace implements SandboxBackendProtocol {
     this.sessionId = options.sessionId
   }
 
-  /** The op facade run as this backend's session. */
+  /** The file API run as this backend's session. */
   private get vfs(): Files {
     if (this.sessionId === undefined) return this.ws.vfs
     return new Session(this.ws, this.sessionId).vfs

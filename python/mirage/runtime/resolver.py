@@ -60,7 +60,7 @@ class PrefixResolver:
     """A MountResolver over a live prefix listing.
 
     The one concrete resolver: the workspace wraps whatever view it
-    wants a consumer to have (all mounts for the ops facade, a
+    wants a consumer to have (all mounts for ``ws.vfs``, a
     sandbox-filtered list for the runtimes) and the matching rule stays
     ``owner_prefix``'s. Reads its sources per call, so mounts and links
     added or removed after construction are always picked up.

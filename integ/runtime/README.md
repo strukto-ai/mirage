@@ -32,7 +32,7 @@ differs.
 | [`config/`](config/)                   | topic   | runtime names and config fields that are refused                                                  |
 | [`cli/`](cli/)                         | topic   | script CLIs in Python and JavaScript                                                              |
 | [`backend/`](backend/)                 | topic   | guest reads and writes on real redis, S3 and MongoDB                                              |
-| [`facade/`](facade/)                   | topic   | the SDK op facade                                                                                 |
+| [`facade/`](facade/)                   | topic   | the SDK file API (`ws.vfs`)                                                                       |
 | [`monty/`](monty/)                     | runtime | Monty's invocation, argv, streams, policy and Python surface                                      |
 | [`wasi/`](wasi/)                       | runtime | CPython on WASI: import paths                                                                     |
 | [`pyodide/`](pyodide/)                 | runtime | Pyodide's mounts, streams, environment, tracebacks and flags                                      |

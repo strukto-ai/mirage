@@ -31,7 +31,7 @@ from mirage.workspace.types import MountRow
 
 
 class Files:
-    """The typed op facade FUSE and programmatic callers use.
+    """The typed file API at ``ws.vfs``, for FUSE and programmatic callers.
 
     Every op delegates to the workspace dispatcher, so FUSE and
     ``ws.vfs`` walk the same pipeline as a shell command: link follow,

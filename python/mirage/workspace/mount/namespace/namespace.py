@@ -538,7 +538,7 @@ class Namespace:
         """lstat a path: the link's own stat, or None when not a link.
 
         A symlink has no backend inode, so the node table is the only
-        authority for it. Every no-follow stat surface (the ops facade,
+        authority for it. Every no-follow stat surface (``ws.vfs``,
         the dispatcher, FUSE) answers through here so they cannot
         disagree about what a link looks like.
 

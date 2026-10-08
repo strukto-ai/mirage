@@ -42,7 +42,7 @@ class Explainer:
         explain (Callable[[str, str], Awaitable[ShellExplanation]]): the
             workspace's line explainer, ``Workspace.explain``.
         session_id (str | None): the session; None for the default one.
-        vfs (Files): the session's VFS facade.
+        vfs (Files): the session's ``ws.vfs``.
     """
 
     def __init__(
@@ -93,7 +93,7 @@ class VfsExplainer:
     decides reads the restored state.
 
     Args:
-        vfs (Files): the session's VFS facade.
+        vfs (Files): the session's ``ws.vfs``.
     """
 
     def __init__(self, vfs: Files) -> None:

@@ -276,8 +276,8 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
     }
   })
 
-  it('STRICT load checks drift on the op facade too, not only Workspace.dispatch', async () => {
-    // The op facade (the FUSE path) reaches the dispatcher without
+  it('STRICT load checks drift on ws.vfs too, not only Workspace.dispatch', async () => {
+    // `ws.vfs` (the FUSE path) reaches the dispatcher without
     // passing Workspace.dispatch, so the pending fingerprint checks
     // must run at the door itself or a first op through FUSE touches
     // drifted state unchecked.

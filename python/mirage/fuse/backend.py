@@ -133,7 +133,7 @@ def check_sizes(
 
     Args:
         backend (MountBackend): the requested backend.
-        files (Files): the op facade whose mounts are being served.
+        files (Files): ``ws.vfs`` whose mounts are being served.
         root_prefix (str): mount root, when the tree is scoped to one mount.
     """
     if backend is not MountBackend.FSKIT:
@@ -167,7 +167,7 @@ def check_writes(
 
     Args:
         backend (MountBackend): the requested backend.
-        files (Files): the op facade whose mounts are being served.
+        files (Files): ``ws.vfs`` whose mounts are being served.
         root_prefix (str): mount root, when the tree is scoped to one mount.
     """
     if backend is not MountBackend.FSKIT:
@@ -205,7 +205,7 @@ def prepare_backend(
 
     Args:
         value (str | MountBackend | None): the requested backend.
-        files (Files | None): op facade to size-check, when one is available.
+        files (Files | None): the file API to size-check, when one is available.
         mountpoint (str | None): intended mountpoint, when already known.
         root_prefix (str): mount root, for scoping the size check.
 

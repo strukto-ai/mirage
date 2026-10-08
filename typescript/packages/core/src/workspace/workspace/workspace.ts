@@ -2112,7 +2112,7 @@ export class Workspace {
 /**
  * One session's doors, bound together.
  *
- * `shell` runs a line as the session, `vfs` is the op facade run as it,
+ * `shell` runs a line as the session, `vfs` is the file API run as it,
  * `tools` the agent tools over both and `explain` the same doors as a dry
  * run, so a host holds one object per agent and every door answers under the same profile: hides, mount
  * modes, grants and standing decisions. Nothing is stored here; the session record stays with the
@@ -2150,7 +2150,7 @@ export class Session {
     return this.ws.mounts()
   }
 
-  /** The op facade run as this session. */
+  /** The file API run as this session. */
   get vfs(): Files {
     return this.id === null ? this.ws.vfs : this.ws.vfs.forSession(this.id)
   }

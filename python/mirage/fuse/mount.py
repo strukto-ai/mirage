@@ -221,7 +221,7 @@ def mount_background(
     """Mount in a background thread and return once the tree is live.
 
     Args:
-        files (Files): the op facade to serve.
+        files (Files): ``ws.vfs`` to serve.
         mountpoint (str): where to mount.
         root_prefix (str): mount root; non-empty scopes the tree.
         session (SessionState | None): bind ops to this session's mount grants.

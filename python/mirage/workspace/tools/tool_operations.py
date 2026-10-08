@@ -134,7 +134,7 @@ async def ensure_parents(vfs: Files, path: str) -> None:
     """Create the directories a new file needs, parents first.
 
     Args:
-        vfs (Files): The op facade to create them through.
+        vfs (Files): ``ws.vfs`` to create them through.
         path (str): Virtual path of the file about to be written.
     """
     parent = gnu_dirname(path)
@@ -160,7 +160,7 @@ async def missing(vfs: Files, path: str) -> bool:
     read's own error stands rather than the probe's.
 
     Args:
-        vfs (Files): The op facade the read went through.
+        vfs (Files): ``ws.vfs`` the read went through.
         path (str): Virtual path of the failed read.
     """
     try:

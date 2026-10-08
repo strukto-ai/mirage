@@ -46,7 +46,7 @@ async function structureWorld(): Promise<Workspace> {
   )
   ws.addMount('/base', base, MountMode.WRITE)
   ws.addMount('/base/inner', inner, MountMode.WRITE)
-  // Seeded through the op facade, not the shell: a shell line would be
+  // Seeded through `ws.vfs`, not the shell: a shell line would be
   // recorded into /.bash_history, which every session may read, and the
   // scoped-world tests would then find the seed line instead of a leak.
   await ws.vfs.write('/base/a.txt', 'top')

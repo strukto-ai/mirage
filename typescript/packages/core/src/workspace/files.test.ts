@@ -203,7 +203,7 @@ describe('Files existence probes', () => {
   })
 })
 
-// The op facade is an op door like the dispatcher: FUSE and programmatic
+// `ws.vfs` is an op door like the dispatcher: FUSE and programmatic
 // access read through it, so policy hooks must fire here too.
 describe('Files policy door', () => {
   class SealReads implements Policy {

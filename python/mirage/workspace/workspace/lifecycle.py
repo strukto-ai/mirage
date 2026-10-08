@@ -110,7 +110,7 @@ def patch_process(
     is the one that shows it; any pooled async client would).
 
     Args:
-        files (Files): the workspace's op facade.
+        files (Files): the workspace's ``ws.vfs``.
         loop (asyncio.AbstractEventLoop): the block's loop.
 
     Returns:

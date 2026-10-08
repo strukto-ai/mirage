@@ -414,7 +414,7 @@ class Dispatcher:
     addressing), cache store, and consistency policy; holds no other
     workspace state. The snapshot drift queue rides along because this
     is the one door: a strict restore's pending fingerprint checks must
-    run before ANY op can touch a mount, and FUSE and the ops facade
+    run before ANY op can touch a mount, and FUSE and ``ws.vfs``
     reach here without passing Workspace.dispatch. So does the
     workspace's write admission, which holds a write while a capture
     reads.
@@ -579,7 +579,7 @@ class Dispatcher:
 
         Pending fingerprint checks from a strict snapshot restore run
         before the op can touch a mount, whichever surface called: FUSE
-        and the ops facade come straight here, so a drain that lived any
+        and ``ws.vfs`` come straight here, so a drain that lived any
         higher would let a first write clobber drifted state. drain()
         clears pending before it stats, so its own probes cannot recurse
         into it. A dry run leaves them pending, its policies' reads
@@ -611,7 +611,7 @@ class Dispatcher:
         link above the final name is then followed, whatever the op does
         with the name: command dispatch walks the operands it classifies,
         and this is the same walk for every other caller (a relative word
-        ln resolves itself, the ops facade, a runtime's os.symlink), so a
+        ln resolves itself, ``ws.vfs``, a runtime's os.symlink), so a
         link made, read or removed under a linked directory lands in the
         directory the link names.
 

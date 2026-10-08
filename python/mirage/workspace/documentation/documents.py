@@ -40,7 +40,7 @@ class Documents:
 
     Args:
         registry (MountRegistry): the workspace's mounts.
-        files (Files): the workspace's op facade.
+        files (Files): the workspace's ``ws.vfs``.
         manager (SessionManager): the workspace's sessions.
         session (Callable[[], SessionState]): the session a call runs as.
         profile (Callable[[str], CompiledProfile]): a named profile,

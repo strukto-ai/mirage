@@ -354,7 +354,7 @@ async def stat_check(ws, check: dict) -> str:
     ``read`` names a path and a byte window, and prints what that window
     returned: no shell command asks for one, because commands read whole
     files, so the ranged read op is only reachable through the same door
-    FUSE and the ops facade use.
+    FUSE and ``ws.vfs`` use.
 
     Args:
         ws: the workspace the case runs against.

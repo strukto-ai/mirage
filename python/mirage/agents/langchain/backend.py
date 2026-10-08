@@ -152,7 +152,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
 
     @property
     def _vfs(self) -> Files:
-        """The op facade run as this backend's session."""
+        """The file API run as this backend's session."""
         if self._session_id is None:
             return self._ws.vfs
         return Session(self._ws, self._session_id).vfs

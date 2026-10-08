@@ -399,7 +399,7 @@ export function dirAwareStat<A extends Accessor>(
 // backend without an attribute slot cannot hold itself. Returns the plain stat
 // unchanged when the executor injected no overlay. Mirrors the Python
 // `overlaid_stat`; every stat-rendering command binds through here so no
-// backend can quietly skip the merge and disagree with the ops facade.
+// backend can quietly skip the merge and disagree with `ws.vfs`.
 export function overlaidStat(
   stat: (p: PathSpec) => Promise<FileStat>,
   overlay: StatOverlay | undefined,

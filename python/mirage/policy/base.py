@@ -62,7 +62,7 @@ class Policy:
         """Admit or refuse one VFS op, at the op doors and on the
         command tier's backend I/O.
 
-        The doors are the dispatcher and the ops facade, which is also
+        The doors are the dispatcher and ``ws.vfs``, which is also
         how FUSE, the runtime guests, ``find -delete`` and the warm
         cache arrive; a mount command's handler (cat, grep -r, sed -i,
         rm) admits each content read, mutation and readdir through the

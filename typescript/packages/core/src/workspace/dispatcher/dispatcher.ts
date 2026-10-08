@@ -312,7 +312,7 @@ export class Dispatcher {
   private readonly policies: Policies
   // The snapshot drift queue rides along because this is the one door:
   // a strict restore's pending fingerprint checks must run before ANY
-  // op can touch a mount, and FUSE and the op facade reach here
+  // op can touch a mount, and FUSE and `ws.vfs` reach here
   // without passing Workspace.dispatch.
   private readonly drift: DriftQueue | null
   // So does the workspace's write admission, which holds a write while a
@@ -446,8 +446,8 @@ export class Dispatcher {
    * Load the namespace and run what a snapshot restore left owed.
    *
    * Pending fingerprint checks from a strict snapshot restore run before
-   * the op can touch a mount, whichever surface called: FUSE and the op
-   * facade come straight here, so a drain that lived any higher would let a
+   * the op can touch a mount, whichever surface called: FUSE and `ws.vfs`
+   * come straight here, so a drain that lived any higher would let a
    * first write clobber drifted state. drain() clears pending before it
    * stats, so its own probes cannot recurse into it. A dry run leaves them
    * pending, its policies' reads included: the check is no policy's
@@ -477,7 +477,7 @@ export class Dispatcher {
    * final name is then followed, whatever the op does with the name:
    * command dispatch walks the operands it classifies, and this is the
    * same walk for every other caller (a relative word ln resolves itself,
-   * the op facade, a runtime's os.symlink), so a link made, read or
+   * `ws.vfs`, a runtime's os.symlink), so a link made, read or
    * removed under a linked directory lands in the directory the link
    * names. Mirrors Python's Dispatcher._walk.
    */
@@ -668,7 +668,7 @@ export class Dispatcher {
    * Admission policies fire at the door, before the warm-cache early
    * return: a cached read must be refused exactly like a cold one, or the
    * cache becomes a policy bypass. This dispatcher is the one door in
-   * TypeScript: shell internals, programmatic access, the op facade, and
+   * TypeScript: shell internals, programmatic access, `ws.vfs`, and
    * FUSE all end up here. A rename's destination is a create there: it
    * passes the same gate as the source, so a path rule holds against
    * moving into a protected scope (or onto the directory that holds one)

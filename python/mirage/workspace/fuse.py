@@ -56,10 +56,10 @@ class FuseManager:
         session: SessionState | None = None,
         backend: str | MountBackend = MountBackend.FUSE,
     ) -> str:
-        """Mount the ops tree and return the live mountpoint.
+        """Mount the workspace's files and return the live mountpoint.
 
         Args:
-            files (Files): the op facade to serve.
+            files (Files): ``ws.vfs`` to serve.
             prefix (str): mount root; non-empty scopes the tree.
             mountpoint (str | None): where to mount; None picks a temporary
                 directory appropriate for the backend.

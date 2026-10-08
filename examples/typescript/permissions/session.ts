@@ -26,7 +26,7 @@ import type {
 
 // One agent, one session. `ws.session(id, { profile })` creates a session
 // under a role and hands back its two doors bound together: `shell`
-// runs a shell line as the session and `vfs` is the op facade run as it.
+// runs a shell line as the session and `vfs` is the file API run as it.
 // Whichever door an agent's tools use, the same profile answers.
 //
 // Two roles read one world and see two filesystems. The reviewer's

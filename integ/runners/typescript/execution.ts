@@ -155,8 +155,8 @@ function checkField(st: HarnessStat, name: string): string {
  * Two forms. `stat` names a path and the FileStat fields to print. `read`
  * names a path and a byte window, and prints what that window returned: no
  * shell command asks for one, because commands read whole files, so the
- * ranged read op is only reachable through the same door FUSE and the ops
- * facade use.
+ * ranged read op is only reachable through the same door FUSE and `ws.vfs`
+ * use.
  */
 export async function statCheck(ws: ExecWorkspace, check: StatCheck): Promise<string> {
   if (check.read !== undefined) {

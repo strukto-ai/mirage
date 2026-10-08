@@ -44,7 +44,7 @@ class MirageFS:
     File Provider adapter can reuse them unchanged.
 
     Args:
-        files (Files): the workspace op facade every callback routes to.
+        files (Files): the workspace's ``ws.vfs`` every callback routes to.
         root_prefix (str): mount root; non-empty scopes the tree to one mount.
         session (SessionState | None): bind every op to this
             session's mount grants.

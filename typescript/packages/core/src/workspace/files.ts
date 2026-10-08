@@ -54,7 +54,7 @@ function payloadBytes(result: unknown, args: readonly unknown[]): number {
 }
 
 /**
- * The typed op facade FUSE and programmatic embedders call.
+ * The typed file API at `ws.vfs`, which FUSE and programmatic embedders call.
  *
  * Every op delegates to the workspace dispatcher, so `ws.vfs` walks the
  * same pipeline as a shell command: link follow, session grants,

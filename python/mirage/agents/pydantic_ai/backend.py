@@ -74,7 +74,7 @@ async def _link(vfs: Files, path: str) -> str | None:
 class MirageWorkspaceBackend:
     """A Mirage session as the environment a Pydantic AI run works in.
 
-    Commands run in Mirage's shell and files go through its op facade,
+    Commands run in Mirage's shell and files go through its ``ws.vfs``,
     both as the session, so its profile judges every call. A command
     runs in a clone of the session at its working directory, as a
     subshell does: a ``cd`` or an ``export`` in one command does not

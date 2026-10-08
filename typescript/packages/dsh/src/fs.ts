@@ -174,7 +174,7 @@ function shadowedByLink(links: LinksSeam | null, virtual: string): boolean {
  * and `processPath` answers in the same virtual path space the mirage shell
  * executes in, so the two providers share one execution world.
  *
- * One limit worth stating: mirage's op facade takes no `AbortSignal`, so
+ * One limit worth stating: mirage's `ws.vfs` takes no `AbortSignal`, so
  * cancellation is honored at this adapter's own boundaries (before a
  * dispatch, between listing entries) and not inside a single op. A long
  * read from a remote backend therefore runs to completion after the

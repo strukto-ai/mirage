@@ -397,7 +397,7 @@ export class MountCore {
     if (isMacosMetadata(name)) {
       throw errnoError('ENOENT', `no such file or directory: ${path}`)
     }
-    // Link check must precede the workspace stat: the op facade follows
+    // Link check must precede the workspace stat: `ws.vfs` follows
     // namespace links, so stat on a link path reports the target.
     const target = this.linkTarget(path)
     if (target !== null) return this.linkStat(target, this.resolve(path))
