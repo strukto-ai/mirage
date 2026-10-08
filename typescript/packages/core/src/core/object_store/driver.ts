@@ -335,10 +335,6 @@ export function refused(
 }
 
 /**
- * Keep the version of each key a walk lost on, except `skip`, which the
- * refusal itself names and keeps. Mirrors python's `keep_lost`.
- */
-/**
  * Keep every lost key's version, then throw the walk's later error. Mirrors
  * python's `keep_all_lost`.
  */
@@ -351,6 +347,10 @@ export async function keepAllLost(
   throw err.error
 }
 
+/**
+ * Keep the version of each key a walk lost on, except `skip`, which the
+ * refusal itself names and keeps. Mirrors python's `keep_lost`.
+ */
 export async function keepLost(
   root: PathSpec,
   keyPrefix: string,

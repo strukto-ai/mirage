@@ -517,9 +517,8 @@ async function movePrefixIf(
 ): Promise<boolean> {
   let found = false
   const lost: [string, string][] = []
+  const failed: string[] = []
   const moved: [string, string][] = []
-  let deleteLost: [string, string][]
-  let failed: string[]
   try {
     for await (const listed of knownPages(conn, srcPfx, known)) {
       found = true
@@ -555,11 +554,19 @@ async function movePrefixIf(
         moved.push([key, token])
       }
     }
-    ;[deleteLost, failed] = await deleteBatch(conn, moved)
+    // A batch at a time, so a later batch's failure keeps what one lost.
+    for (let start = 0; start < moved.length; start += DELETE_BATCH) {
+      const [batchLost, batchFailed] = await deleteBatch(
+        conn,
+        moved.slice(start, start + DELETE_BATCH),
+      )
+      lost.push(...batchLost)
+      failed.push(...batchFailed)
+    }
   } catch (err) {
     raiseLostBefore(lost, err)
   }
-  raiseKept([...lost, ...deleteLost], failed)
+  raiseKept(lost, failed)
   return found
 }
 

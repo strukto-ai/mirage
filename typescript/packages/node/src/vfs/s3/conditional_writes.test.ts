@@ -666,19 +666,20 @@ describe('conditional writes on an S3 mount', () => {
   })
 
   it.each([
-    ['rm -r', 'DeleteObjects', 'rm -r /s3/d'],
-    ['dir mv', 'CopyObject', 'mv /s3/d /s3/e'],
+    ['rm -r', 'DeleteObjects', 'DeleteObjects', 'rm -r /s3/d'],
+    ['dir mv', 'CopyObject', 'CopyObject', 'mv /s3/d /s3/e'],
+    ['dir mv, failed removal', 'CopyObject', 'DeleteObjects', 'mv /s3/d /s3/e'],
   ] as const)(
     'keeps the versions an earlier page lost when a later one fails: %s',
-    async (_name, op, line) => {
-      // d/a is refused on the first page; the second fails. d/a keeps its version.
+    async (_name, changedOn, failedOn, line) => {
+      // d/a is refused first; a later request fails. d/a keeps its version.
       mock.pageSize = 1
       const ws = workspace()
       await run(ws, 'cat /s3/d/a /s3/d/b')
-      mock.before(op, () => {
+      mock.before(changedOn, () => {
         theirs('d/a')
       })
-      mock.before(op, () => {
+      mock.before(failedOn, () => {
         throw new Error('network down')
       })
       let [code, , err] = await run(ws, line)

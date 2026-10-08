@@ -849,19 +849,23 @@ async def test_a_conditional_dir_mv_copies_everything_before_deleting(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "op, line",
-    [("delete_objects", "rm -r /s3/d"), (COPY, "mv /s3/d /s3/e")],
-    ids=["rm -r", "dir mv"],
+    "changed_on, failed_on, line",
+    [
+        ("delete_objects", "delete_objects", "rm -r /s3/d"),
+        (COPY, COPY, "mv /s3/d /s3/e"),
+        (COPY, "delete_objects", "mv /s3/d /s3/e"),
+    ],
+    ids=["rm -r", "dir mv", "dir mv, failed removal"],
 )
 async def test_a_later_error_keeps_the_versions_an_earlier_page_lost(
-    fake, workspaces, op, line
+    fake, workspaces, changed_on, failed_on, line
 ):
-    # d/a is refused on the first page; the second fails. d/a keeps its version.
+    # d/a is refused first; a later request fails. d/a keeps its version.
     fake.page_size = 1
     ws = workspaces()
     await _run(ws, "cat /s3/d/a /s3/d/b")
-    fake.before(op, lambda: _theirs(fake, "d/a"))
-    fake.before(op, _network_down)
+    fake.before(changed_on, lambda: _theirs(fake, "d/a"))
+    fake.before(failed_on, _network_down)
     code, _, err = await _run(ws, line)
     assert code == 1 and "network down" in err, err
     fake.buckets["b"]["d/a"] = b"newest\n"

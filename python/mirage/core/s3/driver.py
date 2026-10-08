@@ -544,6 +544,7 @@ async def _move_prefix_if(
 ) -> bool:
     found = False
     lost: list[tuple[str, str]] = []
+    failed: list[str] = []
     moved: list[tuple[str, str]] = []
     try:
         async for listed in _known_pages(conn, src_pfx, known):
@@ -580,10 +581,16 @@ async def _move_prefix_if(
                         )
                     continue
                 moved.append((key, token))
-        delete_lost, failed = await _delete_batch(conn, moved)
+        # A batch at a time, so a later batch's failure keeps what one lost.
+        for start in range(0, len(moved), DELETE_BATCH):
+            batch_lost, batch_failed = await _delete_batch(
+                conn, moved[start : start + DELETE_BATCH]
+            )
+            lost += batch_lost
+            failed += batch_failed
     except Exception as exc:
         _raise_lost_before(lost, exc)
-    _raise_kept(lost + delete_lost, failed)
+    _raise_kept(lost, failed)
     return found
 
 
