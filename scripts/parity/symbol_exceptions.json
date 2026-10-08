@@ -514,11 +514,6 @@
    "python_only": {
     "is_key_gone": "Python reads a conditioned request's 404 off the botocore response (status and code) beside is_not_found; TypeScript composes isNotFoundError with isMissingBucket inline in the driver's lostCondition."
    }
-  },
-  "workspace/executor/builtins/alias/alias": {
-   "typescript_only": {
-    "sameRead": "A read is a tuple Python compares with `==`; TypeScript's array marks need this helper to compare them by value."
-   }
   }
  }
 }

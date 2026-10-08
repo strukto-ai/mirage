@@ -453,15 +453,15 @@ export class SessionState {
   // `shopt` options, kept apart from `set -o` ones (bash keeps two
   // vocabularies). Only names set away from their default are stored.
   shopts: Record<string, boolean> = {}
-  // `alias NAME=VALUE` definitions. Per name, the read (the parse and the
-  // row a command began on) that last changed it and its value as that
-  // read began (null: not defined), so the commands of that read keep it;
-  // the read that last ran `shopt` on `expand_aliases` and the option as
-  // that read began; and ownership of alias text, so a self-referential
-  // value stops.
+  // `alias NAME=VALUE` definitions. Per read (the parse and the row a
+  // command began on, joined) that changed aliases, their values as it
+  // began (null: not defined), so the commands of that read keep them; per
+  // read that ran `shopt` on `expand_aliases`, the option as it began
+  // (both released when the typed line ends); and ownership of alias text,
+  // so a self-referential value stops.
   aliases: Record<string, string> = {}
-  aliasMarks = new Map<string, [[number, number], string | null]>()
-  expandAliasesMark: [[number, number], boolean] | null = null
+  aliasMarks = new Map<string, Map<string, string | null>>()
+  expandAliasesMarks = new Map<string, boolean>()
   aliasExpansion: AliasExpansion | null = null
   // The aliases a running function's body expands, as its definition saw
   // them (`FunctionSite.aliases`); null reads the live table.
@@ -660,8 +660,8 @@ export class SessionState {
     forked.shopts = { ...this.shopts }
     forked.aliases = { ...this.aliases }
     forked.parseSeq = this.parseSeq
-    forked.aliasMarks = new Map(this.aliasMarks)
-    forked.expandAliasesMark = this.expandAliasesMark
+    forked.aliasMarks = new Map([...this.aliasMarks].map(([read, began]) => [read, new Map(began)]))
+    forked.expandAliasesMarks = new Map(this.expandAliasesMarks)
     forked.aliasView = this.aliasView
     forked.functionSites = new Map(this.functionSites)
     forked.umask = this.umask
@@ -753,7 +753,7 @@ export class SessionState {
     )
     child.aliases = {}
     child.aliasMarks = new Map()
-    child.expandAliasesMark = null
+    child.expandAliasesMarks = new Map()
     child.shopts = {}
     child.pipeStatus = []
     child.lastBgJobId = null

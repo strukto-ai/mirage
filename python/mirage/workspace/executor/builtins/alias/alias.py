@@ -149,32 +149,31 @@ async def handle_unalias(
 
 
 def _changing(session: SessionState, name: str, mark: AliasMark) -> None:
-    """Keep the value ``name`` had as the read at ``mark`` began, before
-    that read first changes it, for the commands it read (``_read_value``).
+    """Keep the value ``name`` had as the read at ``mark`` began, the
+    first time that read changes it, for the commands it read
+    (``_read_value``). Every read keeps its own, so a nested one
+    (``eval``) leaves the outer read's alone.
 
     Args:
         session (SessionState): shell session state.
         name (str): the alias being defined or removed.
         mark (AliasMark): the read changing it.
     """
-    seen = session._alias_marks.get(name)
-    if seen is None or seen[0] != mark:
-        session._alias_marks[name] = (mark, session.aliases.get(name))
+    began = session._alias_marks.setdefault(mark, {})
+    began.setdefault(name, session.aliases.get(name))
 
 
 def _read_value(
     session: SessionState, name: str, mark: AliasMark
 ) -> str | None:
-    seen = session._alias_marks.get(name)
-    if seen is not None and seen[0] == mark:
-        return seen[1]
-    return session.aliases.get(name)
+    began = session._alias_marks.get(mark, {})
+    return began[name] if name in began else session.aliases.get(name)
 
 
 def _expanding(session: SessionState, mark: AliasMark) -> bool:
-    seen = session._expand_aliases_mark
-    if seen is not None and seen[0] == mark:
-        return seen[1]
+    began = session._expand_aliases_marks.get(mark)
+    if began is not None:
+        return began
     return bool(
         session.shopts.get("expand_aliases", SHOPT_DEFAULTS["expand_aliases"])
     )
@@ -189,9 +188,7 @@ def note_expanding(session: SessionState, mark: AliasMark) -> None:
         session (SessionState): shell session state.
         mark (AliasMark): the read running ``shopt``.
     """
-    seen = session._expand_aliases_mark
-    if seen is None or seen[0] != mark:
-        session._expand_aliases_mark = (mark, _expanding(session, mark))
+    session._expand_aliases_marks.setdefault(mark, _expanding(session, mark))
 
 
 def _guards(
@@ -287,11 +284,7 @@ def alias_view(
     names: Iterable[str] = (
         view
         if view is not None
-        else set(session.aliases).union(
-            name
-            for name, (at, _) in session._alias_marks.items()
-            if at == mark
-        )
+        else set(session.aliases).union(session._alias_marks.get(mark, {}))
     )
     blocked = _guards(session, node)[0]
     return {

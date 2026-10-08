@@ -61,10 +61,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "shopt -s expand_aliases\nalias axb='echo hi'\naxb one two; bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"\nalias a=\"echo 2\"; a\nunalias a; a\n{ alias a=\"echo 3\"\na; }\na'",
+      "command": "shopt -s expand_aliases\nalias axb='echo hi'\naxb one two; bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"\nalias a=\"echo 2\"; a\nunalias a; a\n{ alias a=\"echo 3\"\na; }\na'; bash -c 'shopt -s expand_aliases\nalias a=\"echo 1\"\nalias a=\"echo 2\"; eval \"alias a=\\\"echo 3\\\"; a\"; a; eval a\na'; bash -c 'alias a=\"echo 1\"\nshopt -s expand_aliases; eval \"shopt -u expand_aliases; shopt -s expand_aliases\"; a 2>/dev/null || echo none\na'",
       "expect": {
         "exit": 0,
-        "stdout": "hi one two\n1\n2\n3\n",
+        "stdout": "hi one two\n1\n2\n3\n2\n1\n3\n3\nnone\n1\n",
         "stderr": "a: command not found\n"
       }
     },

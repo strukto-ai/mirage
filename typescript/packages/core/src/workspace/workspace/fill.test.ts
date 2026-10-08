@@ -493,6 +493,25 @@ describe('fillEnv through execute', () => {
     }
   })
 
+  it("an uncalled function's saved alias fetches nothing", async () => {
+    const { calls, fetch } = countingSource({ TOKEN: 't0' })
+    registerSecrets('fake-alias-uncalled', FakeConfig, fetch)
+    const ws = await makeWs({ TOKEN: { from: 'fake-alias-uncalled', ref: 'r' } })
+    try {
+      for (const line of [
+        'shopt -s expand_aliases',
+        'alias echo=\'printf "$TOKEN"\'',
+        'f() { :; }',
+        'unalias echo',
+      ])
+        expect((await ws.shell(line)).exitCode).toBe(0)
+      expect(stdoutStr(await ws.shell('echo ok'))).toBe('ok\n')
+      expect(calls).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('the alias rest word is not a managed read', async () => {
     const { calls, fetch } = countingSource({ token: 'v' })
     registerSecrets('fake-alias-rest', FakeConfig, fetch)

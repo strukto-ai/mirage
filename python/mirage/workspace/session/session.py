@@ -491,15 +491,15 @@ class SessionState:
     # terminal is writing to a stream it did not open.
     terminal: StreamOwner = field(default_factory=StreamOwner, repr=False)
     _line_open: bool = field(default=False, repr=False)
-    # Per alias name, the read that last changed it and its value as
-    # that read began (None: not defined), for the commands of that read.
-    _alias_marks: dict[str, tuple[tuple[int, int], str | None]] = field(
+    # Per read that changed aliases, their values as it began (None: not
+    # defined), for the commands of that read; per read that ran `shopt`
+    # on `expand_aliases`, the option as it began. Released when the
+    # typed line ends.
+    _alias_marks: dict[tuple[int, int], dict[str, str | None]] = field(
         default_factory=dict, repr=False
     )
-    # The read that last ran `shopt` on `expand_aliases`, and the option
-    # as that read began.
-    _expand_aliases_mark: tuple[tuple[int, int], bool] | None = field(
-        default=None, repr=False
+    _expand_aliases_marks: dict[tuple[int, int], bool] = field(
+        default_factory=dict, repr=False
     )
     _alias_expansion: AliasExpansion | None = field(default=None, repr=False)
     # The aliases a running function's body expands, as its definition
@@ -972,7 +972,7 @@ class SessionState:
             },
             aliases={},
             _alias_marks={},
-            _expand_aliases_mark=None,
+            _expand_aliases_marks={},
             shell_options={},
             shopts={},
             last_exit_code=0,

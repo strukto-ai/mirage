@@ -82,7 +82,7 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "errexit_ignored",
     "_parse_seq",
     "_alias_marks",
-    "_expand_aliases_mark",
+    "_expand_aliases_marks",
     "_alias_view",
     "_function_sites",
 )

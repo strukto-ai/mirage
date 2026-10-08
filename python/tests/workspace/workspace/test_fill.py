@@ -455,6 +455,26 @@ async def test_a_functions_saved_alias_fills_on_invocation():
 
 
 @pytest.mark.asyncio
+async def test_an_uncalled_functions_saved_alias_fetches_nothing():
+    calls, fetch = counting_source({"TOKEN": "t0"})
+    register_secrets("fake", FakeConfig, fetch)
+    ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
+    try:
+        for line in (
+            "shopt -s expand_aliases",
+            "alias echo='printf \"$TOKEN\"'",
+            "f() { :; }",
+            "unalias echo",
+        ):
+            assert (await ws.shell(line)).exit_code == 0
+        io = await ws.shell("echo ok")
+        assert (await io.stdout_str()) == "ok\n"
+        assert calls == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_alias_rest_is_not_a_managed_read():
     calls, fetch = counting_source({"token": "v"})
     register_secrets("fake", FakeConfig, fetch)

@@ -736,7 +736,7 @@ async function runPreparedLine(
       // Every read of the line has ended, so what a read kept of the
       // aliases it changed goes with it.
       effectiveSession.aliasMarks.clear()
-      effectiveSession.expandAliasesMark = null
+      effectiveSession.expandAliasesMarks.clear()
     }
     // Durable session fields (cwd, env, grants) flush at the end of
     // every execute, success or failure, mirroring Python's finally. It

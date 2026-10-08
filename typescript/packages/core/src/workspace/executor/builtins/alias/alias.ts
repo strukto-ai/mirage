@@ -127,27 +127,24 @@ function aliasesOn(session: SessionState): boolean {
   return session.shopts.expand_aliases ?? SHOPT_DEFAULTS.get('expand_aliases') ?? false
 }
 
-function sameRead(a: AliasMark, b: AliasMark): boolean {
-  return a[0] === b[0] && a[1] === b[1]
-}
-
-/** Keep the value `name` had as the read at `mark` began, before that read
- * first changes it, for the commands it read (`readValue`). */
+/** Keep the value `name` had as the read at `mark` began, the first time
+ * that read changes it, for the commands it read (`readValue`). Every read
+ * keeps its own, so a nested one (`eval`) leaves the outer read's alone. */
 function changing(session: SessionState, name: string, mark: AliasMark): void {
-  const seen = session.aliasMarks.get(name)
-  if (seen === undefined || !sameRead(seen[0], mark))
-    session.aliasMarks.set(name, [mark, sessionEntry(session.aliases, name) ?? null])
+  let began = session.aliasMarks.get(mark.join())
+  if (began === undefined)
+    session.aliasMarks.set(mark.join(), (began = new Map<string, string | null>()))
+  if (!began.has(name)) began.set(name, sessionEntry(session.aliases, name) ?? null)
 }
 
 function readValue(session: SessionState, name: string, mark: AliasMark): string | null {
-  const seen = session.aliasMarks.get(name)
-  if (seen !== undefined && sameRead(seen[0], mark)) return seen[1]
+  const began = session.aliasMarks.get(mark.join())
+  if (began?.has(name) === true) return began.get(name) ?? null
   return sessionEntry(session.aliases, name) ?? null
 }
 
 function expanding(session: SessionState, mark: AliasMark): boolean {
-  const seen = session.expandAliasesMark
-  return seen !== null && sameRead(seen[0], mark) ? seen[1] : aliasesOn(session)
+  return session.expandAliasesMarks.get(mark.join()) ?? aliasesOn(session)
 }
 
 /**
@@ -156,9 +153,8 @@ function expanding(session: SessionState, mark: AliasMark): boolean {
  * already. Mirrors Python's note_expanding.
  */
 export function noteExpanding(session: SessionState, mark: AliasMark): void {
-  const seen = session.expandAliasesMark
-  if (seen === null || !sameRead(seen[0], mark))
-    session.expandAliasesMark = [mark, expanding(session, mark)]
+  if (!session.expandAliasesMarks.has(mark.join()))
+    session.expandAliasesMarks.set(mark.join(), expanding(session, mark))
 }
 
 /** The aliases in progress at each code unit of `node`: its slice of the
@@ -204,7 +200,7 @@ export function aliasView(
 ): Record<string, string> {
   const names = new Set(Object.keys(session.aliasView ?? session.aliases))
   if (session.aliasView === null)
-    for (const [name, [at]] of session.aliasMarks) if (sameRead(at, mark)) names.add(name)
+    for (const name of session.aliasMarks.get(mark.join())?.keys() ?? []) names.add(name)
   const blocked = guards(session, node)[0] ?? new Set<string>()
   const view = ownRecord<string>()
   for (const name of names) {
