@@ -65,6 +65,7 @@ describe('a missing pinned revision', () => {
     ['unpinned', null, 'NoSuchKey', true],
     ['pinned NoSuchVersion', 'rev', 'NoSuchVersion', false],
     ['pinned bodiless', 'rev', 'Unknown', false],
+    ['pinned missing bucket', 'rev', 'NoSuchBucket', null],
   ] as const)('is no missing file: %s', async (_n, revision, code, missing) => {
     // A pin gone from the store fails the read; only an unpinned 404 is absence.
     const gone = Object.assign(new Error(code), {
@@ -77,8 +78,9 @@ describe('a missing pinned revision', () => {
       send: () => Promise.reject(gone),
     }
     const got = DRIVER.getVersioned?.(conn, 'k', revision)
-    if (missing) await expect(got).resolves.toBeNull()
-    else await expect(got).rejects.toMatchObject({ code: 'ENOENT' })
+    if (missing === true) await expect(got).resolves.toBeNull()
+    else if (missing === false) await expect(got).rejects.toMatchObject({ code: 'ENOENT' })
+    else await expect(got).rejects.toBe(gone)
   })
 })
 

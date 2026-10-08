@@ -89,8 +89,14 @@ async def test_a_copy_keeps_its_own_error_whatever_the_source_probe_finds(
         (None, "NoSuchKey", True),
         ("rev", "NoSuchVersion", False),
         ("rev", "404", False),
+        ("rev", "NoSuchBucket", None),
     ],
-    ids=["unpinned", "pinned NoSuchVersion", "pinned bodiless"],
+    ids=[
+        "unpinned",
+        "pinned NoSuchVersion",
+        "pinned bodiless",
+        "pinned missing bucket",
+    ],
 )
 async def test_a_missing_pinned_revision_is_no_missing_file(
     revision, code, missing
@@ -102,6 +108,11 @@ async def test_a_missing_pinned_revision_is_no_missing_file(
     conn = S3Conn(client, S3Config(bucket="b"))
     if missing:
         assert await DRIVER.get_versioned(conn, "k", revision) is None
+        return
+    if missing is None:
+        with pytest.raises(ClientError) as bucket:
+            await DRIVER.get_versioned(conn, "k", revision)
+        assert bucket.value is gone
         return
     with pytest.raises(FileNotFoundError) as raised:
         await DRIVER.get_versioned(conn, "k", revision)

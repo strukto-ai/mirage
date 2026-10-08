@@ -290,6 +290,7 @@ async function getVersioned(
   } catch (err) {
     if (isNotFoundError(err)) {
       if (revision === null) return null
+      if (isMissingBucket(err)) throw err
       // A pinned revision gone from the store is no file, not absence.
       throw enoent(key)
     }
