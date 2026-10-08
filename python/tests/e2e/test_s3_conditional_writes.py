@@ -34,6 +34,7 @@ from tests.e2e.s3_mock import (
     MUTATIONS,
     MultiBucketS3Client,
     MultiBucketSession,
+    in_flight_conflict,
     patch_s3_session,
 )
 
@@ -824,6 +825,50 @@ async def test_a_restored_pin_refuses_a_write_over_a_newer_file(line):
             await ws.close()
     assert (code, STALE in err, _sent(fake, PUT)) == (1, True, [ONE]), err
     assert fake.buckets["b"]["f"] == b"theirs\n"
+
+
+@pytest.mark.asyncio
+async def test_a_restored_pin_gone_from_the_store_fails_truncate():
+    # The saved revision no longer exists: the file is not there to resize.
+    session = MultiBucketSession({"b": dict(SEED)}, versioned={"b"})
+    fake = session._client
+    with patch_s3_session(session):
+        src = _workspace()
+        await _run(src, "cat /s3/f")
+        snap = io.BytesIO()
+        await src.snapshot(snap)
+        await src.close()
+        _theirs(fake)
+        await fake.head_object(Bucket="b", Key="f")
+        ws = await Workspace.load(io.BytesIO(snap.getvalue()))
+        fake._versions["b", "f"] = fake._versions["b", "f"][1:]
+        try:
+            code, _, err = await _run(ws, "truncate -s 1 /s3/f")
+        finally:
+            await ws.close()
+    assert (code, err) == (
+        1,
+        "truncate: cannot open '/s3/f' for writing: No such file or directory\n",
+    )
+    assert (_sent(fake, PUT), fake.buckets["b"]["f"]) == ([], b"theirs\n")
+
+
+def _racing(fake: MultiBucketS3Client) -> None:
+    raise in_flight_conflict()
+
+
+@pytest.mark.asyncio
+async def test_a_write_racing_another_is_refused_then_lands_on_retry(
+    fake, workspaces
+):
+    # A 409 is a refusal; the file did not change, so the kept version lands.
+    ws = workspaces()
+    await _run(ws, "cat /s3/f")
+    fake.before(PUT, lambda: _racing(fake))
+    code, _, err = await _run(ws, "echo mine > /s3/f")
+    assert (code, STALE in err, fake.buckets["b"]["f"]) == (1, True, SEED["f"])
+    code, _, err = await _run(ws, "echo mine > /s3/f")
+    assert (code, fake.buckets["b"]["f"]) == (0, b"mine\n"), err
 
 
 @pytest.mark.asyncio

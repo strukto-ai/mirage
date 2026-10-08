@@ -103,9 +103,9 @@ async def test_a_missing_pinned_revision_is_no_missing_file(
     if missing:
         assert await DRIVER.get_versioned(conn, "k", revision) is None
         return
-    with pytest.raises(ClientError) as raised:
+    with pytest.raises(FileNotFoundError) as raised:
         await DRIVER.get_versioned(conn, "k", revision)
-    assert raised.value is gone
+    assert raised.value.__cause__ is gone
 
 
 # CopyObject If-Match arrived in botocore 1.40.61; older models reject it.

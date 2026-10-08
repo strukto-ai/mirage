@@ -86,6 +86,16 @@ function preconditionFailed(): Error {
   return err
 }
 
+/** The 409 AWS answers a conditional write racing another one. */
+export function inFlightConflict(): Error {
+  const err: Error & { name: string; $metadata?: { httpStatusCode: number } } = new Error(
+    'ConditionalRequestConflict',
+  )
+  err.name = 'ConditionalRequestConflict'
+  err.$metadata = { httpStatusCode: 409 }
+  return err
+}
+
 const CONDITION_KEYS = ['IfMatch', 'IfNoneMatch', 'CopySourceIfMatch'] as const
 
 export const MUTATIONS: ReadonlySet<string> = new Set([

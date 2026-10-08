@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { runWithCacheManager } from '../../cache/context.ts'
 import { runWithRecording, runWithRevisions } from '../../observe/context.ts'
 import type { OpRecord } from '../../observe/record.ts'
-import { errorVirtualPath } from '../../errors/fs.ts'
+import { enoent, errorVirtualPath } from '../../errors/fs.ts'
 import type { ObjectStoreDriver } from './driver.ts'
 import type { FakeStore as Store } from './fakes.ts'
 import { FakeAccessor, FakeManager, FakeStore, makeDriver, spec } from './fakes.ts'
@@ -122,6 +122,15 @@ describe('object_store write', () => {
     const cut = await caught(() =>
       makeTruncate(missingContainer())(accessor, spec('/a/cut.txt'), 4),
     )
+    expect(errorVirtualPath(cut)).toBe('/mnt/a/cut.txt')
+  })
+
+  it('truncate names the path when its pinned revision is gone', async () => {
+    const driver: ObjectStoreDriver<FakeAccessor, Store> = {
+      ...makeDriver(new FakeStore()),
+      getVersioned: (_conn, key) => Promise.reject(enoent(key)),
+    }
+    const cut = await caught(() => makeTruncate(driver)(accessor, spec('/a/cut.txt'), 1))
     expect(errorVirtualPath(cut)).toBe('/mnt/a/cut.txt')
   })
 

@@ -175,9 +175,12 @@ def make_truncate(driver: ObjectStoreDriver[A, C]) -> TruncateFn[A]:
             else:
                 own: str | OwnRead | None = None
                 if driver.get_versioned is not None:
-                    got = await driver.get_versioned(
-                        conn, key, revision_for(path_spec.virtual)
-                    )
+                    try:
+                        got = await driver.get_versioned(
+                            conn, key, revision_for(path_spec.virtual)
+                        )
+                    except FileNotFoundError as exc:
+                        raise enoent(path_spec) from exc
                     data, own = (
                         got if got is not None else (None, OwnRead.ABSENT)
                     )

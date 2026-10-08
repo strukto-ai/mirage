@@ -16,7 +16,7 @@ import { toIsoZ } from '../../utils/dates.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import { VFSName } from '../../types.ts'
-import { eacces, unnamedFsError } from '../../errors/fs.ts'
+import { eacces, enoent, unnamedFsError } from '../../errors/fs.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import {
   type KnownVersions,
@@ -288,8 +288,11 @@ async function getVersioned(
       }),
     )) as typeof resp
   } catch (err) {
-    // A pinned revision gone from the store is a failure, not absence.
-    if (revision === null && isNotFoundError(err)) return null
+    if (isNotFoundError(err)) {
+      if (revision === null) return null
+      // A pinned revision gone from the store is no file, not absence.
+      throw enoent(key)
+    }
     throw err
   }
   const etag = etagOf(resp)

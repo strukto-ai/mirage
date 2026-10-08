@@ -21,7 +21,7 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MountCore } from '../../fuse/core.ts'
 import { MinIOVFS } from '../minio/minio.ts'
-import { installS3Mock, MUTATIONS, type S3Mock } from './mock.ts'
+import { inFlightConflict, installS3Mock, MUTATIONS, type S3Mock } from './mock.ts'
 import { s3Vfs } from '../../test-utils.ts'
 import { Workspace } from '../../workspace.ts'
 
@@ -529,6 +529,19 @@ describe('conditional writes on an S3 mount', () => {
       expect(mock.store.get('b', key)).toBeUndefined()
     },
   )
+
+  it('refuses a write racing another, then lands it on retry', async () => {
+    // A 409 is a refusal; the file did not change, so the kept version lands.
+    const ws = workspace()
+    await run(ws, 'cat /s3/f')
+    mock.before('PutObject', () => {
+      throw inFlightConflict()
+    })
+    const [code, , err] = await run(ws, 'echo mine > /s3/f')
+    expect([code, err.includes(STALE), object('f')], err).toEqual([1, true, 'one\n'])
+    const [again, , againErr] = await run(ws, 'echo mine > /s3/f')
+    expect([again, object('f')], againErr).toEqual([0, 'mine\n'])
+  })
 
   it('names a refused destination file of a directory mv', async () => {
     const ws = workspace()

@@ -36,6 +36,7 @@ from mirage.core.s3.client import (
     is_not_found,
 )
 from mirage.core.s3.constants import CONDITION_LOST_CODES, SCOPE_ERROR
+from mirage.errors.fs import enoent
 from mirage.utils.dates import to_iso_z
 from mirage.vfs.s3.config import S3Config
 
@@ -293,9 +294,12 @@ async def _get_versioned(
     try:
         resp = await conn.client.get_object(**kwargs)
     except Exception as exc:
-        # A pinned revision gone from the store is a failure, not absence.
-        if revision is None and is_not_found(exc):
-            return None
+        if revision is None:
+            if is_not_found(exc):
+                return None
+        elif is_key_gone(exc):
+            # A pinned revision gone from the store is no file, not absence.
+            raise enoent(key) from exc
         raise
     async with closing_body(resp["Body"]) as body:
         data: bytes = await body.read()

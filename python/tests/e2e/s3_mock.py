@@ -54,6 +54,11 @@ def _mock_s3_error(code: str, status: int | None = None) -> Exception:
     return exc
 
 
+def in_flight_conflict() -> Exception:
+    """The 409 AWS answers a conditional write racing another one."""
+    return _mock_s3_error("ConditionalRequestConflict", 409)
+
+
 def _bare(etag: str) -> str:
     return etag.strip('"')
 
@@ -255,7 +260,7 @@ class MultiBucketS3Client:
                     vid_for_resp = vid
                     break
             else:
-                raise _mock_s3_error("NoSuchVersion")
+                raise _mock_s3_error("NoSuchVersion", 404)
         else:
             objects = self._objects(Bucket)
             if Key not in objects:

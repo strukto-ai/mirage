@@ -132,7 +132,13 @@ export function makeTruncate<A extends Accessor, C>(
         let existing: Uint8Array | null
         let own: string | OwnRead | null = null
         if (driver.getVersioned !== undefined) {
-          const got = await driver.getVersioned(conn, key, revisionFor(path.virtual))
+          let got: [Uint8Array, string | null] | null
+          try {
+            got = await driver.getVersioned(conn, key, revisionFor(path.virtual))
+          } catch (err) {
+            if (isMissingPath(err)) throw enoent(path)
+            throw err
+          }
           existing = got?.[0] ?? null
           own = got === null ? OwnRead.ABSENT : got[1]
         } else {

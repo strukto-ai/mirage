@@ -78,7 +78,7 @@ describe('a missing pinned revision', () => {
     }
     const got = DRIVER.getVersioned?.(conn, 'k', revision)
     if (missing) await expect(got).resolves.toBeNull()
-    else await expect(got).rejects.toBe(gone)
+    else await expect(got).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
 
