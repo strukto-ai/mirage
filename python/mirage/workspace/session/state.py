@@ -402,9 +402,10 @@ async def _land_writes(
     """Land arithmetic assignments in order, each as the whole variable
     it produces, so a refusal never leaves one half-applied.
 
-    A scalar is itself; an element is the array it lands in, the way
-    ``assign_element`` lands one, naming the element it assigns so an
-    ``-i`` array never runs its other elements again
+    Each lands the way ``assign_element`` lands one: through a
+    reference on its target, a bare name over an array at element 0
+    (``A=(old keep); n='A=9'`` keeps ``keep``), naming the element it
+    assigns so an ``-i`` array never runs its other elements again
     (``A=(0 'x++'); declare -i A; (( A[0]=9 ))`` leaves ``x++``). A
     readonly name is an error in the expression, which discards the
     line as bash's does (``declare -i n; ( n='R=3'; echo no )`` ends
@@ -420,24 +421,23 @@ async def _land_writes(
         PolicyDenied: the door refused an assignment.
     """
     for write in writes:
+        name = deref(session, write.name) or write.name
+        assoc = visible_assocs(session).get(name)
+        arr = visible_arrays(session).get(name)
         value: ShellValue = write.value
         assigned: frozenset[int | str] | None = None
-        if write.key is not None:
-            assoc = visible_assocs(session).get(write.name)
-            if assoc is not None:
-                value = {**assoc, write.key: write.value}
-                assigned = frozenset({write.key})
-            else:
-                arr = visible_arrays(session).get(write.name)
-                index = int(write.key)
-                value = array_with(
-                    arr if arr is not None else make_array([]),
-                    index,
-                    write.value,
-                )
-                assigned = frozenset({index})
+        if assoc is not None:
+            key = "0" if write.key is None else write.key
+            value = {**assoc, key: write.value}
+            assigned = frozenset({key})
+        elif write.key is not None or arr is not None:
+            index = 0 if write.key is None else int(write.key)
+            value = array_with(
+                arr if arr is not None else make_array([]), index, write.value
+            )
+            assigned = frozenset({index})
         try:
-            await store(write.name, value, assigned=assigned)
+            await store(name, value, assigned=assigned)
         except ReadonlyVariableError as exc:
             raise DiscardSignal(encode_text(f"{exc}\n")) from exc
 
@@ -852,24 +852,25 @@ class _IntegerCoercion:
 
 
 async def _land_coercion(
-    session: SessionState,
-    policies: Policies | None,
-    coercion: _IntegerCoercion,
-    diagnostics: list[str | bytes] | None = None,
+    session: SessionState, store: EnvSet, coercion: _IntegerCoercion
 ) -> None:
-    """Land the assignments a coercion made, each through the door, then
-    settle its ``RANDOM`` draws.
+    """Land the assignments a coercion made, each through the door, in
+    the scope it read, then settle its ``RANDOM`` draws.
+
+    Inside a ``declare -g`` that is the function's: ``local G=3; declare
+    -gi G='G=G+10'`` leaves the local at 13 and stores 13 globally, as
+    bash's does (``_step_back``).
 
     Args:
         session (SessionState): the shell session.
-        policies (Policies | None): the session plane's gate.
+        store (EnvSet): the door each write goes through.
         coercion (_IntegerCoercion): the evaluation that made the writes.
     """
-    await _land_writes(
-        session,
-        functools.partial(set_var, session, policies, diagnostics=diagnostics),
-        coercion.writes,
-    )
+    reach_again = _step_back(session)
+    try:
+        await _land_writes(session, store, coercion.writes)
+    finally:
+        reach_again()
     coercion.reader.settle()
 
 
@@ -890,8 +891,8 @@ async def evaluate_integer(
     Raises:
         PolicyDenied: an assignment named a hidden variable or the gate
             refused it; the ones before it have landed.
-        ReadonlyVariableError: an assignment named a readonly variable,
-            which ends the line, as bash's does.
+        DiscardSignal: an assignment named a readonly variable, which
+            ends the line, as bash's does.
         ArithError: the text does not evaluate; the assignments made
             before the error have landed.
     """
@@ -899,8 +900,7 @@ async def evaluate_integer(
     try:
         coercion(text)
     finally:
-        await _land_writes(session, view.set, coercion.writes)
-        coercion.reader.settle()
+        await _land_coercion(session, view.set, coercion)
 
 
 def ensure_var_visible(session: SessionState, name: str) -> None:
@@ -1053,6 +1053,9 @@ async def set_var(
     # will land: `declare -l profile; profile=ADMIN` stores `admin`, and a
     # rule refusing `admin` must see that, not the raw text.
     coercion = _IntegerCoercion(session)
+    store = functools.partial(
+        set_var, session, policies, diagnostics=diagnostics
+    )
     if existing is not None and existing.attrs:
         try:
             value = coerce_value(value, existing.attrs, coercion, assigned)
@@ -1061,7 +1064,7 @@ async def set_var(
             # (`declare -i n; x='y=5,1/0'; n=x` leaves y at 5, and a
             # RANDOM seed in it seeds); they land, gated, before the
             # refusal reports.
-            await _land_coercion(session, policies, coercion, diagnostics)
+            await _land_coercion(session, store, coercion)
             raise
     await pre_session_gate(
         policies,
@@ -1084,7 +1087,7 @@ async def set_var(
             if diagnostics is None:
                 raise
             diagnostics.append(str(exc))
-            await _land_coercion(session, policies, coercion, diagnostics)
+            await _land_coercion(session, store, coercion)
             return
         session._random_state = seed
         session._random_seed = value
@@ -1092,7 +1095,7 @@ async def set_var(
     note_random_kind(session, name, value)
     # The assignments the coercion or the seed made land now, gated
     # each, before the name they were made for.
-    await _land_coercion(session, policies, coercion, diagnostics)
+    await _land_coercion(session, store, coercion)
     # A reference cannot hold an array: one landing on an unaimed
     # `declare -n` record drops the mark (`with_value`) and bash says so
     # (`declare -n r; r=(x)`). A declaration that named the kind (`-a`,
@@ -1232,7 +1235,8 @@ def reach_global(
     back untouched, which is what GNU shows (``local G=5; declare -gr
     G=1`` leaves ``$G`` at 5 and writable in the function, 1 and frozen
     outside, and a nested ``declare -g`` reaches past the caller's local
-    too). Arithmetic it runs still reads the locals (``_step_back``).
+    too). Arithmetic it runs still reads and writes the locals
+    (``_step_back``), so the local comes back with what that gave it.
 
     Args:
         session (SessionState): shell session state.
@@ -1251,7 +1255,7 @@ def reach_global(
     session._reached = swapped
 
     def restore() -> None:
-        for name, outer, running in swapped:
+        for name, outer, running in session._reached:
             outer[name] = session.vars.get(name)
             _place(session, name, running)
         session._reached = []
@@ -1261,8 +1265,9 @@ def reach_global(
 
 def _step_back(session: SessionState) -> Callable[[], None]:
     """Put the locals a running ``declare -g`` set aside back in place
-    for one arithmetic evaluation, and return the call that reaches the
-    globals again.
+    for one arithmetic evaluation or the writes it made, and return the
+    call that reaches the globals again, keeping what those writes gave
+    the locals.
 
     Args:
         session (SessionState): shell session state.
@@ -1274,6 +1279,10 @@ def _step_back(session: SessionState) -> Callable[[], None]:
         _place(session, name, running)
 
     def again() -> None:
+        session._reached = [
+            (name, outer, session.vars.get(name))
+            for name, outer, _ in session._reached
+        ]
         for name, var in reached:
             _place(session, name, var)
 

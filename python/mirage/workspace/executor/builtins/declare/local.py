@@ -311,6 +311,11 @@ async def _declare_operand(
         return bad_name
     key, append, val = operand_parts(assign)
     fresh = local_vars is not None and key not in local_vars
+    if nameref:
+        # The reference's own `-i -l -u` come off unless asked for, as
+        # bash's do (`declare -l x=T; declare -n x=U` aims at `U`); a
+        # literal written through it leaves its target's alone.
+        shaping, marks = _unshaped(shaping), _unshaped(marks)
     if val is None:
         if local_vars is not None:
             shadow_local(session, local_vars, key)
@@ -396,6 +401,23 @@ async def _declare_operand(
     return None
 
 
+def _unshaped(marks: AttrMarks) -> AttrMarks:
+    """``marks`` taking off each of ``-i -l -u`` they do not name.
+
+    Args:
+        marks (AttrMarks): a ``-n`` declaration's marks.
+    """
+    named = {attr for attr, _ in marks}
+    return (
+        tuple(
+            (attr, False)
+            for attr in (VarAttr.INTEGER, VarAttr.LOWER, VarAttr.UPPER)
+            if attr not in named
+        )
+        + marks
+    )
+
+
 async def _aim_reference(
     session: SessionState,
     view: SessionView,
@@ -436,8 +458,8 @@ async def _aim_reference(
 
     Raises:
         PolicyDenied: the gate refused a write or a mark.
-        ReadonlyVariableError: an ``-i`` value assigned a readonly
-            variable, which ends the line.
+        DiscardSignal: an ``-i`` value assigned a readonly variable,
+            which ends the line.
         ArithError: an ``-i`` value did not evaluate.
     """
     own = visible_record(session, key)

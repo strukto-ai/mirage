@@ -577,6 +577,40 @@
         "stdout": "X=2\nx=4\ndeclare -ai A=([0]=\"9\" [1]=\"x++\")\nrc=1\n",
         "stderr": "bash: R: readonly variable\n"
       }
+    },
+    {
+      "id": "nameref_literal_keeps_target_attrs",
+      "seq": 940130,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( declare -i T=7; declare -n ref=T; declare -n ref=(3); echo rc=$?; T=2+3; declare -p T; declare -l L=AB; declare -n lr=L; declare -n lr=(3); L=CD; declare -p L )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\ndeclare -ai T=([0]=\"5\")\ndeclare -al L=([0]=\"cd\")\n",
+        "stderr": ""
+      }
     }
   ]
 }

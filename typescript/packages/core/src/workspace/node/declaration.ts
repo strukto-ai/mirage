@@ -142,9 +142,7 @@ function declareOptionRefusal(
  * neither, both pinned on 5.2.37. A `+` letter clears; `+r` is not an off
  * toggle, since it is refused on a readonly name (`plusRefusal`) and a
  * no-op otherwise. `r` lands last, as each operand's own last step:
- * `declare -rl L=ABC L=DEF` keeps `abc` and refuses the second write. A
- * `-n` declaration takes off the `-i -l -u` it does not set, so
- * `declare -l x=T; declare -n x=U` aims at `U`.
+ * `declare -rl L=ABC L=DEF` keeps `abc` and refuses the second write.
  */
 function declaredMarks(
   flagChars: ReadonlySet<string>,
@@ -164,8 +162,8 @@ function declaredMarks(
       marks.push([attr, true])
       const displaced = DISPLACES.get(c)
       if (displaced !== undefined) marks.push([displaced, false])
-    } else if ((plusChars.has(c) && c !== 'r') || (on.has('n') && 'ilu'.includes(c))) {
-      if (!marks.some(([a, v]) => a === attr && !v)) marks.push([attr, false])
+    } else if (plusChars.has(c) && c !== 'r') {
+      marks.push([attr, false])
     }
   }
   return marks

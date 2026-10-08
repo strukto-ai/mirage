@@ -230,6 +230,13 @@ async function declareOperand(
   if (badName !== null) return badName
   const [key, append, given] = operandParts(assign)
   const fresh = locals !== null && !locals.has(key)
+  if (nameref) {
+    // The reference's own `-i -l -u` come off unless asked for, as bash's
+    // do (`declare -l x=T; declare -n x=U` aims at `U`); a literal written
+    // through it leaves its target's alone.
+    shaping = unshaped(shaping)
+    marks = unshaped(marks)
+  }
   if (given === null) {
     if (locals !== null) shadowLocal(session, locals, key)
     if (fresh) {
@@ -299,6 +306,15 @@ async function declareOperand(
   await view.set(key, value, true, assigned)
   await stampMarks(session, view, key, checked, marks)
   return null
+}
+
+/** `marks` taking off each of `-i -l -u` they do not name. */
+function unshaped(marks: AttrMarks): AttrMarks {
+  const named = new Set(marks.map(([attr]) => attr))
+  const off = [VarAttr.Integer, VarAttr.Lower, VarAttr.Upper]
+    .filter((attr) => !named.has(attr))
+    .map((attr) => [attr, false] as const)
+  return [...off, ...marks]
 }
 
 /**

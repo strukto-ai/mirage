@@ -170,9 +170,7 @@ def _declared_marks(flag_chars: set[str], plus_chars: set[str]) -> AttrMarks:
     `+` letter clears; `+r` is not an off toggle, since it is refused on
     a readonly name (`plus_refusal`) and a no-op otherwise. `r` lands
     last, as each operand's own last step: `declare -rl L=ABC L=DEF`
-    keeps `abc` and refuses the second write. A `-n` declaration takes
-    off the `-i -l -u` it does not set, so `declare -l x=T; declare -n
-    x=U` aims at `U`.
+    keeps `abc` and refuses the second write.
 
     Args:
         flag_chars (set[str]): the `-` letters.
@@ -187,10 +185,8 @@ def _declared_marks(flag_chars: set[str], plus_chars: set[str]) -> AttrMarks:
             marks.append((_ATTR_LETTERS[c], True))
             if c in _DISPLACES:
                 marks.append((_DISPLACES[c], False))
-        elif (c in plus_chars and c != "r") or ("n" in on and c in "ilu"):
-            off = (_ATTR_LETTERS[c], False)
-            if off not in marks:
-                marks.append(off)
+        elif c in plus_chars and c != "r":
+            marks.append((_ATTR_LETTERS[c], False))
     return tuple(marks)
 
 
