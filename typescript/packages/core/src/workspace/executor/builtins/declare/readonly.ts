@@ -32,7 +32,6 @@ import {
   kindConflict,
   kindListed,
   markFunctions,
-  premark,
   scalarValue,
   splitDeclFlags,
   storeStagedArrays,
@@ -67,9 +66,7 @@ export async function handleReadonly(
   session: SessionState,
   state: SessionView | null = null,
   arrays: { name: string; append: boolean; items: string[] }[] | null = null,
-  stored: string[] | null = null,
   kind: VarKind | null = null,
-  shaping: ReadonlySet<VarAttr> = new Set(),
   parser?: ParseScope,
 ): Promise<Result> {
   const { flags, names, bad } = splitDeclFlags(assignments, READONLY_FLAGS)
@@ -110,10 +107,9 @@ export async function handleReadonly(
       VarAttr.Readonly,
       true,
       true,
-      stored,
+      null,
       kind,
       errors,
-      shaping,
     )
     if (refused !== null) return refused
   }
@@ -132,7 +128,6 @@ export async function handleReadonly(
     if (conflict !== null) errors.push(`bash: readonly: ${key}: ${conflict}`)
     if (eq >= 0 && conflict === null) {
       try {
-        await premark(view, key, shaping)
         await view.set(key, scalarValue(session, key, assign.slice(eq + 1), kind))
       } catch (err) {
         if (err instanceof PolicyDenied) return refusal('readonly', err)
@@ -142,7 +137,6 @@ export async function handleReadonly(
       // Ungated: the `view.set` above already put this name through the
       // gate, so the mark rides on that decision.
       setAttr(session, key, VarAttr.Readonly)
-      if (stored !== null) stored.push(key)
     } else {
       // Gated, exactly as `export NAME` is. The bare form writes no
       // value, so it has no `view.set` to ride on, and marking through
@@ -155,7 +149,6 @@ export async function handleReadonly(
         if (err instanceof PolicyDenied) return refusal('readonly', err)
         throw err
       }
-      if (stored !== null) stored.push(key)
     }
     outliveCall(session, key)
   }

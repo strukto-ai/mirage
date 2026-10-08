@@ -261,9 +261,15 @@ export function refusal(cmd: string, err: PolicyDenied): Result {
   ]
 }
 
-/** Render the shell's own readonly refusal, checked before the door. */
+/**
+ * Render the shell's own readonly refusal, checked before the door.
+ * `declare`, `local` and `typeset` name themselves in it (`bash: declare: R:
+ * readonly variable`); every other writer refuses in the assignment's voice
+ * (`bash: R: readonly variable`).
+ */
 export function readonlyRefusal(cmd: string, name: string): Result {
-  const encoded = encodeText(`bash: ${name}: readonly variable\n`)
+  const voice = cmd === 'declare' || cmd === 'local' || cmd === 'typeset' ? `${cmd}: ` : ''
+  const encoded = encodeText(`bash: ${voice}${name}: readonly variable\n`)
   return [
     null,
     new IOResult({ exitCode: 1, stderr: encoded }),

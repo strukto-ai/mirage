@@ -271,6 +271,18 @@ describe('SessionState.fork', () => {
   })
 })
 
+describe('SessionState.fromJSON', () => {
+  it('keeps the startup vars a recorded session unset', () => {
+    const s = new SessionState({ sessionId: 's' })
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    for (const name of ['OPTIND', 'OPTERR', 'IFS']) delete s.vars[name]
+    const back = SessionState.fromJSON(s.toJSON() as Parameters<typeof SessionState.fromJSON>[0])
+    expect(['OPTIND', 'OPTERR', 'IFS'].filter((name) => name in back.vars)).toEqual([])
+    const bare = SessionState.fromJSON({ session_id: 's', env: { A: '1' } })
+    expect(bare.vars.OPTIND).toEqual(makeVar('1', new Set([VarAttr.Integer])))
+  })
+})
+
 describe('SessionState.newShell', () => {
   it('starts from the environment', () => {
     const exported = new Set([VarAttr.Export])

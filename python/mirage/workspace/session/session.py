@@ -572,6 +572,7 @@ class SessionState:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SessionState":
+        recorded: dict[str, ShellVar] | None = None
         if "env" in data or "var_attrs" in data or "managed" in data:
             data = dict(data)
             env = data.pop("env", {})
@@ -607,6 +608,8 @@ class SessionState:
                     ),
                 )
             data["vars"] = out_vars
+            if attrs is not None:
+                recorded = dict(out_vars)
         for marks in ("readonly_functions", "exported_functions"):
             if marks in data:
                 data = {**data, marks: set(data[marks])}
@@ -695,7 +698,13 @@ class SessionState:
                 processes=data.get("processes", ProcessPermissions()).list,
                 commands=rules.allow if rules is not None else None,
             )
-        return cls(**data)
+        session = cls(**data)
+        if recorded is not None:
+            # A recorded session comes back as it was written, so a
+            # startup variable it had unset stays unset rather than being
+            # seeded again; a bare environment starts a new shell.
+            session.vars = recorded
+        return session
 
     @property
     def argv0(self) -> str:

@@ -31,7 +31,6 @@ from mirage.workspace.executor.builtins.declare.declare import (
     kind_conflict,
     kind_listed,
     mark_functions,
-    premark,
     scalar_value,
     split_decl_flags,
     store_staged_arrays,
@@ -83,9 +82,7 @@ async def handle_readonly(
     session: SessionState,
     state: SessionView | None = None,
     arrays: list[tuple[str, bool, list[str]]] | None = None,
-    stored: list[str] | None = None,
     kind: VarKind | None = None,
-    shaping: frozenset[VarAttr] = frozenset(),
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Mark names readonly, or print them (``readonly -p`` / bare form).
 
@@ -135,10 +132,8 @@ async def handle_readonly(
             arrays,
             mark=VarAttr.READONLY,
             fatal=True,
-            stored=stored,
             kind=kind,
             errors=errors,
-            shaping=shaping,
         )
         if refused is not None:
             return refused
@@ -157,7 +152,6 @@ async def handle_readonly(
             errors.append(f"bash: readonly: {key}: {conflict}")
         if eq and conflict is None:
             try:
-                await premark(view, key, shaping)
                 await view.set(key, scalar_value(session, key, val, kind))
             except PolicyDenied as exc:
                 return refusal("readonly", exc)
@@ -166,8 +160,6 @@ async def handle_readonly(
             # Ungated: the `view.set` above already put this name
             # through the gate, so the mark rides on that decision.
             set_attr(session, key, VarAttr.READONLY)
-            if stored is not None:
-                stored.append(key)
         else:
             # Gated, exactly as `export NAME` is. The bare form writes no
             # value, so it has no `view.set` to ride on, and marking
@@ -179,8 +171,6 @@ async def handle_readonly(
                 await view.mark(key, VarAttr.READONLY, True)
             except PolicyDenied as exc:
                 return refusal("readonly", exc)
-            if stored is not None:
-                stored.append(key)
         outlive_call(session, key)
     if errors:
         return identifier_failure("readonly", errors)

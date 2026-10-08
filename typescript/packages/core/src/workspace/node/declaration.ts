@@ -209,7 +209,8 @@ async function stampAttrs(
 ): Promise<Result | null> {
   const refused = await stampExport(context, view, flagChars, assignments, staged, stored)
   if (refused !== null) return refused
-  let onAttrs = attrsFor('ilunt', (c) => flagChars.has(c) && !plusChars.has(c))
+  // `r` last: a frozen name takes no further attribute.
+  let onAttrs = attrsFor('iluntr', (c) => flagChars.has(c) && !plusChars.has(c))
   if (flagChars.has('l') && flagChars.has('u')) {
     onAttrs = onAttrs.filter((a) => a !== VarAttr.Lower && a !== VarAttr.Upper)
   }
@@ -246,10 +247,6 @@ async function stampAttrs(
  * array is as exportable as a scalar: GNU answers `declare -x A=(a b)`
  * with `declare -ax A=([0]="a" [1]="b")`, and reading only `assignments`
  * left every `declare -x NAME=(...)` unmarked.
- *
- * Shared by the readonly and the plain declaration branch because
- * `declare -rx X=1` goes down the readonly one and still owes the export
- * attribute.
  *
  * Only the names the handler reports storing are marked, and marking is
  * not gated on the aggregate status: a declaration keeps its valid
@@ -425,9 +422,6 @@ export async function executeDeclaration(
     // a missing name is exit 1 without a word.
     return handleDeclareFunctions(cmdWord, session, flagChars, assignments, plusChars, parser)
   }
-  // `export -r` is an invalid option for `export` to refuse, not a readonly
-  // declaration.
-  const isReadonly = keyword === 'readonly' || (keyword !== 'export' && flagChars.has('r'))
   // `-l` and `-u` cannot both hold; a cluster naming both sets neither
   // (pinned: `declare -lu s=aBc` prints `declare -- s`).
   let shaping = new Set(attrsFor('ilu', (c) => flagChars.has(c) && !plusChars.has(c)))
@@ -481,41 +475,22 @@ export async function executeDeclaration(
   // Array literals travel as data: the handler stores them through
   // the session door and owns both refusal voices, so the executor
   // only expands and stages.
-  if (isReadonly) {
-    // Only the `readonly` keyword owns -p / illegal-option handling;
-    // `declare -r` keeps names only.
-    const declView = sessionView(session, registry.policies, context.frame.diagnostics)
-    const stored: string[] = []
-    const result =
-      keyword === 'readonly'
-        ? await handleReadonly(
-            [...flagWords, ...assignments],
-            session,
-            declView,
-            staged,
-            stored,
-            kind,
-            shaping,
-            parser,
-          )
-        : await handleReadonly(assignments, session, declView, staged, stored, kind, shaping)
-    // `declare -rx X=1` carries both attributes: GNU prints
-    // `declare -rx X="1"`. Readonly answers first, so the export stamp
-    // has to land here too, or `-r` silently ate the `-x`.
-    const refused = await stampAttrs(
-      context,
-      declView,
-      flagChars,
-      plusChars,
-      assignments,
+  if (keyword === 'readonly') {
+    const result = await handleReadonly(
+      [...flagWords, ...assignments],
+      session,
+      sessionView(session, registry.policies, context.frame.diagnostics),
       staged,
-      stored,
+      kind,
+      parser,
     )
-    return refused ?? mergeConversionErrors(result, conversionErrors)
+    return mergeConversionErrors(result, conversionErrors)
   }
   // declare/typeset scope like `local` inside a function (bash
   // semantics) and assign globally at top level, which is exactly
-  // handleLocal's fallback when no function scope is active.
+  // handleLocal's fallback when no function scope is active. `-r` rides
+  // the same path and is stamped after the value lands, so
+  // `f() { local -r A=(x); }` freezes f's own A, not the caller's.
   if (keyword === NT.LOCAL || keyword === 'declare' || keyword === 'typeset') {
     // `-p` prints rather than declares, so it is answered before the
     // assignment path runs at all.

@@ -259,11 +259,16 @@ def refusal(cmd: str, exc: PolicyDenied) -> Result:
 def readonly_refusal(cmd: str, name: str) -> Result:
     """Render the shell's own readonly refusal, checked before the door.
 
+    ``declare``, ``local`` and ``typeset`` name themselves in it
+    (``bash: declare: R: readonly variable``); every other writer
+    refuses in the assignment's voice (``bash: R: readonly variable``).
+
     Args:
         cmd (str): builtin name for the node.
         name (str): the frozen variable.
     """
-    err = encode_text(f"bash: {name}: readonly variable\n")
+    voice = f"{cmd}: " if cmd in ("declare", "local", "typeset") else ""
+    err = encode_text(f"bash: {voice}{name}: readonly variable\n")
     return (
         None,
         IOResult(exit_code=1, stderr=err),

@@ -106,9 +106,13 @@ def kind_conflict(
 
 
 def scalar_value(
-    session: SessionState, name: str, value: str, kind: VarKind | None
+    session: SessionState,
+    name: str,
+    value: str,
+    kind: VarKind | None,
+    fresh: bool = False,
 ) -> ShellValue:
-    """What ``export`` / ``readonly NAME=value`` stores.
+    """What a declaration's ``NAME=value`` stores.
 
     An array keeps its kind and takes the value at element 0 (key
     ``"0"`` in a map), as a plain ``NAME=value`` does; otherwise ``-A``
@@ -120,9 +124,10 @@ def scalar_value(
         name (str): the variable being assigned.
         value (str): the assigned text.
         kind (VarKind | None): the kind ``-a`` / ``-A`` asked for.
+        fresh (bool): a new local, which holds nothing of the caller's.
     """
-    held_map = session.assocs.get(name)
-    held_arr = session.arrays.get(name)
+    held_map = None if fresh else session.assocs.get(name)
+    held_arr = None if fresh else session.arrays.get(name)
     if held_map is not None or kind is VarKind.ASSOC:
         return {**(held_map or {}), "0": value}
     if held_arr is not None or kind is VarKind.INDEXED:

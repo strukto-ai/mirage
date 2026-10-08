@@ -913,7 +913,11 @@ export class SessionState {
   }): SessionState {
     const commands = data.commands != null ? commandsFromJSON(data.commands) : null
     const processes = parseProcessPermissions(data.processes ?? DEFAULT_PROCESS_PERMISSIONS)
-    return new SessionState({
+    const vars =
+      data.env !== undefined || data.var_attrs !== undefined || data.managed != null
+        ? restoredVars(data.env ?? {}, data.var_attrs, data.managed)
+        : undefined
+    const session = new SessionState({
       sessionId: data.session_id,
       ...(data.functions === undefined ? {} : { functions: data.functions }),
       readonlyFunctions: new Set(data.readonly_functions ?? []),
@@ -924,9 +928,7 @@ export class SessionState {
       // hand-built -- so every name in it is exported, which is what a
       // process environment means. With the key present the attributes
       // were recorded and are restored as they were written.
-      ...(data.env !== undefined || data.var_attrs !== undefined || data.managed != null
-        ? { vars: restoredVars(data.env ?? {}, data.var_attrs, data.managed) }
-        : {}),
+      ...(vars === undefined ? {} : { vars }),
       ...(data.created_at !== undefined ? { createdAt: data.created_at } : {}),
       ...(data.generation !== undefined ? { generation: data.generation } : {}),
       mountModes: data.mount_modes != null ? new Map(Object.entries(data.mount_modes)) : null,
@@ -962,5 +964,10 @@ export class SessionState {
       processes,
       decisions: data.decisions != null ? data.decisions.map(decisionFromJSON) : [],
     })
+    // A recorded session comes back as it was written, so a startup
+    // variable it had unset stays unset rather than being seeded again; a
+    // bare environment starts a new shell. The constructor seeded a copy.
+    if (data.var_attrs !== undefined && vars !== undefined) session.vars = vars
+    return session
   }
 }

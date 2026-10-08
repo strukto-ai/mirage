@@ -238,9 +238,10 @@ async def _stamp_attrs(
     )
     if refused is not None:
         return refused
+    # `r` last: a frozen name takes no further attribute.
     on_attrs = [
         _ATTR_LETTERS[c]
-        for c in "ilunt"
+        for c in "iluntr"
         if c in flag_chars and c not in plus_chars
     ]
     if "l" in flag_chars and "u" in flag_chars:
@@ -294,10 +295,6 @@ async def _stamp_export(
     `declare -x A=(a b)` with `declare -ax A=([0]="a" [1]="b")`, and
     reading only `assignments` left every `declare -x NAME=(...)`
     unmarked.
-
-    Shared by the readonly and the plain declaration branch because
-    `declare -rx X=1` goes down the readonly one and still owes the
-    export attribute.
 
     Only the names the handler reports storing are marked, and marking
     is not gated on the aggregate status: a declaration keeps its valid
@@ -475,11 +472,6 @@ async def execute_declaration(
         return handle_declare_functions(
             cmd_word, session, flag_chars, assignments, frozenset(plus_chars)
         )
-    # `export -r` is an invalid option for `export` to refuse, not a
-    # readonly declaration.
-    is_readonly = keyword == "readonly" or (
-        keyword != "export" and "r" in flag_chars
-    )
     # `-l` and `-u` cannot both hold; a cluster naming both sets
     # neither (pinned: `declare -lu s=aBc` prints `declare -- s`).
     shaping = frozenset(
@@ -536,53 +528,24 @@ async def execute_declaration(
     # Array literals travel as data: the handler stores them through
     # the session door and owns both refusal voices, so the executor
     # only expands and stages.
-    if is_readonly:
-        decl_view = session_view(
+    if keyword == "readonly":
+        result = await handle_readonly(
+            flag_words + assignments,
             session,
-            namespace.registry.policies,
-            diagnostics=context.frame.diagnostics,
-        )
-        stored: list[str] = []
-        # Only the `readonly` keyword owns -p / illegal-option
-        # handling; `declare -r` keeps names only.
-        if keyword == "readonly":
-            result = await handle_readonly(
-                flag_words + assignments,
+            session_view(
                 session,
-                decl_view,
-                arrays=staged,
-                stored=stored,
-                kind=kind,
-                shaping=shaping,
-            )
-        else:
-            result = await handle_readonly(
-                assignments,
-                session,
-                decl_view,
-                arrays=staged,
-                stored=stored,
-                kind=kind,
-                shaping=shaping,
-            )
-        # `declare -rx X=1` carries both attributes: GNU prints
-        # `declare -rx X="1"`. Readonly answers first, so the export
-        # stamp has to land here too, or `-r` silently ate the `-x`.
-        refused = await _stamp_attrs(
-            context,
-            decl_view,
-            flag_chars,
-            plus_chars,
-            assignments,
-            staged,
-            stored,
+                namespace.registry.policies,
+                diagnostics=context.frame.diagnostics,
+            ),
+            arrays=staged,
+            kind=kind,
         )
-        if refused is not None:
-            return refused
         return _merge_conversion_errors(result, conversion_errors)
     # declare/typeset scope like `local` inside a function (bash
     # semantics) and assign globally at top level, which is exactly
-    # handle_local's fallback when no function scope is active.
+    # handle_local's fallback when no function scope is active. `-r`
+    # rides the same path and is stamped after the value lands, so
+    # `f() { local -r A=(x); }` freezes f's own A, not the caller's.
     if keyword in (NT.LOCAL, "declare", "typeset"):
         # `-p` prints rather than declares, so it is answered before
         # the assignment path runs at all.
@@ -596,7 +559,7 @@ async def execute_declaration(
             namespace.registry.policies,
             diagnostics=context.frame.diagnostics,
         )
-        stored = []
+        stored: list[str] = []
         result = await handle_local(
             assignments,
             session,

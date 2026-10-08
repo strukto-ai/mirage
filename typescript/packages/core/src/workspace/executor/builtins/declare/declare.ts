@@ -118,19 +118,21 @@ export function kindConflict(
 }
 
 /**
- * What `export` / `readonly NAME=value` stores. An array keeps its kind and
+ * What a declaration's `NAME=value` stores. An array keeps its kind and
  * takes the value at element 0 (key `"0"` in a map), as a plain `NAME=value`
  * does; otherwise `-A` makes the map `([0]=value)` and `-a` the one-element
- * array, and with neither the value stays a scalar.
+ * array, and with neither the value stays a scalar. A `fresh` local holds
+ * nothing of the caller's.
  */
 export function scalarValue(
   session: SessionState,
   name: string,
   value: string,
   kind: VarKind | null,
+  fresh = false,
 ): ShellValue {
-  const heldMap = sessionEntry(session.assocs, name)
-  const heldArr = sessionEntry(session.arrays, name)
+  const heldMap = fresh ? undefined : sessionEntry(session.assocs, name)
+  const heldArr = fresh ? undefined : sessionEntry(session.arrays, name)
   if (heldMap !== undefined || kind === VarKind.Assoc) return { ...heldMap, '0': value }
   if (heldArr !== undefined || kind === VarKind.Indexed) {
     const arr: ShellArray = [...(heldArr ?? [])]

@@ -30,8 +30,10 @@ import { arithRefusal, readonlyRefusal, refusal, requireView } from '../shared.t
 import {
   identifierFailure,
   identifierRefusal,
+  kindConflict,
   namerefRefusal,
   premark,
+  scalarValue,
   storeStagedArrays,
   writeGlobal,
 } from './declare.ts'
@@ -102,11 +104,21 @@ export async function handleLocal(
         }
       }
       if (view.isReadonly(key)) return readonlyRefusal(cmd, key)
+      // A new local holds nothing of the caller's; otherwise the value
+      // lands as any declaration's does (`scalarValue`), and an array kind
+      // the variable cannot take is refused.
+      const fresh = locals !== null && !locals.has(key)
+      const conflict = fresh ? null : kindConflict(session, key, kind)
+      if (conflict !== null) {
+        errors.push(`bash: ${cmd}: ${key}: ${conflict}`)
+        continue
+      }
       if (locals !== null) shadowLocal(session, locals, key)
+      const value = nameref ? val : scalarValue(session, key, val, kind, fresh)
       try {
         await premark(view, key, shaping)
-        if (globalScope) await writeGlobal(session, view, key, val)
-        else await view.set(key, val, !nameref)
+        if (globalScope) await writeGlobal(session, view, key, value)
+        else await view.set(key, value, !nameref)
       } catch (err) {
         if (err instanceof PolicyDenied) return refusal(cmd, err)
         if (err instanceof ArithError) return arithRefusal(cmd, err)

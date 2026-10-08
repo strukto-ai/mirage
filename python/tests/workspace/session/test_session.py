@@ -627,6 +627,16 @@ def test_function_sources_and_readonly_metadata_round_trip_without_tree_ownershi
     assert restored.exported_functions == {"f"}
 
 
+def test_a_recorded_session_keeps_the_startup_vars_it_unset():
+    s = SessionState(session_id="s")
+    for name in ("OPTIND", "OPTERR", "IFS"):
+        del s.vars[name]
+    back = SessionState.from_dict(s.to_dict())
+    assert not {"OPTIND", "OPTERR", "IFS"} & set(back.vars)
+    bare = SessionState.from_dict({"session_id": "s", "env": {"A": "1"}})
+    assert bare.vars["OPTIND"] == ShellVar("1", frozenset({VarAttr.INTEGER}))
+
+
 def test_new_shell_starts_from_the_environment():
     exported = frozenset({VarAttr.EXPORT})
     token = ManagedRef("env", "", "TOKEN")
