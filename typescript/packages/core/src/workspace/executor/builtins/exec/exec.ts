@@ -251,11 +251,12 @@ export async function installExecRedirects(
   session: SessionState,
   redirects: Redirect[],
   stdin: ByteSource | null = null,
+  expand?: (redirect: Redirect) => Promise<Redirect>,
 ): Promise<Result> {
   const badFd = unsupportedDescriptor(redirects)
   if (badFd !== null) return execFailure(badDescriptorLine(badFd))
   const saved = bindingsOf(session)
-  const err = await install(dispatch, session, redirects, stdin)
+  const err = await install(dispatch, session, redirects, stdin, expand)
   if (err === null)
     return [null, new IOResult(), new ExecutionNode({ command: 'exec', exitCode: 0 })]
   return rollBack(dispatch, session, saved, err)
@@ -269,8 +270,10 @@ async function install(
   session: SessionState,
   redirects: readonly Redirect[],
   stdin: ByteSource | null,
+  expand?: (redirect: Redirect) => Promise<Redirect>,
 ): Promise<Uint8Array | null> {
-  for (const redirect of redirects) {
+  for (const raw of redirects) {
+    const redirect = expand === undefined ? raw : await expand(raw)
     const error = await installDescriptor(dispatch, session, redirect, stdin)
     if (error !== null) return error
   }

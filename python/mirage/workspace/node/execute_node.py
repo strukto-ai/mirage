@@ -21,10 +21,13 @@ from typing import Any, Callable
 from mirage.cache.index.scope import command_scope
 from mirage.context import (
     program_invocation,
+    redirect_paths_for,
     reset_current_session,
     reset_program_invocation,
+    reset_redirect_paths,
     set_current_evaluation,
     set_program_invocation,
+    set_redirect_paths,
 )
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
@@ -102,7 +105,7 @@ from mirage.workspace.executor.traps import end_shell
 from mirage.workspace.expand import (
     expand_and_classify,
     expand_node,
-    expand_redirects,
+    expand_redirect,
 )
 from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.expand.node import expand_arith
@@ -527,25 +530,21 @@ async def _recurse_pipe_stderr(
     redirects.append(
         Redirect(fd=2, target=1, kind=RedirectKind.STDERR_TO_STDOUT)
     )
-    expanded, pipe_node = await expand_redirects(
-        redirects,
-        context,
+    return await _run_redirected(
+        recurse,
+        dispatch,
         execute_fn,
         registry,
+        namespace,
+        view,
+        command,
+        redirects,
+        None,
+        context,
+        stdin,
         call_stack,
-        view=view,
-        links=namespace,
+        sink=sink,
     )
-    stdout, io, exec_node = await handle_redirect(
-        recurse, dispatch, command, expanded, context, stdin, call_stack
-    )
-    if pipe_node is not None and stdout is not None:
-        stdout, io2, exec_node2 = await recurse(
-            pipe_node, context, stdout, call_stack
-        )
-        io = await io.merge(io2)
-        exec_node = exec_node2
-    return stdout, io, exec_node
 
 
 async def _negated(
@@ -693,12 +692,15 @@ async def _run_redirected(
             sink=sink,
         )
         return await _negated(stdout, io, exec_node, context, inner)
-    expanded_redirects, pipe_node = await expand_redirects(
-        redirects,
-        context,
-        execute_fn,
-        registry,
-        call_stack,
+    pipe_node = next(
+        (r.pipeline for r in redirects if r.pipeline is not None), None
+    )
+    expand = partial(
+        expand_redirect,
+        context=context,
+        execute_fn=execute_fn,
+        registry=registry,
+        call_stack=call_stack,
         view=view,
         forked=_forks(command, context),
         links=namespace,
@@ -709,7 +711,7 @@ async def _run_redirected(
     # through to the ordinary path, which refuses the command form.
     if _is_bare_exec(command):
         return await install_exec_redirects(
-            dispatch, session, expanded_redirects, stdin
+            dispatch, session, redirects, stdin, expand=expand
         )
     # A heredoc's operator line reads the routed stdout, so then it is
     # returned rather than written. A simple command expands its words
@@ -724,16 +726,53 @@ async def _run_redirected(
     if simple:
         context.frame.diagnostics = []
     try:
-        stdout, io, exec_node = await handle_redirect(
-            partial(recurse, own_diagnostics=False) if simple else recurse,
-            dispatch,
-            command,
-            expanded_redirects,
-            context,
-            stdin,
-            call_stack,
-            sink=sink if pipe_node is None else None,
-        )
+        if command is not None and command.type == NT.COMMAND:
+
+            async def under_redirects(run, guard, name, args):
+                async def prepared(node, current, given, stack, *, sink=None):
+                    return await run(
+                        given, sink, redirect_paths_for(command.id)
+                    )
+
+                return await handle_redirect(
+                    prepared,
+                    dispatch,
+                    command,
+                    redirects,
+                    context,
+                    stdin,
+                    call_stack,
+                    sink=sink if pipe_node is None else None,
+                    expand=expand,
+                    guard=guard,
+                    name=name,
+                    args=args,
+                )
+
+            token = set_redirect_paths(command.id, (), under_redirects)
+            try:
+                stdout, io, exec_node = await recurse(
+                    command,
+                    context,
+                    stdin,
+                    call_stack,
+                    sink=sink if pipe_node is None else None,
+                    own_diagnostics=False,
+                )
+            finally:
+                reset_redirect_paths(token)
+        else:
+            stdout, io, exec_node = await handle_redirect(
+                partial(recurse, own_diagnostics=False) if simple else recurse,
+                dispatch,
+                command,
+                redirects,
+                context,
+                stdin,
+                call_stack,
+                sink=sink if pipe_node is None else None,
+                expand=expand,
+            )
         if simple and context.frame.diagnostics:
             err = _diagnostic_stderr(command, context)
             io.stderr = err + await io.materialize_stderr()

@@ -65,7 +65,12 @@ import type { JobTable } from '../../shell/job_table/index.ts'
 import { ERREXIT_EXEMPT_TYPES, FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
 import { NodeType as NT, type PipelineStages, Redirect, RedirectKind } from '../../shell/types.ts'
 import { NodeKind, nodeKind, pipelineTransparent } from '../../shell/node_kind.ts'
-import { expandRedirects } from '../expand/redirects.ts'
+import {
+  runWithRedirectPaths,
+  redirectPathsFor,
+  type RedirectRunner,
+} from '../../context/session_context.ts'
+import { expandRedirect } from '../expand/redirects.ts'
 import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
 import { expandPattern } from '../expand/pattern.ts'
 import type { ArithWrite } from '../../shell/types.ts'
@@ -568,22 +573,25 @@ async function runRedirected(
     )
     return negated(stdout, io, execNode, context, inner)
   }
-  const [expandedRedirects, pipeNode] = await expandRedirects(
-    redirects,
-    context,
-    executeFn,
-    registry,
-    callStack,
-    sessionView(session, registry.policies, context.frame.diagnostics),
-    forks(command, context),
-    namespace,
-  )
+  const pipeNode =
+    (redirects.find((r) => r.pipeline != null)?.pipeline as TSNodeLike | null) ?? null
+  const expand = (redirect: Redirect) =>
+    expandRedirect(
+      redirect,
+      context,
+      executeFn,
+      registry,
+      callStack,
+      sessionView(session, registry.policies, context.frame.diagnostics),
+      forks(command, context),
+      namespace,
+    )
   // `exec > file` with no command installs the redirects on the shell
   // for every later statement, rather than applying them to one
   // command. `exec cmd > file` still has a command and falls through
   // to the ordinary path, which refuses the command form.
   if (isBareExec(command)) {
-    return await installExecRedirects(dispatch, session, expandedRedirects, stdin)
+    return await installExecRedirects(dispatch, session, redirects, stdin, expand)
   }
   // A heredoc's operator line reads the routed stdout, so then it is
   // returned rather than written. A simple command expands its words
@@ -600,19 +608,50 @@ async function runRedirected(
   let io: IOResult
   let execNode: ExecutionNode
   try {
-    ;[stdout, io, execNode] = await handleRedirect(
-      simple
-        ? (n, s, i, cs, opts) => recurse(n, s, i, cs, { ...opts, ownDiagnostics: false })
-        : recurse,
-      dispatch,
-      command,
-      expandedRedirects,
-      context,
-      stdin,
-      callStack,
-      false,
-      pipeNode === null ? sink : undefined,
-    )
+    if (command !== null && command.type === NT.COMMAND) {
+      const underRedirects: RedirectRunner = (run, guard, name, args) =>
+        handleRedirect(
+          (_node, _current, given, _stack, options) =>
+            run(given, options?.sink, redirectPathsFor(command)),
+          dispatch,
+          command,
+          redirects,
+          context,
+          stdin,
+          callStack,
+          false,
+          pipeNode === null ? sink : undefined,
+          expand,
+          guard,
+          name,
+          args,
+        )
+      ;[stdout, io, execNode] = await runWithRedirectPaths(
+        command,
+        [],
+        () =>
+          recurse(command, context, stdin, callStack, {
+            ...(pipeNode === null && sink ? { sink } : {}),
+            ownDiagnostics: false,
+          }),
+        underRedirects,
+      )
+    } else {
+      ;[stdout, io, execNode] = await handleRedirect(
+        simple
+          ? (n, s, i, cs, opts) => recurse(n, s, i, cs, { ...opts, ownDiagnostics: false })
+          : recurse,
+        dispatch,
+        command,
+        redirects,
+        context,
+        stdin,
+        callStack,
+        false,
+        pipeNode === null ? sink : undefined,
+        expand,
+      )
+    }
     if (simple && context.frame.diagnostics.length > 0) {
       const err = diagnosticStderr(command, context)
       io.stderr = concat([err, await io.materializeStderr()])
@@ -690,38 +729,26 @@ async function recursePipeStderr(
   callStack: CallStack | null,
   opts?: ExecuteNodeOpts,
 ): Promise<Result> {
-  const session = context.session
   if (!targets.includes(node) || nodeKind(node) !== NodeKind.REDIRECT) {
     return recurse(node, context, stdin, callStack, opts)
   }
   const [command, redirects] = getRedirects(node)
   redirects.push(new Redirect({ fd: 2, target: 1, kind: RedirectKind.STDERR_TO_STDOUT }))
-  const [expanded, pipeNode] = await expandRedirects(
-    redirects,
-    context,
-    executeFn,
-    registry,
-    callStack,
-    sessionView(session, registry.policies, context.frame.diagnostics),
-    false,
-    namespace,
-  )
-  let [stdout, io, execNode] = await handleRedirect(
+  return runRedirected(
     recurse,
     dispatch,
+    executeFn,
+    registry,
+    namespace,
     command,
-    expanded,
+    redirects,
+    undefined,
+    undefined,
+    opts?.sink,
     context,
     stdin,
     callStack,
   )
-  if (pipeNode !== null && stdout !== null) {
-    const [stdout2, io2, execNode2] = await recurse(pipeNode, context, stdout, callStack)
-    stdout = stdout2
-    io = await io.merge(io2)
-    execNode = execNode2
-  }
-  return [stdout, io, execNode]
 }
 
 export interface ExecuteNodeDeps {

@@ -55,6 +55,7 @@ from mirage.commands.cli.builtin.git.util import (
     start_point,
     verb_usage,
 )
+from mirage.commands.cli.constants import GIT_LONG_OPTIONS
 from mirage.commands.cli.refusal import (
     HELP_SWITCH,
     git_option_refusal,
@@ -170,16 +171,16 @@ def remote_urls(cfg: ConfigFile, name: str) -> tuple[list[str], list[str]]:
                 (value.decode(), base)
                 for value in multivar(cfg, section, b"pushinsteadof")
             )
-    if not push:
+    fetch = [_rewrite_url(url, rules) for url in urls]
+    if push:
+        push = [_rewrite_url(url, rules) for url in push]
+    else:
         push = [
             _rewrite_url(url, push_rules)
             for url in urls
             if any(url.startswith(prefix) for prefix, _ in push_rules)
-        ] or urls
-    return (
-        [_rewrite_url(url, rules) for url in urls],
-        [_rewrite_url(url, rules) for url in push],
-    )
+        ] or fetch
+    return fetch, push
 
 
 async def remote_get_url(
@@ -196,6 +197,7 @@ async def remote_get_url(
             list(inv.texts[1:]),
             inv.cwd.virtual,
             unknown_is_operand=True,
+            abbreviations=GIT_LONG_OPTIONS["remote get-url"],
         )
         names = tuple(word for word, _ in parsed.args)
         bad = offending(names, escaped(inv.argv), frozenset())

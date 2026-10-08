@@ -1514,10 +1514,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/redirect-glob && cd /data/redirect-glob && printf 'one\\n' > a.txt && cat < *.txt && printf 'two\\n' >> *.txt && cat < *.txt && printf 'replace\\n' >| *.txt && cat < *.txt && { echo out; echo err >&2; } &> *.txt && cat < *.txt && printf '%s\\n' \"$(<*.txt)\" && ln -s a.txt alias.log && cat < *.log && mkdir sub && ln -s .. sub/up && cat < sub/up/*.txt); rm -r /data/redirect-glob",
+      "command": "(mkdir -p /data/redirect-glob && cd /data/redirect-glob && printf 'one\\n' > a.txt && cat < *.txt && printf 'two\\n' >> *.txt && cat < *.txt && printf 'replace\\n' >| *.txt && cat < *.txt && { echo out; echo err >&2; } &> *.txt && cat < *.txt && printf '%s\\n' \"$(<*.txt)\" && ln -s a.txt alias.log && cat < *.log && mkdir sub && ln -s .. sub/up && cat < sub/up/*.txt && echo created > created.new > *.new && cat created.new && printf 'stale\\n' > emptied && echo substituted > emptied > \"$(cat emptied; echo substituted)\" && test ! -s emptied && cat substituted; target=before; target=after echo prefix > \"$target\"; cat before; test ! -e after && echo before-prefix; shopt -s expand_aliases; alias redirect_say='echo alias'; eval 'redirect_say > alias.out'; cat alias.out); rm -r /data/redirect-glob",
       "expect": {
         "exit": 0,
-        "stdout": "one\none\ntwo\nreplace\nout\nerr\nout\nerr\nout\nerr\nout\nerr\n",
+        "stdout": "one\none\ntwo\nreplace\nout\nerr\nout\nerr\nout\nerr\nout\nerr\ncreated\nsubstituted\nprefix\nbefore-prefix\nalias\n",
         "stderr": ""
       }
     },
@@ -1546,11 +1546,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/redirect-many && cd /data/redirect-many && printf 'a\\n' > a.txt && printf 'b\\n' > b.txt; cat < *.txt; echo input=$?; echo bad > *.txt; echo output=$?; echo bad >> *.txt; echo append=$?; { echo bad; } > *.txt; echo compound=$?; true | cat < *.txt; echo pipe=$?; ! cat < *.txt; echo negated=$?; echo bad > *.txt > \"$(touch later; echo skipped)\"; echo ordered=$?; test ! -e later && echo unexpanded; (exec > *.txt); echo exec=$?; cat a.txt b.txt); rm -r /data/redirect-many",
+      "command": "(mkdir -p /data/redirect-many && cd /data/redirect-many && printf 'a\\n' > a.txt && printf 'b\\n' > b.txt; cat < *.txt; echo input=$?; echo bad > *.txt; echo output=$?; echo bad >> *.txt; echo append=$?; { echo bad; } > *.txt; echo compound=$?; true | cat < *.txt; echo pipe=$?; ! cat < *.txt; echo negated=$?; echo bad > *.txt > \"$(touch later; echo skipped)\"; echo ordered=$?; test ! -e later && echo unexpanded; (exec > *.txt); echo exec=$?; cat a.txt b.txt; rm b.txt; echo bad > b.txt > *.txt; echo created=$?; test ! -s b.txt && echo empty; cat a.txt; rm b.txt; echo bad >> b.txt >> *.txt; echo appended=$?; test ! -s b.txt && echo empty; rm b.txt; { echo bad; } > b.txt > *.txt; echo grouped=$?; rm b.txt; true | echo bad > b.txt > *.txt; echo piped=$?; rm b.txt; (exec > b.txt > *.txt); echo installed=$?; test ! -s b.txt && echo empty; echo bad > missing/leaf > \"$(touch skipped; echo unused)\"; echo failed=$?; test ! -e skipped && echo unexpanded; rm b.txt; echo bad 2>errors >b.txt >*.txt; echo routed=$?; cat errors; echo bad 2>>errors > missing/leaf; echo refused=$?; tail -1 errors); rm -r /data/redirect-many",
       "expect": {
         "exit": 0,
-        "stdout": "input=1\noutput=1\nappend=1\ncompound=1\npipe=1\nnegated=0\nordered=1\nunexpanded\nexec=1\na\nb\n",
-        "stderr": "*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n"
+        "stdout": "input=1\noutput=1\nappend=1\ncompound=1\npipe=1\nnegated=0\nordered=1\nunexpanded\nexec=1\na\nb\ncreated=1\nempty\na\nappended=1\nempty\ngrouped=1\npiped=1\ninstalled=1\nempty\nfailed=1\nunexpanded\nrouted=1\n*.txt: ambiguous redirect\nrefused=1\nmissing/leaf: No such file or directory\n",
+        "stderr": "*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\nmissing/leaf: No such file or directory\n"
       }
     },
     {

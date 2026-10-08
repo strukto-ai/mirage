@@ -42,6 +42,7 @@ import {
   verbUsage,
 } from './util.ts'
 import { HELP_SWITCH, gitOptionRefusal, gitUsage } from '../../refusal.ts'
+import { GIT_LONG_OPTIONS } from '../../constants.ts'
 import { isBare } from './discover.ts'
 import type { Dispatch, RepoLocation } from './types.ts'
 
@@ -124,13 +125,15 @@ export function remoteUrls(cfg: readonly ConfigLine[], name: string): [string[],
     if (key === 'insteadof') rules.push([line.value ?? '', base])
     if (key === 'pushinsteadof') pushRules.push([line.value ?? '', base])
   }
-  if (!push.length) {
+  const fetch = urls.map((url) => rewriteUrl(url, rules))
+  if (push.length) push = push.map((url) => rewriteUrl(url, rules))
+  else {
     push = urls
       .filter((url) => pushRules.some(([prefix]) => url.startsWith(prefix)))
       .map((url) => rewriteUrl(url, pushRules))
-    if (!push.length) push = urls
+    if (!push.length) push = fetch
   }
-  return [urls.map((url) => rewriteUrl(url, rules)), push.map((url) => rewriteUrl(url, rules))]
+  return [fetch, push]
 }
 
 /** Read the get-url remainder through the shared option parser. */
@@ -143,6 +146,7 @@ export async function remoteGetUrl(inv: CLIInvocation): Promise<CommandFnResult>
       '',
       undefined,
       true,
+      GIT_LONG_OPTIONS.get('remote get-url'),
     )
     const names = parsed.args.map(([word]) => word)
     const bad = offending(names, escaped(inv.argv), new Set())

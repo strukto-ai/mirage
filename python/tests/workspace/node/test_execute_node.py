@@ -160,7 +160,7 @@ def _data_writes(dispatch):
     return [
         c
         for c in dispatch.call_args_list
-        if c[0][0] == "write" and c[1].get("data")
+        if c[0][0] in ("write", "pwrite") and c[1].get("data")
     ]
 
 

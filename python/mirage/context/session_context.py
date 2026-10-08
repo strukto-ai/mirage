@@ -16,7 +16,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mirage.errors.fs import eacces, enoent, erofs
 from mirage.policy.types import DryRun, EntryGate, VfsExplanation
@@ -39,6 +39,11 @@ from mirage.utils.hidden import (
 from mirage.utils.path import parent
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.session.session import SessionState
+
+if TYPE_CHECKING:
+    from mirage.io.types import ByteSource, IOResult
+    from mirage.shell.console import JobConsole
+    from mirage.workspace.types import ExecutionNode
 
 
 class SessionOwner(ABC):
@@ -469,20 +474,30 @@ def get_walk_probe() -> WalkProbe | None:
     return _current_walk_probe.get()
 
 
-# Opens a statement's write targets as bash does before the command
-# runs, given the admitted command's name and arguments; False when one
-# cannot be opened.
-RedirectOpener = Callable[[str, tuple[str, ...]], Awaitable[bool]]
+# Runs a prepared command under ordered redirects, with a gate for
+# each target and the command identity for the single-output fast path.
+RedirectResult = tuple["ByteSource | None", "IOResult", "ExecutionNode"]
+RedirectRun = Callable[
+    ["ByteSource | None", "JobConsole | None", tuple[PathSpec, ...]],
+    Awaitable[RedirectResult],
+]
+RedirectGuard = Callable[
+    [tuple[PathSpec, ...]], Awaitable[RedirectResult | None]
+]
+RedirectRunner = Callable[
+    [RedirectRun, RedirectGuard | None, str, tuple[str, ...]],
+    Awaitable[RedirectResult],
+]
 
 _redirect_paths: ContextVar[
-    tuple[int, tuple[PathSpec, ...], RedirectOpener | None] | None
+    tuple[int, tuple[PathSpec, ...], RedirectRunner | None] | None
 ] = ContextVar("mirage_redirect_paths", default=None)
 
 
 def set_redirect_paths(
     node_id: int,
     paths: tuple[PathSpec, ...],
-    opener: RedirectOpener | None = None,
+    runner: RedirectRunner | None = None,
 ) -> Token[Any]:
     """Bind a statement's expanded redirect targets to the command node
     they belong to, for that node's run.
@@ -494,18 +509,16 @@ def set_redirect_paths(
     on the way to the command (a ``$()`` operand, an ``eval``) never
     inherits the outer statement's targets.
 
-    The opener empties the targets bash opens for writing before the
-    command runs; dispatch calls it with the command's name and arguments
-    once the line is admitted, so a command the gate refuses leaves its
-    targets as they were.
+    The runner applies redirects after command words expand, admitting
+    each resolved target before opening it. Nested expansions retain
+    their own command identity and never inherit this runner.
 
     Args:
         node_id (int): the command node the targets belong to.
         paths (tuple[PathSpec, ...]): the expanded targets.
-        opener (RedirectOpener | None): opens the targets, False when
-            one of them cannot be opened.
+        runner (RedirectRunner | None): runs the command under its redirects.
     """
-    return _redirect_paths.set((node_id, paths, opener))
+    return _redirect_paths.set((node_id, paths, runner))
 
 
 def reset_redirect_paths(token: Token[Any]) -> None:
@@ -526,8 +539,8 @@ def redirect_paths_for(node_id: int) -> tuple[PathSpec, ...]:
     return bound[1]
 
 
-def redirect_opener_for(node_id: int) -> RedirectOpener | None:
-    """The opener bound with this command node's redirect targets, None
+def redirect_runner_for(node_id: int) -> RedirectRunner | None:
+    """The runner bound with this command node's redirect targets, None
     for any other node or when none is bound.
 
     Args:

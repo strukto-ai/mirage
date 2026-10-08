@@ -31,20 +31,9 @@ import type { ExecuteFn } from './node.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
-/**
- * Expand redirect targets: heredoc vars, target words, pipelines.
- *
- * The single expansion path for redirected statements; the executor
- * then applies the redirects. Heredoc/herestring bodies get
- * session variables substituted; file targets are expanded and
- * classified into PathSpec or plain text; the first attached pipeline
- * is detached and returned separately. `forked` says the redirects belong
- * to a program bash forks for, which expands them in the child: an error
- * there is kept for the command to fail on (`UNEXPANDED`) rather than
- * thrown into the shell, which discards the line.
- */
-export async function expandRedirects(
-  redirects: readonly Redirect[],
+/** Expand one redirect immediately before the executor applies it. */
+export async function expandRedirect(
+  redirect: Redirect,
   context: EvaluationContext,
   executeFn: ExecuteFn,
   registry: MountRegistry,
@@ -52,37 +41,17 @@ export async function expandRedirects(
   view?: SessionView,
   forked = false,
   links: NamespaceLinks | null = null,
-): Promise<[Redirect[], TSNodeLike | null]> {
-  const expanded: Redirect[] = []
-  for (const [index, r] of redirects.entries()) {
-    let current: Redirect
-    try {
-      current = await expandRedirect(r, context, executeFn, registry, callStack, view, links)
-    } catch (err) {
-      if (!(err instanceof ExitSignal) || !forked) throw err
-      current = new Redirect({ fd: r.fd, target: err, kind: RedirectKind.UNEXPANDED })
-    }
-    expanded.push(current)
-    if (current.kind === RedirectKind.AMBIGUOUS || current.kind === RedirectKind.UNEXPANDED) {
-      // A failed expansion stops later redirects; its attached pipeline still runs.
-      current.pipeline =
-        redirects.slice(index).find((each) => each.pipeline != null)?.pipeline ?? null
-      break
-    }
+): Promise<Redirect> {
+  try {
+    return await expandTarget(redirect, context, executeFn, registry, callStack, view, links)
+  } catch (error) {
+    if (!(error instanceof ExitSignal) || !forked) throw error
+    return new Redirect({ fd: redirect.fd, target: error, kind: RedirectKind.UNEXPANDED })
   }
-  let pipeNode: TSNodeLike | null = null
-  for (const r of expanded) {
-    if (r.pipeline !== null && r.pipeline !== undefined) {
-      pipeNode = r.pipeline as TSNodeLike
-      r.pipeline = null
-      break
-    }
-  }
-  return [expanded, pipeNode]
 }
 
 /** Expand one redirect's body or target. */
-async function expandRedirect(
+async function expandTarget(
   r: Redirect,
   context: EvaluationContext,
   executeFn: ExecuteFn,

@@ -13,10 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from collections.abc import Awaitable, Callable
 from enum import Enum, auto
 from functools import partial
 
 from mirage.context import reset_redirect_paths, set_redirect_paths
+from mirage.context.session_context import RedirectGuard, RedirectResult
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
@@ -52,7 +54,6 @@ from mirage.shell.descriptors import (
 )
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text
-from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind, TSNodeLike
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.workspace.evaluation import EvaluationContext
@@ -281,37 +282,32 @@ async def handle_redirect(
     call_stack: CallStack | None = None,
     capture_input: bool = False,
     sink: JobConsole | None = None,
+    expand: Callable[[Redirect], Awaitable[Redirect]] | None = None,
+    guard: RedirectGuard | None = None,
+    name: str = "",
+    args: tuple[str, ...] = (),
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Apply ordered descriptor bindings for one command and restore them.
 
-    Descriptors alias shared file descriptions, including read/write offsets.
-    A target opened for writing is emptied before the command runs, as
-    bash's open-before-exec does, so ``cat f > f`` reads an empty file and
-    ``ls > out`` lists ``out``; a target that cannot be opened stops the
-    command before it runs. A ``>>`` target is opened then too, created
-    when it is missing, so ``ls >> out`` lists ``out``. A simple command
-    opens its targets only once dispatch admits it, so a command the gate
-    refuses leaves them as they were. A builtin that touches no file of
-    its own (``echo``, ``printf``, ``:``) cannot tell, so its targets are
-    opened by the write of its output, one write per target, and one that
-    cannot be opened fails that write with the open's error, the output
-    dropped. Two opens stay out of bash's order:
-    an input that cannot be opened stops the line before any target is
-    opened, where bash has emptied the ones written before it, because
-    the gate has not judged the line yet; and an input that reaches a
-    ``>`` target only through a symlink is read before the target is
-    emptied, since the paths are compared as typed.
+    Each target expands, is admitted, and opens before the next target
+    expands. Earlier opens therefore affect later globs and substitutions,
+    and a failure stops the remaining redirects. Descriptors alias shared
+    file descriptions, including their read/write offsets.
 
     Args:
         execute_node (Callable): executor for the redirected command.
         dispatch (DispatchFn): workspace operation dispatcher.
         command (TSNodeLike | None): command, or a redirect-only statement.
-        redirects (list[Redirect]): expanded redirects in source order.
+        redirects (list[Redirect]): redirects in source order.
         context (EvaluationContext): enclosing descriptor bindings.
         stdin (ByteSource | None): inherited input.
         call_stack (CallStack | None): function stack.
         capture_input (bool): capture a redirect-only substitution's input.
         sink (JobConsole | None): destination for terminal output.
+        expand (Callable | None): expand one target immediately before opening.
+        guard (RedirectGuard | None): admit each resolved target before I/O.
+        name (str): command name for the output-only fast path.
+        args (tuple[str, ...]): expanded command arguments.
     """
     session = context.session
     bad_fd = unsupported_descriptor(redirects)
@@ -359,45 +355,71 @@ async def handle_redirect(
         outputs[fd] = _descriptor_output(descriptor)
         if descriptor.identity == CLOSED:
             closed.add(fd)
+
+    async def failed(result: RedirectResult) -> RedirectResult:
+        stdout, io, node = result
+        data = await io.materialize_stderr()
+        target = outputs[2]
+        if target is _TO_STDERR:
+            return result
+        io.stderr = None
+        if target is _TO_STDOUT:
+            stdout = data
+        elif isinstance(target, FileDescription):
+            await write_description(dispatch, session, target, data)
+        elif isinstance(target, Inherited):
+            if not await deliver(sink, target, data):
+                if target.channel == Channel.STDOUT:
+                    stdout = data
+                else:
+                    io.stderr = data
+        return stdout, io, node
+
     files: list[FileDescription] = []
-    # bash empties a write target as it opens it, so the command finds
-    # nothing to read in the same file through an input redirect.
-    truncated: dict[str, int] = {}
-    for at, r in enumerate(redirects):
-        if (
-            r.kind in (RedirectKind.STDOUT, RedirectKind.STDERR)
-            and not r.append
-            and not isinstance(r.target, int)
-        ):
-            truncated.setdefault(_ensure_scope(r.target).virtual, at)
-    for at, r in enumerate(redirects):
+    expanded: list[Redirect] = []
+    targets: tuple[PathSpec, ...] = ()
+    read_paths: dict[int, str] = {}
+    for raw in redirects:
+        r = await expand(raw) if expand is not None else raw
+        expanded.append(r)
         if r.kind == RedirectKind.AMBIGUOUS:
-            return _shell_failure(
-                encode_text(f"{_redirect_word(r)}: ambiguous redirect\n")
+            return await failed(
+                _shell_failure(
+                    encode_text(f"{_redirect_word(r)}: ambiguous redirect\n")
+                )
             )
         if r.kind == RedirectKind.UNEXPANDED and isinstance(
             r.target, ExitSignal
         ):
-            return _shell_failure(r.target.stderr, r.target.exit_code)
+            return await failed(
+                _shell_failure(r.target.stderr, r.target.exit_code)
+            )
         if isinstance(r.target, int):
             if r.target == FD_CLOSE:
                 closed.add(r.fd)
+                read_paths.pop(r.fd, None)
                 inputs[r.fd], outputs[r.fd] = _Unreadable.TOKEN, _CLOSED
             elif r.target != r.fd:
                 if r.target in closed or r.target not in outputs:
-                    return _shell_failure(bad_descriptor_line(r.target))
+                    return await failed(
+                        _shell_failure(bad_descriptor_line(r.target))
+                    )
                 source = inputs[r.target]
                 if not isinstance(source, _Unreadable):
                     source = share(source if source is not None else b"")
                     inputs[r.target] = source
                 inputs[r.fd], outputs[r.fd] = source, outputs[r.target]
+                if r.target in read_paths:
+                    read_paths[r.fd] = read_paths[r.target]
+                else:
+                    read_paths.pop(r.fd, None)
                 closed.discard(r.fd)
             continue
         fds = [1, 2] if r.fd == FD_BOTH else [r.fd]
-        for fd in fds:
-            closed.discard(fd)
-            inputs[fd], outputs[fd] = _Unreadable.TOKEN, _CLOSED
         if r.kind in (RedirectKind.HEREDOC, RedirectKind.HERESTRING):
+            closed.discard(r.fd)
+            read_paths.pop(r.fd, None)
+            outputs[r.fd] = _CLOSED
             data = r.target
             if isinstance(data, str):
                 if r.kind == RedirectKind.HERESTRING:
@@ -412,42 +434,48 @@ async def handle_redirect(
             inputs[r.fd] = data if r.fd == 0 else SharedInput(data)
             continue
         scope = _ensure_scope(r.target)
+        targets = (*targets, scope)
+        if guard is not None:
+            denied = await guard(targets)
+            if denied is not None:
+                return denied
+        refusal = await _open_refusal(dispatch, context, [r])
+        if refusal is not None:
+            return await failed(refusal)
         if r.kind in (RedirectKind.STDIN, RedirectKind.READWRITE):
-            # Opened after the target was emptied there is nothing to
-            # read; opened before, the file must still be there.
-            emptied_at = (
-                truncated.get(scope.virtual)
-                if r.kind == RedirectKind.STDIN
-                else None
-            )
             try:
                 if (
                     scope.virtual == "/dev/stdin"
                     and r.kind == RedirectKind.STDIN
                 ):
-                    inputs[r.fd] = stdin
+                    closed.discard(r.fd)
+                    read_paths.pop(r.fd, None)
+                    inputs[r.fd], outputs[r.fd] = stdin, _CLOSED
                     continue
-                if emptied_at is not None and emptied_at < at:
-                    data = b""
-                else:
-                    data, _ = await dispatch("read", scope)
+                data, _ = await dispatch("read", scope)
             except FileNotFoundError as exc:
                 if r.kind != RedirectKind.READWRITE:
-                    return _redirect_failure(scope, exc)
+                    return await failed(_redirect_failure(scope, exc))
                 data = b""
             except FS_ERRORS as exc:
-                return _redirect_failure(scope, exc)
-            data = (
-                b""
-                if emptied_at is not None
-                else await materialize(data) or b""
-            )
+                return await failed(_redirect_failure(scope, exc))
+            data = await materialize(data) or b""
+            closed.discard(r.fd)
+            read_paths.pop(r.fd, None)
+            outputs[r.fd] = _CLOSED
             if r.kind == RedirectKind.READWRITE:
-                file = FileDescription(scope, append=True)
+                try:
+                    await create_file(
+                        dispatch, session, scope, b"", append=True
+                    )
+                except FS_ERRORS as exc:
+                    return await failed(_redirect_failure(scope, exc))
+                file = FileDescription(scope, append=True, opened=True)
                 file.source = FileInput(file, data)
                 files.append(file)
                 inputs[r.fd], outputs[r.fd] = file.source, file
             else:
+                read_paths[r.fd] = scope.virtual
                 inputs[r.fd] = (
                     DeviceInput()
                     if data == b"" and await _is_device(dispatch, scope)
@@ -456,36 +484,34 @@ async def handle_redirect(
                     else SharedInput(data)
                 )
         else:
-            file = FileDescription(scope, append=r.append)
+            deferred = len(redirects) == 1 and _output_only(name, args)
+            if not deferred:
+                token = (
+                    set_redirect_paths(command.id, targets)
+                    if command is not None and guard is not None
+                    else None
+                )
+                try:
+                    await create_file(
+                        dispatch, session, scope, b"", append=r.append
+                    )
+                except FS_ERRORS as exc:
+                    return await failed(_redirect_failure(scope, exc))
+                finally:
+                    if token is not None:
+                        reset_redirect_paths(token)
+            if not r.append:
+                emptied = SharedInput(b"")
+                for fd, path in read_paths.items():
+                    if path == scope.virtual:
+                        inputs[fd] = emptied
+            file = FileDescription(scope, append=r.append, opened=not deferred)
             files.append(file)
             for fd in fds:
-                outputs[fd] = file
-    refusal = await _open_refusal(dispatch, context, redirects)
-    if refusal is not None:
-        return refusal
-    opening = [file for file in files if file.source is None]
-    opened: set[int] = set()
-    failure: list[tuple[PathSpec, OSError]] = []
-
-    async def open_targets(name: str = "", args: tuple[str, ...] = ()) -> bool:
-        """Open the statement's write targets, as bash's opens do before
-        the command runs: a ``>`` one emptied, a ``>>`` one created when
-        it is missing; False, the failure kept, when one cannot be
-        opened. An output-only builtin's targets wait for the write of
-        its output instead (``_output_only``)."""
-        if _output_only(name, args):
-            return True
-        while opening:
-            file = opening.pop(0)
-            try:
-                await create_file(
-                    dispatch, session, file.scope, b"", append=file.append
-                )
-            except FS_ERRORS as exc:
-                failure.append((file.scope, exc))
-                return False
-            opened.add(id(file))
-        return True
+                closed.discard(fd)
+                read_paths.pop(fd, None)
+                inputs[fd], outputs[fd] = _Unreadable.TOKEN, file
+    redirects = expanded
 
     recorder = Recorder()
     for file in files:
@@ -506,20 +532,8 @@ async def handle_redirect(
             session.descriptors[fd] = _describe(
                 outputs[fd], inputs[fd], recorder if fd > 2 else None
             )
-    targets = tuple(
-        _ensure_scope(r.target)
-        for r in redirects
-        if not isinstance(r.target, int)
-        and r.kind not in (RedirectKind.HEREDOC, RedirectKind.HERESTRING)
-    )
-    # A simple command opens its targets once dispatch has admitted it
-    # (see set_redirect_paths); a compound one has no gate of its own and
-    # opens them here, before its body runs.
-    simple = command is not None and command.type == NT.COMMAND
     token = (
-        set_redirect_paths(
-            command.id, targets, open_targets if simple else None
-        )
+        set_redirect_paths(command.id, targets)
         if command is not None
         else None
     )
@@ -539,8 +553,6 @@ async def handle_redirect(
         if command is None:
             if capture_input and not isinstance(inputs[0], _Unreadable):
                 await pump(recorder, Channel.STDOUT, inputs[0])
-            io = IOResult()
-        elif not simple and not await open_targets():
             io = IOResult()
         else:
             _, io, exec_node = await drained(
@@ -589,8 +601,6 @@ async def handle_redirect(
     # written (`route.release()`).
     route.recorder = Recorder()
     try:
-        if failure:
-            return _redirect_failure(*failure[0])
         chunks = recorder.chunks
         if refused:
             outputs = {0: _CLOSED, 1: _TO_STDOUT, 2: _TO_STDERR}
@@ -640,10 +650,8 @@ async def handle_redirect(
                         if unique
                         else b""
                     )
-                    if data or id(file) not in opened:
+                    if data or not file.opened:
                         await write_description(dispatch, session, file, data)
-                    else:
-                        file.opened = True
                     if unique:
                         consumed.add(id(file))
                         if data:
@@ -714,7 +722,7 @@ async def handle_redirect(
 def _output_only(name: str, args: tuple[str, ...]) -> bool:
     """Whether an admitted command reads and writes no file of its own.
 
-    Its write targets can then be opened by the write of its output: no
+    Its final write target can be opened by the write of its output: no
     read it makes can see a target emptied early, and a target that
     cannot be opened fails that write with the error the open would have
     met, the output dropped and the status 1, which is what bash shows
@@ -932,19 +940,6 @@ async def _open_refusal(
     than the noclobber one. bash stops at the first target it cannot
     open, so the scan reports one line and stops.
 
-    The opens are modelled in the order they were written, because each
-    one is visible to the next: `set -C; echo x > a > a` creates `a` on
-    the first redirect and then refuses the second, even though `a` did
-    not exist when the statement began. Probing every target against one
-    pre-command snapshot passed both and wrote the output. `>>` and `>|`
-    never refuse but do create, so they count as opens too.
-
-    The stat is skipped unless the option is on, so the ordinary
-    redirect path costs no extra round trip. A directory typed without
-    a slash needs none here: the open itself answers `Is a directory`,
-    from the kernel on a real filesystem and from the store's own
-    directory table on a keyed one, and the write path renders it.
-
     Targets are stat'd through the op dispatcher rather than a backend,
     so a redirect that lands on another mount is answered by the mount
     that owns it.
@@ -960,8 +955,6 @@ async def _open_refusal(
     """
     session = context.session
     noclobber = bool(session.shell_options.get("noclobber"))
-    opened: set[str] = set()
-    pending: list[PathSpec] = []
     for r in redirects:
         if r.kind in (
             RedirectKind.STDIN,
@@ -972,15 +965,11 @@ async def _open_refusal(
             continue
         scope = _ensure_scope(r.target)
         if scope.raw_path.endswith("/"):
-            earlier = await _apply_pending_opens(dispatch, pending)
-            if earlier is not None:
-                return earlier
             return _shell_failure(
                 encode_text(f"{scope.raw_path}: Is a directory\n")
             )
-        path = scope.virtual
         is_dir = False
-        exists = path in opened
+        exists = False
         if noclobber and not exists:
             try:
                 stat, _ = await dispatch("stat", scope)
@@ -994,57 +983,12 @@ async def _open_refusal(
             exists = stat is not None
             is_dir = stat is not None and stat.type == FileType.DIRECTORY
         if noclobber and exists and not r.append and not r.clobber:
-            earlier = await _apply_pending_opens(dispatch, pending)
-            if earlier is not None:
-                return earlier
             detail = (
                 posix_phrase(FsCondition.EISDIR)
                 if is_dir
                 else "cannot overwrite existing file"
             )
             return _shell_failure(encode_text(f"{scope.raw_path}: {detail}\n"))
-        # This open succeeds, so the target exists for every redirect
-        # after it, and a truncating one leaves it empty to be found.
-        # Without the option nothing was stat'd, so an append target of
-        # unknown standing is not listed: pre-opening it with an empty
-        # write would truncate a file that is there.
-        opened.add(path)
-        if not r.append or (noclobber and not exists):
-            pending.append(scope)
-    return None
-
-
-async def _apply_pending_opens(
-    dispatch: DispatchFn,
-    pending: list[PathSpec],
-) -> tuple[None, IOResult, ExecutionNode] | None:
-    """Apply the opens a refused statement already performed.
-
-    bash opens redirects left to right, so the ones before the refused
-    one have happened by the time it refuses: ``set -C; echo x >> a > a``
-    leaves ``a`` existing and empty, and ``>| a > a`` truncates it. Only
-    targets the scan found absent, or opened for truncation, are listed,
-    so an append onto an existing file keeps its bytes.
-
-    An earlier open that fails is the statement's refusal instead: bash
-    stops at the first open it cannot perform, so ``echo x > /nodir/f >
-    reg/`` reports ``/nodir/f: No such file or directory`` and never
-    reaches the slashed target, and the opens after the failed one are
-    not performed either.
-
-    Args:
-        dispatch (DispatchFn): op dispatcher.
-        pending (list[PathSpec]): targets to create or truncate, in the
-            order they were opened.
-
-    Returns:
-        The earlier open's failure, or None when every open went through.
-    """
-    for scope in pending:
-        try:
-            await dispatch("write", scope, data=b"")
-        except FS_ERRORS as exc:
-            return _redirect_failure(scope, exc)
     return None
 
 

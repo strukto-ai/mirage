@@ -33,8 +33,8 @@ from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import visible_env
 
 
-async def expand_redirects(
-    redirects: list[Redirect],
+async def expand_redirect(
+    redirect: Redirect,
     context: EvaluationContext,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
@@ -42,70 +42,32 @@ async def expand_redirects(
     view: SessionView | None = None,
     forked: bool = False,
     links: NamespaceLinks | None = None,
-) -> tuple[list[Redirect], Any]:
-    """Expand redirect targets: heredoc vars, target words, pipelines.
-
-    The single expansion path for redirected statements, which the
-    executor then applies. Heredoc/herestring bodies get session
-    variables substituted; file targets are expanded and classified
-    into PathSpec or plain text; the first attached pipeline is
-    detached and returned separately.
+) -> Redirect:
+    """Expand one redirect immediately before the executor applies it.
 
     Args:
-        redirects (list[Redirect]): parsed redirects from get_redirects.
+        redirect (Redirect): the next redirect in source order.
         context (EvaluationContext): the evaluation's session and frame.
-        execute_fn (Callable): recursive execute (for expansions).
+        execute_fn (Callable): recursive execute for substitutions.
         registry (MountRegistry): mount registry for classification.
         call_stack (CallStack | None): shell call stack for expansion.
-        view (SessionView | None): the session plane's gated door.
+        view (SessionView | None): gated session writes.
+        forked (bool): retain an expansion error for the child command.
         links (NamespaceLinks | None): namespace links for pathname expansion.
-        forked (bool): the redirects belong to a program bash forks
-            for, which expands them in the child: an error there is
-            kept for the command to fail on (``UNEXPANDED``) rather
-            than raised into the shell, which discards the line.
-
-    Returns:
-        (expanded, pipe_node): expanded redirects and the detached
-        pipeline node (or None).
     """
-    expanded: list[Redirect] = []
-    for index, r in enumerate(redirects):
-        try:
-            current = await _expand_redirect(
-                r, context, execute_fn, registry, call_stack, view, links
-            )
-        except ExitSignal as exc:
-            if not forked:
-                raise
-            current = Redirect(
-                fd=r.fd, target=exc, kind=RedirectKind.UNEXPANDED
-            )
-        expanded.append(current)
-        if current.kind in (
-            RedirectKind.AMBIGUOUS,
-            RedirectKind.UNEXPANDED,
-        ):
-            # A failed expansion stops later redirects; its attached
-            # pipeline still runs.
-            current.pipeline = next(
-                (
-                    later.pipeline
-                    for later in redirects[index:]
-                    if later.pipeline is not None
-                ),
-                None,
-            )
-            break
-    pipe_node = None
-    for r in expanded:
-        if r.pipeline is not None:
-            pipe_node = r.pipeline
-            r.pipeline = None
-            break
-    return expanded, pipe_node
+    try:
+        return await _expand_target(
+            redirect, context, execute_fn, registry, call_stack, view, links
+        )
+    except ExitSignal as exc:
+        if not forked:
+            raise
+        return Redirect(
+            fd=redirect.fd, target=exc, kind=RedirectKind.UNEXPANDED
+        )
 
 
-async def _expand_redirect(
+async def _expand_target(
     r: Redirect,
     context: EvaluationContext,
     execute_fn: Callable[..., Any],
