@@ -20,7 +20,7 @@ import { KeyLock } from '../../cache/lock.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { dispatchStat, dotRefusal, walkSpelling } from '../../commands/builtin/utils/paths.ts'
-import { getExtension } from '../../commands/resolve.ts'
+import { getExtension } from '../../utils/filetype.ts'
 import { IOResult, type OpReport } from '../../io/types.ts'
 import {
   eacces,

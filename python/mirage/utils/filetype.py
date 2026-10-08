@@ -143,3 +143,32 @@ def mime_type_for(filename: str) -> str:
     if not ext:
         return OCTET_STREAM
     return MIME_BY_EXTENSION.get(ext, OCTET_STREAM)
+
+
+# Extensions with a dot inside, which the last dot alone would cut short.
+COMPOUND_EXTENSIONS = frozenset(
+    {
+        ".gdoc.json",
+        ".gslide.json",
+        ".gsheet.json",
+        ".gmail.json",
+    }
+)
+
+
+def get_extension(path: str | None) -> str | None:
+    """A path's extension with its dot, a compound one whole.
+
+    Args:
+        path (str | None): the path; None has none.
+    """
+    if path is None:
+        return None
+    basename = path.rsplit("/", 1)[-1]
+    for ext in COMPOUND_EXTENSIONS:
+        if basename.endswith(ext):
+            return ext
+    dot = path.rfind(".")
+    if dot == -1 or "/" in path[dot:]:
+        return None
+    return path[dot:]

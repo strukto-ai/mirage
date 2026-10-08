@@ -26,7 +26,6 @@ from mirage.cache.file import io as cache_io
 from mirage.cache.lock import KeyLock
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.paths import dot_refusal, walk_spelling
-from mirage.commands.resolve import get_extension
 from mirage.context import (
     explaining,
     get_current_session,
@@ -67,6 +66,7 @@ from mirage.types import (
     VFSName,
     Visibility,
 )
+from mirage.utils.filetype import get_extension
 from mirage.utils.hidden import hidden_under, move_reveals, path_visible
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import CycleError, norm, norm_dir, owner_prefix, parent

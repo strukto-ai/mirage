@@ -50,7 +50,7 @@ import { declared } from '../../vfs/call.ts'
 import { WRITE_EFFECTS } from '../../vfs/constants.ts'
 import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 
-import { getExtension } from '../../commands/resolve.ts'
+import { getExtension } from '../../utils/filetype.ts'
 import { resolveLimit } from '../../policy/index.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { CommandTimeoutError, UsageError } from '../../commands/errors.ts'

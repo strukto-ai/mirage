@@ -32,7 +32,6 @@ from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.builtin.utils.paths import dispatch_stat, link_follow
 from mirage.commands.config import Command, CommandOpts, ExecContext
 from mirage.commands.errors import CommandTimeoutError, UsageError
-from mirage.commands.resolve import get_extension
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.constants import (
     STDIN_DASH_COMMANDS,
@@ -82,6 +81,7 @@ from mirage.types import (
     WalkProbe,
 )
 from mirage.utils.context_scope import ContextScope
+from mirage.utils.filetype import get_extension
 from mirage.utils.ids import uuid7
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.ranges import is_unsatisfiable_range, slice_window
