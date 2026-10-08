@@ -20,7 +20,7 @@ import { PartialOutputError, UsageError } from '../../../errors.ts'
 import type { CLIInvocation } from '../../types.ts'
 import { crc32 } from '../../../../utils/compress.ts'
 import { runViewCmd, workflowViewCmd } from './actions.ts'
-import { PathSpec } from '../../../../types.ts'
+import { cliInvocation } from '../../../../workspace/fixtures/cli_invocation.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -56,16 +56,7 @@ vi.mock('./accessor.ts', async (importOriginal) => {
 })
 
 function inv(texts: string[], flags: CLIInvocation['flags'] = {}): CLIInvocation {
-  return {
-    config: { token: 't', repo: 'o/r' },
-    argv: [],
-    paths: [],
-    texts,
-    flags,
-    stdin: null,
-    cwd: PathSpec.fromStrPath('/'),
-    env: {},
-  }
+  return cliInvocation({ config: { token: 't', repo: 'o/r' }, texts, flags })
 }
 
 function text(result: CommandFnResult): string {

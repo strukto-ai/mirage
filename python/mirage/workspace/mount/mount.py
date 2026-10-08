@@ -223,7 +223,9 @@ def _parameters(fn: Callable[..., Any]) -> frozenset[str] | None:
     )
 
 
-def _taken(fn: Callable[..., Any], kwargs: dict[str, Any]) -> dict[str, Any]:
+def _taken(
+    name: str, fn: Callable[..., Any], kwargs: dict[str, Any]
+) -> dict[str, Any]:
     """The keywords of ``kwargs`` that ``fn`` takes.
 
     The mount hands every function its ``index``; a function that does
@@ -232,6 +234,7 @@ def _taken(fn: Callable[..., Any], kwargs: dict[str, Any]) -> dict[str, Any]:
     raise, never silently dropped.
 
     Args:
+        name (str): the function the caller named, which the error names.
         fn (Callable[..., Any]): the function about to run.
         kwargs (dict[str, Any]): the call's keywords.
     """
@@ -242,8 +245,7 @@ def _taken(fn: Callable[..., Any], kwargs: dict[str, Any]) -> dict[str, Any]:
     unknown = sorted(set(kwargs) - names - {"index"})
     if unknown:
         raise TypeError(
-            f"{getattr(target, '__name__', target)}() got an unexpected "
-            f"keyword argument {unknown[0]!r}"
+            f"{name}() got an unexpected keyword argument {unknown[0]!r}"
         )
     return {k: v for k, v in kwargs.items() if k in names}
 
@@ -670,6 +672,51 @@ class MountEntry:
             name (str): the op name.
         """
         return call_effect(type(self.vfs), name) in WRITE_EFFECTS
+
+    def require_writable(
+        self, name: str, path: PathSpec, values: Iterable[Any]
+    ) -> None:
+        """Refuse a write the mount's mode does not grant at every path.
+
+        Every path the call is handed is one it may change: a rename's
+        destination, a custom function's other paths. A rename mutates
+        everything under its endpoints in one backend call, so a
+        read-only region below either one refuses it too. Removals stay
+        per-path: the runtimes compose rmtree from unlink and rmdir, and
+        each answers for its own path.
+
+        Args:
+            name (str): the function name.
+            path (PathSpec): the path the call names.
+            values (Iterable[Any]): the call's other arguments; each
+                PathSpec among them is a path it reaches.
+        """
+        effect = call_effect(type(self.vfs), name)
+        if effect not in WRITE_EFFECTS:
+            return
+        require_paths_writable(
+            [path, *(v for v in values if isinstance(v, PathSpec))],
+            self.prefix,
+            self.mode,
+            subtree=effect is Effect.RENAME,
+        )
+
+    def refuse_keywords(self, name: str, kwargs: dict[str, Any]) -> None:
+        """Refuse a keyword the function ``name`` does not take.
+
+        The door asks before it answers a read from the cache, so a warm
+        read refuses the keyword a cold one would.
+
+        Args:
+            name (str): the function name.
+            kwargs (dict[str, Any]): the call's keywords; ``filetype`` is
+                the mount's own and passes.
+        """
+        fn = getattr(self.vfs, name, None)
+        if callable(fn):
+            _taken(
+                name, fn, {k: v for k, v in kwargs.items() if k != "filetype"}
+            )
 
     def renders(self, filetype: str | None) -> bool:
         """Whether the VFS renders a read of ``filetype``.
@@ -1217,26 +1264,9 @@ class MountEntry:
             if not levels:
                 raise enotsup(str(self.vfs.name), name, path)
 
-            effect = call_effect(type(self.vfs), name)
-            if effect in WRITE_EFFECTS:
-                # Every path the call is handed is one it may change: a
-                # rename's destination, a custom function's other paths.
-                endpoints = [PathSpec.from_str_path(path)] + [
-                    value
-                    for value in kwargs.values()
-                    if isinstance(value, PathSpec)
-                ]
-                require_paths_writable(
-                    endpoints,
-                    self.prefix,
-                    self.mode,
-                    # A rename mutates everything under its endpoints in
-                    # one backend call, so a read-only region below
-                    # either one refuses it too. Removals stay per-path:
-                    # the runtimes compose rmtree from unlink and rmdir,
-                    # and each answers for its own path.
-                    subtree=effect is Effect.RENAME,
-                )
+            self.require_writable(
+                name, PathSpec.from_str_path(path), kwargs.values()
+            )
 
             mount_prefix = self.prefix.rstrip("/")
             scope = PathSpec(
@@ -1263,7 +1293,7 @@ class MountEntry:
                     # spells the two the same, and routing the physical one
                     # hands the op back to the backend serving it.
                     with host_io():
-                        result = fn(scope, *args, **_taken(fn, kwargs))
+                        result = fn(scope, *args, **_taken(name, fn, kwargs))
                         if inspect.isawaitable(result):
                             result = await run_with_timeout(
                                 result, op_timeout, name

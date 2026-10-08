@@ -16,7 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as AccessorModule from './accessor.ts'
 import type * as PullModule from '../../../../core/github/pull.ts'
 import type { CLIInvocation } from '../../types.ts'
-import { PathSpec } from '../../../../types.ts'
+import { cliInvocation } from '../../../../workspace/fixtures/cli_invocation.ts'
 
 let ROWS: Record<string, unknown>[] = []
 // What real gh 2.85 printed for `gh pr diff --name-only` over this diff: the
@@ -61,16 +61,7 @@ function json(result: Awaited<ReturnType<typeof viewCmd>>): Record<string, unkno
 }
 
 function inv(flags: CLIInvocation['flags'] = {}): CLIInvocation {
-  return {
-    config: { token: 't' },
-    argv: [],
-    paths: [],
-    texts: ['5'],
-    flags: { repo: 'o/r', ...flags },
-    stdin: null,
-    cwd: PathSpec.fromStrPath('/'),
-    env: {},
-  }
+  return cliInvocation({ config: { token: 't' }, texts: ['5'], flags: { repo: 'o/r', ...flags } })
 }
 
 async function bucketOf(row: Record<string, unknown>): Promise<unknown> {

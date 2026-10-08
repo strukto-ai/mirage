@@ -93,7 +93,7 @@ class DoorOps {
   }
 
   async rename(src: PathSpec, dst: PathSpec): Promise<void> {
-    await this.call('rename', src, [dst], { dst })
+    await this.call('rename', src, [dst])
   }
 
   async truncate(path: PathSpec, length: number): Promise<void> {

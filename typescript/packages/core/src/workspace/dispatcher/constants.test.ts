@@ -29,23 +29,11 @@ import {
 const sorted = (names: ReadonlySet<string>): string[] => [...names].sort()
 
 describe('dispatcher op sets', () => {
-  it('never follows a link-entry op', () => {
-    // lstat semantics: the operand names the link itself, so no stat
-    // surface may rewrite it through the table.
-    expect([...NO_FOLLOW_OPS].sort()).toEqual(
-      ['readlink', 'rename', 'rmdir', 'symlink', 'unlink'].sort(),
-    )
-  })
-
-  it('does not stamp an mtime for a removal', () => {
-    expect(STAMP_WRITE_OPS.has('unlink')).toBe(false)
-    expect(STAMP_WRITE_OPS.has('rmdir')).toBe(false)
-    expect(STAMP_WRITE_OPS.has('write')).toBe(true)
-  })
-
   it('follows the declarations', () => {
     // Every class is read off what the functions declare; this pins the
     // result so a declaration that moves an op between classes is seen.
+    // A link-entry op never follows (lstat semantics) and a removal
+    // stamps no mtime.
     const writes = ['append', 'create', 'pwrite', 'truncate', 'write']
     expect(sorted(DISPATCH_READ_OPS)).toEqual(['read'])
     expect(sorted(DISPATCH_WRITE_OPS)).toEqual(
@@ -59,6 +47,7 @@ describe('dispatcher op sets', () => {
     expect(sorted(FILE_CREATE_OPS)).toEqual(writes)
     expect(sorted(ENTRY_CREATE_OPS)).toEqual(['mkdir', 'symlink'])
     expect(sorted(HIDDEN_CREATE_OPS)).toEqual([...writes, 'mkdir', 'symlink'].sort())
+    expect(sorted(NO_FOLLOW_OPS)).toEqual(['readlink', 'rename', 'rmdir', 'symlink', 'unlink'])
     expect(sorted(STAMP_WRITE_OPS)).toEqual([...writes, 'mkdir'].sort())
   })
 })

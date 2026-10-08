@@ -24,7 +24,6 @@ import { getExtension } from '../../commands/resolve.ts'
 import { IOResult, type OpReport } from '../../io/types.ts'
 import {
   eacces,
-  erofs,
   eexist,
   einval,
   enoent,
@@ -91,7 +90,6 @@ import {
   XATTR_OPS,
 } from './constants.ts'
 import {
-  effectivePathMode,
   explaining,
   getCurrentSession,
   hiddenRefusal,
@@ -388,7 +386,7 @@ export class Dispatcher {
       ]
     }
     this.follow(call)
-    this.walkOperands(call)
+    await this.walkOperands(call)
     if (XATTR_OPS.has(name)) {
       return [
         await this.answerXattr(name, call.path, call.kwargs ?? {}, report, issuer),
@@ -587,7 +585,7 @@ export class Dispatcher {
    */
   private follow(call: Call): void {
     const nofollow = call.kwargs?.nofollow === true
-    if (nofollow) {
+    if (call.kwargs !== undefined && 'nofollow' in call.kwargs) {
       const rest = { ...call.kwargs }
       delete rest.nofollow
       call.kwargs = rest
@@ -608,15 +606,22 @@ export class Dispatcher {
 
   /**
    * Walk and follow a function's other path arguments as its path. Each
-   * answers to the session's hides as typed, walked and followed, and the
-   * command's gate judges every spelling, so a second path is no way
-   * around a hide or a rule. The followed spelling replaces the argument.
-   * Mirrors Python's Dispatcher._walk_operands.
+   * answers to the session's hides as typed, walked and followed, its dots
+   * and trailing slash are judged as the path's are, and the command's gate
+   * judges every spelling, so a second path is no way around a hide, a
+   * missing directory or a rule. The followed spelling replaces the
+   * argument. Mirrors Python's Dispatcher._walk_operands.
    */
-  private walkOperands(call: Call): void {
+  private async walkOperands(call: Call): Promise<void> {
     for (const [at, typed] of operands(call.name, call.args, call.kwargs)) {
       if (!pathVisible(call.vis, typed.virtual)) throw hiddenRefusal(call.vis, typed.virtual, false)
       if (typed.walkError !== null) throw walkRefusal(typed)
+      if (typed.dotted !== null) {
+        const refusal = await dotRefusal(dispatchStat(this.dispatch), typed, (virtual) =>
+          this.namespace.follow(virtual),
+        )
+        if (refusal !== null) throw refusal
+      }
       const walked = this.walked(typed, false)
       const followed = followOrLoop(this.namespace, walked, true)
       const landed = followed === walked.virtual ? walked : PathSpec.fromStrPath(followed)
@@ -776,6 +781,7 @@ export class Dispatcher {
     ) {
       return null
     }
+    mount.refuseKeywords(call.name, call.kwargs ?? {})
     const [offset, size] = readWindow(call.kwargs)
     const window = sliceWindow(cached, offset, size)
     // Nothing crossed the network, and neither a gate nor a hard cap leaves
@@ -832,21 +838,7 @@ export class Dispatcher {
     const filetype = getExtension(p.virtual)
     const [readOffset, readSize] = readWindow(kwargs)
     const whole = readOffset === 0 && readSize === null
-    if (mount.writes(name)) {
-      if (effectivePathMode(p.virtual, mountPrefix, mode) === MountMode.READ) {
-        throw erofs(p, `mount at '${p.virtual}' is read-only`)
-      }
-      // A rename mutates its destination too, so both endpoints answer.
-      const wDst = name === 'rename' && call.args?.[0] instanceof PathSpec ? call.args[0] : null
-      if (wDst !== null && effectivePathMode(wDst.virtual, mountPrefix, mode) === MountMode.READ) {
-        throw erofs(wDst, `mount at '${wDst.virtual}' is read-only`)
-      }
-      for (const [, other] of operands(name, call.args, kwargs)) {
-        if (effectivePathMode(other.virtual, mountPrefix, mode) === MountMode.READ) {
-          throw erofs(other, `mount at '${other.virtual}' is read-only`)
-        }
-      }
-    }
+    mount.requireWritable(name, p, [...(call.args ?? []), ...Object.values(kwargs ?? {})])
     // Ops registered under a rendered filetype (gdocs/gsheets/gslides/
     // gmail reads) resolve by the path's extension; Python reaches them
     // because its dispatcher routes through Mount.call, which

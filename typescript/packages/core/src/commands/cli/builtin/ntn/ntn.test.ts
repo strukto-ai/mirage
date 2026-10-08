@@ -28,7 +28,7 @@ import { query } from './datasources/query.ts'
 import { whoamiRow } from './whoami.ts'
 import { propertyCell } from './util.ts'
 import { yieldBytes } from '../../../../io/stream.ts'
-import { PathSpec } from '../../../../types.ts'
+import { cliInvocation } from '../../../../workspace/fixtures/cli_invocation.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -69,16 +69,7 @@ function makeInv(
   texts: string[] = [],
   stdin: ByteSource | null = null,
 ): CLIInvocation {
-  return {
-    config: {},
-    argv: [],
-    paths: [],
-    texts,
-    flags,
-    stdin,
-    cwd: PathSpec.fromStrPath('/'),
-    env: {},
-  }
+  return cliInvocation({ config: {}, texts, flags, stdin })
 }
 
 function leaf(...path: string[]) {

@@ -25,35 +25,16 @@ from mirage.workspace.dispatcher.constants import (
     STAMP_WRITE_OPS,
 )
 
-
-def test_link_entry_ops_never_follow():
-    # lstat semantics: the operand names the link itself, so no stat
-    # surface may rewrite it through the table.
-    assert set(NO_FOLLOW_OPS) == {
-        "unlink",
-        "rename",
-        "rmdir",
-        "symlink",
-        "readlink",
-    }
-
-
-def test_removals_do_not_stamp_an_mtime():
-    assert "unlink" not in STAMP_WRITE_OPS
-    assert "rmdir" not in STAMP_WRITE_OPS
-    assert "write" in STAMP_WRITE_OPS
+WRITES = {"write", "append", "pwrite", "create", "truncate"}
 
 
 def test_the_op_classes_follow_the_declarations():
     # Every class is read off what the functions declare; this pins the
     # result so a declaration that moves an op between classes is seen.
+    # A link-entry op never follows (lstat semantics) and a removal
+    # stamps no mtime.
     assert DISPATCH_READ_OPS == {"read"}
-    assert DISPATCH_WRITE_OPS == {
-        "write",
-        "append",
-        "pwrite",
-        "create",
-        "truncate",
+    assert DISPATCH_WRITE_OPS == WRITES | {
         "mkdir",
         "unlink",
         "rmdir",
@@ -66,29 +47,15 @@ def test_the_op_classes_follow_the_declarations():
         "removexattr",
     }
     assert NAMESPACE_TABLE_OPS == {"symlink", "readlink"}
-    assert SERIAL_WRITE_OPS == {
-        "write",
-        "append",
-        "pwrite",
-        "create",
-        "truncate",
+    assert SERIAL_WRITE_OPS == WRITES | {"unlink", "rename"}
+    assert FILE_CREATE_OPS == WRITES
+    assert ENTRY_CREATE_OPS == {"mkdir", "symlink"}
+    assert HIDDEN_CREATE_OPS == WRITES | ENTRY_CREATE_OPS
+    assert NO_FOLLOW_OPS == {
         "unlink",
         "rename",
+        "rmdir",
+        "symlink",
+        "readlink",
     }
-    assert FILE_CREATE_OPS == {
-        "write",
-        "append",
-        "pwrite",
-        "create",
-        "truncate",
-    }
-    assert ENTRY_CREATE_OPS == {"mkdir", "symlink"}
-    assert HIDDEN_CREATE_OPS == FILE_CREATE_OPS | {"mkdir", "symlink"}
-    assert STAMP_WRITE_OPS == {
-        "write",
-        "append",
-        "pwrite",
-        "create",
-        "truncate",
-        "mkdir",
-    }
+    assert STAMP_WRITE_OPS == WRITES | {"mkdir"}

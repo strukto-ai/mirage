@@ -137,15 +137,25 @@ function dstArg(value: unknown): PathSpec {
 }
 
 /**
- * Refuse the keywords a custom function cannot take, which is all of
- * them: a TypeScript function has no keyword parameters. The mount hands
- * every function its `index` and a caller may name the `filetype`; any
- * other keyword is the TypeError a direct call raises in Python, never
- * silently dropped. Mirrors Python's `_taken`.
+ * Refuse a keyword the function `name` does not take: the TypeError a direct
+ * call raises in Python, never silently dropped. The mount hands every
+ * function its `index` and a caller may name the `filetype`; a built-in takes
+ * the keywords its Python signature names, and a custom function none, a
+ * TypeScript function having no keyword parameters. Mirrors Python's `_taken`.
  */
 function taken(name: string, kwargs: OpKwargs): void {
+  const keywords: Readonly<Record<string, readonly string[]>> = {
+    read: ['offset', 'size'],
+    mkdir: ['parents'],
+    truncate: ['no_create'],
+    setattr: ['mode', 'uid', 'gid', 'atime', 'mtime'],
+  }
+  const known = Object.hasOwn(keywords, name) ? (keywords[name] ?? []) : []
   const [first] = Object.keys(kwargs)
-    .filter((key) => key !== 'index' && key !== 'filetype' && kwargs[key] !== undefined)
+    .filter(
+      (key) =>
+        key !== 'index' && key !== 'filetype' && !known.includes(key) && kwargs[key] !== undefined,
+    )
     .sort(compareCodePoints)
   if (first !== undefined) {
     throw new TypeError(`${name}() got an unexpected keyword argument '${first}'`)
@@ -518,6 +528,35 @@ export class MountEntry {
   }
 
   /**
+   * Refuse a write the mount's mode does not grant at every path. Every path
+   * the call is handed is one it may change: a rename's destination, a custom
+   * function's other paths. A rename mutates everything under its endpoints
+   * in one backend call, so a read-only region below either one refuses it
+   * too. Removals stay per-path: the runtimes compose rmtree from unlink and
+   * rmdir, and each answers for its own path. Mirrors Python's
+   * `MountEntry.require_writable`.
+   */
+  requireWritable(name: string, path: PathSpec, values: readonly unknown[]): void {
+    const effect = callEffect(this.vfs.constructor, name)
+    if (effect === null || !WRITE_EFFECTS.includes(effect)) return
+    requirePathsWritable(
+      [path, ...values.filter((value): value is PathSpec => value instanceof PathSpec)],
+      this.prefix,
+      this.mode,
+      effect === Effect.RENAME,
+    )
+  }
+
+  /**
+   * Refuse a keyword the function `name` does not take. The door asks before
+   * it answers a read from the cache, so a warm read refuses the keyword a
+   * cold one would. Mirrors Python's `MountEntry.refuse_keywords`.
+   */
+  refuseKeywords(name: string, kwargs: OpKwargs): void {
+    taken(name, kwargs)
+  }
+
+  /**
    * Whether the VFS renders a read of `filetype`. A rendered read is never
    * served from or kept in the file cache.
    */
@@ -638,14 +677,7 @@ export class MountEntry {
         return [(scope, _args, kw) => vfs.setattr(scope, kw as SetAttrFields)]
       default: {
         const method = (vfs as unknown as Record<string, (...args: unknown[]) => unknown>)[name]
-        return method === undefined
-          ? []
-          : [
-              (scope, args, kw) => {
-                taken(name, kw)
-                return method.call(vfs, scope, ...args)
-              },
-            ]
+        return method === undefined ? [] : [(scope, args) => method.call(vfs, scope, ...args)]
       }
     }
   }
@@ -701,6 +733,7 @@ export class MountEntry {
     const filetype = kwargs.filetype === undefined ? getExtension(scope.virtual) : kwargs.filetype
     const levels = this.callers(name, filetype)
     if (levels.length === 0) throw enotsup(this.vfs.name, name, scope)
+    taken(name, kwargs)
     for (const call of levels) {
       const result = await call(scope, args, kwargs)
       if (result !== null && result !== undefined) return result
@@ -1046,22 +1079,8 @@ export class MountEntry {
       if (levels.length === 0) {
         throw enotsup(this.vfs.name, name, path)
       }
-      if (this.writes(name)) {
-        // Every path the call is handed is one it may change: a rename's
-        // destination, a custom function's other paths.
-        const endpoints = [
-          PathSpec.fromStrPath(path),
-          ...[...args, ...Object.values(kwargs)].filter(
-            (value): value is PathSpec => value instanceof PathSpec,
-          ),
-        ]
-        // A rename mutates everything under its endpoints in one backend
-        // call, so a read-only region below either one refuses it too.
-        // Removals stay per-path: the runtimes compose rmtree from unlink
-        // and rmdir, and each answers for its own path.
-        const subtree = callEffect(this.vfs.constructor, name) === Effect.RENAME
-        requirePathsWritable(endpoints, this.prefix, this.mode, subtree)
-      }
+      this.requireWritable(name, PathSpec.fromStrPath(path), [...args, ...Object.values(kwargs)])
+      taken(name, kwargs)
       const mountPrefix = rstripSlash(this.prefix)
       const lastSlash = path.lastIndexOf('/')
       const scope = new PathSpec({

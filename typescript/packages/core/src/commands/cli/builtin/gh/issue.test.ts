@@ -16,7 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as AccessorModule from './accessor.ts'
 import type * as IssueModule from '../../../../core/github/issue.ts'
 import type { CLIInvocation } from '../../types.ts'
-import { PathSpec } from '../../../../types.ts'
+import { cliInvocation } from '../../../../workspace/fixtures/cli_invocation.ts'
 
 const FIELDS = vi.fn<typeof IssueModule.issueFields>()
 const LIST = vi.fn<typeof IssueModule.listIssueFields>()
@@ -38,16 +38,7 @@ vi.mock('../../../../core/github/issue.ts', async (importOriginal) => {
 const { ISSUE_FIELDS, listCmd, viewCmd } = await import('./issue.ts')
 
 function inv(flags: CLIInvocation['flags'] = {}): CLIInvocation {
-  return {
-    config: { token: 't' },
-    argv: [],
-    paths: [],
-    texts: ['4'],
-    flags: { repo: 'o/r', ...flags },
-    stdin: null,
-    cwd: PathSpec.fromStrPath('/'),
-    env: {},
-  }
+  return cliInvocation({ config: { token: 't' }, texts: ['4'], flags: { repo: 'o/r', ...flags } })
 }
 
 function json(result: Awaited<ReturnType<typeof viewCmd>>): unknown {

@@ -290,6 +290,30 @@ def _judge(gate: EntryGate, *paths: PathSpec | None) -> None:
         gate.check(virtual)
 
 
+def _follow_or_loop(
+    namespace: Namespace,
+    path: PathSpec,
+    last: bool,
+    spelled: str | None = None,
+) -> str:
+    """The door's link follow of one path, with a loop as ELOOP.
+
+    Args:
+        namespace (Namespace): the namespace whose links are followed.
+        path (PathSpec): the path the follow answers for.
+        last (bool): follow the final name too, not only the names above.
+        spelled (str | None): the spelling to follow, ``path.virtual``
+            when None.
+    """
+    virtual = path.virtual if spelled is None else spelled
+    try:
+        if last:
+            return namespace.follow(virtual)
+        return namespace.follow_parent(virtual)
+    except CycleError:
+        raise eloop(path) from None
+
+
 def _operands(name: str, kwargs: dict[str, Any]) -> list[tuple[str, PathSpec]]:
     """A function's path arguments beside its path, by keyword.
 
@@ -522,7 +546,7 @@ class Dispatcher:
                 IOResult(),
             )
         self._follow(call)
-        self._walk_operands(call)
+        await self._walk_operands(call)
         if name in XATTR_OPS:
             return (
                 await self._answer_xattr(name, call.path, kwargs, report),
@@ -693,13 +717,9 @@ class Dispatcher:
             call (_Call): the walked op; its ``path`` becomes the target.
         """
         walked = call.path
-        if call.name not in NO_FOLLOW_OPS and not call.kwargs.pop(
-            "nofollow", False
-        ):
-            try:
-                followed = self._namespace.follow(call.path.virtual)
-            except CycleError:
-                raise eloop(call.path) from None
+        nofollow = call.kwargs.pop("nofollow", False)
+        if call.name not in NO_FOLLOW_OPS and not nofollow:
+            followed = _follow_or_loop(self._namespace, call.path, True)
             if followed != call.path.virtual:
                 call.path = PathSpec.from_str_path(followed)
                 if not path_visible(call.vis, call.path.virtual):
@@ -711,13 +731,14 @@ class Dispatcher:
         if call.rule_gate is not None and not call.no_follow:
             _judge(call.rule_gate, call.typed, walked, call.path)
 
-    def _walk_operands(self, call: _Call) -> None:
+    async def _walk_operands(self, call: _Call) -> None:
         """Walk and follow a function's other path arguments as its path.
 
         Each answers to the session's hides as typed, walked and
-        followed, and the command's gate judges every spelling, so a
-        second path is no way around a hide or a rule. The followed
-        spelling replaces the argument.
+        followed, its dots and trailing slash are judged as the path's
+        are, and the command's gate judges every spelling, so a second
+        path is no way around a hide, a missing directory or a rule. The
+        followed spelling replaces the argument.
 
         Args:
             call (_Call): the followed op; its path arguments are walked.
@@ -727,11 +748,13 @@ class Dispatcher:
                 raise hidden_refusal(call.vis, typed.virtual, False)
             if typed.walk_error is not None:
                 raise walk_refusal(typed)
+            refusal = await dot_refusal(
+                self._walk_stat, typed, self._namespace.follow
+            )
+            if refusal is not None:
+                raise refusal
             walked = self._walked(typed, False)
-            try:
-                followed = self._namespace.follow(walked.virtual)
-            except CycleError:
-                raise eloop(walked) from None
+            followed = _follow_or_loop(self._namespace, walked, True)
             landed = (
                 walked
                 if followed == walked.virtual
@@ -881,6 +904,7 @@ class Dispatcher:
             or self._namespace.try_mount_for(call.path.virtual) is not mount
         ):
             return None
+        mount.refuse_keywords(call.name, call.kwargs)
         offset, size = call.window
         served = slice_window(cached, offset, size)
         # Nothing crossed the network, and neither a gate nor a hard cap
@@ -1268,10 +1292,7 @@ class Dispatcher:
                 OSError every caller's per-operand catch words.
         """
         spelled = walk_spelling(path, self._namespace.follow)
-        try:
-            walked = self._namespace.follow_parent(spelled)
-        except CycleError:
-            raise eloop(path) from None
+        walked = _follow_or_loop(self._namespace, path, False, spelled)
         if spelled != path.virtual:
             walked = posixpath.normpath(walked)
         if walked == path.virtual:
