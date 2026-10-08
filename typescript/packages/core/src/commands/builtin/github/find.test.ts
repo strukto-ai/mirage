@@ -33,6 +33,8 @@ import type { CommandOpts } from '../../config.ts'
 import { findGeneric } from '../generic/find.ts'
 import type * as findModule from '../generic/find.ts'
 import { GITHUB_FIND } from './find.ts'
+import { ioFor } from '../../../test-utils.ts'
+import { GitHubVFS } from '../../../vfs/github/github.ts'
 
 const generic = vi.mocked(findGeneric)
 
@@ -89,8 +91,15 @@ describe('github find', () => {
     // github lists through the index, which the mount seeds from the tree.
     const index = new RAMIndexCacheStore()
     await populateIndex(index, TREE, '')
-    const opts: CommandOpts = { stdin: null, flags: {}, filetypeFns: null, cwd: '/', index }
-    await cmd.fn(makeAccessor(), [pattern], [], opts)
+    const accessor = makeAccessor()
+    const opts: CommandOpts = {
+      stdin: null,
+      flags: {},
+      io: ioFor(GitHubVFS, accessor),
+      cwd: '/',
+      index,
+    }
+    await cmd.fn(accessor, [pattern], [], opts)
     const seen = generic.mock.calls[0]?.[0] ?? []
     expect(seen.map((p) => p.virtual)).toEqual(['/src/a.py', '/src/b.py'])
   })
@@ -107,16 +116,17 @@ describe('github find', () => {
     const sess = new SessionState({ sessionId: 'veiled' })
     sess.visibility = { ...sess.visibility, paths: { paths: ['/src/c.txt'] } }
     const vis = sess.visibility
+    const accessor = makeAccessor()
     const opts: CommandOpts = {
       stdin: null,
       flags: {},
-      filetypeFns: null,
+      io: ioFor(GitHubVFS, accessor),
       cwd: '/',
       index,
       ns: { visibility: vis, scoped: (virtual: string) => hiddenUnder(vis, virtual) },
     }
     const listed = await runWithSession(sess, async () => {
-      await cmd.fn(makeAccessor(), [src], [], opts)
+      await cmd.fn(accessor, [src], [], opts)
       const walk = generic.mock.calls[0]?.[3]
       if (walk === undefined) throw new Error('the generic was not reached')
       return walk(src, {})

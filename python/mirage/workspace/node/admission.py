@@ -51,7 +51,6 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.helpers import (
     get_parts,
     get_redirects,
-    get_text,
     literal_word,
     split_env_prefix,
 )
@@ -92,7 +91,7 @@ from mirage.workspace.lookup import (
 from mirage.workspace.lookup.constants import INTERPRETER_NAMES
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.node.inner_lines import Word, inner_lines
+from mirage.workspace.node.inner_lines import Word, inner_lines, read_word
 from mirage.workspace.node.occurrence import (
     Frame,
     argv_frame,
@@ -874,9 +873,7 @@ async def admit_line(
         frame = root_frame(ast, handed.origin if handed is not None else None)
     for node in command_nodes(ast):
         _, parts = split_env_prefix(get_parts(node))
-        words = [
-            Word(get_text(part), literal_word(part, home)) for part in parts
-        ]
+        words = [read_word(part, home) for part in parts]
         if not words:
             continue
         refusal = await _admit_words(

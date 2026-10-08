@@ -16,12 +16,16 @@ import functools
 from typing import TYPE_CHECKING
 
 from mirage.context import get_admission
-from mirage.ops.config import NamespaceLinks
-from mirage.ops.namespace_view import namespace_names
-from mirage.ops.types import LinkView, MountView, NamespaceView
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, Visibility
 from mirage.utils.hidden import hidden_under, path_visible
+from mirage.view.namespace_view import namespace_names
+from mirage.view.types import (
+    LinkView,
+    MountView,
+    NamespaceLinks,
+    NamespaceView,
+)
 from mirage.workspace.mount.namespace.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
 from mirage.workspace.mount.namespace.probe import (
@@ -188,7 +192,7 @@ def namespace_view_of(
     Stamped on every invocation's ``CommandOpts`` as ``ns``, whether or
     not the handler looks; a command opts in by reading the field it
     wants, and one that grows a new name-plane need reads another field
-    instead of threading a new keyword through ``execute_cmd``. Bound
+    instead of threading a new keyword through ``run_command``. Bound
     per session, the way the session view is: its listings come
     filtered by that session's hides, and ``scoped`` answers for the
     command being admitted, whose gate is bound while it runs.

@@ -42,7 +42,7 @@
     },
     {
       "id": "whole_line_literal_words",
-      "note": "A whole-line runtime expands the line itself, so the gate reads it as typed: a word only the runtime could expand is refused where a rule in force would have read it (the command name under any rule, an argument where a rule reads that command's arguments), the lines a word runs (eval, sh -c, xargs, timeout) are admitted in turn, and a line the gate cannot see into (a sourced file, a bash option mirage does not read) is refused, while bash --version runs nothing. Literal words, and dynamic ones no rule reads, reach the runtime.",
+      "note": "A whole-line runtime expands the line itself, so the gate reads it as typed. Dynamic command names are refused under any rule, and dynamic arguments are refused when a rule reads that command's arguments. Nested commands (eval, sh -c, xargs, timeout) are admitted in turn; files and unsupported shell options remain unreadable. Shell program selection uses only a literal prefix including glob quoting, because expansion can shift an option's value onto --version or -c. A known version response or literal -c payload stays readable with dynamic positional words. Literal words, and dynamic ones no rule reads, reach the runtime.",
       "world": {
         "runtimes": [
           {
@@ -164,6 +164,83 @@
           "expect": {
             "exit": 0,
             "stdout": "box:bash --version\n"
+          }
+        },
+        {
+          "command": "unset SKIP; bash --rcfile $SKIP --version -c 'rm /ram/x'",
+          "expect": {
+            "exit": 126,
+            "stderr": "bash: Permission denied\n"
+          }
+        },
+        {
+          "command": "shopt -s nullglob; bash --rcfile missing-* --version -c 'rm /ram/x'",
+          "expect": {
+            "exit": 126,
+            "stderr": "bash: Permission denied\n"
+          }
+        },
+        {
+          "command": "bash --rcfile missing-[ab] --version -c 'rm /ram/x'",
+          "expect": {
+            "exit": 126,
+            "stderr": "bash: Permission denied\n"
+          }
+        },
+        {
+          "command": "bash --rcfile missing-\"*\" --version -c 'rm /ram/x'",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:bash --rcfile missing-\"*\" --version -c 'rm /ram/x'\n"
+          }
+        },
+        {
+          "command": "bash --rcfile missing-\\* --version -c 'rm /ram/x'",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:bash --rcfile missing-\\* --version -c 'rm /ram/x'\n"
+          }
+        },
+        {
+          "command": "bash --rcfile 'missing-*' --version -c 'rm /ram/x'",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:bash --rcfile 'missing-*' --version -c 'rm /ram/x'\n"
+          }
+        },
+        {
+          "command": "unset SKIP; sh --init-file $SKIP --help -c 'rm /ram/x'",
+          "expect": {
+            "exit": 126,
+            "stderr": "sh: Permission denied\n"
+          }
+        },
+        {
+          "command": "SKIP='rc -c rm'; bash --rcfile $SKIP --version -c 'echo safe'",
+          "expect": {
+            "exit": 126,
+            "stderr": "bash: Permission denied\n"
+          }
+        },
+        {
+          "command": "bash --rcfile rc --version -c 'rm /ram/x'",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:bash --rcfile rc --version -c 'rm /ram/x'\n"
+          }
+        },
+        {
+          "command": "bash --version $SKIP -c 'rm /ram/x'",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:bash --version $SKIP -c 'rm /ram/x'\n"
+          }
+        },
+        {
+          "command": "bash -c 'echo \"$1\"' name \"$ARG\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:bash -c 'echo \"$1\"' name \"$ARG\"\n"
           }
         },
         {

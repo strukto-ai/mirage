@@ -67,9 +67,15 @@ def test_manager_default_cwd():
 
 def test_manager_default_env():
     mgr = SessionManager("default")
-    # A fresh session carries the seeded `$PWD`, `$PATH` and `$IFS`, nothing
-    # else.
-    assert mgr.env == {"PWD": "/", "PATH": "/usr/bin", "IFS": " \t\n"}
+    # A fresh session carries the seeded `$PWD`, `$PATH`, `$IFS`, `$OPTIND`
+    # and `$OPTERR`, nothing else.
+    assert mgr.env == {
+        "PWD": "/",
+        "PATH": "/usr/bin",
+        "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
+    }
     mgr.env = {"A": "1"}
     assert mgr.env == {"A": "1"}
     assert mgr.get("default").env == {"A": "1"}
@@ -180,16 +186,25 @@ async def test_manager_hydrates_from_store():
             "mount_modes": {"/data": "read"},
             "functions": {"f": "f() { echo persisted; }"},
             "readonly_functions": ["f"],
+            "exported_functions": ["f"],
         },
     )
     mgr = SessionManager("default", store=store)
     await mgr.ensure_loaded()
     s = mgr.get("restored")
     assert s.cwd == "/w"
-    assert s.env == {"K": "v", "PWD": "/w", "PATH": "/usr/bin", "IFS": " \t\n"}
+    assert s.env == {
+        "K": "v",
+        "PWD": "/w",
+        "PATH": "/usr/bin",
+        "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
+    }
     assert s.mount_modes == {"/data": MountMode.READ}
     assert s.functions == {"f": "f() { echo persisted; }"}
     assert s.readonly_functions == {"f"}
+    assert s.exported_functions == {"f"}
 
 
 @pytest.mark.asyncio
@@ -214,18 +229,22 @@ async def test_manager_default_adopts_stored_fields():
             "env": {"A": "1"},
             "functions": {"f": "f() { :; }"},
             "readonly_functions": ["f"],
+            "exported_functions": ["f"],
         },
     )
     mgr = SessionManager("default", store=store)
     await mgr.ensure_loaded()
     assert mgr.get("default").functions == {"f": "f() { :; }"}
     assert mgr.get("default").readonly_functions == {"f"}
+    assert mgr.get("default").exported_functions == {"f"}
     assert mgr.cwd == "/w"
     assert mgr.env == {
         "A": "1",
         "PWD": "/w",
         "PATH": "/usr/bin",
         "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
     }
 
 

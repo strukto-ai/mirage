@@ -18,13 +18,14 @@ import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.commands.builtin.generic_bind.builders.unzip import unzip
-from mirage.commands.builtin.ram.io import IO
 from mirage.commands.config import CommandOpts
 from mirage.core.ram.mkdir import mkdir
 from mirage.core.ram.read import read
 from mirage.core.ram.write import write
 from mirage.types import PathSpec
+from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ram.store import RAMStore
+from tests.fixtures.vfs_io import io_for
 
 # a/b.txt ("first"), then a/../b.txt ("second"), which Info-ZIP maps onto
 # the same path.
@@ -52,7 +53,7 @@ async def test_unzip_without_a_dispatcher_sees_a_member_it_just_wrote(
     accessor = RAMAccessor(RAMStore())
     await write(accessor, PathSpec.from_str_path("/m.zip"), ARCHIVE)
     _, io = await unzip(
-        IO,
+        io_for(RAMVFS, accessor),
         accessor,
         [PathSpec.from_str_path("/m.zip")],
         [],
@@ -72,7 +73,7 @@ async def test_unzip_without_a_dispatcher_never_replaces_a_file_under_n():
     await mkdir(accessor, PathSpec.from_str_path("/a"))
     await write(accessor, PathSpec.from_str_path("/a/b.txt"), b"old\n")
     _, io = await unzip(
-        IO,
+        io_for(RAMVFS, accessor),
         accessor,
         [PathSpec.from_str_path("/m.zip")],
         [],

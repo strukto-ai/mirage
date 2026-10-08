@@ -21,12 +21,13 @@ import {
   command,
   type CommandFnResult,
   type CommandOpts,
-  type RegisteredCommand,
+  type Command,
+  type CommandIO,
 } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { resolveGlobOf, withWriteGuards, type CommandIO } from '../generic_bind/adapter.ts'
+import { mountIo, resolveGlobOf, withWriteGuards } from '../generic_bind/adapter.ts'
 import { formatRecords } from '../utils/output.ts'
 
 const ENC = new TextEncoder()
@@ -42,7 +43,7 @@ export function rmWithoutOperands(force: boolean): CommandFnResult {
 }
 
 /**
- * Build a backend's `rm` from its glob resolver and its unlink.
+ * Build a backend's `rm` from its unlink, resolving globs through the mount's table.
  *
  * Every API-backed mount spells the same GNU behaviour: report the operand
  * it could not remove, keep removing the rest, and exit 1 if any failed.
@@ -50,12 +51,7 @@ export function rmWithoutOperands(force: boolean): CommandFnResult {
  * gives the generic rm's slots, so this family enforces the session's
  * path axis like the command it stands in for.
  */
-export function makeRm<A extends Accessor>(
-  vfs: VFSName,
-  io: CommandIO<A>,
-  rawUnlink: UnlinkFn<A>,
-): RegisteredCommand[] {
-  const resolveGlob = resolveGlobOf(io)
+export function makeRm<A extends Accessor>(vfs: VFSName, rawUnlink: UnlinkFn<A>): Command[] {
   const unlink = withWriteGuards(rawUnlink)
   return command({
     name: 'rm',
@@ -73,6 +69,7 @@ export function makeRm<A extends Accessor>(
       const force = fl.asBool('f')
       const verbose = fl.asBool('v')
       if (paths.length === 0) return rmWithoutOperands(force)
+      const resolveGlob = resolveGlobOf(mountIo(opts) as CommandIO<A>)
       const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
       const verboseParts: string[] = []
       const errors: string[] = []

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { patchGeneric } from '../generic/patch.ts'
@@ -32,7 +33,7 @@ async function runPatch(
   await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
     stdin,
     flags,
-    filetypeFns: null,
+    io: commandIo(vfs),
     cwd: '/',
   })
 }
@@ -118,7 +119,6 @@ it.each(['', '/data', '/nested/data'])(
         source === 'operand' ? [orig, input] : [],
         {
           mountPrefix: prefix,
-          filetypeFns: null,
           cwd: prefix || '/',
           flags: { p: '1', ...(source === 'input' ? { i: input.virtual } : {}) },
           stdin: source === 'stdin' ? diff : null,

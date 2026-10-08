@@ -19,11 +19,12 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from './client.ts'
-import { IO } from '../../commands/builtin/discord/io.ts'
-import { resolveGlobOf } from '../../commands/builtin/generic_bind/index.ts'
+import { makeResolveGlob } from '../../utils/glob_walk.ts'
+import { readdir as discordReaddir } from './readdir.ts'
+import { stat as discordStat } from './stat.ts'
 import { DEFAULT_MAX_GLOB_MATCHES } from '../../utils/glob_walk.ts'
 
-const resolveDiscordGlob = resolveGlobOf(IO)
+const resolveDiscordGlob = makeResolveGlob(discordReaddir, undefined, undefined, discordStat)
 
 class FakeDiscordTransport implements DiscordTransport {
   public readonly calls: { method: DiscordMethod; endpoint: string }[] = []

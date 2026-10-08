@@ -6,12 +6,58 @@ from collections.abc import (
     Sequence,
 )
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from enum import StrEnum
+from typing import Any, NamedTuple, Protocol
 
 from mirage.cache.index import IndexCacheStore
 from mirage.types import FileStat, JsonValue, PathSpec
 
 DuEntries = tuple[list[tuple[str, int]], int]
+
+
+class Effect(StrEnum):
+    """What a dispatchable VFS function does to the mount.
+
+    READ returns content and METADATA an entry's metadata; neither
+    changes the mount. WRITE changes a file's bytes, CREATE makes a name
+    that must not exist yet, REMOVE drops a name, RENAME moves one with
+    everything under it, and ATTR changes an entry's metadata. Every
+    effect but READ and METADATA is a write: a read-only mount refuses
+    the call and admission judges it as one.
+    """
+
+    READ = "read"
+    METADATA = "metadata"
+    WRITE = "write"
+    CREATE = "create"
+    REMOVE = "remove"
+    RENAME = "rename"
+    ATTR = "attr"
+
+
+class Target(StrEnum):
+    """What kind of entry a dispatchable function's path names."""
+
+    FILE = "file"
+    DIR = "dir"
+    LINK = "link"
+    ANY = "any"
+
+
+class Declaration(NamedTuple):
+    """What ``vfs_call`` declares for one function.
+
+    Args:
+        effect (Effect): what the call does to the mount.
+        target (Target): the kind of entry its path names.
+        creates (bool): a WRITE that makes a missing file, as open(2)
+            with O_CREAT.
+    """
+
+    effect: Effect
+    target: Target
+    creates: bool
+
 
 OperationFn = Callable[..., Any]
 
@@ -212,45 +258,6 @@ class DuOps:
 
     size: DuSizeOp
     entries: DuEntriesOp
-
-
-@dataclass(frozen=True, kw_only=True)
-class ReadOps:
-    """Required resource reads: child paths, rendered bytes, and metadata."""
-
-    readdir: ReaddirOp
-    read_bytes: ReadBytesOp
-    stat: StatOp
-
-
-@dataclass(frozen=True, kw_only=True)
-class NativeReadOps:
-    """Optional read accelerators with the same semantics as generic reads."""
-
-    read_stream: ReadStreamOp | None = None
-    read_range: ReadRangeOp | None = None
-    exists: ExistsOp | None = None
-    find: OperationFn | None = None
-    du: DuOps | None = None
-
-
-@dataclass(frozen=True, kw_only=True)
-class WriteOps:
-    """Independent mutations; omitted operations remain unsupported."""
-
-    write: WriteOp | None = None
-    append: WriteOp | None = None
-    pwrite: PwriteOp | None = None
-    create: PathOp | None = None
-    mkdir: MkdirOp | None = None
-    unlink: PathOp | None = None
-    rmdir: RmdirOp | None = None
-    rm_r: RmTreeOp | None = None
-    rename: PairOp | None = None
-    copy: PairOp | None = None
-    dir_copy: PairOp | None = None
-    truncate: TruncateOp | None = None
-    set_attrs: OperationFn | None = None
 
 
 class NarrowPathsOp(Protocol):

@@ -19,22 +19,40 @@ import { createWriteStream, mkdirSync } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
 import path from 'node:path'
 
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
-
 import { CapacityState, ListingVersion, PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { CapacityResult } from '@struktoai/mirage-core/types'
 
-import { DISK_COMMANDS } from '../../commands/builtin/disk/index.ts'
-import { IO } from '../../commands/builtin/disk/io.ts'
-import { DEFAULT_MAX_DU_ENTRIES } from '@struktoai/mirage-core/commands/builtin/generic/du'
-
 import { openRegular, readEntries, resolveInside } from '../../core/disk/utils.ts'
 import { DiskAccessor } from '../../accessor/disk.ts'
-import { DISK_OPS } from '../../ops/disk/index.ts'
 import { PROMPT } from './prompt.ts'
 import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
 import { buildDeltaHook } from '../../core/disk/watch/index.ts'
+import type { FileStat, SetAttrFields } from '@struktoai/mirage-core/types'
+import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
+import type { FindOptions } from '@struktoai/mirage-core/vfs/base'
+import type { DuEntries } from '@struktoai/mirage-core/vfs/types'
+import { readdir as diskReaddir } from '../../core/disk/readdir.ts'
+import { read as diskRead, readRange as diskReadRange } from '../../core/disk/read.ts'
+import { stat as diskStat } from '../../core/disk/stat.ts'
+import { readStream as diskStream } from '../../core/disk/stream.ts'
+import { exists as diskExists } from '../../core/disk/exists.ts'
+import { find as diskFind } from '../../core/disk/find.ts'
+import { size as diskDu, entries as diskDuAll } from '../../core/disk/du/index.ts'
+import { write as diskWrite } from '../../core/disk/write.ts'
+import { appendBytes as diskAppend } from '../../core/disk/append.ts'
+import { pwrite as diskPwrite } from '../../core/disk/pwrite.ts'
+import { create as diskCreate } from '../../core/disk/create.ts'
+import { mkdir as diskMkdir } from '../../core/disk/mkdir.ts'
+import { unlink as diskUnlink } from '../../core/disk/unlink.ts'
+import { rmdir as diskRmdir } from '../../core/disk/rmdir.ts'
+import { rmR as diskRmR } from '../../core/disk/rm.ts'
+import { rename as diskRename } from '../../core/disk/rename.ts'
+import { copy as diskCopy } from '../../core/disk/copy.ts'
+import { truncate as diskTruncate } from '../../core/disk/truncate.ts'
+import { setAttrs as diskSetAttrs } from '../../core/disk/set_attrs.ts'
+import { SCOPE_ERROR } from '../../core/disk/constants.ts'
+
+const isMountedOp = (a: DiskAccessor) => a.root !== ''
 
 export interface DiskVFSOptions {
   root: string
@@ -72,8 +90,7 @@ export class DiskVFS extends BaseVFS {
   override readonly cachesReads: boolean = false
   // byte store: stat() sizes every file from metadata
   override readonly sizesAlwaysKnown: boolean = true
-  override readonly maxDuEntries: number | null =
-    IO.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : IO.maxDuEntries
+  override readonly maxDuEntries: number | null = null
   override readonly indexTtl: number = 60
   override readonly prompt = PROMPT
   // Each folder's listing is stored at the folder's own version (inode and
@@ -121,12 +138,103 @@ export class DiskVFS extends BaseVFS {
     }
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return DISK_OPS
+  override readonly readsRanges: boolean = true
+
+  override readonly local: boolean = true
+
+  override readonly maxGlobMatches: number = SCOPE_ERROR
+
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return diskReaddir(this.accessor, path, index)
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return DISK_COMMANDS
+  override read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    if (offset === 0 && size === null) return diskRead(this.accessor, path)
+    return diskReadRange(this.accessor, path, index, offset, size)
+  }
+
+  override stat(path: PathSpec, _index?: IndexCacheStore): Promise<FileStat> {
+    return diskStat(this.accessor, path)
+  }
+
+  override readStream(path: PathSpec, _index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    return diskStream(this.accessor, path)
+  }
+
+  override exists(path: PathSpec): Promise<boolean> {
+    return diskExists(this.accessor, path)
+  }
+
+  override find(path: PathSpec, options: FindOptions, _index?: IndexCacheStore): Promise<string[]> {
+    return diskFind(this.accessor, path, options)
+  }
+
+  override duSize(path: PathSpec, _index?: IndexCacheStore): Promise<number> {
+    return diskDu(this.accessor, path)
+  }
+
+  override duEntries(path: PathSpec, _index?: IndexCacheStore): Promise<DuEntries> {
+    return diskDuAll(this.accessor, path)
+  }
+
+  override write(path: PathSpec, data: Uint8Array): Promise<void> {
+    return diskWrite(this.accessor, path, data)
+  }
+
+  override append(path: PathSpec, data: Uint8Array): Promise<void> {
+    return diskAppend(this.accessor, path, data)
+  }
+
+  override pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {
+    return diskPwrite(this.accessor, path, data, offset)
+  }
+
+  override create(path: PathSpec): Promise<void> {
+    return diskCreate(this.accessor, path)
+  }
+
+  override mkdir(path: PathSpec, parents = false): Promise<void> {
+    return diskMkdir(this.accessor, path, parents)
+  }
+
+  override unlink(path: PathSpec): Promise<void> {
+    return diskUnlink(this.accessor, path)
+  }
+
+  override rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
+    return diskRmdir(this.accessor, path)
+  }
+
+  override rmR(path: PathSpec): Promise<void> {
+    return diskRmR(this.accessor, path)
+  }
+
+  override rename(src: PathSpec, dst: PathSpec): Promise<void> {
+    return diskRename(this.accessor, src, dst)
+  }
+
+  override copy(src: PathSpec, dst: PathSpec): Promise<void> {
+    return diskCopy(this.accessor, src, dst)
+  }
+
+  override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
+    return diskTruncate(this.accessor, path, length, noCreate)
+  }
+
+  override setattr(
+    path: PathSpec,
+    fields: SetAttrFields,
+  ): Promise<Record<string, number | string>> {
+    return diskSetAttrs(this.accessor, path, fields)
+  }
+
+  override isMounted(): boolean {
+    return isMountedOp(this.accessor)
   }
 
   override deltaHook(): DeltaHook {

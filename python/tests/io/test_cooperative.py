@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -222,7 +223,7 @@ async def test_pipeline_cache_lifecycle(failure):
     stream = CachableAsyncIterator(source())
 
     async def execute(cmd, session, stdin, call_stack, *, sink=None):
-        if cmd == "cat":
+        if cmd.text == "cat":
             return (
                 async_chain([stream]),
                 IOResult(reads={"/remote": stream}, cache=["/remote"]),
@@ -237,7 +238,7 @@ async def test_pipeline_cache_lifecycle(failure):
 
     run = handle_pipe(
         execute,
-        ["cat", "wc"],
+        [SimpleNamespace(type="command", text=word) for word in ("cat", "wc")],
         [],
         EvaluationContext(SessionState(session_id="test")),
     )
@@ -324,7 +325,7 @@ async def test_cancel_during_cache_fill_aborts():
     ws = Workspace({"/data": RAMVFS()})
     cancel = asyncio.Event()
 
-    real_apply_io = ws.apply_io
+    real_apply_io = ws._dispatcher.apply_io
 
     async def slow_apply_io(io, records=None, cache_facts=None):
         if io.exit_code != 0:
@@ -333,7 +334,7 @@ async def test_cancel_during_cache_fill_aborts():
         cancel.set()
         await asyncio.Event().wait()
 
-    ws.apply_io = slow_apply_io
+    ws._dispatcher.apply_io = slow_apply_io
     try:
         await ws.shell("false")
         session = ws.get_session(ws.default_session_id)

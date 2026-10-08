@@ -122,13 +122,10 @@ describe('sharepoint under read: fresh', () => {
       // The fixture held: the mount index answers a stat with c1 and no
       // request of its own, so there is a stale row to trust.
       const mount = w.mount('/m')
-      const accessor = mount.vfs.accessor
       const index = mount.index
       const items = graph.count('item')
-      const listed = (await w.opsRegistry.call(
+      const listed = (await mount.callKeyed(
         'stat',
-        mount.vfs,
-        accessor,
         new PathSpec({ virtual: '/m/a.txt', directory: '/m/', vfsPath: 'a.txt' }),
         [],
         { index },

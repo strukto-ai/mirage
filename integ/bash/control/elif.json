@@ -135,6 +135,108 @@
         "stdout": "0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ctl_if_test_list_decides_by_its_last_statement",
+      "seq": 502833,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "if echo a; false; then echo t; else echo e; fi; if false; echo s=$?; then echo t; fi; if false; then :; elif true; false; then echo c; else echo e2; fi",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\ne\ns=1\nt\ne2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_test_list_ignores_errexit",
+      "seq": 502835,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( set -e; if false; true; then echo t; fi; while false; false; do :; done; echo after )",
+      "expect": {
+        "exit": 0,
+        "stdout": "t\nafter\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_if_tests_share_closed_input",
+      "seq": 502843,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\n' | if exec <&-; false; then :; elif read x; then echo bad; else echo good; fi; printf 'payload\\n' | if { exec <&-; false; }; then :; elif read x; then echo \"$x\"; else echo none; fi",
+      "expect": {
+        "exit": 0,
+        "stdout": "good\nnone\n",
+        "stderr": "bash: read: read error: 0: Bad file descriptor\nbash: read: read error: 0: Bad file descriptor\n"
+      }
     }
   ]
 }

@@ -1,0 +1,70 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import pytest
+
+from mirage.accessor.gsheets import GSheetsAccessor
+from mirage.cache.index.config import IndexEntry
+from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
+from mirage.vfs.gsheets import GSheetsVFS
+from tests.fixtures.vfs_io import call_over
+
+
+def _op(name: str):
+    return call_over(GSheetsVFS, name)
+
+
+readdir = _op("readdir")
+
+
+def _scope(path: str, prefix: str = "/gsheets") -> PathSpec:
+    return PathSpec(
+        vfs_path=mount_key(path, prefix),
+        virtual=path,
+        directory=path.rsplit("/", 1)[0] or "/",
+    )
+
+
+@pytest.fixture
+def accessor():
+    return GSheetsAccessor(config=None, token_manager=None)
+
+
+@pytest.fixture
+def index():
+    return RAMIndexCacheStore()
+
+
+@pytest.mark.asyncio
+async def test_readdir_root(accessor, index):
+    result = await readdir(accessor, _scope("/gsheets"), index=index)
+    assert result == ["/gsheets/owned", "/gsheets/shared"]
+
+
+@pytest.mark.asyncio
+async def test_readdir_owned_serves_cached_listing(accessor, index):
+    entry = IndexEntry(
+        id="sheet1",
+        name="Budget",
+        resource_type="gsheets/sheet",
+        remote_time="2026-04-01T00:00:00Z",
+        vfs_name="Budget__sheet1.gsheet.json",
+    )
+    await index.set_dir(
+        "/gsheets/owned", [("Budget__sheet1.gsheet.json", entry)]
+    )
+    result = await readdir(accessor, _scope("/gsheets/owned"), index=index)
+    assert "/gsheets/owned/Budget__sheet1.gsheet.json" in result

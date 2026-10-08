@@ -35,7 +35,6 @@ async function run(line: Line): Promise<{ exit: number; stdout: string; stderr: 
   const opts = {
     stdin: stdinOf('x\n'),
     ...line,
-    filetypeFns: null,
     cwd: '/',
     vfs: { kind: 'ram' } as never,
   } as CommandOpts
@@ -307,7 +306,6 @@ describe('nl -b p<re> compiles a POSIX BRE, not this engine s dialect', () => {
     const opts = {
       stdin: stdinOf(`${subject}\n`),
       ...nlBag('-b', 'p' + pattern),
-      filetypeFns: null,
       cwd: '/',
       vfs: { kind: 'ram' } as never,
     } as CommandOpts
@@ -520,7 +518,6 @@ describe('nl pads a delimiter only when it is one byte', () => {
     const opts = {
       stdin: stdinOf(text),
       ...nlBag('-d', delimiter),
-      filetypeFns: null,
       cwd: '/',
       vfs: { kind: 'ram' } as never,
     } as CommandOpts
@@ -602,7 +599,6 @@ describe('nl line number overflow is deferred', () => {
     const opts = {
       stdin: stdinOf(stdin),
       flags: { starting_line_number: start, ...flags },
-      filetypeFns: null,
       cwd: '/',
       vfs: { kind: 'ram' } as never,
     } as CommandOpts
@@ -646,7 +642,6 @@ describe('nl line number overflow is deferred', () => {
     const opts = {
       stdin: stdinOf('a\n\nb\n'),
       flags: { starting_line_number: INTMAX_MAX_TXT },
-      filetypeFns: null,
       cwd: '/',
       vfs: { kind: 'ram' } as never,
     } as CommandOpts

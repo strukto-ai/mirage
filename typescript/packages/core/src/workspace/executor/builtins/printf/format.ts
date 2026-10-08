@@ -518,7 +518,7 @@ function formatHexFloat(
  *
  * A `\x`, `\u` or `\U` with no hex digit after it is written as it
  * stands, and bash's warning for it goes to `warnings`, in the order bash
- * writes them to stderr. bash's tescape reports it with builtin_error and
+ * writes them to stderr. bash writes it as a `bash: printf:` diagnostic and
  * leaves the exit status alone, so `printf '\x'` still exits 0.
  */
 function readEscape(

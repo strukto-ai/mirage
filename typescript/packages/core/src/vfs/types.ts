@@ -15,6 +15,48 @@ import type {
 
 export type DuEntries = [entries: [string, number][], total: number]
 
+/**
+ * What a dispatchable VFS function does to the mount. READ returns content
+ * and METADATA an entry's metadata; neither changes the mount. WRITE changes
+ * a file's bytes, CREATE makes a name that must not exist yet, REMOVE drops a
+ * name, RENAME moves one with everything under it, and ATTR changes an
+ * entry's metadata. Every effect but READ and METADATA is a write: a
+ * read-only mount refuses the call and admission judges it as one. Mirrors
+ * Python's `Effect`.
+ */
+export const Effect = Object.freeze({
+  READ: 'read',
+  METADATA: 'metadata',
+  WRITE: 'write',
+  CREATE: 'create',
+  REMOVE: 'remove',
+  RENAME: 'rename',
+  ATTR: 'attr',
+} as const)
+
+export type Effect = (typeof Effect)[keyof typeof Effect]
+
+/** What kind of entry a dispatchable function's path names. Mirrors Python's `Target`. */
+export const Target = Object.freeze({
+  FILE: 'file',
+  DIR: 'dir',
+  LINK: 'link',
+  ANY: 'any',
+} as const)
+
+export type Target = (typeof Target)[keyof typeof Target]
+
+/**
+ * What `vfsCall` declares for one function: its effect, the kind of entry
+ * its path names, and whether a WRITE makes a missing file, as open(2) with
+ * O_CREAT. Mirrors Python's `Declaration`.
+ */
+export interface Declaration {
+  readonly effect: Effect
+  readonly target: Target
+  readonly creates: boolean
+}
+
 export type ReaddirOp<A extends Accessor = Accessor> = ReaddirFn<
   [accessor: A, path: PathSpec, index?: IndexCacheStore]
 >
@@ -114,44 +156,6 @@ export type ResolveGlobOp<A extends Accessor = Accessor> = (
 export interface DuOps<A extends Accessor = Accessor> {
   size: DuSizeOp<A>
   entries: DuEntriesOp<A>
-}
-
-export interface ReadOps<A extends Accessor = Accessor> {
-  readdir: ReaddirOp<A>
-  readBytes: ReadBytesOp<A>
-  stat: StatOp<A>
-}
-
-export interface NativeReadOps<A extends Accessor = Accessor> {
-  readStream?: ReadStreamOp<A>
-  readRange?: (
-    accessor: A,
-    path: PathSpec,
-    index: IndexCacheStore | undefined,
-    offset: number,
-    size: number | null,
-  ) => Promise<Uint8Array>
-  exists?: ExistsOp<A>
-  find?: FindOp<A>
-  du?: DuOps<A>
-}
-
-export interface WriteOps<A extends Accessor = Accessor> {
-  write?: WriteOp<A>
-  append?: WriteOp<A>
-  pwrite?: PwriteOp<A>
-  create?: PathOp<A>
-  mkdir?: MkdirOp<A>
-  unlink?: PathOp<A>
-  rmdir?: RmdirOp<A>
-  rmR?: PathOp<A>
-  rename?: RenameOp<A>
-  copy?: CopyOp<A>
-  dirCopy?: CopyOp<A>
-  /** noCreate requires an atomic existence precondition, or ENOTSUP before writing. */
-  truncate?: (accessor: A, path: PathSpec, length: number, noCreate?: boolean) => Promise<void>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  setAttrs?: (...args: any[]) => unknown
 }
 
 /** A resource query and backend-specific arguments, validated by the backend. */

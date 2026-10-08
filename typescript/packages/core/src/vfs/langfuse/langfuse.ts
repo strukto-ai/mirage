@@ -15,17 +15,24 @@
 import { BaseVFS } from '../base.ts'
 import { LangfuseAccessor } from '../../accessor/langfuse.ts'
 
-import { LANGFUSE_COMMANDS } from '../../commands/builtin/langfuse/index.ts'
-import type { RegisteredCommand } from '../../commands/config.ts'
 import { HttpLangfuseTransport } from '../../core/langfuse/client.ts'
-
-import { LANGFUSE_OPS } from '../../ops/langfuse/index.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 
 import { PROMPT } from './prompt.ts'
 import { VFSName } from '../../types.ts'
 
 import { redactLangfuseConfig, type LangfuseConfig, type LangfuseConfigRedacted } from './config.ts'
+import type { PathSpec, FileStat, JsonValue } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
+import type { SearchQuery, SearchOp } from '../types.ts'
+import { readdir as langfuseReaddir } from '../../core/langfuse/readdir.ts'
+import { read as langfuseRead } from '../../core/langfuse/read.ts'
+import { stat as langfuseStat } from '../../core/langfuse/stat.ts'
+import { makeSearchOp } from '../../core/hierarchy/search.ts'
+import { detectScope } from '../../core/langfuse/scope.ts'
+import { SEARCHERS } from '../../core/langfuse/search.ts'
+
+const searchOp: SearchOp<LangfuseAccessor> = makeSearchOp(detectScope, SEARCHERS)
 
 export interface LangfuseVFSState {
   type: string
@@ -64,12 +71,32 @@ export class LangfuseVFS extends BaseVFS {
     this.accessor = new LangfuseAccessor(new HttpLangfuseTransport(transportOpts), accessorConfig)
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return LANGFUSE_COMMANDS
+  override readonly searchMeta: Readonly<Record<string, JsonValue>> = { grep: { mode: 'regex' } }
+
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return langfuseReaddir(this.accessor, path, index)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return LANGFUSE_OPS
+  override async read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const data = await langfuseRead(this.accessor, path, index)
+    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return langfuseStat(this.accessor, path, index)
+  }
+
+  override search(
+    path: PathSpec,
+    query: SearchQuery,
+    index?: IndexCacheStore,
+  ): Promise<string[] | null> {
+    return searchOp(this.accessor, path, query, index)
   }
 
   override getState(): Promise<LangfuseVFSState> {

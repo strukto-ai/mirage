@@ -14,7 +14,6 @@
 
 import { type PathSpec, FileStat, FileType, MountMode } from '../../types.ts'
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -22,10 +21,8 @@ import { resolveNewerRefs } from './find_refs.ts'
 
 async function shellWs(): Promise<Workspace> {
   const parser = await getTestParser()
-  const ops = new OpsRegistry()
   const root = new RAMVFS()
-  ops.registerVfs(root)
-  const ws = new Workspace({ '/': root }, { mode: MountMode.WRITE, ops, shellParser: parser })
+  const ws = new Workspace({ '/': root }, { mode: MountMode.WRITE, shellParser: parser })
   ws.createSession('s')
   return ws
 }

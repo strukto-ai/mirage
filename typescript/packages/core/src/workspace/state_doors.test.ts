@@ -15,11 +15,11 @@
 import { seedVar } from '../workspace/session/state.ts'
 import { VarAttr } from '../shell/variable.ts'
 import { afterEach, describe, expect, it } from 'vitest'
-import { RegisteredCommand } from '../commands/config.ts'
+import { Command } from '../commands/config.ts'
 import { CommandSpec, Operand } from '../commands/spec/types.ts'
 import { runWithSession } from '../context/session_context.ts'
 import { IOResult } from '../io/types.ts'
-import { OpsRegistry, type RegisteredOp } from '../ops/registry.ts'
+import { BaseVFS } from '../vfs/base.ts'
 import type {
   Action,
   Decision,
@@ -54,12 +54,15 @@ class DenyOp implements Policy {
   }
 }
 
-// Ops resolve by VFS name in the workspace registry, so an
-// overlay-backend simulation blocks registration itself.
-class NoSetattrRegistry extends OpsRegistry {
-  override register(ro: RegisteredOp): void {
-    if (ro.name === 'setattr') return
-    super.register(ro)
+class OverlayRAMVFS extends RAMVFS {
+  static {
+    // No setattr of its own, as an API backend with no attribute slot:
+    // attrs land in the namespace overlay.
+    Object.defineProperty(
+      this.prototype,
+      'setattr',
+      Object.getOwnPropertyDescriptor(BaseVFS.prototype, 'setattr') ?? {},
+    )
   }
 }
 
@@ -147,7 +150,7 @@ describe('name-plane writes go through the door', () => {
     expect(voicedStderr(io)).toBe("ln: failed to create symbolic link '/b': Permission denied\n")
   })
 
-  it('symlink and readlink answer on the op facade', async () => {
+  it('symlink and readlink answer on ws.vfs', async () => {
     // readlink is the read twin: guests and CLIs ask through the same
     // door instead of a bespoke channel.
     const ws = await makeWs()
@@ -225,14 +228,13 @@ describe('name-plane writes go through the door', () => {
     // A backend with no native setattr op stores attrs in the namespace
     // overlay; that write must clear the same gates as a native one.
     const parser = await getTestParser()
-    const vfs = new RAMVFS()
+    const vfs = new OverlayRAMVFS()
     vfs.store.files.set('/f.txt', ENC.encode('body\n'))
     const ws = new Workspace(
       { '/o': vfs },
       {
         mode: MountMode.WRITE,
         shellParser: parser,
-        ops: new NoSetattrRegistry(),
         policies: [new DenyOp('setattr')],
       },
     )
@@ -245,12 +247,9 @@ describe('name-plane writes go through the door', () => {
 
   it('overlay setattr still lands without policies', async () => {
     const parser = await getTestParser()
-    const vfs = new RAMVFS()
+    const vfs = new OverlayRAMVFS()
     vfs.store.files.set('/f.txt', ENC.encode('body\n'))
-    const ws = new Workspace(
-      { '/o': vfs },
-      { mode: MountMode.WRITE, shellParser: parser, ops: new NoSetattrRegistry() },
-    )
+    const ws = new Workspace({ '/o': vfs }, { mode: MountMode.WRITE, shellParser: parser })
     open.push(ws)
     const io = await ws.shell('chmod 600 /o/f.txt')
     expect(io.exitCode).toBe(0)
@@ -332,7 +331,7 @@ describe('session-state writes go through the view', () => {
     // A command's env is the process view: a child cannot write the
     // parent's environment, so a mutation must not land in the session.
     const ws = await makeWs()
-    const rc = new RegisteredCommand({
+    const rc = new Command({
       name: 'envpoke',
       spec: CMD_SPEC,
       vfs: VFSName.RAM,
@@ -352,7 +351,7 @@ describe('session-state writes go through the view', () => {
     // The LinkView pattern for the session plane: reading `sessionView`
     // off the opts is the whole opt-in, and reads answer through it.
     const ws = await makeWs()
-    const rc = new RegisteredCommand({
+    const rc = new Command({
       name: 'envread',
       spec: CMD_SPEC,
       vfs: VFSName.RAM,
@@ -658,7 +657,7 @@ describe('op hooks bind at the op doors and the command tier', () => {
     // the boundary is loud.
     const ws = await makeSealedWs([new SealedPaths()])
 
-    // The doors hold: the op facade, and a dispatcher-routed redirect
+    // The doors hold: `ws.vfs`, and a dispatcher-routed redirect
     // write.
     await expect(ws.vfs.read('/a/secret.txt')).rejects.toMatchObject({
       refusal: { reason: 'secret is sealed' },
@@ -827,13 +826,52 @@ describe('hidden vars across the shell tier', () => {
 
   it('arithmetic assignment of a hidden var is refused', async () => {
     // $((X=5)) and ((X=5)) write the raw env on purpose, but a hidden
-    // name is not theirs to clobber; both spellings refuse.
+    // name is not theirs to clobber; both spellings refuse. The writes
+    // before it land in order and their RANDOM draws settle.
     const ws = await makeHiddenVarsWs()
     const expansion = await ws.shell('echo "$((SLACK_TOKEN=5))"', { sessionId: 'agent' })
     expect(expansion.exitCode).not.toBe(0)
     const command = await ws.shell('((SLACK_TOKEN=7))', { sessionId: 'agent' })
     expect(command.exitCode).not.toBe(0)
+    const partial = await ws.shell(
+      "let 'X=1,SLACK_TOKEN=3,X=7'; let 'RANDOM=42,Y=RANDOM,SLACK_TOKEN=1'; echo $X $Y $RANDOM",
+      { sessionId: 'agent' },
+    )
+    expect(new TextDecoder().decode(partial.stdout)).toBe('1 17772 26794\n')
     expect(ws.getSession('agent').env.SLACK_TOKEN).toBe('xoxb-real')
+  })
+
+  for (const line of [
+    'declare -n SLACK_TOKEN',
+    'declare -n SLACK_TOKEN+=x',
+    'declare +n SLACK_TOKEN',
+  ]) {
+    it(`${line} never quotes the hidden value`, async () => {
+      // A reference checks the value its name holds; a hidden one reads as
+      // unset, so the refusal is the door's and not a line quoting it.
+      const ws = await makeHiddenVarsWs()
+      const io = await ws.shell(line, { sessionId: 'agent' })
+      expect(io.exitCode).not.toBe(0)
+      expect(stderrStr(io)).not.toContain('xoxb-real')
+      expect(stderrStr(io)).toContain('permission denied')
+      const record = ws.getSession('agent').vars.SLACK_TOKEN
+      expect(record?.value).toBe('xoxb-real')
+      expect(record?.attrs.size).toBe(0)
+    })
+  }
+
+  it('declare -ni stops its value at a hidden write', async () => {
+    // `declare -ni r=M` evaluates M through the `-i` door, so a hidden name
+    // it assigns is refused there and nothing after it lands.
+    const ws = await makeHiddenVarsWs()
+    const io = await ws.shell("X=0; M='SLACK_TOKEN=5,X=7'; declare -ni r=M", {
+      sessionId: 'agent',
+    })
+    expect(io.exitCode).not.toBe(0)
+    expect(stderrStr(io)).toContain('permission denied')
+    const session = ws.getSession('agent')
+    expect(session.vars.SLACK_TOKEN?.value).toBe('xoxb-real')
+    expect(session.vars.X?.value).toBe('0')
   })
 
   it('printf -v of a hidden var is refused', async () => {
@@ -1094,7 +1132,7 @@ describe('hidden paths across the tiers', () => {
     expect(out).toContain('note.key')
   })
 
-  it('the op facade agrees with the shell', async () => {
+  it('ws.vfs agrees with the shell', async () => {
     const ws = await makeHiddenPathsWs()
     const sess = ws.getSession('agent')
     await runWithSession(sess, async () => {
@@ -2641,7 +2679,7 @@ describe('a dispatched read through a link meets the target rule', () => {
 describe('a dispatched op meets the rule on the path the door reaches', () => {
   // A host command that removes or moves a name through the dispatcher it
   // is handed, the way a custom command reaches a mount.
-  const zap = new RegisteredCommand({
+  const zap = new Command({
     name: 'zap',
     spec: CMD_SPEC,
     vfs: VFSName.RAM,

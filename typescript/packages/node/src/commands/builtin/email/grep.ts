@@ -39,7 +39,7 @@ import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { detectScope, NATIVE_KINDS } from '../../../core/email/scope.ts'
 import { searchAndFormat } from '../../../core/email/search.ts'
-import { IO } from './io.ts'
+import { mountIo } from '@struktoai/mirage-core/commands/builtin/generic_bind/adapter'
 
 // The email push-down is not a "print the provider's answer" push-down: IMAP
 // search only picks the candidate messages, and `grepLines` then runs the
@@ -84,7 +84,7 @@ async function grep(
   // waits for it too; every other reason to defer is the shared gate's. A
   // scope that names no folder falls through to the generic scan rather than
   // answering, which is what the mount root does.
-  const [scan, scoped] = scanIo(IO, opts.ns, opts.mountPrefix)
+  const [scan, scoped] = scanIo(mountIo(opts), opts.ns, opts.mountPrefix)
   const operand = scoped ? null : pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
   // IMAP TEXT is a case-insensitive substring search, not a regex engine,
   // so the server is asked for the literal every match must contain and

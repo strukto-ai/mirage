@@ -18,7 +18,7 @@ import type { MirageToolOperations } from '@struktoai/mirage-core/workspace/tool
 import { failureText } from '@struktoai/mirage-core/errors/classify'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { VERSION } from '@struktoai/mirage-core/version'
-import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import {
   CallArgsError,

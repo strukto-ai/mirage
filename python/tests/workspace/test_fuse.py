@@ -56,7 +56,7 @@ class TestFuseManager:
 
         ws = Workspace({"/a/": RAMVFS()}, mode=MountMode.WRITE)
         fm = FuseManager()
-        fm.setup(ws._ops, prefix="/a/", mountpoint=str(tmp_path))
+        fm.setup(ws._files, prefix="/a/", mountpoint=str(tmp_path))
         fm.close()
 
         assert tmp_path.exists()
@@ -74,7 +74,7 @@ class TestFuseManager:
 
         ws = Workspace({"/a/": RAMVFS()}, mode=MountMode.WRITE)
         fm = FuseManager()
-        fm.setup(ws._ops, prefix="/a/")
+        fm.setup(ws._files, prefix="/a/")
         fm.close()
 
         assert not generated.exists()
@@ -84,7 +84,7 @@ class TestFuseManager:
         _fake_mount(monkeypatch)
         ws = Workspace({"/a/": RAMVFS()}, mode=MountMode.WRITE)
         fm = FuseManager()
-        fm.setup(ws._ops, prefix="/a/", mountpoint=str(tmp_path))
+        fm.setup(ws._files, prefix="/a/", mountpoint=str(tmp_path))
         monkeypatch.setattr(sys, "platform", "linux")
         monkeypatch.setattr(
             "mirage.workspace.fuse.unmount_with_fusermount",
@@ -108,7 +108,7 @@ class TestFuseManager:
         monkeypatch.setattr(sys, "platform", "linux")
         ws = Workspace({"/a/": RAMVFS()}, mode=MountMode.WRITE)
         fm = FuseManager()
-        fm.setup(ws._ops, prefix="/a/", mountpoint=str(link / "mp"))
+        fm.setup(ws._files, prefix="/a/", mountpoint=str(link / "mp"))
         link.unlink()
         unmount = Mock()
         monkeypatch.setattr(

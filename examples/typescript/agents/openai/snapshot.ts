@@ -17,7 +17,6 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import {
   MountMode,
-  OpsRegistry,
   RAMVFS,
   Workspace,
   toStateDict,
@@ -32,9 +31,7 @@ loadEnv({
 
 function makeWorkspace(): Workspace {
   const ram = new RAMVFS()
-  const ops = new OpsRegistry()
-  for (const op of ram.ops()) ops.register(op)
-  return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+  return new Workspace({ '/': ram }, { mode: MountMode.WRITE })
 }
 
 const ws = makeWorkspace()

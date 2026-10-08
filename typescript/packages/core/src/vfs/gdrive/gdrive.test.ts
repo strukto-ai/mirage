@@ -21,11 +21,40 @@ vi.mock('../../core/google/drive.ts', async () => {
   return driveModuleMock(actual)
 })
 
+import type * as VersionsModule from '../../core/gdrive/versions.ts'
+
+// A byte read pins Drive's head revision and downloads that revision; the
+// shared fake serves neither, so they answer from it here, the way the
+// Python fake's `capture_file_metadata` does.
+const held = vi.hoisted(() => ({ fake: null as FakeDrive | null }))
+
+vi.mock('../../core/gdrive/versions.ts', async () => {
+  const actual = await vi.importActual<typeof VersionsModule>('../../core/gdrive/versions.ts')
+  return {
+    ...actual,
+    captureFileMetadata: async (tm: unknown, fileId: string) => {
+      if (held.fake === null) throw new Error('no fake drive')
+      const file = await held.fake.getFile(tm as never, fileId)
+      return [file.md5Checksum ?? null, file.headRevisionId ?? null]
+    },
+    downloadRevision: (tm: unknown, fileId: string) => {
+      if (held.fake === null) throw new Error('no fake drive')
+      return held.fake.downloadFile(tm as never, fileId)
+    },
+  }
+})
+
 import type { FakeDrive } from '../../core/gdrive/_test_util.ts'
 import { resetFakeDrive } from '../../core/gdrive/_test_util.ts'
 import { MountMode, ReadPolicy } from '../../types.ts'
 import { md5Hex } from '../../utils/hash.ts'
+import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import {
+  ContentDriftError,
+  captureFingerprints,
+  checkDrift,
+} from '../../workspace/snapshot/drift.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { GDriveVFS } from './gdrive.ts'
 
@@ -35,6 +64,7 @@ let fake: FakeDrive
 
 beforeEach(() => {
   fake = resetFakeDrive()
+  held.fake = fake
 })
 
 describe('GDriveVFS re-list cleanup', () => {
@@ -169,5 +199,43 @@ describe('GDriveVFS warm read under fresh', () => {
     }
     expect(outs[0]).toBe(outs[1])
     expect(outs[0]).not.toBe('')
+  })
+})
+
+describe('GDriveVFS snapshot capture on a written path', () => {
+  // A read stamps a pin with a revision; the write after it must replace
+  // that pin whole with the upload reply's md5, so a replay checks the
+  // written bytes rather than pinning the pre-write revision.
+  it('pins the write token and replays against it', async () => {
+    const id = fake.add('file.txt', 'root', undefined, ENC.encode('v1'))
+    const ws = new Workspace(
+      { '/gd': new GDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
+      {
+        mode: MountMode.WRITE,
+        read: { policy: ReadPolicy.FRESH, ttl: 600 },
+        shellParser: await getTestParser(),
+      },
+    )
+    try {
+      await ws.shell('cat /gd/file.txt; echo x | tee /gd/file.txt')
+      expect(DEC.decode(fake.items.get(id)?.content)).toBe('x\n')
+      const pins = captureFingerprints(ws.records, ws.registry).filter(
+        (e) => e.path === '/gd/file.txt',
+      )
+      const recorded = md5Hex(ENC.encode('x\n'))
+      expect(pins).toEqual([{ path: '/gd/file.txt', mount_prefix: '/gd/', fingerprint: recorded }])
+      // Drift checks stat with a fresh index, as the workspace's drift
+      // drain does; the mount's index still holds the pre-change row.
+      const statFn = (p: string): Promise<unknown> =>
+        ws.dispatch('stat', p, [], { index: new RAMIndexCacheStore() })
+      await checkDrift(ws.registry, statFn, '/gd/file.txt', recorded)
+      const item = fake.items.get(id)
+      if (item !== undefined) item.content = ENC.encode('changed')
+      await expect(
+        checkDrift(ws.registry, statFn, '/gd/file.txt', recorded),
+      ).rejects.toBeInstanceOf(ContentDriftError)
+    } finally {
+      await ws.close()
+    }
   })
 })

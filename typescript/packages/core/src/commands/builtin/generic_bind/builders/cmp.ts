@@ -13,15 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { cmpGeneric } from '../../generic/cmp.ts'
-import { type Builder, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const cmpCmd: BuilderFn = async (ops, accessor, paths, texts, opts) => {
+const cmpCmd: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
   const idx = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   return cmpGeneric(resolved, texts, opts, (p) => ops.readStream(accessor, p, idx))
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'cmp',
   read: true,
   fn: cmpCmd,

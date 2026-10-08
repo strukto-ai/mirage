@@ -12,12 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
+
 import pytest
 
 from mirage.types import MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.workspace import Workspace
-from mirage.workspace.snapshot.drift import capture_fingerprints
+from mirage.workspace.snapshot.drift import (
+    ContentDriftError,
+    capture_fingerprints,
+    check_drift,
+)
 from mirage.workspace.snapshot.keys import FingerprintKey
 from tests.e2e.gdrive_mock import FakeGDrive, patch_gdrive
 
@@ -195,7 +201,7 @@ async def test_a_gdrive_read_reaches_snapshot_capture():
     ws = _fresh_ws()
     with patch_gdrive(fake):
         await ws.shell("cat /gd/file.txt")
-        entries = capture_fingerprints(ws)
+        entries = capture_fingerprints(ws._files.records, ws._registry)
     paths = [e[FingerprintKey.PATH] for e in entries]
     assert "/gd/file.txt" in paths
 
@@ -210,11 +216,40 @@ async def test_a_captured_gdrive_read_carries_a_revision():
     ws = _fresh_ws()
     with patch_gdrive(fake):
         await ws.shell("cat /gd/file.txt")
-        entries = capture_fingerprints(ws)
+        entries = capture_fingerprints(ws._files.records, ws._registry)
     entry = next(
         e for e in entries if e[FingerprintKey.PATH] == "/gd/file.txt"
     )
     assert entry.get(FingerprintKey.REVISION) is not None
+
+
+@pytest.mark.asyncio
+async def test_a_written_gdrive_path_pins_the_write_token_and_replays():
+    # The read's pin carries a revision; the write after it must replace
+    # that pin whole with the upload reply's md5, so a replay checks the
+    # written bytes rather than pinning the pre-write revision.
+    fake = FakeGDrive()
+    fake.add_file("file.txt", b"v1")
+    ws = _fresh_ws()
+    with patch_gdrive(fake):
+        await ws.shell("cat /gd/file.txt; echo x | tee /gd/file.txt")
+        assert fake.calls["update_file_content"] == 1
+        pins = {
+            e[FingerprintKey.PATH]: e
+            for e in capture_fingerprints(ws._files.records, ws._registry)
+        }
+        assert pins.get("/gd/file.txt") == {
+            FingerprintKey.PATH: "/gd/file.txt",
+            FingerprintKey.MOUNT_PREFIX: "/gd/",
+            FingerprintKey.FINGERPRINT: hashlib.md5(b"x\n").hexdigest(),
+        }
+        recorded = pins["/gd/file.txt"][FingerprintKey.FINGERPRINT]
+        await check_drift(ws._registry.try_mount_for, "/gd/file.txt", recorded)
+        fake.add_file("file.txt", b"changed")
+        with pytest.raises(ContentDriftError):
+            await check_drift(
+                ws._registry.try_mount_for, "/gd/file.txt", recorded
+            )
 
 
 @pytest.mark.asyncio

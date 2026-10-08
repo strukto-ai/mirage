@@ -100,7 +100,7 @@ async def test_a_read_mount_refuses_an_id_addressed_write(
     """Every card write declares ``write=True`` and refuses under a READ
     mount gate.
 
-    ``Mount.execute_cmd``'s write-command gate keys on the registration
+    ``Mount.run_command``'s write-command gate keys on the registration
     flag. An id-addressed write names no path the per-path mode guard
     could judge, so each handler must also call ``require_mount_writable``
     itself (after its own validation, before the client call). With no

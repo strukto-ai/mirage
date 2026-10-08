@@ -14,11 +14,11 @@
 
 import asyncio
 
-from mirage.ops.registry import op
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from tests.fixtures.driver_ops import ops
+from tests.fixtures.vfs_io import install, replaces
 
 
 def _ws(**files):
@@ -99,7 +99,7 @@ def test_xxd_reverse_stream_fills_forward_and_refuses_backward():
     )
 
 
-@op("read", vfs="ram", filetype=".tally")
+@replaces("read", filetype=".tally")
 async def _rendered(accessor, path, **kwargs):
     return b"RENDERED"
 
@@ -110,7 +110,7 @@ def test_xxd_reverse_across_mounts_writes_into_the_stored_bytes():
     async def run():
         source, target = RAMVFS(), RAMVFS()
         ws = Workspace({"/a": source, "/b": target}, mode=MountMode.WRITE)
-        ws.mount("/b").register_fns([_rendered])
+        install(ws.mount("/b"), [_rendered])
         await ws.shell("printf ABCDEFGH > /b/out.tally")
         await ws.shell("printf '00000004: 6869  hi\\n' > /a/dump")
         io = await ws.shell("xxd -r /a/dump /b/out.tally")

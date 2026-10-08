@@ -23,6 +23,7 @@ from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
 from mirage.cache.file.utils import parse_limit
 from mirage.cache.invalidation import Invalidation
 from mirage.cache.lock import KeyLockMixin
+from mirage.types import PathSpec
 from mirage.utils.key_prefix import under_path
 from mirage.vfs.ram import RAMVFS
 
@@ -143,8 +144,17 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
                 self._store.files.pop(key, None)
         self._discard_lock(key)
 
-    async def exists(self, key: str) -> bool:
-        entry = self._entries.get(key)
+    async def exists(self, key: str | PathSpec) -> bool:
+        """Whether the cache holds a live entry for ``key``.
+
+        The cache's own key test, which a path answers by its mount path.
+
+        Args:
+            key (str | PathSpec): the entry's key.
+        """
+        entry = self._entries.get(
+            key if isinstance(key, str) else key.mount_path
+        )
         return entry is not None and not entry.expired
 
     async def is_fresh(self, key: str, remote_fingerprint: str) -> bool:

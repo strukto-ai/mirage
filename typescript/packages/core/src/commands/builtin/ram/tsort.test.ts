@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
@@ -28,7 +29,7 @@ async function runTsort(stdin: Uint8Array | null): Promise<{ out: string; exitCo
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
     stdin,
     flags: {},
-    filetypeFns: null,
+    io: commandIo(vfs),
     cwd: '/',
   })
   if (result === null) return { out: '', exitCode: -1 }

@@ -6,7 +6,7 @@ icon: camera
 
 ## What It Does
 
-A snapshot captures a workspace as a single tar file: mount configs, sessions, history, finished jobs, cache bytes, and one fingerprint per recorded remote read. Loading a snapshot reconstructs the workspace and verifies that the underlying sources have not drifted since capture.
+A snapshot captures a workspace as a single tar file: mount configs, sessions, history, finished jobs, cache bytes, and one fingerprint per remote path the agent read or wrote. Loading a snapshot reconstructs the workspace and verifies that the underlying sources have not drifted since capture.
 
 When the backend exposes a stable per-object revision marker (S3 `VersionId`, Drive `revisionId`, Git commit SHA), the snapshot also records that revision. At load time, reads pin to the recorded revision and serve the exact bytes the original agent saw, even if the live object has since been overwritten.
 
@@ -108,7 +108,7 @@ A server never writes a snapshot to its own disk. Over [HTTP](/home/access/http#
     - Mount configs (creds redacted; restore via `mounts=` override)
     - Sessions, history, finished jobs
     - Cache bytes for touched paths
-    - One fingerprint per remote read (ETag-equivalent)
+    - One fingerprint per remote read or write (ETag-equivalent)
     - Optional per-path `revision` when the backend exposes one
   </Card>
   <Card title="Not captured" icon="xmark">
@@ -149,7 +149,7 @@ Snapshots interact with two existing caches:
 | **File cache** (`Workspace._cache`) | raw bytes per virtual path | ✅ bytes for touched paths are serialized into the tar |
 | **Index cache** (`VFS._index`) | `FileStat` entries for listings | ❌ rebuilt lazily after load |
 
-**Only files the agent actually read are fingerprinted.** Capture walks `ws._ops.records` for `op == "read"` and dedups by path. Files that were listed but never opened, or touched only by `stat` / `readdir`, do not carry a fingerprint or a revision.
+**Only files the agent actually read or wrote are fingerprinted.** Capture walks `ws._ops.records` in time order and keeps, per path, the token of the newest read or write. A write pins the token its upload reply names, with no revision: S3 and the object stores and Google Drive record one, so a path read and then written replays against the written bytes, not the pre-write revision. A write that records no token drops the path's pin. OneDrive and SharePoint writes record none, because Graph's `cTag` can move after the upload reply when SharePoint promotes document properties into an Office file, so a written OneDrive or SharePoint path carries no pin. A path pinned by a token alone, every written path among them, costs one live stat in the drift check on the first command after load, so a workspace that wrote many files pays one stat per written file there; a read pinned to a revision replays that revision and costs no stat. Files that were listed but never opened, or touched only by `stat` / `readdir`, do not carry a fingerprint or a revision.
 
 At load time, three pieces of restored state cooperate per read:
 
@@ -185,7 +185,7 @@ Legend: ✅ = implemented · 🟡 = VFS opts in, but recorded reads do not yet c
 | Hugging Face mounts | 🟡 | 🟡 | — | ❌ | mounts opt in, but read records do not yet include the stat fingerprint. |
 | Nextcloud | 🟡 | — | — | ❌ | The VFS opts in, but read records do not yet include the WebDAV ETag. |
 | GitHub | ✅ | ✅ | ✅ | ❌ | Uses the git blob sha; a commit pin is not wired. |
-| Google Drive | ❌ | ❌ | ❌ | ❌ | Current reads are live-only; revision-aware replay is not wired yet. |
+| Google Drive | ✅ | ✅ | ✅ | ✅ | Uses the md5 (else the head revision) plus the head revision id; a write pins its upload reply's token with no revision. |
 | Other remote mounts | ❌ | ❌ | ❌ | ❌ | Snapshot restores their config/state, then reads current remote content. |
 
 ### Local State

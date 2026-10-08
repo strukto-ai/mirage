@@ -1,6 +1,7 @@
 import pytest
 
-from mirage.shell.parse import find_syntax_error, parse
+from mirage.shell.parse import check_syntax, parse
+from mirage.shell.parse.syntax import find_syntax_issue
 
 
 @pytest.mark.parametrize(
@@ -13,7 +14,8 @@ from mirage.shell.parse import find_syntax_error, parse
 )
 def test_balanced_substring_defers_arithmetic_to_execution(source):
     root = parse(source)
-    assert find_syntax_error(root) is None
+    assert check_syntax(source) is None
+    assert find_syntax_issue(root) is None
     assert root.text.decode() == source
 
 
@@ -33,4 +35,4 @@ def test_substring_keeps_nested_nodes_and_source_offsets():
 
 @pytest.mark.parametrize("source", ["echo ${x:$n", "echo ${x:$(echo 1)}; if"])
 def test_unbalanced_shell_still_fails(source):
-    assert find_syntax_error(parse(source)) is not None
+    assert check_syntax(source) is not None

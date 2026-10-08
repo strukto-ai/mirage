@@ -59,7 +59,7 @@ import {
   UNREADABLE_LINES,
   unreadable,
 } from './admission.ts'
-import { innerLines, innerReadable, wordValue, type Word } from './inner_lines.ts'
+import { innerLines, innerReadable, readWord, wordValue, type Word } from './inner_lines.ts'
 import {
   type Frame,
   bodyFrame,
@@ -495,7 +495,7 @@ async function judgeWords(
 /** One command node's words, name first, the env prefix dropped. */
 function wordsOf(node: TSNodeLike, home: string | null): Word[] {
   const [, parts] = splitEnvPrefix(getParts(node))
-  return parts.map((part) => ({ raw: getText(part), text: literalWord(part, home) }))
+  return parts.map((part) => readWord(part, home))
 }
 
 /**

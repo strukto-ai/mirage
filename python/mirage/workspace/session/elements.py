@@ -13,8 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
+from collections.abc import Sequence
 
-from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.array import (
     array_count,
@@ -23,9 +23,12 @@ from mirage.shell.array import (
     array_has,
     array_with,
 )
+from mirage.shell.types import ArithWrite
 from mirage.shell.variable import ShellValue
+from mirage.view.types import SessionView
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import (
+    RandomReader,
     conversion_scalar,
     deref,
     ensure_var_visible,
@@ -144,13 +147,14 @@ async def assign_element(
         return "readonly"
     amap = session.assocs.get(name)
     stored: ShellValue
+    assigned: frozenset[int | str] | None = None
     if amap is not None:
         key = "0" if subscript is None else subscript
         if key == "":
             return "subscript"
         updated = dict(amap)
         updated[key] = (amap.get(key, "") + value) if append else value
-        stored = updated
+        stored, assigned = updated, frozenset({key})
     else:
         arr = session.arrays.get(name)
         if subscript is None and arr is None:
@@ -173,8 +177,41 @@ async def assign_element(
                 return "subscript"
             base = array_get(arr, idx) if append else ""
             stored = array_with(arr, idx, base + value)
+            assigned = frozenset({idx})
     if view is not None:
-        await view.set(name, stored)
+        await view.set(name, stored, assigned=assigned)
         return "ok"
     seed_var(session, name, stored)
     return "ok"
+
+
+async def land_arith(
+    session: SessionState,
+    view: SessionView | None,
+    writes: Sequence[ArithWrite],
+    reader: RandomReader,
+) -> None:
+    """Land an arithmetic command's assignments in the order the
+    expression made them, each through the door: a hidden name refuses
+    and the ones after it never land, as a readonly name stopped the
+    evaluation itself (``let 'X=5, R=3'`` leaves X at 5). The draws made
+    after a seed that landed settle either way.
+
+    Args:
+        session (SessionState): shell session state.
+        view (SessionView | None): the session plane's gated door.
+        writes (Sequence[ArithWrite]): the assignments, in order.
+        reader (RandomReader): the expression's ``RANDOM`` reader.
+
+    Raises:
+        PolicyDenied: a write named a hidden variable, or a
+            pre_session rule refused it.
+    """
+    try:
+        for write in writes:
+            ensure_var_visible(session, write.name)
+            await assign_element(
+                session, view, write.name, write.key, write.value
+            )
+    finally:
+        reader.settle()

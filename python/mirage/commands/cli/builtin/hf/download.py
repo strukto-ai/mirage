@@ -404,9 +404,7 @@ async def download_cmd(
     local_dir = fl.as_path("local_dir")
     cache_word = cache_root(dict(inv.env))
     cache_dir = fl.as_path("cache_dir") or (
-        PathSpec.from_str_path(cache_word, cwd=inv.cwd.virtual)
-        if cache_word
-        else None
+        PathSpec.from_str_path(cache_word, cwd=inv.cwd) if cache_word else None
     )
     if not local_dir and not cache_dir:
         raise UsageError(

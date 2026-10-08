@@ -127,6 +127,31 @@ export function pipelineTransparent(node: KindNodeLike): boolean {
   return PIPELINE_TRANSPARENT_KINDS.has(kind)
 }
 
+const SIMPLE_COMMAND_KINDS: ReadonlySet<NodeKind> = new Set([
+  NodeKind.COMMAND,
+  NodeKind.DECLARATION,
+  NodeKind.UNSET,
+  NodeKind.VAR_ASSIGN,
+  NodeKind.VAR_ASSIGNS,
+])
+
+/**
+ * Whether a statement is a simple command: a command word, a function call
+ * or a declaration, not a compound command. A child shell forked to run one
+ * (a pipeline stage, a `&` job) is that command, so an error that ends it
+ * reports the status the shell itself would exit with (`: ${U?} &` is 127);
+ * a compound command forked the same way reports a subshell's
+ * (`{ : ${U?}; } &` is 1).
+ */
+export function simpleCommand(node: KindNodeLike): boolean {
+  const kind = nodeKind(node)
+  if (kind === NodeKind.REDIRECT) {
+    const inner = node.namedChildren?.find((child) => !REDIRECT_NODE_TYPES.has(child.type))
+    return inner === undefined || simpleCommand(inner)
+  }
+  return SIMPLE_COMMAND_KINDS.has(kind)
+}
+
 /**
  * Classify a tree-sitter node into the shared statement kind, or
  * UNSUPPORTED for node types neither walker implements (tree-sitter

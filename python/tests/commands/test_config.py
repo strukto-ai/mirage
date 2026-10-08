@@ -14,7 +14,7 @@
 
 import asyncio
 
-from mirage.commands.config import CommandOpts, RegisteredCommand, command
+from mirage.commands.config import Command, CommandOpts, command
 from mirage.commands.spec import SPECS, CommandSpec, Operand, Option
 from mirage.version import __version__
 
@@ -39,9 +39,9 @@ async def _collect(source):
     return b"".join(parts)
 
 
-class TestRegisteredCommand:
+class TestCommand:
     def test_basic_fields(self):
-        rc = RegisteredCommand(
+        rc = Command(
             name="cat",
             spec=CommandSpec(rest=Operand(type="path")),
             vfs="ram",
@@ -53,7 +53,7 @@ class TestRegisteredCommand:
         assert rc.filetype is None
 
     def test_with_filetype(self):
-        rc = RegisteredCommand(
+        rc = Command(
             name="grep",
             spec=CommandSpec(),
             vfs="s3",
@@ -90,7 +90,7 @@ class TestCommandDecorator:
         assert len(wrapped._registered_commands) == 2
 
     def test_write_defaults_false(self):
-        rc = RegisteredCommand(
+        rc = Command(
             name="cat",
             spec=CommandSpec(rest=Operand(type="path")),
             vfs="ram",
@@ -100,7 +100,7 @@ class TestCommandDecorator:
         assert rc.write is False
 
     def test_write_flag_true(self):
-        rc = RegisteredCommand(
+        rc = Command(
             name="rm",
             spec=CommandSpec(),
             vfs="s3",

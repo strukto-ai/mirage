@@ -3,13 +3,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from mirage.commands.builtin.backends import commands_for
 from mirage.core.chroma import tree
-from mirage.ops.registry import RegisteredOp
 from mirage.types import MountMode, ReadPolicy, ReadSpec, VFSName
 from mirage.vfs.registry import REGISTRY, build_vfs
 from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
 from tests.core.chroma.conftest import FakeCollection
+from tests.fixtures.vfs_io import served
 
 
 @pytest.mark.asyncio
@@ -32,14 +33,8 @@ async def test_chroma_vfs_is_registered():
 async def test_chroma_vfs_registers_expected_commands_and_ops():
     vfs = build_vfs("chroma", {"collection_name": "docs"})
 
-    commands = {item.name for item in vfs.commands()}
-    ops = {
-        ro.name
-        for item in vfs.ops()
-        for ro in (
-            [item] if isinstance(item, RegisteredOp) else item._registered_ops
-        )
-    }
+    commands = {item.name for item in commands_for(vfs)}
+    ops = served(vfs)
 
     assert {
         "cat",

@@ -15,13 +15,14 @@
 from typing import Any
 
 from mirage.accessor.slack import SlackAccessor
-from mirage.commands.builtin.slack import COMMANDS
-from mirage.commands.builtin.slack.io import IO
-from mirage.commands.config import RegisteredCommand, registered_commands
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.slack.constants import DU_MAX_ENTRIES
+from mirage.core.slack.read import read as _read
+from mirage.core.slack.read import read_range as _read_range
+from mirage.core.slack.readdir import readdir as _readdir
+from mirage.core.slack.stat import stat as _stat
 from mirage.core.time_range import TimeRange
-from mirage.ops.registry import RegisteredOp
-from mirage.ops.slack import OPS as SLACK_VFS_OPS
-from mirage.types import VFSName
+from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.slack.config import SlackConfig
 from mirage.vfs.slack.prompt import PROMPT, WRITE_PROMPT
@@ -36,9 +37,11 @@ class SlackVFS(BaseVFS):
     # (users.list is payload-identical to users.info, verified live), and
     # file blobs carry Slack's upload byte count.
     sizes_always_known: bool = True
-    max_du_entries: int | None = IO.max_du_entries
+    max_du_entries: int | None = DU_MAX_ENTRIES
     prompt: str = PROMPT
     write_prompt: str = WRITE_PROMPT
+
+    reads_ranges: bool = True
 
     def __init__(self, config: SlackConfig) -> None:
         super().__init__()
@@ -49,11 +52,26 @@ class SlackVFS(BaseVFS):
         )
         self.prompt = PROMPT + self.accessor.time_range.prompt()
 
-    def ops(self) -> list[RegisteredOp]:
-        return SLACK_VFS_OPS
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await _readdir(self.accessor, path, index)
 
-    def commands(self) -> list[RegisteredCommand]:
-        return registered_commands(COMMANDS)
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        if not offset and size is None:
+            return await _read(self.accessor, path, index)
+        return await _read_range(self.accessor, path, index, offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await _stat(self.accessor, path, index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

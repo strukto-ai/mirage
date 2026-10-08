@@ -17,20 +17,19 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.render import ZERO_LENGTH_NAME
 from mirage.errors.types import DotWalkError, FsCondition
 from mirage.io.types import IOResult, SizedRun
-from mirage.ops.namespace_view import paths_scoped
-from mirage.ops.types import LinkView, MountView, NamespaceView, StatPath
 from mirage.types import FileStat, PathSpec, Visibility
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import respell_raw
 from mirage.vfs.types import DuEntries
+from mirage.view.namespace_view import paths_scoped
+from mirage.view.types import LinkView, MountView, NamespaceView, StatPath
 
 logger = logging.getLogger(__name__)
 
 ComputeSize = Callable[[PathSpec], Awaitable[int]]
 ComputeEntries = Callable[[PathSpec], Awaitable[DuEntries]]
 
-DEFAULT_MAX_DU_ENTRIES = 10000
 USAGE_HINT = "Try 'du --help' for more information."
 TRUNCATED_NOTE = "du: walk stopped early: the reported sizes are incomplete"
 _DEPTH_HEX = re.compile(r"^[+-]?0[xX][0-9a-fA-F]+$")

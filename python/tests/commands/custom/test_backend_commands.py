@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.commands.builtin.backends import commands_for
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -21,7 +22,7 @@ from mirage.workspace import Workspace
 
 def test_memory_backend_provides_commands():
     backend = RAMVFS()
-    cmds = backend.commands()
+    cmds = commands_for(backend)
     names = {c.name for c in cmds}
     assert "cat" in names
     assert "ls" in names

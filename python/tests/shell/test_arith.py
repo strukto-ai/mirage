@@ -1,7 +1,7 @@
 import pytest
 
 from mirage.shell.arith import evaluate_arith
-from mirage.shell.errors import ArithError, UnboundVariable
+from mirage.shell.errors import ArithError, ReadonlyError, UnboundVariable
 from mirage.shell.types import ArithResult, ElementOps
 
 
@@ -149,14 +149,19 @@ def test_element_reads_and_writes():
 def test_writes_keep_evaluation_order_across_kinds():
     # A bare name aliases element 0, so `a[0]=1, a=2` must land a=2
     # last and `a=2, a[0]=1` must land a[0]=1 last; a target written
-    # twice is recorded once, at its last write.
+    # twice is recorded each time, so a refusal partway keeps the
+    # writes before it.
     ops = _fake_elements()
     result = evaluate_arith("arr[0] = 1, arr = 2", {}, elements=ops)
     assert _writes(result) == [("arr", "0", "1"), ("arr", None, "2")]
     result = evaluate_arith("arr = 2, arr[0] = 1", {}, elements=ops)
     assert _writes(result) == [("arr", None, "2"), ("arr", "0", "1")]
     result = evaluate_arith("arr = 1, arr[0] = 2, arr = 3", {}, elements=ops)
-    assert _writes(result) == [("arr", "0", "2"), ("arr", None, "3")]
+    assert _writes(result) == [
+        ("arr", None, "1"),
+        ("arr", "0", "2"),
+        ("arr", None, "3"),
+    ]
 
 
 def test_element_incr_decr_and_quoted_key():
@@ -218,7 +223,10 @@ def test_a_variable_evaluated_as_an_expression_shares_the_record():
     assert [(w.name, w.value) for w in result.writes] == [("y", "5")]
     result = evaluate_arith("y=1, x, y", {"x": "y+=1"})
     assert result.value == 2
-    assert [(w.name, w.value) for w in result.writes] == [("y", "2")]
+    assert [(w.name, w.value) for w in result.writes] == [
+        ("y", "1"),
+        ("y", "2"),
+    ]
 
 
 def test_an_indexed_subscript_evaluates_in_the_expression_record():
@@ -233,6 +241,24 @@ def test_an_indexed_subscript_evaluates_in_the_expression_record():
     # An associative subscript stays a key, never an expression.
     result = evaluate_arith("m[a] + 1", {}, elements=_fake_elements())
     assert result.value == 8 and result.writes == ()
+
+
+def test_a_frozen_name_stops_the_evaluation_after_the_writes_before_it():
+    # bash: `(( X=5, R=3, X=6 ))` with R readonly binds X=5 and stops; a
+    # refusal inside a subscript is marked, since it ends the shell.
+    def frozen(name: str) -> str | None:
+        return name if name == "R" else None
+
+    with pytest.raises(ReadonlyError) as exc:
+        evaluate_arith("X=5, R=3, X=6", {}, frozen=frozen)
+    assert (exc.value.name, exc.value.in_subscript) == ("R", False)
+    assert [(w.name, w.value) for w in exc.value.writes] == [("X", "5")]
+    with pytest.raises(ReadonlyError) as exc:
+        evaluate_arith(
+            "x=1, arr[R=3]", {}, elements=_fake_elements(), frozen=frozen
+        )
+    assert exc.value.in_subscript
+    assert [(w.name, w.value) for w in exc.value.writes] == [("x", "1")]
 
 
 # `set -u` for the names an expression reads, pinned on bash 5.2.37: an

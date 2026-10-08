@@ -25,9 +25,11 @@ import {
 } from '../../../core/databricks_volume/_test_util.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { materialize } from '../../../io/types.ts'
-import type { RegisteredCommand } from '../../config.ts'
+import type { Command } from '../../config.ts'
 import { PathSpec } from '../../../types.ts'
 import { DATABRICKS_VOLUME_COMMANDS } from './index.ts'
+import { ioFor } from '../../../test-utils.ts'
+import { DatabricksVolumeVFSBase } from '../../../vfs/databricks_volume/databricks_volume.ts'
 
 const MS = 1_700_000_000_000
 const FROZEN_NOW_S = 1_700_000_000
@@ -35,7 +37,7 @@ const DAY_S = 86_400
 const AGES_DAYS = [1, 2, 3, 10, 20]
 const DEC = new TextDecoder()
 
-function cmdOf(name: string): RegisteredCommand {
+function cmdOf(name: string): Command {
   const cmd = DATABRICKS_VOLUME_COMMANDS.find((c) => c.name === name)
   if (cmd === undefined) throw new Error(`${name} not registered`)
   return cmd
@@ -109,10 +111,11 @@ async function findText(
   index: IndexCacheStore,
 ): Promise<string> {
   const cmd = cmdOf('find')
-  const result = await cmd.fn(makeAccessor(), paths, texts, {
+  const accessor = makeAccessor()
+  const result = await cmd.fn(accessor, paths, texts, {
     stdin: null,
     flags: {},
-    filetypeFns: null,
+    io: ioFor(DatabricksVolumeVFSBase, accessor),
     cwd: '/',
     index,
   })
@@ -131,10 +134,11 @@ async function runCmd(
   index: IndexCacheStore,
 ): Promise<void> {
   const cmd = cmdOf(name)
-  const result = await cmd.fn(makeAccessor(), paths, texts, {
+  const accessor = makeAccessor()
+  const result = await cmd.fn(accessor, paths, texts, {
     stdin: null,
     flags,
-    filetypeFns: null,
+    io: ioFor(DatabricksVolumeVFSBase, accessor),
     cwd: '/',
     index,
   })

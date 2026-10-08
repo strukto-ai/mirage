@@ -1,6 +1,0 @@
-import { IO } from '../../commands/builtin/mem0/io.ts'
-import { VFSName } from '../../types.ts'
-import { makeGenericOps } from '../generic/factory.ts'
-import type { RegisteredOp } from '../registry.ts'
-
-export const MEM0_OPS: readonly RegisteredOp[] = makeGenericOps(VFSName.MEM0, IO)

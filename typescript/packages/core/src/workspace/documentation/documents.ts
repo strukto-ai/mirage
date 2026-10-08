@@ -14,8 +14,7 @@
 
 import { KeyLock } from '../../cache/lock.ts'
 import { runWithSession } from '../../context/session_context.ts'
-import type { OpsRegistry } from '../../ops/registry.ts'
-import type { Ops } from '../../ops/ops.ts'
+import type { Files } from '../files.ts'
 import type { CompiledProfile } from '../../policy/profile.ts'
 import { DEFAULT_READ_SPEC, FileType, MountMode, PathSpec } from '../../types.ts'
 import { eexist, enoent, enotdir, isEnoent } from '../../errors/fs.ts'
@@ -34,8 +33,7 @@ export class Documents {
 
   constructor(
     private readonly registry: MountRegistry,
-    private readonly opsRegistry: OpsRegistry,
-    private readonly ops: Ops,
+    private readonly files: Files,
     private readonly manager: SessionManager,
     private readonly session: () => SessionState,
     private readonly profile: (name: string) => CompiledProfile,
@@ -105,12 +103,12 @@ export class Documents {
         }
         return this.render(kind)
       },
-      this.manager,
+      { owner: this.manager },
     )
   }
 
   async expose(kind: 'vfs' | 'skill', path: string, session: SessionState | null): Promise<void> {
-    const directory = await this.ops.stat(parent(path))
+    const directory = await this.files.stat(parent(path))
     if (directory.type !== FileType.DIRECTORY) throw enotdir(parent(path))
     let view = this.views.get(path)
     if (view !== undefined && view.kind !== kind) throw eexist(path)
@@ -121,17 +119,16 @@ export class Documents {
         new SessionState({ sessionId: '' }),
         async () => {
           try {
-            await this.ops.stat(path, undefined, { nofollow: true })
+            await this.files.stat(path, undefined, { nofollow: true })
           } catch (error) {
             if (isEnoent(error)) return
             throw error
           }
           throw eexist(path)
         },
-        this.manager,
+        { owner: this.manager },
       )
       view = new DocumentVFS(path.slice(path.lastIndexOf('/') + 1), () => this.render(kind), kind)
-      this.opsRegistry.registerVfs(view)
       const document = view
       const mount = this.registry.mount(path, view, MountMode.READ, DEFAULT_READ_SPEC)
       mount.visible = () =>

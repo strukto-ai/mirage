@@ -341,8 +341,178 @@
       }
     },
     {
+      "id": "ctl_bash_c_reads_exported_variables_only",
+      "seq": 502162,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( NBX=1; export NBY=2 constructor=ok toString=ts; NBA=(1 2); export NBA; declare -rx NBR=1; declare -ix NBI=5; nbf() { local -x NBV=1; local NBW=2; NBP=3 bash -c 'NBR=2; NBI=2+3; echo \"x=[$NBX] y=[$NBY] a=[$NBA] r=$NBR i=$NBI v=$NBV w=[$NBW] p=$NBP $constructor $toString\"'; }; nbf )",
+      "expect": {
+        "exit": 0,
+        "stdout": "x=[] y=[2] a=[] r=2 i=2+3 v=1 w=[] p=3 ok ts\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_bash_c_runs_exported_functions_only",
+      "seq": 502164,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( nbf() { echo f; }; nbg() { echo g; }; export -f nbf; bash -c 'nbf; nbg' 2>/dev/null; echo rc=$?; env -i bash -c nbf 2>/dev/null; echo rc=$?; env bash -c nbf; nbf() { echo 2; }; bash -c nbf; export -nf nbf; bash -c nbf 2>/dev/null; echo rc=$?; export -f nbf; unset -f nbf; nbf() { echo 3; }; bash -c nbf 2>/dev/null; echo rc=$? )",
+      "expect": {
+        "exit": 0,
+        "stdout": "f\nrc=127\nrc=127\nf\n2\nrc=127\nrc=127\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_bash_c_starts_a_fresh_shell",
+      "seq": 502166,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( alias nba='echo hi'; set -u -o pipefail; shopt -s nullglob; false; bash -c 'echo \"status=$? [${PIPESTATUS[@]}] [$NBUNSET]\"; false | true; echo pipe=$?; echo /nb_nonexist*; nba' 2>/dev/null; echo rc=$? ); ( set -e; bash -c 'false; echo still' )",
+      "expect": {
+        "exit": 0,
+        "stdout": "status=0 [] []\npipe=0\n/nb_nonexist*\nrc=127\nstill\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_bash_c_restarts_getopts",
+      "seq": 502179,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( getopts ab opt -ab; bash -c 'getopts xy opt -xy; echo \"$opt $OPTIND\"'; export OPTIND=5 OPTERR=0; bash -c 'declare -p OPTIND; OPTIND+=1; echo \"$OPTIND $OPTERR\"' )",
+      "expect": {
+        "exit": 0,
+        "stdout": "x 1\ndeclare -ix OPTIND=\"1\"\n2 1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_bash_c_draws_its_own_random",
+      "seq": 502181,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( export RANDOM=42; a=$(bash -c 'echo $RANDOM $RANDOM $RANDOM'); b=$(bash -c 'echo $RANDOM $RANDOM $RANDOM'); [ \"$a\" = \"$b\" ] && echo same || echo differ )",
+      "expect": {
+        "exit": 0,
+        "stdout": "differ\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "ctl_bash_answers_version_and_help",
-      "seq": 502178,
+      "seq": 502844,
       "targets": [
         "ram",
         "disk",
@@ -376,7 +546,7 @@
     },
     {
       "id": "ctl_bash_reads_long_options_before_short_ones",
-      "seq": 502179,
+      "seq": 502845,
       "targets": [
         "ram",
         "disk",

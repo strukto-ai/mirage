@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { treeGeneric } from '../../generic/tree.ts'
-import { type Builder, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const tree: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+const tree: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   return treeGeneric(
@@ -26,7 +26,7 @@ const tree: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   )
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'tree',
   fn: tree,
 }

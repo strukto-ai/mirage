@@ -26,9 +26,9 @@ from mirage.errors.classify import classify
 from mirage.errors.constants import WALK_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import linux_errno
-from mirage.ops.types import MountIsRoot, MountRoot
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import respell_one
+from mirage.view.types import MountIsRoot, MountRoot
 
 
 def os_error_text(exc: BaseException) -> str:

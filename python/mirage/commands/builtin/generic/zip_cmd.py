@@ -17,10 +17,10 @@ from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, MountView
 from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.path import respell_one
+from mirage.view.types import LinkView, MountView
 
 # Info-ZIP 3.0's wording, pinned on debian:stable-slim. A warning is
 # indented with a tab and -q silences it; the "Nothing to do!" error is

@@ -1,4 +1,3 @@
-from mirage.commands.builtin.dify.io import IO
 from mirage.commands.builtin.generic.search import make_search
 from mirage.commands.spec.flag_view import FlagView
 from mirage.types import JsonValue
@@ -13,4 +12,4 @@ def _options(fl: FlagView) -> dict[str, JsonValue]:
     }
 
 
-search = make_search("dify", IO.search, _options)
+search = make_search("dify", _options)

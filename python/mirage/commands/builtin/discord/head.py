@@ -13,10 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.commands.builtin.discord.io import IO
 from mirage.commands.builtin.generic.head import head_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
+    mount_io,
     resolve_or_empty,
 )
 from mirage.commands.config import CommandOpts, command
@@ -33,11 +33,13 @@ async def head(
     texts: list[str],
     opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
-    resolved = await resolve_or_empty(IO, accessor, paths, opts.index)
+    resolved = await resolve_or_empty(
+        mount_io(opts), accessor, paths, opts.index
+    )
     return await head_generic(
         resolved,
         list(texts),
         opts,
-        bound_op(IO.stat, accessor, opts.index),
+        bound_op(mount_io(opts).stat, accessor, opts.index),
         bound_op(discord_read, accessor, opts.index),
     )

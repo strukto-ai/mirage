@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
@@ -36,7 +37,7 @@ async function runTail(
   const result = await cmd.fn(vfs.accessor, paths, [], {
     stdin: null,
     flags,
-    filetypeFns: null,
+    io: commandIo(vfs),
     cwd: '/',
     ...(options.index !== undefined ? { index: options.index } : {}),
   })

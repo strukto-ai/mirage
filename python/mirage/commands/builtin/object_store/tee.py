@@ -18,22 +18,25 @@ from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.tee import tee_generic as generic_tee
-from mirage.commands.builtin.generic_bind.adapter import CommandIO, Operation
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.builtin.generic_bind.adapter import (
+    Operation,
+    over_mount_io,
+    require_op,
+)
+from mirage.commands.config import CommandIO, CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def make_tee(vfs: str, io: CommandIO) -> Callable[..., Any]:
-    """Build the write-tracking tee override for one keyed store.
+def _build(io: CommandIO) -> Callable[..., Any]:
+    """The tee handler over one mount's table.
 
     Args:
-        vfs (str): VFS name the command registers under.
-        io (CommandIO): the backend's op table; must wire write.
+        io (CommandIO): the guarded table of the running mount.
     """
     read_stream = io.read_stream
-    write_bytes = io.require(Operation.WRITE)
+    write_bytes = require_op(io, Operation.WRITE)
     resolve_glob = io.resolve_glob
 
     async def tee(
@@ -57,7 +60,19 @@ def make_tee(vfs: str, io: CommandIO) -> Callable[..., Any]:
             stat=partial(io.stat, accessor, index=opts.index),
         )
 
+    return tee
+
+
+def make_tee(
+    vfs: str, wrap: Callable[[CommandIO], CommandIO]
+) -> Callable[..., Any]:
+    """Build the write-tracking tee override for one keyed store.
+
+    Args:
+        vfs (str): VFS name the command registers under.
+        wrap (Callable): the guards over the mount's table.
+    """
     wrapped: Callable[..., Any] = command(
         "tee", vfs=vfs, spec=SPECS["tee"], write=True, path_guarded=True
-    )(tee)
+    )(over_mount_io(_build, wrap))
     return wrapped

@@ -110,7 +110,7 @@ def test_thrown_command_error_prefixes_argv0(monkeypatch):
     async def boom(*args, **kwargs):
         raise RuntimeError("kaboom")
 
-    monkeypatch.setattr(mount, "execute_cmd", boom)
+    monkeypatch.setattr(mount, "run_command", boom)
     io = _exec(ws, "cat /ram/notes.txt")
     assert io.exit_code == 1
     assert io.stderr == b"cat: kaboom\n"

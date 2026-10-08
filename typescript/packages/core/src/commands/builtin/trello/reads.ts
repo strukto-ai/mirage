@@ -34,12 +34,7 @@ import {
 } from '../../../core/trello/normalize.ts'
 import { IOResult } from '../../../io/types.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
-import {
-  command,
-  type CommandFnResult,
-  type CommandOpts,
-  type RegisteredCommand,
-} from '../../config.ts'
+import { command, type CommandFnResult, type CommandOpts, type Command } from '../../config.ts'
 import { CommandSpec, Operand } from '../../spec/types.ts'
 import { requireBoard, requireCard, requireList } from './_scope.ts'
 
@@ -131,8 +126,8 @@ const TRELLO_READS: readonly TrelloRead[] = [
   { name: 'trello card comments', runner: (a, t) => runCardComments(a, t), spec: SPEC_ARG },
 ]
 
-export function makeTrelloReadCommands(): RegisteredCommand[] {
-  const commands: RegisteredCommand[] = []
+export function makeTrelloReadCommands(): Command[] {
+  const commands: Command[] = []
   for (const entry of TRELLO_READS) {
     commands.push(
       ...command({

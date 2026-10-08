@@ -9,6 +9,8 @@ from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.email import EmailVFS
+from tests.fixtures.vfs_io import io_for
 
 sys.modules.setdefault(
     "aioimaplib",
@@ -73,7 +75,7 @@ async def test_grep_regex_narrows_on_its_required_literal():
             accessor,
             [_folder()],
             ['budget[^"<]*'],
-            CommandOpts(flags={"r": True}),
+            CommandOpts(io=io_for(EmailVFS, accessor), flags={"r": True}),
         )
     assert search.await_args.args[2] == "budget"
     assert (

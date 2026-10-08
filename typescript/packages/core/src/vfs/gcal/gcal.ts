@@ -14,19 +14,20 @@
 
 import { BaseVFS } from '../base.ts'
 import { GCalAccessor } from '../../accessor/gcal.ts'
-import { GCAL_COMMANDS } from '../../commands/builtin/gcal/index.ts'
-
-import type { RegisteredCommand } from '../../commands/config.ts'
 
 import { bucketName, bucketStart } from '../../core/gcal/day.ts'
 import { TokenManager } from '../../core/google/client.ts'
-import { GCAL_OPS } from '../../ops/gcal/index.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 
 import { BUCKET_PROMPT, DAY_PROMPT, PROMPT, WRITE_PROMPT } from './prompt.ts'
 import { VFSName } from '../../types.ts'
 
 import { redactGCalConfig, type GCalConfig, type GCalConfigRedacted } from './config.ts'
+import type { PathSpec, FileStat } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
+import { readdir as gcalReaddir } from '../../core/gcal/readdir.ts'
+import { read as gcalRead } from '../../core/gcal/read.ts'
+import { stat as gcalStat } from '../../core/gcal/stat.ts'
 
 const EXAMPLE_DAY = '2026-08-11'
 
@@ -66,12 +67,22 @@ export class GCalVFS extends BaseVFS {
     this.prompt = treePrompt(config.bucketDays) + this.accessor.timeRange.prompt()
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return GCAL_COMMANDS
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return gcalReaddir(this.accessor, path, index)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return GCAL_OPS
+  override async read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const data = await gcalRead(this.accessor, path, index)
+    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return gcalStat(this.accessor, path, index)
   }
 
   override getState(): Promise<GCalVFSState> {

@@ -12,17 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DEFAULT_MAX_DU_ENTRIES } from '../commands/builtin/generic/du.ts'
 import { type Accessor, NOOPAccessor } from '../accessor/base.ts'
+import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { PredNode } from '../commands/builtin/find_eval.ts'
-import { type CommandIO, makeGenericCommands } from '../commands/builtin/generic_bind/index.ts'
-import type { RegisteredCommand } from '../commands/config.ts'
-import { makeGenericOps } from '../ops/generic/factory.ts'
-import type { RegisteredOp } from '../ops/registry.ts'
-import type { CapacityResult } from '../types.ts'
+import type { Command } from '../commands/config.ts'
+import { enotsup } from '../errors/fs.ts'
+import type { CapacityResult, FileStat, JsonValue, PathSpec, SetAttrFields } from '../types.ts'
 import { CapacityState, ListingVersion } from '../types.ts'
+import { DEFAULT_MAX_GLOB_MATCHES } from '../utils/glob_walk.ts'
 import type { DeltaHook } from '../watch/base.ts'
-import { VFSAdapter } from './adapter.ts'
+import { vfsCall } from './call.ts'
+import { DEFAULT_MAX_DU_ENTRIES } from './constants.ts'
+import { type DuEntries, Effect, type SearchQuery, Target } from './types.ts'
 
 export interface FindOptions {
   name?: string | null
@@ -81,23 +82,20 @@ const NO_ACCESSOR = new NOOPAccessor()
 export const VFS_BRAND: unique symbol = Symbol.for('mirage.BaseVFS')
 
 /**
- * What a driver built from a table hands the constructor: the accessor,
- * the table of core functions over it, and the facts and prompts it
- * declares. A builtin declares the same things as class members instead
- * and passes nothing. Mirrors the keyword arguments of Python's
- * `BaseVFS.__init__`.
+ * The facts a subclass that does not declare them as members hands the
+ * constructor. Every field is optional, so a class that declares its facts
+ * as members calls `super()` bare. Mirrors the keyword arguments of
+ * Python's `BaseVFS.__init__`.
  */
 export interface VFSOptions<A extends Accessor = Accessor> {
   /**
-   * VFS name the commands and ops register under, and the `type` key
-   * `getState` writes into a snapshot. Also the registry key when the
-   * backend is exposed through `registerVfsFactory`.
+   * VFS name commands register under, and the `type` key `getState`
+   * writes into a snapshot. Also the registry key when the backend is
+   * exposed through `registerVfsFactory`.
    */
-  name: string
-  /** Backend handle passed to every core function on the table. */
-  accessor: A
-  /** The backend's resource capabilities, or a prebuilt IO table. */
-  io: CommandIO<A> | VFSAdapter<A>
+  name?: string
+  /** Backend handle the functions use. */
+  accessor?: A
   /** LLM-facing description of the mounted layout. */
   prompt?: string
   /** Appended to `prompt` when the mount is writable. */
@@ -111,71 +109,45 @@ export interface VFSOptions<A extends Accessor = Accessor> {
    * Extra commands, from `command({...})`: bespoke verbs, or the
    * replacements for whatever `overrides` suppressed.
    */
-  commands?: readonly RegisteredCommand[]
-  /**
-   * Irregular VFS/FUSE handlers, layered over the derived set. One
-   * carrying no filetype shadows the derived op of the same name.
-   *
-   * Plain records rather than Python's decorated functions: TypeScript's
-   * `op` is a *method* decorator, so a standalone handler has no
-   * decorator form to carry its registration.
-   */
-  ops?: readonly RegisteredOp[]
-  /**
-   * Derive the VFS/FUSE op set from the table (read/readdir/stat plus
-   * whatever mutations the table carries). Set false to serve only the
-   * explicit `ops`.
-   */
-  autoOps?: boolean
+  commands?: readonly Command[]
   /** Serve repeat reads from the file cache. Read-mostly content only. */
   cachesReads?: boolean
   /**
-   * Whether `io.stat` sizes every regular file without fetching it. A
-   * backend that renders its content on read leaves this false and rides
-   * the unknown-size machinery; a byte store sets it, which is also what
-   * makes the mount legal on FSKit.
+   * Whether `stat` sizes every regular file without fetching it, which is
+   * also what makes the mount legal on FSKit.
    */
   sizesAlwaysKnown?: boolean
   /**
-   * Whether `io.stat` fills `FileStat.fingerprint` with a stable
-   * per-path version marker. Setting it without that is not drift
-   * detection, it is a snapshot that claims to have one.
+   * Whether `stat` fills `FileStat.fingerprint` with a stable per-path
+   * version marker. Setting it without that is not drift detection.
    */
   supportsSnapshot?: boolean
   /**
-   * Whether `io.stat` and the read record stamp the *same kind* of content
+   * Whether `stat` and the read record stamp the *same kind* of content
    * token, so a `read: fresh` mount can compare them. Setting it without
-   * that makes every read verdict stale and refetch forever; a mount
-   * declaring `fresh` on a backend that leaves it false is refused at mount
-   * time instead.
+   * that makes every read verdict stale; a mount declaring `fresh` on a
+   * backend that leaves it false is refused.
    */
   readRevalidatable?: boolean
 }
 
 /**
- * What a driver supplies, and nothing a mount runs it with. A driver is
- * an accessor and the tables it serves through: `ops()` for the
- * VFS/FUSE verbs and `commands()` for the shell. Everything a tree needs
- * to run one (the placement, the index store, the registered tables, the
- * reference it was built from) lives on the mount, so an author never
- * sees it.
+ * A backend: an accessor, the facts about it, and its functions.
  *
- * There are two ways to be one. A builtin declares its facts as members
- * and returns from `ops()` and `commands()` the tables its `ops/<name>`
- * and `commands/builtin/<name>` modules build, so it calls `super()`
- * bare. A custom backend hands the constructor a {@link VFSOptions}: an
- * accessor and a {@link VFSAdapter} (or a prebuilt {@link CommandIO}
- * table), from which the whole generic command set (`ls`, `cat`, `grep`,
- * `find`, `head`, `wc`, ...) plus glob resolution and the VFS/FUSE ops
- * are derived. That is the one-file path, which
- * `examples/typescript/other/custom_vfs.ts` walks end to end. Optional
- * capabilities unlock more surface (`writes` enables the byte-mutation
- * family, `find` and `du` become native fast paths). A table without an
- * op still gets every command: `gzip -c` and `tar -t` run as readers,
- * and a line that needs the missing op answers `Operation not supported`
- * at that op. The accessor generic type-checks the table against the
- * accessor the core functions actually take, which Python leaves as
- * `Any`.
+ * A VFS answers `readdir`, `read` and `stat`; every other function
+ * (`write`, `unlink`, `readStream`, a native `find` or `search`, ...) is
+ * optional, and a VFS answers exactly the ones it defines. Every generic
+ * shell command (`ls`, `cat`, `grep`, `find`, `head`, `wc`, ...) runs on
+ * the three required ones, and a line that needs a function the VFS does
+ * not define answers `Operation not supported` at that call, so `gzip -c`
+ * and `tar -t` still run as readers on a read-only backend. A method
+ * marked `@vfsCall` is also reachable by name through the dispatcher
+ * (`ws.dispatch('search_abc', path)`), with every check the door runs; the
+ * built-in ones are marked here, and an override keeps the mark.
+ *
+ * Everything a tree needs to run one (the placement, the index store, the
+ * registered commands, the reference it was built from) lives on the
+ * mount, so an author never sees it.
  *
  * Snapshots and versions see one of two things, and a subclass picks
  * which by what it owns. Content the VFS holds itself (an in-memory
@@ -184,14 +156,14 @@ export interface VFSOptions<A extends Accessor = Accessor> {
  * version rebuilds the mount with that content and no override. Content
  * that lives in a remote service is only observed: keep the default
  * state, set `supportsSnapshot` and fill `FileStat.fingerprint`, and a
- * snapshot pins what it read while `Workspace.load` asks for the live
- * VFS back. Mirrors Python's `BaseVFS`.
+ * snapshot pins what it read while `Workspace.load` asks for the live VFS
+ * back. Mirrors Python's `BaseVFS`.
  */
 export class BaseVFS<A extends Accessor = Accessor> {
   readonly [VFS_BRAND] = true as const
-  readonly name: string
-  declare readonly prompt?: string
-  declare readonly writePrompt?: string
+  readonly name: string = 'base'
+  readonly prompt: string = ''
+  readonly writePrompt: string = ''
   readonly indexTtl: number = 600
   /**
    * Whether reads of this VFS may be served from / written to the
@@ -283,91 +255,285 @@ export class BaseVFS<A extends Accessor = Accessor> {
    */
   readonly maxDuEntries: number | null = DEFAULT_MAX_DU_ENTRIES
   /**
-   * The backend handle every core function on the tables takes. A driver
-   * built from a table takes it from its options; a builtin declares and
-   * assigns its own. One that brings none runs over a no-op accessor.
+   * Whether `read` fetches a byte window from the store itself. When false
+   * the caller reads the whole file and slices it, so `read` is only ever
+   * handed a window by a VFS that sets this.
    */
-  readonly accessor: A
+  readonly readsRanges: boolean = false
+  /**
+   * Whether the data lives on the host filesystem, which lets a command
+   * aggregate on the host instead of streaming through mirage.
+   */
+  readonly local: boolean = false
+  /** How many paths one glob may expand to before it stops. */
+  readonly maxGlobMatches: number = DEFAULT_MAX_GLOB_MATCHES
+  /**
+   * What `search` supports, read by the consumers that opt in by namespace
+   * (`{grep: {mode: 'literal'}}` lets grep and rg use it). Empty means no
+   * consumer may assume anything.
+   */
+  readonly searchMeta: Readonly<Record<string, JsonValue>> = {}
+  /**
+   * Extensions whose `read` is a rendering rather than the stored bytes,
+   * each to the name of the method that renders it, which takes `read`'s
+   * arguments, window included. A rendered read is never served from or
+   * kept in the file cache, and a `raw` read asks for `read` itself.
+   */
+  readonly renderers: Readonly<Record<string, string>> = {}
+  /** The generic shell commands this VFS replaces with its own. */
+  readonly overrides: ReadonlySet<string> = new Set()
+  /**
+   * The backend handle every function takes. A builtin declares and
+   * assigns its own; one that brings none runs over a no-op accessor.
+   */
+  readonly accessor: A = NO_ACCESSOR as unknown as A
 
-  // Whether this driver was built from a table, and the two tables
-  // derived from it when it was.
-  readonly #fromTable: boolean
-  readonly #commands: readonly RegisteredCommand[]
-  readonly #ops: readonly RegisteredOp[]
+  readonly #commands: readonly Command[]
   #closed = false
 
   /**
-   * Build a driver from a table, or nothing at all. A builtin declares
-   * its facts as members and returns its tables from `ops()` and
-   * `commands()`, so it calls `super()` bare. Given options, the whole
-   * generic command set and the derived op set are wired from the
-   * table.
+   * Set the facts a subclass does not declare as members. Every option is
+   * optional, so a class that declares its facts as members calls
+   * `super()` bare.
    */
-  constructor(options?: VFSOptions<A>) {
-    // A builtin passes nothing and declares its facts as members. A
-    // bare subclass of a builtin (`class WikiVFS extends RAMVFS {}`)
-    // constructed from a config forwards that config here through the
-    // implicit constructor; it is not a table, so it builds nothing and
-    // the subclass's own members stand. Only a real options object,
-    // which always carries `io`, builds the generic tables. Python is
-    // immune to this by construction (its `__init__` is keyword-only, so
-    // a forwarded positional raises rather than being read as a table).
-    const io = (options as { io?: CommandIO<A> | VFSAdapter<A> } | undefined)?.io
-    if (options === undefined || io === undefined) {
-      this.name = 'base'
-      this.accessor = NO_ACCESSOR as unknown as A
-      this.#fromTable = false
-      this.#commands = []
-      this.#ops = []
-      return
+  constructor(options: VFSOptions<A> = {}) {
+    if (options.name !== undefined) {
+      if (options.name === '') throw new Error('a VFS needs a non-empty name')
+      this.name = options.name
     }
-    if (options.name === '') throw new Error('a VFS needs a non-empty name')
-    this.name = options.name
-    this.accessor = options.accessor
-    this.#fromTable = true
-    this.prompt = options.prompt ?? ''
-    this.writePrompt = options.writePrompt ?? ''
-    this.cachesReads = options.cachesReads ?? false
-    this.sizesAlwaysKnown = options.sizesAlwaysKnown ?? false
-    this.supportsSnapshot = options.supportsSnapshot ?? false
-    this.readRevalidatable = options.readRevalidatable ?? false
-    const table = io instanceof VFSAdapter ? io.toCommandIO() : io
-    this.maxDuEntries =
-      table.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : table.maxDuEntries
-    this.#commands = [
-      ...makeGenericCommands<A>(
-        options.name,
-        table,
-        options.overrides !== undefined ? { overrides: options.overrides } : {},
-      ),
-      ...(options.commands ?? []),
-    ]
-    const userOps = options.ops ?? []
-    // A user op carrying no filetype replaces the derived op of the same
-    // name: the derived set is built with those names skipped, so
-    // registering both cannot leave two handlers competing for one key.
-    const shadowed = new Set(userOps.filter((ro) => ro.filetype === null).map((ro) => ro.name))
-    const derived =
-      options.autoOps === false
-        ? []
-        : makeGenericOps<A>(options.name, table, { overrides: shadowed })
-    this.#ops = [...derived, ...userOps]
+    if (options.accessor !== undefined) this.accessor = options.accessor
+    if (options.prompt !== undefined) this.prompt = options.prompt
+    if (options.writePrompt !== undefined) this.writePrompt = options.writePrompt
+    if (options.overrides !== undefined) this.overrides = new Set(options.overrides)
+    if (options.cachesReads !== undefined) this.cachesReads = options.cachesReads
+    if (options.sizesAlwaysKnown !== undefined) this.sizesAlwaysKnown = options.sizesAlwaysKnown
+    if (options.supportsSnapshot !== undefined) this.supportsSnapshot = options.supportsSnapshot
+    if (options.readRevalidatable !== undefined) {
+      this.readRevalidatable = options.readRevalidatable
+    }
+    this.#commands = [...(options.commands ?? [])]
   }
 
   /**
-   * The VFS/FUSE verbs this driver serves, as registered ops. A verb
-   * that is not in this list is not served: the mount answers
-   * `Operation not supported` for it. A driver built from a table serves
-   * the set derived from it; a builtin returns the list its `ops/<name>`
-   * module derives from the backend's table.
+   * Whether this VFS defines the function `name`. A function the base
+   * declares is supported once a subclass or the instance itself replaces
+   * it; one only a subclass declares (a custom `@vfsCall`) is supported
+   * because it exists.
    */
-  ops(): readonly RegisteredOp[] {
-    return this.#ops
+  supports(name: string): boolean {
+    const own: unknown = (this as unknown as Record<string, unknown>)[name]
+    return (
+      typeof own === 'function' &&
+      own !== (BaseVFS.prototype as unknown as Record<string, unknown>)[name]
+    )
   }
 
-  /** The shell commands this driver serves, as registered commands. */
-  commands(): readonly RegisteredCommand[] {
+  /** The bespoke commands this VFS was handed. */
+  commands(): readonly Command[] {
     return this.#commands
+  }
+
+  /** List the children of a directory. */
+  @vfsCall({ effect: Effect.READ, target: Target.DIR })
+  readdir(path: PathSpec, _index?: IndexCacheStore): Promise<string[]> {
+    return Promise.reject(enotsup(this.name, 'readdir', path))
+  }
+
+  /**
+   * Read a file's bytes, or a window of them. A window reaches this only
+   * when `readsRanges` is set: the caller otherwise reads the whole file
+   * and slices it.
+   */
+  @vfsCall({ effect: Effect.READ, target: Target.FILE })
+  read(
+    path: PathSpec,
+    _index?: IndexCacheStore,
+    _offset = 0,
+    _size: number | null = null,
+  ): Promise<Uint8Array> {
+    return Promise.reject(enotsup(this.name, 'read', path))
+  }
+
+  /** Describe a path; rejects with ENOENT when nothing is there. */
+  @vfsCall({ effect: Effect.METADATA })
+  stat(path: PathSpec, _index?: IndexCacheStore): Promise<FileStat> {
+    return Promise.reject(enotsup(this.name, 'stat', path))
+  }
+
+  /**
+   * Stream a file's bytes as the caller pulls them. A VFS that does not
+   * define it is read whole instead.
+   */
+  readStream(path: PathSpec, _index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    throw enotsup(this.name, 'readStream', path)
+  }
+
+  /** Whether anything is at `path`; derived from `stat` when not defined. */
+  exists(path: PathSpec): Promise<boolean> {
+    return Promise.reject(enotsup(this.name, 'exists', path))
+  }
+
+  /** Answer `find` natively instead of walking `readdir`. */
+  find(path: PathSpec, _options: FindOptions, _index?: IndexCacheStore): Promise<string[]> {
+    return Promise.reject(enotsup(this.name, 'find', path))
+  }
+
+  /**
+   * The recursive byte total under `path`, natively. Native `du` is both
+   * `duSize` and `duEntries`: the generic derives its per-directory rows
+   * from the entries, so one without the other is not served.
+   */
+  duSize(path: PathSpec, _index?: IndexCacheStore): Promise<number> {
+    return Promise.reject(enotsup(this.name, 'du', path))
+  }
+
+  /**
+   * Every stored file under `path` with its size, natively. A native answer
+   * comes from one pass over the stored files, so a directory holding no
+   * file never appears in the entries and gets no row, where the shared
+   * readdir walk prints its `0` row. The difference is accepted for the
+   * speed and pinned in `integ/unix/du/empty.json`.
+   */
+  duEntries(path: PathSpec, _index?: IndexCacheStore): Promise<DuEntries> {
+    return Promise.reject(enotsup(this.name, 'du', path))
+  }
+
+  /** Replace a file's bytes, creating it when missing. */
+  @vfsCall({ effect: Effect.WRITE, target: Target.FILE, creates: true })
+  write(path: PathSpec, _data: Uint8Array): Promise<void> {
+    return Promise.reject(enotsup(this.name, 'write', path))
+  }
+
+  /**
+   * Add bytes to the end of a file, creating it when missing. A VFS that
+   * defines `write` and not this is appended to by reading the file and
+   * writing it back.
+   */
+  @vfsCall({ effect: Effect.WRITE, target: Target.FILE, creates: true })
+  append(path: PathSpec, _data: Uint8Array, _index?: IndexCacheStore): Promise<void> {
+    return Promise.reject(enotsup(this.name, 'append', path))
+  }
+
+  /**
+   * Write bytes at an offset, keeping every byte outside them. As
+   * pwrite(2): a gap past the end reads back as zeros and a missing file
+   * is created. A VFS that defines `write` and not this is written by
+   * reading the file and writing it back.
+   */
+  @vfsCall({ effect: Effect.WRITE, target: Target.FILE, creates: true })
+  pwrite(
+    path: PathSpec,
+    _data: Uint8Array,
+    _offset: number,
+    _index?: IndexCacheStore,
+  ): Promise<void> {
+    return Promise.reject(enotsup(this.name, 'pwrite', path))
+  }
+
+  /** Create an empty file, leaving an existing one as it is. */
+  @vfsCall({ effect: Effect.WRITE, target: Target.FILE, creates: true })
+  create(path: PathSpec): Promise<void> {
+    return Promise.reject(enotsup(this.name, 'create', path))
+  }
+
+  /** Make a directory; `parents` makes missing parents too, as `mkdir -p`. */
+  @vfsCall({ effect: Effect.CREATE, target: Target.DIR })
+  mkdir(path: PathSpec, _parents = false): Promise<void> {
+    return Promise.reject(enotsup(this.name, 'mkdir', path))
+  }
+
+  /** Remove a file. */
+  @vfsCall({ effect: Effect.REMOVE, target: Target.FILE })
+  unlink(path: PathSpec): Promise<void> {
+    return Promise.reject(enotsup(this.name, 'unlink', path))
+  }
+
+  /**
+   * Remove an empty directory. The index is the mount's, which a refused
+   * rmdir's hidden-remnant walk lists through.
+   */
+  @vfsCall({ effect: Effect.REMOVE, target: Target.DIR })
+  rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
+    return Promise.reject(enotsup(this.name, 'rmdir', path))
+  }
+
+  /** Remove a subtree in one call instead of entry by entry. */
+  rmR(path: PathSpec): Promise<void> {
+    return Promise.reject(enotsup(this.name, 'rmR', path))
+  }
+
+  /** Move a name within this VFS. */
+  @vfsCall({ effect: Effect.RENAME })
+  rename(src: PathSpec, _dst: PathSpec): Promise<void> {
+    return Promise.reject(enotsup(this.name, 'rename', src))
+  }
+
+  /** Copy a file within this VFS without moving its bytes through mirage. */
+  copy(_src: PathSpec, dst: PathSpec): Promise<void> {
+    return Promise.reject(enotsup(this.name, 'copy', dst))
+  }
+
+  /** Copy a directory tree within this VFS in one call. */
+  dirCopy(_src: PathSpec, dst: PathSpec): Promise<void> {
+    return Promise.reject(enotsup(this.name, 'dirCopy', dst))
+  }
+
+  /**
+   * Resize a file, padding with zeros or cutting the end. `noCreate`
+   * refuses a missing file instead of creating it; a VFS that cannot hold
+   * that atomically rejects with ENOTSUP before writing.
+   */
+  @vfsCall({ effect: Effect.WRITE, target: Target.FILE, creates: true })
+  truncate(path: PathSpec, _length: number, _noCreate = false): Promise<void> {
+    return Promise.reject(enotsup(this.name, 'truncate', path))
+  }
+
+  /**
+   * Store metadata fields the backend keeps itself. Resolves to the fields
+   * it stored; the rest land in the namespace's attribute overlay.
+   */
+  @vfsCall({ effect: Effect.ATTR })
+  setattr(path: PathSpec, _fields: SetAttrFields): Promise<Record<string, number | string>> {
+    return Promise.reject(enotsup(this.name, 'setattr', path))
+  }
+
+  /**
+   * Search the resource under `path`; null declines, [] is none. Results
+   * are text records in the format `searchMeta` declares. Errors and
+   * incomplete results reject, never answered as a miss.
+   */
+  search(path: PathSpec, _query: SearchQuery, _index?: IndexCacheStore): Promise<string[] | null> {
+    return Promise.reject(enotsup(this.name, 'search', path))
+  }
+
+  /** Search several scopes as one ranked query. */
+  searchMany(
+    paths: PathSpec[],
+    _query: SearchQuery,
+    _index?: IndexCacheStore,
+  ): Promise<string[] | null> {
+    return Promise.reject(enotsup(this.name, 'search', paths[0] ?? ''))
+  }
+
+  /**
+   * The files under `paths` a content index says may hold `query`, so a
+   * recursive grep scans only those. A superset is harmless, since the
+   * scan still runs over the answer; null means the index cannot answer
+   * and the scan walks everything. Consulted only while
+   * `contentSearchEnabled`.
+   */
+  narrowPaths(_query: string, _paths: PathSpec[]): Promise<PathSpec[] | null> {
+    return Promise.resolve(null)
+  }
+
+  /** Whether this mount opted in to `narrowPaths`. */
+  contentSearchEnabled(): boolean {
+    return false
+  }
+
+  /** Whether the backend is there to answer at all. */
+  isMounted(): boolean {
+    return true
   }
 
   deltaHook?(): DeltaHook
@@ -399,20 +565,17 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /**
-   * What a snapshot records for this driver. The default carries only
-   * the type, which is enough to rebuild a builtin that owns nothing. A
-   * driver built from a table adds `needs_override`: the base cannot
-   * know a subclass's constructor, so both loaders then require the
-   * mount to be handed back live (`load`'s overrides; `copy()` does this
-   * itself). A driver that owns its content (an in-memory store)
-   * overrides this and {@link BaseVFS.loadState} to carry it and drops
-   * the flag; a driver over a remote service keeps the default and pins
-   * what it read through `supportsSnapshot` fingerprints instead.
-   * `toStateDict` calls this and `loadState` on every mount, which is
-   * why neither is optional. Mirrors Python `BaseVFS.get_state`.
+   * What a snapshot records for this driver: its type and `needs_override`,
+   * since the base cannot know a subclass's constructor, so both loaders
+   * then require the mount to be handed back live (`load`'s overrides;
+   * `copy()` does this itself). A driver that owns its content (an
+   * in-memory store) overrides this and {@link BaseVFS.loadState} to carry
+   * it and drops the flag; a driver over a remote service keeps the default
+   * and pins what it read through `supportsSnapshot` fingerprints instead.
+   * `toStateDict` calls this and `loadState` on every mount, which is why
+   * neither is optional. Mirrors Python `BaseVFS.get_state`.
    */
   getState(): VFSStateBase | Promise<VFSStateBase> {
-    if (!this.#fromTable) return { type: this.name }
     return { type: this.name, needs_override: true }
   }
 

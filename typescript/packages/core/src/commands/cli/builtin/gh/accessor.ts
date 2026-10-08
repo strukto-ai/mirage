@@ -162,7 +162,7 @@ export async function readCliFile(
   }
   const dispatch = inv.doors?.dispatch
   if (dispatch === undefined) throw new Error(`${option} needs a workspace to read files from`)
-  const spec = PathSpec.fromStrPath(raw, undefined, inv.cwd ?? '/')
+  const spec = PathSpec.fromStrPath(raw, undefined, inv.cwd)
   try {
     const [data] = await dispatch('read', spec)
     return await materialize(data as ByteSource)

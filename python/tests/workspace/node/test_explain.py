@@ -985,7 +985,13 @@ async def test_a_line_the_gate_cannot_read_is_explained_as_refused():
     )
     try:
         ws.create_session("s", profile="r")
-        for line in ("source /data/f.sh", "bash --restricted -c 'rm /data/x'"):
+        for line in (
+            "source /data/f.sh",
+            "bash --restricted -c 'rm /data/x'",
+            "bash --rcfile $SKIP --version -c 'rm /data/x'",
+            "bash --init-file $SKIP --help -c 'rm /data/x'",
+            "bash --rcfile missing-* --version -c 'rm /data/x'",
+        ):
             said = await _judged(ws, line, "s")
             ran = await ws.shell(line, session_id="s")
             assert ran.exit_code == 126

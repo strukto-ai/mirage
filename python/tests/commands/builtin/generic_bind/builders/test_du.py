@@ -16,12 +16,11 @@ import dataclasses
 
 import pytest
 
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders.du import WalkBudget, du
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.stream import materialize
-from mirage.ops.types import MountView
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.view.types import MountView
 
 TREE = {
     "/db": ["/db/a.txt", "/db/sub"],

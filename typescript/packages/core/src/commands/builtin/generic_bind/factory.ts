@@ -20,11 +20,11 @@ import { cacheAwareReadBytes, cacheAwareReadStream } from '../../../cache/read_t
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
-import type { ChildMounts, LinkView, NamespaceView } from '../../../ops/types.ts'
-import { type CommandFn, type RegisteredCommand, command } from '../../config.ts'
+import type { ChildMounts, LinkView, NamespaceView } from '../../../view/types.ts'
+import { type CommandFn, type Command, command, type CommandIO } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import {
-  type CommandIO,
+  mountIo,
   scopedIo,
   withAbortGuard,
   withCommandGuards,
@@ -159,11 +159,22 @@ function writeWraps<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
   return withSlashGuard(ops)
 }
 
-export interface MakeGenericCommandsOptions<A extends Accessor = Accessor> {
+export interface GenericCommandsOptions {
+  /** Command names to skip: the backend ships its own wrapper for these. */
   overrides?: ReadonlySet<string>
-  // Per-command adapters that replace the shared adapter when one command
-  // needs a cheaper backend operation (mirrors the Python ops_overrides).
-  opsOverrides?: Record<string, CommandIO<A>>
+  /**
+   * A change to the mount's table for every command (disk sets its native
+   * `find` and `du` aside, so a shell walk reports partial results and
+   * per-directory errors).
+   */
+  table?: (io: CommandIO) => CommandIO
+  /**
+   * Per-command changes to the mount's table, for a command that needs a
+   * cheaper backend operation (dify's light `ls`).
+   */
+  adapt?: Readonly<Record<string, (io: CommandIO) => CommandIO>>
+  /** Whether the backend's data lives on the host, which lets a command aggregate there. */
+  local?: boolean
 }
 
 // The namespace facts a glob resolver reads, stamped on the adapter per
@@ -182,37 +193,35 @@ function stampNamespace(raw: CommandIO, children?: ChildMounts, links?: LinkView
   }
 }
 
-export function makeGenericCommands<A extends Accessor = Accessor>(
-  vfs: string,
-  ops: CommandIO<A>,
-  options: MakeGenericCommandsOptions<A> = {},
-): RegisteredCommand[] {
+/**
+ * Generate the default command set for a backend. Each command runs over
+ * the table of the mount it runs on (`opts.io`), so the set is built once
+ * per backend name. Mirrors Python's `generic_commands`.
+ */
+export function genericCommands(vfs: string, options: GenericCommandsOptions = {}): Command[] {
   const skip = options.overrides ?? new Set<string>()
-  const opsOver = options.opsOverrides ?? {}
+  const changes = options.adapt ?? {}
+  const table = options.table
   // A name no builder has does nothing at all, so a misspelled override left
   // the generic registered beside the bespoke one, and an override for a
   // command the table never had (mem0's `search`) read as if it displaced
   // something. Refused at registration, which is import time. Mirrors
-  // `make_generic_commands` in `generic_bind/factory.py`.
+  // `generic_commands` in `generic_bind/factory.py`.
   const known = new Set(BUILDERS.map((b) => b.name))
-  const unknown = [...new Set([...skip, ...Object.keys(opsOver)])]
+  const unknown = [...new Set([...skip, ...Object.keys(changes)])]
     .filter((name) => !known.has(name))
     .sort(compareCodePoints)
   if (unknown.length > 0) {
-    throw new Error(`makeGenericCommands('${vfs}'): no generic builder named ${unknown.join(', ')}`)
+    throw new Error(`genericCommands('${vfs}'): no generic builder named ${unknown.join(', ')}`)
   }
-  const commands: RegisteredCommand[] = []
+  const commands: Command[] = []
   for (const b of BUILDERS) {
     if (skip.has(b.name)) continue
-    const raw = (opsOver[b.name] ?? ops) as CommandIO
+    const change = changes[b.name]
     // Path guards are applied per invocation, over the stamped adapter,
-    // inside the command closure below. The raw adapter stays untouched
-    // for the ops tables, whose door does its own enforcement.
+    // inside the command closure below. The mount's table stays untouched
+    // for the op door, which does its own enforcement.
     const finish = b.read === true ? readWraps : b.write === true ? writeWraps : statWraps
-    // A per-command adapter with its own stat (dify's light ls) would
-    // otherwise print the probe's full stat under fresh only.
-    const answered =
-      raw.stat === (ops as CommandIO).stat && b.write !== true ? withProbeAnswers(raw) : raw
     // A nested mount's keys live in another VFS and no VFS
     // stores a symlink, so a glob resolved by one backend's readdir
     // misses both. The names are session-scoped, so the fact is stamped
@@ -243,6 +252,11 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
     // so a handler the caller was released from begins no further read
     // or write between its operands.
     const fn: CommandFn = (accessor, paths, texts, opts) => {
+      const io = table === undefined ? mountIo(opts) : table(mountIo(opts))
+      const raw = change === undefined ? io : change(io)
+      // A per-command table with its own stat (dify's light ls) would
+      // otherwise print the probe's full stat under fresh only.
+      const answered = raw.stat === io.stat && b.write !== true ? withProbeAnswers(raw) : raw
       const guarded = scopedIo(
         withAbortGuard(
           withDirGuard(
@@ -274,7 +288,7 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
         },
       )
     }
-    const aggregate = raw.local !== false ? (b.aggregate ?? null) : null
+    const aggregate = options.local === true ? (b.aggregate ?? null) : null
     commands.push(
       ...command({
         name: b.name,

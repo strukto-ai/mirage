@@ -18,7 +18,7 @@ import { PathSpec, type Visibility } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { IOResult, type SizedRun } from '../../../io/types.ts'
-import { pathsScoped } from '../../../ops/namespace_view.ts'
+import { pathsScoped } from '../../../view/namespace_view.ts'
 import { pathVisible } from '../../../utils/hidden.ts'
 import { ZERO_LENGTH_NAME } from '../../../errors/render.ts'
 import { fsStrerror, isDotWalkError, isMissingPath } from '../../../errors/fs.ts'
@@ -29,7 +29,7 @@ import { formatRecords } from '../utils/output.ts'
 import { scaledSize } from '../utils/formatting.ts'
 import { quoteText } from '../../quote.ts'
 import { INTMAX } from '../constants.ts'
-import type { LinkView, MountView, NamespaceView, StatPath } from '../../../ops/types.ts'
+import type { LinkView, MountView, NamespaceView, StatPath } from '../../../view/types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
 import type { DuEntries } from '../../../vfs/types.ts'
@@ -37,7 +37,6 @@ import { posixPhrase } from '../../../errors/posix.ts'
 export type ComputeSize = (p: PathSpec) => Promise<number>
 export type ComputeEntries = (p: PathSpec) => Promise<DuEntries>
 
-export const DEFAULT_MAX_DU_ENTRIES = 10000
 const USAGE_HINT = "Try 'du --help' for more information."
 const DEPTH_HEX = /^[+-]?0[xX][0-9a-fA-F]+$/
 const DEPTH_OCT = /^[+-]?0[0-7]*$/

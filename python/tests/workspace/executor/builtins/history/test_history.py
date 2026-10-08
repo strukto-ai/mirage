@@ -28,7 +28,7 @@ class FakeMount:
         self.io = io or IOResult()
         self.calls = []
 
-    async def execute_cmd(
+    async def run_command(
         self, name, paths, texts, flags, context=ExecContext()
     ):
         self.calls.append((name, texts, flags, context))

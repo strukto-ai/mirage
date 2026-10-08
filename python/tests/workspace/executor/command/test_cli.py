@@ -310,6 +310,17 @@ async def test_stdin_rides_the_invocation_record():
     assert "stdin" not in inv.flags
 
 
+@pytest.mark.asyncio
+async def test_the_session_cwd_rides_the_invocation_record():
+    CALLS.clear()
+    await handle_cli(
+        make_install(),
+        ["prog", "message", "send", "-t", "x"],
+        SessionState(session_id="t", cwd="/data"),
+    )
+    assert CALLS.pop().cwd.virtual == "/data"
+
+
 class FakePyRuntime(LanguageRuntime):
     name = "fakepy"
     language = "python"

@@ -41,9 +41,12 @@ import { DIFY_COMMANDS } from '../dify/index.ts'
 import { CHROMA_COMMANDS } from '../chroma/index.ts'
 import { parseFindExpression } from '../find_parse.ts'
 import { readsSizes, readsTimes } from './find.ts'
-import type { NamespaceView } from '../../../ops/types.ts'
+import type { NamespaceView } from '../../../view/types.ts'
 import type { Visibility } from '../../../types.ts'
 import { hiddenUnder } from '../../../utils/hidden.ts'
+import { ioFor } from '../../../test-utils.ts'
+import { ChromaVFS } from '../../../vfs/chroma/chroma.ts'
+import { DifyVFS } from '../../../vfs/dify/dify.ts'
 
 // The command's view as the workspace builds it for a session.
 function viewOf(vis: Visibility): NamespaceView {
@@ -97,7 +100,7 @@ describe('slug-tree find under a hide', () => {
     const opts = {
       stdin: null,
       flags: {},
-      filetypeFns: null,
+      io: ioFor(DifyVFS, accessor),
       cwd: '/',
       index: new RAMIndexCacheStore(),
       ns: viewOf(sess.visibility),
@@ -168,16 +171,17 @@ describe('chroma find', () => {
       })
       const sess = new SessionState({ sessionId: 'veiled' })
       sess.visibility = { ...sess.visibility, paths: { paths: hidden === null ? [] : [hidden] } }
+      const accessor = chromaAccessor(gets)
       const opts = {
         stdin: null,
         flags,
-        filetypeFns: null,
+        io: ioFor(ChromaVFS, accessor),
         cwd: '/',
         index: new RAMIndexCacheStore(),
         ns: viewOf(sess.visibility),
       }
       const [stdout, io] = await runWithSession(sess, async () => {
-        const result = await find.fn(chromaAccessor(gets), [root], texts, opts)
+        const result = await find.fn(accessor, [root], texts, opts)
         const [bytes, ioResult] = result ?? [null, null]
         return [new TextDecoder().decode(await materialize(bytes)), ioResult] as const
       })

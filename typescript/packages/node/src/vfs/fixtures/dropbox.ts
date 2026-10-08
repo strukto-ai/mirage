@@ -59,7 +59,12 @@ function norm(path: string): string {
  * `Dropbox-API-Result` with the file's metadata on a full read and on a
  * ranged one (206), as the real service does. A rewrite keeps
  * `server_modified`: the real service repeated it across same-size writes,
- * so only `content_hash` tells them apart. A path in `restricted` exists but
+ * so only `content_hash` tells them apart. `/2/files/upload` (logged
+ * `upload`, routed before the JSON-body routes since its body is the bytes)
+ * stores the body at the `Dropbox-API-Arg` path and answers the FileMetadata
+ * rendered by `fileEntry`, the renderer get_metadata and listings use, so an
+ * upload reply's content_hash and a later stat's cannot disagree. A path in
+ * `restricted` exists but
  * answers get_metadata and download with a `path/restricted_content` 409, the
  * way Dropbox refuses content it may not serve.
  */
@@ -195,6 +200,14 @@ export class InlineDropbox {
       return InlineDropbox.json({ access_token: 't', expires_in: 14400, token_type: 'bearer' })
     }
     if (route === '/2/files/download') return this.download(req)
+    if (route === '/2/files/upload') {
+      const arg = JSON.parse(req.headers.get('Dropbox-API-Arg') ?? '{}') as { path?: string }
+      const path = norm(arg.path ?? '')
+      this.log.push('upload')
+      const data = new Uint8Array(await req.arrayBuffer())
+      this.files.set(path, data)
+      return InlineDropbox.json(this.fileEntry(path, data))
+    }
     const body = (await req.json()) as { path?: string }
     const path = norm(body.path ?? '')
     if (route === '/2/files/list_folder') {

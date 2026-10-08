@@ -13,7 +13,36 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as ObserveModule from '../../observe/context.ts'
+import type * as CacheContextModule from '../../cache/context.ts'
 import type * as DriveModule from '../google/drive.ts'
+import type { DriveFile } from '../google/drive.ts'
+
+const H = vi.hoisted(() => ({
+  order: [] as string[],
+}))
+
+vi.mock('../../observe/context.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof ObserveModule>()
+  return {
+    ...actual,
+    record: (...args: Parameters<typeof actual.record>) => {
+      H.order.push('record')
+      actual.record(...args)
+    },
+  }
+})
+
+vi.mock('../../cache/context.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof CacheContextModule>()
+  return {
+    ...actual,
+    invalidateAfterWrite: async (...args: Parameters<typeof actual.invalidateAfterWrite>) => {
+      H.order.push('invalidate')
+      await actual.invalidateAfterWrite(...args)
+    },
+  }
+})
 
 vi.mock('../google/drive.ts', async () => {
   const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
@@ -21,6 +50,7 @@ vi.mock('../google/drive.ts', async () => {
   return driveModuleMock(actual)
 })
 
+import { runWithRecording } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import type { FakeDrive } from './_test_util.ts'
 import { DOC_MIME, makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
@@ -33,6 +63,7 @@ const accessor = makeGDriveAccessor()
 
 beforeEach(() => {
   fake = resetFakeDrive()
+  H.order = []
 })
 
 function spec(virtual: string): PathSpec {
@@ -74,4 +105,83 @@ describe('gdrive write', () => {
       { code: 'EACCES' },
     )
   })
+})
+
+const HAPPY: Record<string, unknown> = {
+  size: '5',
+  md5Checksum: 'm5',
+  headRevisionId: 'r5',
+  mimeType: 'text/plain',
+}
+
+// [name, overrides on the fake's public() reply (null removes), expected
+// fingerprint] for 5 written bytes. The literal tokens are ones no local hash
+// produces.
+const REPLY_ROWS: [string, Record<string, unknown>, string | null][] = [
+  ['agrees', {}, 'm5'],
+  ['no md5 takes the head revision', { md5Checksum: null }, 'r5'],
+  ['no mimeType counts as non-native', { mimeType: null }, 'm5'],
+]
+
+function withOverrides(
+  reply: DriveFile,
+  overrides: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...reply }
+  for (const [key, value] of Object.entries({ ...HAPPY, ...overrides })) {
+    if (value === null) Reflect.deleteProperty(out, key)
+    else out[key] = value
+  }
+  return out
+}
+
+function replyWith(build: (reply: DriveFile) => unknown): void {
+  const upload = fake.uploadFile.bind(fake)
+  const update = fake.updateFileContent.bind(fake)
+  vi.spyOn(fake, 'uploadFile').mockImplementation(
+    async (...args: Parameters<FakeDrive['uploadFile']>) => build(await upload(...args)) as never,
+  )
+  vi.spyOn(fake, 'updateFileContent').mockImplementation(
+    async (...args: Parameters<FakeDrive['updateFileContent']>) =>
+      build(await update(...args)) as never,
+  )
+}
+
+async function writeRecorded(): Promise<unknown[][]> {
+  const [, records] = await runWithRecording(() =>
+    write(accessor, spec('/f.txt'), ENC.encode('hello')),
+  )
+  return records.map((r) => [r.op, r.path, r.bytes, r.fingerprint, r.revision])
+}
+
+describe.each([
+  ['create', false],
+  ['update', true],
+])('gdrive write records the upload reply (%s)', (_kind, existing) => {
+  beforeEach(() => {
+    if (existing) fake.add('f.txt', 'root', undefined, ENC.encode('old'))
+  })
+
+  it.each(REPLY_ROWS)('%s', async (_name, overrides, token) => {
+    replyWith((reply) => withOverrides(reply, overrides))
+    expect(await writeRecorded()).toEqual([['write', '/f.txt', 5, token, null]])
+    // Recorded before the eviction, so the record exists when the cache
+    // reacts to the write.
+    expect(H.order).toEqual(['record', 'invalidate'])
+  })
+})
+
+it('a gdrive write whose reply is empty still records it', async () => {
+  // The upload landed, so the write counts even without a token: an earlier
+  // write's claim on the path must not win.
+  replyWith(() => null)
+  expect(await writeRecorded()).toEqual([['write', '/f.txt', 5, null, null]])
+})
+
+it('a gdrive write whose reply fails still evicts the path', async () => {
+  // Drive may have stored the bytes before the reply broke off, so the cached
+  // copy is stale either way.
+  vi.spyOn(fake, 'uploadFile').mockRejectedValue(new Error('reply cut off'))
+  await expect(writeRecorded()).rejects.toThrow('reply cut off')
+  expect(H.order).toEqual(['invalidate'])
 })

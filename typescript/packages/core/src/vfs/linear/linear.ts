@@ -15,17 +15,18 @@
 import { BaseVFS } from '../base.ts'
 import { LinearAccessor } from '../../accessor/linear.ts'
 
-import { LINEAR_COMMANDS } from '../../commands/builtin/linear/index.ts'
-import type { RegisteredCommand } from '../../commands/config.ts'
 import { HttpLinearTransport } from '../../core/linear/client.ts'
 import { redactLinearConfig } from '../../core/linear/config.ts'
 import type { LinearConfig, LinearConfigRedacted } from '../../core/linear/config.ts'
 
-import { LINEAR_OPS } from '../../ops/linear/index.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
-
 import { PROMPT, WRITE_PROMPT } from './prompt.ts'
 import { VFSName } from '../../types.ts'
+import type { PathSpec, FileStat } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
+import { readdir as linearReaddir } from '../../core/linear/readdir.ts'
+import { read as linearRead } from '../../core/linear/read.ts'
+import { stat as linearStat } from '../../core/linear/stat.ts'
 
 export interface LinearVFSState {
   type: string
@@ -54,12 +55,22 @@ export class LinearVFS extends BaseVFS {
     this.accessor = new LinearAccessor(new HttpLinearTransport(transportOpts), accessorOpts)
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return LINEAR_COMMANDS
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return linearReaddir(this.accessor, path, index)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return LINEAR_OPS
+  override async read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const data = await linearRead(this.accessor, path, index)
+    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return linearStat(this.accessor, path, index)
   }
 
   override getState(): Promise<LinearVFSState> {

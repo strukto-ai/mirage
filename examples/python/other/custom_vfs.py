@@ -30,22 +30,19 @@ from mirage import (
     IOResult,
     MountMode,
     PathSpec,
-    ReadOps,
-    VFSAdapter,
     Workspace,
-    WriteOps,
     command,
     register_vfs,
 )
 
-# A whole custom backend in one script: four async core functions over
-# your data source, a read adapter with optional writes, one BaseVFS. Every
-# generic command (ls, cat, grep, find, head, wc, ...) works for free,
-# and so does versioning, in the shape the content calls for: the wiki's
-# pages are the VFS's own, so they ride its state and a snapshot
-# rebuilds the mount through the registered name with the pages as they
-# were; the feed's live in a service, so the VFS is only observed
-# and a load asks for it back rather than restoring a copy.
+# A whole custom backend in one script: a BaseVFS whose methods answer
+# over your data source. readdir, read and stat are enough for every
+# generic command (ls, cat, grep, find, head, wc, ...); write and mkdir
+# make the mount writable. Versioning works too, in the shape the content
+# calls for: the wiki's pages are the VFS's own, so they ride its state
+# and a snapshot rebuilds the mount through the registered name with the
+# pages as they were; the feed's live in a service, so the VFS is only
+# observed and a load asks for it back rather than restoring a copy.
 
 PAGES = {
     "guides": {
@@ -71,81 +68,54 @@ def _node(pages: dict, key: str):
     return node
 
 
-async def readdir(
-    accessor: WikiAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
-    node = _node(accessor.pages, path.vfs_path)
-    if not isinstance(node, dict):
-        raise NotADirectoryError(path.virtual)
-    parent = path.virtual.rstrip("/")
-    return [
-        f"{parent}/{name}" + ("/" if isinstance(child, dict) else "")
-        for name, child in node.items()
-    ]
+class PagesVFS(BaseVFS):
+    """Markdown pages read from the accessor's dict."""
 
+    accessor: WikiAccessor
 
-async def read_bytes(
-    accessor: WikiAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> bytes:
-    node = _node(accessor.pages, path.vfs_path)
-    if isinstance(node, dict):
-        raise IsADirectoryError(path.virtual)
-    return node.encode()
-
-
-async def stat(
-    accessor: WikiAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> FileStat:
-    node = _node(accessor.pages, path.vfs_path)
-    name = path.virtual.rstrip("/").rsplit("/", 1)[-1] or "/"
-    if isinstance(node, dict):
-        return FileStat(name=name, size=None, type=FileType.DIRECTORY)
-    data = node.encode()
-    # The fingerprint is the content's own hash: the stable identity a
-    # snapshot records for every read and a load checks for drift.
-    return FileStat(
-        name=name,
-        size=len(data) if accessor.known_sizes else None,
-        type=FileType.FILE,
-        content=ContentType.TEXT,
-        fingerprint=hashlib.sha256(data).hexdigest()[:16],
-    )
-
-
-async def write(accessor: WikiAccessor, path: PathSpec, data: bytes) -> None:
-    *folders, name = (p for p in path.vfs_path.split("/") if p)
-    node = accessor.pages
-    for part in folders:
-        node = node.setdefault(part, {})
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        node = _node(self.accessor.pages, path.vfs_path)
         if not isinstance(node, dict):
             raise NotADirectoryError(path.virtual)
-    node[name] = data.decode()
+        parent = path.virtual.rstrip("/")
+        return [
+            f"{parent}/{name}" + ("/" if isinstance(child, dict) else "")
+            for name, child in node.items()
+        ]
 
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        # reads_ranges stays False, so a byte window is cut from the whole
+        # page for us and offset and size can be ignored here.
+        node = _node(self.accessor.pages, path.vfs_path)
+        if isinstance(node, dict):
+            raise IsADirectoryError(path.virtual)
+        return node.encode()
 
-async def mkdir(
-    accessor: WikiAccessor, path: PathSpec, parents: bool = False
-) -> None:
-    parts = [p for p in path.vfs_path.split("/") if p]
-    node = accessor.pages
-    for i, part in enumerate(parts):
-        leaf = i == len(parts) - 1
-        if part not in node:
-            if not leaf and not parents:
-                raise FileNotFoundError(path.virtual)
-            node[part] = {}
-        elif leaf and (not parents or not isinstance(node[part], dict)):
-            raise FileExistsError(path.virtual)
-        node = node[part]
-        if not isinstance(node, dict):
-            raise NotADirectoryError(path.virtual)
-    if not parts and not parents:
-        raise FileExistsError(path.virtual)
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        node = _node(self.accessor.pages, path.vfs_path)
+        name = path.virtual.rstrip("/").rsplit("/", 1)[-1] or "/"
+        if isinstance(node, dict):
+            return FileStat(name=name, size=None, type=FileType.DIRECTORY)
+        data = node.encode()
+        # The fingerprint is the content's own hash: the stable identity a
+        # snapshot records for every read and a load checks for drift.
+        return FileStat(
+            name=name,
+            size=len(data) if self.accessor.known_sizes else None,
+            type=FileType.FILE,
+            content=ContentType.TEXT,
+            fingerprint=hashlib.sha256(data).hexdigest()[:16],
+        )
 
 
 # Optional: a bespoke domain verb, registered alongside the generics.
@@ -160,15 +130,8 @@ async def wiki_titles(accessor, paths, texts, opts):
     return ("\n".join(titles) + "\n").encode(), IOResult()
 
 
-def make_io(*, writable: bool = True) -> VFSAdapter:
-    return VFSAdapter(
-        read=ReadOps(readdir=readdir, read_bytes=read_bytes, stat=stat),
-        writes=WriteOps(write=write, mkdir=mkdir) if writable else WriteOps(),
-    )
-
-
-class WikiVFS(BaseVFS):
-    """The backend as a class, so the registry can build it by name."""
+class WikiVFS(PagesVFS):
+    """The writable backend, a class so the registry can build it by name."""
 
     def __init__(self, pages: dict | None = None) -> None:
         # A copy, so a live workspace and one loaded from its snapshot
@@ -177,11 +140,36 @@ class WikiVFS(BaseVFS):
         super().__init__(
             name="wiki",
             accessor=self.wiki,
-            io=make_io(),
             prompt="A team wiki rendered as markdown files.",
             commands=[wiki_titles],
             supports_snapshot=True,
         )
+
+    async def write(self, path: PathSpec, data: bytes) -> None:
+        *folders, name = (p for p in path.vfs_path.split("/") if p)
+        node = self.wiki.pages
+        for part in folders:
+            node = node.setdefault(part, {})
+            if not isinstance(node, dict):
+                raise NotADirectoryError(path.virtual)
+        node[name] = data.decode()
+
+    async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
+        parts = [p for p in path.vfs_path.split("/") if p]
+        node = self.wiki.pages
+        for i, part in enumerate(parts):
+            leaf = i == len(parts) - 1
+            if part not in node:
+                if not leaf and not parents:
+                    raise FileNotFoundError(path.virtual)
+                node[part] = {}
+            elif leaf and (not parents or not isinstance(node[part], dict)):
+                raise FileExistsError(path.virtual)
+            node = node[part]
+            if not isinstance(node, dict):
+                raise NotADirectoryError(path.virtual)
+        if not parts and not parents:
+            raise FileExistsError(path.virtual)
 
     # The pages are this VFS's own content, not a remote backend's,
     # so they ride its state: a snapshot or a version rebuilds the mount
@@ -201,16 +189,16 @@ class WikiVFS(BaseVFS):
 # back live, so a snapshot pins what it read (through the fingerprints
 # stat reports) and a load without the live VFS is refused rather
 # than answered with an empty mount. Nothing registers it: a mount that
-# is handed back needs no name in any registry.
+# is handed back needs no name in any registry. It defines no write, so
+# the mount is read-only.
 FEED = {"status.md": "All systems go.\n"}
 
 
-class FeedVFS(BaseVFS):
+class FeedVFS(PagesVFS):
     def __init__(self) -> None:
         super().__init__(
             name="feed",
             accessor=WikiAccessor(FEED, known_sizes=False),
-            io=make_io(writable=False),
             prompt="A status feed rendered as markdown.",
             supports_snapshot=True,
         )

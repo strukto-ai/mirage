@@ -12,16 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ProcessView } from '../process/types.ts'
-
 import type { ByteSource, IOResult, OpReport } from '../io/types.ts'
 import type { PathSpec, SetAttrFields } from '../types.ts'
 import type { RuntimeConfig } from './config.ts'
 import type { RouteScript } from './routing/types.ts'
-import type { NamespaceView, SessionView } from '../ops/types.ts'
-import type { WorkspaceBinding } from './binding.ts'
-import type { MountResolver } from './resolver.ts'
-import type { ContextScope } from '../utils/context_scope.ts'
 
 /**
  * The languages a runtime can interpret, one name for both doors (run
@@ -54,8 +48,9 @@ export type RuntimeLanguage = 'python' | 'js'
 export type RuntimeReach = 'workspace' | 'process' | 'remote'
 
 /**
- * The workspace op dispatch: run `op` against the mount owning `path`
- * and return its result with the accounting IOResult. Defined here, on
+ * The workspace dispatch: run the function `name` against the mount
+ * owning `path` and return its result with the accounting IOResult.
+ * Defined here, on
  * the consumer side, because runtimes receive it through a binding while the
  * workspace provides it, and the runtime package imports no workspace
  * module — the home of Python's DispatchFn protocol (runtime/types).
@@ -64,7 +59,7 @@ export type RuntimeReach = 'workspace' | 'process' | 'remote'
  * step throws the result away; runtimes and combiners never pass it.
  */
 export type DispatchFn = (
-  op: string,
+  name: string,
   path: PathSpec,
   args?: readonly unknown[],
   kwargs?: Record<string, unknown>,
@@ -238,19 +233,6 @@ export interface RuntimeCapabilities {
   readonly evaluate: boolean
   readonly reach: RuntimeReach
   readonly filesystem: readonly FilesystemOperation[]
-}
-
-/** Local workspace doors captured for one execution, never guest globals. */
-export interface RuntimeContext {
-  readonly binding: WorkspaceBinding
-  readonly dispatch: BridgeDispatchFn
-  readonly resolver: MountResolver
-  readonly ns: NamespaceView
-  readonly sessionView: SessionView | null
-  readonly cwd: PathSpec
-  readonly env: Readonly<Record<string, string>>
-  readonly scope: ContextScope
-  readonly processes: ProcessView | null
 }
 
 /**

@@ -24,7 +24,7 @@ from openhands.sdk.workspace.local import LocalWorkspace
 from openhands.sdk.workspace.models import CommandResult, FileOperationResult
 from pydantic import Field, PrivateAttr
 
-from mirage.ops.ops import Ops
+from mirage.workspace.files import Files
 from mirage.workspace.tools.io_text import with_refusal
 from mirage.workspace.workspace import Session
 from mirage.workspace.workspace import Workspace as MirageBackingWorkspace
@@ -137,8 +137,8 @@ class MirageWorkspace(LocalWorkspace):
         self._bridge = _AsyncBridge()
 
     @property
-    def _vfs(self) -> Ops:
-        """The op facade run as this workspace's session."""
+    def _vfs(self) -> Files:
+        """The file API run as this workspace's session."""
         if self._session_id is None:
             return self._ws.vfs
         return Session(self._ws, self._session_id).vfs

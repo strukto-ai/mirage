@@ -13,12 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { Ops } from '../../ops/ops.ts'
+import { Files } from '../files.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
-import { Session } from '../workspace/handle.ts'
-import { Workspace } from '../workspace/workspace.ts'
+import { Session, Workspace } from '../workspace/workspace.ts'
 import { MirageToolOperations, TOOL_NAMES } from './tool_operations.ts'
 import { Outcome } from '../../policy/types.ts'
 import type { Policy } from '../../policy/base.ts'
@@ -279,7 +278,7 @@ describe('a session', () => {
     // the tool reports the failure as its result instead of raising it.
     await ws.shell('mkdir /d')
     const spy = vi
-      .spyOn(Ops.prototype, 'exists')
+      .spyOn(Files.prototype, 'exists')
       .mockRejectedValue(Object.assign(new Error('Input/output error'), { code: 'EIO' }))
     try {
       const read = await ops.call('read', { path: '/d/flaky.txt' })

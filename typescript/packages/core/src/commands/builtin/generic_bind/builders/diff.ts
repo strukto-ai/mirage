@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { diffGeneric } from '../../generic/diff.ts'
-import { type Builder, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const diff: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+const diff: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   return diffGeneric(
@@ -27,7 +27,7 @@ const diff: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   )
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'diff',
   read: true,
   fn: diff,

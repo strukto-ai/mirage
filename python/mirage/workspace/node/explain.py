@@ -66,7 +66,7 @@ from mirage.workspace.node.admission import (
     statement_redirects,
     unreadable,
 )
-from mirage.workspace.node.inner_lines import Word, inner_lines
+from mirage.workspace.node.inner_lines import Word, inner_lines, read_word
 from mirage.workspace.node.occurrence import (
     Frame,
     argv_frame,
@@ -637,7 +637,7 @@ def _words_of(node: Any, home: str | None) -> list[Word]:
         home (str | None): the home directory a leading ``~`` names.
     """
     _, parts = split_env_prefix(get_parts(node))
-    return [Word(get_text(part), literal_word(part, home)) for part in parts]
+    return [read_word(part, home) for part in parts]
 
 
 def _walk_substitution(

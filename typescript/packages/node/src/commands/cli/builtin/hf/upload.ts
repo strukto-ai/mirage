@@ -154,7 +154,7 @@ export async function uploadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   // refuses when there is none.
   const source =
     inv.paths[0] ??
-    PathSpec.fromStrPath(repoId.slice(repoId.lastIndexOf('/') + 1), undefined, inv.cwd ?? '/')
+    PathSpec.fromStrPath(repoId.slice(repoId.lastIndexOf('/') + 1), undefined, inv.cwd)
   const operands = [...inv.paths.map((path) => path.rawPath), ...inv.texts.slice(1)]
   const include = fl.asList('include')
   const exclude = fl.asList('exclude')
@@ -226,17 +226,14 @@ export async function uploadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
         )
       : []
   const message = fl.asStr('commit_message')
-  if (additions.length > 0 || doomed.length > 0) {
-    await commit(accessor, {
-      additions,
-      deletions: doomed,
-      message: message === undefined || message === '' ? DEFAULT_COMMIT_MESSAGE : message,
-      description: fl.asStr('commit_description') ?? '',
-      createPr: fl.asBool('create_pr'),
-    })
-  } else {
-    warnings += EMPTY_COMMIT_WARNING
-  }
+  const reply = await commit(accessor, {
+    additions,
+    deletions: doomed,
+    message: message === undefined || message === '' ? DEFAULT_COMMIT_MESSAGE : message,
+    description: fl.asStr('commit_description') ?? '',
+    createPr: fl.asBool('create_pr'),
+  })
+  if (reply === undefined) warnings += EMPTY_COMMIT_WARNING
   const home = repoUrl((inv.config as HfConfig).endpoint, accessor.repoType, repoId)
   const url = rstripSlash(`${home}/tree/${accessor.revision}/${base}`)
   return textOut(`${url}\n`, warnings)

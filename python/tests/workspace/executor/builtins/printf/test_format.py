@@ -25,7 +25,7 @@ _OCTAL_PINS = [
 ]
 
 # bash 5.2.37 under LC_ALL=C.UTF-8 through `od -An -tx1`: the format and
-# a %b argument write \u and \U through u32toutf8, so a surrogate half
+# a %b argument UTF-8-encode \u and \U values, so a surrogate half
 # and a value past Unicode come out UTF-8-shaped, and 0x80000000 and
 # past come out as nothing.
 _UNICODE_PINS = [
@@ -128,7 +128,7 @@ def test_octal_reads_three_digits_in_the_format_and_zero_plus_three_in_b(
 
 
 @pytest.mark.parametrize("escape,expected", _UNICODE_PINS)
-def test_unicode_escapes_write_through_u32toutf8(escape, expected):
+def test_unicode_escapes_are_utf8_encoded(escape, expected):
     fmt_out, fmt_messages, fmt_failed, _ = run_printf(escape, [])
     b_out, b_messages, b_failed, _ = run_printf("%b", [escape])
     assert (_od(fmt_out), fmt_messages, fmt_failed) == (expected, [], False)

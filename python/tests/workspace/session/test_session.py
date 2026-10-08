@@ -40,7 +40,13 @@ def test_session_defaults():
     assert s.cwd == "/"
     # bash exports `$PWD` from startup, so even a session that never
     # ran `cd` has one.
-    assert s.env == {"PWD": "/", "PATH": "/usr/bin", "IFS": " \t\n"}
+    assert s.env == {
+        "PWD": "/",
+        "PATH": "/usr/bin",
+        "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
+    }
     assert s.functions == {}
     assert s.last_exit_code == 0
 
@@ -88,6 +94,8 @@ def test_session_to_dict():
         "PWD": "/data",
         "PATH": "/usr/bin",
         "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
     }
     assert "created_at" in d
 
@@ -160,6 +168,8 @@ def test_fork_copies_every_field_including_mount_modes():
         "PWD": "/disk",
         "PATH": "/usr/bin",
         "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
     }
     assert forked.mount_modes == {
         "/s3": MountMode.READ,
@@ -210,6 +220,8 @@ def test_fork_overrides_apply_without_mutating_original():
         "PWD": "/ram",
         "PATH": "/usr/bin",
         "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
     }
     assert original.cwd == "/disk"
     assert original.env == {
@@ -217,6 +229,8 @@ def test_fork_overrides_apply_without_mutating_original():
         "PWD": "/disk",
         "PATH": "/usr/bin",
         "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
     }
 
 
@@ -283,10 +297,17 @@ def test_to_dict_carries_the_attributes_beside_the_values():
         "PWD": "/",
         "PATH": "/usr/bin",
         "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
         "PLAIN": "hello",
         "EXPO": "world",
     }
-    assert data["var_attrs"] == {"PWD": "x", "EXPO": "x", "MARKED": "rx"}
+    assert data["var_attrs"] == {
+        "PWD": "x",
+        "OPTIND": "i",
+        "EXPO": "x",
+        "MARKED": "rx",
+    }
 
 
 def test_var_attrs_is_written_even_when_empty():
@@ -296,8 +317,10 @@ def test_var_attrs_is_written_even_when_empty():
     # environment, and the reload re-exported everything it held.
     s = SessionState(session_id="s1")
     seed_var(s, "X", "secret")
-    # `export -n PWD` clears the one attribute a fresh session carries.
+    # `export -n PWD` and `unset OPTIND` clear the attributes a fresh
+    # session carries.
     set_attr(s, "PWD", VarAttr.EXPORT, False)
+    del s.vars["OPTIND"]
     data = s.to_dict()
     assert data["var_attrs"] == {}
     back = SessionState.from_dict(data)
@@ -586,13 +609,76 @@ def test_session_profile_round_trips_and_is_omitted_when_none():
 def test_function_sources_and_readonly_metadata_round_trip_without_tree_ownership():
     source = "f() { echo a; }"
     parent = SessionState(
-        session_id="s", functions={"f": source}, readonly_functions={"f"}
+        session_id="s",
+        functions={"f": source},
+        readonly_functions={"f"},
+        exported_functions={"f"},
     )
     restored = SessionState.from_dict(parent.to_dict())
     assert restored.functions == {"f": source}
     assert restored.readonly_functions == {"f"}
+    assert restored.exported_functions == {"f"}
     child = restored.fork()
     child.functions.clear()
     child.readonly_functions.clear()
+    child.exported_functions.clear()
     assert restored.functions == parent.functions
     assert restored.readonly_functions == {"f"}
+    assert restored.exported_functions == {"f"}
+
+
+def test_a_recorded_session_keeps_the_startup_vars_it_unset():
+    s = SessionState(session_id="s")
+    for name in ("OPTIND", "OPTERR", "IFS"):
+        del s.vars[name]
+    back = SessionState.from_dict(s.to_dict())
+    assert not {"OPTIND", "OPTERR", "IFS"} & set(back.vars)
+    bare = SessionState.from_dict({"session_id": "s", "env": {"A": "1"}})
+    assert bare.vars["OPTIND"] == ShellVar("1", frozenset({VarAttr.INTEGER}))
+
+
+def test_new_shell_starts_from_the_environment():
+    exported = frozenset({VarAttr.EXPORT})
+    token = ManagedRef("env", "", "TOKEN")
+    parent = SessionState(
+        session_id="s",
+        cwd="/w",
+        vars={
+            "PLAIN": ShellVar("p"),
+            "OUT": ShellVar("o", exported | {VarAttr.READONLY}),
+            "ARR": ShellVar(["a"], exported),
+            "UNSET": ShellVar(None, exported),
+            "IFS": ShellVar(",", exported),
+            "TOKEN": ShellVar(None, exported, token),
+            "OPTIND": ShellVar("5", exported),
+            "RANDOM": ShellVar("42", exported),
+        },
+        functions={"f": "f() { :; }", "g": "g() { :; }"},
+        exported_functions={"f"},
+        readonly_functions={"f"},
+        aliases={"a": "echo"},
+        shell_options={"errexit": True},
+        last_exit_code=1,
+        umask=0o077,
+    )
+    parent._getopts_pos, parent._getopts_optind = 2, 1
+    child = parent.new_shell()
+    assert child.vars == {
+        "OUT": ShellVar("o", exported),
+        "TOKEN": ShellVar(None, exported, token),
+        "OPTIND": ShellVar("1", exported | {VarAttr.INTEGER}),
+        "OPTERR": ShellVar("1"),
+        "RANDOM": ShellVar("42", exported),
+        "PWD": ShellVar("/w", exported),
+        "PATH": ShellVar("/usr/bin"),
+        "IFS": ShellVar(" \t\n"),
+    }
+    assert child.functions == {"f": "f() { :; }"}
+    assert child.exported_functions == {"f"}
+    assert child.readonly_functions == set()
+    assert (child.aliases, child.shell_options) == ({}, {})
+    assert (child.last_exit_code, child.cwd, child.umask) == (0, "/w", 0o077)
+    assert (child._getopts_pos, child._getopts_optind) == (0, None)
+    assert child._random_seed == "42"
+    assert set(parent.functions) == {"f", "g"}
+    assert parent.vars["PLAIN"] == ShellVar("p")

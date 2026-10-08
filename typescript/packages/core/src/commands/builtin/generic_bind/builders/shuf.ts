@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { shufGeneric } from '../../generic/shuf.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type GenericCommand, resolveGlobOf } from '../adapter.ts'
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'shuf',
   read: true,
   fn: async (ops, accessor, paths, texts, opts) => {

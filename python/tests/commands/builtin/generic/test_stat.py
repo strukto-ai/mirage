@@ -4,8 +4,6 @@ import pytest
 
 from mirage.commands.builtin.generic.stat import stat
 from mirage.io.types import materialize
-from mirage.ops.registry import RegisteredOp
-from mirage.ops.types import LinkView
 from mirage.types import (
     DEVICE_NUMBERS_KEY,
     LINK_TARGET_KEY,
@@ -18,7 +16,9 @@ from mirage.types import (
     PathSpec,
 )
 from mirage.utils.stat_view import DIR_SIZE
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
+from mirage.view.types import LinkView
 from mirage.workspace import Workspace
 
 _MTIME = "2026-01-02T15:30:45Z"
@@ -30,8 +30,7 @@ class _OverlayRAMVFS(RAMVFS):
     """RAM VFS with native setattr stripped, standing in for an API
     backend whose chmod/chown/touch live only in the namespace overlay."""
 
-    def ops(self) -> list[RegisteredOp]:
-        return [ro for ro in super().ops() if ro.name != "setattr"]
+    setattr = BaseVFS.setattr
 
 
 def _fs(**kw: object) -> FileStat:

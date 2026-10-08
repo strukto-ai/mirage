@@ -34,7 +34,6 @@ import {
 import type { CommandFnResult } from '../../../config.ts'
 import { UsageError } from '../../../errors.ts'
 import { IOResult } from '../../../../io/types.ts'
-import { PathSpec } from '../../../../types.ts'
 import type { CLIInvocation } from '../../types.ts'
 import {
   camel,
@@ -455,18 +454,17 @@ export async function cloneCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   const url = `${webOrigin(config)}/${ref.owner}/${ref.repo}.git`
   const target = names[1] ?? ref.repo
   const leaf = findNode(GIT, ['clone'])?.node ?? GIT
-  const cwd = inv.cwd ?? '/'
   const words = [...gitflags, url, target]
-  const parsed = parseCommand(leaf, words, cwd, 'git clone', inv.env, true)
+  const parsed = parseCommand(leaf, words, inv.cwd.virtual, 'git clone', inv.env, true)
   const git: CLIInvocation = {
     config: null,
     argv: ['clone', ...words],
     paths: [],
     texts: parsed.args.map(([word]) => word),
-    flags: { ...parseToKwargs(parsed), C: PathSpec.fromStrPath(cwd, undefined, '/') },
+    cwd: inv.cwd,
+    flags: { ...parseToKwargs(parsed), C: inv.cwd },
     stdin: inv.stdin,
     env: inv.env,
-    cwd,
     ...(inv.doors !== undefined ? { doors: inv.doors } : {}),
     spec: leaf,
   }

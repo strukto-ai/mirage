@@ -20,6 +20,8 @@ import { PathSpec } from '../../../types.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { resolveMongoDBConfig } from '../../../vfs/mongodb/config.ts'
 import { MONGODB_WC } from './wc.ts'
+import { ioFor } from '../../../test-utils.ts'
+import { MongoDBVFSBase } from '../../../vfs/mongodb/mongodb.ts'
 
 function docs(name: string): PathSpec {
   const virtual = `/mongo/app/collections/${name}/documents.jsonl`
@@ -46,7 +48,7 @@ async function wcLines(path: PathSpec, counted: string[]): Promise<[string, numb
   const result = await cmd.fn(accessor, [path], [], {
     stdin: null,
     flags: { lines: true },
-    filetypeFns: null,
+    io: ioFor(MongoDBVFSBase, accessor),
     cwd: '/',
   })
   if (result === null) throw new Error('wc returned nothing')

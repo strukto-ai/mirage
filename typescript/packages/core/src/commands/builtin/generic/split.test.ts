@@ -32,7 +32,6 @@ async function runSplit(
   const opts = {
     stdin: ENC.encode(input),
     flags,
-    filetypeFns: null,
     cwd: '/',
     vfs: { kind: 'ram' } as never,
   } as CommandOpts
@@ -326,7 +325,6 @@ describe('split names stdin outputs in the working directory', () => {
       const opts = {
         stdin: ENC.encode('a\nb\n'),
         flags: { lines: '1' },
-        filetypeFns: null,
         cwd,
         mountPrefix: '/data',
       } as CommandOpts

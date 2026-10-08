@@ -13,8 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import itertools
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 ILLEGAL = -1
 CUT = -2
@@ -497,10 +500,7 @@ def _host_decode(codec: str, seq: bytes) -> int | None:
         codec (str): a python codec name.
         seq (bytes): one whole sequence.
     """
-    try:
-        text = seq.decode(codec)
-    except UnicodeDecodeError:
-        return None
+    text = seq.decode(codec)
     return ord(text) if len(text) == 1 else None
 
 
@@ -518,16 +518,31 @@ def multibyte_table(spec: MultibyteSpec) -> Table:
     if known is not None:
         return known
     table: Table = {}
+    refused = 0
+    first_error: UnicodeDecodeError | None = None
     for seq in _sequences(spec.blocks):
         key = int.from_bytes(seq, "big")
         if any(low <= key <= high for low, high in spec.excluded):
             continue
-        cp = _host_decode(spec.codec, seq)
+        try:
+            cp = _host_decode(spec.codec, seq)
+        except UnicodeDecodeError as exc:
+            refused += 1
+            if first_error is None:
+                first_error = exc
+            continue
         if cp is None:
             continue
         if not spec.private_use and PRIVATE_USE[0] <= cp <= PRIVATE_USE[1]:
             continue
         table[key] = cp
+    if first_error is not None:
+        logger.debug(
+            "iconv: %s table skipped %d undecodable sequences; first: %s",
+            spec.codec,
+            refused,
+            first_error,
+        )
     for key, cp in spec.remapped:
         table[key] = cp
     _TABLES[spec.name] = table

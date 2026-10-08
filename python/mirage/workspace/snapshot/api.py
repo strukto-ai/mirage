@@ -14,13 +14,13 @@
 
 import io
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from mirage.concurrency.limiter import run_blocking
 from mirage.types import PathSpec
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.snapshot.manifest import split_manifest_and_blobs
-from mirage.workspace.snapshot.state import to_state_dict
+from mirage.workspace.snapshot.state import WorkspaceLike, to_state_dict
 from mirage.workspace.snapshot.tar_io import read_tar, write_tar
 
 try:
@@ -29,9 +29,6 @@ try:
     from mirage.core.s3.write import write
 except ImportError:
     S3Accessor = None  # type: ignore[assignment,misc]
-
-if TYPE_CHECKING:
-    from mirage.workspace.workspace import Workspace
 
 
 def _s3_accessor(config: S3Config) -> "S3Accessor":
@@ -99,7 +96,7 @@ class _Counted:
 
 
 async def snapshot(
-    ws: "Workspace",
+    ws: WorkspaceLike,
     target,
     *,
     compress: str | None = None,
@@ -107,7 +104,7 @@ async def snapshot(
 ) -> int:
     """Serialize a Workspace to a tar archive.
 
-    Fingerprints come from ``ws._ops.records`` (each read carries the
+    Fingerprints come from ``ws._files.records`` (each read carries the
     backend's version marker captured at the moment of the read), so
     no live network round-trips are needed at snapshot time. Archive
     compression and host file I/O run off the workspace loop.
@@ -117,7 +114,7 @@ async def snapshot(
     keeps the dependency direction unidirectional: workspace → snapshot.
 
     Args:
-        ws: the workspace to snapshot.
+        ws (WorkspaceLike): the workspace to snapshot.
         target: filesystem path (str/Path) OR a writable file-like
             object (BytesIO, a pipe, etc.); with ``s3``, the object key.
         compress: None | "gz" | "bz2" | "xz".

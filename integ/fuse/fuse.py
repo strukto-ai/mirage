@@ -35,8 +35,8 @@ from mirage.vfs.ram import RAMVFS
 ProbeValue = str | int | bool | None
 
 
-class SizelessOps:
-    """Ops proxy that strips stat sizes.
+class SizelessFiles:
+    """Files proxy that strips stat sizes.
 
     Simulates API-backed mounts (Linear, Slack, Trello, ...) whose byte
     size is unknown until the content is fetched: over FUSE such files must
@@ -332,7 +332,7 @@ def run_sizeless_probe(result: dict[str, ProbeValue]) -> None:
     api._store.files["/api.json"] = API_CONTENT
     ws = Workspace({"/api": Mount(api, mode=MountMode.READ)})
     mountpoint = tempfile.mkdtemp(prefix="mirage-fuse-api-")
-    mount_background(SizelessOps(ws.vfs), mountpoint)
+    mount_background(SizelessFiles(ws.vfs), mountpoint)
     api_file = f"{mountpoint}/api/api.json"
     try:
         # Size-unknown semantics (see the CLAUDE.md FUSE section): stat 0

@@ -1,13 +1,6 @@
-from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
-from typing import Any
 
-from mirage.context.session_context import (
-    reset_current_session,
-    set_current_session,
-)
 from mirage.workspace.frame import ExecutionFrame
-from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.session.session import SessionState
 
 
@@ -30,50 +23,6 @@ class EvaluationContext:
             None
         """
         return EvaluationContext(self.session.fork(), self.frame.fork(), self)
-
-
-_current: ContextVar[EvaluationContext | None] = ContextVar(
-    "mirage_evaluation", default=None
-)
-
-
-def set_current_evaluation(
-    context: EvaluationContext, owner: SessionManager | None = None
-) -> tuple[Token[Any], Token[EvaluationContext | None]]:
-    """Bind evaluation and session scopes together.
-
-    Args:
-        context (EvaluationContext): the evaluator entering this task.
-        owner (SessionManager | None): the workspace owner; inherited if omitted.
-    """
-    ancestors = []
-    parent = context.parent
-    while parent is not None:
-        ancestors.append(parent.session)
-        parent = parent.parent
-    session_token = set_current_session(
-        context.session, owner, ancestors=tuple(ancestors)
-    )
-    return session_token, _current.set(context)
-
-
-def reset_current_evaluation(
-    tokens: tuple[Token[Any], Token[EvaluationContext | None]],
-) -> None:
-    """Restore the evaluation and session scopes ``set_current_evaluation``
-    replaced.
-
-    Args:
-        tokens (tuple[Token[Any], Token[EvaluationContext | None]]): what
-            ``set_current_evaluation`` returned.
-    """
-    session_token, evaluation_token = tokens
-    _current.reset(evaluation_token)
-    reset_current_session(session_token)
-
-
-def get_current_evaluation() -> EvaluationContext | None:
-    return _current.get()
 
 
 def child_context(context: EvaluationContext) -> EvaluationContext:

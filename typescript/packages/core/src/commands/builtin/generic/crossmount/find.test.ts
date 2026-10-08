@@ -16,7 +16,6 @@ import { expect, it } from 'vitest'
 import { command } from '../../../config.ts'
 import { SPECS } from '../../../spec/index.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { RegisteredOp } from '../../../../ops/registry.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
 import { eacces } from '../../../../errors/fs.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
@@ -64,10 +63,8 @@ function refused() {
 }
 
 class Unlisted extends RAMVFS {
-  override ops(): readonly RegisteredOp[] {
-    return super
-      .ops()
-      .map((ro) => (ro.name === 'readdir' ? { ...ro, fn: () => Promise.reject(eacces('/a')) } : ro))
+  override readdir(): Promise<string[]> {
+    return Promise.reject(eacces('/a'))
   }
 }
 

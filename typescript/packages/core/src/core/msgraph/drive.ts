@@ -406,7 +406,7 @@ function currentVersionId(versions: Record<string, unknown>[]): string | null {
 // serve them as fresh. `versions` also expands the version history for the
 // current revision, which only a snapshot needs; without it the revision is
 // null. Every shell line records, so only reads outside one (FUSE, a runtime's
-// guest, the ops facade) skip it.
+// guest, `ws.vfs`) skip it.
 async function captureItemMetadata(
   config: MsGraphConfigResolved,
   loc: DriveLoc,

@@ -44,7 +44,6 @@ from mirage.commands.spec.standard import standard_request
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
-from mirage.ops.types import NamespaceView, StatPath
 from mirage.policy import resolve_limit, resolve_producer
 from mirage.policy.types import HandOff
 from mirage.runtime.routing import RouteDecision
@@ -54,6 +53,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.job_table import JobTable
 from mirage.types import PathSpec, Producer
+from mirage.view.types import NamespaceView, StatPath
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.command.cli import (
     CLIContext,
@@ -75,6 +75,7 @@ from mirage.workspace.executor.command.run import (
     drop_mount_caches,
     exec_node,
     find_start_points,
+    run_claiming,
     run_on_mount,
     scalar_find_flags,
 )
@@ -221,7 +222,7 @@ async def handle_command(
     """Execute a simple command.
 
     Parts are already classified: strings for text,
-    PathSpec for paths. Dispatches to mount.execute_cmd. ``execute_fn``
+    PathSpec for paths. Dispatches to mount.run_command. ``execute_fn``
     runs a line in the session, which is how find's ``-exec`` runs its
     command. ``sink`` is where a function body writes its statements.
     """
@@ -576,24 +577,28 @@ async def handle_command(
             ),
             dispatch=dispatch,
         )
-        stdout, io = await handle_cross_mount(
-            cmd_name,
-            cross_scopes,
-            cross_texts,
-            cross_flags,
-            dispatch,
-            run_operand,
-            stdin=stdin,
-            storage_key=make_storage_key(registry),
-            ns=cross_ns,
-            session_view=session_view(
-                session,
-                registry.policies,
-                diagnostics=context.frame.diagnostics,
+        # The relay's keys are already virtual, so no prefix.
+        stdout, io = await run_claiming(
+            "",
+            lambda: handle_cross_mount(
+                cmd_name,
+                cross_scopes,
+                cross_texts,
+                cross_flags,
+                dispatch,
+                run_operand,
+                stdin=stdin,
+                storage_key=make_storage_key(registry),
+                ns=cross_ns,
+                session_view=session_view(
+                    session,
+                    registry.policies,
+                    diagnostics=context.frame.diagnostics,
+                ),
+                cwd=session.cwd,
+                argv=spelled_words(parts[1:]),
+                aggregate=aggregate_for(cmd_name, cross_scopes, registry),
             ),
-            cwd=session.cwd,
-            argv=spelled_words(parts[1:]),
-            aggregate=aggregate_for(cmd_name, cross_scopes, registry),
         )
         if cmd_name == "find":
             stdout = await _finish_find(

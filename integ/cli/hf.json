@@ -344,11 +344,37 @@
       "targets": [
         "cli-hf"
       ],
-      "command": "mkdir -p /scratch/dl/v1 /scratch/dl/v2 && echo -n a > /scratch/dl/v1/a.txt && echo -n o > /scratch/dl/v1/old.txt && echo -n x > /scratch/dl/v1/x.bin && echo -n A > /scratch/dl/v2/a.txt && hf upload integ/repo-cli /scratch/dl/v1 dl --commit-message v1 > /dev/null && hf upload integ/repo-cli /scratch/dl/v2 dl --delete '*.txt' --commit-message v2 > /dev/null && hf download integ/repo-cli --include 'dl/*' --local-dir /scratch/dl/out && cat /scratch/dl/out/dl/a.txt && echo && hf repo-files delete integ/repo-cli 'dl/[^a]*' --commit-message v3 > /dev/null && hf upload integ/repo-cli /scratch/dl/v2 dl --include 'none*' --delete 'x*' --commit-message v4 > /dev/null && hf upload integ/repo-cli /scratch/dl/v2 dl --include 'none*' --commit-message v5 && hf download integ/repo-cli --include 'dl/*' --local-dir /scratch/dl/gone",
+      "command": "mkdir -p /scratch/dl/v1 /scratch/dl/v2 && echo -n a > /scratch/dl/v1/a.txt && echo -n o > /scratch/dl/v1/old.txt && echo -n x > /scratch/dl/v1/x.bin && echo -n A > /scratch/dl/v2/a.txt && hf upload integ/repo-cli /scratch/dl/v1 dl --commit-message v1 > /dev/null && hf upload integ/repo-cli /scratch/dl/v2 dl --delete '*.txt' --commit-message v2 > /dev/null && hf upload integ/repo-cli /scratch/dl/v2 dl --delete '*.txt' --commit-message unchanged > /dev/null && hf upload integ/repo-cli /scratch/dl/v2/a.txt dl/a.txt --commit-message unchanged > /dev/null && hf download integ/repo-cli --include 'dl/*' --local-dir /scratch/dl/out && cat /scratch/dl/out/dl/a.txt && echo && hf repo-files delete integ/repo-cli 'dl/[^a]*' --commit-message v3 > /dev/null && hf upload integ/repo-cli /scratch/dl/v2 dl --include 'none*' --delete 'x*' --commit-message v4 > /dev/null && hf upload integ/repo-cli /scratch/dl/v2 dl --include 'none*' --commit-message v5 && hf download integ/repo-cli --include 'dl/*' --local-dir /scratch/dl/gone",
       "expect": {
         "exit": 1,
         "stdout": "/scratch/dl/out/dl/a.txt\n/scratch/dl/out/dl/x.bin\n/scratch/dl/out\nA\nhttp://127.0.0.1:5086/integ/repo-cli/tree/main/dl\n",
-        "stderr": "No files have been modified since last commit. Skipping to prevent empty commit.\nhf download: No files in integ/repo-cli matched the line\n"
+        "stderr": "No files have been modified since last commit. Skipping to prevent empty commit.\nNo files have been modified since last commit. Skipping to prevent empty commit.\nNo files have been modified since last commit. Skipping to prevent empty commit.\nhf download: No files in integ/repo-cli matched the line\n"
+      }
+    },
+    {
+      "id": "hf_upload_reads_a_relative_file_in_cwd_whatever_pwd_says",
+      "seq": 960151,
+      "targets": [
+        "cli-hf"
+      ],
+      "command": "(cd /scratch && export PWD=/nowhere && printf cwd > hf-pwd.txt && hf upload integ/repo-cli hf-pwd.txt pwd.txt --quiet && hf download integ/repo-cli pwd.txt --local-dir hf-pwd-back --quiet > /dev/null && cat hf-pwd-back/pwd.txt)",
+      "expect": {
+        "exit": 0,
+        "stdout": "http://127.0.0.1:5086/integ/repo-cli/tree/main/pwd.txt\ncwd",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hf_a_relative_hub_cache_lands_in_cwd_whatever_pwd_says",
+      "seq": 960152,
+      "targets": [
+        "cli-hf"
+      ],
+      "command": "(cd /scratch && export PWD=/nowhere && HF_HUB_CACHE=hf-pwd-cache hf download integ/repo-cli one_byte.txt --revision main --quiet > /dev/null && head -c 8 /scratch/hf-pwd-cache/models--integ--repo-cli/refs/main)",
+      "expect": {
+        "exit": 0,
+        "stdout": "00000000",
+        "stderr": ""
       }
     }
   ]

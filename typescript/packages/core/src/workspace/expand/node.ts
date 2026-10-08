@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { EvaluationContext } from '../evaluation.ts'
-import type { SessionView } from '../../ops/types.ts'
+import type { SessionView } from '../../view/types.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
@@ -21,13 +21,18 @@ import { quotedParts } from '../../shell/helpers.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
 import type { SessionState } from '../session/session.ts'
-import { randomReader, sessionElements, visibleEnv } from '../session/state.ts'
+import { randomReader, sessionArith } from '../session/state.ts'
 import { markEscapedGlobs, markGlobs, unmarkGlobs } from '../../utils/glob_walk.ts'
 import { expandTilde } from '../../utils/path.ts'
 import { homeDir } from '../session/shell_dirs.ts'
-import { evaluateArith } from '../../shell/arith.ts'
 import { splitBacktickRegion } from '../../shell/backticks.ts'
-import { ArithError, BadSubstitution, DiscardSignal, named } from '../../shell/errors.ts'
+import {
+  ArithError,
+  BadSubstitution,
+  DiscardSignal,
+  ReadonlyError,
+  named,
+} from '../../shell/errors.ts'
 import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from '../../shell/escapes.ts'
 import { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
 import { scanParameter } from '../../shell/parameter.ts'
@@ -146,7 +151,7 @@ export async function childLine(
     context,
     node,
     substitution: true,
-    callStack: (callStack ?? new CallStack()).fork(),
+    callStack: (callStack ?? new CallStack()).fork(true, false),
     ...(span === undefined ? {} : { span }),
   })
 }
@@ -517,6 +522,31 @@ async function stringChunks(
 }
 
 /** A command substitution's output or an arithmetic expansion's value. */
+/**
+ * An arithmetic expansion's value. Reads resolve against the visible env,
+ * so a hidden name counts as unset; the write-back goes through the session
+ * plane's door, so a preSession rule governs `$((X=5))` exactly as it
+ * governs `X=5`. bash bound the assignments made before an error, RANDOM's
+ * seed included; they land before the line dies.
+ */
+async function arithValue(
+  session: SessionState,
+  view: SessionView | undefined,
+  expr: string,
+): Promise<string> {
+  const reader = randomReader(session)
+  let result: ArithResult
+  try {
+    result = sessionArith(session, expr, reader)
+  } catch (err) {
+    if (!(err instanceof ArithError || err instanceof ReadonlyError)) throw err
+    await landArithWrites(session, view, err.writes, reader)
+    throw err instanceof ReadonlyError ? err.signal() : arithExit(expr, err)
+  }
+  await landArithWrites(session, view, result.writes, reader)
+  return result.value.toString()
+}
+
 async function substitution(
   tsNode: TSNodeLike,
   context: EvaluationContext,
@@ -527,27 +557,9 @@ async function substitution(
   const session = context.session
   const prefix = foldedWhitespace(tsNode)
   if (tsNode.type === NT.ARITHMETIC_EXPANSION) {
-    const expr = await expandArith(tsNode, context, executeFn, callStack, view)
-    let result: ArithResult
-    const reader = randomReader(session)
-    try {
-      result = evaluateArith(
-        expr,
-        visibleEnv(session),
-        0,
-        sessionElements(session, reader),
-        reader.read,
-        reader.wrote,
-      )
-    } catch (err) {
-      if (!(err instanceof ArithError)) throw err
-      await landArithWrites(session, view, err.writes, reader)
-      throw arithExit(expr, err)
-    }
-    await landArithWrites(session, view, result.writes, reader)
-    return result.value.toString()
+    return arithValue(session, view, await expandArith(tsNode, context, executeFn, callStack, view))
   }
-  const rawSub = (tsNode.sourceText ?? tsNode.text).slice(prefix.length)
+  const rawSub = (tsNode.inlined ?? tsNode.sourceText ?? tsNode.text).slice(prefix.length)
   if (rawSub.startsWith('`') && rawSub.endsWith('`')) {
     // Backtick regions are re-lexed here rather than trusted from the
     // grammar, which merges adjacent pairs (see splitBacktickRegion).
@@ -562,31 +574,7 @@ async function substitution(
     const only = sub[0]
     if (sub.length === 1 && only?.type === NT.SUBSHELL) {
       const parenExpr = await substituteDollarRefs(only, context, executeFn, callStack, view)
-      const expr = parenExpr.slice(1, -1)
-      let arith: ArithResult
-      const reader = randomReader(session)
-      try {
-        // Reads resolve against the visible env, so a hidden name
-        // counts as unset; the write-back below lands on the raw env
-        // (policy-ungated until expansion goes async), with the
-        // hidden gate applied inside expansionWrite.
-        arith = evaluateArith(
-          expr,
-          visibleEnv(session),
-          0,
-          sessionElements(session, reader),
-          reader.read,
-          reader.wrote,
-        )
-      } catch (err) {
-        if (!(err instanceof ArithError)) throw err
-        // bash bound the assignments made before the error, RANDOM's
-        // seed included; they land before the line dies.
-        await landArithWrites(session, view, err.writes, reader)
-        throw arithExit(expr, err)
-      }
-      await landArithWrites(session, view, arith.writes, reader)
-      return arith.value.toString()
+      return arithValue(session, view, parenExpr.slice(1, -1))
     }
   }
   // The whole body goes to the evaluator: bash substitutes the full

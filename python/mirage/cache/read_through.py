@@ -20,13 +20,8 @@ from typing import Any
 from mirage.accessor.base import Accessor
 from mirage.cache.context import CacheInvalidator, active_cache_manager
 from mirage.context.session_context import get_admission
-from mirage.types import (
-    EntryGate,
-    PathSpec,
-    PolymorphicReadFn,
-    ReadBytesFn,
-    ReadStreamFn,
-)
+from mirage.policy.types import EntryGate
+from mirage.types import PathSpec, PolymorphicReadFn, ReadBytesFn, ReadStreamFn
 
 
 async def _serve_stream(

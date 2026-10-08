@@ -12,9 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.commands.builtin.hf_buckets.io import IO as _IO
+from mirage.commands.builtin.generic_bind import generic_commands
 
 COMMANDS = [
-    *make_generic_commands("hf_buckets", _IO),
+    *generic_commands("hf_buckets"),
 ]

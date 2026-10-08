@@ -25,9 +25,9 @@ from mirage.commands.cli.builtin.git.io import (
     read_optional,
 )
 from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
-from mirage.ops.types import LinkView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.view.types import LinkView, StatPath
 
 # git's three untracked modes. "normal" names an untracked directory
 # once instead of everything inside it, "all" names every file, and "no"

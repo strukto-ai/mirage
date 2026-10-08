@@ -29,7 +29,6 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 
 import { IOResult } from '../../../../io/types.ts'
-import { OpsRegistry } from '../../../../ops/registry.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
@@ -108,11 +107,9 @@ beforeAll(async () => {
   seed = join(tmp, 'seed')
   execFileSync('bash', [SCENARIO, native], { stdio: 'ignore', env: ENV })
   cpSync(native, seed, { recursive: true })
-  const registry = new OpsRegistry()
   const ram = new RAMVFS()
-  registry.registerVfs(ram)
   parser = await createShellParser({ engineWasm, grammarWasm })
-  ws = new Workspace({ '/w': ram }, { mode: MountMode.WRITE, ops: registry, shellParser: parser })
+  ws = new Workspace({ '/w': ram }, { mode: MountMode.WRITE, shellParser: parser })
   ws.registerCli('git', GIT)
   for (const name of readdirSync(seed)) await load(name)
 })

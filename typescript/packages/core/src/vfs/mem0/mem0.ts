@@ -1,13 +1,17 @@
 import { BaseVFS } from '../base.ts'
 import { Mem0Accessor } from '../../accessor/mem0.ts'
 import { redactMem0Config, type Mem0Config, type Mem0ConfigRedacted } from './config.ts'
-import { MEM0_COMMANDS } from '../../commands/builtin/mem0/index.ts'
 
-import { MEM0_OPS } from '../../ops/mem0/index.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 import { VFSName } from '../../types.ts'
-import type { RegisteredCommand } from '../../commands/config.ts'
 import { PROMPT } from './prompt.ts'
+import type { PathSpec, FileStat } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
+import type { SearchQuery } from '../types.ts'
+import { readdir } from '../../core/mem0/readdir.ts'
+import { read, readStream } from '../../core/mem0/read.ts'
+import { stat } from '../../core/mem0/stat.ts'
+import { searchResource, searchMany } from '../../core/mem0/search.ts'
 
 export interface Mem0VFSState {
   type: string
@@ -32,12 +36,42 @@ export class Mem0VFS extends BaseVFS {
     this.accessor = new Mem0Accessor(config)
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return MEM0_COMMANDS
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return readdir(this.accessor, path, index)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return MEM0_OPS
+  override async read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const data = await read(this.accessor, path, index)
+    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return stat(this.accessor, path, index)
+  }
+
+  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    return readStream(this.accessor, path, index)
+  }
+
+  override search(
+    path: PathSpec,
+    query: SearchQuery,
+    index?: IndexCacheStore,
+  ): Promise<string[] | null> {
+    return searchResource(this.accessor, path, query, index)
+  }
+
+  override searchMany(
+    paths: PathSpec[],
+    query: SearchQuery,
+    index?: IndexCacheStore,
+  ): Promise<string[] | null> {
+    return searchMany(this.accessor, paths, query, index)
   }
 
   override getState(): Mem0VFSState {

@@ -28,8 +28,7 @@ import { registerSecrets } from '../../secrets/registry.ts'
 import { MountMode } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
-import { Workspace } from '../workspace/workspace.ts'
-import { Session } from '../workspace/handle.ts'
+import { Session, Workspace } from '../workspace/workspace.ts'
 import { explainLine, type Judgment } from './explain.ts'
 
 const DEC = new TextDecoder()
@@ -779,7 +778,13 @@ describe('prejudge', () => {
     )
     open.push(w)
     w.createSession('s', { profile: 'r' })
-    for (const line of ['source /data/f.sh', "bash --restricted -c 'rm /data/x'"]) {
+    for (const line of [
+      'source /data/f.sh',
+      "bash --restricted -c 'rm /data/x'",
+      "bash --rcfile $SKIP --version -c 'rm /data/x'",
+      "bash --init-file $SKIP --help -c 'rm /data/x'",
+      "bash --rcfile missing-* --version -c 'rm /data/x'",
+    ]) {
       const said = await judged(w, line, 's', true)
       const ran = await w.shell(line, { sessionId: 's' })
       expect(ran.exitCode).toBe(126)

@@ -122,7 +122,10 @@ describe('an attached path value reaches the command', () => {
 describe('specForCommand', () => {
   it('falls back to the shared specs when the mount lacks the command', () => {
     const reg = new MountRegistry({ '/ram': new StubVFS() }, MountMode.WRITE)
-    expect(specForCommand('grep', reg, '/ram')).toBe(BUILTIN_SPECS.grep)
+    const mount = reg.mountFor('/ram')
+    const name = Object.keys(BUILTIN_SPECS).find((n) => mount.specFor(n) === null)
+    if (name === undefined) throw new Error('the mount serves every shared spec')
+    expect(specForCommand(name, reg, '/ram')).toBe(BUILTIN_SPECS[name])
   })
 
   it('unknown name is null', () => {

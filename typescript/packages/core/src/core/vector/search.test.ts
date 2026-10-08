@@ -112,7 +112,7 @@ describe('vector search', () => {
   ])('refuses a batch the store cannot rank: %j', async (options, message) => {
     const ops = makeSearch(tree())
     await expect(
-      ops.searchMany?.(new Accessor(), [ps('/db/animals')], { query: 'q', options }),
+      ops.searchMany(new Accessor(), [ps('/db/animals')], { query: 'q', options }),
     ).rejects.toThrow(message)
   })
 })

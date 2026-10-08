@@ -28,7 +28,12 @@ from mirage.commands.spec.usage import (
     unknown_option_error,
     usage_hint,
 )
-from mirage.context import reset_program_invocation, set_program_invocation
+from mirage.context import (
+    reset_current_session,
+    reset_program_invocation,
+    set_current_evaluation,
+    set_program_invocation,
+)
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import enoent, fs_strerror
 from mirage.io import IOResult
@@ -38,11 +43,7 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.join import shell_join
 from mirage.utils.quote import shell_quote
-from mirage.workspace.evaluation import (
-    EvaluationContext,
-    reset_current_evaluation,
-    set_current_evaluation,
-)
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.script.script import read_script_bytes
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.lookup.lookup import execs
@@ -606,7 +607,7 @@ async def _run_lines(
             return io
         finally:
             reset_program_invocation(marked)
-            reset_current_evaluation(token)
+            reset_current_session(token)
             taken.discard(slot)
 
     async def worker() -> None:

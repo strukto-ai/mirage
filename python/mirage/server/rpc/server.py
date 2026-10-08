@@ -46,7 +46,7 @@ from mirage.server.vfs_calls import VFS_CALLS, VfsCall
 from mirage.types import JsonValue
 from mirage.workspace.tools.tool_operations import MirageToolOperations
 from mirage.workspace.workspace import Workspace
-from mirage.workspace.workspace.handle import Session
+from mirage.workspace.workspace.workspace import Session
 
 logger = logging.getLogger(__name__)
 

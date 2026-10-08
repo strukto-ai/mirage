@@ -23,9 +23,9 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import WALK_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
+from mirage.view.types import StatPath
 
 PACK_BLOCK = 1 << 18
 

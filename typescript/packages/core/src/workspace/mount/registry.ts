@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ProcessView } from '../../process/types.ts'
+import { commandsFor } from '../../commands/builtin/backends.ts'
+import type { ProcessView } from '../../process/view.ts'
 import type { SessionState } from '../session/session.ts'
 import { isNoMount, noMount } from '../../errors/fs.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
@@ -60,7 +61,7 @@ interface ReadReconciler {
 
 // The stat the dispatcher itself runs for a mount's VFS: its registry op,
 // behind the dispatcher's fence. A trailing-slash glob classifies a match
-// with it, the twin of python's owner.execute_op("stat").
+// with it, the twin of python's owner.call("stat").
 type OpStat = (mount: MountEntry, path: PathSpec) => Promise<unknown>
 
 export const DEV_PREFIX = '/dev/'
@@ -81,12 +82,6 @@ export class MountCommandUnsupported extends Error {
     this.backend = backend
     this.operand = operand
   }
-}
-
-export interface OpsMountInfo {
-  prefix: string
-  resourceType: string
-  mode: MountMode
 }
 
 /** What a placement adds to a driver: the store config and the reference it came from. */
@@ -331,15 +326,14 @@ export class MountRegistry {
       alias === undefined ? init : { ...init, indexConfig: alias.indexConfig },
     )
     if (alias !== undefined) m.activity = alias.activity
-    // Through `registerFns`, as python's `registry.mount` does, so a
+    // Through `registerCommands`, as python's `registry.mount` does, so a
     // family table that fans out over sibling VFS names (the HF four
     // share one table) registers only this mount's entries instead of
     // letting the last sibling win on a shared key.
-    m.registerFns(init.vfs.commands())
+    m.registerCommands(commandsFor(init.vfs))
     for (const cmd of GENERAL_COMMANDS) {
       m.registerGeneral(cmd)
     }
-    m.registerFns(init.vfs.ops())
     return m
   }
 
@@ -481,14 +475,6 @@ export class MountRegistry {
 
   mountPrefixes(): string[] {
     return this.visibleMounts().map((m) => m.prefix)
-  }
-
-  opsMounts(): OpsMountInfo[] {
-    return this.mountList.map((m) => ({
-      prefix: m.prefix,
-      resourceType: m.vfs.name,
-      mode: m.mode,
-    }))
   }
 
   findVfsByName(vfsName: string | null): BaseVFS | null {

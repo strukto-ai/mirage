@@ -31,7 +31,6 @@ async function runBc(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
     stdin: ENC.encode(stdin),
     flags,
-    filetypeFns: null,
     cwd: '/',
     ...(env === undefined ? {} : { env }),
   })

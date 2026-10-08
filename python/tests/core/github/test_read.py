@@ -23,7 +23,6 @@ import mirage.core.github.tree
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexEntry, LookupStatus
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.github.io import IO
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.read import read, read_bytes
 from mirage.core.github.stat import stat
@@ -31,7 +30,9 @@ from mirage.core.github.tree import refill_snapshot
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
+from mirage.vfs.github import GitHubVFS
 from tests.fixtures.github_api import FakeGitHub, blob_sha, race_index, serve
+from tests.fixtures.vfs_io import io_for
 
 
 @pytest.fixture
@@ -187,11 +188,12 @@ async def test_the_synthesized_stream_records_once():
     data = b"streamed"
     with serve(FakeGitHub(files={"a.txt": data})) as gh:
         scope = RecordingScope()
+        accessor = _served(gh)
         try:
             chunks = [
                 c
-                async for c in IO.read_stream(
-                    _served(gh), _at("a.txt", "/gh"), RAMIndexCacheStore()
+                async for c in io_for(GitHubVFS, accessor).read_stream(
+                    accessor, _at("a.txt", "/gh"), RAMIndexCacheStore()
                 )
             ]
         finally:

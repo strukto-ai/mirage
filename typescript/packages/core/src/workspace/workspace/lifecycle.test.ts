@@ -375,7 +375,7 @@ it.each(
       expect(indexClosed).toBe(false)
       return { state: CapacityState.UNKNOWN }
     })
-    ws.opsRegistry.register({ name: 'read', vfs: 'ram', filetype: null, write: false, fn: read })
+    vfs.read = read as unknown as typeof vfs.read
     const [registered] = command({
       name: 'readvalue',
       vfs: 'ram',

@@ -17,10 +17,10 @@ import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { readBytesOp, statOp } from '../../generic/crossmount/utils.ts'
 import { tarGeneric } from '../../generic/tar/tar.ts'
-import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 import { isDirOf, relayIsDirOf, walkOf } from '../archive_io.ts'
 
-const tar: BuilderFn = async (ops, accessor, paths, texts, opts) => {
+const tar: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
   const idx = opts.index ?? undefined
   const write = requireOp(ops.write, 'write')
   const mkdir = requireOp(ops.mkdir, 'mkdir')
@@ -70,7 +70,7 @@ const tar: BuilderFn = async (ops, accessor, paths, texts, opts) => {
   })
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'tar',
   write: true,
   fn: tar,

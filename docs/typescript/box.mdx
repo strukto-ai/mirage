@@ -162,6 +162,12 @@ of `/box/foo/bar/anyfile.json` hit the cache instead of re-walking.
 
 Listings live for the mount's `ttl` (600 s by default), at most 24 hours. To force re-resolution, recreate the `BoxVFS`.
 
+## Writes
+
+A write records the `sha1` its upload reply names, so a `fresh` read
+right after a `tee` or `sed -i` downloads nothing. See
+[Writes](/home/cache#writes).
+
 ## Reads under `fresh`
 
 A Box mount accepts `read: fresh`. The token is the file's `sha1`, which a

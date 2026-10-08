@@ -29,6 +29,15 @@ class DenyAws(Policy):
         return None
 
 
+class DenyUnset(Policy):
+    """Refuses every unset and allows every write."""
+
+    async def pre_session(self, ctx: SessionContext) -> Action | None:
+        if ctx.verb == "unset":
+            return Deny("no unsets\n")
+        return None
+
+
 @pytest.fixture
 def guarded():
     """A workspace whose policy refuses writes to ``AWS_*``."""
@@ -63,6 +72,10 @@ async def value_of(ws, name: str) -> bytes:
         ("((AWS_LIMIT=5))", "AWS_LIMIT"),
         ("printf -v AWS_KEY %s x", "AWS_KEY"),
         ("for ((AWS_I=0; AWS_I<1; AWS_I++)); do :; done", "AWS_I"),
+        # The write re-aims an unset reference, so the mark lands on a
+        # name the assignment's own gate never saw.
+        ("declare -n ref; export ref=AWS_KEY", "AWS_KEY"),
+        ("declare -n ref; readonly ref=AWS_KEY", "AWS_KEY"),
     ],
 )
 async def test_every_session_writer_clears_the_gate(
@@ -136,3 +149,50 @@ async def test_refused_offset_does_not_expand_length(guarded):
     assert result.refusal and "not yours to set" in result.refusal.reason
     assert await value_of(guarded, "AWS_LIMIT") == b"[]"
     assert await value_of(guarded, "OTHER") == b"[]"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,name,expected",
+    [
+        ("readonly SAFE=(one) AWS_BLOCKED=(two)", "SAFE", "-ar"),
+        ("export SAFE=(one) AWS_BLOCKED=(two)", "SAFE", "-ax"),
+        ("declare -rx SAFE=(one) AWS_BLOCKED=(two)", "SAFE", "-arx"),
+    ],
+)
+async def test_a_refused_literal_leaves_the_stored_ones_marked(
+    guarded, line: str, name: str, expected: str
+):
+    # The literals store first and take their marks once they all have;
+    # a policy refusing a later one must not leave an earlier one stored
+    # but unfrozen.
+    result = await guarded.shell(line)
+    assert result.refusal and "not yours to set" in result.refusal.reason
+    shown = await guarded.shell(f"declare -p {name}")
+    assert shown.stdout == f'declare {expected} {name}=([0]="one")\n'.encode()
+
+
+@pytest.mark.asyncio
+async def test_a_literal_mark_stays_on_the_target_its_write_cleared(guarded):
+    # The literal writes through `ref` to `T`; the plain operand then
+    # re-aims `ref` at `AWS_KEY`, and the literal's `-x` must not follow
+    # it there past the gate. Under `-n` it marks the reference itself.
+    result = await guarded.shell(
+        "T=old; declare -n ref=T; declare -nx ref=AWS_KEY ref=(one)"
+    )
+    assert result.exit_code == 0
+    shown = await guarded.shell("declare -p ref AWS_KEY")
+    assert shown.stdout == b'declare -nx ref="AWS_KEY"\n'
+    assert b"AWS_KEY: not found" in (shown.stderr or b"")
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_local_assignment_asks_for_no_unset():
+    # The new local's reset is the scope's bookkeeping, not a deletion
+    # the line asked for; only the assignment is the gated write.
+    with Workspace({"/ram/": RAMVFS()}, policies=[DenyUnset()]) as ws:
+        result = await ws.shell(
+            'X=outer; f(){ local X=inner; echo "$X"; }; f; echo "$X"'
+        )
+    assert result.exit_code == 0
+    assert result.stdout == b"inner\nouter\n"

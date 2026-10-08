@@ -20,7 +20,9 @@ from mirage.commands.builtin.langfuse import COMMANDS
 from mirage.commands.config import CommandOpts
 from mirage.io.types import materialize
 from mirage.types import PathSpec
+from mirage.vfs.langfuse import LangfuseVFS
 from mirage.vfs.langfuse.config import LangfuseConfig
+from tests.fixtures.vfs_io import io_for
 
 
 def _find_command():
@@ -46,7 +48,11 @@ async def _run(paths, *texts: str, **flags) -> list[str]:
         accessor,
         paths,
         list(texts),
-        CommandOpts(index=RAMIndexCacheStore(), flags={**flags}),
+        CommandOpts(
+            io=io_for(LangfuseVFS, accessor),
+            index=RAMIndexCacheStore(),
+            flags={**flags},
+        ),
     )
     data = await materialize(stdout)
     return data.decode().splitlines()

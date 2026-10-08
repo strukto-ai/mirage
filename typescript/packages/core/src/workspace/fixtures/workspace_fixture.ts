@@ -14,10 +14,11 @@
 
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { OpsRegistry } from '../../ops/registry.ts'
+import type { ByteSource, IOResult } from '../../io/types.ts'
+import type { OpRecord } from '../../observe/record.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../shell/parse/index.ts'
-import { MountMode, type Refusal } from '../../types.ts'
+import { type CacheFacts, MountMode, type Refusal } from '../../types.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { describeRefusal, saysWhy } from '../../policy/index.ts'
 
@@ -34,6 +35,39 @@ export async function getTestParser(): Promise<ShellParser> {
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
+
+/** A writable workspace with a read-caching RAM mount at `/r`. */
+export async function cachingRamWorkspace(): Promise<Workspace> {
+  const ram = new RAMVFS()
+  ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
+  return new Workspace({ '/r': ram }, { mode: MountMode.WRITE, shellParser: await getTestParser() })
+}
+
+export type Mark = [op: string, path: string, claimed: ByteSource | null | undefined]
+
+type ApplyIoFn = (
+  io: IOResult,
+  records?: readonly OpRecord[],
+  cacheFacts?: (path: string) => CacheFacts,
+) => Promise<void>
+
+/**
+ * Snapshot each `applyIo` call's records (as `[op, path, claimed]`) and a copy
+ * of its writes on `ws`. The hook only snapshots: an assertion thrown inside
+ * applyIo is folded into the line's result. The marks are read before the
+ * real applyIo, since the line clears them once it has run.
+ */
+export function captureMarks(ws: Workspace): [Mark[], Record<string, ByteSource>][] {
+  const captured: [Mark[], Record<string, ByteSource>][] = []
+  const dispatcher = (ws as unknown as { dispatcher: { applyIo: ApplyIoFn } }).dispatcher
+  const orig = dispatcher.applyIo.bind(dispatcher)
+  dispatcher.applyIo = async (io, records, cacheFacts) => {
+    const marks: Mark[] = (records ?? []).map((r) => [r.op, r.path, r.claimed])
+    captured.push([marks, { ...io.writes }])
+    return orig(io, records, cacheFacts)
+  }
+  return captured
+}
 
 export interface TestWorkspace {
   ws: Workspace
@@ -75,14 +109,9 @@ export async function makeWorkspace(extra: { agentId?: string } = {}): Promise<T
   putFile(ram, '/nums.txt', '5\n3\n1\n4\n2\n')
   putFile(ram, '/words.txt', 'banana\napple\ncherry\napple\n')
 
-  const registry = new OpsRegistry()
-  registry.registerVfs(s3)
-  registry.registerVfs(disk)
-  registry.registerVfs(ram)
-
   const ws = new Workspace(
     { '/s3': s3, '/disk': disk, '/ram': ram },
-    { mode: MountMode.EXEC, ops: registry, shellParser: parser, ...extra },
+    { mode: MountMode.EXEC, shellParser: parser, ...extra },
   )
   ws.getSession(ws.defaultSessionId).cwd = '/s3'
   return { ws, s3, disk, ram }

@@ -37,17 +37,11 @@ import { ioReach, ioRefusal } from '../../policy/match/rule.ts'
 import { hasRules, readsArgs, scopesPaths } from '../../policy/match/reads.ts'
 import type { ValueType } from '../../commands/spec/types.ts'
 import { commandNodes } from '../../runtime/routing/index.ts'
-import {
-  getParts,
-  getRedirects,
-  getText,
-  literalWord,
-  splitEnvPrefix,
-} from '../../shell/helpers.ts'
+import { getParts, getRedirects, literalWord, splitEnvPrefix } from '../../shell/helpers.ts'
 import { NodeType, RedirectKind } from '../../shell/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { PathSpec, type Refusal } from '../../types.ts'
-import type { EntryGate } from '../../types.ts'
+import type { EntryGate } from '../../policy/types.ts'
 import { isGlob } from '../../utils/hidden.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { makeAbortError } from '../abort.ts'
@@ -80,7 +74,7 @@ import {
 } from '../lookup/index.ts'
 import type { SessionState } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
-import { innerLines, innerReadable, wordValue, type Word } from './inner_lines.ts'
+import { innerLines, innerReadable, readWord, wordValue, type Word } from './inner_lines.ts'
 import {
   argvFrame,
   type Frame,
@@ -731,10 +725,7 @@ export async function admitLine(
   const scope = frame ?? rootFrame(root, handed?.origin ?? null)
   for (const node of commandNodes(root)) {
     const [, parts] = splitEnvPrefix(getParts(node))
-    const words: Word[] = parts.map((part) => ({
-      raw: getText(part),
-      text: literalWord(part, home),
-    }))
+    const words = parts.map((part) => readWord(part, home))
     if (words.length === 0) continue
     const refusal = await admitWords(
       words,

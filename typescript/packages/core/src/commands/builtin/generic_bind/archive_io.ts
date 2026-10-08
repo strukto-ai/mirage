@@ -15,14 +15,14 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { walkFind, type WalkFindDeps } from '../../../core/generic/find.ts'
-import type { ChildMounts } from '../../../ops/types.ts'
+import type { ChildMounts } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { FileType, type PathSpec } from '../../../types.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { readdirOp, statOp } from '../generic/crossmount/utils.ts'
 import type { DirProbe, StatFn, WalkFn } from '../generic/archive/walk.ts'
-import type { CommandIO } from './adapter.ts'
+import type { CommandIO } from '../../config.ts'
 
 function walkWith(
   readdir: WalkFindDeps['readdir'],

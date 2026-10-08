@@ -17,8 +17,6 @@ from functools import partial
 from typing import Any
 
 from mirage.io import IOResult
-from mirage.ops.types import SessionView
-from mirage.shell.arith import evaluate_arith
 from mirage.shell.backticks import split_backtick_region
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.call_stack import CallStack
@@ -26,6 +24,7 @@ from mirage.shell.errors import (
     ArithError,
     BadSubstitution,
     DiscardSignal,
+    ReadonlyError,
     named,
 )
 from mirage.shell.escapes import (
@@ -40,6 +39,7 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.utils.glob_walk import mark_escaped_globs, mark_globs, unmark_globs
 from mirage.utils.path import expand_tilde
+from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.statement import record_status
 from mirage.workspace.expand.constants import ARITH_DELIMITERS, ARITH_OPERATORS
@@ -51,9 +51,9 @@ from mirage.workspace.expand.variable import (
     land_arith_writes,
     parameter_chunks,
 )
-from mirage.workspace.session import visible_env
+from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.shell_dirs import home_dir
-from mirage.workspace.session.state import random_reader, session_elements
+from mirage.workspace.session.state import random_reader, session_arith
 
 
 def _folded_whitespace(node: TSNodeLike) -> str:
@@ -156,7 +156,7 @@ async def child_line(
         node=node,
         span=span,
         substitution=True,
-        call_stack=(call_stack or CallStack()).fork(),
+        call_stack=(call_stack or CallStack()).fork(paren=False),
     )
 
 
@@ -329,6 +329,35 @@ async def _arith_subscript(
         else:
             parts.append(get_text(sc))
     return f"{name}[{''.join(parts)}]"
+
+
+async def _arith_value(
+    session: SessionState, view: SessionView | None, expr: str
+) -> str:
+    """An arithmetic expansion's value.
+
+    Reads resolve against the visible env, so a hidden name counts as
+    unset; the write-back goes through the session plane's door, so a
+    ``pre_session`` rule governs ``$((X=5))`` exactly as it governs
+    ``X=5``. bash bound the assignments made before an error, RANDOM's
+    seed included; they land before the line dies.
+
+    Args:
+        session (SessionState): the session the expression reads.
+        view (SessionView | None): the session plane's gated door.
+        expr (str): the expanded expression.
+    """
+    reader = random_reader(session)
+    try:
+        result = session_arith(session, expr, reader)
+    except ArithError as exc:
+        await land_arith_writes(session, view, exc.writes, reader)
+        raise arith_exit(expr, exc) from exc
+    except ReadonlyError as exc:
+        await land_arith_writes(session, view, exc.writes, reader)
+        raise exc.signal() from exc
+    await land_arith_writes(session, view, result.writes, reader)
+    return str(result.value)
 
 
 async def expand_node(
@@ -625,30 +654,18 @@ async def _substitution(
     session = context.session
     prefix = _folded_whitespace(ts_node)
     if ts_node.type == NT.ARITHMETIC_EXPANSION:
-        expr = await expand_arith(
-            ts_node, context, execute_fn, call_stack, view=view
+        return await _arith_value(
+            session,
+            view,
+            await expand_arith(
+                ts_node, context, execute_fn, call_stack, view=view
+            ),
         )
-        try:
-            # Reads resolve against the visible env, so a hidden name
-            # counts as unset; the write-back below goes through the
-            # session plane's door, so a pre_session rule governs
-            # `$((X=5))` exactly as it governs `X=5`.
-            reader = random_reader(session)
-            result = evaluate_arith(
-                expr,
-                visible_env(session),
-                elements=session_elements(session, reader),
-                read_var=reader.read,
-                wrote_var=reader.wrote,
-            )
-        except ArithError as exc:
-            # bash bound the assignments made before the error, RANDOM's
-            # seed included; they land before the line dies.
-            await land_arith_writes(session, view, exc.writes, reader)
-            raise arith_exit(expr, exc) from exc
-        await land_arith_writes(session, view, result.writes, reader)
-        return str(result.value)
-    source = getattr(ts_node, "source_text", ts_node.text) or b""
+    source = (
+        getattr(ts_node, "inlined", None)
+        or getattr(ts_node, "source_text", ts_node.text)
+        or b""
+    )
     raw = decode_text(source)[len(prefix) :]
     if raw.startswith("`") and raw.endswith("`"):
         # Backtick regions are re-lexed here rather than trusted from

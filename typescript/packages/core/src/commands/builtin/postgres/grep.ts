@@ -19,8 +19,7 @@ import { command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { scanIo } from '../generic_bind/index.ts'
 import { runSearch } from '../generic_bind/search.ts'
-
-import { IO } from './io.ts'
+import { mountIo } from '../generic_bind/adapter.ts'
 
 // The push-down is a literal-substring search that prints each matching
 // row as a whole line; literalPushdownOperand defers a real regex, a
@@ -31,7 +30,7 @@ export const POSTGRES_GREP = command({
   spec: specOf('grep'),
   fn: (accessor: PostgresAccessor, paths, texts, opts) =>
     runSearch<PostgresAccessor>(
-      scanIo(IO, opts.ns, opts.mountPrefix)[0],
+      scanIo(mountIo(opts), opts.ns, opts.mountPrefix)[0],
       'grep',
       accessor,
       paths,

@@ -14,16 +14,35 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import replace
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 
-from mirage.ops.types import NamespaceView, SessionView
-from mirage.process.types import ProcessView
+from mirage.process.view import ProcessView
 from mirage.runtime.resolver import MountResolver
-from mirage.runtime.types import DispatchFn, RuntimeContext
+from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 from mirage.utils.context_scope import ContextScope
+from mirage.view.types import NamespaceView, SessionView
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeContext:
+    """Local workspace binding captured for one execution, never guest globals.
+
+    The scoped doors retain session, policy, and observation context even
+    when called later from a worker callback. No workspace stores are exposed.
+    """
+
+    binding: WorkspaceBinding
+    dispatch: DispatchFn
+    resolver: MountResolver
+    ns: NamespaceView
+    session_view: SessionView | None
+    cwd: PathSpec
+    env: Mapping[str, str]
+    scope: ContextScope
+    processes: ProcessView | None = None
 
 
 class WorkspaceBinding:

@@ -15,8 +15,9 @@
 import type { Evicted } from '../cache/index/config.ts'
 import { ListingCheckStore } from '../cache/index/ram.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
-import type { OpsRegistry } from '../ops/registry.ts'
-import type { BaseVFS } from '../vfs/base.ts'
+import { BaseVFS } from '../vfs/base.ts'
+import { callNames, declaredCalls } from '../vfs/call.ts'
+import { Effect, Target } from '../vfs/types.ts'
 import { FileStat, ListingVersion, PathSpec, ReadPolicy } from '../types.ts'
 import { enoent, isEnoent, isEnotdir, isMissingOp } from '../errors/fs.ts'
 import { mountKey } from '../utils/key_prefix.ts'
@@ -25,7 +26,13 @@ import { ancestors } from '../utils/path.ts'
 import type { MountEntry } from './mount/mount.ts'
 import type { Namespace } from './mount/namespace/namespace.ts'
 
-const REVALIDATE_OPS = new Set(['read', 'read_bytes', 'stat'])
+const CALLS = declaredCalls(BaseVFS)
+
+// What a FRESH read policy revalidates: a file's content and a stat.
+const REVALIDATE_OPS: ReadonlySet<string> = new Set([
+  ...callNames(CALLS, { effects: [Effect.READ], targets: [Target.FILE] }),
+  ...callNames(CALLS, { effects: [Effect.METADATA] }),
+])
 
 // The spec a backend op sees for an absolute virtual path on `mount`.
 function scopeOf(mount: MountEntry, path: string): PathSpec {
@@ -56,9 +63,9 @@ enum Verdict {
  *
  * Three read paths call in: the cached-read gate (mayServeCached), which the
  * dispatcher and the file cache's own door both run, its main-op catch
- * (onOpMissing) for cross-mount and programmatic reads, and the mount
+ * (onEnoent) for cross-mount and programmatic reads, and the mount
  * registry's per-command reconcile (reconcileRead) for single-mount shell
- * reads. The re-stat goes through the ops registry (not mount.executeOp,
+ * reads. The re-stat goes through the ops registry (not mount.call,
  * whose op set omits stat). Reconcile state follows each consumer's store
  * (RAM local, Redis shared across runtimes), so this is a thin coordinator
  * holding references, not config.
@@ -75,12 +82,10 @@ enum Verdict {
 export class Reconciler {
   private readonly cache: FileCache & BaseVFS
   private readonly namespace: Namespace
-  private readonly opsRegistry: OpsRegistry
 
-  constructor(cache: FileCache & BaseVFS, namespace: Namespace, opsRegistry: OpsRegistry) {
+  constructor(cache: FileCache & BaseVFS, namespace: Namespace) {
     this.cache = cache
     this.namespace = namespace
-    this.opsRegistry = opsRegistry
   }
 
   // Re-stat the backend and apply the matching cache/overlay reaction. A
@@ -91,7 +96,6 @@ export class Reconciler {
   // backend is reused (CacheManager.probedStat) until a write lands: the
   // verdict and its reactions still run, only the round trip is skipped.
   private async probe(mount: MountEntry, path: string): Promise<Verdict> {
-    const vfs = mount.vfs
     const scope = scopeOf(mount, path)
     const manager = mount.cacheManager
     let remoteStat: unknown = manager?.probedStat(scope) ?? null
@@ -101,9 +105,7 @@ export class Reconciler {
       scratch = new ListingCheckStore({ hints: mount.index })
       try {
         // No cached row answers; the mount's rows ride along as hints.
-        remoteStat = await this.opsRegistry.call('stat', vfs, vfs.accessor, scope, [], {
-          index: scratch,
-        })
+        remoteStat = await mount.callKeyed('stat', scope, [], { index: scratch })
       } catch (err) {
         if (isEnoent(err) || isEnotdir(err)) {
           await this.onMissing(path)
@@ -265,17 +267,9 @@ export class Reconciler {
   // Ask the backend for the version a listing check compares: the mount root
   // or the folder the version covers.
   private async listingFingerprint(mount: MountEntry, path: string): Promise<string | null> {
-    const vfs = mount.vfs
-    const remote = await this.opsRegistry.call(
-      'stat',
-      vfs,
-      vfs.accessor,
-      scopeOf(mount, path),
-      [],
-      {
-        index: new ListingCheckStore(),
-      },
-    )
+    const remote = await mount.callKeyed('stat', scopeOf(mount, path), [], {
+      index: new ListingCheckStore(),
+    })
     return remote instanceof FileStat ? remote.fingerprint : null
   }
 
@@ -316,10 +310,10 @@ export class Reconciler {
   //
   // `isEnoent` is load-bearing and stays: the call site is a generic
   // catch, so without it a 500, a timeout or an auth failure would GC.
-  async onOpMissing(mount: MountEntry, opName: string, path: string, err: unknown): Promise<void> {
+  async onEnoent(mount: MountEntry, name: string, path: string, err: unknown): Promise<void> {
     if (
       mount.read.policy === ReadPolicy.FRESH &&
-      REVALIDATE_OPS.has(opName) &&
+      REVALIDATE_OPS.has(name) &&
       (isEnoent(err) || isEnotdir(err))
     ) {
       await this.onMissing(path)

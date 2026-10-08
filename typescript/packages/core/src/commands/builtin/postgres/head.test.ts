@@ -32,6 +32,8 @@ import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { resolvePostgresConfig } from '../../../vfs/postgres/config.ts'
 import { POSTGRES_HEAD } from './head.ts'
+import { ioFor } from '../../../test-utils.ts'
+import { PostgresVFSBase } from '../../../vfs/postgres/postgres.ts'
 
 class StubDriver implements PgDriver {
   query<R = Record<string, unknown>>(): Promise<PgQueryResult<R>> {
@@ -69,7 +71,7 @@ async function head(n: number, maxReadRows?: number): Promise<[string[], number,
   const result = await cmd.fn(accessor, [ROWS], [], {
     stdin: null,
     flags: { lines: String(n) },
-    filetypeFns: null,
+    io: ioFor(PostgresVFSBase, accessor),
     cwd: '/',
   })
   if (result === null) throw new Error('head returned nothing')

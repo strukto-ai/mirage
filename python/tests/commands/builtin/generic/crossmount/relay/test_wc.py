@@ -162,8 +162,8 @@ async def test_a_wc_without_counts_is_recounted_alone():
     first.load_state({"files": {"/x": b"a\nb\n"}})
     second.load_state({"files": {"/y": b"c\n"}})
     ws = Workspace({"/a": first, "/b": second}, mode=MountMode.WRITE)
-    ws.mount("/a").register_fns([_row_count])
-    ws.mount("/b").register_fns([_uncounted])
+    ws.mount("/a").register_commands([_row_count])
+    ws.mount("/b").register_commands([_uncounted])
     try:
         result = await ws.shell("wc -l /a/x /b/y")
         assert (await result.materialize_stdout()) == (

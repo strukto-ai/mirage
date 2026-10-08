@@ -29,7 +29,6 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 import { IOResult } from '../../../../io/types.ts'
-import { OpsRegistry } from '../../../../ops/registry.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
@@ -86,12 +85,7 @@ async function stage(setup: Setup): Promise<[Workspace, string]> {
   setup(repo)
 
   const ram = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram)
-  const ws = new Workspace(
-    { '/repo': ram },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  const ws = new Workspace({ '/repo': ram }, { mode: MountMode.WRITE, shellParser: parser })
   const dispatch: Dispatch = async (op, path, args = [], kwargs = {}) => [
     await ws.dispatch(op, path.virtual, args, kwargs),
     new IOResult(),

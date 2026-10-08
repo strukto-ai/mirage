@@ -14,11 +14,11 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
+    GenericCommand,
     Operation,
+    require_op,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -42,8 +42,8 @@ async def touch(
             f"touch: missing file operand\n{usage_hint('touch')}", 1
         )
     paths = await ops.resolve_glob(accessor, paths, opts.index)
-    exists = ops.require(Operation.EXISTS)
-    write = ops.require(Operation.WRITE)
+    exists = require_op(ops, Operation.EXISTS)
+    write = require_op(ops, Operation.WRITE)
     created: dict[str, ByteSource] = {}
     errors: list[str] = []
     for p in paths:
@@ -67,4 +67,4 @@ async def touch(
     )
 
 
-BUILDER = Builder("touch", touch, write=True)
+BUILDER = GenericCommand("touch", touch, write=True)

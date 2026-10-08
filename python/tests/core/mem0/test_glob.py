@@ -3,9 +3,10 @@ from pydantic import SecretStr
 
 from mirage.accessor.mem0 import Mem0Accessor
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.commands.builtin.mem0.io import resolve_glob
 from mirage.types import PathSpec
 from mirage.vfs.mem0.config import Mem0Config
+from mirage.vfs.mem0.mem0 import Mem0VFS
+from tests.fixtures.vfs_io import io_for
 
 
 class FakeClient:
@@ -36,7 +37,9 @@ async def test_passthrough_non_pattern():
         vfs_path="aaa.json",
         resolved=True,
     )
-    out = await resolve_glob(acc, [p], RAMIndexCacheStore())
+    out = await io_for(Mem0VFS, acc).resolve_glob(
+        acc, [p], RAMIndexCacheStore()
+    )
     assert out == [p]
 
 
@@ -50,5 +53,7 @@ async def test_expands_star():
         pattern="*.json",
         resolved=False,
     )
-    out = await resolve_glob(acc, [p], RAMIndexCacheStore())
+    out = await io_for(Mem0VFS, acc).resolve_glob(
+        acc, [p], RAMIndexCacheStore()
+    )
     assert sorted(x.virtual for x in out) == ["/mem/aaa.json", "/mem/bbb.json"]

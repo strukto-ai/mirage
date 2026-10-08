@@ -57,7 +57,7 @@ export async function deleteCmd(inv: CLIInvocation): Promise<CommandFnResult> {
       description: fl.asStr('commit_description') ?? '',
       createPr: fl.asBool('create_pr'),
     })
-    url = typeof reply.commitUrl === 'string' ? reply.commitUrl : ''
+    url = typeof reply?.commitUrl === 'string' ? reply.commitUrl : ''
   }
   return textOut(`Files correctly deleted from repo. Commit: ${url}.\n`, stderr)
 }

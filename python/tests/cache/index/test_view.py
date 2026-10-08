@@ -35,9 +35,9 @@ from mirage.cache.index.ram import ListingCheckStore, RAMIndexCacheStore
 from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.view import IndexView
-from mirage.ops.registry import RegisteredOp
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from tests.fixtures.vfs_io import override
 
 
 @pytest.mark.asyncio
@@ -110,13 +110,7 @@ async def test_late_index_write_cannot_cross_mount_ownership(
                 await index.entries()
         return ["/data/stale"]
 
-    ws.mount(prefix).register_fns(
-        [
-            RegisteredOp(
-                name="readdir", vfs="ram", filetype=None, fn=delayed_readdir
-            )
-        ]
-    )
+    override(ws.mount(prefix).vfs, "readdir", delayed_readdir)
     reading = asyncio.create_task(ws.vfs.readdir("/data"))
     changing = None
     replacement = RAMVFS()

@@ -15,7 +15,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import * as client from './client.ts'
-import { LfsRequiredError, commit, commitUrl, payload, uploadModes } from './commit.ts'
+import { COMMIT_CHUNK } from './constants.ts'
+import { LfsRequiredError, commit, commitUrl, payload, preupload } from './commit.ts'
 
 function accessor(): HfHubAccessor {
   return new HfHubAccessor({ repoId: 'acme/widget' } as never)
@@ -75,25 +76,45 @@ describe('payload', () => {
   })
 })
 
-describe('uploadModes', () => {
+describe('preupload', () => {
   it('sends a sample, not the content', async () => {
     const spy = vi
       .spyOn(client, 'hubPost')
       .mockResolvedValue({ files: [{ path: 'a.txt', uploadMode: 'regular' }] })
-    const modes = await uploadModes(accessor(), [
+    const modes = await preupload(accessor(), [
       { path: 'a.txt', data: new Uint8Array(2000).fill(120) },
     ])
     const body = spy.mock.calls[0]?.[2] as { files: { sample: string; size: number }[] }
     const first = body.files[0] as { sample: string; size: number }
     expect(Buffer.from(first.sample, 'base64').length).toBe(512)
     expect(first.size).toBe(2000)
-    expect(modes.get('a.txt')).toBe('regular')
+    expect(modes.get('a.txt')).toEqual({ mode: 'regular', ignore: false })
     spy.mockRestore()
+  })
+
+  it.each([
+    ['.gitignore', '# µ\n' + '*.bin\n'.repeat(100)],
+    ['.gitignore', ''],
+    ['sub/.gitignore', '*'],
+  ])('sends root gitignore with every chunk (%s)', async (path, content) => {
+    const post = vi.spyOn(client, 'hubPost').mockResolvedValue({ files: [] })
+    const additions = Array.from({ length: COMMIT_CHUNK }, (_, i) => ({
+      path: `part-${String(i)}`,
+      data: bytes('x'),
+    }))
+    additions.push({ path, data: bytes(content) })
+    await preupload(accessor(), additions)
+    expect(post).toHaveBeenCalledTimes(2)
+    for (const [, , body] of post.mock.calls) {
+      if (path === '.gitignore') expect(body).toHaveProperty('gitIgnore', content)
+      else expect(body).not.toHaveProperty('gitIgnore')
+    }
+    post.mockRestore()
   })
 
   it('asks nothing for no additions', async () => {
     const spy = vi.spyOn(client, 'hubPost')
-    expect((await uploadModes(accessor(), [])).size).toBe(0)
+    expect((await preupload(accessor(), [])).size).toBe(0)
     expect(spy).not.toHaveBeenCalled()
     spy.mockRestore()
   })
@@ -141,6 +162,72 @@ describe('commit', () => {
     const ndjson = vi.spyOn(client, 'hubPostNdjson').mockResolvedValue({})
     await commit(accessor(), { deletions: ['a.txt'] })
     expect(post).not.toHaveBeenCalled()
+    post.mockRestore()
+    ndjson.mockRestore()
+  })
+})
+
+describe('unchanged uploads', () => {
+  it.each([
+    ['regular', bytes('hi'), '32f95c0d1244a78b2be1bab8de17906fabb2c4a8'],
+    ['lfs', bytes('hi'), '8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4'],
+    ['lfs', new Uint8Array(), 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391'],
+    [
+      'regular',
+      new Uint8Array([0, 255, ...new Uint8Array(600).fill(120)]),
+      'e3e299f367bb91e875a9717da73dc05badb1fe7e',
+    ],
+  ] as const)('skips a commit for identical %s content', async (mode, data, oid) => {
+    const post = vi.spyOn(client, 'hubPost').mockResolvedValue({
+      files: [{ path: 'same', uploadMode: mode, oid }],
+    })
+    const ndjson = vi.spyOn(client, 'hubPostNdjson').mockResolvedValue({})
+    expect(await commit(accessor(), { additions: [{ path: 'same', data }] })).toBeUndefined()
+    expect(ndjson).not.toHaveBeenCalled()
+    post.mockRestore()
+    ndjson.mockRestore()
+  })
+
+  it('keeps changed files and deletions', async () => {
+    const post = vi.spyOn(client, 'hubPost').mockResolvedValue({
+      files: [
+        { path: 'same', uploadMode: 'regular', oid: '32f95c0d1244a78b2be1bab8de17906fabb2c4a8' },
+        { path: 'changed', uploadMode: 'regular', oid: 'old' },
+        { path: 'new', uploadMode: 'regular' },
+        { path: 'ignored', uploadMode: 'lfs', shouldIgnore: true },
+      ],
+    })
+    const ndjson = vi.spyOn(client, 'hubPostNdjson').mockResolvedValue({ commitOid: 'next' })
+    await commit(accessor(), {
+      additions: ['same', 'changed', 'new', 'ignored'].map((path) => ({ path, data: bytes('hi') })),
+      deletions: ['obsolete'],
+    })
+    const body = ndjson.mock.calls[0]?.[2]
+    if (body === undefined) throw new Error('Expected a commit request')
+    const operations = lines(body).slice(1)
+    expect(operations.map((op) => [op.key, (op.value as { path: string }).path])).toEqual([
+      ['file', 'changed'],
+      ['file', 'new'],
+      ['deletedFile', 'obsolete'],
+    ])
+    post.mockRestore()
+    ndjson.mockRestore()
+  })
+
+  it('does not cancel deletions when every addition is unchanged', async () => {
+    const post = vi.spyOn(client, 'hubPost').mockResolvedValue({
+      files: [
+        { path: 'same', uploadMode: 'regular', oid: '32f95c0d1244a78b2be1bab8de17906fabb2c4a8' },
+      ],
+    })
+    const ndjson = vi.spyOn(client, 'hubPostNdjson').mockResolvedValue({ commitOid: 'next' })
+    await commit(accessor(), {
+      additions: [{ path: 'same', data: bytes('hi') }],
+      deletions: ['obsolete'],
+    })
+    const body = ndjson.mock.calls[0]?.[2]
+    if (body === undefined) throw new Error('Expected a commit request')
+    expect(lines(body).slice(1)).toEqual([{ key: 'deletedFile', value: { path: 'obsolete' } }])
     post.mockRestore()
     ndjson.mockRestore()
   })

@@ -13,59 +13,83 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from typing import TYPE_CHECKING, Literal
+from collections.abc import Awaitable, Callable
+from typing import Literal
 
 from mirage.cache.index import NULL_INDEX
 from mirage.context import (
-    get_current_session_unless_foreign,
     reset_current_session,
     set_current_session,
 )
 from mirage.errors.fs import eexist, enoent, enotdir
+from mirage.policy.profile import CompiledProfile
 from mirage.types import FileType, MountMode, PathSpec, ReadSpec
 from mirage.utils.hidden import path_visible
 from mirage.utils.path import norm, parent
 from mirage.vfs.document.document import DocumentVFS
 from mirage.workspace.documentation import render
-from mirage.workspace.session.resolve import apply_profile, compile_profile
+from mirage.workspace.files import Files
+from mirage.workspace.mount.registry import MountRegistry
+from mirage.workspace.session.manager import SessionManager
+from mirage.workspace.session.resolve import apply_profile
 from mirage.workspace.session.session import SessionState
-
-if TYPE_CHECKING:
-    from mirage.workspace.workspace.workspace import Workspace
 
 
 class Documents:
-    """Session-aware generated files owned by one live workspace."""
+    """Session-aware generated files owned by one live workspace.
 
-    def __init__(self, workspace: "Workspace") -> None:
-        self.workspace = workspace
+    Args:
+        registry (MountRegistry): the workspace's mounts.
+        files (Files): the workspace's ``ws.vfs``.
+        manager (SessionManager): the workspace's sessions.
+        session (Callable[[], SessionState]): the session a call runs as.
+        profile (Callable[[str], CompiledProfile]): a named profile,
+            compiled.
+        ensure_loaded (Callable[[], Awaitable[None]]): hydrates the
+            sessions.
+        unmount (Callable[[str], Awaitable[None]]): removes a mount.
+        follow_parent (Callable[[str], str]): a path with every link
+            above its name followed.
+    """
+
+    def __init__(
+        self,
+        registry: MountRegistry,
+        files: Files,
+        manager: SessionManager,
+        session: Callable[[], SessionState],
+        profile: Callable[[str], CompiledProfile],
+        ensure_loaded: Callable[[], Awaitable[None]],
+        unmount: Callable[[str], Awaitable[None]],
+        follow_parent: Callable[[str], str],
+    ) -> None:
         self.views: dict[str, DocumentVFS] = {}
         self.lock = asyncio.Lock()
-
-    def session(self) -> SessionState:
-        ws = self.workspace
-        return (
-            get_current_session_unless_foreign(ws._session_mgr)
-            or ws._op_session()
-        )
+        self._registry = registry
+        self._files = files
+        self._manager = manager
+        self._session = session
+        self._profile = profile
+        self._ensure_loaded = ensure_loaded
+        self._unmount = unmount
+        self._follow_parent = follow_parent
 
     def render(self, kind: Literal["vfs", "skill"]) -> str:
-        ws = self.workspace
         renderer = render.vfs_md if kind == "vfs" else render.skill_md
-        return renderer(ws._registry, self.session())
+        return renderer(self._registry, self._session())
 
     async def clear(self) -> None:
         """Drop every binding; a snapshot load restores none."""
         async with self.lock:
             for path in list(self.views):
-                await self.workspace.unmount(path)
+                await self._unmount(path)
 
     async def release_session(self, session_id: str) -> None:
         async with self.lock:
             for path, view in list(self.views.items()):
                 view.sessions.pop(session_id, None)
                 if not view.global_view and not view.sessions:
-                    await self.workspace.unmount(path)
+                    await self._unmount(path)
 
     async def get(
         self,
@@ -80,20 +104,17 @@ class Documents:
             raise ValueError(
                 "profile is only valid for generation without a path or session"
             )
-        ws = self.workspace
-        await ws.ensure_sessions_loaded()
+        await self._ensure_loaded()
         if profile is not None:
             session = SessionState(session_id="")
-            apply_profile(
-                session, compile_profile(ws._base_profile(profile), profile)
-            )
+            apply_profile(session, self._profile(profile))
         else:
             session = (
-                ws.get_session(session_id)
+                self._manager.get(session_id)
                 if session_id is not None
-                else self.session()
+                else self._session()
             )
-        token = set_current_session(session, ws._session_mgr)
+        token = set_current_session(session, self._manager)
         try:
             if path is not None:
                 virtual = path.virtual if isinstance(path, PathSpec) else path
@@ -110,7 +131,7 @@ class Documents:
                     )
                 # Bound where a later read lands: every link above the
                 # name is followed, as the read's own walk follows it.
-                bound = ws._namespace.follow_parent(virtual)
+                bound = self._follow_parent(virtual)
                 if not all(
                     path_visible(session.visibility, p)
                     for p in (virtual, bound)
@@ -132,8 +153,7 @@ class Documents:
         path: str,
         session: SessionState | None,
     ) -> None:
-        ws = self.workspace
-        directory = await ws.vfs.stat(parent(path))
+        directory = await self._files.stat(parent(path))
         if directory.type != FileType.DIRECTORY:
             raise enotdir(parent(path))
         view = self.views.get(path)
@@ -143,11 +163,11 @@ class Documents:
             # Collision checks are host-side: a hidden backend entry must
             # not be overwritten by a new view either.
             token = set_current_session(
-                SessionState(session_id=""), ws._session_mgr
+                SessionState(session_id=""), self._manager
             )
             try:
                 try:
-                    await ws.vfs.stat(path, nofollow=True)
+                    await self._files.stat(path, nofollow=True)
                 except FileNotFoundError:
                     pass
                 else:
@@ -157,16 +177,16 @@ class Documents:
             view = DocumentVFS(
                 path.rsplit("/", 1)[-1], lambda: self.render(kind), kind
             )
-            mount = ws._registry.mount(
+            mount = self._registry.mount(
                 path, view, MountMode.READ, ReadSpec(), store=NULL_INDEX
             )
             mount.visible = lambda: (
                 view.global_view
-                or view.sessions.get(self.session().session_id)
-                == self.session().created_at
+                or view.sessions.get(self._session().session_id)
+                == self._session().created_at
             )
             self.views[path] = view
-            ws._ops.set_mounts(ws._registry.ops_mounts())
+            self._files.set_mounts(self._registry.mount_rows())
         if session is None:
             view.global_view = True
         else:

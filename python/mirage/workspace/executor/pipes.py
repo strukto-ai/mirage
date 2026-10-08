@@ -18,6 +18,7 @@ from functools import partial
 from typing import Any
 
 from mirage.commands.builtin.utils.limit import run_with_timeout
+from mirage.context import reset_current_session, set_current_evaluation
 from mirage.io import IOResult
 from mirage.io.stream import (
     async_chain,
@@ -43,15 +44,11 @@ from mirage.shell.constants import (
 from mirage.shell.descriptors import ENCLOSING, Recorder
 from mirage.shell.errors import ExitSignal, PipeClosed, ReturnSignal
 from mirage.shell.job_table import JobTable, JobWaits
+from mirage.shell.node_kind import simple_command
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec
-from mirage.workspace.evaluation import (
-    EvaluationContext,
-    child_context,
-    reset_current_evaluation,
-    set_current_evaluation,
-)
+from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.builtins.exec import divert_statement
 from mirage.workspace.executor.control import UNWINDING, carried, ended
 from mirage.workspace.executor.jobs import handle_background, pump
@@ -97,6 +94,9 @@ async def handle_pipe(
         for i in range(len(commands))
     ]
     ios: list[IOResult] = [IOResult() for _ in commands]
+    # A stage the top shell forks for a simple command is that command's
+    # shell; one a child shell forks is a child of a child.
+    forked = call_stack is not None and call_stack.subshell
     child_nodes: list[ExecutionNode] = [ExecutionNode() for _ in commands]
 
     # Each segment is a child shell: bash forks one per stage.
@@ -114,7 +114,9 @@ async def handle_pipe(
         input_stream = stdin if i == 0 else pipes[i - 1].stream()
         io = IOResult()
         child_exec = ExecutionNode()
-        stage_stack = (call_stack or CallStack()).fork()
+        stage_stack = (call_stack or CallStack()).fork(
+            paren=None if simple_command(cmd) else True
+        )
         # A job a stage before the last starts writes into the pipe, and
         # the reader sees end of input only once the job has closed it.
         waits = None
@@ -150,8 +152,9 @@ async def handle_pipe(
         except PipeClosed:
             io.exit_code = 141
         except UNWINDING as sig:
-            # A stage is a subshell: whatever unwinds ends it there.
-            unwound = ended(sig)
+            # A stage is a subshell: whatever unwinds ends it there, a
+            # simple command the top shell forked as that shell would.
+            unwound = ended(sig, simple_command(cmd) and not forked)
             io.exit_code = unwound.exit_code
             await pump(output, Channel.STDOUT, unwound.stdout)
             await pump(output, Channel.STDERR, unwound.stderr)
@@ -171,7 +174,7 @@ async def handle_pipe(
             io.stderr = await output.snapshot(Channel.STDERR)
             ios[i] = io
             child_nodes[i] = child_exec
-            reset_current_evaluation(token)
+            reset_current_session(token)
         return io.exit_code
 
     tasks: list[asyncio.Task[int]] = []
@@ -360,7 +363,7 @@ async def handle_subshell(
     session._line_open = True
     # A child shell: `shift` or `set --` in it leaves the caller's
     # parameters alone, and it runs in none of the caller's loops.
-    call_stack = (call_stack or CallStack()).fork(loops=False)
+    call_stack = (call_stack or CallStack()).fork(loops=False, paren=True)
     all_stdout: list[Any] = []
     merged_io = IOResult()
     last_exec = ExecutionNode(command="()", exit_code=0)

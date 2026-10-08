@@ -13,14 +13,15 @@
       ],
       "steps": [
         {
-          "command": "python3 - <<'PY'\nimport socket\nimport urllib.request\n\n\ndef show(label, attempt):\n    try:\n        attempt()\n        print(label, 'ok')\n    except OSError as e:\n        print(label, type(e).__name__, e)\n\n\nshow('connect', lambda: socket.create_connection(('127.0.0.1', 9), timeout=3))\nshow('connect by name', lambda: socket.create_connection(('example.com', 80), timeout=3))\nquiet = socket.socket()\nquiet.setblocking(False)\nshow('non-blocking connect', lambda: quiet.connect(('127.0.0.1', 9)))\nshow('udp sendto', lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(b'x', ('127.0.0.1', 9)))\nshow('http', lambda: urllib.request.urlopen('http://127.0.0.1:9/', timeout=3))\nshow('https', lambda: urllib.request.urlopen('https://example.com/', timeout=3))\ntcp = socket.socket()\nshow('tcp bind', lambda: tcp.bind(('127.0.0.1', 0)))\nshow('tcp listen', tcp.listen)\nshow('udp bind', lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM).bind(('127.0.0.1', 0)))\nshow('socketpair', socket.socketpair)\nPY",
+          "command": "python3 - <<'PY'\nimport socket\nimport urllib.request\n\n\ndef show(label, attempt):\n    try:\n        attempt()\n        print(label, 'ok')\n    except OSError as e:\n        if label == 'https':\n            assert isinstance(e, urllib.error.URLError)\n            assert (isinstance(e.reason, OSError) and e.reason.errno == 40) or e.reason == 'unknown url type: https', e\n            print(label, 'unavailable')\n        else:\n            print(label, type(e).__name__, e)\n\n\nshow('connect', lambda: socket.create_connection(('127.0.0.1', 9), timeout=3))\nshow('connect by name', lambda: socket.create_connection(('example.com', 80), timeout=3))\nquiet = socket.socket()\nquiet.setblocking(False)\nshow('non-blocking connect', lambda: quiet.connect(('127.0.0.1', 9)))\nshow('udp sendto', lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(b'x', ('127.0.0.1', 9)))\nshow('http', lambda: urllib.request.urlopen('http://127.0.0.1:9/', timeout=3))\nshow('https', lambda: urllib.request.urlopen('https://example.com/', timeout=3))\ntcp = socket.socket()\nshow('tcp bind', lambda: tcp.bind(('127.0.0.1', 0)))\nshow('tcp listen', tcp.listen)\nshow('udp bind', lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM).bind(('127.0.0.1', 0)))\nshow('socketpair', socket.socketpair)\nPY",
           "expect": {
             "exit": 0,
-            "stdout": "connect OSError [Errno 40] Network unreachable\nconnect by name OSError [Errno 40] Network unreachable\nnon-blocking connect OSError [Errno 40] Network unreachable\nudp sendto OSError [Errno 40] Network unreachable\nhttp URLError <urlopen error [Errno 40] Network unreachable>\nhttps URLError <urlopen error [Errno 40] Network unreachable>\ntcp bind ok\ntcp listen OSError [Errno 38] Network is down\nudp bind OSError [Errno 38] Network is down\nsocketpair OSError [Errno 38] Network is down\n",
+            "stdout": "connect OSError [Errno 40] Network unreachable\nconnect by name OSError [Errno 40] Network unreachable\nnon-blocking connect OSError [Errno 40] Network unreachable\nudp sendto OSError [Errno 40] Network unreachable\nhttp URLError <urlopen error [Errno 40] Network unreachable>\nhttps unavailable\ntcp bind ok\ntcp listen OSError [Errno 38] Network is down\nudp bind OSError [Errno 38] Network is down\nsocketpair OSError [Errno 38] Network is down\n",
             "stderr": ""
           }
         }
-      ]
+      ],
+      "note": "Pyodide 0.29 has no HTTPS handler; newer builds refuse HTTPS through the sealed socket transport. Both supported refusals are asserted explicitly."
     }
   ]
 }

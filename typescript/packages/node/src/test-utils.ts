@@ -15,7 +15,6 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { DiskAccessor } from './accessor/disk.ts'
 
@@ -36,14 +35,4 @@ export function tmpRoot(label = 'mirage-disk-test-'): {
 
 export function spec(p: string): PathSpec {
   return PathSpec.fromStrPath(p)
-}
-
-export function opOf(
-  ops: readonly RegisteredOp[],
-  name: string,
-  filetype: string | null = null,
-): RegisteredOp {
-  const found = ops.find((op) => op.name === name && op.filetype === filetype)
-  if (found === undefined) throw new Error(`op not registered: ${name}`)
-  return found
 }

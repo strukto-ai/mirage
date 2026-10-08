@@ -22,22 +22,22 @@ from mirage.commands.builtin.generic.cp import parse_flags
 from mirage.commands.builtin.generic.crossmount.utils import transfer_links_of
 from mirage.commands.builtin.generic.find import parse_find_args
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
+    GenericCommand,
     Operation,
     bound_op,
     overlaid_stat,
+    require_op,
 )
 from mirage.commands.builtin.utils.links import typed_link
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.generic.find import walk_find
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import StatOverlay
 from mirage.types import NativeCopy, PathSpec, PrimitiveCopy
 from mirage.utils.key_prefix import rekey
 from mirage.vfs.types import OperationFn
+from mirage.view.types import StatOverlay
 
 
 async def _walk_find(
@@ -119,7 +119,7 @@ async def cp(
         # transfer capability. Refuse it through the same guarded door
         # before the command leaves an uncopyable destination tree.
         mkdir = partial(
-            replace(ops, mkdir=None).require(Operation.MKDIR), accessor
+            require_op(replace(ops, mkdir=None), Operation.MKDIR), accessor
         )
     strategy: NativeCopy | PrimitiveCopy
     primitive = ops.copy is None
@@ -135,12 +135,12 @@ async def cp(
         strategy = PrimitiveCopy(
             read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
             write=partial(_write, ops.write, accessor),
-            mkdir=partial(ops.require(Operation.MKDIR), accessor),
+            mkdir=partial(require_op(ops, Operation.MKDIR), accessor),
             readdir=bound_op(ops.readdir, accessor, opts.index),
         )
     else:
         strategy = NativeCopy(
-            copy=partial(ops.require(Operation.COPY), accessor),
+            copy=partial(require_op(ops, Operation.COPY), accessor),
             find=_make_find(ops, accessor, opts.index),
             dir_copy=dir_copy,
             mkdir=mkdir,
@@ -171,4 +171,4 @@ async def cp(
     )
 
 
-BUILDER = Builder("cp", cp, write=True)
+BUILDER = GenericCommand("cp", cp, write=True)

@@ -7,6 +7,8 @@ from mirage.commands.config import CommandOpts
 from mirage.io.types import materialize
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.dify import DifyVFS
+from tests.fixtures.vfs_io import io_for
 
 
 def document(document_id: str, name: str, slug: str | None = None) -> dict:
@@ -65,7 +67,9 @@ async def test_search_command_resolves_globs_and_passes_multiple_documents(
             )
         ],
         ["login"],
-        CommandOpts(index=RAMIndexCacheStore()),
+        CommandOpts(
+            io=io_for(DifyVFS, accessor()), index=RAMIndexCacheStore()
+        ),
     )
 
     assert await materialize(stdout) == b"api\nauth\n"
@@ -100,7 +104,9 @@ async def test_search_command_root_searches_whole_dataset(monkeypatch):
         accessor(),
         [root],
         ["anything"],
-        CommandOpts(index=RAMIndexCacheStore()),
+        CommandOpts(
+            io=io_for(DifyVFS, accessor()), index=RAMIndexCacheStore()
+        ),
     )
 
     assert await materialize(stdout) == b"dataset\n"

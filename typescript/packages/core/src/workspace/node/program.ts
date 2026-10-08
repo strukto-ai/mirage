@@ -147,10 +147,9 @@ async function runProgram(
       continue
     }
     if (child.type === NT.ERROR) {
-      // ERROR nodes that contain only stray statement separators (`& ;`)
-      // are filtered out at parse-time by findSyntaxError, so anything
-      // reaching here is a recovered fragment we deliberately skip;
-      // structural errors would have raised before executeNode ran.
+      // A line bash refuses never gets here (checkSyntax gates it), so an
+      // ERROR node is a fragment the grammar recovered from in a line bash
+      // reads, which we deliberately skip.
       i += 1
       continue
     }
@@ -297,6 +296,13 @@ async function runProgram(
           })
           i = nextLine(node, children, i)
           continue
+        }
+        if (err instanceof DiscardSignal) {
+          // A line loop a child shell runs ends it on a discard with the
+          // discard's own status: `( eval ': ${R:=x}' )` and
+          // `$( : ${R:=x} )` end with 1, where the `( )` around a bare
+          // `: ${R:=x}` ends with 2.
+          err.containedCode = err.exitCode
         }
         if (inline) {
           const parts = allStdout.filter((part): part is ByteSource => part !== null)

@@ -14,13 +14,8 @@
 
 import { BaseVFS } from '../base.ts'
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { DROPBOX_COMMANDS } from '../../commands/builtin/dropbox/index.ts'
 
-import type { RegisteredCommand } from '../../commands/config.ts'
 import { DropboxTokenManager } from '../../core/dropbox/client.ts'
-
-import { DROPBOX_OPS } from '../../ops/dropbox/index.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 
 import { PROMPT } from './prompt.ts'
 import { VFSName } from '../../types.ts'
@@ -28,6 +23,31 @@ import { VFSName } from '../../types.ts'
 import { redactDropboxConfig, type DropboxConfig, type DropboxConfigRedacted } from './config.ts'
 import { buildDeltaHook } from '../../core/dropbox/watch.ts'
 import { type DeltaHook } from '../../watch/index.ts'
+import type { PathSpec, FileStat } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { DuEntries, MkdirOp } from '../types.ts'
+import { readdir as dropboxReaddir } from '../../core/dropbox/readdir.ts'
+import { read as dropboxRead, readStream as dropboxStream } from '../../core/dropbox/read.ts'
+import { stat as dropboxStat } from '../../core/dropbox/stat.ts'
+import { exists as dropboxExists } from '../../core/dropbox/exists.ts'
+import { makeWalkedDu } from '../../core/generic/du.ts'
+import { truncateByRewrite } from '../../core/generic/rewrite.ts'
+import { write as dropboxWrite } from '../../core/dropbox/write.ts'
+import { create as dropboxCreate } from '../../core/dropbox/create.ts'
+import { mkdir as dropboxMkdir } from '../../core/dropbox/mkdir.ts'
+import { unlink as dropboxUnlink } from '../../core/dropbox/unlink.ts'
+import { rmdir as dropboxRmdir } from '../../core/dropbox/rmdir.ts'
+import { rmR as dropboxRmR } from '../../core/dropbox/rm.ts'
+import { rename as dropboxRename } from '../../core/dropbox/rename.ts'
+import { copy as dropboxCopy } from '../../core/dropbox/copy.ts'
+import { narrowPaths as dropboxNarrowPaths } from '../../core/dropbox/search.ts'
+
+const du = makeWalkedDu(dropboxStat, dropboxReaddir)
+
+const mkdirOp: MkdirOp<DropboxAccessor> = (accessor, path, parents) =>
+  dropboxMkdir(accessor, path, parents)
+
+const enabledOp = (accessor: DropboxAccessor) => accessor.contentSearch
 
 export interface DropboxVFSState {
   type: string
@@ -60,12 +80,90 @@ export class DropboxVFS extends BaseVFS {
     })
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return DROPBOX_COMMANDS
+  override readonly readsRanges: boolean = true
+
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return dropboxReaddir(this.accessor, path, index)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return DROPBOX_OPS
+  override read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    if (offset === 0 && size === null) return dropboxRead(this.accessor, path, index)
+    return dropboxRead(this.accessor, path, index, size === null ? { offset } : { offset, size })
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return dropboxStat(this.accessor, path, index)
+  }
+
+  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    return dropboxStream(this.accessor, path, index)
+  }
+
+  override exists(path: PathSpec): Promise<boolean> {
+    return dropboxExists(this.accessor, path)
+  }
+
+  override duSize(path: PathSpec, index?: IndexCacheStore): Promise<number> {
+    return du.size(this.accessor, path, index)
+  }
+
+  override duEntries(path: PathSpec, index?: IndexCacheStore): Promise<DuEntries> {
+    return du.entries(this.accessor, path, index)
+  }
+
+  override write(path: PathSpec, data: Uint8Array): Promise<void> {
+    return dropboxWrite(this.accessor, path, data)
+  }
+
+  override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
+    return truncateByRewrite(
+      (p) => this.read(p),
+      (p, d) => this.write(p, d),
+      path,
+      length,
+      noCreate,
+    )
+  }
+
+  override create(path: PathSpec): Promise<void> {
+    return dropboxCreate(this.accessor, path)
+  }
+
+  override mkdir(path: PathSpec, parents = false): Promise<void> {
+    return mkdirOp(this.accessor, path, parents)
+  }
+
+  override unlink(path: PathSpec): Promise<void> {
+    return dropboxUnlink(this.accessor, path)
+  }
+
+  override rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
+    return dropboxRmdir(this.accessor, path)
+  }
+
+  override rmR(path: PathSpec): Promise<void> {
+    return dropboxRmR(this.accessor, path)
+  }
+
+  override rename(src: PathSpec, dst: PathSpec): Promise<void> {
+    return dropboxRename(this.accessor, src, dst)
+  }
+
+  override copy(src: PathSpec, dst: PathSpec): Promise<void> {
+    return dropboxCopy(this.accessor, src, dst)
+  }
+
+  override narrowPaths(query: string, paths: PathSpec[]): Promise<PathSpec[] | null> {
+    return dropboxNarrowPaths(this.accessor, query, paths)
+  }
+
+  override contentSearchEnabled(): boolean {
+    return enabledOp(this.accessor)
   }
 
   override deltaHook(): DeltaHook {

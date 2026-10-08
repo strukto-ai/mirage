@@ -15,12 +15,13 @@
 from typing import Any
 
 from mirage.accessor.airtable import AirtableAccessor
-from mirage.commands.builtin.airtable import COMMANDS
-from mirage.commands.config import RegisteredCommand, registered_commands
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.airtable.config import AirtableConfig
-from mirage.ops.airtable import OPS
-from mirage.ops.registry import RegisteredOp
-from mirage.types import VFSName
+from mirage.core.airtable.read import read as _read
+from mirage.core.airtable.readdir import readdir as _readdir
+from mirage.core.airtable.stat import stat as _stat
+from mirage.types import FileStat, PathSpec, VFSName
+from mirage.utils.ranges import slice_window
 from mirage.vfs.airtable.prompt import PROMPT, WRITE_PROMPT
 from mirage.vfs.base import BaseVFS
 
@@ -47,11 +48,25 @@ class AirtableVFS(BaseVFS):
         self.config = config
         self.accessor = AirtableAccessor(self.config)
 
-    def ops(self) -> list[RegisteredOp]:
-        return OPS
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await _readdir(self.accessor, path, index)
 
-    def commands(self) -> list[RegisteredCommand]:
-        return registered_commands(COMMANDS)
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        data = await _read(self.accessor, path, index)
+        return slice_window(data, offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await _stat(self.accessor, path, index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

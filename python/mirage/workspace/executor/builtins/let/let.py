@@ -14,11 +14,10 @@
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
-from mirage.shell.arith import evaluate_arith
 from mirage.shell.bytes import encode_text
-from mirage.shell.errors import ArithError
+from mirage.shell.errors import ArithError, ReadonlyError
+from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.shared import (
     readonly_refusal,
     refusal,
@@ -26,13 +25,11 @@ from mirage.workspace.executor.builtins.shared import (
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
-from mirage.workspace.session.elements import assign_element
+from mirage.workspace.session.elements import land_arith
 from mirage.workspace.session.state import (
-    ensure_var_visible,
     random_reader,
-    session_elements,
+    session_arith,
     session_view,
-    visible_env,
 )
 from mirage.workspace.types import ExecutionNode
 
@@ -51,7 +48,9 @@ async def handle_let(
     No operand at all is ``let: expression expected``, exit 1, and a
     malformed one aborts the builtin at that word with the evaluator's
     own message; the operands before it have already landed, which is
-    GNU's order too.
+    GNU's order too. A write to a readonly name stops it the same way,
+    after the writes the expression made before it (``let 'X=5, R=3'``
+    leaves X at 5); one inside a subscript ends the shell.
 
     Args:
         args (list[str]): the words after ``let``, one expression each.
@@ -69,36 +68,23 @@ async def handle_let(
     value = 0
     for expr in args:
         reader = random_reader(session)
-        error: ArithError | None = None
+        error: ArithError | ReadonlyError | None = None
         value = 0
         try:
-            arith = evaluate_arith(
-                expr,
-                visible_env(session),
-                elements=session_elements(session, reader),
-                read_var=reader.read,
-                wrote_var=reader.wrote,
-            )
+            arith = session_arith(session, expr, reader)
             writes, value = arith.writes, arith.value
-        except ArithError as exc:
+        except (ArithError, ReadonlyError) as exc:
             # bash bound the assignments made before the error; they
             # land before the error is reported.
             error, writes = exc, exc.writes
-        for write in writes:
-            try:
-                ensure_var_visible(session, write.name)
-            except PolicyDenied as exc:
-                return refusal("let", exc)
-            if view.is_readonly(write.name):
-                return readonly_refusal("let", write.name)
         try:
-            for write in writes:
-                await assign_element(
-                    session, view, write.name, write.key, write.value
-                )
-            reader.settle()
+            await land_arith(session, view, writes, reader)
         except PolicyDenied as exc:
             return refusal("let", exc)
+        if isinstance(error, ReadonlyError):
+            if error.in_subscript:
+                raise error.signal()
+            return readonly_refusal("let", error.name)
         if error is not None:
             err = encode_text(f"bash: let: {expr}: {error}\n")
             return (

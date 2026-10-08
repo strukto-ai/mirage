@@ -12,17 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { SlackVFSBase } from '@struktoai/mirage-core/vfs/slack/slack'
 import { SlackAccessor } from '@struktoai/mirage-core/accessor/slack'
 
-import { SLACK_COMMANDS } from '@struktoai/mirage-core/commands/builtin/slack/index'
-import { IO } from '@struktoai/mirage-core/commands/builtin/slack/io'
-import { DEFAULT_MAX_DU_ENTRIES } from '@struktoai/mirage-core/commands/builtin/generic/du'
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import { BrowserSlackTransport } from '@struktoai/mirage-core/core/slack/client_browser'
-
-import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
-import { SLACK_OPS } from '@struktoai/mirage-core/ops/slack/index'
 
 import { PROMPT, WRITE_PROMPT } from '@struktoai/mirage-core/vfs/slack/prompt'
 import { VFSName } from '@struktoai/mirage-core/types'
@@ -34,7 +27,7 @@ export interface SlackVFSState {
   config: SlackConfigRedacted
 }
 
-export class SlackVFS extends BaseVFS {
+export class SlackVFS extends SlackVFSBase {
   override readonly name: string = VFSName.SLACK
   override readonly cachesReads: boolean = true
   // Every listed file carries an exact size: chat.jsonl and users/*.json
@@ -42,8 +35,6 @@ export class SlackVFS extends BaseVFS {
   // (users.list is payload-identical to users.info, verified live), and
   // file blobs carry Slack's upload byte count.
   override readonly sizesAlwaysKnown: boolean = true
-  override readonly maxDuEntries: number | null =
-    IO.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : IO.maxDuEntries
   override readonly prompt: string
   override readonly writePrompt: string = WRITE_PROMPT
   readonly config: SlackConfig
@@ -60,14 +51,6 @@ export class SlackVFS extends BaseVFS {
       config,
     )
     this.prompt = PROMPT + this.accessor.timeRange.prompt()
-  }
-
-  override commands(): readonly RegisteredCommand[] {
-    return SLACK_COMMANDS
-  }
-
-  override ops(): readonly RegisteredOp[] {
-    return SLACK_OPS
   }
 
   override getState(): Promise<SlackVFSState> {

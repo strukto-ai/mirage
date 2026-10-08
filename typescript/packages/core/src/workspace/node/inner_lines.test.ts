@@ -12,9 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { assert, describe, expect, it } from 'vitest'
 
-import { innerLines, innerReadable, wordValue, type Word } from './inner_lines.ts'
+import { getParts } from '../../shell/helpers.ts'
+import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { innerLines, innerReadable, readWord, wordValue, type Word } from './inner_lines.ts'
 
 // Mirrors python/tests/workspace/node/test_inner_lines.py.
 
@@ -118,5 +120,59 @@ describe('innerLines', () => {
       { raw: '"$p"', text: null },
     ])
     expect(line?.line).toBe('rm "$p"')
+  })
+
+  describe.each(['bash', 'sh'])('%s literal program selection', (head) => {
+    it.each<[string[], string[]]>([
+      [['--rcfile'], ['--version', '-c', 'rm /x']],
+      [['--init-file'], ['--help', '-c', 'rm /x']],
+      [['--rcfile'], ['-c', 'echo safe', '-c', 'rm /x']],
+      [['-c'], ['rm /x']],
+    ])('stops at a dynamic word between %j and %j', (before, after) => {
+      const [inner] = innerLines(head, [
+        ...words(...before),
+        { raw: '$SKIP', text: null },
+        ...words(...after),
+      ])
+      expect(inner && innerReadable(inner)).toBe(false)
+    })
+
+    it('keeps the answer and program established by a literal prefix', () => {
+      const dynamic: Word = { raw: '$ARG', text: null }
+      expect(innerLines(head, [...words('--version'), dynamic])).toEqual([])
+      const [inner] = innerLines(head, [...words('-c', 'echo safe'), dynamic])
+      expect(inner?.line).toBe('echo safe')
+    })
+  })
+
+  it.each<[string, boolean]>([
+    ['missing-*', false],
+    ['missing-?', false],
+    ['missing-[ab]', false],
+    ["'missing-'*", false],
+    [String.raw`missing-\\*`, false],
+    ['@(x|y)', false],
+    ['!(x)', false],
+    ['{a,b}', false],
+    ["'missing-*'", true],
+    ['"missing-*"', true],
+    [String.raw`missing-\*`, true],
+    [String.raw`missing-\[ab]`, true],
+    ['missing-"*"', true],
+  ])('preserves shell option glob quoting: %s', async (raw, stable) => {
+    const parser = await getTestParser()
+    const first = parser.parse(`bash --rcfile ${raw} --version -c 'rm /x'`).children[0]
+    assert(first)
+    const inner = innerLines(
+      'bash',
+      getParts(first)
+        .slice(1)
+        .map((part) => readWord(part)),
+    )
+    expect(inner.length === 0).toBe(stable)
+    if (!stable) {
+      expect(inner).toHaveLength(1)
+      expect(inner[0] && innerReadable(inner[0])).toBe(false)
+    }
   })
 })

@@ -12,8 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ErrorOf } from '../../types.ts'
 import { type ByteWindow, rangeHeader, windowOf } from '../../utils/ranges.ts'
+
+// How a >= 400 API response and its body text become the backend's own
+// error; the engine here calls it, each backend supplies one.
+export type ErrorOf = (response: Response, body: string) => Error
 
 export interface RetryPolicy {
   /** Response statuses worth retrying. */

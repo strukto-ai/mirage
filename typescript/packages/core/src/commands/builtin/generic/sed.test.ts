@@ -29,7 +29,6 @@ async function runSed(
   const opts = {
     stdin: null,
     flags,
-    filetypeFns: null,
     cwd: '/',
     vfs: { kind: 'ram' } as never,
   } as CommandOpts
@@ -73,7 +72,6 @@ describe('sed operands after a directory (GNU sed 4.9)', () => {
     const opts = {
       stdin: null,
       flags: { n: true, ...flags },
-      filetypeFns: null,
       cwd: '/',
       vfs: { kind: 'ram' } as never,
     } as CommandOpts

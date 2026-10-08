@@ -24,10 +24,7 @@ from mirage.commands.builtin.generic.rg import (
     rg_syntax,
 )
 from mirage.commands.builtin.generic.rg import parse_flags as parse_rg_flags
-from mirage.commands.builtin.generic_bind.adapter import (
-    CommandIO,
-    bound_op,
-)
+from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_pattern import (
     PATTERN_KEYS,
     matcher_syntax,
@@ -42,15 +39,15 @@ from mirage.commands.builtin.grep_pushdown import (
     whole_word_literal,
 )
 from mirage.commands.builtin.utils.output import format_records
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.types import FileTooLargeError
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.namespace_view import paths_scoped
 from mirage.shell.bytes import utf8_locale
 from mirage.types import FileType, JsonValue, PathSpec
 from mirage.vfs.types import SearchQuery
+from mirage.view.namespace_view import paths_scoped
 
 logger = logging.getLogger(__name__)
 

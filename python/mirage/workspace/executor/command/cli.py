@@ -45,15 +45,15 @@ from mirage.errors.types import FsCondition
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, CommandOutput
-from mirage.ops.types import NamespaceView, SessionView, StatPath
 from mirage.policy import resolve_limit
-from mirage.process.types import ProcessView
+from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.routing import runtime_for_language
 from mirage.runtime.types import CodeExecution, DispatchFn, ScriptSource
 from mirage.shell.bytes import encode_text
 from mirage.types import FileType, Limit, PathSpec, Producer, word_text
+from mirage.view.types import NamespaceView, SessionView, StatPath
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.run import exec_node
@@ -485,10 +485,10 @@ async def handle_cli(
         argv=tuple(argv),
         paths=tuple(parsed.paths),
         texts=tuple(parsed.texts),
+        cwd=PathSpec.from_str_path(session.cwd),
         flags=kw,
         stdin=stdin,
         env=env_snapshot(session),
-        cwd=PathSpec.from_str_path(session.cwd),
         doors=doors,
         spec=leaf,
         shell=shell if context.shell is not None else None,
@@ -517,11 +517,16 @@ async def handle_cli(
                     command=cmd_str, exit_code=127, stderr=sel_stderr
                 ),
             )
-        body = _script_output(inv, leaf.script, runtime, prog)
+        body = _script_output(
+            inv,
+            leaf.script,
+            runtime,
+            prog,
+        )
     else:
         fn = leaf.fn
         if fn is None:
-            # validate_cli guarantees fn XOR subcommands XOR script and
+            # _validate_cli guarantees fn XOR subcommands XOR script and
             # walk only returns handler-bearing nodes as leaf; reaching
             # this is a bug.
             raise RuntimeError(

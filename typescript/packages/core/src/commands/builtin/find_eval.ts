@@ -14,7 +14,7 @@
 
 import { fnmatch } from '../../utils/fnmatch.ts'
 import { inMtimeWindow } from '../../utils/dates.ts'
-import type { LinkView } from '../../ops/types.ts'
+import type { LinkView } from '../../view/types.ts'
 import { respellOne } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { DIR_SIZE } from '../../utils/stat_view.ts'

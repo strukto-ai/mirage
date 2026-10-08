@@ -6,8 +6,14 @@ import pytest
 
 from mirage.accessor.base import Accessor
 from mirage.types import PathSpec
+from mirage.vfs.chroma import ChromaVFS
+from mirage.vfs.dify import DifyVFS
+from mirage.vfs.lancedb import LanceDBVFS
+from mirage.vfs.mem0 import Mem0VFS
+from mirage.vfs.qdrant import QdrantVFS
 from mirage.vfs.search import int_option, search_resources
 from mirage.vfs.types import SearchOps, SearchQuery
+from tests.fixtures.vfs_io import io_for
 
 PATH = PathSpec(virtual="/data", directory="/", vfs_path="")
 
@@ -45,6 +51,15 @@ def test_search_options_reject_non_integer_limits(value):
         int_option(SearchQuery("query", options={"top_k": value}), "top_k", 10)
 
 
+VFS_CLASSES = {
+    "chroma": ChromaVFS,
+    "dify": DifyVFS,
+    "qdrant": QdrantVFS,
+    "lancedb": LanceDBVFS,
+    "mem0": Mem0VFS,
+}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "backend,core,operation",
@@ -60,7 +75,6 @@ async def test_builtin_semantic_adapters_delegate_one_batch(
     monkeypatch, backend, core, operation
 ):
     module = importlib.import_module(f"mirage.core.{core}.search")
-    table = importlib.import_module(f"mirage.commands.builtin.{backend}.io").IO
     raw = AsyncMock(return_value=b"ranked record\n")
     monkeypatch.setattr(module, operation, raw)
     options = {"top_k": 2}
@@ -69,6 +83,8 @@ async def test_builtin_semantic_adapters_delegate_one_batch(
     client = SimpleNamespace(
         config=SimpleNamespace(search_limit=10, default_search_limit=10)
     )
+    table = io_for(VFS_CLASSES[backend], client)
+    assert table.search is not None
     result = await search_resources(
         table.search,
         client,

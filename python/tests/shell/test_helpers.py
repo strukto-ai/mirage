@@ -203,15 +203,16 @@ def test_get_pipeline_stages(cmd, redirected, shape):
 
 
 def test_get_while_parts():
-    cond, body = get_while_parts(_first("while true; do echo loop; done"))
-    assert get_text(cond) == "true"
+    test, body = get_while_parts(_first("while a; b; do echo loop; done"))
+    assert [get_text(t) for t in test] == ["a", "b"]
+    assert [get_text(b) for b in body] == ["echo loop"]
 
 
 def test_get_while_until():
     node = _first("until false; do echo; done")
     assert node.children[0].type == NT.UNTIL
-    cond, body = get_while_parts(node)
-    assert get_text(cond) == "false"
+    test, body = get_while_parts(node)
+    assert [get_text(t) for t in test] == ["false"]
 
 
 def test_get_for_parts():
@@ -240,11 +241,12 @@ def test_get_list_parts_or():
 
 def test_get_if_branches():
     branches, else_body = get_if_branches(
-        _first(
-            "if true; then echo y; elif false; then echo n; else echo x; fi"
-        )
+        _first("if a; b; then c; d; elif e\nf\nthen g; else h; fi")
     )
-    assert len(branches) == 2
+    assert [
+        ([get_text(t) for t in test], [get_text(b) for b in body])
+        for test, body in branches
+    ] == [(["a", "b"], ["c", "d"]), (["e", "f"], ["g"])]
     assert else_body is not None
 
 

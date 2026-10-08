@@ -86,7 +86,7 @@ def _mock_registry():
     mount.prefix = "/data/"
     mount.ensure_ready = AsyncMock()
     mount.mode = MountMode.EXEC
-    mount.execute_cmd = AsyncMock(return_value=(b"ok\n", IOResult()))
+    mount.run_command = AsyncMock(return_value=(b"ok\n", IOResult()))
     mount.vfs = MagicMock()
     mount.vfs.resolve_glob = _no_match_resolve_glob
     mount.spec_for = MagicMock(return_value=None)
@@ -105,10 +105,10 @@ def _mock_registry():
     return reg, mount
 
 
-async def _sort_execute_cmd(
+async def _sort_run_command(
     name, paths, texts, flag_kwargs, context=ExecContext()
 ):
-    """Mock execute_cmd that sorts stdin for sort command."""
+    """Mock run_command that sorts stdin for sort command."""
     if name == "sort" and context.stdin:
         data = context.stdin if isinstance(context.stdin, bytes) else b""
         lines = data.decode().strip().split("\n")
@@ -179,8 +179,8 @@ def test_false():
 
 def test_command_dispatches_to_mount():
     stdout, io, _, _, mount, _ = _exec("cat /data/file.txt")
-    mount.execute_cmd.assert_called_once()
-    args = mount.execute_cmd.call_args
+    mount.run_command.assert_called_once()
+    args = mount.run_command.call_args
     assert args[0][0] == "cat"
     scopes = args[0][1]
     assert len(scopes) == 1
@@ -196,14 +196,14 @@ def test_trailing_comment_is_ignored_at_program_level():
     stdout, io, _, _, mount, _ = _exec(
         "cat /data/file.txt        # -l, -a clustered"
     )
-    mount.execute_cmd.assert_called_once()
+    mount.run_command.assert_called_once()
     assert io.exit_code == 0
 
 
 def test_standalone_comment_is_a_noop():
     # A line that's *only* a comment must execute cleanly with exit 0.
     _, io, _, _, mount, _ = _exec("# just a comment")
-    mount.execute_cmd.assert_not_called()
+    mount.run_command.assert_not_called()
     assert io.exit_code == 0
 
 
@@ -213,7 +213,7 @@ def test_comment_inside_compound_statement_is_skipped():
     _, io, _, _, mount, _ = _exec(
         "{ cat /data/a.txt; # mid-block comment\ncat /data/b.txt; }"
     )
-    assert mount.execute_cmd.call_count == 2
+    assert mount.run_command.call_count == 2
     assert io.exit_code == 0
 
 
@@ -1032,8 +1032,8 @@ def test_function_with_for():
 def test_command_file_becomes_globscope():
     """cat /data/file.txt → PathSpec(resolved=True)."""
     _, _, _, _, mount, _ = _exec("cat /data/file.txt")
-    mount.execute_cmd.assert_called_once()
-    scopes = mount.execute_cmd.call_args[0][1]
+    mount.run_command.assert_called_once()
+    scopes = mount.run_command.call_args[0][1]
     assert len(scopes) == 1
     assert isinstance(scopes[0], PathSpec)
     assert scopes[0].resolved is True
@@ -1043,7 +1043,7 @@ def test_command_file_becomes_globscope():
 def test_command_glob_becomes_globscope():
     """cat /data/*.txt → unresolved PathSpec passed to VFS."""
     _, _, _, _, mount, _ = _exec("cat /data/*.txt")
-    scopes = mount.execute_cmd.call_args[0][1]
+    scopes = mount.run_command.call_args[0][1]
     assert len(scopes) == 1
     s = scopes[0]
     assert isinstance(s, PathSpec)
@@ -1055,7 +1055,7 @@ def test_command_glob_becomes_globscope():
 def test_command_question_glob():
     """cat /data/file?.txt → unresolved PathSpec passed to VFS."""
     _, _, _, _, mount, _ = _exec("cat /data/file?.txt")
-    scopes = mount.execute_cmd.call_args[0][1]
+    scopes = mount.run_command.call_args[0][1]
     assert isinstance(scopes[0], PathSpec)
     assert scopes[0].pattern == "file?.txt"
     assert scopes[0].resolved is False
@@ -1064,7 +1064,7 @@ def test_command_question_glob():
 def test_command_bracket_glob():
     """cat /data/file[0-9].txt → unresolved PathSpec passed to VFS."""
     _, _, _, _, mount, _ = _exec("cat /data/file[0-9].txt")
-    scopes = mount.execute_cmd.call_args[0][1]
+    scopes = mount.run_command.call_args[0][1]
     assert isinstance(scopes[0], PathSpec)
     assert "[0-9]" in scopes[0].pattern
     assert scopes[0].resolved is False
@@ -1073,7 +1073,7 @@ def test_command_bracket_glob():
 def test_command_text_stays_string():
     """grep pattern /data/file → 'pattern' is text, path is PathSpec."""
     _, _, _, _, mount, _ = _exec("grep pattern /data/file.txt")
-    args = mount.execute_cmd.call_args
+    args = mount.run_command.call_args
     assert args[0][0] == "grep"
     paths = args[0][1]
     texts = args[0][2]
@@ -1085,7 +1085,7 @@ def test_command_text_stays_string():
 def test_command_multiple_paths():
     """diff /data/a.txt /data/b.txt → two PathSpecs with correct originals."""
     _, _, _, _, mount, _ = _exec("diff /data/a.txt /data/b.txt")
-    scopes = mount.execute_cmd.call_args[0][1]
+    scopes = mount.run_command.call_args[0][1]
     assert len(scopes) == 2
     assert all(isinstance(s, PathSpec) for s in scopes)
     assert "a.txt" in scopes[0].virtual
@@ -1102,8 +1102,8 @@ def test_command_no_paths():
 def test_command_flags_stay_text():
     """grep -rn pattern /data/f → flags are text, path is PathSpec."""
     _, _, _, _, mount, _ = _exec("grep -rn pattern /data/f.txt")
-    paths = mount.execute_cmd.call_args[0][1]
-    texts = mount.execute_cmd.call_args[0][2]
+    paths = mount.run_command.call_args[0][1]
+    texts = mount.run_command.call_args[0][2]
     assert len(paths) == 1
     assert isinstance(paths[0], PathSpec)
     assert "-rn" in texts
@@ -1111,10 +1111,10 @@ def test_command_flags_stay_text():
 
 
 def test_execute_cmd_receives_the_positional_args_and_one_context():
-    """execute_cmd is called with (cmd_name, paths, texts, flag_kwargs,
+    """run_command is called with (cmd_name, paths, texts, flag_kwargs,
     context) — the workspace's side arrives as one ExecContext value."""
     _, _, _, _, mount, _ = _exec("cat /data/file.txt")
-    args = mount.execute_cmd.call_args[0]
+    args = mount.run_command.call_args[0]
     assert len(args) == 5
     assert args[0] == "cat"
     assert isinstance(args[1], list)
@@ -1126,16 +1126,16 @@ def test_execute_cmd_receives_the_positional_args_and_one_context():
 def test_flag_kwargs_is_empty_without_spec():
     """Without a spec, flag_kwargs should be empty dict."""
     _, _, _, _, mount, _ = _exec("cat /data/file.txt")
-    flag_kwargs = mount.execute_cmd.call_args[0][3]
+    flag_kwargs = mount.run_command.call_args[0][3]
     assert flag_kwargs == {}
 
 
 def test_texts_separated_from_paths():
     """grep pattern /data/file → texts=['pattern'], paths=[PathSpec]."""
     _, _, _, _, mount, _ = _exec("grep pattern /data/file.txt")
-    paths = mount.execute_cmd.call_args[0][1]
-    texts = mount.execute_cmd.call_args[0][2]
-    flag_kwargs = mount.execute_cmd.call_args[0][3]
+    paths = mount.run_command.call_args[0][1]
+    texts = mount.run_command.call_args[0][2]
+    flag_kwargs = mount.run_command.call_args[0][3]
     assert len(paths) == 1
     assert isinstance(paths[0], PathSpec)
     assert texts == ["pattern"]
@@ -1145,8 +1145,8 @@ def test_texts_separated_from_paths():
 def test_flags_and_texts_separated():
     """grep -rn pattern /data/f → flags in texts (no spec), paths separate."""
     _, _, _, _, mount, _ = _exec("grep -rn pattern /data/f.txt")
-    paths = mount.execute_cmd.call_args[0][1]
-    texts = mount.execute_cmd.call_args[0][2]
+    paths = mount.run_command.call_args[0][1]
+    texts = mount.run_command.call_args[0][2]
     assert len(paths) == 1
     assert "-rn" in texts
     assert "pattern" in texts
@@ -1158,7 +1158,7 @@ def test_flags_and_texts_separated():
 def test_var_expands_to_file():
     """cat $FILE → PathSpec(resolved=True)."""
     _, _, _, _, mount, _ = _exec("cat $FILE", env={"FILE": "/data/x.txt"})
-    scopes = mount.execute_cmd.call_args[0][1]
+    scopes = mount.run_command.call_args[0][1]
     assert len(scopes) == 1
     assert isinstance(scopes[0], PathSpec)
     assert scopes[0].resolved is True
@@ -1168,7 +1168,7 @@ def test_var_expands_to_file():
 def test_var_expands_to_glob():
     """cat $P → unresolved glob PathSpec passed to VFS."""
     _, _, _, _, mount, _ = _exec("cat $P", env={"P": "/data/*.csv"})
-    scopes = mount.execute_cmd.call_args[0][1]
+    scopes = mount.run_command.call_args[0][1]
     assert len(scopes) == 1
     assert isinstance(scopes[0], PathSpec)
     assert scopes[0].pattern == "*.csv"
@@ -1185,7 +1185,7 @@ def test_var_expands_to_text():
 def test_concatenation_var_path():
     """cat $DIR/file.txt → expanded + classified as PathSpec."""
     _, _, _, _, mount, _ = _exec("cat $DIR/file.txt", env={"DIR": "/data"})
-    scopes = mount.execute_cmd.call_args[0][1]
+    scopes = mount.run_command.call_args[0][1]
     assert len(scopes) == 1
     assert isinstance(scopes[0], PathSpec)
     assert scopes[0].resolved is True
@@ -1194,7 +1194,7 @@ def test_concatenation_var_path():
 def test_concatenation_var_glob():
     """cat $DIR/*.csv → unresolved glob PathSpec passed to VFS."""
     _, _, _, _, mount, _ = _exec("cat $DIR/*.csv", env={"DIR": "/data"})
-    scopes = mount.execute_cmd.call_args[0][1]
+    scopes = mount.run_command.call_args[0][1]
     assert len(scopes) == 1
     assert isinstance(scopes[0], PathSpec)
     assert scopes[0].pattern == "*.csv"
@@ -1500,7 +1500,7 @@ def test_pipeline_redirect_expansion():
 def test_for_with_command_expansion():
     """for f in a b; do cat /data/$f.txt; done → 2 mount calls."""
     _, _, _, _, mount, _ = _exec("for f in a b; do cat /data/$f.txt; done")
-    assert mount.execute_cmd.call_count == 2
+    assert mount.run_command.call_count == 2
 
 
 def test_if_with_var_condition():
@@ -1635,7 +1635,7 @@ def test_case_expanded_word_no_glob_match():
 def test_cmd_concat_var_glob():
     """cat $DIR/*.txt → unresolved glob PathSpec passed to VFS."""
     _, _, _, _, mount, _ = _exec("cat $DIR/*.txt", env={"DIR": "/data"})
-    scopes = mount.execute_cmd.call_args[0][1]
+    scopes = mount.run_command.call_args[0][1]
     assert len(scopes) == 1
     assert isinstance(scopes[0], PathSpec)
     assert scopes[0].pattern == "*.txt"
@@ -1645,7 +1645,7 @@ def test_cmd_concat_var_glob():
 def test_cmd_concat_var_file():
     """cat $DIR/file.txt → /data/file.txt → PathSpec(resolved=True)."""
     _, _, _, _, mount, _ = _exec("cat $DIR/file.txt", env={"DIR": "/data"})
-    scopes = mount.execute_cmd.call_args[0][1]
+    scopes = mount.run_command.call_args[0][1]
     assert len(scopes) == 1
     assert isinstance(scopes[0], PathSpec)
     assert scopes[0].resolved is True
@@ -1675,7 +1675,7 @@ def test_cmd_cmd_sub_as_arg():
             EvaluationContext(session),
         )
     )
-    scopes = mount.execute_cmd.call_args[0][1]
+    scopes = mount.run_command.call_args[0][1]
     assert len(scopes) == 1
     assert isinstance(scopes[0], PathSpec)
     assert "file.txt" in scopes[0].virtual
@@ -1686,7 +1686,7 @@ def test_cmd_multiple_concat_paths():
     _, _, _, _, mount, _ = _exec(
         "diff $A/x.txt $B/y.txt", env={"A": "/s3", "B": "/data"}
     )
-    scopes = mount.execute_cmd.call_args[0][1]
+    scopes = mount.run_command.call_args[0][1]
     assert len(scopes) == 2
     assert isinstance(scopes[0], PathSpec)
     assert isinstance(scopes[1], PathSpec)
@@ -1782,7 +1782,7 @@ def test_redirect_stderr_path():
     """cat missing 2> /data/err.log → stderr written to file."""
     dispatch = _mock_dispatch()
     reg, mount = _mock_registry()
-    mount.execute_cmd = AsyncMock(side_effect=FileNotFoundError("missing"))
+    mount.run_command = AsyncMock(side_effect=FileNotFoundError("missing"))
     mount.resolve_command = MagicMock(return_value=MagicMock())
     reg.mounts = MagicMock(return_value=[mount])
     stdout, io, _, _, _, dispatch = _exec(
@@ -1824,7 +1824,7 @@ def test_heredoc_no_target_crash():
     """cat <<EOF\\nhello\\nEOF → dispatches cat, no crash."""
     _, io, _, _, mount, _ = _exec("cat <<EOF\nhello\nEOF")
     assert io.exit_code == 0
-    mount.execute_cmd.assert_called_once()
+    mount.run_command.assert_called_once()
 
 
 # ── complex: full pipeline simulation ──────────
@@ -1861,9 +1861,9 @@ def test_nested_expansion_in_for_body():
     _, _, _, _, mount, _ = _exec(
         "for d in /s3 /data; do cat $d/file.txt; done"
     )
-    assert mount.execute_cmd.call_count == 2
+    assert mount.run_command.call_count == 2
     # Each call should have a PathSpec path
-    for call in mount.execute_cmd.call_args_list:
+    for call in mount.run_command.call_args_list:
         scopes = call[0][1]
         assert len(scopes) == 1
         assert isinstance(scopes[0], PathSpec)
@@ -2121,7 +2121,7 @@ def test_pipeline_passes_stdout_as_stdin():
     """echo hello | cat → cat receives echo's stdout."""
     _, _, exec_node, _, mount, _ = _exec("echo hello | cat")
     assert exec_node.op == "|"
-    assert mount.execute_cmd.call_count == 1
+    assert mount.run_command.call_count == 1
 
 
 def test_redirect_stdin_from_file():
@@ -2129,7 +2129,7 @@ def test_redirect_stdin_from_file():
     dispatch = _mock_dispatch()
     dispatch.return_value = (b"line2\nline1\n", IOResult())
     reg, mount = _mock_registry()
-    mount.execute_cmd = AsyncMock(side_effect=_sort_execute_cmd)
+    mount.run_command = AsyncMock(side_effect=_sort_run_command)
     job_table = JobTable()
     execute_fn = AsyncMock(return_value=IOResult())
     session = _session()
@@ -2311,7 +2311,7 @@ def test_pipeline_stdin_flows_through():
         "echo data | cat", stdin=None
     )
     assert exec_node.op == "|"
-    assert mount.execute_cmd.call_count == 1
+    assert mount.run_command.call_count == 1
 
 
 def test_select_stdin_materialized():
@@ -2333,7 +2333,7 @@ def test_for_with_cmd_using_stdin():
     _, _, _, _, mount, _ = _exec_with_stdin(
         "for x in a b; do cat /data/f.txt; done", stdin=b"piped data"
     )
-    assert mount.execute_cmd.call_count == 2
+    assert mount.run_command.call_count == 2
 
 
 def test_subshell_stdin_passthrough():
@@ -2354,7 +2354,7 @@ def test_redirect_stdin_with_async_iterator():
     dispatch = _mock_dispatch()
     dispatch.return_value = (b"b\na\n", IOResult())
     reg, mount = _mock_registry()
-    mount.execute_cmd = AsyncMock(side_effect=_sort_execute_cmd)
+    mount.run_command = AsyncMock(side_effect=_sort_run_command)
     job_table = JobTable()
     execute_fn = AsyncMock(return_value=IOResult())
     session = _session()
@@ -2666,7 +2666,7 @@ def test_for_if_pipeline():
         "fi; done"
     )
     assert session.env["DONE"] == "c"
-    assert mount.execute_cmd.call_count == 3
+    assert mount.run_command.call_count == 3
 
 
 def test_function_with_while_read():
@@ -2802,8 +2802,8 @@ def test_nested_while_loops():
 def test_python3_dispatched_to_mount():
     """python3 -c 'code' → dispatched as a command to mount."""
     _, _, _, _, mount, _ = _exec("python3 -c 'print(42)'")
-    mount.execute_cmd.assert_called_once()
-    assert mount.execute_cmd.call_args[0][0] == "python3"
+    mount.run_command.assert_called_once()
+    assert mount.run_command.call_args[0][0] == "python3"
 
 
 def test_python3_heredoc_parsed():
@@ -2890,8 +2890,8 @@ def test_echo_in_for():
 def test_echo_pipe_to_cat():
     _, _, exec_node, _, mount, _ = _exec("echo hello | cat")
     assert exec_node.op == "|"
-    mount.execute_cmd.assert_called_once()
-    assert mount.execute_cmd.call_args[0][0] == "cat"
+    mount.run_command.assert_called_once()
+    assert mount.run_command.call_args[0][0] == "cat"
 
 
 def test_echo_redirect():

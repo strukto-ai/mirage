@@ -57,9 +57,9 @@ from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
+from mirage.view.types import LinkView, MountView, StatPath
 
 Tree = dict[bytes, tuple[int, bytes]]
 

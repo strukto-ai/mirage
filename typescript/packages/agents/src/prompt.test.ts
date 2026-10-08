@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '@struktoai/mirage-core/ops/registry'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -21,9 +20,7 @@ import { MIRAGE_SYSTEM_PROMPT, buildSystemPrompt } from './prompt.ts'
 
 function mkWs(): Workspace {
   const ram = new RAMVFS()
-  const ops = new OpsRegistry()
-  for (const op of ram.ops()) ops.register(op)
-  return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+  return new Workspace({ '/': ram }, { mode: MountMode.WRITE })
 }
 
 describe('buildSystemPrompt', () => {

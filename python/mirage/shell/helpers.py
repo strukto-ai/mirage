@@ -381,16 +381,13 @@ def _pipeline_head(stage: TSNodeLike) -> PipelineStages:
 
 def get_while_parts(
     node: TSNodeLike,
-) -> tuple[TSNodeLike, list[TSNodeLike]]:
-    """Get (condition, body_commands) from while/until.
-
-    Returns the do_group's children list so multi-statement
-    bodies are preserved.
+) -> tuple[list[TSNodeLike], list[TSNodeLike]]:
+    """Get (test, body_commands) from while/until: every statement
+    before the do_group, whose last one's status decides, and the
+    do_group's children.
     """
-    nc = node.named_children
-    condition = nc[0]
-    body = list(nc[1].named_children)
-    return condition, body
+    *test, body = node.named_children
+    return test, list(body.named_children)
 
 
 def get_for_parts(
@@ -488,6 +485,7 @@ _TARGET_TYPES = frozenset(
         NT.SIMPLE_EXPANSION,
         NT.EXPANSION,
         NT.COMMAND_SUBSTITUTION,
+        NT.ARITHMETIC_EXPANSION,
         NT.STRING,
         NT.RAW_STRING,
         NT.ANSI_C_STRING,
@@ -797,39 +795,47 @@ def get_list_parts(
     return left, op, right
 
 
+def _test_and_body(
+    node: TSNodeLike,
+) -> tuple[list[TSNodeLike], list[TSNodeLike]]:
+    """Split an ``if`` or ``elif`` at its ``then``: the test statements
+    before it, the rest after.
+
+    Args:
+        node (TSNodeLike): an if_statement or elif_clause.
+    """
+    cut = next(
+        (c.start_byte for c in node.children if c.type == "then"),
+        node.end_byte,
+    )
+    named = node.named_children
+    return (
+        [c for c in named if c.start_byte < cut],
+        [c for c in named if c.start_byte >= cut],
+    )
+
+
 def get_if_branches(
     node: TSNodeLike,
-) -> tuple[list[tuple[TSNodeLike, list[TSNodeLike]]], list[TSNodeLike] | None]:
+) -> tuple[
+    list[tuple[list[TSNodeLike], list[TSNodeLike]]], list[TSNodeLike] | None
+]:
     """Get (branches, else_body) from if_statement.
 
-    Each branch is (condition, body_commands) where
-    body_commands is a list of tree-sitter nodes.
+    Each branch is (test, body_commands): the statements before its
+    ``then``, whose last one's status decides, and those after it.
     else_body is also a list of nodes, or None.
     """
-    nc = node.named_children
-    condition: TSNodeLike | None = nc[0]
-    body: list[TSNodeLike] = []
-    branches: list[tuple[TSNodeLike, list[TSNodeLike]]] = []
-    else_body = None
-
-    for c in nc[1:]:
+    test, rest = _test_and_body(node)
+    branches: list[tuple[list[TSNodeLike], list[TSNodeLike]]] = [(test, [])]
+    else_body: list[TSNodeLike] | None = None
+    for c in rest:
         if c.type == NT.ELIF_CLAUSE:
-            if condition is not None:
-                branches.append((condition, body))
-            ec = c.named_children
-            condition = ec[0]
-            body = list(ec[1:])
+            branches.append(_test_and_body(c))
         elif c.type == NT.ELSE_CLAUSE:
-            if condition is not None:
-                branches.append((condition, body))
-                condition = None
             else_body = list(c.named_children)
         else:
-            body.append(c)
-
-    if condition is not None:
-        branches.append((condition, body))
-
+            branches[-1][1].append(c)
     return branches, else_body
 
 
@@ -1009,7 +1015,17 @@ def input_substitution_redirect(node: TSNodeLike) -> Redirect | None:
 
 
 def get_process_sub_body(node: TSNodeLike) -> str:
-    text = decode_text(getattr(node, "source_text", node.text) or b"")
+    """A process substitution's command text, with the heredoc bodies the
+    line reads after it moved inside it.
+
+    Args:
+        node (TSNodeLike): the process_substitution node.
+    """
+    text = decode_text(
+        getattr(node, "inlined", None)
+        or getattr(node, "source_text", node.text)
+        or b""
+    )
     if text.startswith(("<(", ">(")) and text.endswith(")"):
         return text[2:-1]
     return text

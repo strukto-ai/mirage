@@ -165,7 +165,7 @@ async def lookup_retrying(
 
     A ``read: fresh`` verdict clears the mount index without taking its
     lock, and one landing mid-lookup leaves a miss that only says the store
-    was emptied. Read as absence, that miss reaches ``on_op_missing``
+    was emptied. Read as absence, that miss reaches ``on_enoent``
     through a dispatcher door and drops the path's overlay for good. The
     second lookup refills a cleared index, or reads the one another op
     reseeded meanwhile, so a miss is absent only when both agree. A genuine

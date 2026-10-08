@@ -13,11 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it } from 'vitest'
+import '../../commands/builtin/backends.ts'
+import { commandsFor } from '@struktoai/mirage-core/commands/builtin/backends'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { SSH_COMMANDS } from '../../commands/builtin/ssh/index.ts'
 import { type FakeSftp, makeFakeAccessor } from '../../core/ssh/_test_utils.ts'
-import { SSH_OPS } from '../../ops/ssh/index.ts'
 import type { SSHConfig } from './config.ts'
 import { PROMPT } from './prompt.ts'
 import { SSHVFS } from './ssh.ts'
@@ -54,16 +55,10 @@ describe('SSHVFS — identity', () => {
     expect(res.prompt).toBe(PROMPT)
   })
 
-  it('commands() length matches SSH_COMMANDS', () => {
+  it('serves SSH_COMMANDS', () => {
     const res = makeVfs(state)
-    expect(res.commands().length).toBe(SSH_COMMANDS.length)
-    expect(res.commands().length).toBe(71)
-  })
-
-  it('ops() length matches SSH_OPS', () => {
-    const res = makeVfs(state)
-    expect(res.ops().length).toBe(SSH_OPS.length)
-    expect(res.ops().length).toBe(14)
+    expect(commandsFor(res)).toEqual(SSH_COMMANDS)
+    expect(SSH_COMMANDS.length).toBe(71)
   })
 })
 

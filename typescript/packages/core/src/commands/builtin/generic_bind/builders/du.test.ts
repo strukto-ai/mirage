@@ -19,9 +19,10 @@ import { FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { eacces, enoent } from '../../../../errors/fs.ts'
 import { runWithAdmission } from '../../../../context/session_context.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
-import type { EntryGate } from '../../../../types.ts'
-import { scopedIo, type CommandIO } from '../adapter.ts'
-import type { MountView, NamespaceView } from '../../../../ops/types.ts'
+import type { EntryGate } from '../../../../policy/types.ts'
+import { scopedIo } from '../adapter.ts'
+import type { CommandIO } from '../../../config.ts'
+import type { MountView, NamespaceView } from '../../../../view/types.ts'
 
 const DEC = new TextDecoder()
 
@@ -66,7 +67,6 @@ describe('du walk fallback (no native du op)', () => {
     const result = await BUILDER.fn(bounded, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
       stdin: null,
       flags: {},
-      filetypeFns: null,
       cwd: '/',
     })
     expect(result).not.toBeNull()
@@ -84,7 +84,6 @@ describe('du walk fallback (no native du op)', () => {
       BUILDER.fn(failing, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
         stdin: null,
         flags: {},
-        filetypeFns: null,
         cwd: '/',
       }),
     ).rejects.toThrow('403 Forbidden')
@@ -128,7 +127,6 @@ async function runScoped(
     BUILDER.fn(scopedIo(ops, SCOPED_VIEW, paths, ''), ACCESSOR, paths, [], {
       stdin: null,
       flags: {},
-      filetypeFns: null,
       cwd: '/',
       ns: SCOPED_VIEW,
     }),
@@ -246,7 +244,6 @@ describe('du rows for directories no file points at', () => {
     const result = await BUILDER.fn(ops, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
       stdin: null,
       flags,
-      filetypeFns: null,
       cwd: '/',
     })
     if (result === null) throw new Error('no result')

@@ -88,3 +88,25 @@ async def test_door_options_route_nothing(line, out):
     )
     r = await ws.shell(line)
     assert (r.exit_code, r.stdout, r.stderr or b"") == (0, out, b"")
+
+
+@pytest.mark.asyncio
+async def test_a_cross_mount_sed_in_place_keeps_both_edited_files_cached():
+    # The run_sed relay is its own write path, apart from run_dispatch: it
+    # claims each -i file, and the line keeps the edited bytes on both
+    # mounts, which then serve a cat after the backend changes.
+    left, right = RAMVFS(), RAMVFS()
+    left.caches_reads = right.caches_reads = True
+    left.load_state({"files": {"/f": b"a1\n"}})
+    right.load_state({"files": {"/g": b"a2\n"}})
+    ws = Workspace({"/a": left, "/b": right}, mode=MountMode.WRITE)
+    try:
+        result = await ws.shell("sed -i s/a/b/ /a/f /b/g")
+        assert result.exit_code == 0
+        assert await ws.cache.get("/a/f") == b"b1\n"
+        assert await ws.cache.get("/b/g") == b"b2\n"
+        left.load_state({"files": {"/f": b"changed\n"}})
+        again = await ws.shell("cat /a/f")
+        assert await again.materialize_stdout() == b"b1\n"
+    finally:
+        await ws.close()

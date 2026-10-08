@@ -13,35 +13,28 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { MountMode, PathSpec, VFSName } from '../types.ts'
+import { MountMode, PathSpec } from '../types.ts'
+import { ops } from '../test-utils.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { runWithRecording } from './context.ts'
 
-function call(
-  registry: OpsRegistry,
-  name: string,
-  ram: RAMVFS,
-  path: string,
-  ...args: unknown[]
-): Promise<unknown> {
-  return registry.call(name, VFSName.RAM, ram.accessor, PathSpec.fromStrPath(path), args)
+function call(name: string, ram: RAMVFS, path: string, ...args: unknown[]): Promise<unknown> {
+  return ops(ram).call(name, PathSpec.fromStrPath(path), args)
 }
 
-function setup(): { ram: RAMVFS; registry: OpsRegistry } {
+function setup(): { ram: RAMVFS } {
   const ram = new RAMVFS()
-  const registry = new OpsRegistry()
-  new Workspace({ '/ram': ram }, { mode: MountMode.WRITE, ops: registry })
-  return { ram, registry }
+  new Workspace({ '/ram': ram }, { mode: MountMode.WRITE })
+  return { ram }
 }
 
 describe('core ram ops emit OpRecords inside runWithRecording', () => {
   it('read records op="read" with correct byte count and source="ram"', async () => {
-    const { ram, registry } = setup()
+    const { ram } = setup()
     ram.store.files.set('/hello.txt', new TextEncoder().encode('hello world'))
     const [data, records] = await runWithRecording(async () => {
-      return (await call(registry, 'read', ram, '/hello.txt')) as Uint8Array
+      return (await call('read', ram, '/hello.txt')) as Uint8Array
     })
     expect(new TextDecoder().decode(data)).toBe('hello world')
     expect(records).toHaveLength(1)
@@ -51,10 +44,10 @@ describe('core ram ops emit OpRecords inside runWithRecording', () => {
   })
 
   it('write records op="write" with correct byte count', async () => {
-    const { ram, registry } = setup()
+    const { ram } = setup()
     ram.store.dirs.add('/')
     const [, records] = await runWithRecording(async () => {
-      await call(registry, 'write', ram, '/hello.txt', new TextEncoder().encode('hello'))
+      await call('write', ram, '/hello.txt', new TextEncoder().encode('hello'))
     })
     expect(records).toHaveLength(1)
     expect(records[0]?.op).toBe('write')
@@ -62,10 +55,10 @@ describe('core ram ops emit OpRecords inside runWithRecording', () => {
   })
 
   it('append records op="append" with correct byte count', async () => {
-    const { ram, registry } = setup()
+    const { ram } = setup()
     ram.store.dirs.add('/')
     const [, records] = await runWithRecording(async () => {
-      await call(registry, 'append', ram, '/test.jsonl', new TextEncoder().encode('hello'))
+      await call('append', ram, '/test.jsonl', new TextEncoder().encode('hello'))
     })
     expect(records).toHaveLength(1)
     expect(records[0]?.op).toBe('append')
@@ -74,9 +67,9 @@ describe('core ram ops emit OpRecords inside runWithRecording', () => {
   })
 
   it('outside a recording scope, reads still succeed and emit no records', async () => {
-    const { ram, registry } = setup()
+    const { ram } = setup()
     ram.store.files.set('/hello.txt', new TextEncoder().encode('hello'))
-    const data = (await call(registry, 'read', ram, '/hello.txt')) as Uint8Array
+    const data = (await call('read', ram, '/hello.txt')) as Uint8Array
     expect(new TextDecoder().decode(data)).toBe('hello')
   })
 })

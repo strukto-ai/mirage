@@ -62,7 +62,6 @@ from mirage.io.types import ByteSource
 from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.observe.store import ObserverStore
-from mirage.ops import Ops
 from mirage.policy import (
     AskHandler,
     Decisions,
@@ -82,12 +81,16 @@ from mirage.policy.types import DryRun
 from mirage.process.child import ChildProcess
 from mirage.process.stdio import ProcessInput, ProcessOutput
 from mirage.process.supervisor import ProcessSupervisor
-from mirage.process.types import ProcessView, SpawnRequest
+from mirage.process.types import SpawnRequest
+from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
-from mirage.runtime.binding import WorkspaceBinding, capture_binding
+from mirage.runtime.binding import (
+    RuntimeContext,
+    WorkspaceBinding,
+    capture_binding,
+)
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.routing import RouteDecision, RoutePolicy
-from mirage.runtime.types import RuntimeContext
 from mirage.secrets.config import EnvVar, SecretSource
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import source_for
@@ -121,12 +124,13 @@ from mirage.vfs.history import HISTORY_PREFIX, HistoryViewVFS
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.abort import MirageAbortError, run_cancellable
 from mirage.workspace.cli import CLIInstall
-from mirage.workspace.dispatcher import Dispatcher
+from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.documentation.documents import Documents
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.statement import restore_status
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.expand.globs import GlobOptions, resolve_globs
+from mirage.workspace.files import Files
 from mirage.workspace.lookup import lookup, program, program_note, programs
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountEntry, MountRegistry
@@ -176,15 +180,20 @@ from mirage.workspace.workspace.build import (
     wire_runtime_world,
 )
 from mirage.workspace.workspace.cache import build_file_cache
-from mirage.workspace.workspace.execute import LineFrame, execute_line
+from mirage.workspace.workspace.execute import (
+    ExecuteEnv,
+    LineFrame,
+    execute_line,
+)
+from mirage.workspace.workspace.explainer import Explainer
 from mirage.workspace.workspace.failure import placement_refused
 from mirage.workspace.workspace.guard import reject_config_script
-from mirage.workspace.workspace.handle import Session
 from mirage.workspace.workspace.kernel_mounts import KernelMounts
 from mirage.workspace.workspace.lifecycle import (
-    close_async,
+    CloseDeps,
+    Patched,
+    close_workspace,
     patch_process,
-    stop_vfs_loop,
     unpatch_process,
 )
 from mirage.workspace.workspace.meta import WorkspaceMeta
@@ -434,7 +443,6 @@ class Workspace:
             else None
         )
 
-        self._documents = Documents(self)
         self.observer = Observer(store=stores.observe)
         # The stores this workspace's state lives in, whether the state
         # store built them or the caller passed one in directly: delete
@@ -453,9 +461,9 @@ class Workspace:
         self._registry.mount(
             BIN_PREFIX,
             BinViewVFS(
-                lambda: programs(self._op_session(), self._registry),
+                lambda: programs(self._call_session(), self._registry),
                 lambda name: program_note(
-                    name, self._op_session(), self._registry
+                    name, self._call_session(), self._registry
                 ),
             ),
             MountMode.READ,
@@ -466,22 +474,32 @@ class Workspace:
         # and the policy gates fire exactly once, at that door. It runs
         # as the default session, as a bare ``shell`` does, so the
         # default profile confines it too.
-        self._ops = Ops(
-            self._registry.ops_mounts(),
+        self._files = Files(
+            self._registry.mount_rows(),
             observer=self.observer,
             agent_id=agent_id or "",
             links=self._namespace,
             dispatch=self._dispatcher.dispatch,
             bind=self._bind_session,
         )
-        self._kernel_mounts = KernelMounts(self._ops, self._session_mgr)
-        # Held only while the workspace is a context manager; set by
-        # lifecycle.patch_process. Declared here because the pair was
-        # invented by assignment, so an unpatch without a patch raised
-        # AttributeError instead of restoring nothing.
-        self._original_open: Callable[..., Any] | None = None
-        self._original_io_open: Callable[..., Any] | None = None
-        self._original_os_names: dict[str, Callable[..., Any]] | None = None
+        self._kernel_mounts = KernelMounts(self._files, self._session_mgr)
+        self._documents = Documents(
+            self._registry,
+            self._files,
+            self._session_mgr,
+            lambda: (
+                get_current_session_unless_foreign(self._session_mgr)
+                or self._call_session()
+            ),
+            lambda name: compile_profile(self._base_profile(name), name),
+            lambda: self.ensure_sessions_loaded(),
+            lambda path: self.unmount(path),
+            lambda path: self._namespace.follow_parent(path),
+        )
+        # Held only while the workspace is a context manager: what
+        # lifecycle.patch_process replaced and the block's one loop.
+        # Declared here, so an unpatch without a patch restores nothing.
+        self._patched: list[Patched] = []
         self._vfs_loop: asyncio.AbstractEventLoop | None = None
 
         self._runtime_binding = WorkspaceBinding(
@@ -678,14 +696,13 @@ class Workspace:
         return self._session_mgr.has_managed_env
 
     @property
-    def vfs(self) -> Ops:
-        """The op facade: read/write/stat/readdir/... against the mounts.
+    def vfs(self) -> Files:
+        """The file API: read/write/stat/readdir/... against the mounts.
 
         Named as TypeScript names it (`ws.vfs`), so one host API reads the
-        same in both languages; the `Ops` class name stays, since it is
-        the op vocabulary the dispatcher speaks, not a filesystem.
+        same in both languages.
         """
-        return self._ops
+        return self._files
 
     @property
     def tools(self) -> MirageToolOperations:
@@ -854,7 +871,7 @@ class Workspace:
             vfs_ref=vfs_ref,
         )
         prepare_added_mount(self._registry, entry, previous)
-        self._ops.set_mounts(self._registry.ops_mounts())
+        self._files.set_mounts(self._registry.mount_rows())
         return entry
 
     async def unmount(self, prefix: str) -> None:
@@ -862,7 +879,7 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         await unmount_prefix(
             self._registry,
-            self._ops,
+            self._files,
             prefix,
             lambda: self._shutting_down,
             self._shared_mounts,
@@ -880,7 +897,7 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         mode = parse_mount_mode(mode)
         self._registry.mount_for_prefix(prefix).mode = mode
-        self._ops.set_mounts(self._registry.ops_mounts())
+        self._files.set_mounts(self._registry.mount_rows())
 
     def add_fuse_mount(
         self,
@@ -979,7 +996,7 @@ class Workspace:
             prefixes.append(entry.prefix)
         return prefixes
 
-    def _op_session(self) -> SessionState:
+    def _call_session(self) -> SessionState:
         """The session an op runs under: the bound one, else the default."""
         return get_current_session_for(
             self._session_mgr
@@ -994,7 +1011,7 @@ class Workspace:
         session = (
             self._session_mgr.get(session_id)
             if session_id is not None
-            else self._op_session()
+            else self._call_session()
         )
         token = set_current_session(session, self._session_mgr)
         try:
@@ -1024,7 +1041,7 @@ class Workspace:
         session = (
             self._session_mgr.get(session_id)
             if session_id is not None
-            else self._op_session()
+            else self._call_session()
         )
         return self._spawn_for_session(request, session)
 
@@ -1104,7 +1121,7 @@ class Workspace:
                     await view.set(name, value)
                     await view.mark(name, VarAttr.EXPORT, True)
                 result = await execute_line(
-                    self,
+                    self._execute_env(),
                     shell_join(argv),
                     child.session_id,
                     input_stream.stream(),
@@ -1229,7 +1246,8 @@ class Workspace:
     # ── lifecycle ───────────────────────────────────────────────────────────
 
     def __enter__(self) -> "Workspace":
-        patch_process(self)
+        self._vfs_loop = asyncio.new_event_loop()
+        self._patched = patch_process(self._files, self._vfs_loop)
         return self
 
     def __exit__(
@@ -1238,9 +1256,13 @@ class Workspace:
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        unpatch_process(self)
+        unpatch_process(self._patched)
+        self._patched = []
         run_async_from_sync(self.close(), self._vfs_loop)
-        stop_vfs_loop(self)
+        # Closed after the workspace close, which ran on it.
+        loop, self._vfs_loop = self._vfs_loop, None
+        if loop is not None:
+            loop.close()
 
     @property
     def registry(self) -> MountRegistry:
@@ -1284,7 +1306,7 @@ class Workspace:
         inside child directories. The default watch runtime attaches
         lazily on first use; call ``attach_watch_runtime`` beforehand
         only to customize it. The str tolerance lives only
-        here, at the consumer boundary (mirroring ``Ops``); the
+        here, at the consumer boundary (mirroring ``Files``); the
         runtime below is PathSpec-only.
 
         Args:
@@ -1318,7 +1340,7 @@ class Workspace:
         await self._watch.notify(change)
 
     async def close(self) -> None:
-        await close_async(self)
+        await self._close(drop_state=False)
 
     async def delete(self) -> None:
         """Close the workspace and delete its state from the store.
@@ -1331,11 +1353,66 @@ class Workspace:
             RuntimeError: the workspace was closed first, which closed
                 the stores its state lives in, so nothing was deleted.
         """
-        await close_async(self, drop_state=True)
+        await self._close(drop_state=True)
         if not self._state_dropped:
             raise RuntimeError(
                 "workspace was closed before delete; its state is kept"
             )
+
+    async def _close(self, drop_state: bool) -> None:
+        """Release everything the workspace owns, exactly once
+        (``close_workspace``); a later call answers as the first did.
+
+        Args:
+            drop_state (bool): delete the workspace's state from its
+                store once nothing writes it any more, before the store
+                closes.
+        """
+        # Stop lifecycle mutations before teardown yields or captures its
+        # close lists. Keep _closed separate so runtime journals can still
+        # dispatch.
+        self._closing = True
+        async with self._close_lock:
+            if self._async_closed:
+                if self._close_error is not None:
+                    raise self._close_error
+                return
+            self._state_dropped = drop_state
+            failures = await close_workspace(self._close_deps(drop_state))
+            self._closed = True
+            self._async_closed = True
+            if failures:
+                self._close_error = (
+                    failures[0]
+                    if len(failures) == 1
+                    else BaseExceptionGroup(
+                        "workspace teardown failed", failures
+                    )
+                )
+                raise self._close_error
+
+    def _close_deps(self, drop_state: bool) -> CloseDeps:
+        """What closing releases (``close_workspace``).
+
+        Args:
+            drop_state (bool): delete the workspace's state too.
+        """
+        return CloseDeps(
+            sessions=self._session_mgr,
+            watch=self._watch,
+            cache=self._cache,
+            owns_state_store=self._owns_state_store,
+            state_store=self._state_store,
+            closers=[self._script_policy.close, self._runtimes.close],
+            job_table=self.job_table,
+            processes=self.processes,
+            registry=self._registry,
+            shared_mounts=self._shared_mounts,
+            kernel_mounts=self._kernel_mounts,
+            drop_state=drop_state,
+            workspace_id=self.workspace_id,
+            planes=self._planes,
+        )
 
     # ── snapshot / load / copy ─────────────────────────────────────────────
 
@@ -1485,7 +1562,11 @@ class Workspace:
             state, mounts=mounts, clis=clis, secrets=secrets
         )
         install_fingerprints(
-            ws, state.get(StateKey.FINGERPRINTS) or [], drift_policy
+            ws._registry,
+            ws._cache,
+            ws._drift,
+            state.get(StateKey.FINGERPRINTS) or [],
+            drift_policy,
         )
         live_only = state.get(StateKey.LIVE_ONLY_MOUNTS) or []
         if live_only:
@@ -1644,7 +1725,7 @@ class Workspace:
         *,
         profile: str | SessionProfile | Mapping[str, Any] | None = None,
         permissions: SessionProfile | Mapping[str, Any] | None = None,
-    ) -> Session:
+    ) -> "Session":
         """One session's two doors: ``shell`` and ``vfs`` bound to it.
 
         Creates the session under the given profile when the id is new
@@ -1799,6 +1880,20 @@ class Workspace:
     @property
     def state_store(self) -> WorkspaceStateStore:
         return self._state_store
+
+    async def _adopt_default_session(self, session_id: str) -> None:
+        """Snapshot restore: adopt the snapshot's default session identity
+        and point the discovery record at it.
+
+        Args:
+            session_id (str): the snapshot's default session.
+        """
+        await self._meta.adopt_default(session_id)
+
+    def _forget_reads(self) -> None:
+        """Snapshot restore: every session the snapshot restores is a new
+        one to the agent tools, so none keeps what was read before."""
+        self._reads.clear()
 
     async def workspace_meta(self) -> dict[str, Any]:
         """This workspace's metadata record (discovery surface)."""
@@ -2017,13 +2112,13 @@ class Workspace:
             reset_current_session(token)
 
     async def dispatch(
-        self, op: str, path: PathSpec, **kwargs: Any
+        self, name: str, path: PathSpec, /, **kwargs: Any
     ) -> tuple[Any, IOResult]:
         # The door owns pre-dispatch initialization (namespace load,
-        # pending drift checks), so FUSE and the ops facade get it too.
+        # pending drift checks), so FUSE and `ws.vfs` get it too.
         # Runs as the default session unless one is bound, like ws.vfs.
         return await self._bind_session(
-            None, partial(self._dispatcher.dispatch, op, path, **kwargs)
+            None, partial(self._dispatcher.dispatch, name, path, **kwargs)
         )
 
     async def stat(self, path: str) -> FileStat:
@@ -2083,6 +2178,28 @@ class Workspace:
         return [m.virtual for m in matches if isinstance(m, PathSpec)]
 
     # ── execution ────────────────────────────────────────────────────────────
+
+    def _execute_env(self) -> ExecuteEnv:
+        """The parts a line runs against (``execute_line``)."""
+        return ExecuteEnv(
+            meta=self._meta,
+            drift=self._drift,
+            namespace=self._namespace,
+            sessions=self._session_mgr,
+            registry=self._registry,
+            dispatcher=self._dispatcher,
+            observer=self.observer,
+            records=self._files.records,
+            job_table=self.job_table,
+            agent_id=self._default_agent_id,
+            runtimes=self._runtimes,
+            router=self._router,
+            processes=self.processes,
+            dispatch=self.dispatch,
+            has_managed_env=lambda: self._has_managed_env,
+            secret_sources=self._secret_sources,
+            execute=self.shell,
+        )
 
     async def apply_io(
         self,
@@ -2238,7 +2355,7 @@ class Workspace:
                     session_id,
                     partial(
                         execute_line,
-                        self,
+                        self._execute_env(),
                         command,
                         session_id,
                         stdin,
@@ -2286,3 +2403,135 @@ class Workspace:
                     await sink.emit(channel, data)
             result.stdout = result.stderr = None
         return result
+
+
+class Session:
+    """One session's doors, bound together.
+
+    ``shell`` runs a line as the session, ``vfs`` is the file API run
+    as it, ``tools`` the agent tools over both and ``explain`` the same
+    doors as a dry run, so a host holds one
+    object per agent and every door answers under the same profile:
+    hides, mount modes, grants and standing decisions. Nothing is
+    stored here; the session record stays with the session manager and
+    ``state`` reads it. Obtained from ``Workspace.session``, which
+    creates the session or adopts it. A None id is the workspace's
+    default session as it is when each call runs, the way ``ws.vfs``
+    and ``ws.shell`` follow it when a snapshot load or an attach
+    re-keys it.
+    """
+
+    def __init__(self, ws: Workspace, session_id: str | None) -> None:
+        self._ws = ws
+        self._id = session_id
+
+    @property
+    def session_id(self) -> str:
+        return (
+            self._id if self._id is not None else self._ws.default_session_id
+        )
+
+    @property
+    def state(self) -> SessionState:
+        """The session record: cwd, env, modes, hides, decisions."""
+        return self._ws.get_session(self.session_id)
+
+    @property
+    def decisions(self) -> Decisions:
+        """The workspace's approval ledger, which this session's asked
+        commands and ops are recorded in."""
+        return self._ws.decisions
+
+    def mounts(self) -> list[MountEntry]:
+        """The workspace's mounts, which the session's profile narrows."""
+        return self._ws.mounts()
+
+    @property
+    def vfs(self) -> Files:
+        """The file API run as this session."""
+        if self._id is None:
+            return self._ws.vfs
+        return self._ws.vfs._for_session(self._id)
+
+    @property
+    def explain(self) -> Explainer:
+        """This session's calls explained instead of run, under the same
+        names: ``explain.shell(line)``, ``explain.vfs.<call>(...)``."""
+        return Explainer(self._ws.explain, self._id, self.vfs)
+
+    @property
+    def tools(self) -> MirageToolOperations:
+        """The agent tools run as this session: one table per session,
+        shared by every caller in the process."""
+        return self._ws._session_tools(self._id)
+
+    async def _loaded(self) -> None:
+        """Hydrate the workspace's sessions, so a stored one is known."""
+        await self._ws.ensure_sessions_loaded()
+
+    async def _reads(self) -> FileVersionTracker:
+        """The read history the session's agent tools share."""
+        return await self._ws._session_reads(self._id)
+
+    async def shell(
+        self,
+        command: str,
+        stdin: ByteSource | None = None,
+        agent_id: str | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        cancel: asyncio.Event | None = None,
+        record: bool = True,
+        runtime: str | None = None,
+    ) -> IOResult:
+        """Run a shell line as this session; ``Workspace.shell`` with
+        the session fixed.
+
+        Args:
+            command (str): the shell line.
+            stdin (ByteSource | None): stdin payload.
+            agent_id (str | None): agent identifier for observability.
+            cwd (str | None): per-call working directory, run in an
+                ephemeral clone of the session.
+            env (dict[str, str] | None): per-call env overrides, run in
+                an ephemeral clone of the session.
+            cancel (asyncio.Event | None): abort signal.
+            record (bool): whether the line enters history.
+            runtime (str | None): the runtime to route the line to.
+        """
+        return await self._ws.shell(
+            command,
+            session_id=self._id,
+            stdin=stdin,
+            agent_id=agent_id,
+            cwd=cwd,
+            env=env,
+            cancel=cancel,
+            record=record,
+            runtime=runtime,
+        )
+
+    async def glob(self, pattern: str) -> list[str]:
+        """The paths a pattern matches as this session;
+        ``Workspace.glob`` with the session fixed.
+
+        Args:
+            pattern (str): the pattern, such as ``/src/**/*.py``.
+        """
+        return await self._ws.glob(pattern, session_id=self._id)
+
+    async def vfs_md(self, path: str | PathSpec | None = None) -> str:
+        """Render this session's VFS Markdown, optionally at a virtual path.
+
+        Args:
+            path (str | PathSpec | None): destination inside this workspace.
+        """
+        return await self._ws.vfs_md(path, session_id=self._id)
+
+    async def skill_md(self, path: str | PathSpec | None = None) -> str:
+        """Render this session's CLI skill, optionally at a virtual path.
+
+        Args:
+            path (str | PathSpec | None): destination inside this workspace.
+        """
+        return await self._ws.skill_md(path, session_id=self._id)

@@ -48,7 +48,8 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "THIRD_PARTY_NOTICES"
   ],
   "scripts": {
     "build": "node scripts/embed-wasm.mjs && node scripts/clean.mjs && tsc -p tsconfig.build.json",

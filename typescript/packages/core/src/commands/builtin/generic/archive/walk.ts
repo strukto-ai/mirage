@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { LinkView, MountView } from '../../../../ops/types.ts'
+import type { LinkView, MountView } from '../../../../view/types.ts'
 import { type FileStat, FileType, LINK_TARGET_KEY, PathSpec } from '../../../../types.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
 import { isEnotdir } from '../../../../errors/fs.ts'

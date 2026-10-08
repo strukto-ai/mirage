@@ -58,9 +58,9 @@ from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import eisdir, fs_strerror
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, MountView
 from mirage.types import PathSpec
 from mirage.utils.compress import GZIP_MAGIC, GzipDataError, gunzip_partial
+from mirage.view.types import LinkView, MountView
 
 logger = logging.getLogger(__name__)
 

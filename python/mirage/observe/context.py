@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
@@ -71,6 +72,49 @@ class RecordingScope:
         if self._token is not None:
             _recorder.reset(self._token)
             self._token = None
+
+
+def active_records() -> list[OpRecord] | None:
+    """The enclosing typed line's records, or None outside one.
+
+    A nested evaluation ($(), eval, source, xargs) opens an inert scope
+    that collects nothing of its own, and its IOResult does not always
+    reach the enclosing line (TypeScript returns only its streams). It
+    applies against the part of these it added, so its own write records
+    decide what the nested apply keeps.
+
+    Returns:
+        list[OpRecord] | None: the active recorder's sink, or None.
+    """
+    rec = _recorder.get()
+    return rec.sink if rec is not None else None
+
+
+_command_sink: ContextVar[list[OpRecord] | None] = ContextVar(
+    "_command_sink", default=None
+)
+
+
+@contextmanager
+def command_records() -> Iterator[list[OpRecord]]:
+    """Collect the records the running command itself emits.
+
+    Yields a fresh list that :func:`record` and :func:`record_stream`
+    append to, beside the line's sink, while the block runs. A nested
+    block opens its own list, and a concurrent task keeps the list its
+    context was copied with, so a pipeline stage never sees a sibling
+    stage's records. Nothing is collected outside a recording scope.
+
+    Yields:
+        list[OpRecord]: the command's own records, shared with the
+        line's sink.
+    """
+    mine: list[OpRecord] = []
+    token = _command_sink.set(mine)
+    try:
+        yield mine
+    finally:
+        _command_sink.reset(token)
 
 
 def active_recorder() -> Recorder | None:
@@ -187,7 +231,7 @@ def finish_record(
     """Close ``timer`` and build the finished record.
 
     The one place an op's duration and wall-clock stamp are read, shared
-    by the recorder sink (:func:`record`) and by the ``Ops`` facade's own
+    by the recorder sink (:func:`record`) and by the ``Files`` facade's own
     ledger, so the two cannot disagree about what a duration measures.
 
     Args:
@@ -243,17 +287,19 @@ def record(
     rec = _recorder.get()
     if rec is None:
         return
-    rec.sink.append(
-        finish_record(
-            op,
-            path,
-            source,
-            nbytes,
-            timer,
-            fingerprint=fingerprint,
-            revision=revision,
-        )
+    op_rec = finish_record(
+        op,
+        path,
+        source,
+        nbytes,
+        timer,
+        fingerprint=fingerprint,
+        revision=revision,
     )
+    rec.sink.append(op_rec)
+    mine = _command_sink.get()
+    if mine is not None:
+        mine.append(op_rec)
 
 
 def record_stream(
@@ -301,6 +347,9 @@ def record_stream(
         mount_id=rec.mount_id,
     )
     rec.sink.append(op_rec)
+    mine = _command_sink.get()
+    if mine is not None:
+        mine.append(op_rec)
     return op_rec
 
 

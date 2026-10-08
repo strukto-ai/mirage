@@ -66,7 +66,7 @@ async def delete_cmd(
                 description=fl.as_str("commit_description") or "",
                 create_pr=bool(fl.as_bool("create_pr")),
             )
-            reported = reply.get("commitUrl")
+            reported = (reply or {}).get("commitUrl")
             url = reported if isinstance(reported, str) else ""
     return text_out(
         f"Files correctly deleted from repo. Commit: {url}.\n", stderr

@@ -16,6 +16,7 @@ import { Channel } from '@struktoai/mirage-core/shell/console/index'
 import { asyncContextIsolatesTasks } from '@struktoai/mirage-core/utils/async_context'
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { IOResult } from '@struktoai/mirage-core/io/types'
+import { ICONV_MULTIBYTE_DIGESTS, iconvMultibyteDigests } from '@struktoai/mirage-core/test-utils'
 import { JobConsole, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-browser'
 import {
   bindMount,
@@ -109,6 +110,12 @@ function battery(): [string, Check][] {
 }
 
 const CHECKS: [string, Check][] = [
+  ...ICONV_MULTIBYTE_DIGESTS.map(([spec, ...expected]): [string, Check] => [
+    `iconv ${spec.name} decode and reverse tables match the pinned digests`,
+    async () => {
+      equal(await iconvMultibyteDigests(spec), expected)
+    },
+  ]),
   [
     'a page has no task-local async context',
     async () => {

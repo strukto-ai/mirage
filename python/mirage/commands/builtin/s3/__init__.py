@@ -12,21 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.generic_bind import generic_commands
 from mirage.commands.builtin.object_store import (
     OBJECT_STORE_OVERRIDES,
     make_object_store_commands,
 )
-from mirage.commands.builtin.s3.io import IO as _IO
 from mirage.commands.config import CommandCatalog
 
 COMMANDS = CommandCatalog(
     [
-        *make_generic_commands(
-            "s3",
-            _IO,
-            overrides=OBJECT_STORE_OVERRIDES,
-        ),
-        *make_object_store_commands("s3", _IO),
+        *generic_commands("s3", overrides=OBJECT_STORE_OVERRIDES),
+        *make_object_store_commands("s3"),
     ]
 )

@@ -13,6 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { SHELL_SPECS, parseShellOptions } from '../../commands/spec/shell.ts'
+import { getText, literalWord } from '../../shell/helpers.ts'
+import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
+import { hasGlob, markEscapedGlobs } from '../../utils/glob_walk.ts'
 import { parseBashArgs } from '../executor/builtins/script/bash.ts'
 import { timeoutMissing } from '../executor/builtins/timeout/timeout.ts'
 import { xargsMissing } from '../executor/builtins/xargs/xargs.ts'
@@ -26,6 +29,23 @@ import { xargsMissing } from '../executor/builtins/xargs/xargs.ts'
 export interface Word {
   readonly raw: string
   readonly text: string | null
+  /** An unquoted pathname pattern may erase or multiply this word. */
+  readonly glob?: boolean
+}
+
+function wordGlobs(node: TSNodeLike): boolean {
+  if (node.type === NT.WORD || node.type === NT.NUMBER) {
+    return hasGlob(markEscapedGlobs(getText(node)))
+  }
+  if (node.type === NT.COMMAND_NAME || node.type === NT.CONCATENATION) {
+    return node.namedChildren.some(wordGlobs)
+  }
+  return node.type === NT.EXTGLOB_PATTERN
+}
+
+/** Read a word without losing which glob characters are quoted. */
+export function readWord(node: TSNodeLike, home: string | null = null): Word {
+  return { raw: getText(node), text: literalWord(node, home), glob: wordGlobs(node) }
 }
 
 /** The text the gate works with: the literal when it has one, the word as typed otherwise. */
@@ -228,7 +248,15 @@ function builtinInner(args: readonly Word[]): InnerLine[] {
 // options mirage does not (`--restricted`, `-O extglob`) and still runs the
 // program.
 function shellInner(args: readonly Word[]): InnerLine[] {
-  const parsed = parseBashArgs(args.map(wordValue))
+  // Expansion can erase or split a word, shifting an option's value
+  // onto --version or -c. Only a literal prefix can establish what
+  // runs; dynamic positional words after its program cannot change it.
+  const literal: string[] = []
+  for (const word of args) {
+    if (word.text === null || word.glob) break
+    literal.push(word.text)
+  }
+  const parsed = parseBashArgs(literal)
   if (parsed.help || parsed.version) return []
   if (parsed.script !== null) return [asLine(parsed.script)]
   return [UNREADABLE]

@@ -24,11 +24,9 @@
 
 import hashlib
 from copy import deepcopy
-from functools import partial
 
-from mirage import (NULL_INDEX, Accessor, BaseVFS, CommandIO, ContentType,
-                    FileStat, FileType, IndexCacheStore, PathSpec,
-                    stream_from_bytes)
+from mirage import (NULL_INDEX, Accessor, BaseVFS, ContentType, FileStat,
+                    FileType, IndexCacheStore, PathSpec)
 
 PAGES = {"notes.md": "agents just speak bash\n"}
 FEED = {"status.md": "All systems go.\n"}
@@ -44,68 +42,61 @@ def _key(path: PathSpec) -> str:
     return path.vfs_path.strip("/")
 
 
-async def readdir(accessor: PageAccessor,
-                  path: PathSpec,
-                  index: IndexCacheStore = NULL_INDEX) -> list[str]:
-    if _key(path):
-        raise NotADirectoryError(path.virtual)
-    parent = path.virtual.rstrip("/")
-    return [f"{parent}/{name}" for name in sorted(accessor.pages)]
+class PagesVFS(BaseVFS):
+    """One flat page store: readdir, read and stat, and write."""
+
+    accessor: PageAccessor
+
+    async def readdir(self,
+                      path: PathSpec,
+                      index: IndexCacheStore = NULL_INDEX) -> list[str]:
+        if _key(path):
+            raise NotADirectoryError(path.virtual)
+        parent = path.virtual.rstrip("/")
+        return [f"{parent}/{name}" for name in sorted(self.accessor.pages)]
+
+    async def read(self,
+                   path: PathSpec,
+                   index: IndexCacheStore = NULL_INDEX,
+                   offset: int = 0,
+                   size: int | None = None) -> bytes:
+        key = _key(path)
+        if not key:
+            raise IsADirectoryError(path.virtual)
+        if key not in self.accessor.pages:
+            raise FileNotFoundError(path.virtual)
+        return self.accessor.pages[key].encode()
+
+    async def stat(self,
+                   path: PathSpec,
+                   index: IndexCacheStore = NULL_INDEX) -> FileStat:
+        key = _key(path)
+        name = path.virtual.rstrip("/").rsplit("/", 1)[-1] or "/"
+        if not key:
+            return FileStat(name=name, size=None, type=FileType.DIRECTORY)
+        if key not in self.accessor.pages:
+            raise FileNotFoundError(path.virtual)
+        data = self.accessor.pages[key].encode()
+        return FileStat(name=name,
+                        size=len(data),
+                        type=FileType.FILE,
+                        content=ContentType.TEXT,
+                        fingerprint=hashlib.sha256(data).hexdigest()[:16])
+
+    async def write(self, path: PathSpec, data: bytes) -> None:
+        key = _key(path)
+        if not key or "/" in key:
+            raise NotADirectoryError(path.virtual)
+        self.accessor.pages[key] = data.decode()
 
 
-async def read_bytes(accessor: PageAccessor,
-                     path: PathSpec,
-                     index: IndexCacheStore = NULL_INDEX) -> bytes:
-    key = _key(path)
-    if not key:
-        raise IsADirectoryError(path.virtual)
-    if key not in accessor.pages:
-        raise FileNotFoundError(path.virtual)
-    return accessor.pages[key].encode()
-
-
-async def stat(accessor: PageAccessor,
-               path: PathSpec,
-               index: IndexCacheStore = NULL_INDEX) -> FileStat:
-    key = _key(path)
-    name = path.virtual.rstrip("/").rsplit("/", 1)[-1] or "/"
-    if not key:
-        return FileStat(name=name, size=None, type=FileType.DIRECTORY)
-    if key not in accessor.pages:
-        raise FileNotFoundError(path.virtual)
-    data = accessor.pages[key].encode()
-    return FileStat(name=name,
-                    size=len(data),
-                    type=FileType.FILE,
-                    content=ContentType.TEXT,
-                    fingerprint=hashlib.sha256(data).hexdigest()[:16])
-
-
-async def write(accessor: PageAccessor, path: PathSpec, data: bytes) -> None:
-    key = _key(path)
-    if not key or "/" in key:
-        raise NotADirectoryError(path.virtual)
-    accessor.pages[key] = data.decode()
-
-
-def make_io() -> CommandIO:
-    return CommandIO(readdir=readdir,
-                     read_bytes=read_bytes,
-                     read_stream=partial(stream_from_bytes, read_bytes),
-                     stat=stat,
-                     write=write,
-                     is_mounted=lambda a: True,
-                     local=False)
-
-
-class WikiVFS(BaseVFS):
+class WikiVFS(PagesVFS):
     """Owned content: the pages ride the state and rebuild without help."""
 
     def __init__(self, pages: dict[str, str] | None = None) -> None:
         self.store = PageAccessor(deepcopy(PAGES if pages is None else pages))
         super().__init__(name="wiki",
                          accessor=self.store,
-                         io=make_io(),
                          supports_snapshot=True)
 
     def get_state(self) -> dict:
@@ -115,11 +106,10 @@ class WikiVFS(BaseVFS):
         self.store.pages = deepcopy(state.get("pages", {}))
 
 
-class FeedVFS(BaseVFS):
+class FeedVFS(PagesVFS):
     """Observed content: the default state asks to be handed back live."""
 
     def __init__(self) -> None:
         super().__init__(name="feed",
                          accessor=PageAccessor(FEED),
-                         io=make_io(),
                          supports_snapshot=True)

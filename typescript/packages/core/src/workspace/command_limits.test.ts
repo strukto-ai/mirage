@@ -17,7 +17,6 @@ import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { CLISpec } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { Limit, MountMode, OnExceed } from '../types.ts'
@@ -39,11 +38,9 @@ beforeAll(async () => {
 
 function buildWs(nLines: number): Workspace {
   const ram = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram)
   const body = Array.from({ length: nLines }, (_, i) => `line${String(i)}\n`).join('')
   ram.store.files.set('/big.txt', ENC.encode(body))
-  return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops: registry, shellParser: parser })
+  return new Workspace({ '/': ram }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 function overrideLimit(ws: Workspace, name: string, sg: Limit): void {
@@ -100,14 +97,11 @@ describe('Workspace command limit', () => {
 
   it('commandLimits constructor option caps below default', async () => {
     const ram = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(ram)
     ram.store.files.set('/big.txt', ENC.encode('line0\nline1\nline2\nline3\nline4\n'))
     const ws = new Workspace(
       { '/': ram },
       {
         mode: MountMode.WRITE,
-        ops: registry,
         shellParser: parser,
         commandLimits: { cat: new Limit({ maxLines: 3 }) },
       },
@@ -131,13 +125,10 @@ describe('Workspace command limit', () => {
     // declared a `cat` one. Python reaches the merged shape through
     // `entry.command_limits.update()`.
     const ram = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(ram)
     const ws = new Workspace(
       { '/': spell(ram, { cat: new Limit({ maxLines: 3 }) }) as never },
       {
         mode: MountMode.WRITE,
-        ops: registry,
         shellParser: parser,
         commandLimits: { cat: new Limit({ maxLines: 9 }), ls: new Limit({ maxLines: 7 }) },
       },

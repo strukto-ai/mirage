@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Workspace } from '@struktoai/mirage-node'
-import type { Ops } from '@struktoai/mirage-core/ops/ops'
-import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
+import type { Files } from '@struktoai/mirage-core/workspace/files'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type {
   EditResult,
   ExecuteResponse,
@@ -79,7 +79,7 @@ function shellQuote(s: string): string {
   return `'${s.replaceAll(`'`, `'\\''`)}'`
 }
 
-async function ensureParent(vfs: Ops, path: string): Promise<void> {
+async function ensureParent(vfs: Files, path: string): Promise<void> {
   const parent = gnuDirname(path)
   if (parent === '/' || parent === '' || parent === '.') return
   if (await vfs.exists(parent)) return
@@ -142,8 +142,8 @@ export class LangchainWorkspace implements SandboxBackendProtocol {
     this.sessionId = options.sessionId
   }
 
-  /** The op facade run as this backend's session. */
-  private get vfs(): Ops {
+  /** The file API run as this backend's session. */
+  private get vfs(): Files {
     if (this.sessionId === undefined) return this.ws.vfs
     return new Session(this.ws, this.sessionId).vfs
   }

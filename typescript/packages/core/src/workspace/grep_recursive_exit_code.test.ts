@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { getTestParser, stdoutStr } from './fixtures/workspace_fixture.ts'
@@ -35,9 +34,7 @@ async function makeWs(): Promise<Workspace> {
   r.store.dirs.add('/')
   r.store.dirs.add('/src')
   r.store.files.set('/src/a.js', ENC.encode('legacyFetch("/api");\n'))
-  const registry = new OpsRegistry()
-  registry.registerVfs(r)
-  return new Workspace({ '/': r }, { mode: MountMode.WRITE, ops: registry, shellParser: parser })
+  return new Workspace({ '/': r }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 describe('grep -r recursive exit code (issue #43)', () => {
@@ -100,12 +97,9 @@ it('keeps binary-only matches through nested mount fan-out', async () => {
   outer.store.dirs.add('/')
   outer.store.dirs.add('/work')
   inner.store.files.set('/paper.pdf', ENC.encode('needle\0tail\n'))
-  const registry = new OpsRegistry()
-  registry.registerVfs(outer)
-  registry.registerVfs(inner)
   const ws = new Workspace(
     { '/': outer, '/work/remote': inner },
-    { mode: MountMode.WRITE, ops: registry, shellParser: await getTestParser() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
   )
   try {
     const normal = await ws.shell('grep -r needle /work')

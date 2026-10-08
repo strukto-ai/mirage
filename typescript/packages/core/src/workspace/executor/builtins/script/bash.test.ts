@@ -72,8 +72,12 @@ describe('parseBashArgs', () => {
     expect(parsed.settings).toEqual([['pipefail', true]])
   })
 
-  it('consumes a long option value', () => {
-    expect(parseBashArgs(['--rcfile', 'rc', 'run.sh']).path).toBe('run.sh')
+  describe.each(['--rcfile', '--init-file'])('%s', (option) => {
+    it.each(['rc', '', '--version', '--help'])('consumes its value %j', (value) => {
+      const parsed = parseBashArgs([option, value, 'run.sh'])
+      expect(parsed.path).toBe('run.sh')
+      expect(parsed.help || parsed.version).toBe(false)
+    })
   })
 
   it('reports an unsupported short option', () => {

@@ -16,6 +16,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
+from mirage.shell.helpers import get_text, literal_word
+from mirage.shell.types import NodeType as NT
+from mirage.shell.types import TSNodeLike
+from mirage.utils.glob_walk import has_glob, mark_escaped_globs
 from mirage.workspace.executor.builtins.script.bash import parse_bash_args
 from mirage.workspace.executor.builtins.timeout.timeout import timeout_missing
 from mirage.workspace.executor.builtins.xargs.xargs import xargs_missing
@@ -31,16 +35,37 @@ class Word:
             removed, escapes resolved); None when only the runtime can
             say, a parameter or command substitution or a brace
             expansion.
+        glob (bool): whether an unquoted pathname pattern may erase or
+            multiply this word when the runtime expands it.
     """
 
     raw: str
     text: str | None
+    glob: bool = False
 
     @property
     def value(self) -> str:
         """The text the gate works with: the literal when it has one,
         the word as typed otherwise."""
         return self.text if self.text is not None else self.raw
+
+
+def _word_globs(node: TSNodeLike) -> bool:
+    if node.type in (NT.WORD, NT.NUMBER):
+        return has_glob(mark_escaped_globs(get_text(node)))
+    if node.type in (NT.COMMAND_NAME, NT.CONCATENATION):
+        return any(_word_globs(child) for child in node.named_children)
+    return node.type == NT.EXTGLOB_PATTERN
+
+
+def read_word(node: TSNodeLike, home: str | None = None) -> Word:
+    """Read a word without losing which glob characters are quoted.
+
+    Args:
+        node (TSNodeLike): the command word's syntax node.
+        home (str | None): the home directory a leading tilde names.
+    """
+    return Word(get_text(node), literal_word(node, home), _word_globs(node))
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,7 +281,15 @@ def _shell_inner(args: Sequence[Word]) -> list[InnerLine]:
     and a line mirage's parse refuses are lines the gate cannot read,
     since a real bash takes options mirage does not (``--restricted``,
     ``-O extglob``) and still runs the program."""
-    parsed = parse_bash_args([w.value for w in args])
+    # Expansion can erase or split a word, shifting an option's value
+    # onto --version or -c. Only a literal prefix can establish what
+    # runs; dynamic positional words after its program cannot change it.
+    literal: list[str] = []
+    for word in args:
+        if word.text is None or word.glob:
+            break
+        literal.append(word.text)
+    parsed = parse_bash_args(literal)
     if parsed.help or parsed.version:
         return []
     if parsed.script is not None:

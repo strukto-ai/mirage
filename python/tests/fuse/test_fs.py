@@ -426,7 +426,7 @@ async def test_total_ops_persists_across_drains(seed_ws):
 async def test_total_ops_counts_reads_and_writes(rw_ws):
     await rw_ws.shell("tee /f.txt", stdin=b"x")
     fs = MirageFS(rw_ws.vfs)
-    fs.core._ops.records.clear()
+    fs.core._files.records.clear()
     fh = fs.open("/f.txt", os.O_RDONLY)
     fs.read("/f.txt", 1024, 0, fh)
     fh2 = fs.create("/g.txt", 0o644)
@@ -446,7 +446,7 @@ def test_permission_error_logged_on_create():
 def test_permission_error_not_counted_as_op():
     ro_ws = Workspace({"/": RAMVFS()}, mode=MountMode.READ)
     fs = MirageFS(ro_ws.vfs)
-    fs.core._ops.records.clear()
+    fs.core._files.records.clear()
     with pytest.raises(Exception):
         fs.create("/new.txt", 0o644)
     ops = fs.drain_ops()

@@ -30,6 +30,12 @@ class DenyAws implements Policy {
   }
 }
 
+class DenyUnset implements Policy {
+  preSession(ctx: SessionContext): Action | null {
+    return ctx.verb === 'unset' ? { kind: 'deny', reason: 'no unsets' } : null
+  }
+}
+
 async function guarded(): Promise<Workspace> {
   const parser = await getTestParser()
   return new Workspace(
@@ -55,6 +61,10 @@ const REFUSED: [string, string][] = [
   ['((AWS_LIMIT=5))', 'AWS_LIMIT'],
   ['printf -v AWS_KEY %s x', 'AWS_KEY'],
   ['for ((AWS_I=0; AWS_I<1; AWS_I++)); do :; done', 'AWS_I'],
+  // The write re-aims an unset reference, so the mark lands on a name the
+  // assignment's own gate never saw.
+  ['declare -n ref; export ref=AWS_KEY', 'AWS_KEY'],
+  ['declare -n ref; readonly ref=AWS_KEY', 'AWS_KEY'],
 ]
 
 const ALLOWED: [string, string, string][] = [
@@ -146,6 +156,68 @@ it('does not expand length after a refused offset', async () => {
       const after = await ws.shell(`echo [$${name}]`)
       expect(DEC.decode(after.stdout).trim()).toBe('[]')
     }
+  } finally {
+    await ws.close()
+  }
+})
+
+// The literals store first and take their marks once they all have; a
+// policy refusing a later one must not leave an earlier one stored but
+// unfrozen.
+const LITERALS: [string, string][] = [
+  ['readonly SAFE=(one) AWS_BLOCKED=(two)', '-ar'],
+  ['export SAFE=(one) AWS_BLOCKED=(two)', '-ax'],
+  ['declare -rx SAFE=(one) AWS_BLOCKED=(two)', '-arx'],
+]
+
+describe('a refused literal leaves the stored ones marked', () => {
+  for (const [line, expected] of LITERALS) {
+    it(line, async () => {
+      const ws = await guarded()
+      try {
+        const result = await ws.shell(line)
+        expect(result.refusal?.reason).toContain('not yours to set')
+        const shown = await ws.shell('declare -p SAFE')
+        expect(DEC.decode(shown.stdout)).toBe(`declare ${expected} SAFE=([0]="one")\n`)
+      } finally {
+        await ws.close()
+      }
+    })
+  }
+})
+
+it("keeps a literal's mark on the target its write cleared", async () => {
+  // The literal writes through `ref` to `T`; the plain operand then re-aims
+  // `ref` at `AWS_KEY`, and the literal's `-x` must not follow it there past
+  // the gate. Under `-n` it marks the reference itself.
+  const ws = await guarded()
+  try {
+    const result = await ws.shell('T=old; declare -n ref=T; declare -nx ref=AWS_KEY ref=(one)')
+    expect(result.exitCode).toBe(0)
+    const shown = await ws.shell('declare -p ref AWS_KEY')
+    expect(DEC.decode(shown.stdout)).toBe('declare -nx ref="AWS_KEY"\n')
+    expect(DEC.decode(shown.stderr)).toContain('AWS_KEY: not found')
+  } finally {
+    await ws.close()
+  }
+})
+
+it('asks for no unset when a fresh local is assigned', async () => {
+  // The new local's reset is the scope's bookkeeping, not a deletion the
+  // line asked for; only the assignment is the gated write.
+  const parser = await getTestParser()
+  const ws = new Workspace(
+    { '/ram': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      shellParserFactory: () => Promise.resolve(parser),
+      policies: [new DenyUnset()],
+    },
+  )
+  try {
+    const result = await ws.shell('X=outer; f(){ local X=inner; echo "$X"; }; f; echo "$X"')
+    expect(result.exitCode).toBe(0)
+    expect(DEC.decode(result.stdout)).toBe('inner\nouter\n')
   } finally {
     await ws.close()
   }

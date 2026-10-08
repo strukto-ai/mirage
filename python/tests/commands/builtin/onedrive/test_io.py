@@ -3,9 +3,10 @@ import pytest
 import mirage.core.msgraph.client as graph_client
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.commands.builtin.onedrive.io import IO
 from mirage.core.msgraph.client import GraphError
 from mirage.types import PathSpec
+from mirage.vfs.onedrive import OneDriveVFS
+from tests.fixtures.vfs_io import vfs_over
 
 _BASE = "https://graph.microsoft.com/v1.0/me/drive"
 _TREE = {
@@ -47,8 +48,8 @@ def _accessor() -> OneDriveAccessor:
 
 @pytest.mark.asyncio
 async def test_du_walks_one_list_per_folder_with_file_sizes_only(seen):
-    entries, total = await IO.du.entries(
-        _accessor(), PathSpec.from_str_path("/od", ""), RAMIndexCacheStore()
+    entries, total = await vfs_over(OneDriveVFS, _accessor()).du_entries(
+        PathSpec.from_str_path("/od", ""), RAMIndexCacheStore()
     )
     assert entries == [("/a.txt", 3), ("/sub/b.txt", 5)]
     assert total == 8

@@ -23,15 +23,19 @@ from typing import Any
 from mirage.commands.builtin.utils.identity import UNKNOWN_NAME
 from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.commands.errors import CommandTimeoutError
-from mirage.context import program_invocation
+from mirage.context import (
+    program_invocation,
+    reset_current_session,
+    set_current_evaluation,
+)
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
-from mirage.ops.types import SessionView
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
-from mirage.process.types import ProcessInfo, ProcessState, ProcessView
+from mirage.process.types import ProcessInfo, ProcessState
+from mirage.process.view import ProcessView
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import (
@@ -51,16 +55,12 @@ from mirage.shell.constants import (
 from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.helpers import get_redirects, get_text, is_backgrounded
 from mirage.shell.job_table import Job, JobStatus, JobTable
-from mirage.shell.node_kind import NodeKind, node_kind
+from mirage.shell.node_kind import NodeKind, node_kind, simple_command
 from mirage.shell.parse.program import retain_programs
 from mirage.shell.types import TSNodeLike
 from mirage.utils.timezone import zone_from_env
-from mirage.workspace.evaluation import (
-    EvaluationContext,
-    child_context,
-    reset_current_evaluation,
-    set_current_evaluation,
-)
+from mirage.view.types import SessionView
+from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.executor.statement import failed_read, statement_stdin
@@ -209,7 +209,9 @@ async def handle_background(
     bg_session.job_output = JobOutput(output)
     # A job is a child shell outside every loop: `{ break; } &` in a
     # loop refuses, as bash's does.
-    bg_call_stack = (call_stack or CallStack()).fork(loops=False)
+    bg_call_stack = (call_stack or CallStack()).fork(
+        loops=False, paren=None if simple_command(left) else True
+    )
     job_handed = (
         decisions.split(
             session.session_id, handed, occurrence_of(left, handed)
@@ -265,15 +267,22 @@ async def handle_background(
                 )
             except ExitSignal as sig:
                 # A background job is its own shell: exit ends the job
-                # only.
+                # only, a simple command the top shell forked with the
+                # status that shell would exit with (`: ${U?} &` is 127,
+                # `{ : ${U?}; } &` and `( : ${U?} & )` are 1).
                 stdout = sig.stdout or b""
-                io = IOResult(
-                    exit_code=sig.contained_code, stderr=sig.stderr or None
+                status = (
+                    sig.exit_code
+                    if simple_command(left)
+                    and not sig.sourced
+                    and not (call_stack is not None and call_stack.subshell)
+                    else sig.contained_code
                 )
+                io = IOResult(exit_code=status, stderr=sig.stderr or None)
                 exec_node = ExecutionNode(
                     command=cmd_str_inner,
                     stderr=sig.stderr,
-                    exit_code=sig.contained_code,
+                    exit_code=status,
                 )
             except ReturnSignal as sig:
                 stdout = sig.stdout
@@ -294,7 +303,7 @@ async def handle_background(
             return io, exec_node
         finally:
             release_job()
-            reset_current_evaluation(token)
+            reset_current_session(token)
             if job_handed is not None and decisions is not None:
                 await decisions.revoke(session.session_id, job_handed)
 

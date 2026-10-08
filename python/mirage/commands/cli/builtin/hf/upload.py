@@ -245,16 +245,15 @@ async def upload_cmd(
             if from_dir and deletions
             else []
         )
-        if additions or doomed:
-            await commit(
-                accessor,
-                additions=additions,
-                deletions=doomed,
-                message=fl.as_str("commit_message") or DEFAULT_COMMIT_MESSAGE,
-                description=fl.as_str("commit_description") or "",
-                create_pr=bool(fl.as_bool("create_pr")),
-            )
-        else:
+        reply = await commit(
+            accessor,
+            additions=additions,
+            deletions=doomed,
+            message=fl.as_str("commit_message") or DEFAULT_COMMIT_MESSAGE,
+            description=fl.as_str("commit_description") or "",
+            create_pr=bool(fl.as_bool("create_pr")),
+        )
+        if reply is None:
             warnings += EMPTY_COMMIT_WARNING
         home = repo_url(inv.config.endpoint, accessor.repo_type, repo_id)
         url = f"{home}/tree/{accessor.revision}/{base}".rstrip("/")

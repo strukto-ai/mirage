@@ -79,7 +79,7 @@ async function run(
   stdin: ByteSource | null,
   read: (p: PathSpec) => AsyncIterable<Uint8Array> = stream,
 ): Promise<[string, number]> {
-  const opts = { stdin, flags, filetypeFns: null, cwd: '/' } as unknown as CommandOpts
+  const opts = { stdin, flags, cwd: '/' } as unknown as CommandOpts
   const [out, io] = (await rgGeneric(paths, [pattern], opts, stat, readdir, read)) as [
     ByteSource,
     IOResult,
@@ -219,7 +219,7 @@ describe('rgGeneric - unreadable paths are named as typed', () => {
     paths: PathSpec[],
     flags: Readonly<Record<string, string | boolean | readonly string[]>>,
   ): Promise<[string, string, number]> {
-    const opts = { stdin: null, flags, filetypeFns: null, cwd: '/d' } as unknown as CommandOpts
+    const opts = { stdin: null, flags, cwd: '/d' } as unknown as CommandOpts
     const [out, io] = (await rgGeneric(paths, ['hit'], opts, statOf, readdirOf, streamOf)) as [
       ByteSource,
       IOResult,
@@ -254,7 +254,6 @@ describe('rgGeneric - an operand the walk refused', () => {
     const opts = {
       stdin: null,
       flags: {},
-      filetypeFns: null,
       cwd: '/sub',
     } as unknown as CommandOpts
     const [out, io] = (await rgGeneric(paths, ['o'], opts, stat, readdir, stream)) as [
@@ -296,7 +295,7 @@ describe('rgGeneric - an operand the walk refused', () => {
     // ripgrep 14.1.1 opens a lone file operand after the stat said it is one,
     // so a file it may not read is `rg: locked.txt: Permission denied (os
     // error 13)`, exit 2, not the shared handler's exit 1.
-    const opts = { stdin: null, flags: {}, filetypeFns: null, cwd: '/' } as unknown as CommandOpts
+    const opts = { stdin: null, flags: {}, cwd: '/' } as unknown as CommandOpts
     const typedLocked = new PathSpec({
       virtual: '/a.txt',
       directory: '/',
@@ -322,7 +321,7 @@ describe('rgGeneric - an operand the walk refused', () => {
 })
 
 describe('labelled', () => {
-  const base: CommandOpts = { stdin: null, flags: {}, filetypeFns: null, cwd: '/' }
+  const base: CommandOpts = { stdin: null, flags: {}, cwd: '/' }
 
   it('asks for the filename a walk would have printed', () => {
     expect(labelled(base).flags).toEqual({ with_filename: true })

@@ -16,13 +16,16 @@ from mirage.commands.config import CommandOpts
 from mirage.context import reset_current_session, set_current_session
 from mirage.core.dify import tree
 from mirage.io.types import IOResult, materialize
-from mirage.ops.types import NamespaceView
 from mirage.types import HiddenPaths, PathSpec, Visibility
 from mirage.utils.hidden import hidden_under
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.chroma import ChromaVFS
+from mirage.vfs.dify import DifyVFS
+from mirage.view.types import NamespaceView
 from mirage.workspace.session import SessionState
 from tests.commands.builtin.dify.conftest import document
 from tests.core.chroma.conftest import accessor_for, seeded_collection
+from tests.fixtures.vfs_io import io_for
 
 find = next(
     cmd for cmd in COMMANDS if cmd._registered_commands[0].name == "find"
@@ -64,7 +67,14 @@ async def run(
         config=SimpleNamespace(slug_metadata_name="slug")
     )
     stdout, io = await find(
-        accessor, paths, texts, CommandOpts(index=RAMIndexCacheStore(), **opts)
+        accessor,
+        paths,
+        texts,
+        CommandOpts(
+            index=RAMIndexCacheStore(),
+            io=io_for(DifyVFS, accessor),
+            **opts,
+        ),
     )
     return await materialize(stdout), io
 
@@ -188,11 +198,17 @@ async def test_chroma_scans_chunks_only_for_a_size_test(
     session = SessionState(session_id="veiled", visibility=vis)
     token = set_current_session(session)
     try:
+        accessor = accessor_for(collection)
         stdout, io = await chroma_find(
-            accessor_for(collection),
+            accessor,
             [spec("/knowledge")],
             texts,
-            CommandOpts(index=RAMIndexCacheStore(), flags=flags, ns=view(vis)),
+            CommandOpts(
+                index=RAMIndexCacheStore(),
+                io=io_for(ChromaVFS, accessor),
+                flags=flags,
+                ns=view(vis),
+            ),
         )
         stdout = await materialize(stdout)
     finally:

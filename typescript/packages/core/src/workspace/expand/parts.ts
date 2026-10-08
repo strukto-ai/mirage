@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { EvaluationContext } from '../evaluation.ts'
-import type { SessionView } from '../../ops/types.ts'
+import type { SessionView } from '../../view/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import type { PathSpec } from '../../types.ts'
 import { markEscapedGlobs } from '../../utils/glob_walk.ts'

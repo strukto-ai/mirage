@@ -74,7 +74,7 @@ export class VersionedVFS extends RAMVFS {
     })
   }
 
-  async stat(path: PathSpec): Promise<FileStat> {
+  override async stat(path: PathSpec): Promise<FileStat> {
     if (!this.hasStat) throw enotsup(this.name, 'stat', path)
     this.stats.push(path.virtual)
     const waiters = this.waiters
@@ -94,27 +94,20 @@ export class VersionedVFS extends RAMVFS {
 }
 
 /**
- * Mount `vfs` at `/m` and route its stats to the stub.
- *
- * The reconciler stats through the ops registry, so the stub answers there;
- * every other op reaches RAM as usual, and `asked` names every op the
- * registry was called for. Restore with vi.restoreAllMocks().
+ * Mount `vfs` at `/m`, its stat the stub's. `asked` names every op the
+ * mount's door was called for. Restore with vi.restoreAllMocks().
  */
 export function versionedWorkspace(
   vfs: VersionedVFS,
   policy: ReadPolicy = ReadPolicy.FRESH,
 ): { ws: Workspace; mount: MountEntry; rec: Reconciler; asked: string[] } {
   const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE, read: { policy, ttl: 600 } })
-  const call = ws.opsRegistry.call.bind(ws.opsRegistry)
-  const asked: string[] = []
-  vi.spyOn(ws.opsRegistry, 'call').mockImplementation(
-    (name, kind, accessor, path, args, kwargs) => {
-      asked.push(name)
-      return name === 'stat' && kind === vfs
-        ? vfs.stat(path)
-        : call(name, kind, accessor, path, args, kwargs)
-    },
-  )
   const mount = ws.namespace.mountFor('/m/a')
-  return { ws, mount, rec: new Reconciler(ws.cache, ws.namespace, ws.opsRegistry), asked }
+  const call = mount.callKeyed.bind(mount)
+  const asked: string[] = []
+  vi.spyOn(mount, 'callKeyed').mockImplementation((name, ...rest) => {
+    asked.push(name)
+    return call(name, ...rest)
+  })
+  return { ws, mount, rec: new Reconciler(ws.cache, ws.namespace), asked }
 }

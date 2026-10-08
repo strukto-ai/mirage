@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { toHex } from '../../../utils/hex.ts'
+
 export const ILLEGAL = -1
 export const CUT = -2
 
@@ -450,12 +452,7 @@ function sequences(blocks: readonly Block[]): Uint8Array[] {
 
 /** The one code point the host decoder reads `seq` as, or null. */
 function hostDecode(decoder: TextDecoder, seq: Uint8Array): number | null {
-  let text: string
-  try {
-    text = decoder.decode(seq)
-  } catch {
-    return null
-  }
+  const text = decoder.decode(seq)
   const cp = text.codePointAt(0)
   if (cp === undefined) return null
   return text.length === (cp > 0xffff ? 2 : 1) ? cp : null
@@ -475,7 +472,9 @@ export function hostDecoder(spec: MultibyteSpec): TextDecoder | null {
   if (decoder === undefined) {
     try {
       decoder = new TextDecoder(spec.codec, { fatal: true })
-    } catch {
+    } catch (error) {
+      if (!(error instanceof RangeError)) throw error
+      console.debug(`iconv: no host decoder for ${spec.codec}: ${String(error)}`)
       decoder = null
     }
     DECODERS.set(spec, decoder)
@@ -490,14 +489,28 @@ export function multibyteTable(spec: MultibyteSpec): Table {
   const decoder = hostDecoder(spec)
   if (decoder === null) throw new Error(`no TextDecoder for ${spec.codec}`)
   const table = new Map<number, number>()
+  let refused = 0
+  let firstError: string | null = null
   for (const seq of sequences(spec.blocks)) {
     const k = key(seq, 0, seq.length)
     if (spec.excluded.some(([low, high]) => low <= k && k <= high)) continue
-    const cp = hostDecode(decoder, seq)
+    let cp: number | null
+    try {
+      cp = hostDecode(decoder, seq)
+    } catch (error) {
+      if (!(error instanceof TypeError)) throw error
+      refused++
+      firstError ??= `${toHex(seq)}: ${String(error)}`
+      continue
+    }
     if (cp === null) continue
     if (!spec.privateUse && cp >= PRIVATE_USE[0] && cp <= PRIVATE_USE[1]) continue
     table.set(k, cp)
   }
+  if (firstError !== null)
+    console.debug(
+      `iconv: ${spec.codec} table skipped ${String(refused)} undecodable sequences; first: ${firstError}`,
+    )
   for (const [k, cp] of spec.remapped) table.set(k, cp)
   TABLES.set(spec, table)
   return table

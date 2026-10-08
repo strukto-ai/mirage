@@ -35,9 +35,6 @@ class _QuotaVFS(RAMVFS):
 
     name = "quota"
 
-    def ops(self):
-        return [replace(ro, vfs=self.name) for ro in super().ops()]
-
     def commands(self):
         return [replace(rc, vfs=self.name) for rc in super().commands()]
 

@@ -15,7 +15,6 @@
 import { describe, expect, it } from 'vitest'
 import { CLISpec } from '../../commands/cli/types.ts'
 import { IOResult } from '../../io/types.ts'
-import { OpsRegistry } from '../../ops/registry.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { PROCESS_EXECUTOR, type ProcessExecutor } from '../../runtime/mixin.ts'
@@ -54,9 +53,7 @@ class Sandbox extends Runtime implements ProcessExecutor {
 
 function fixture(): { session: SessionState; ws: Workspace } {
   const ram = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram)
-  const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE, ops: registry })
+  const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE })
   return { session: new SessionState({ sessionId: 't' }), ws }
 }
 

@@ -14,6 +14,7 @@
 
 import functools
 import logging
+from collections.abc import Awaitable, Callable
 
 from mirage.commands.config import ExecContext
 from mirage.commands.errors import CommandTimeoutError, UsageError
@@ -23,6 +24,8 @@ from mirage.errors.render import format_fs_error
 from mirage.io import IOResult
 from mirage.io.stream import materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
+from mirage.observe.context import command_records
+from mirage.observe.record import WRITE_FINGERPRINT_OPS, OpRecord
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.table import WorkspaceRuntime
@@ -203,6 +206,60 @@ async def run_nested_line(
     return await execute_fn(line, session_id=session_id, stdin=stdin)
 
 
+def _mark_claimed_writes(records: list[OpRecord], io: IOResult) -> None:
+    """Mark a command's write records with the value it claims for them.
+
+    A ``write`` record of a path the command both wrote and listed in
+    ``IOResult.cache`` gets that exact ``IOResult.writes`` value as
+    ``claimed``, which :func:`written_verdict` compares with the value
+    the line caches. A record the line already sealed is left alone: a
+    background command returning after its line ended must not mark a
+    record that line persisted.
+
+    Args:
+        records (list[OpRecord]): The command's own records.
+        io (IOResult): Its result, virtual keys, streams already wrapped.
+    """
+    cached = set(io.cache)
+    for rec in records:
+        if (
+            rec.sealed
+            or rec.op not in WRITE_FINGERPRINT_OPS
+            or rec.path not in cached
+            or rec.path not in io.writes
+        ):
+            continue
+        rec.claimed = io.writes[rec.path]
+
+
+async def run_claiming(
+    prefix: str,
+    call: Callable[[], Awaitable[tuple[ByteSource | None, IOResult]]],
+) -> tuple[ByteSource | None, IOResult]:
+    """Run one command and mark the writes it claims.
+
+    The command's own records are collected while ``call`` runs; its
+    keys then gain the mount ``prefix`` (empty for a relay, whose keys
+    are already virtual), its streams are wrapped, and
+    :func:`_mark_claimed_writes` marks its write records with the values
+    it put in ``IOResult.writes``.
+
+    Args:
+        prefix (str): the mount prefix, without a trailing slash.
+        call (Callable[[], Awaitable[tuple[ByteSource | None, IOResult]]]):
+            runs the command.
+    """
+    with command_records() as mine:
+        stdout, io = await call()
+    if prefix:
+        io.reads = {prefix + k: v for k, v in io.reads.items()}
+        io.writes = {prefix + k: v for k, v in io.writes.items()}
+        io.cache = [prefix + p for p in io.cache]
+    stdout, io = wrap_cachable_streams(stdout, io)
+    _mark_claimed_writes(mine, io)
+    return stdout, io
+
+
 async def run_on_mount(
     registry: MountRegistry,
     context: EvaluationContext,
@@ -222,7 +279,7 @@ async def run_on_mount(
     """Run one already-parsed command on the mount that owns its paths.
 
     The shared single-mount execution tail: mount resolution, session
-    mode checks, ``execute_cmd``, filesystem-error formatting, ls/find
+    mode checks, ``run_command``, filesystem-error formatting, ls/find
     post-processing,
     and read/write key prefixing. ``handle_command`` uses it for the normal
     path, and passes it (bound) to the cross-mount runners so each operand
@@ -297,45 +354,50 @@ async def run_on_mount(
         return None, denial
 
     try:
-        stdout, io = await mount.execute_cmd(
-            cmd_name,
-            paths,
-            texts,
-            flag_kwargs,
-            ExecContext(
-                limit_override=(
-                    session.command_limits.get(cmd_name)
-                    or mount.command_limits.get(cmd_name)
-                    or registry.command_limits.get(cmd_name)
+        return await run_claiming(
+            mount.prefix.rstrip("/"),
+            lambda: mount.run_command(
+                cmd_name,
+                paths,
+                texts,
+                flag_kwargs,
+                ExecContext(
+                    limit_override=(
+                        session.command_limits.get(cmd_name)
+                        or mount.command_limits.get(cmd_name)
+                        or registry.command_limits.get(cmd_name)
+                    ),
+                    stdin=stdin,
+                    cwd=session.cwd,
+                    dispatch=dispatch,
+                    session_id=session.session_id,
+                    env=env_snapshot(session),
+                    session_view=session_view(
+                        session,
+                        registry.policies,
+                        diagnostics=context.frame.diagnostics,
+                    ),
+                    processes=registry.process_view(session)
+                    if registry.process_view is not None
+                    else None,
+                    exec_allowed=registry.is_exec_allowed(),
+                    exec_path_allowed=registry.exec_allowed_at,
+                    runtime=line_runtime,
+                    runtime_unavailable=registry.runtime_unavailable.get(
+                        cmd_name
+                    ),
+                    ns=ns,
+                    stat_path=stat_path,
+                    readdir_path=readdir_path,
+                    shell=(
+                        functools.partial(
+                            run_nested_line, execute_fn, session.session_id
+                        )
+                        if execute_fn is not None
+                        else None
+                    ),
+                    argv=argv,
                 ),
-                stdin=stdin,
-                cwd=session.cwd,
-                dispatch=dispatch,
-                session_id=session.session_id,
-                env=env_snapshot(session),
-                session_view=session_view(
-                    session,
-                    registry.policies,
-                    diagnostics=context.frame.diagnostics,
-                ),
-                processes=registry.process_view(session)
-                if registry.process_view is not None
-                else None,
-                exec_allowed=registry.is_exec_allowed(),
-                exec_path_allowed=registry.exec_allowed_at,
-                runtime=line_runtime,
-                runtime_unavailable=registry.runtime_unavailable.get(cmd_name),
-                ns=ns,
-                stat_path=stat_path,
-                readdir_path=readdir_path,
-                shell=(
-                    functools.partial(
-                        run_nested_line, execute_fn, session.session_id
-                    )
-                    if execute_fn is not None
-                    else None
-                ),
-                argv=argv,
             ),
         )
     except UsageError as exc:
@@ -359,10 +421,3 @@ async def run_on_mount(
             exit_code=read_fail_exit_code(cmd_name, exc),
             stderr=format_fs_error(cmd_name, exc, paths),
         )
-
-    prefix = mount.prefix.rstrip("/")
-    if prefix:
-        io.reads = {prefix + k: v for k, v in io.reads.items()}
-        io.writes = {prefix + k: v for k, v in io.writes.items()}
-        io.cache = [prefix + p for p in io.cache]
-    return wrap_cachable_streams(stdout, io)

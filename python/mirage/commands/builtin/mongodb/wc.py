@@ -21,9 +21,9 @@ from mirage.commands.builtin.generic.wc import (
 )
 from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
+    mount_io,
     resolve_or_empty,
 )
-from mirage.commands.builtin.mongodb.io import IO
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.core.hierarchy.scope import ScopeMatch
@@ -55,7 +55,9 @@ async def wc(
         parsed = parse_flags(opts.flags)
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
-    resolved = await resolve_or_empty(IO, accessor, paths, opts.index)
+    resolved = await resolve_or_empty(
+        mount_io(opts), accessor, paths, opts.index
+    )
     # Line counts on collections come from a server-side count_documents
     # instead of reading every document. -l only (default prints words and
     # bytes too, which needs the content).

@@ -21,19 +21,19 @@ from typing import Any, Callable
 from mirage.cache.index.scope import command_scope
 from mirage.context import (
     program_invocation,
+    reset_current_session,
     reset_program_invocation,
+    set_current_evaluation,
     set_program_invocation,
 )
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
-from mirage.ops.types import SessionView
 from mirage.policy import HandOff, PolicyDenied
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
-from mirage.shell.arith import evaluate_arith
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
@@ -68,12 +68,8 @@ from mirage.shell.parse.names import literal_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import PipelineStages, Redirect, RedirectKind
 from mirage.types import PathSpec
-from mirage.workspace.evaluation import (
-    EvaluationContext,
-    child_context,
-    reset_current_evaluation,
-    set_current_evaluation,
-)
+from mirage.view.types import SessionView
+from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins import handle_test, handle_unset
 from mirage.workspace.executor.builtins.exec import install_exec_redirects
@@ -124,14 +120,12 @@ from mirage.workspace.node.test_expr import (
     expand_test_expr,
 )
 from mirage.workspace.node.timing import timing_report
-from mirage.workspace.session.elements import assign_element
+from mirage.workspace.session.elements import land_arith
 from mirage.workspace.session.functions import FunctionSite
 from mirage.workspace.session.state import (
-    ensure_var_visible,
     random_reader,
-    session_elements,
+    session_arith,
     session_view,
-    visible_env,
 )
 from mirage.workspace.types import ExecutionNode
 
@@ -163,7 +157,8 @@ async def _eval_cfor_expr(
             the loop can print bash's `((: expr: reason` diagnostic.
         ReadonlyError: the expression assigns to a readonly variable,
             which aborts the loop the same way an invalid expression
-            does.
+            does; the writes before it have landed.
+        ExitSignal: that assignment was inside a subscript.
         PolicyDenied: a pre_session rule refused one of the writes.
     """
     session = context.session
@@ -180,34 +175,24 @@ async def _eval_cfor_expr(
         ]
     )
     reader = random_reader(session)
-    error: ArithError | None = None
+    error: ArithError | ReadonlyError | None = None
     value = 0
     try:
-        # Reads resolve against the visible env so a hidden name counts
-        # as unset; a hidden write refuses through the session door
-        # (ensure_var_visible), caught by the loop beside ReadonlyError.
-        result = evaluate_arith(
-            text,
-            visible_env(session),
-            elements=session_elements(session, reader),
-            read_var=reader.read,
-            wrote_var=reader.wrote,
-        )
+        result = session_arith(session, text, reader)
         writes, value = result.writes, result.value
-    except ArithError as exc:
+    except (ArithError, ReadonlyError) as exc:
         # bash bound the assignments made before the error; they land
         # before the error is reported.
         error, writes = exc, exc.writes
-    for write in writes:
-        ensure_var_visible(session, write.name)
-        if write.name in session.readonly_vars:
-            raise ReadonlyError(write.name)
     # Through the door, so a pre_session rule governs an arithmetic
-    # assignment exactly as it governs `X=1`; in evaluation order, so
-    # a bare name and its element 0 land as the expression wrote them.
-    for write in writes:
-        await assign_element(session, view, write.name, write.key, write.value)
-    reader.settle()
+    # assignment exactly as it governs `X=1` and a hidden name refuses
+    # at its own write; in evaluation order, so a bare name and its
+    # element 0 land as the expression wrote them.
+    await land_arith(session, view, writes, reader)
+    if isinstance(error, ReadonlyError):
+        if error.in_subscript:
+            raise error.signal()
+        raise error
     if error is not None:
         raise ArithError(f"{text}: {error}") from error
     return int(value)
@@ -1290,7 +1275,7 @@ async def _execute_node(
                 results.append(result)
                 return result[1].exit_code
             finally:
-                reset_current_evaluation(token)
+                reset_current_session(token)
                 if program_token is not None:
                     reset_program_invocation(program_token)
 
@@ -1318,50 +1303,31 @@ async def _execute_node(
         text = get_text(node)
         expr = await expand_arith(node, context, execute_fn, cs, view=view)
         reader = random_reader(session)
-        error: ArithError | None = None
+        error: ArithError | ReadonlyError | None = None
         value = 0
         try:
             # Reads resolve against the visible env so a hidden name
-            # counts as unset; a hidden write refuses below, in this
-            # command's own voice like the readonly refusal.
-            arith = evaluate_arith(
-                expr,
-                visible_env(session),
-                elements=session_elements(session, reader),
-                read_var=reader.read,
-                wrote_var=reader.wrote,
-            )
+            # counts as unset; a hidden write refuses at its own write
+            # below, in this command's own voice like the readonly one.
+            arith = session_arith(session, expr, reader)
             writes, value = arith.writes, arith.value
-        except ArithError as exc:
+        except (ArithError, ReadonlyError) as exc:
             # bash bound the assignments made before the error; they
             # land before the error is reported.
             error, writes = exc, exc.writes
-        for write in writes:
-            name = write.name
-            try:
-                ensure_var_visible(session, name)
-            except PolicyDenied as exc:
-                err = encode_text(f"bash: {exc.strerror}\n")
-                return (
-                    None,
-                    IOResult(exit_code=1, stderr=err),
-                    ExecutionNode(command=text, exit_code=1, stderr=err),
-                )
-            if name in session.readonly_vars:
-                err = encode_text(f"bash: {name}: readonly variable\n")
-                return (
-                    None,
-                    IOResult(exit_code=1, stderr=err),
-                    ExecutionNode(command=text, exit_code=1, stderr=err),
-                )
         try:
-            for write in writes:
-                await assign_element(
-                    session, view, write.name, write.key, write.value
-                )
-            reader.settle()
+            await land_arith(session, view, writes, reader)
         except PolicyDenied as exc:
             err = encode_text(f"bash: {exc.strerror}\n")
+            return (
+                None,
+                IOResult(exit_code=1, stderr=err),
+                ExecutionNode(command=text, exit_code=1, stderr=err),
+            )
+        if isinstance(error, ReadonlyError):
+            if error.in_subscript:
+                raise error.signal()
+            err = encode_text(f"bash: {error}\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
@@ -1527,12 +1493,12 @@ async def _execute_node(
 
     # ── while / until ───────────────────────────
     if kind in (NodeKind.WHILE, NodeKind.UNTIL):
-        condition, body = get_while_parts(node)
+        test, body = get_while_parts(node)
         if kind == NodeKind.UNTIL:
             with cs.loop():
                 return await handle_until(
                     stream,
-                    condition,
+                    test,
                     body,
                     context,
                     stdin,
@@ -1545,7 +1511,7 @@ async def _execute_node(
         with cs.loop():
             return await handle_while(
                 stream,
-                condition,
+                test,
                 body,
                 context,
                 stdin,

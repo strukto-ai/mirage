@@ -15,24 +15,44 @@
 import os
 import shutil
 import stat
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.commands.builtin.disk import COMMANDS as DISK_COMMANDS
-from mirage.commands.builtin.disk.io import IO
-from mirage.commands.config import RegisteredCommand, registered_commands
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.disk.append import append_bytes as _append
+from mirage.core.disk.constants import SCOPE_ERROR
+from mirage.core.disk.copy import copy as _copy
+from mirage.core.disk.create import create as _create
+from mirage.core.disk.du import entries as _du_entries
+from mirage.core.disk.du import size as _du_size
+from mirage.core.disk.exists import exists as _exists
+from mirage.core.disk.find import find as _find
+from mirage.core.disk.mkdir import mkdir as _mkdir
+from mirage.core.disk.pwrite import pwrite as _pwrite
+from mirage.core.disk.read import read as _read
+from mirage.core.disk.read import read_range as _read_range
+from mirage.core.disk.readdir import readdir as _readdir
+from mirage.core.disk.rename import rename as _rename
+from mirage.core.disk.rm import rm_r as _rm_r
+from mirage.core.disk.rmdir import rmdir as _rmdir
+from mirage.core.disk.set_attrs import set_attrs as _set_attrs
+from mirage.core.disk.stat import stat as _stat
+from mirage.core.disk.stream import read_stream as _read_stream
+from mirage.core.disk.truncate import truncate as _truncate
+from mirage.core.disk.unlink import unlink as _unlink
 from mirage.core.disk.utils import (
     open_regular,
     resolve_inside_sync,
     walk_entries,
 )
 from mirage.core.disk.watch import build_delta_hook
-from mirage.ops.disk import OPS as DISK_OPS
-from mirage.ops.registry import RegisteredOp
+from mirage.core.disk.write import write as _write
 from mirage.types import (
     CapacityResult,
     CapacityState,
+    FileStat,
     ListingVersion,
     PathSpec,
     VFSName,
@@ -40,6 +60,7 @@ from mirage.types import (
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.disk.prompt import PROMPT
 from mirage.vfs.errors import VFSConfigError
+from mirage.vfs.types import DuEntries
 from mirage.watch.base import DeltaHook
 
 
@@ -47,7 +68,7 @@ class DiskVFS(BaseVFS):
     name: str = VFSName.DISK
     # byte store: stat() sizes every file from metadata
     sizes_always_known: bool = True
-    max_du_entries: int | None = IO.max_du_entries
+    max_du_entries: int | None = None
     accessor: DiskAccessor
     index_ttl: float = 60
     prompt: str = PROMPT
@@ -57,6 +78,10 @@ class DiskVFS(BaseVFS):
     # folder_versions=False declares NONE for itself; the class keeps
     # FOLDER for the spec table.
     listing_version: ListingVersion = ListingVersion.FOLDER
+
+    reads_ranges: bool = True
+    local: bool = True
+    max_glob_matches: int | None = SCOPE_ERROR
 
     def __init__(self, root: str, folder_versions: bool = True) -> None:
         """Args:
@@ -80,11 +105,123 @@ class DiskVFS(BaseVFS):
         self.root.mkdir(parents=True, exist_ok=True)
         self.accessor = DiskAccessor(self.root, folder_versions)
 
-    def ops(self) -> list[RegisteredOp]:
-        return DISK_OPS
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await _readdir(self.accessor, path, index)
 
-    def commands(self) -> list[RegisteredCommand]:
-        return registered_commands(DISK_COMMANDS)
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        if not offset and size is None:
+            return await _read(self.accessor, path, index)
+        return await _read_range(self.accessor, path, index, offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await _stat(self.accessor, path, index)
+
+    def read_stream(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> AsyncIterator[bytes]:
+        return _read_stream(self.accessor, path, index)
+
+    async def exists(self, path: PathSpec) -> bool:
+        return await _exists(self.accessor, path)
+
+    async def find(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        **predicates: Any,
+    ) -> list[str]:
+        return await _find(self.accessor, path, index=index, **predicates)
+
+    async def du_size(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> int:
+        return await _du_size(self.accessor, path, index)
+
+    async def du_entries(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> DuEntries:
+        return await _du_entries(self.accessor, path, index)
+
+    async def write(self, path: PathSpec, data: bytes) -> None:
+        await _write(self.accessor, path, data)
+
+    async def append(
+        self,
+        path: PathSpec,
+        data: bytes,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> None:
+        await _append(self.accessor, path, data)
+
+    async def pwrite(
+        self,
+        path: PathSpec,
+        data: bytes,
+        offset: int,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> None:
+        await _pwrite(self.accessor, path, data, offset)
+
+    async def create(self, path: PathSpec) -> None:
+        await _create(self.accessor, path)
+
+    async def unlink(self, path: PathSpec) -> None:
+        await _unlink(self.accessor, path)
+
+    async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
+        await _mkdir(self.accessor, path, parents=parents)
+
+    async def rmdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> None:
+        await _rmdir(self.accessor, path, index)
+
+    async def rm_r(self, path: PathSpec) -> Any:
+        return await _rm_r(self.accessor, path)
+
+    async def rename(self, src: PathSpec, dst: PathSpec) -> None:
+        await _rename(self.accessor, src, dst)
+
+    async def copy(self, src: PathSpec, dst: PathSpec) -> None:
+        await _copy(self.accessor, src, dst)
+
+    async def truncate(
+        self, path: PathSpec, length: int, no_create: bool = False
+    ) -> None:
+        await _truncate(self.accessor, path, length, no_create)
+
+    async def setattr(
+        self,
+        path: PathSpec,
+        *,
+        mode: int | None = None,
+        uid: int | str | None = None,
+        gid: int | str | None = None,
+        atime: str | None = None,
+        mtime: str | None = None,
+    ) -> dict[str, int | str]:
+        return await _set_attrs(
+            self.accessor,
+            path,
+            mode=mode,
+            uid=uid,
+            gid=gid,
+            atime=atime,
+            mtime=mtime,
+        )
+
+    def is_mounted(self) -> bool:
+        return self.accessor.root is not None
 
     def storage_location(self) -> str:
         # The resolved root is the storage: two DiskVFS instances built on the

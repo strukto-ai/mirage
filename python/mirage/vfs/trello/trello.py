@@ -15,11 +15,12 @@
 from typing import Any
 
 from mirage.accessor.trello import TrelloAccessor
-from mirage.commands.builtin.trello import COMMANDS
-from mirage.commands.config import RegisteredCommand, registered_commands
-from mirage.ops.registry import RegisteredOp
-from mirage.ops.trello import OPS as TRELLO_VFS_OPS
-from mirage.types import VFSName
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.trello.read import read as _read
+from mirage.core.trello.readdir import readdir as _readdir
+from mirage.core.trello.stat import stat as _stat
+from mirage.types import FileStat, PathSpec, VFSName
+from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.trello.config import TrelloConfig
 from mirage.vfs.trello.prompt import PROMPT, WRITE_PROMPT
@@ -37,11 +38,25 @@ class TrelloVFS(BaseVFS):
         self.config = config
         self.accessor = TrelloAccessor(self.config)
 
-    def ops(self) -> list[RegisteredOp]:
-        return TRELLO_VFS_OPS
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await _readdir(self.accessor, path, index)
 
-    def commands(self) -> list[RegisteredCommand]:
-        return registered_commands(COMMANDS)
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        data = await _read(self.accessor, path, index)
+        return slice_window(data, offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await _stat(self.accessor, path, index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

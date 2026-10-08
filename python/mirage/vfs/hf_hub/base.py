@@ -12,22 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
 from typing import Any, Generic, TypeVar
 
 from mirage.accessor.hf_hub import HfHubAccessor
-from mirage.commands.builtin.hf_hub import COMMANDS as HF_COMMANDS
-from mirage.commands.config import RegisteredCommand, registered_commands
-from mirage.core.hf_hub.watch import build_delta_hook
-from mirage.ops.hf_hub import OPS as HF_OPS
-from mirage.ops.registry import RegisteredOp
-from mirage.types import ListingVersion
-from mirage.vfs.base import BaseVFS
-from mirage.watch.base import DeltaHook
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 
 # The accessor a subclass narrows to. TypeScript spells this as an abstract
 # readonly field the subclass redeclares, which its covariant property rule
 # allows; python attributes are invariant, so the same narrowing has to be a
 # type parameter or mypy reads every subclass as an illegal override.
+from mirage.core.hf_hub.constants import SCOPE_ERROR
+from mirage.core.hf_hub.exists import exists as _exists
+from mirage.core.hf_hub.read import read as _read
+from mirage.core.hf_hub.readdir import readdir as _readdir
+from mirage.core.hf_hub.stat import stat as _stat
+from mirage.core.hf_hub.stream import read_stream as _read_stream
+from mirage.core.hf_hub.watch import build_delta_hook
+from mirage.types import FileStat, ListingVersion, PathSpec
+from mirage.vfs.base import BaseVFS
+from mirage.watch.base import DeltaHook
+
 A = TypeVar("A", bound=HfHubAccessor)
 
 
@@ -64,16 +69,42 @@ class HfHubVFS(BaseVFS, Generic[A]):
     # which one the Hub resolves.
     listing_version: ListingVersion = ListingVersion.MOUNT
 
+    reads_ranges: bool = True
+    max_glob_matches: int | None = SCOPE_ERROR
+
     def __init__(self, config: Any) -> None:
         super().__init__()
         self.config = config
         self.accessor = self.ACCESSOR(self.config)
 
-    def ops(self) -> list[RegisteredOp]:
-        return HF_OPS
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await _readdir(self.accessor, path, index)
 
-    def commands(self) -> list[RegisteredCommand]:
-        return registered_commands(HF_COMMANDS)
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        if not offset and size is None:
+            return await _read(self.accessor, path, index)
+        return await _read(self.accessor, path, index, offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await _stat(self.accessor, path, index)
+
+    def read_stream(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> AsyncIterator[bytes]:
+        return _read_stream(self.accessor, path, index)
+
+    async def exists(self, path: PathSpec) -> bool:
+        return await _exists(self.accessor, path)
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)

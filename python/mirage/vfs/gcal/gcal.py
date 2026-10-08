@@ -16,13 +16,14 @@ from datetime import date
 from typing import Any
 
 from mirage.accessor.gcal import GCalAccessor
-from mirage.commands.builtin.gcal import COMMANDS
-from mirage.commands.config import RegisteredCommand, registered_commands
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gcal.day import bucket_name, bucket_start
+from mirage.core.gcal.read import read as _read
+from mirage.core.gcal.readdir import readdir as _readdir
+from mirage.core.gcal.stat import stat as _stat
 from mirage.core.google.client import TokenManager
-from mirage.ops.gcal import OPS as GCAL_VFS_OPS
-from mirage.ops.registry import RegisteredOp
-from mirage.types import VFSName
+from mirage.types import FileStat, PathSpec, VFSName
+from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gcal.config import GCalConfig
 from mirage.vfs.gcal.prompt import (
@@ -72,11 +73,25 @@ class GCalVFS(BaseVFS):
             tree_prompt(config.bucket_days) + self.accessor.time_range.prompt()
         )
 
-    def ops(self) -> list[RegisteredOp]:
-        return GCAL_VFS_OPS
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await _readdir(self.accessor, path, index)
 
-    def commands(self) -> list[RegisteredCommand]:
-        return registered_commands(COMMANDS)
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        data = await _read(self.accessor, path, index)
+        return slice_window(data, offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await _stat(self.accessor, path, index)
 
     async def close(self) -> None:
         """Drain the token manager's connection pool with the VFS."""

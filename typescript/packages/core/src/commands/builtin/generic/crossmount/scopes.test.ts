@@ -14,7 +14,7 @@
 
 import { expect, it } from 'vitest'
 import { IOResult } from '../../../../io/types.ts'
-import type { MountView, NamespaceView } from '../../../../ops/types.ts'
+import type { MountView, NamespaceView } from '../../../../view/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { eacces } from '../../../../errors/fs.ts'

@@ -32,7 +32,7 @@ from mirage.server.io_serde import (
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.vfs_calls import VFS_CALLS, VfsCall
 from mirage.types import JsonValue
-from mirage.workspace.workspace.handle import Session
+from mirage.workspace.workspace.workspace import Session
 
 logger = logging.getLogger(__name__)
 

@@ -53,8 +53,8 @@ async def main():
     for rc in greet._registered_commands:
         print(f"  VFS={rc.vfs!r:10}  name={rc.name!r}")
 
-    ws.mount("/ram/").register_fns([greet])
-    ws.mount("/disk/").register_fns([greet])
+    ws.mount("/ram/").register_commands([greet])
+    ws.mount("/disk/").register_commands([greet])
 
     await ws.shell("echo content > /ram/note.txt")
 

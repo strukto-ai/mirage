@@ -60,6 +60,8 @@ import { resolvePostgresConfig } from '../../../vfs/postgres/config.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import { hasUnresolvedGlob } from '../utils/paths.ts'
 import { POSTGRES_COMMANDS } from './index.ts'
+import { ioFor } from '../../../test-utils.ts'
+import { PostgresVFSBase } from '../../../vfs/postgres/postgres.ts'
 
 const POSTGRES_GREP = POSTGRES_COMMANDS.filter((c) => c.name === 'grep' && c.filetype == null)
 const POSTGRES_RG = POSTGRES_COMMANDS.filter((c) => c.name === 'rg' && c.filetype == null)
@@ -133,13 +135,14 @@ describe('postgres grep push-down and globs', () => {
     )
     vi.mocked(searchModule.searchEntity).mockResolvedValue([])
 
-    const result = await cmd.fn(makeAccessor(), [globPath()], ['ada'], {
+    const accessor = makeAccessor()
+    const result = await cmd.fn(accessor, [globPath()], ['ada'], {
       stdin: null,
       // `args_l`, not a bare `l`: flagKwargName maps the ambiguous short
       // `-l` onto `args_l` in both languages, so the dispatcher never emits
       // `l` and a spec-bound FlagView refuses to read one.
       flags: { args_l: true },
-      filetypeFns: null,
+      io: ioFor(PostgresVFSBase, accessor),
       cwd: '/',
     })
 
@@ -155,10 +158,11 @@ describe('postgres grep push-down and globs', () => {
     )
     vi.mocked(searchModule.searchEntity).mockResolvedValue([])
 
-    await cmd.fn(makeAccessor(), [concretePath()], ['a.b'], {
+    const accessor = makeAccessor()
+    await cmd.fn(accessor, [concretePath()], ['a.b'], {
       stdin: null,
       flags: {},
-      filetypeFns: null,
+      io: ioFor(PostgresVFSBase, accessor),
       cwd: '/',
     })
 
@@ -180,10 +184,11 @@ describe('postgres rg push-down and globs', () => {
     )
     vi.mocked(searchModule.searchEntity).mockResolvedValue([])
 
-    await cmd.fn(makeAccessor(), [globPath()], ['ada'], {
+    const accessor = makeAccessor()
+    await cmd.fn(accessor, [globPath()], ['ada'], {
       stdin: null,
       flags: {},
-      filetypeFns: null,
+      io: ioFor(PostgresVFSBase, accessor),
       cwd: '/',
     })
 

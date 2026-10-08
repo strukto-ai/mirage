@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
@@ -28,7 +29,7 @@ const DEC = new TextDecoder()
 // after `cd /slack/...` would return [] because the cwd PathSpec was rebuilt
 // without preserving the mount prefix. TS doesn't reproduce the bug today
 // (opts.cwd is a string and opts.mountPrefix is set separately by
-// Mount.executeCmd), but this test pins the contract so a future refactor
+// Mount.runCommand), but this test pins the contract so a future refactor
 // that drops `prefix: opts.mountPrefix ?? ''` from slack/ls.ts surfaces
 // immediately.
 describe('slack ls (no args) after cd preserves mount prefix', () => {
@@ -67,7 +68,7 @@ describe('slack ls (no args) after cd preserves mount prefix', () => {
       {
         stdin: null,
         flags: {},
-        filetypeFns: null,
+        io: commandIo(vfs),
         cwd: '/slack/channels',
         mountPrefix: '/slack',
         index: idx,
@@ -78,7 +79,7 @@ describe('slack ls (no args) after cd preserves mount prefix', () => {
     const out = await cmd.fn(vfs.accessor, [], [], {
       stdin: null,
       flags: {},
-      filetypeFns: null,
+      io: commandIo(vfs),
       cwd: '/slack/channels/general__C1',
       mountPrefix: '/slack',
       index: idx,
