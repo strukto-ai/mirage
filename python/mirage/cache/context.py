@@ -260,15 +260,14 @@ def publish_read(path: str, data: bytes, fingerprint: str | None) -> None:
 class WriteCondition:
     """The precondition one write carries.
 
+    Empty when mirage holds no version of the object: the write goes out
+    plain, there being nothing to compare.
+
     Args:
         if_match (str | None): the version the object must still have.
-        if_none_match (bool): the object must not exist yet; sent when no
-            version is known, so a new file is created and an existing
-            one is refused.
     """
 
     if_match: str | None = None
-    if_none_match: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,13 +281,15 @@ class WriteContext:
     Args:
         vfs (str): the backend's name, for a refusal.
         conditions (frozenset[str]): the ops the backend can condition
-            (put, create, copy, delete).
+            (put, copy, delete).
         read_version (Callable): the version the mount last saw for a
             path (its cached copy's token), None when it saw none.
         read_versions (Callable): ``read_version`` for many paths at
             once, in one store round trip.
         drop (Callable): drops the mount's cached copy of a path, so the
             read a refusal asks for really fetches.
+        keep (Callable): keeps a version for a path without bytes, the
+            one a refused write lost on.
     """
 
     vfs: str
@@ -296,6 +297,7 @@ class WriteContext:
     read_version: Callable[[PathSpec], Awaitable[str | None]]
     read_versions: Callable[[list[PathSpec]], Awaitable[list[str | None]]]
     drop: Callable[[PathSpec], Awaitable[None]]
+    keep: Callable[[PathSpec, str], Awaitable[None]]
 
 
 WriteKind = Literal["write", "copy", "delete"]
@@ -381,7 +383,7 @@ async def write_condition(
 
     The version is the op's own read's (``own``, or one handed down by
     :func:`own_write_version`) when ``prefer_own``; otherwise the mount's
-    cached version first. With none, the write asks for create-only.
+    cached version first. With none, the write goes out plain.
 
     Args:
         path (PathSpec): the path written.
@@ -389,7 +391,7 @@ async def write_condition(
         own (str | OwnRead | None): the version the op itself just saw,
             or ABSENT when its read found no file: a file the mount holds a
             version of was removed since, so the write is refused; one it
-            never saw is created.
+            never saw is written plain.
         prefer_own (bool): whether the op's own version wins over the
             mount's cached one (true for a read-modify-write, false for a
             delete, which falls back to its own lookup).
@@ -405,19 +407,13 @@ async def write_condition(
     cached = await context.read_version(path)
     if own is OwnRead.ABSENT:
         if cached:
-            raise await stale(path)
+            raise await stale(path, gone=True)
         own = None
     version = (own or cached) if prefer_own else (cached or own)
-    needed = {"copy": "copy", "delete": "delete"}.get(
-        kind, "put" if version else "create"
-    )
-    if needed not in context.conditions:
+    needed = kind if kind in ("copy", "delete") else "put" if version else None
+    if needed is not None and needed not in context.conditions:
         raise enotsup(context.vfs, f"conditional {kind}", path)
-    if version:
-        return WriteCondition(if_match=version)
-    if kind == "delete":
-        return WriteCondition()
-    return WriteCondition(if_none_match=True)
+    return WriteCondition(if_match=version or None)
 
 
 def conditioned(path: PathSpec, kind: Literal["copy", "delete"]) -> bool:
@@ -441,31 +437,51 @@ def conditioned(path: PathSpec, kind: Literal["copy", "delete"]) -> bool:
     return True
 
 
-async def drop_cached(path: PathSpec) -> None:
+async def drop_cached(path: PathSpec, keep: str | None = None) -> None:
     """Drop the write context's cached copy of ``path``, if there is one.
 
-    For the other end of a refused move, whose copy is as unsure as the
-    end the refusal names. The line marks it lost too, so nothing it read
-    of the path earlier is cached again when it ends.
+    The line marks it lost too, so nothing it read of the path earlier is
+    cached again when it ends. A refused write keeps the version it lost
+    on: a retry without a read sends it again and is refused again, rather
+    than going out plain over the newer file.
 
     Args:
         path (PathSpec): the path to drop.
+        keep (str | None): the version to keep without bytes, if any.
     """
-    mark_lost(path.virtual)
+    mark_lost(path.virtual, keep)
     context = _write.get()
     if context is not None:
         await context.drop(path)
+        if keep:
+            await context.keep(path, keep)
 
 
-async def stale(path: PathSpec, landed: bool = False) -> StaleWriteError:
+async def stale(
+    path: PathSpec,
+    landed: bool = False,
+    gone: bool = False,
+    version: str | None = None,
+) -> StaleWriteError:
     """The refusal for a lost condition, after dropping the cached copy.
+
+    The version the write lost on is kept, so a retry without a read is
+    refused again; a file found gone keeps none, there being no newer
+    bytes for a retry to overwrite.
 
     Args:
         path (PathSpec): the path whose write lost.
         landed (bool): a move's copy landed before its source's delete
             lost.
+        gone (bool): the file no longer exists.
+        version (str | None): the version the write sent, when the line
+            no longer names it (a move retracts both paths).
     """
-    await drop_cached(path)
+    context = _write.get()
+    keep = None
+    if not gone and context is not None:
+        keep = version or await context.read_version(path)
+    await drop_cached(path, keep)
     err = stale_write(path)
     err.landed = landed
     return err

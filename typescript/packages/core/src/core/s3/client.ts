@@ -131,10 +131,6 @@ export function isNotFoundError(err: unknown): boolean {
   return e.$metadata?.httpStatusCode === 404
 }
 
-/**
- * The codes a lost condition comes back as: 412 when the object changed
- * since the version sent, 409 when another conditional write is in flight.
- */
 export const CONDITION_LOST_CODES: ReadonlySet<string> = new Set([
   '412',
   'PreconditionFailed',

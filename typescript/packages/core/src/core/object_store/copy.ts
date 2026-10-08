@@ -17,13 +17,19 @@ import {
   evictAfter,
   invalidateAfterWrite,
   invalidateAncestors,
-  stale,
   writeCondition,
 } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
-import { enoent, enotsup } from '../../errors/fs.ts'
+import { enoent } from '../../errors/fs.ts'
 import * as kp from '../../utils/key_prefix.ts'
-import { type ExistsFn, type ObjectStoreDriver, type PairFn, ConditionLost } from './driver.ts'
+import {
+  type ExistsFn,
+  type ObjectStoreDriver,
+  type PairFn,
+  ConditionLost,
+  refused,
+  requireHook,
+} from './driver.ts'
 
 /**
  * Build single-object copy over one driver. The driver must carry a
@@ -70,24 +76,20 @@ export function makeCopy<A extends Accessor, C>(
       await invalidateAncestors(dst)
     }
     const cond = await writeCondition(dst, 'copy')
-    if (cond !== null && driver.copyIf === undefined) {
-      throw enotsup(driver.vfs, 'conditional copy', dst)
-    }
-    const { copyIf } = driver
     const { conn, close } = await driver.connect(accessor)
     let copied: boolean
     try {
       copied = await evictAfter(async () => {
         try {
-          return cond !== null && copyIf !== undefined
-            ? await copyIf(conn, srcKey, dstKey, cond)
+          return cond !== null
+            ? await requireHook(driver.copyIf)(conn, srcKey, dstKey, cond)
             : await copyFile(conn, srcKey, dstKey)
         } finally {
           await close()
         }
       }, settle)
     } catch (err) {
-      if (err instanceof ConditionLost) throw await stale(dst)
+      if (err instanceof ConditionLost) throw await refused(dst, err, cond)
       throw err
     }
     if (!copied) throw enoent(src)

@@ -37,7 +37,6 @@ from asyncssh.constants import (
     FXF_TRUNC,
 )
 
-from mirage import Workspace
 from mirage.errors.fs import eexist, eisdir, enoent
 from mirage.errors.types import NoMountError
 from mirage.fuse.core import MountCore
@@ -51,7 +50,6 @@ from mirage.server.ssh.session import (
     open_session,
 )
 from mirage.server.ssh.stream import ENCODING, ERRORS
-from mirage.workspace.mount.write_policy import conditional_overlap
 
 logger = logging.getLogger(__name__)
 
@@ -295,25 +293,6 @@ def as_os_error(err: Exception) -> OSError:
     return OSError(code, os.strerror(code))
 
 
-def _refuse_conditional(ws: Workspace) -> None:
-    """Refuse a workspace holding a conditional mount.
-
-    MountCore cannot carry a write's version; uploads would empty files.
-
-    Args:
-        ws (Workspace): the workspace served.
-
-    Raises:
-        SFTPPermissionDenied: a mount is ``write: conditional``.
-    """
-    conditional = conditional_overlap(ws.mounts(), "/")
-    if conditional is not None:
-        raise asyncssh.SFTPPermissionDenied(
-            f"mount {conditional!r}: write: conditional cannot be "
-            "served over SFTP, which has no place to carry the version"
-        )
-
-
 class MirageSFTPServer(asyncssh.SFTPServer):
     """SFTP (and scp) onto a workspace, through the MountCore FUSE uses.
 
@@ -349,9 +328,7 @@ class MirageSFTPServer(asyncssh.SFTPServer):
         self._lock = asyncio.Lock()
 
     async def _mount(self) -> MountCore:
-        if self._core is not None and self._entry is not None:
-            # A mount added since the core was built is judged too.
-            _refuse_conditional(self._entry.runner.ws)
+        if self._core is not None:
             return self._core
         entry = login_entry(self._registry, self._conn, self._workspace_id)
         if entry is None:
@@ -359,7 +336,6 @@ class MirageSFTPServer(asyncssh.SFTPServer):
                 f"no such workspace: {self._workspace_id}"
             )
         ws = entry.runner.ws
-        _refuse_conditional(ws)
         profile = key_profile(self._conn)
         await entry.runner.call(
             open_session(ws, self._session_id, profile=profile)

@@ -84,8 +84,7 @@ export async function read(
       fingerprint,
       revision,
     })
-    // A whole read hands its token to an op that writes back what it read;
-    // a window is not the object the token names.
+    // Only a whole read's token names the object; a window's does not.
     if (range === null) publishRead(virtual, bytes, fingerprint)
     return bytes
   } catch (err) {

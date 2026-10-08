@@ -190,11 +190,7 @@ async def _put(conn: S3Conn, key: str, data: bytes) -> ObjectMeta | None:
 
 
 def _quoted(token: str) -> str:
-    """An ETag as the wire spells it.
-
-    The token is kept unquoted (``_etag_of``), and the probes that
-    measured each store's conditions sent the quoted form a response
-    carries, so that is the form sent back.
+    """An ETag as the wire spells it; tokens are stored unquoted.
 
     Args:
         token (str): the ETag, quoted or not.
@@ -205,8 +201,6 @@ def _quoted(token: str) -> str:
 def _condition(cond: WriteCondition) -> dict[str, str]:
     if cond.if_match is not None:
         return {"IfMatch": _quoted(cond.if_match)}
-    if cond.if_none_match:
-        return {"IfNoneMatch": "*"}
     return {}
 
 
@@ -231,7 +225,9 @@ async def _guarded(key: str, call: Awaitable[T], matched: bool = False) -> T:
         return await call
     except Exception as exc:
         if _lost_condition(exc, matched):
-            raise ConditionLost([key]) from exc
+            raise ConditionLost(
+                [key], gone=not is_condition_lost(exc)
+            ) from exc
         raise
 
 
@@ -296,7 +292,8 @@ async def _copy_if(
                     "source probe failed for %s", src_key, exc_info=True
                 )
         if lost:
-            raise ConditionLost([dst_key]) from exc
+            gone = not is_condition_lost(exc)
+            raise ConditionLost([dst_key], gone=gone) from exc
         raise
     return True
 
@@ -308,6 +305,37 @@ async def _delete_if(conn: S3Conn, key: str, cond: WriteCondition) -> None:
             Bucket=conn.config.bucket, Key=key, **_condition(cond)
         ),
     )
+
+
+async def _copy_loser(
+    conn: S3Conn, src_key: str, dst_key: str, cond: WriteCondition
+) -> ConditionLost:
+    """Which end of a refused copy changed: the destination or the source.
+
+    S3 answers 412 for either condition, so the destination is looked up:
+    one no longer at the version sent is the end that lost; otherwise the
+    source's pin did. Only a refusal pays for the lookup.
+
+    Args:
+        conn (S3Conn): the open connection.
+        src_key (str): the source key, pinned by ``CopySourceIfMatch``.
+        dst_key (str): the destination key.
+        cond (WriteCondition): the destination's condition.
+    """
+    try:
+        if cond.if_match is not None:
+            meta = await _head(conn, dst_key)
+            if meta is None or _quoted(meta.fingerprint or "") != _quoted(
+                cond.if_match
+            ):
+                return ConditionLost([dst_key], gone=meta is None)
+        return ConditionLost(
+            [src_key], gone=await _head(conn, src_key) is None
+        )
+    except Exception:
+        # Unknown which end changed: name the source; both keep versions.
+        logger.debug("copy loser lookup failed for %s", dst_key, exc_info=True)
+        return ConditionLost([src_key])
 
 
 async def _move_file_if(
@@ -324,17 +352,18 @@ async def _move_file_if(
             return False
         source = meta.fingerprint or ""
     source = _quoted(source)
-    await _guarded(
-        src_key,
-        conn.client.copy_object(
+    try:
+        await conn.client.copy_object(
             Bucket=conn.config.bucket,
             CopySource={"Bucket": conn.config.bucket, "Key": src_key},
             Key=dst_key,
             CopySourceIfMatch=source,
             **_condition(cond),
-        ),
-        matched=True,
-    )
+        )
+    except Exception as exc:
+        if not _lost_condition(exc, matched=True):
+            raise
+        raise await _copy_loser(conn, src_key, dst_key, cond) from exc
     try:
         await _guarded(
             src_key,
@@ -344,7 +373,7 @@ async def _move_file_if(
             matched=True,
         )
     except ConditionLost as exc:
-        raise ConditionLost(exc.keys, landed=True) from exc
+        raise ConditionLost(exc.keys, landed=True, gone=exc.gone) from exc
     return True
 
 
@@ -392,7 +421,7 @@ def _refused(failed: list[str]) -> PermissionError:
 
 async def _delete_batch(
     conn: S3Conn, listed: list[tuple[str, str]]
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[tuple[str, str]], list[str]]:
     """Delete each listed key only while it is the version listed.
 
     Args:
@@ -401,34 +430,39 @@ async def _delete_batch(
             still carry.
 
     Returns:
-        tuple[list[str], list[str]]: the keys a newer write changed, which
-        were kept, and the keys the store refused for another reason.
+        tuple[list[tuple[str, str]], list[str]]: the keys a newer write
+        changed, which were kept, each with the ETag it was measured on,
+        and the keys the store refused for another reason.
     """
-    lost: list[str] = []
+    lost: list[tuple[str, str]] = []
     failed: list[str] = []
     for start in range(0, len(listed), DELETE_BATCH):
         batch = listed[start : start + DELETE_BATCH]
+        sent = dict(batch)
         resp = await conn.client.delete_objects(
             Bucket=conn.config.bucket,
             Delete={"Objects": [{"Key": k, "ETag": e} for k, e in batch]},
         )
         # A refusal comes back per key in the body of a 200.
         for err in (resp or {}).get("Errors") or []:
-            target = (
-                lost if err.get("Code") in CONDITION_LOST_CODES else failed
-            )
-            target.append(str(err.get("Key", "")))
+            key = str(err.get("Key", ""))
+            if err.get("Code") in CONDITION_LOST_CODES:
+                lost.append((key, sent.get(key, "")))
+            else:
+                failed.append(key)
     return lost, failed
 
 
-def _raise_kept(lost: list[str], failed: list[str]) -> None:
+def _raise_kept(lost: list[tuple[str, str]], failed: list[str]) -> None:
     """Raise for the keys a prefix op kept.
 
-    Lost keys come first, so the caller drops their cached copies; keys
-    the store refused for another reason come next.
+    Lost keys come first, so the caller drops their cached copies and
+    keeps the versions they were measured on; keys the store refused for
+    another reason come next.
 
     Args:
-        lost (list[str]): keys a newer write changed.
+        lost (list[tuple[str, str]]): keys a newer write changed, each
+            with the version it was measured on.
         failed (list[str]): keys the store refused for another reason.
 
     Raises:
@@ -436,7 +470,7 @@ def _raise_kept(lost: list[str], failed: list[str]) -> None:
         PermissionError: no key was lost and some were refused.
     """
     if lost:
-        raise ConditionLost(lost)
+        raise ConditionLost([key for key, _ in lost], versions=dict(lost))
     if failed:
         raise _refused(failed)
 
@@ -444,7 +478,7 @@ def _raise_kept(lost: list[str], failed: list[str]) -> None:
 async def _delete_prefix_if(
     conn: S3Conn, pfx: str, known: KnownVersions
 ) -> None:
-    lost: list[str] = []
+    lost: list[tuple[str, str]] = []
     failed: list[str] = []
     async for listed in _known_pages(conn, pfx, known):
         page_lost, page_failed = await _delete_batch(conn, listed)
@@ -457,7 +491,7 @@ async def _move_prefix_if(
     conn: S3Conn, src_pfx: str, dst_pfx: str, known: KnownVersions
 ) -> bool:
     found = False
-    lost: list[str] = []
+    lost: list[tuple[str, str]] = []
     moved: list[tuple[str, str]] = []
     async for listed in _known_pages(conn, src_pfx, known):
         found = True
@@ -468,12 +502,12 @@ async def _move_prefix_if(
                     CopySource={"Bucket": conn.config.bucket, "Key": key},
                     Key=f"{dst_pfx}{key[len(src_pfx) :]}",
                     CopySourceIfMatch=token,
-                    IfNoneMatch="*",
                 )
             except Exception as exc:
                 if not _lost_condition(exc, matched=True):
                     raise
-                lost.append(key)
+                # A source gone (404) keeps no version: nothing newer to guard.
+                lost.append((key, token if is_condition_lost(exc) else ""))
                 continue
             moved.append((key, token))
     delete_lost, failed = await _delete_batch(conn, moved)

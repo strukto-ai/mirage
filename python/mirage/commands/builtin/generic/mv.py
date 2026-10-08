@@ -52,7 +52,7 @@ from mirage.commands.builtin.utils.copy import (
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import fs_strerror
+from mirage.errors.fs import fs_strerror, inner_suffix, with_inner
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition, StaleWriteError
 from mirage.io.types import ByteSource, IOResult
@@ -576,8 +576,7 @@ async def mv_generic(
             copies is not None
             and copies.links.stat_at(src.virtual) is not None
         )
-        # A source whose delete would be refused is refused here, before a
-        # backup renames the destination aside.
+        # Refuse an undeletable source before a backup moves the target aside.
         if (
             isinstance(strategy, PrimitiveMove)
             and strategy.check_unlink is not None
@@ -656,12 +655,12 @@ async def mv_generic(
             try:
                 await strategy.rename(src, target)
             except FS_ERRORS as exc:
+                inner = inner_suffix(src, exc)
+                # Copy landed, source delete lost: GNU's cross-device unlink failure.
                 if isinstance(exc, StaleWriteError) and exc.landed:
-                    # The copy landed and only the source's removal lost,
-                    # as a cross-device GNU mv whose unlink fails.
                     errors.append(
-                        f"mv: cannot remove '{src.raw_path}': "
-                        f"{fs_strerror(exc)}"
+                        f"mv: cannot remove '{with_inner(src.raw_path, inner)}"
+                        f"': {fs_strerror(exc)}"
                     )
                     writes[target.mount_path] = b""
                     if not src_is_dir:
@@ -672,8 +671,9 @@ async def mv_generic(
                 # operand, not an aborted command: GNU reports it and
                 # keeps going with the remaining sources.
                 errors.append(
-                    f"mv: cannot move '{src.raw_path}' to "
-                    f"'{target.raw_path}': {fs_strerror(exc)}"
+                    f"mv: cannot move '{with_inner(src.raw_path, inner)}' to "
+                    f"'{with_inner(target.raw_path, inner)}': "
+                    f"{fs_strerror(exc)}"
                 )
                 continue
             writes[src.mount_path] = b""

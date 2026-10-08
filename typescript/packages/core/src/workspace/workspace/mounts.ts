@@ -15,7 +15,7 @@
 import { BIN_PREFIX } from '../../shell/constants.ts'
 import { HISTORY_PREFIX } from '../../vfs/history/history.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
-import { type Limit, type ReadSpec, MountBackend, MountMode, WritePolicy } from '../../types.ts'
+import { type Limit, type ReadSpec, MountMode, WritePolicy } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { MountSpec } from './types.ts'
@@ -71,7 +71,6 @@ export function normalizeMounts(
   const indexes: Record<string, IndexConfig> = {}
   const read: Record<string, ReadSpec> = {}
   const write: Record<string, WritePolicy> = {}
-  const backends: Record<string, MountBackend> = {}
   for (const [prefix, spec] of Object.entries(mounts)) {
     if (spec instanceof Mount) {
       bare[prefix] = spec.vfs
@@ -85,7 +84,6 @@ export function normalizeMounts(
         indexes[prefix] = normalizeIndexConfig(spec.options.index)
       if (spec.options.read !== undefined) read[prefix] = spec.options.read
       if (spec.options.write !== undefined) write[prefix] = coerceWritePolicy(spec.options.write)
-      if (spec.options.backend !== undefined) backends[prefix] = spec.options.backend
     } else if (Array.isArray(spec)) {
       const [vfs, mode, mountCommandLimits] = spec as readonly [
         BaseVFS,
@@ -111,7 +109,6 @@ export function normalizeMounts(
       vfs,
       write[prefix] ?? defaults.write,
       modes[prefix] ?? defaults.mode,
-      backends[prefix] ?? MountBackend.WORKSPACE,
       defaults.caching && vfs.cachesReads,
     )
   }

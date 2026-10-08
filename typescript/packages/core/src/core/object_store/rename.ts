@@ -23,9 +23,17 @@ import {
   writeCondition,
 } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
-import { enoent, enotsup } from '../../errors/fs.ts'
+import { enoent } from '../../errors/fs.ts'
+import type { PathSpec } from '../../types.ts'
 import * as kp from '../../utils/key_prefix.ts'
-import { type ExistsFn, type ObjectStoreDriver, type PairFn, ConditionLost } from './driver.ts'
+import {
+  type ExistsFn,
+  type ObjectStoreDriver,
+  type PairFn,
+  ConditionLost,
+  keepLost,
+  requireHook,
+} from './driver.ts'
 
 /**
  * Build file-or-prefix relocation over one driver.
@@ -65,19 +73,13 @@ export function makeRename<A extends Accessor, C>(
     let op = 'rename'
     // A move is a copy then a delete, so both carry a condition.
     const cond = await writeCondition(dst, 'copy')
-    const { moveFileIf, movePrefixIf } = driver
-    let source: string | null = null
-    if (cond !== null) {
-      source = (await writeCondition(src, 'delete'))?.ifMatch ?? null
-      if (moveFileIf === undefined || movePrefixIf === undefined) {
-        throw enotsup(driver.vfs, 'conditional rename', src)
-      }
-    }
+    const source = cond !== null ? ((await writeCondition(src, 'delete'))?.ifMatch ?? null) : null
     const move = async (conn: C): Promise<boolean> => {
-      if (cond !== null && moveFileIf !== undefined && movePrefixIf !== undefined) {
+      if (cond !== null) {
+        const moveFileIf = requireHook(driver.moveFileIf)
         if (await moveFileIf(conn, srcKey, kp.apply(kpfx, dst.mountPath), cond, source)) return true
         op = 'rename_prefix'
-        return movePrefixIf(
+        return requireHook(driver.movePrefixIf)(
           conn,
           kp.applyDir(kpfx, src.mountPath),
           kp.applyDir(kpfx, dst.mountPath),
@@ -125,9 +127,24 @@ export function makeRename<A extends Accessor, C>(
       }, settle)
     } catch (err) {
       if (!(err instanceof ConditionLost)) throw err
-      await dropCached(dst)
       const key = err.keys[0] ?? srcKey
-      throw await stale(key === srcKey ? src : kp.keyPath(src, kpfx, key), err.landed)
+      let lost: PathSpec
+      let sent: string | null
+      if (key === kp.apply(kpfx, dst.mountPath)) {
+        lost = dst
+        sent = cond?.ifMatch ?? null
+      } else if (key === srcKey) {
+        lost = src
+        sent = source
+      } else {
+        lost = kp.keyPath(src, kpfx, key)
+        sent = err.versions.get(key) ?? null
+      }
+      await keepLost(src, kpfx, err, key)
+      // A landed copy left the destination unsure; a refused one kept it.
+      if (err.landed) await dropCached(dst)
+      else if (lost !== dst && cond?.ifMatch !== undefined) await dropCached(dst, cond.ifMatch)
+      throw await stale(lost, err.landed, err.gone, sent)
     }
     if (!moved) throw enoent(src)
   }

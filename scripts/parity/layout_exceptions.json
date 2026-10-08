@@ -178,8 +178,7 @@
   },
   "vfs/s3": {
    "typescript_only": {
-    "storage_id": "s3StorageLocation, shared by the node and browser S3VFS classes, which are two runtime twins of Python's one vfs/s3/s3.py (where storage_location is a method). Core cannot hold the class because each runtime's accessor differs.",
-    "profile": "Reads the AWS shared config and credentials files for the endpoint the JS SDK resolves, synchronously for the mount verdict; the SDK's own loader is async and its parser unexported. Python asks botocore, which resolves the endpoint of a client built offline."
+    "storage_id": "s3StorageLocation, shared by the node and browser S3VFS classes, which are two runtime twins of Python's one vfs/s3/s3.py (where storage_location is a method). Core cannot hold the class because each runtime's accessor differs."
    }
   },
   "workspace/snapshot": {

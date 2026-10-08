@@ -16,7 +16,6 @@ from mirage.cache.context import (
     evict_after,
     invalidate_after_write,
     invalidate_ancestors,
-    stale,
     write_condition,
 )
 from mirage.core.object_store.driver import (
@@ -26,8 +25,9 @@ from mirage.core.object_store.driver import (
     ExistsFn,
     ObjectStoreDriver,
     PairFn,
+    refused,
 )
-from mirage.errors.fs import enoent, enotsup
+from mirage.errors.fs import enoent
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils import key_prefix as kp
@@ -92,14 +92,13 @@ def make_copy(
         async with driver.connect(accessor) as conn:
             if cond is None:
                 op = copy_file(conn, src_key, dst_key)
-            elif driver.copy_if is None:
-                raise enotsup(driver.vfs, "conditional copy", dst_spec)
             else:
+                assert driver.copy_if is not None
                 op = driver.copy_if(conn, src_key, dst_key, cond)
             try:
                 copied = await evict_after(op, settle)
             except ConditionLost as exc:
-                raise await stale(dst_spec) from exc
+                raise await refused(dst_spec, exc, cond) from exc
         if not copied:
             raise enoent(src_spec.virtual)
 

@@ -815,6 +815,7 @@ class MountEntry:
             read_version=manager.read_version,
             read_versions=manager.read_versions,
             drop=manager.invalidate_after_write,
+            keep=manager.keep_version,
         )
 
     async def _pick_handlers(

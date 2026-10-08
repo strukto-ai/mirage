@@ -13,8 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { captureRead } from './context.ts'
-import { activeRecords, lostPaths, recordIndex } from '../observe/context.ts'
-import { STAMP_FINGERPRINT_OPS } from '../observe/record.ts'
+import { activeRecords, lineVersion, lostPaths, recordIndex } from '../observe/context.ts'
 import { DEFAULT_READ_TTL, type FileStat, PathSpec } from '../types.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
@@ -436,8 +435,7 @@ export class CacheManager {
    * a fetch.
    */
   async cachedBytes(path: PathSpec): Promise<Uint8Array | null> {
-    // The key has dropped a trailing slash; only the backend read answers
-    // ENOTDIR for a plain file named as a directory.
+    // The key drops a trailing slash; only the backend answers its ENOTDIR.
     if (path.dotted?.endsWith('/') === true) return null
     const key = this.cacheKey(path)
     const cache = this.readableCache(key)
@@ -446,6 +444,24 @@ export class CacheManager {
     if (!(await this.mayServeCached(key))) return null
     const cached = await cache.get(key)
     return this.ownsPath(key) ? cached : null
+  }
+
+  /**
+   * Keep `version` for `path` without bytes, if this mount caches: a refused
+   * write keeps the version it lost on, so the next write without a read
+   * sends it again. A cache that refuses the entry is logged, never thrown:
+   * the refusal itself already stands. Mirrors python's `keep_version`.
+   */
+  async keepVersion(path: PathSpec, version: string): Promise<void> {
+    const key = this.cacheKey(path)
+    const cache = this.fileCache
+    if (cache === null || !this.ownsPath(key)) return
+    try {
+      await withCacheMutation(cache, () => cache.setVersions({ [key]: version }))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.warn(`version not kept for ${key}: ${msg}`)
+    }
   }
 
   /**
@@ -469,10 +485,9 @@ export class CacheManager {
     paths.forEach((path, i) => {
       const key = this.cacheKey(path)
       if (index !== undefined) {
-        if (lost?.holds(key) === true) return
-        const rec = index.newestVersion(key)
-        if (rec !== null) {
-          out[i] = STAMP_FINGERPRINT_OPS.has(rec.op) ? (rec.fingerprint ?? null) : null
+        const [known, version] = lineVersion(index, lost, key)
+        if (known) {
+          out[i] = version
           return
         }
       }

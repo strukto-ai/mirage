@@ -70,10 +70,7 @@ export const RETRACT_FINGERPRINT_OPS: ReadonlySet<string> = new Set([
   'rename_prefix',
   'copy',
 ])
-// What a conditional write reads its version off, within the line: a record
-// that stamps a token names the bytes now at its path, and one that retracts
-// says the line no longer knows them (so the write asks for create-only,
-// never for a version older than the line's own change).
+// Stamps name the bytes at a path; retracts mean the line no longer knows them.
 export const VERSION_OPS: ReadonlySet<string> = new Set([
   ...STAMP_FINGERPRINT_OPS,
   ...RETRACT_FINGERPRINT_OPS,

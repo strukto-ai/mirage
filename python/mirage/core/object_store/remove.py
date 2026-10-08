@@ -30,9 +30,11 @@ from mirage.core.object_store.driver import (
     ObjectStoreDriver,
     PathFn,
     RmdirFn,
+    keep_lost,
+    refused,
 )
 from mirage.core.object_store.stat import make_stat
-from mirage.errors.fs import eisdir, enoent, enotempty, enotsup
+from mirage.errors.fs import eisdir, enoent, enotempty
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils import key_prefix as kp
@@ -83,14 +85,13 @@ def make_unlink(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
         async with driver.connect(accessor) as conn:
             if cond is None:
                 op = driver.delete_file(conn, key)
-            elif driver.delete_if is None:
-                raise enotsup(driver.vfs, "conditional delete", path_spec)
             else:
+                assert driver.delete_if is not None
                 op = driver.delete_if(conn, key, cond)
             try:
                 await evict_after(op, settle)
             except ConditionLost as exc:
-                raise await stale(path_spec) from exc
+                raise await refused(path_spec, exc, cond) from exc
 
     return unlink
 
@@ -112,9 +113,6 @@ def make_remove_prefix(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
         pfx = kp.apply_dir(kpfx, path)
         # Keeps and reports a key changed since the agent (or walk) saw it.
         conditional = conditioned(path_spec, "delete")
-        delete_prefix_if = driver.delete_prefix_if
-        if conditional and delete_prefix_if is None:
-            raise enotsup(driver.vfs, "conditional delete", path_spec)
         timer = start_op()
 
         async def settle(_: None) -> None:
@@ -131,8 +129,9 @@ def make_remove_prefix(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
             await invalidate_ancestors(path_spec)
 
         async with driver.connect(accessor) as conn:
-            if conditional and delete_prefix_if is not None:
-                op = delete_prefix_if(
+            if conditional:
+                assert driver.delete_prefix_if is not None
+                op = driver.delete_prefix_if(
                     conn, pfx, known_versions(path_spec, kpfx)
                 )
             else:
@@ -140,8 +139,11 @@ def make_remove_prefix(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
             try:
                 await evict_after(op, settle)
             except ConditionLost as exc:
+                key = exc.keys[0]
+                await keep_lost(path_spec, kpfx, exc, key)
                 raise await stale(
-                    kp.key_path(path_spec, kpfx, exc.keys[0])
+                    kp.key_path(path_spec, kpfx, key),
+                    version=exc.versions.get(key),
                 ) from exc
 
     return remove_prefix

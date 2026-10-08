@@ -123,8 +123,7 @@ class StaleWriteError(OSError):
     was read.
 
     Raised when a ``write: conditional`` mount's precondition (the
-    version mirage last saw) no longer holds, and when there is no
-    version to send for a file that already exists. Stamped like the
+    version mirage last saw) no longer holds. Stamped like the
     other per-operand errors, so a command renders ``<cmd>: <path>:
     changed since it was read; read it again before writing`` and moves
     on. A direct OSError subclass, never PermissionError or

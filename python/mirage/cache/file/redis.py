@@ -50,6 +50,17 @@ KEY_BATCH = 1000
 VERSION_TTL = 86_400
 
 
+def _text(value: bytes | str | None) -> str | None:
+    """A stored version as text, None when the key holds none.
+
+    Args:
+        value (bytes | str | None): the reply for one version key.
+    """
+    if value is None:
+        return None
+    return value.decode() if isinstance(value, bytes) else str(value)
+
+
 class RedisFileCacheStore(RedisVFS, FileCacheMixin):
     def __init__(
         self,
@@ -171,10 +182,7 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         return bool(await self._cache_client.exists(self._data_key(name)))
 
     async def fingerprint(self, key: str) -> str | None:
-        fp = await self._cache_client.get(self._meta_key(key))
-        if fp is None:
-            return None
-        return fp.decode() if isinstance(fp, bytes) else str(fp)
+        return _text(await self._cache_client.get(self._meta_key(key)))
 
     async def fingerprints(self, keys: list[str]) -> list[str | None]:
         out: list[str | None] = []
@@ -182,12 +190,7 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
             got = await self._cache_client.mget(
                 [self._meta_key(k) for k in keys[start : start + KEY_BATCH]]
             )
-            out.extend(
-                None
-                if fp is None
-                else (fp.decode() if isinstance(fp, bytes) else str(fp))
-                for fp in got
-            )
+            out.extend(_text(fp) for fp in got)
         return out
 
     async def set_versions(self, versions: dict[str, str]) -> None:

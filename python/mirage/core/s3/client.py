@@ -17,7 +17,6 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 
 import aioboto3
-import botocore.session
 from botocore.config import Config
 
 from mirage.utils import key_prefix as kp
@@ -37,8 +36,6 @@ def is_not_found(exc: Exception) -> bool:
     return False
 
 
-# The codes a lost condition comes back as: 412 when the object changed
-# since the version sent, 409 when another conditional write is in flight.
 CONDITION_LOST_CODES = frozenset(
     {"412", "PreconditionFailed", "409", "ConditionalRequestConflict"}
 )
@@ -92,23 +89,6 @@ def _client_kwargs(config: S3Config) -> dict[str, Any]:
         cfg_kwargs["s3"] = {"addressing_style": "path"}
     kwargs["config"] = Config(**cfg_kwargs)
     return kwargs
-
-
-def resolved_endpoint(config: S3Config) -> str | None:
-    """The endpoint a client built from ``config`` sends its requests to.
-
-    The client takes it from the config, the environment
-    (``AWS_ENDPOINT_URL_S3``, ``AWS_ENDPOINT_URL``) or the profile, so it
-    is read off a client built offline: no request is sent.
-
-    Args:
-        config (S3Config): the mount's config.
-    """
-    kwargs = _client_kwargs(config)
-    kwargs.pop("service_name")
-    session = botocore.session.Session(profile=config.aws_profile or None)
-    endpoint = session.create_client("s3", **kwargs).meta.endpoint_url
-    return str(endpoint) if endpoint else None
 
 
 def async_session(config: S3Config) -> aioboto3.Session:

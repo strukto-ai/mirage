@@ -7,8 +7,7 @@
 -- check, both writes and both expirations in one execution is what makes
 -- add() insert-only across processes: a background drain finishing late
 -- cannot land between the check and the write and overwrite a newer fill.
--- A meta key already holding this fingerprint is a version kept for longer
--- than the bytes; it keeps the longer bound.
+-- A meta key already holding this fingerprint keeps its longer bound.
 if redis.call('EXISTS', KEYS[1]) ~= 0 then
   return 0
 end

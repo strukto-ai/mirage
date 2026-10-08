@@ -62,7 +62,6 @@ export async function handleCrossMount(
   cwd = '/',
   argv: readonly string[] = [],
   aggregate: AggregateFn | null = null,
-  // Refuses a move's source whose mount cannot condition the delete.
   deleteCheck?: (path: PathSpec) => void,
 ): Promise<CrossResult> {
   const native = runSingle

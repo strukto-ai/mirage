@@ -66,18 +66,27 @@ export async function commandRecords<T>(fn: (records: OpRecord[]) => Promise<T>)
 /**
  * The paths whose conditional write lost on a line. A lost path's cached
  * copy was dropped; nothing the line read of it before the loss may be
- * cached again or sent as a version. A read or write of the path after the
+ * cached again. The version the write lost on is the one a retry sends, so
+ * it is refused again until a read. A read or write of the path after the
  * loss names the bytes now there, and lifts the mark. Mirrors python's
  * `LostPaths`, which rides the recorder; here it is keyed by the line's
  * records, since `applyIo` runs after the recording scope ends.
  */
 export class LostPaths {
   readonly marks = new Map<string, number>()
+  readonly versions = new Map<string, string>()
 
   constructor(private readonly records: readonly OpRecord[]) {}
 
-  mark(key: string): void {
+  mark(key: string, version: string | null = null): void {
     this.marks.set(key, this.records.length)
+    if (version !== null && version !== '') this.versions.set(key, version)
+    else this.versions.delete(key)
+  }
+
+  /** The version a write to `key` lost on, while it is still lost. */
+  version(key: string): string | null {
+    return this.holds(key) ? (this.versions.get(key) ?? null) : null
   }
 
   holds(key: string): boolean {
@@ -87,6 +96,24 @@ export class LostPaths {
       .slice(start)
       .some((rec) => rec.path === key && STAMP_FINGERPRINT_OPS.has(rec.op))
   }
+}
+
+/**
+ * The version the running line itself names for `key`, with whether the line
+ * knows `key` at all. A lost path names the version its write lost on;
+ * otherwise the newest version record does, a stamp its token and a
+ * retraction none. Mirrors python's `line_version`.
+ */
+export function lineVersion(
+  index: RecordIndex,
+  lost: LostPaths | null,
+  key: string,
+): [boolean, string | null] {
+  if (lost?.holds(key) === true) return [true, lost.version(key)]
+  const rec = index.newestVersion(key)
+  if (rec === null) return [false, null]
+  const fingerprint = STAMP_FINGERPRINT_OPS.has(rec.op) ? (rec.fingerprint ?? '') : ''
+  return [true, fingerprint !== '' ? fingerprint : null]
 }
 
 const lostByLine = new WeakMap<readonly OpRecord[], LostPaths>()
@@ -114,8 +141,8 @@ export function lostPaths(records: readonly OpRecord[] | undefined): LostPaths |
 }
 
 /** Mark `key` lost on the running line, if one is recording. */
-export function markLost(key: string): void {
-  lostPaths(storage.getStore()?.records)?.mark(key)
+export function markLost(key: string, version: string | null = null): void {
+  lostPaths(storage.getStore()?.records)?.mark(key, version)
 }
 
 export function activeRecords(): readonly OpRecord[] | undefined {

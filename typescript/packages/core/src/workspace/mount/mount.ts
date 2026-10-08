@@ -738,8 +738,7 @@ export class MountEntry {
   writeContext(): WriteContext | null {
     const manager = this.cacheManager
     if (this.write !== WritePolicy.CONDITIONAL || manager === null) return null
-    // One object per manager, so a command's frame and its op door's frame
-    // for this mount compare equal on storage that cannot isolate tasks.
+    // One object per manager, so this mount's frames compare equal.
     if (this.writeContextFor?.manager !== manager) {
       this.writeContextFor = {
         manager,
@@ -749,6 +748,7 @@ export class MountEntry {
           readVersion: (path) => manager.readVersion(path),
           readVersions: (paths) => manager.readVersions(paths),
           drop: (path) => manager.invalidateAfterWrite(path),
+          keep: (path, version) => manager.keepVersion(path, version),
         },
       }
     }

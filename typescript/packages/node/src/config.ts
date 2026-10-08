@@ -683,10 +683,7 @@ export interface MountBlock {
    */
   read?: string
   ttl?: number
-  /**
-   * Whether this mount's writes carry the version they were based on;
-   * overrides the workspace `write:` as `mode` does.
-   */
+  /** Overrides the workspace `write:` as `mode` does. */
   write?: string | null
   /** Replaces the workspace `index:` whole; nothing is inherited. */
   index?: RedisIndexBlock | (RamIndexBlock & { type: 'ram' }) | null

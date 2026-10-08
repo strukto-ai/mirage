@@ -61,7 +61,6 @@ export async function runRelay(
   // against.
   cwd = '/',
   argv: readonly string[] = [],
-  // Refuses a move's source whose mount cannot condition the delete (mv).
   deleteCheck?: (path: PathSpec) => void,
 ): Promise<CrossResult> {
   if (!RELAY_COMMANDS.has(cmdName))

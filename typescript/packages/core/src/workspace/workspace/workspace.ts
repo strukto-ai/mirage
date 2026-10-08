@@ -62,7 +62,6 @@ import {
   type ReadSpec,
   DEFAULT_READ_SPEC,
   DriftPolicy,
-  MountBackend,
   MountMode,
   PathSpec,
   WritePolicy,
@@ -74,7 +73,7 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import { Ops } from '../../ops/ops.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { checkReadCapability } from '../mount/read_policy.ts'
-import { checkWriteCapability, coerceWritePolicy, exposureOverlaps } from '../mount/write_policy.ts'
+import { checkWriteCapability, coerceWritePolicy } from '../mount/write_policy.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { PrefixResolver } from '../../runtime/resolver.ts'
 import { ChildProcess } from '../../process/child.ts'
@@ -258,8 +257,7 @@ export class Workspace {
     this.readDefault = options.read ?? DEFAULT_READ_SPEC
     this.writeDefault = coerceWritePolicy(options.write)
     const index = options.index === undefined ? undefined : normalizeIndexConfig(options.index)
-    // Built ahead of the mounts: a zero limit keeps nothing, so no write on
-    // a conditional mount would have a version, and the verdict has to know.
+    // Before the mounts: the write verdict asks whether the cache keeps anything.
     this.cache = buildFileCache(options.cache, options.cacheLimit)
     const normalized = normalizeMounts(mounts, this.readDefault, index, {
       mode: options.mode ?? MountMode.READ,
@@ -1289,15 +1287,6 @@ export class Workspace {
   }
 
   /**
-   * Each subtree a kernel mount (fuse, fskit) exposes, with its backend; a
-   * conditional mount added under one is refused. None in core: the node
-   * workspace owns the kernel mounts.
-   */
-  protected kernelExposures(): readonly [string, MountBackend][] {
-    return []
-  }
-
-  /**
    * Add a mount to a running workspace.
    *
    * The runtime door runs the same read-policy verdict the constructor
@@ -1310,9 +1299,8 @@ export class Workspace {
    * refused, before the read policy is judged.
    *
    * `write` is the mount's write policy; left out, the workspace default.
-   * It is judged on the mount's mode, on whether the cache keeps anything,
-   * and on any live kernel mount exposing the prefix, as the constructor
-   * does.
+   * It is judged on the mount's mode and on whether the cache keeps
+   * anything, as the constructor does.
    */
   addMount(
     prefix: string,
@@ -1331,16 +1319,11 @@ export class Workspace {
     const alias = this.registry.allMounts().find((m) => m.vfs === vfs)
     checkReadCapability(prefix, vfs, resolvedRead, alias !== undefined ? alias.indexConfig : own)
     const resolvedWrite = write === undefined ? this.writeDefault : coerceWritePolicy(write)
-    // A live kernel mount over the prefix is the backend it goes through.
-    const backend =
-      this.kernelExposures().find(([exposed]) => exposureOverlaps(prefix, exposed))?.[1] ??
-      MountBackend.WORKSPACE
     checkWriteCapability(
       prefix,
       vfs,
       resolvedWrite,
       mode,
-      backend,
       this.cache.cacheLimit > 0 && vfs.cachesReads,
     )
     const previous = this.registry.allMounts()
@@ -2037,8 +2020,7 @@ export class Workspace {
     // The Mounts ride through whole; flattening them to [vfs, mode]
     // here is what would drop the restored read policy.
     const mounts: Record<string, MountSpec> = { ...args.mountArgs }
-    // The saved default survives like each mount's policy: an option naming
-    // another one is refused rather than taking over mounts added later.
+    // The saved write default wins; an option naming another is refused.
     const asked = options.write !== undefined ? coerceWritePolicy(options.write) : undefined
     if (asked !== undefined && asked !== args.writeDefault) {
       throw new Error(
@@ -2046,8 +2028,6 @@ export class Workspace {
           `the options ask write: ${asked}`,
       )
     }
-    // The saved default comes last: an option naming another was refused
-    // above, and one left undefined must not overwrite it.
     const mergedOptions: WorkspaceOptions = {
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
       ...(args.defaultAgentId !== null ? { agentId: args.defaultAgentId } : {}),

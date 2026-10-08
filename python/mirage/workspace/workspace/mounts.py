@@ -174,7 +174,6 @@ def normalize_mounts(
             spec.vfs,
             spec.write,
             spec.mode,
-            spec.backend,
             caching and spec.vfs.caches_reads,
         )
     return specs

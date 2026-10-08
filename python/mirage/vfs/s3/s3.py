@@ -13,14 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
-import logging
+import os
 from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.generic.rewrite import append_by_rewrite
-from mirage.core.s3.client import resolved_endpoint
 from mirage.core.s3.constants import SCOPE_ERROR
 from mirage.core.s3.copy import copy as _copy
 from mirage.core.s3.create import create as _create
@@ -47,8 +46,6 @@ from mirage.vfs.s3.prompt import PROMPT
 from mirage.vfs.types import DuEntries
 from mirage.watch.base import DeltaHook
 
-logger = logging.getLogger(__name__)
-
 
 class S3VFS(BaseVFS):
     accessor: S3Accessor
@@ -71,17 +68,26 @@ class S3VFS(BaseVFS):
         self.accessor = S3Accessor(self.config)
 
     def resolved_endpoint(self) -> str | None:
-        """The endpoint the client sends to, read off an offline client.
+        """The endpoint this mount declares, for its write-condition row.
 
-        Mirrors TS ``resolvedEndpoint``.
+        The config's, else ``AWS_ENDPOINT_URL_S3`` or ``AWS_ENDPOINT_URL``
+        unless ``AWS_IGNORE_CONFIGURED_ENDPOINT_URLS`` is true. An endpoint
+        set only in an AWS profile is not read. Mirrors TS
+        ``resolvedEndpoint``.
         """
-        try:
-            return resolved_endpoint(self.config)
-        except Exception as exc:
-            # A profile that does not exist fails the client too, and the
-            # mount reports that on first use; judge it on what it declared.
-            logger.debug("endpoint not resolved for %s: %s", self.name, exc)
+        if self.config.endpoint_url:
             return self.config.endpoint_url
+        env = os.environ
+        if (
+            env.get("AWS_IGNORE_CONFIGURED_ENDPOINT_URLS", "").lower()
+            == "true"
+        ):
+            return None
+        return (
+            env.get("AWS_ENDPOINT_URL_S3")
+            or env.get("AWS_ENDPOINT_URL")
+            or None
+        )
 
     async def readdir(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

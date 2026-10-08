@@ -234,15 +234,14 @@ export function publishRead(path: string, data: Uint8Array, fingerprint: string 
   }
 }
 
-/** The precondition one write carries. Mirrors Python's `WriteCondition`. */
+/**
+ * The precondition one write carries; empty when mirage holds no version of
+ * the object, so the write goes out plain, there being nothing to compare.
+ * Mirrors Python's `WriteCondition`.
+ */
 export interface WriteCondition {
   /** The version the object must still have. */
   readonly ifMatch?: string
-  /**
-   * The object must not exist yet; sent when no version is known, so a new
-   * file is created and an existing one is refused.
-   */
-  readonly ifNoneMatch?: true
 }
 
 /**
@@ -253,7 +252,7 @@ export interface WriteCondition {
  */
 export interface WriteContext {
   readonly vfs: string
-  /** The ops the backend can condition: put, create, copy, delete. */
+  /** The ops the backend can condition: put, copy, delete. */
   readonly conditions: readonly string[]
   /** The version the mount last saw for a path, null when it saw none. */
   readVersion(path: PathSpec): Promise<string | null>
@@ -261,6 +260,8 @@ export interface WriteContext {
   readVersions(paths: readonly PathSpec[]): Promise<(string | null)[]>
   /** Drops the mount's cached copy, so the read a refusal asks for fetches. */
   drop(path: PathSpec): Promise<void>
+  /** Keeps a version for a path without bytes, the one a refused write lost on. */
+  keep(path: PathSpec, version: string): Promise<void>
 }
 
 export type WriteKind = 'write' | 'copy' | 'delete'
@@ -295,15 +296,24 @@ export function runWithWriteContext<T>(
  * refused instead.
  */
 function activeWriteContext(path: PathSpec): WriteContext | null {
-  const states = writeStorage.liveStores()
+  return agreed(writeStorage.liveStores(), (state) => state.context, path)
+}
+
+/** The value every live frame holds, null with none; frames that disagree refuse the write. */
+function agreed<S, V>(
+  states: readonly S[],
+  pick: (state: S) => V | null,
+  path: PathSpec,
+): V | null {
   const first = states[0]
   if (first === undefined) return null
+  const value = pick(first)
   for (const state of states) {
-    if (state.context !== first.context) {
+    if (pick(state) !== value) {
       throw enotsup('workspace', 'conditional write (overlapping lines)', path)
     }
   }
-  return first.context
+  return value
 }
 
 /**
@@ -325,15 +335,7 @@ export function runWithOwnVersion<T>(
  * in place of the op's own.
  */
 function ownVersion(path: PathSpec): string | OwnRead | null {
-  const states = ownVersionStorage.liveStores()
-  const first = states[0]
-  if (first === undefined) return null
-  for (const state of states) {
-    if (state.version !== first.version) {
-      throw enotsup('workspace', 'conditional write (overlapping lines)', path)
-    }
-  }
-  return first.version
+  return agreed(ownVersionStorage.liveStores(), (state) => state.version, path)
 }
 
 /**
@@ -371,19 +373,18 @@ export async function writeCondition(
   const read = own ?? ownVersion(path)
   const cached = await context.readVersion(path)
   // The op's own read found no file: one the mount saw was removed since.
-  if (read === OwnRead.ABSENT && cached !== null && cached !== '') throw await stale(path)
+  if (read === OwnRead.ABSENT && cached !== null && cached !== '') {
+    throw await stale(path, false, true)
+  }
   const mine = read === OwnRead.ABSENT ? null : read
   const ownToken = mine === '' ? null : mine
   const cachedToken = cached === '' ? null : cached
   const version = preferOwn ? (ownToken ?? cachedToken) : (cachedToken ?? ownToken)
-  const needed =
-    kind === 'copy' ? 'copy' : kind === 'delete' ? 'delete' : version !== null ? 'put' : 'create'
-  if (!context.conditions.includes(needed)) {
+  const needed = kind !== 'write' ? kind : version !== null ? 'put' : null
+  if (needed !== null && !context.conditions.includes(needed)) {
     throw enotsup(context.vfs, `conditional ${kind}`, path)
   }
-  if (version !== null) return { ifMatch: version }
-  if (kind === 'delete') return {}
-  return { ifNoneMatch: true }
+  return version !== null ? { ifMatch: version } : {}
 }
 
 /**
@@ -401,19 +402,33 @@ export function conditioned(path: PathSpec, kind: 'copy' | 'delete'): boolean {
 }
 
 /** Drop the write context's cached copy of `path`, if there is one. */
-export async function dropCached(path: PathSpec): Promise<void> {
-  markLost(path.virtual)
+export async function dropCached(path: PathSpec, keep: string | null = null): Promise<void> {
+  markLost(path.virtual, keep)
   const context = activeWriteContext(path)
-  if (context !== null) await context.drop(path)
+  if (context === null) return
+  await context.drop(path)
+  if (keep !== null && keep !== '') await context.keep(path, keep)
 }
 
 /**
- * The refusal for a lost condition, after dropping the cached copy;
- * `landed` marks a move whose copy landed before its source's delete lost,
- * which `mv` reports as a failed removal.
+ * The refusal for a lost condition, after dropping the cached copy. The
+ * version the write lost on is kept, so a retry without a read is refused
+ * again; a file found `gone` keeps none, there being no newer bytes for a
+ * retry to overwrite. `landed` marks a move whose copy landed before its
+ * source's delete lost, which `mv` reports as a failed removal; `version` is
+ * the one the write sent, when the line no longer names it (a move retracts
+ * both paths). Mirrors python's `stale`.
  */
-export async function stale(path: PathSpec, landed = false): Promise<FsError> {
-  await dropCached(path)
+export async function stale(
+  path: PathSpec,
+  landed = false,
+  gone = false,
+  version: string | null = null,
+): Promise<FsError> {
+  const context = activeWriteContext(path)
+  const sent = version !== null && version !== '' ? version : null
+  const keep = !gone && context !== null ? (sent ?? (await context.readVersion(path))) : null
+  await dropCached(path, keep)
   return staleWrite(path, landed)
 }
 

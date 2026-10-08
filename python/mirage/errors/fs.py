@@ -329,6 +329,36 @@ def enotsup(
     )
 
 
+def inner_suffix(operand: PathSpec, exc: BaseException) -> str:
+    """The part of a failure's path below ``operand``, '' when it is the operand.
+
+    A recursive command that fails on a file inside its operand names that
+    file, as GNU does (``rm: cannot remove 'd/s/b'``): the operand as typed
+    plus this suffix. Mirrors TS ``innerSuffix``.
+
+    Args:
+        operand (PathSpec): the operand the command was given.
+        exc (BaseException): the failure; its ``filename`` names the file.
+    """
+    name = getattr(exc, "filename", None)
+    base = operand.virtual.rstrip("/")
+    if not isinstance(name, str) or not name.startswith(base + "/"):
+        return ""
+    return name[len(base) :]
+
+
+def with_inner(raw: str, inner: str) -> str:
+    """An operand as typed, or naming the file inside it that failed.
+
+    Mirrors TS ``withInner``.
+
+    Args:
+        raw (str): the operand as the user typed it.
+        inner (str): its ``inner_suffix``; '' keeps the operand as typed.
+    """
+    return raw.rstrip("/") + inner if inner else raw
+
+
 def fs_strerror(exc: BaseException) -> str | None:
     """The phrase a command line ends with for a failed operand.
 

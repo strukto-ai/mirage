@@ -33,7 +33,7 @@ import {
   pathExists,
   type BackendKeyFn,
 } from '../utils/copy.ts'
-import { fsStrerror, isFsError, isLandedMove } from '../../../errors/fs.ts'
+import { fsStrerror, innerSuffix, isFsError, isLandedMove, withInner } from '../../../errors/fs.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import {
   type TransferLinks,
@@ -481,8 +481,7 @@ export async function mvGeneric(
       }
     }
     const sourceLink = copies !== undefined && copies.links.statAt(src.virtual) !== null
-    // A source whose delete would be refused is refused here, before a
-    // backup renames the destination aside.
+    // Refuse an undeletable source before a backup moves the target aside.
     if (isPrimitiveMove(strategy) && !sourceLink) {
       try {
         strategy.checkUnlink?.(src)
@@ -552,10 +551,11 @@ export async function mvGeneric(
         await strategy.rename(src, target)
       } catch (err) {
         if (!isFsError(err)) throw err
+        const inner = innerSuffix(src, err)
+        const from = withInner(src.rawPath, inner)
         if (isLandedMove(err)) {
-          // The copy landed and only the source's removal lost, as a
-          // cross-device GNU mv whose unlink fails.
-          errors.push(`mv: cannot remove '${src.rawPath}': ${String(fsStrerror(err))}`)
+          // Copy landed, source delete lost: GNU's cross-device unlink failure.
+          errors.push(`mv: cannot remove '${from}': ${String(fsStrerror(err))}`)
           writes[target.mountPath] = new Uint8Array()
           if (!srcIsDir) created.add(keyOf(target))
           continue
@@ -564,9 +564,8 @@ export async function mvGeneric(
         // chain is not all directories) is one failed operand, not an
         // aborted command: GNU reports it and keeps going with the
         // remaining sources.
-        errors.push(
-          `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${String(fsStrerror(err))}`,
-        )
+        const to = withInner(target.rawPath, inner)
+        errors.push(`mv: cannot move '${from}' to '${to}': ${String(fsStrerror(err))}`)
         continue
       }
       writes[src.mountPath] = new Uint8Array()

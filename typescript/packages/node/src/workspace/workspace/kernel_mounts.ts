@@ -12,19 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountBackend } from '@struktoai/mirage-core/types'
-import {
-  conditionalOverlap,
-  kernelRefusal,
-} from '@struktoai/mirage-core/workspace/mount/write_policy'
+import type { MountBackend } from '@struktoai/mirage-core/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { FuseManager } from '../fuse.ts'
-
-/** Restore `map`'s entry for `key` to `value`, or remove it when undefined. */
-function putBack<V>(map: Map<string, V>, key: string, value: V | undefined): void {
-  if (value === undefined) map.delete(key)
-  else map.set(key, value)
-}
 
 /**
  * The workspace's real mountpoints, one {@link FuseManager} per subtree.
@@ -43,8 +33,6 @@ export class KernelMounts {
   private readonly workspace: Workspace
   private readonly mountpointsMap = new Map<string, string>()
   private readonly managers = new Map<string, FuseManager>()
-  private readonly exposures = new Map<string, [string, MountBackend]>()
-  private readonly settling = new Map<string, Promise<string>>()
 
   constructor(workspace: Workspace) {
     this.workspace = workspace
@@ -62,47 +50,19 @@ export class KernelMounts {
    * @param sessionId session whose grants scope the ops
    * @param backend fuse or fskit
    */
-  add(
+  async add(
     prefix: string,
     mountpoint?: string,
     sessionId?: string,
     backend?: MountBackend,
   ): Promise<string> {
-    const key = sessionId === undefined ? prefix : `${prefix}@${sessionId}`
-    // One setup per key at a time: a failed one puts back only settled records.
-    const previous = this.settling.get(key)
-    const setUp = (): Promise<string> => this.setUp(key, prefix, mountpoint, sessionId, backend)
-    const run = previous === undefined ? setUp() : previous.then(setUp, setUp)
-    this.settling.set(key, run)
-    const settled = (): void => {
-      if (this.settling.get(key) === run) this.settling.delete(key)
-    }
-    run.then(settled, settled)
-    return run
-  }
-
-  private async setUp(
-    key: string,
-    prefix: string,
-    mountpoint: string | undefined,
-    sessionId: string | undefined,
-    backend: MountBackend | undefined,
-  ): Promise<string> {
-    // Judged as the setup starts: a queued one starts after others settle.
-    const conditional = conditionalOverlap(this.workspace.mounts(), prefix)
-    if (conditional !== null)
-      throw new Error(kernelRefusal(conditional, backend ?? MountBackend.FUSE))
     const session = sessionId !== undefined ? this.workspace.getSession(sessionId) : undefined
-    const priorManager = this.managers.get(key)
-    const priorMountpoint = this.mountpointsMap.get(key)
-    const priorExposure = this.exposures.get(key)
+    const key = sessionId === undefined ? prefix : `${prefix}@${sessionId}`
     // Register a pinned path BEFORE mounting so a collision is rejected
     // without leaving a partial mount.
     if (mountpoint !== undefined) this.register(key, mountpoint)
     const manager = new FuseManager()
     this.managers.set(key, manager)
-    // Exposed from the start, so a mount added during setup sees it.
-    this.exposures.set(key, [prefix, backend ?? MountBackend.FUSE])
     try {
       const resolved = await manager.setup(this.workspace, {
         rootPrefix: prefix,
@@ -113,11 +73,10 @@ export class KernelMounts {
       if (mountpoint === undefined) this.register(key, resolved)
       return resolved
     } catch (err) {
-      // The mount never came up; put back what the key held before, so a
-      // live mount under the same key keeps its records.
-      putBack(this.managers, key, priorManager)
-      putBack(this.mountpointsMap, key, priorMountpoint)
-      putBack(this.exposures, key, priorExposure)
+      // The mount never came up; drop the manager and any registered path
+      // so mountpoints does not misreport it as live.
+      this.managers.delete(key)
+      this.mountpointsMap.delete(key)
       throw err
     }
   }
@@ -130,7 +89,6 @@ export class KernelMounts {
    */
   async remove(prefix: string, sessionId?: string): Promise<void> {
     const key = sessionId === undefined ? prefix : `${prefix}@${sessionId}`
-    if (this.settling.has(key)) await this.settled(key)
     const manager = this.managers.get(key)
     if (manager !== undefined) {
       await manager.unmount()
@@ -138,31 +96,13 @@ export class KernelMounts {
     }
     this.managers.delete(key)
     this.mountpointsMap.delete(key)
-    this.exposures.delete(key)
-  }
-
-  /** Wait for every setup queued on `key` to settle, whatever its outcome. */
-  private async settled(key: string): Promise<void> {
-    for (let run = this.settling.get(key); run !== undefined; run = this.settling.get(key)) {
-      await run.then(
-        () => undefined,
-        () => undefined,
-      )
-    }
-  }
-
-  /** Each exposed prefix with the backend exposing it. */
-  exposed(): [string, MountBackend][] {
-    return [...this.exposures.values()]
   }
 
   /** Unmount everything this workspace exposed. */
   async close(): Promise<void> {
-    if (this.settling.size > 0) await Promise.allSettled([...this.settling.values()])
     for (const manager of this.managers.values()) await manager.unmount()
     this.managers.clear()
     this.mountpointsMap.clear()
-    this.exposures.clear()
   }
 
   /** The single active mountpoint, when there is exactly one. */

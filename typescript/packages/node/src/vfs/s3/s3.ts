@@ -24,7 +24,6 @@ import { VFSName } from '@struktoai/mirage-core/types'
 import { HttpProxyAgent } from 'http-proxy-agent'
 import { HttpsProxyAgent } from 'https-proxy-agent'
 import { redactConfig, type S3Config, type S3ConfigRedacted } from './config.ts'
-import { configuredEndpoint } from './profile.ts'
 import { buildDeltaHook } from '@struktoai/mirage-core/core/s3/watch'
 import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
 
@@ -51,15 +50,23 @@ export class S3VFS extends S3VFSBase {
   override readonly accessor: S3Accessor
 
   /**
-   * The endpoint the SDK client sends to: the config's, else the one the SDK
-   * reads from its environment and shared config. Mirrors python's
-   * `resolved_endpoint`.
+   * The endpoint this mount declares, for its write-condition row: the
+   * config's, else AWS_ENDPOINT_URL_S3 or AWS_ENDPOINT_URL unless
+   * AWS_IGNORE_CONFIGURED_ENDPOINT_URLS is true. An endpoint set only in an
+   * AWS profile is not read. Mirrors python's `resolved_endpoint`.
    */
   get resolvedEndpoint(): string | undefined {
     if (this.config.endpoint !== undefined && this.config.endpoint !== '') {
       return this.config.endpoint
     }
-    return configuredEndpoint()
+    const env = process.env
+    if (env.AWS_IGNORE_CONFIGURED_ENDPOINT_URLS?.toLowerCase() === 'true') return undefined
+    const endpoint = env.AWS_ENDPOINT_URL_S3 ?? ''
+    return endpoint !== ''
+      ? endpoint
+      : env.AWS_ENDPOINT_URL !== ''
+        ? env.AWS_ENDPOINT_URL
+        : undefined
   }
 
   constructor(config: S3Config) {

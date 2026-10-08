@@ -21,7 +21,7 @@ from weakref import WeakKeyDictionary
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.io import CachableAsyncIterator, IOResult
 from mirage.io.types import ByteSource
-from mirage.observe.context import LostPaths
+from mirage.observe.context import LostPaths, line_version
 from mirage.observe.record import (
     READ_FINGERPRINT_OPS,
     STAMP_FINGERPRINT_OPS,
@@ -191,8 +191,7 @@ async def _set_cached_locked(
     ttl: int | None,
 ) -> None:
     if len(data) > cache.cache_limit:
-        # Bytes bigger than the whole cache would flush every warm entry and
-        # then themselves; the version is kept apart.
+        # Bytes over the whole cache limit would evict every warm entry.
         await cache.remove(path)
         return
     if written is not None:
@@ -248,32 +247,6 @@ async def _store(
             logger.warning(
                 "stale copy not dropped for %s", path, exc_info=True
             )
-
-
-def mark_claimed_writes(records: list[OpRecord], io: IOResult) -> None:
-    """Mark a command's write records with the value it claims for them.
-
-    A ``write`` record of a path the command both wrote and listed in
-    ``IOResult.cache`` gets that exact ``IOResult.writes`` value as
-    ``claimed``, which :func:`written_verdict` compares with the value
-    the line caches. A record the line already sealed is left alone: a
-    background command returning after its line ended must not mark a
-    record that line persisted.
-
-    Args:
-        records (list[OpRecord]): The command's own records.
-        io (IOResult): Its result, virtual keys, streams already wrapped.
-    """
-    cached = set(io.cache)
-    for rec in records:
-        if (
-            rec.sealed
-            or rec.op not in WRITE_FINGERPRINT_OPS
-            or rec.path not in cached
-            or rec.path not in io.writes
-        ):
-            continue
-        rec.claimed = io.writes[rec.path]
 
 
 def _gone(
@@ -337,12 +310,9 @@ async def _keep_versions(
         facts = cache_facts(path)
         if not (facts.cacheable and facts.versions):
             continue
-        if lost is not None and lost.holds(path):
-            continue
-        rec = index.newest_version(path)
-        if rec is None or _retracted(rec) or not rec.fingerprint:
-            continue
-        versions[path] = rec.fingerprint
+        _, version = line_version(index, lost, path)
+        if version:
+            versions[path] = version
     if not versions:
         return
     try:

@@ -361,8 +361,7 @@ class MountBlock(BaseModel):
     # at workspace level it would sit beside `index: {ttl:}`.
     read: ReadPolicy | None = None
     ttl: int | None = None
-    # Whether this mount's writes carry the version they were based on;
-    # overrides the workspace `write:` as `mode` does.
+    # Overrides the workspace `write:` as `mode` does.
     write: WritePolicy | None = None
     # Replaces the workspace `index:` whole; nothing is inherited.
     index: IndexBlock | None = None

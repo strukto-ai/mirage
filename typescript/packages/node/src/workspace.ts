@@ -123,12 +123,7 @@ export class Workspace extends CoreWorkspace {
     sessionId?: string,
     backend?: MountBackend,
   ): Promise<string> {
-    // KernelMounts judges the conditional-mount refusal as each setup starts.
     return this.kernelMounts.add(prefix, mountpoint, sessionId, backend)
-  }
-
-  protected override kernelExposures(): readonly [string, MountBackend][] {
-    return this.kernelMounts.exposed()
   }
 
   removeFuseMount(prefix: string, sessionId?: string): Promise<void> {

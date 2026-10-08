@@ -13,9 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
-import type { KnownVersions, WriteCondition } from '../../cache/context.ts'
+import { type KnownVersions, type WriteCondition, dropCached, stale } from '../../cache/context.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { FsError } from '../../errors/types.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
+import * as kp from '../../utils/key_prefix.ts'
 
 export type ReaddirFn<A extends Accessor> = (
   accessor: A,
@@ -250,8 +252,7 @@ export interface ObjectStoreDriver<A extends Accessor, C> {
   findTree?: (conn: C, pfx: string, hints: FindHints) => [AsyncIterable<TreeEntry>, boolean]
   /**
    * `put` carrying a write condition; a lost one throws `ConditionLost`.
-   * Absent when the store cannot condition a write, which is what keeps
-   * such a store from mounting `write: conditional` at all.
+   * Absent when the store cannot condition a write.
    */
   putIf?: (
     conn: C,
@@ -299,12 +300,50 @@ export class ConditionLost extends Error {
    * @param keys the raw keys whose condition did not hold, in order met
    * @param landed a move's copy landed and only its source's delete lost,
    *   so the destination holds the copy
+   * @param gone the object no longer exists, so no newer bytes are there
+   *   for a retry to overwrite
+   * @param versions the version each lost key was measured on, where the op knew it
    */
   constructor(
     readonly keys: readonly string[],
     readonly landed = false,
+    readonly gone = false,
+    readonly versions: ReadonlyMap<string, string> = new Map(),
   ) {
     super(`condition lost on '${keys[0] ?? ''}'`)
     this.name = 'ConditionLost'
   }
+}
+
+/** The refusal for a one-path op whose condition lost. Mirrors python's `refused`. */
+export function refused(
+  path: PathSpec,
+  err: ConditionLost,
+  cond: WriteCondition | null,
+): Promise<FsError> {
+  return stale(path, false, err.gone, cond?.ifMatch ?? null)
+}
+
+/**
+ * Keep the version of each key a walk lost on, except `skip`, which the
+ * refusal itself names and keeps. Mirrors python's `keep_lost`.
+ */
+export async function keepLost(
+  root: PathSpec,
+  keyPrefix: string,
+  err: ConditionLost,
+  skip: string,
+): Promise<void> {
+  for (const [key, version] of err.versions) {
+    if (key !== skip) await dropCached(kp.keyPath(root, keyPrefix, key), version)
+  }
+}
+
+/**
+ * The `*If` hook a conditional op calls. Every `write: conditional` mount is
+ * on the S3 driver, which carries them all.
+ */
+export function requireHook<F>(hook: F | undefined): F {
+  if (hook === undefined) throw new Error('conditional op on a driver without its hook')
+  return hook
 }

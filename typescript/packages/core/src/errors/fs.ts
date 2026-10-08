@@ -68,11 +68,28 @@ export function efbig(path: string | { virtual: string }): FsError {
 }
 
 /** A conditional write the backend refused: the file changed since it was
- * read, or it exists and there is no version to send. Per-operand, so a
- * command reports it and moves on; never a read failure. Python's
- * StaleWriteError. */
+ * read. Per-operand, so a command reports it and moves on; never a read
+ * failure. Python's StaleWriteError. */
 export function staleWrite(path: string | { virtual: string }, landed = false): StaleWriteError {
   return Object.assign(fsError(path, 'STALE_WRITE'), { landed })
+}
+
+/**
+ * The part of a failure's path below `operand`, '' when it is the operand: a
+ * recursive command that fails on a file inside its operand names that
+ * file, as GNU does (`rm: cannot remove 'd/s/b'`). Mirrors Python's
+ * `inner_suffix`.
+ */
+export function innerSuffix(operand: { virtual: string }, err: unknown): string {
+  const name = (err as { virtualPath?: unknown }).virtualPath
+  const base = operand.virtual.replace(/\/+$/, '')
+  if (typeof name !== 'string' || !name.startsWith(`${base}/`)) return ''
+  return name.slice(base.length)
+}
+
+/** An operand as typed, or naming the file inside it that failed. Mirrors Python's `with_inner`. */
+export function withInner(raw: string, inner: string): string {
+  return inner === '' ? raw : raw.replace(/\/+$/, '') + inner
 }
 
 export function isLandedMove(err: unknown): err is StaleWriteError {

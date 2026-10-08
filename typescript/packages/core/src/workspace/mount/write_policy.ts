@@ -12,18 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { MountBackend } from '../../types.ts'
-import { KERNEL_BACKENDS, MountMode, WritePolicy } from '../../types.ts'
+import { MountMode, WritePolicy } from '../../types.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
-import { normDir } from '../../utils/slash.ts'
 
-const ALL: readonly string[] = Object.freeze(['put', 'create', 'copy', 'delete'])
+const ALL: readonly string[] = Object.freeze(['put', 'copy', 'delete'])
 
 /** The ops each backend conditions (docs/home/yaml.mdx, conditions.json). */
 export const WRITE_CONDITIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   s3: ALL,
   seaweedfs: ALL,
-  minio: Object.freeze(['put', 'create']),
+  minio: Object.freeze(['put']),
   aliyun: ALL,
   backblaze: ALL,
   ceph: ALL,
@@ -38,17 +36,8 @@ export const WRITE_CONDITIONS: Readonly<Record<string, readonly string[]>> = Obj
   wasabi: ALL,
 })
 
-/**
- * type: s3 pointed at another endpoint can be any S3-compatible server, MinIO
- * included, so it is trusted only as far as MinIO is.
- */
+/** A custom `type: s3` endpoint may be MinIO, so it gets MinIO's row. */
 export const CUSTOM_ENDPOINT_CONDITIONS: readonly string[] = WRITE_CONDITIONS.minio ?? []
-
-/** What the exposure check reads off a mount. */
-export interface PolicyMount {
-  readonly prefix: string
-  readonly write: WritePolicy
-}
 
 /**
  * Coerce a declared write-policy name to its `WritePolicy`, or refuse it.
@@ -125,44 +114,11 @@ export function writeConditions(vfs: BaseVFS): readonly string[] {
 }
 
 /**
- * The prefix of a conditional mount an exposure of `prefix` reaches: one it
- * covers (`/` covers `/s3/`) or one it sits inside (`/s3/sub`). Mirrors
- * Python's `conditional_overlap`.
- */
-export function conditionalOverlap(mounts: Iterable<PolicyMount>, prefix: string): string | null {
-  for (const m of mounts) {
-    if (m.write !== WritePolicy.CONDITIONAL) continue
-    if (exposureOverlaps(m.prefix, prefix)) return m.prefix
-  }
-  return null
-}
-
-/**
- * Whether exposing `exposed` reaches the mount at `mountPrefix`: it does when
- * it covers the mount (`/` covers `/s3/`) or sits inside it (`/s3/sub` is
- * inside `/s3/`). Mirrors python's `exposure_overlaps`.
- */
-export function exposureOverlaps(mountPrefix: string, exposed: string): boolean {
-  const mount = normDir(mountPrefix)
-  const out = normDir(exposed)
-  return mount.startsWith(out) || out.startsWith(mount)
-}
-
-/** The refusal for a conditional mount a kernel mount would expose. Mirrors python's `kernel_refusal`. */
-export function kernelRefusal(prefix: string, backend: MountBackend): string {
-  return (
-    `mount '${normDir(prefix)}': write: conditional cannot be exposed through backend ${backend}, ` +
-    'which has no place to carry the version'
-  )
-}
-
-/**
  * Refuse a write policy this mount cannot honour.
  *
  * A policy that cannot act must say so: a conditional mount whose writes would
  * go out unconditioned is the silent downgrade the policy exists to remove, so
- * it is refused at mount time. The arms are ordered, and the order is part of
- * the contract both hosts share. Mirrors Python's `check_write_capability`.
+ * it is refused at mount time. Mirrors Python's `check_write_capability`.
  *
  * @param caches whether the mount keeps a cached copy (the version a write
  *   sends is the one that copy holds)
@@ -173,7 +129,6 @@ export function checkWriteCapability(
   vfs: BaseVFS,
   declared: WritePolicy,
   mode: MountMode,
-  backend: MountBackend,
   caches: boolean,
 ): void {
   const policy = coerceWritePolicy(declared)
@@ -189,7 +144,6 @@ export function checkWriteCapability(
       `mount '${prefix}': write: conditional needs a writable mount; this one is read`,
     )
   }
-  if (KERNEL_BACKENDS.includes(backend)) throw new Error(kernelRefusal(prefix, backend))
   if (presigned(vfs)) {
     throw new Error(
       `mount '${prefix}': write: conditional cannot be sent through a presigned-URL client, ` +

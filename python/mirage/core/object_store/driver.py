@@ -18,9 +18,16 @@ from dataclasses import dataclass, field
 from typing import Generic, Literal, Protocol, TypeVar
 
 from mirage.accessor.base import Accessor
-from mirage.cache.context import KnownVersions, WriteCondition
+from mirage.cache.context import (
+    KnownVersions,
+    WriteCondition,
+    drop_cached,
+    stale,
+)
 from mirage.cache.index import IndexCacheStore
+from mirage.errors.types import StaleWriteError
 from mirage.types import FileStat, PathSpec
+from mirage.utils import key_prefix as kp
 
 A = TypeVar("A", bound=Accessor)
 C = TypeVar("C")
@@ -188,12 +195,55 @@ class ConditionLost(Exception):
             the order they were met.
         landed (bool): a move's copy landed and only its source's delete
             lost, so the destination holds the copy.
+        gone (bool): the object no longer exists, so no newer bytes are
+            there for a retry to overwrite.
+        versions (dict[str, str] | None): the version each lost key was
+            measured on, where the op knew it.
     """
 
-    def __init__(self, keys: list[str], landed: bool = False) -> None:
+    def __init__(
+        self,
+        keys: list[str],
+        landed: bool = False,
+        gone: bool = False,
+        versions: dict[str, str] | None = None,
+    ) -> None:
         super().__init__(f"condition lost on {keys[0] if keys else ''!r}")
         self.keys = keys
         self.landed = landed
+        self.gone = gone
+        self.versions = versions or {}
+
+
+async def refused(
+    path: PathSpec, exc: ConditionLost, cond: WriteCondition | None
+) -> StaleWriteError:
+    """The refusal for a one-path op whose condition lost.
+
+    Args:
+        path (PathSpec): the path the op wrote.
+        exc (ConditionLost): the store's refusal.
+        cond (WriteCondition | None): the condition the op sent.
+    """
+    return await stale(
+        path, gone=exc.gone, version=cond.if_match if cond else None
+    )
+
+
+async def keep_lost(
+    root: PathSpec, key_prefix: str, exc: ConditionLost, skip: str
+) -> None:
+    """Keep the version of each key a walk lost on, except ``skip``.
+
+    Args:
+        root (PathSpec): the walk's operand, for addressing its keys.
+        key_prefix (str): the mount's backend key prefix.
+        exc (ConditionLost): the store's refusal.
+        skip (str): the key the refusal itself names and keeps.
+    """
+    for key, version in exc.versions.items():
+        if key != skip:
+            await drop_cached(kp.key_path(root, key_prefix, key), version)
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,8 +346,7 @@ class ObjectStoreDriver(Generic[A, C]):
             ``list_tree`` unnarrowed.
         put_if (Callable | None): ``put`` carrying a write condition; a
             lost one raises :class:`ConditionLost`. None when the store
-            cannot condition a write, which is what keeps such a store
-            from mounting ``write: conditional`` at all.
+            cannot condition a write.
         get_versioned (Callable | None): ``get`` plus the token of the
             bytes returned, for an op that writes back what it read.
         copy_if (Callable | None): ``copy_file`` with the destination's

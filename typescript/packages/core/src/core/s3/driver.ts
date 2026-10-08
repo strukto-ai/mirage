@@ -179,16 +179,13 @@ function put(conn: S3Conn, key: string, data: Uint8Array): Promise<ObjectMeta | 
   return putIf(conn, key, data, {})
 }
 
-// The token is kept unquoted (`etagOf`), and the probes that measured each
-// store's conditions sent the quoted form a response carries, so that is the
-// form sent back.
+// Tokens are stored unquoted (`etagOf`); the wire takes the quoted form.
 function quoted(token: string): string {
   return token.startsWith('"') ? token : `"${token}"`
 }
 
 function condition(cond: WriteCondition): Record<string, string> {
   if (cond.ifMatch !== undefined) return { IfMatch: quoted(cond.ifMatch) }
-  if (cond.ifNoneMatch === true) return { IfNoneMatch: '*' }
   return {}
 }
 
@@ -211,7 +208,7 @@ async function guarded<T>(key: string, call: Promise<T>, matched = false): Promi
   try {
     return await call
   } catch (err) {
-    if (lostCondition(err, matched)) throw new ConditionLost([key])
+    if (lostCondition(err, matched)) throw new ConditionLost([key], false, !isConditionLost(err))
     throw err
   }
 }
@@ -290,7 +287,7 @@ async function copyIf(
         console.debug(`source probe failed for ${srcKey}: ${String(probeErr)}`)
       }
     }
-    if (lost) throw new ConditionLost([dstKey])
+    if (lost) throw new ConditionLost([dstKey], false, !isConditionLost(err))
     throw err
   }
   return true
@@ -309,6 +306,33 @@ async function deleteIf(conn: S3Conn, key: string, cond: WriteCondition): Promis
   )
 }
 
+/**
+ * Which end of a refused copy changed: S3 answers 412 for either condition,
+ * so the destination is looked up, and one no longer at the version sent is
+ * the end that lost; otherwise the source's pin did. Only a refusal pays for
+ * the lookup. Mirrors python's `_copy_loser`.
+ */
+async function copyLoser(
+  conn: S3Conn,
+  srcKey: string,
+  dstKey: string,
+  cond: WriteCondition,
+): Promise<ConditionLost> {
+  try {
+    if (cond.ifMatch !== undefined) {
+      const meta = await head(conn, dstKey)
+      if (meta === null || quoted(meta.fingerprint ?? '') !== quoted(cond.ifMatch)) {
+        return new ConditionLost([dstKey], false, meta === null)
+      }
+    }
+    return new ConditionLost([srcKey], false, (await head(conn, srcKey)) === null)
+  } catch (err) {
+    // Unknown which end changed: the source is named, and both keep their versions.
+    console.debug(`copy loser lookup failed for ${dstKey}: ${String(err)}`)
+    return new ConditionLost([srcKey])
+  }
+}
+
 async function moveFileIf(
   conn: S3Conn,
   srcKey: string,
@@ -324,9 +348,8 @@ async function moveFileIf(
     pinned = meta.fingerprint ?? ''
   }
   const match = quoted(pinned)
-  await guarded(
-    srcKey,
-    conn.send(
+  try {
+    await conn.send(
       new conn.mod.CopyObjectCommand({
         Bucket: conn.config.bucket,
         CopySource: `${conn.config.bucket}/${srcKey}`,
@@ -334,9 +357,11 @@ async function moveFileIf(
         CopySourceIfMatch: match,
         ...condition(cond),
       }),
-    ),
-    true,
-  )
+    )
+  } catch (err) {
+    if (!lostCondition(err, true)) throw err
+    throw await copyLoser(conn, srcKey, dstKey, cond)
+  }
   try {
     await guarded(
       srcKey,
@@ -350,7 +375,7 @@ async function moveFileIf(
       true,
     )
   } catch (err) {
-    if (err instanceof ConditionLost) throw new ConditionLost(err.keys, true)
+    if (err instanceof ConditionLost) throw new ConditionLost(err.keys, true, err.gone)
     throw err
   }
   return true
@@ -397,11 +422,12 @@ function refused(failed: readonly string[]): Error {
 async function deleteBatch(
   conn: S3Conn,
   keys: readonly [string, string][],
-): Promise<[string[], string[]]> {
-  const lost: string[] = []
+): Promise<[[string, string][], string[]]> {
+  const lost: [string, string][] = []
   const failed: string[] = []
   for (let start = 0; start < keys.length; start += DELETE_BATCH) {
     const batch = keys.slice(start, start + DELETE_BATCH)
+    const sent = new Map(batch)
     const resp = (await conn.send(
       new conn.mod.DeleteObjectsCommand({
         Bucket: conn.config.bucket,
@@ -409,7 +435,9 @@ async function deleteBatch(
       }),
     )) as { Errors?: { Key?: string; Code?: string }[] }
     for (const err of resp.Errors ?? []) {
-      ;(CONDITION_LOST_CODES.has(err.Code ?? '') ? lost : failed).push(err.Key ?? '')
+      const key = err.Key ?? ''
+      if (CONDITION_LOST_CODES.has(err.Code ?? '')) lost.push([key, sent.get(key) ?? ''])
+      else failed.push(key)
     }
   }
   return [lost, failed]
@@ -417,16 +445,23 @@ async function deleteBatch(
 
 /**
  * Raise for the keys a prefix op kept: lost keys first, so the caller drops
- * their cached copies, then keys the store refused. Mirrors Python's
- * `_raise_kept`.
+ * their cached copies and keeps the versions they were measured on, then
+ * keys the store refused. Mirrors Python's `_raise_kept`.
  */
-function raiseKept(lost: readonly string[], failed: readonly string[]): void {
-  if (lost.length > 0) throw new ConditionLost([...lost])
+function raiseKept(lost: readonly [string, string][], failed: readonly string[]): void {
+  if (lost.length > 0) {
+    throw new ConditionLost(
+      lost.map(([key]) => key),
+      false,
+      false,
+      new Map(lost),
+    )
+  }
   if (failed.length > 0) throw refused(failed)
 }
 
 async function deletePrefixIf(conn: S3Conn, pfx: string, known: KnownVersions): Promise<void> {
-  const lost: string[] = []
+  const lost: [string, string][] = []
   const failed: string[] = []
   for await (const listed of knownPages(conn, pfx, known)) {
     const [pageLost, pageFailed] = await deleteBatch(conn, listed)
@@ -443,7 +478,7 @@ async function movePrefixIf(
   known: KnownVersions,
 ): Promise<boolean> {
   let found = false
-  const lost: string[] = []
+  const lost: [string, string][] = []
   const moved: [string, string][] = []
   for await (const listed of knownPages(conn, srcPfx, known)) {
     found = true
@@ -455,12 +490,12 @@ async function movePrefixIf(
             CopySource: `${conn.config.bucket}/${key}`,
             Key: `${dstPfx}${key.slice(srcPfx.length)}`,
             CopySourceIfMatch: token,
-            IfNoneMatch: '*',
           }),
         )
       } catch (err) {
         if (!lostCondition(err, true)) throw err
-        lost.push(key)
+        // A source gone (404) keeps no version: nothing newer to guard.
+        lost.push([key, isConditionLost(err) ? token : ''])
         continue
       }
       moved.push([key, token])

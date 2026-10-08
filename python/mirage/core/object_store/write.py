@@ -17,7 +17,6 @@ from mirage.cache.context import (
     WriteCondition,
     invalidate_after_write,
     invalidate_ancestors,
-    stale,
     write_condition,
 )
 from mirage.cache.index import NULL_INDEX
@@ -32,6 +31,7 @@ from mirage.core.object_store.driver import (
     StatFn,
     TruncateFn,
     WriteFn,
+    refused,
 )
 from mirage.core.object_store.stat import make_stat
 from mirage.errors.fs import eexist, enoent, enotdir, enotsup
@@ -83,11 +83,10 @@ async def _put(
     try:
         if cond is None:
             return await driver.put(conn, key, data)
-        if driver.put_if is None:
-            raise enotsup(driver.vfs, "conditional write", path_spec)
+        assert driver.put_if is not None
         return await driver.put_if(conn, key, data, cond)
     except ConditionLost as exc:
-        raise await stale(path_spec) from exc
+        raise await refused(path_spec, exc, cond) from exc
     except Exception as exc:
         if driver.is_not_found(exc):
             raise enoent(path_spec) from exc

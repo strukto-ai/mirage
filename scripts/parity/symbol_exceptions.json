@@ -419,9 +419,8 @@
     "resolvedEndpoint": "TypeScript reads the node S3VFS's resolvedEndpoint getter structurally, beside its s3Config and presigned readers; Python reads it through the EndpointVFS protocol."
    },
    "python_only": {
-    "_endpoint": "Python reads the endpoint through the EndpointVFS protocol (S3VFS.resolved_endpoint builds a botocore client offline); TypeScript reads the node S3VFS getter structurally in resolvedEndpoint().",
-    "_resolved": "Python caches each VFS's conditions row, since resolving its endpoint builds a botocore client; TypeScript's resolvedEndpoint reads files and the environment and is memoised per mount by writeContextFor.",
-    "EndpointVFS": "The capability a backend reports its resolved endpoint through: Python's S3VFS.resolved_endpoint builds a botocore client offline; TypeScript's write_policy reads the node S3VFS.resolvedEndpoint getter structurally, with no named protocol."
+    "_endpoint": "Python reads the endpoint through the EndpointVFS protocol (S3VFS.resolved_endpoint: the config's, else the AWS endpoint env vars); TypeScript reads the node S3VFS getter structurally in resolvedEndpoint().",
+    "EndpointVFS": "The capability a backend reports its resolved endpoint through (S3VFS.resolved_endpoint); TypeScript's write_policy reads the node S3VFS.resolvedEndpoint getter structurally, with no named protocol."
    }
   },
   "workspace/workspace/mounts": {
@@ -440,7 +439,8 @@
     "ownVersionStorage": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
     "runWithOwnVersion": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
     "runWithWriteContext": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
-    "writeStorage": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split."
+    "writeStorage": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
+    "agreed": "TypeScript's fallback async-context storage can hold several live frames that disagree on the write context or the op's own version; Python's ContextVar is always task-isolated, so there is nothing to agree."
    }
   },
   "observe/context": {
@@ -451,11 +451,6 @@
     "lostByLine": "TypeScript keys a line's lost paths by its records array, because applyIo runs after runWithRecording returns; Python keeps them on the Recorder (active_lost).",
     "recordIndex": "TypeScript keys a line's version index by its records array, as it does the line's lost paths (lostPaths); Python keeps the index on the Recorder (Recorder.index), which push_mount_context carries.",
     "indexByLine": "The WeakMap behind recordIndex, keyed by a line's records array; Python keeps the index on the Recorder (Recorder.index)."
-   }
-  },
-  "core/s3/client": {
-   "python_only": {
-    "resolved_endpoint": "Python resolves the endpoint an s3 client sends to by building a botocore client offline (config, AWS_ENDPOINT_URL[_S3], the profile) and caches the row per VFS; TypeScript core cannot read the environment, so the node S3VFS answers it through its resolvedEndpoint getter instead."
    }
   },
   "core/s3/driver": {
@@ -486,6 +481,14 @@
   "cache/file/redis": {
    "typescript_only": {
     "luaBody": "node-redis EVALs the script text on every call, so TypeScript drops the Lua files' comment lines first; redis-py registers each script once and sends only its SHA."
+   },
+   "python_only": {
+    "_text": "redis-py returns a stored version as bytes or str depending on decode_responses; node-redis returns a string, so TypeScript has nothing to decode."
+   }
+  },
+  "core/object_store/driver": {
+   "typescript_only": {
+    "requireHook": "Python narrows a conditional op's *_if hook with assert; TypeScript's lint bans the non-null assertion, so the narrowing is this helper."
    }
   }
  }

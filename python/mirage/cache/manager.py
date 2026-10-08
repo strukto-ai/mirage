@@ -31,8 +31,7 @@ from mirage.cache.index.constants import (
 from mirage.cache.index.scope import command_started, tick
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.view import IndexView
-from mirage.observe.context import active_recorder
-from mirage.observe.record import STAMP_FINGERPRINT_OPS, RecordIndex
+from mirage.observe.context import active_recorder, line_version
 from mirage.types import DEFAULT_READ_TTL, FileStat, PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -554,6 +553,26 @@ class CacheManager:
         cached = await cache.get(key)
         return cached if self._owns_path(key) else None
 
+    async def keep_version(self, path: PathSpec, version: str) -> None:
+        """Keep ``version`` for ``path`` without bytes, if this mount caches.
+
+        A refused write keeps the version it lost on, so the next write
+        without a read sends it again. A cache that refuses the entry is
+        logged, never raised: the refusal itself already stands.
+
+        Args:
+            path (PathSpec): the path refused.
+            version (str): the version the write lost on.
+        """
+        key = self._cache_key(path)
+        if self._file_cache is None or not self._owns_path(key):
+            return
+        try:
+            async with mutation_lock(self._file_cache):
+                await self._file_cache.set_versions({key: version})
+        except Exception:
+            logger.warning("version not kept for %s", key, exc_info=True)
+
     async def read_version(self, path: PathSpec) -> str | None:
         """The version this mount last saw for ``path``, None when none.
 
@@ -576,20 +595,14 @@ class CacheManager:
         out: list[str | None] = [None] * len(paths)
         pending: list[tuple[int, str]] = []
         recorder = active_recorder()
-        index = (
-            None
-            if recorder is None
-            else recorder.index or RecordIndex(recorder.sink)
-        )
         for i, path in enumerate(paths):
             key = self._cache_key(path)
-            if recorder is not None and index is not None:
-                if recorder.lost is not None and recorder.lost.holds(key):
-                    continue
-                rec = index.newest_version(key)
-                if rec is not None:
-                    if rec.op in STAMP_FINGERPRINT_OPS:
-                        out[i] = rec.fingerprint or None
+            if recorder is not None:
+                known, version = line_version(
+                    recorder.index, recorder.lost, key
+                )
+                if known:
+                    out[i] = version
                     continue
             if self._file_cache is not None and self._owns_path(key):
                 pending.append((i, key))

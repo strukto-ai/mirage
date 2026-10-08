@@ -18,7 +18,6 @@ import {
   type WriteCondition,
   invalidateAfterWrite,
   invalidateAncestors,
-  stale,
   writeCondition,
 } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
@@ -36,6 +35,8 @@ import {
   type TruncateFn,
   type WriteFn,
   ConditionLost,
+  refused,
+  requireHook,
 } from './driver.ts'
 import { makeStat } from './stat.ts'
 
@@ -59,10 +60,9 @@ async function put<A extends Accessor, C>(
 ): Promise<ObjectMeta | null> {
   try {
     if (cond === null) return await driver.put(conn, key, data)
-    if (driver.putIf === undefined) throw enotsup(driver.vfs, 'conditional write', path)
-    return await driver.putIf(conn, key, data, cond)
+    return await requireHook(driver.putIf)(conn, key, data, cond)
   } catch (err) {
-    if (err instanceof ConditionLost) throw await stale(path)
+    if (err instanceof ConditionLost) throw await refused(path, err, cond)
     if (driver.isNotFound(err)) throw enoent(path)
     throw err
   }

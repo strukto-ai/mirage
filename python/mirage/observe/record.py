@@ -57,10 +57,7 @@ CONTENT_CHANGING_OPS = frozenset(
 RETRACT_FINGERPRINT_OPS = frozenset(
     {"unlink", "rm_r", "rmdir", "rename", "rename_prefix", "copy"}
 )
-# What a conditional write reads its version off, within the line: a
-# record that stamps a token names the bytes now at its path, and one that
-# retracts says the line no longer knows them (so the write asks for
-# create-only, never for a version older than the line's own change).
+# Stamps name the bytes at a path; retracts mean the line no longer knows them.
 VERSION_OPS = STAMP_FINGERPRINT_OPS | RETRACT_FINGERPRINT_OPS
 # The subset that moved a whole prefix, and so takes every pin beneath
 # it. Membership is what the op *did*, never what it could have done:

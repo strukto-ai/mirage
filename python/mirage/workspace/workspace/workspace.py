@@ -143,9 +143,6 @@ from mirage.workspace.mount.spec import Mount
 from mirage.workspace.mount.write_policy import (
     check_write_capability,
     coerce_write_policy,
-    conditional_overlap,
-    exposure_overlaps,
-    kernel_refusal,
 )
 from mirage.workspace.node.explain import (
     explain_line,
@@ -862,8 +859,7 @@ class Workspace:
                 one goes unused.
             write (WritePolicy | str | None): the mount's write policy;
                 None takes the workspace default. It is judged like the
-                constructor's, a live kernel mount over the prefix
-                included.
+                constructor's.
 
         Returns:
             MountEntry: the installed mount, with its normalized prefix.
@@ -891,21 +887,11 @@ class Workspace:
             if write is not None
             else self._write_default
         )
-        # A live kernel mount over the prefix is the backend it goes through.
-        backend = next(
-            (
-                kernel
-                for exposed, kernel in self._kernel_mounts.exposed()
-                if exposure_overlaps(prefix, exposed)
-            ),
-            MountBackend.WORKSPACE,
-        )
         check_write_capability(
             prefix,
             vfs,
             resolved_write,
             mode,
-            backend,
             self._cache.cache_limit > 0 and vfs.caches_reads,
         )
         self._registry.check_vfs_available(vfs)
@@ -963,14 +949,7 @@ class Workspace:
             session_id (str | None): session whose mount grants scope
                 every op served through this mountpoint.
             backend (str | MountBackend): fuse or fskit.
-
-        Raises:
-            ValueError: the subtree reaches a ``write: conditional`` mount,
-                whose version a kernel mount has no place to carry.
         """
-        conditional = conditional_overlap(self._registry.mounts(), prefix)
-        if conditional is not None:
-            raise ValueError(kernel_refusal(conditional, backend))
         return self._kernel_mounts.add(
             prefix, mountpoint, session_id, backend=backend
         )
@@ -1685,9 +1664,7 @@ class Workspace:
         profile: str | None = None,
     ) -> "Workspace":
         args = build_mount_args(state, mounts, clis)
-        # No read= here: each restored Mount carries its own spec, and
-        # the state dict has no workspace-level read default to pass. The
-        # write default is saved: a mount added later takes it.
+        # No read= here: each restored Mount carries its own spec.
         ws = cls(
             args.mount_args,
             write=args.write_default,

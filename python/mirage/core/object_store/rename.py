@@ -28,8 +28,9 @@ from mirage.core.object_store.driver import (
     ExistsFn,
     ObjectStoreDriver,
     PairFn,
+    keep_lost,
 )
-from mirage.errors.fs import enoent, enotsup
+from mirage.errors.fs import enoent
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils import key_prefix as kp
@@ -82,22 +83,17 @@ def make_rename(
         op = "rename"
         # A move is a copy then a delete, so both carry a condition.
         cond = await write_condition(dst_spec, "copy")
-        move_file_if = driver.move_file_if
-        move_prefix_if = driver.move_prefix_if
         source: str | None = None
         if cond is not None:
             src_cond = await write_condition(src_spec, "delete")
             source = src_cond.if_match if src_cond is not None else None
-            if move_file_if is None or move_prefix_if is None:
-                raise enotsup(driver.vfs, "conditional rename", src_spec)
 
         async def move(conn: C) -> bool:
             nonlocal op
-            if (
-                cond is not None
-                and move_file_if is not None
-                and move_prefix_if is not None
-            ):
+            if cond is not None:
+                move_file_if = driver.move_file_if
+                move_prefix_if = driver.move_prefix_if
+                assert move_file_if is not None and move_prefix_if is not None
                 if await move_file_if(
                     conn, src_key, kp.apply(kpfx, dst), cond, source
                 ):
@@ -148,14 +144,26 @@ def make_rename(
             try:
                 moved = await evict_after(move(conn), settle)
             except ConditionLost as exc:
-                await drop_cached(dst_spec)
                 key = exc.keys[0]
-                lost = (
-                    src_spec
-                    if key == src_key
-                    else kp.key_path(src_spec, kpfx, key)
-                )
-                raise await stale(lost, landed=exc.landed) from exc
+                if key == kp.apply(kpfx, dst):
+                    lost = dst_spec
+                    sent = cond.if_match if cond is not None else None
+                elif key == src_key:
+                    lost, sent = src_spec, source
+                else:
+                    lost = kp.key_path(src_spec, kpfx, key)
+                    sent = exc.versions.get(key)
+                await keep_lost(src_spec, kpfx, exc, key)
+                # A landed copy left the destination unsure; a refused one kept it.
+                if exc.landed:
+                    await drop_cached(dst_spec)
+                elif (
+                    lost is not dst_spec and cond is not None and cond.if_match
+                ):
+                    await drop_cached(dst_spec, cond.if_match)
+                raise await stale(
+                    lost, landed=exc.landed, gone=exc.gone, version=sent
+                ) from exc
         if not moved:
             raise enoent(src_spec.virtual)
 

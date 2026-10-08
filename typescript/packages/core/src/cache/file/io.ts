@@ -14,7 +14,7 @@
 
 import { CachableAsyncIterator, concat } from '../../io/cachable_iterator.ts'
 import { materialize, type ByteSource, type IOResult } from '../../io/types.ts'
-import type { LostPaths } from '../../observe/context.ts'
+import { type LostPaths, lineVersion } from '../../observe/context.ts'
 import {
   RecordIndex,
   type OpRecord,
@@ -154,8 +154,7 @@ async function setCachedLocked(
   ttl: number | null,
 ): Promise<void> {
   if (data.byteLength > cache.cacheLimit) {
-    // Bytes bigger than the whole cache would flush every warm entry and
-    // then themselves; the version is kept apart.
+    // Bytes over the whole cache limit would evict every warm entry.
     await cache.remove(path)
     return
   }
@@ -251,12 +250,8 @@ async function keepVersions(
   for (const path of paths) {
     const facts = cacheFacts(path)
     if (!facts.cacheable || facts.versions !== true) continue
-    if (lost?.holds(path) === true) continue
-    const rec = index.newestVersion(path)
-    if (rec === null || retracted(rec)) continue
-    const fingerprint = rec.fingerprint ?? ''
-    if (fingerprint === '') continue
-    versions[path] = fingerprint
+    const [, version] = lineVersion(index, lost, path)
+    if (version !== null) versions[path] = version
   }
   if (Object.keys(versions).length === 0) return
   try {
@@ -267,26 +262,6 @@ async function keepVersions(
     console.warn(
       `versions not kept for ${String(paths.length)} paths, first ${paths[0] ?? ''}: ${msg}`,
     )
-  }
-}
-
-/**
- * Mark a command's write records with the value it claims for them.
- *
- * A `write` record of a path the command both wrote and listed in
- * `IOResult.cache` gets that exact `IOResult.writes` value as `claimed`,
- * which `writtenVerdict` compares with the value the line caches. A record
- * the line already sealed is left alone: a background command returning
- * after its line ended must not mark a record that line persisted. `io`
- * has virtual keys and its streams already wrapped. Mirrors python's
- * `mark_claimed_writes`.
- */
-export function markClaimedWrites(records: readonly OpRecord[], io: IOResult): void {
-  const cached = new Set(io.cache)
-  for (const rec of records) {
-    if (rec.sealed || !WRITE_FINGERPRINT_OPS.has(rec.op) || !cached.has(rec.path)) continue
-    const value = io.writes[rec.path]
-    if (value !== undefined) rec.claimed = value
   }
 }
 

@@ -26,26 +26,42 @@ class LostPaths:
     """The paths whose conditional write lost on this line.
 
     A lost path's cached copy was dropped; nothing the line read of it
-    before the loss may be cached again or sent as a version. A read or
-    write of the path after the loss names the bytes now there, and
-    lifts the mark.
+    before the loss may be cached again. The version the write lost on is
+    the one a retry sends, so it is refused again until a read. A read or
+    write of the path after the loss names the bytes now there, and lifts
+    the mark.
 
     Args:
         sink (list[OpRecord]): the line's records, shared with its frames.
         marks (dict[str, int]): each lost path and where in ``sink`` it
             was lost.
+        versions (dict[str, str]): each lost path's refused version.
     """
 
     sink: list[OpRecord]
     marks: dict[str, int] = field(default_factory=dict)
+    versions: dict[str, str] = field(default_factory=dict)
 
-    def mark(self, key: str) -> None:
+    def mark(self, key: str, version: str | None = None) -> None:
         """Record that a conditional write to ``key`` lost.
 
         Args:
             key (str): the virtual path.
+            version (str | None): the version it lost on, if any.
         """
         self.marks[key] = len(self.sink)
+        if version:
+            self.versions[key] = version
+        else:
+            self.versions.pop(key, None)
+
+    def version(self, key: str) -> str | None:
+        """The version a write to ``key`` lost on, while it is still lost.
+
+        Args:
+            key (str): the virtual path.
+        """
+        return self.versions.get(key) if self.holds(key) else None
 
     def holds(self, key: str) -> bool:
         """Whether ``key`` is lost and nothing since has read or written it.
@@ -62,6 +78,33 @@ class LostPaths:
         )
 
 
+def line_version(
+    index: RecordIndex, lost: LostPaths | None, key: str
+) -> tuple[bool, str | None]:
+    """The version the running line itself names for ``key``.
+
+    A lost path names the version its write lost on; otherwise the newest
+    version record does, a stamp its token and a retraction none.
+
+    Args:
+        index (RecordIndex): the line's records, indexed.
+        lost (LostPaths | None): the line's lost paths.
+        key (str): the virtual path.
+
+    Returns:
+        tuple[bool, str | None]: whether the line knows ``key`` at all,
+        and the version it names.
+    """
+    if lost is not None and lost.holds(key):
+        return True, lost.version(key)
+    rec = index.newest_version(key)
+    if rec is None:
+        return False, None
+    if rec.op in STAMP_FINGERPRINT_OPS:
+        return True, rec.fingerprint or None
+    return True, None
+
+
 @dataclass(frozen=True)
 class Recorder:
     """Active recording state for a session.
@@ -75,15 +118,15 @@ class Recorder:
 
     Args:
         sink (list[OpRecord]): Where new records are appended.
+        lost (LostPaths): The line's lost paths.
+        index (RecordIndex): The line's version index over ``sink``.
         mount_id (str | None): Identity of the mounted instance serving reads.
-        lost (LostPaths | None): The line's lost paths.
-        index (RecordIndex | None): The line's version index over ``sink``.
     """
 
-    sink: list[OpRecord] = field(default_factory=list)
+    sink: list[OpRecord]
+    lost: LostPaths
+    index: RecordIndex
     mount_id: str | None = None
-    lost: LostPaths | None = None
-    index: RecordIndex | None = None
 
 
 _recorder: ContextVar[Recorder | None] = ContextVar("_recorder", default=None)
@@ -171,15 +214,16 @@ def active_lost() -> LostPaths | None:
     return rec.lost if rec is not None else None
 
 
-def mark_lost(key: str) -> None:
+def mark_lost(key: str, version: str | None = None) -> None:
     """Mark ``key`` lost on the running line, if one is recording.
 
     Args:
         key (str): the virtual path whose conditional write lost.
+        version (str | None): the version it lost on, if any.
     """
     lost = active_lost()
     if lost is not None:
-        lost.mark(key)
+        lost.mark(key, version)
 
 
 def active_recorder() -> Recorder | None:
