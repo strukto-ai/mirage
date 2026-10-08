@@ -14,6 +14,7 @@
 
 import asyncio
 import errno
+from types import MappingProxyType
 
 import pytest
 
@@ -60,6 +61,15 @@ def test_mount_rejects_double_slash():
 def test_mount_valid_prefix():
     m = MountEntry("/data/", RAMVFS())
     assert m.prefix == "/data/"
+
+
+class MisnamedRenderer(RAMVFS):
+    renderers = MappingProxyType({".doc": "render_doc"})
+
+
+def test_mount_rejects_a_renderer_that_names_no_method():
+    with pytest.raises(TypeError, match="'render_doc', which is not a method"):
+        MountEntry("/data/", MisnamedRenderer())
 
 
 # ── read-only enforcement ──────────────────────

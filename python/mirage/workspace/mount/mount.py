@@ -330,6 +330,12 @@ class MountEntry:
             raise ValueError(f"prefix must end with /: {prefix!r}")
         if "//" in prefix:
             raise ValueError(f"prefix must not contain //: {prefix!r}")
+        for filetype, renderer in vfs.renderers.items():
+            if not callable(getattr(vfs, renderer, None)):
+                raise TypeError(
+                    f"{type(vfs).__name__}.renderers maps {filetype!r} to "
+                    f"{renderer!r}, which is not a method"
+                )
         self.visible: Callable[[], bool] | None = None
         self.mount_id = uuid7()
         self.prefix = prefix

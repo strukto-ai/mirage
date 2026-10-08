@@ -256,6 +256,13 @@ export class MountEntry {
     if (prefix.includes('//')) {
       throw new Error(`prefix must not contain //: ${prefix}`)
     }
+    for (const [filetype, renderer] of Object.entries(init.vfs.renderers)) {
+      if (typeof (init.vfs as unknown as Record<string, unknown>)[renderer] !== 'function') {
+        throw new TypeError(
+          `${init.vfs.constructor.name}.renderers maps '${filetype}' to '${renderer}', which is not a method`,
+        )
+      }
+    }
     this.prefix = prefix
     this.vfs = init.vfs
     this.io = commandIo(init.vfs)

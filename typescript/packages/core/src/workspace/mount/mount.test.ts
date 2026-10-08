@@ -64,6 +64,15 @@ describe('Mount constructor validation', () => {
     const m = new MountEntry({ prefix: '/ram/', vfs: new StubVFS() })
     expect(m.mode).toBe(MountMode.READ)
   })
+
+  it('rejects a renderer that names no method', () => {
+    class MisnamedRenderer extends StubVFS {
+      override readonly renderers: Readonly<Record<string, string>> = { '.doc': 'renderDoc' }
+    }
+    expect(() => new MountEntry({ prefix: '/ram/', vfs: new MisnamedRenderer() })).toThrow(
+      "'renderDoc', which is not a method",
+    )
+  })
 })
 
 describe('Mount.resolveCommand fallback chain', () => {
