@@ -515,8 +515,9 @@ class ScriptPolicy(Policy, SessionScopedMixin):
 
     async def _reading(
         self,
-        op: str,
+        name: str,
         path: PathSpec,
+        /,
         *,
         report: OpReport | None = None,
         **kwargs: Any,
@@ -526,7 +527,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         it runs, so ``pre_vfs`` above lets it through.
 
         Args:
-            op (str): the op the engine asked for.
+            name (str): the function the engine asked for.
             path (PathSpec): the resolved virtual path.
             report (OpReport | None): the caller's accounting, which a
                 runtime never passes.
@@ -535,7 +536,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         assert self._dispatch is not None
         token = _POLICY_READ.set(True)
         try:
-            return await self._dispatch(op, path, report=report, **kwargs)
+            return await self._dispatch(name, path, report=report, **kwargs)
         finally:
             _POLICY_READ.reset(token)
 

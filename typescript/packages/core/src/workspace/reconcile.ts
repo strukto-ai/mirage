@@ -302,10 +302,10 @@ export class Reconciler {
   //
   // `isEnoent` is load-bearing and stays: the call site is a generic
   // catch, so without it a 500, a timeout or an auth failure would GC.
-  async onOpMissing(mount: MountEntry, opName: string, path: string, err: unknown): Promise<void> {
+  async onOpMissing(mount: MountEntry, name: string, path: string, err: unknown): Promise<void> {
     if (
       mount.read.policy === ReadPolicy.FRESH &&
-      REVALIDATE_OPS.has(opName) &&
+      REVALIDATE_OPS.has(name) &&
       (isEnoent(err) || isEnotdir(err))
     ) {
       await this.onMissing(path)

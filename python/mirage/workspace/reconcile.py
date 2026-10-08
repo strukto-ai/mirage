@@ -340,7 +340,7 @@ class Reconciler:
             logger.warning("reconcile probe failed for %s: %s", path, exc)
 
     async def on_op_missing(
-        self, mount: MountEntry, op: str, path: str
+        self, mount: MountEntry, name: str, path: str
     ) -> None:
         """React to a read/stat op that the backend reported gone.
 
@@ -358,10 +358,10 @@ class Reconciler:
 
         Args:
             mount (MountEntry): the resolved mount for ``path``.
-            op (str): the op that raised.
+            name (str): the op that raised.
             path (str): absolute virtual path the backend reports gone.
         """
-        if mount.read.policy is ReadPolicy.FRESH and op in _REVALIDATE_OPS:
+        if mount.read.policy is ReadPolicy.FRESH and name in _REVALIDATE_OPS:
             await self.on_missing(path)
 
     async def on_gone(

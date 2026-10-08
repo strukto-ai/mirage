@@ -739,13 +739,13 @@ export class Workspace {
   // its own, as an argument rather than ambient state.
   private buildWorkspaceBridge(issuer?: symbol): BridgeDispatchFn {
     const dispatch = (
-      opName: string,
+      name: string,
       path: string,
       args: readonly unknown[] = [],
       kwargs: OpKwargs = {},
     ): Promise<unknown> =>
       this.dispatchInternal(
-        opName,
+        name,
         path,
         args,
         issuer === undefined ? kwargs : { ...kwargs, issuer },
@@ -1511,18 +1511,18 @@ export class Workspace {
   }
 
   async dispatch(
-    opName: string,
+    name: string,
     path: string,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     // Runs as the default session unless one is bound, like `ws.vfs`.
-    return this.bindSession(null, () => this.dispatchInternal(opName, path, args, kwargs))
+    return this.bindSession(null, () => this.dispatchInternal(name, path, args, kwargs))
   }
 
   private async dispatchInternal(
-    opName: string,
+    name: string,
     path: string,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
@@ -1535,7 +1535,7 @@ export class Workspace {
     // revisions, overlay stat, and post-write invalidation. The same
     // single path Python's Workspace.dispatch delegates to.
     const [result] = await this.dispatcher.dispatch(
-      opName,
+      name,
       PathSpec.fromStrPath(path),
       args,
       kwargs,

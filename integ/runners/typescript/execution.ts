@@ -109,7 +109,7 @@ export interface ExecWorkspace {
   vfs: { records: readonly { op: string; path: string }[] }
   shell(cmd: string, opts?: { stdin?: Uint8Array; sessionId?: string }): Promise<ExecResult>
   dispatch(
-    opName: string,
+    name: string,
     path: string,
     args?: readonly unknown[],
     kwargs?: Record<string, unknown>,

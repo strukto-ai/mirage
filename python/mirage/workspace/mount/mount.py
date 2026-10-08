@@ -656,13 +656,13 @@ class MountEntry:
             )
         return dict(sorted(result.items()))
 
-    def writes(self, op_name: str) -> bool:
+    def writes(self, name: str) -> bool:
         """Whether the VFS declares the function ``op_name`` a write.
 
         Args:
-            op_name (str): the op name.
+            name (str): the op name.
         """
-        return call_effect(type(self.vfs), op_name) is Effect.WRITE
+        return call_effect(type(self.vfs), name) is Effect.WRITE
 
     def renders(self, filetype: str | None) -> bool:
         """Whether the VFS renders a read of ``filetype``.
@@ -1070,17 +1070,17 @@ class MountEntry:
             stream = _command_output(stream, io, cmd_name, paths)
         return stream, io
 
-    def supports_op(self, op_name: str, path: str) -> bool:
+    def supports_op(self, name: str, path: str) -> bool:
         """Report whether an op would resolve for a path on this mount.
 
         Args:
-            op_name (str): operation name (e.g. "setattr").
+            name (str): operation name (e.g. "setattr").
             path (str): virtual path (drives filetype-specific lookup).
         """
-        return bool(self._callers(op_name, get_extension(path)))
+        return bool(self._callers(name, get_extension(path)))
 
     def _callers(
-        self, op_name: str, filetype: str | None
+        self, name: str, filetype: str | None
     ) -> list[Callable[..., Any]]:
         """What answers ``op_name`` on this mount, in the order to try.
 
@@ -1093,11 +1093,11 @@ class MountEntry:
         ``@vfs_call`` is reachable by name.
 
         Args:
-            op_name (str): the op name.
+            name (str): the op name.
             filetype (str | None): the extension the read resolves by.
         """
         vfs = self.vfs
-        if op_name == "read":
+        if name == "read":
             levels: list[Callable[..., Any]] = []
             renderer = (
                 vfs.renderers.get(filetype) if filetype is not None else None
@@ -1113,23 +1113,21 @@ class MountEntry:
                     functools.partial(_read_window, vfs.read, vfs.reads_ranges)
                 )
             return levels
-        if op_name == "glob":
+        if name == "glob":
             return [self._glob] if vfs.supports("readdir") else []
-        if op_name in ("append", "pwrite") and not vfs.supports(op_name):
+        if name in ("append", "pwrite") and not vfs.supports(name):
             return (
-                [getattr(self, f"_{op_name}_by_rewrite")]
+                [getattr(self, f"_{name}_by_rewrite")]
                 if vfs.supports("write")
                 else []
             )
-        if op_name == "pwrite":
+        if name == "pwrite":
             return [self._pwrite]
-        if op_name == "mkdir" and vfs.supports("mkdir"):
+        if name == "mkdir" and vfs.supports("mkdir"):
             return [self._mkdir]
-        if call_effect(type(vfs), op_name) is None or not vfs.supports(
-            op_name
-        ):
+        if call_effect(type(vfs), name) is None or not vfs.supports(name):
             return []
-        return [getattr(vfs, op_name)]
+        return [getattr(vfs, name)]
 
     async def _append_by_rewrite(
         self,
@@ -1178,8 +1176,9 @@ class MountEntry:
 
     async def call(
         self,
-        op_name: str,
+        name: str,
         path: str,
+        /,
         *args,
         **kwargs,
     ) -> Any:
@@ -1198,7 +1197,7 @@ class MountEntry:
         ``readFile(path, {raw: true})``.
 
         Args:
-            op_name (str): operation name (e.g. "read", "stat").
+            name (str): operation name (e.g. "read", "stat").
             path (str): virtual path.
         """
         async with self.use():
@@ -1207,11 +1206,11 @@ class MountEntry:
                 if "filetype" in kwargs
                 else get_extension(path)
             )
-            levels = self._callers(op_name, filetype)
+            levels = self._callers(name, filetype)
             if not levels:
-                raise enotsup(str(self.vfs.name), op_name, path)
+                raise enotsup(str(self.vfs.name), name, path)
 
-            if call_effect(type(self.vfs), op_name) is Effect.WRITE:
+            if call_effect(type(self.vfs), name) is Effect.WRITE:
                 dst = kwargs.get("dst")
                 endpoints = [PathSpec.from_str_path(path)]
                 if isinstance(dst, PathSpec):
@@ -1220,7 +1219,7 @@ class MountEntry:
                     endpoints,
                     self.prefix,
                     self.mode,
-                    subtree=op_name in _SUBTREE_OPS,
+                    subtree=name in _SUBTREE_OPS,
                 )
 
             mount_prefix = self.prefix.rstrip("/")
@@ -1232,7 +1231,7 @@ class MountEntry:
             kwargs.setdefault("index", self.index)
             # Per-op caps are policy and fire at the op doors (post_vfs);
             # only the timeout stays here, bounding the backend call itself.
-            op_override = self.command_limits.get(op_name)
+            op_override = self.command_limits.get(name)
             op_timeout = (
                 op_override.timeout_seconds
                 if op_override is not None
@@ -1251,7 +1250,7 @@ class MountEntry:
                         result = fn(scope, *args, **_taken(fn, kwargs))
                         if inspect.isawaitable(result):
                             result = await run_with_timeout(
-                                result, op_timeout, op_name
+                                result, op_timeout, name
                             )
                     if result is not None:
                         return _wrap_op_stream(

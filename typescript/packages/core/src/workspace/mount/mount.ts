@@ -494,9 +494,9 @@ export class MountEntry {
     return this.vfs.readsRanges && !this.renders(getExtension(path))
   }
 
-  /** Whether the VFS declares the function `opName` a write. */
-  writes(opName: string): boolean {
-    return callEffect(this.vfs.constructor, opName) === Effect.WRITE
+  /** Whether the VFS declares the function `name` a write. */
+  writes(name: string): boolean {
+    return callEffect(this.vfs.constructor, name) === Effect.WRITE
   }
 
   /**
@@ -546,7 +546,7 @@ export class MountEntry {
   }
 
   /**
-   * What answers `opName` on this mount, in the order to try.
+   * What answers `name` on this mount, in the order to try.
    *
    * A rendered filetype's renderer answers a read before `read` does,
    * window and all, and the first answer that is not null wins. The rest
@@ -557,9 +557,9 @@ export class MountEntry {
    * custom one is handed the scope and the op's positional arguments.
    * Mirrors Python's `MountEntry._callers`.
    */
-  callers(opName: string, filetype: string | null): OpCall[] {
+  callers(name: string, filetype: string | null): OpCall[] {
     const vfs = this.vfs
-    if (opName === 'read') {
+    if (name === 'read') {
       const levels: OpCall[] = []
       const renderer = filetype !== null ? vfs.renderers[filetype] : undefined
       const render =
@@ -576,21 +576,21 @@ export class MountEntry {
       }
       return levels
     }
-    if (opName === 'glob') {
+    if (name === 'glob') {
       return vfs.supports('readdir') ? [(scope, _args, kw) => this.glob(scope, kw.index)] : []
     }
-    if ((opName === 'append' || opName === 'pwrite') && !vfs.supports(opName)) {
+    if ((name === 'append' || name === 'pwrite') && !vfs.supports(name)) {
       if (!vfs.supports('write')) return []
-      return opName === 'append'
+      return name === 'append'
         ? [(scope, args, kw) => this.appendByRewrite(scope, writeData(args), kw.index)]
         : [
             (scope, args, kw) =>
               this.pwriteByRewrite(scope, writeData(args), offsetArg(args[1], scope), kw.index),
           ]
     }
-    if (callEffect(vfs.constructor, opName) === null) return []
-    if (!vfs.supports(opName)) return []
-    switch (opName) {
+    if (callEffect(vfs.constructor, name) === null) return []
+    if (!vfs.supports(name)) return []
+    switch (name) {
       case 'readdir':
         return [(scope, _args, kw) => vfs.readdir(scope, kw.index)]
       case 'stat':
@@ -619,7 +619,7 @@ export class MountEntry {
       case 'setattr':
         return [(scope, _args, kw) => vfs.setattr(scope, kw as SetAttrFields)]
       default: {
-        const method = (vfs as unknown as Record<string, (...args: unknown[]) => unknown>)[opName]
+        const method = (vfs as unknown as Record<string, (...args: unknown[]) => unknown>)[name]
         return method === undefined ? [] : [(scope, args) => method.call(vfs, scope, ...args)]
       }
     }
@@ -661,21 +661,21 @@ export class MountEntry {
   }
 
   /**
-   * Run `opName` on this mount's VFS over a scope already keyed below the
+   * Run `name` on this mount's VFS over a scope already keyed below the
    * mount: each level in turn until one answers with something other than
    * null. A read resolves its renderer by `kwargs.filetype` when the caller
    * names one (null asks for the stored bytes) and by the path's extension
    * otherwise.
    */
   async callOp(
-    opName: string,
+    name: string,
     scope: PathSpec,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
     const filetype = kwargs.filetype === undefined ? getExtension(scope.virtual) : kwargs.filetype
-    const levels = this.callers(opName, filetype)
-    if (levels.length === 0) throw enotsup(this.vfs.name, opName, scope)
+    const levels = this.callers(name, filetype)
+    if (levels.length === 0) throw enotsup(this.vfs.name, name, scope)
     for (const call of levels) {
       const result = await call(scope, args, kwargs)
       if (result !== null && result !== undefined) return result
@@ -1010,22 +1010,22 @@ export class MountEntry {
    * rendering over the file. Mirrors Python's `MountEntry.call`.
    */
   async call(
-    opName: string,
+    name: string,
     path: string,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
     return this.use(async (): Promise<unknown> => {
       const filetype = kwargs.filetype === undefined ? getExtension(path) : kwargs.filetype
-      const levels = this.callers(opName, filetype)
+      const levels = this.callers(name, filetype)
       if (levels.length === 0) {
-        throw enotsup(this.vfs.name, opName, path)
+        throw enotsup(this.vfs.name, name, path)
       }
-      if (this.writes(opName)) {
+      if (this.writes(name)) {
         const dst = kwargs.dst
         const endpoints = [PathSpec.fromStrPath(path)]
         if (dst instanceof PathSpec) endpoints.push(dst)
-        requirePathsWritable(endpoints, this.prefix, this.mode, SUBTREE_OPS.has(opName))
+        requirePathsWritable(endpoints, this.prefix, this.mode, SUBTREE_OPS.has(name))
       }
       const mountPrefix = rstripSlash(this.prefix)
       const lastSlash = path.lastIndexOf('/')
@@ -1040,7 +1040,7 @@ export class MountEntry {
       }
       // Per-op caps are policy and fire at the op door (postVfs); only
       // the timeout stays here, bounding the backend call itself.
-      const opOverride = this.commandLimits.get(opName) ?? null
+      const opOverride = this.commandLimits.get(name) ?? null
       const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
       return runWithMountContext(
         () =>
@@ -1049,7 +1049,7 @@ export class MountEntry {
               const result = await runWithTimeout(
                 Promise.resolve(call(scope, args, effectiveKwargs)),
                 opTimeout,
-                opName,
+                name,
               )
               if (result !== null && result !== undefined) {
                 return wrapOpStream(result, this.mountId, this.activity)

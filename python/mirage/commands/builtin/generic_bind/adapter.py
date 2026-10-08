@@ -1468,12 +1468,12 @@ def with_dispatch_rule_guard(dispatch: DispatchFn) -> DispatchFn:
     """
 
     async def guarded(
-        op: str, path: PathSpec, **options: Any
+        name: str, path: PathSpec, /, **options: Any
     ) -> tuple[Any, IOResult]:
         gate = get_admission()
-        if gate is not None and op not in METADATA_OPS:
+        if gate is not None and name not in METADATA_OPS:
             options = {**options, "rule_gate": gate}
-        return await dispatch(op, path, **options)
+        return await dispatch(name, path, **options)
 
     return guarded
 

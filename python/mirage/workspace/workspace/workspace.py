@@ -2113,13 +2113,13 @@ class Workspace:
             reset_current_session(token)
 
     async def dispatch(
-        self, op: str, path: PathSpec, **kwargs: Any
+        self, name: str, path: PathSpec, /, **kwargs: Any
     ) -> tuple[Any, IOResult]:
         # The door owns pre-dispatch initialization (namespace load,
         # pending drift checks), so FUSE and the ops facade get it too.
         # Runs as the default session unless one is bound, like ws.vfs.
         return await self._bind_session(
-            None, partial(self._dispatcher.dispatch, op, path, **kwargs)
+            None, partial(self._dispatcher.dispatch, name, path, **kwargs)
         )
 
     async def stat(self, path: str) -> FileStat:

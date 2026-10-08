@@ -297,7 +297,7 @@ async def listing_error(
 
 
 def enotsup(
-    vfs: str, op_name: str, path: str | PathSpec
+    vfs: str, name: str, path: str | PathSpec
 ) -> OperationNotSupportedError:
     """Missing-capability error for an op a backend does not register.
 
@@ -307,14 +307,14 @@ def enotsup(
 
     Args:
         vfs (str): VFS name of the mount that lacks the op.
-        op_name (str): The unresolvable op (e.g. ``unlink``).
+        name (str): The unresolvable op (e.g. ``unlink``).
         path (object): The operand; ``virtual`` is the reported spelling.
     """
     return _stamped(
         OperationNotSupportedError,
         FsCondition.ENOTSUP,
         path,
-        f"{vfs}: no op {op_name!r}",
+        f"{vfs}: no op {name!r}",
     )
 
 
