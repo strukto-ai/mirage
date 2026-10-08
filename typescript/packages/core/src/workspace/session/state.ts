@@ -33,8 +33,8 @@ import {
   RANDOM_UNSET,
 } from '../../shell/constants.ts'
 import { encodeText } from '../../shell/bytes.ts'
-import { ArithError, DiscardSignal } from '../../shell/errors.ts'
-import type { ArithWrite, ElementOps } from '../../shell/types.ts'
+import { ArithError, ExitSignal, ReadonlyError } from '../../shell/errors.ts'
+import type { ArithResult, ArithWrite, ElementOps } from '../../shell/types.ts'
 import { varHidden } from '../../utils/hidden.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { ReadonlyVariableError } from './errors.ts'
@@ -393,9 +393,9 @@ export function sessionElements(
  * over an array at element 0 (`A=(old keep); n='A=9'` keeps `keep`), naming
  * the element it assigns so an `-i` array never runs its other elements
  * again (`A=(0 'x++'); declare -i A; (( A[0]=9 ))` leaves `x++`).
- * A readonly name is an error in the expression, which discards the line as
- * bash's does (`declare -i n; ( n='R=3'; echo no )` ends only the
- * subshell): DiscardSignal.
+ * Both of its contexts, a subscript and an `-i` value, end the shell on a
+ * readonly name (`declare -i n; ( n='R=3'; echo no )` ends only the
+ * subshell): ExitSignal.
  */
 async function landWrites(
   session: SessionState,
@@ -414,15 +414,16 @@ async function landWrites(
       assigned = new Set([key])
     } else if (write.key !== null || arr !== undefined) {
       const index = write.key === null ? 0 : Number(write.key)
-      value = arrayWith(arr ?? makeArray([]), index, write.value)
+      // A scalar becomes element 0, as `assignElement` turns it
+      // (`x=7; n='x[1]=5'` keeps the 7).
+      const scalar = arr === undefined ? conversionScalar(session, name) : undefined
+      value = arrayWith(arr ?? makeArray(scalar === undefined ? [] : [scalar]), index, write.value)
       assigned = new Set([index])
     }
     try {
       await store(name, value, true, assigned)
     } catch (err) {
-      if (err instanceof ReadonlyVariableError) {
-        throw new DiscardSignal(encodeText(`${err.message}\n`))
-      }
+      if (err instanceof ReadonlyVariableError) throw new ReadonlyError(err.varName).signal(true)
       throw err
     }
   }
@@ -440,9 +441,9 @@ async function landWrites(
  * subscript text leading the message, since bash aborts the line on it
  * (`${a[1/0]}` is `1/0: division by 0`) rather than reading element 0.
  * `view` is the gated door; null lands the writes ungated, outside a
- * workspace. Throws what the door throws too: a PolicyDenied, a
- * ReadonlyVariableError, or an ArithError from a `-i` name refusing the
- * value.
+ * workspace. Throws what the door throws too: a PolicyDenied, or an
+ * ArithError from a `-i` name refusing the value; a readonly name ends the
+ * shell wherever a subscript is (`${a[R=3]}`): ExitSignal.
  */
 export async function subscriptIndex(
   session: SessionState,
@@ -454,21 +455,13 @@ export async function subscriptIndex(
   const reader = randomReader(session)
   let idx = 0
   let writes: readonly ArithWrite[]
-  let error: ArithError | null = null
+  let error: ArithError | ReadonlyError | null = null
   try {
-    const result = evaluateArith(
-      subscript,
-      visibleEnv(session),
-      0,
-      sessionElements(session, reader),
-      reader.read,
-      reader.wrote,
-      session.shellOptions.nounset === true,
-    )
+    const result = sessionArith(session, subscript, reader, session.shellOptions.nounset === true)
     idx = Number(result.value)
     writes = result.writes
   } catch (err) {
-    if (!(err instanceof ArithError)) throw err
+    if (!(err instanceof ArithError || err instanceof ReadonlyError)) throw err
     error = err
     writes = err.writes
   }
@@ -481,6 +474,7 @@ export async function subscriptIndex(
     writes,
   )
   reader.settle()
+  if (error instanceof ReadonlyError) throw error.signal(true)
   if (error !== null) throw new ArithError(`${subscript.trim()}: ${error.message}`)
   return idx
 }
@@ -653,6 +647,42 @@ export function randomReader(session: SessionState): RandomReader {
 }
 
 /**
+ * Evaluate `text` as every arithmetic context of the shell does: against
+ * the visible env and the session's elements, drawing through `reader`, and
+ * stopping at a write to a readonly name, as bash's evaluation does
+ * (`(( X=5, R=3 ))` binds X and refuses R). Throws ArithError when the text
+ * does not evaluate, and ReadonlyError, carrying the writes made before it,
+ * for a readonly name.
+ */
+export function sessionArith(
+  session: SessionState,
+  text: string,
+  reader: RandomReader,
+  nounset = false,
+): ArithResult {
+  return evaluateArith(
+    text,
+    visibleEnv(session),
+    0,
+    sessionElements(session, reader),
+    reader.read,
+    reader.wrote,
+    nounset,
+    (name) => readonlyTarget(session, name),
+  )
+}
+
+/**
+ * The readonly variable a write to `name` reaches, through a `declare -n`
+ * reference, which the refusal names; null when the write lands. Mirrors
+ * Python's _readonly_target.
+ */
+function readonlyTarget(session: SessionState, name: string): string | null {
+  const target = deref(session, name)
+  return envIsReadonly(session, target, false) ? target : null
+}
+
+/**
  * The `-i` coercion and the `RANDOM` seed, as one evaluation. The
  * incoming text evaluates as arithmetic against the visible env, element
  * references resolving through the session's resolver, so `n=x+1` sees
@@ -663,7 +693,9 @@ export function randomReader(session: SessionState): RandomReader {
  * are kept for the door to land (`landCoercion`): bash binds `x` in
  * `n='x=5'` and in `RANDOM='x=5'`, before the error too if the expression
  * then fails. A malformed expression throws ArithError with the
- * offending text leading, the way every caller voices it.
+ * offending text leading, the way every caller voices it; a write to a
+ * readonly name ends the shell (ExitSignal), as bash's coercion does, where
+ * a seed (`evaluate`) reports it the way it reports a malformed one.
  */
 class IntegerCoercion {
   readonly reader: RandomReader
@@ -674,27 +706,31 @@ class IntegerCoercion {
   }
 
   readonly run = (text: string): string => {
+    try {
+      return this.evaluate(text)
+    } catch (err) {
+      if (err instanceof ReadonlyError) throw err.signal(true)
+      throw err
+    }
+  }
+
+  /**
+   * The value `text` evaluates to, keeping the writes it made before an
+   * ArithError or a ReadonlyError.
+   */
+  evaluate(text: string): string {
     const session = this.session
     // Inside a `declare -g` the expression still reads the function's
     // scope, as bash's does (`local H=2; declare -gi G=H` stores 2), while
     // the value lands on the global.
     const reachAgain = stepBack(session)
     try {
-      const result = evaluateArith(
-        text,
-        visibleEnv(session),
-        0,
-        sessionElements(session, this.reader),
-        this.reader.read,
-        this.reader.wrote,
-      )
+      const result = sessionArith(session, text, this.reader)
       this.writes.push(...result.writes)
       return result.value.toString()
     } catch (err) {
-      if (err instanceof ArithError) {
-        this.writes.push(...err.writes)
-        throw new ArithError(`${text}: ${err.message}`)
-      }
+      if (err instanceof ArithError || err instanceof ReadonlyError) this.writes.push(...err.writes)
+      if (err instanceof ArithError) throw new ArithError(`${text}: ${err.message}`)
       throw err
     } finally {
       reachAgain()
@@ -727,8 +763,8 @@ async function landCoercion(
  * through `view`, storing no result: a `declare -ni r=M` value, which bash
  * evaluates before refusing the reference (`M='X=5'` sets X). Inside a
  * `declare -g` it reads the function's scope, as the coercion does. A hidden
- * name throws PolicyDenied and a readonly one DiscardSignal, which ends the
- * line as bash's does, the assignments before it landed; a malformed text
+ * name throws PolicyDenied and a readonly one ExitSignal, which ends the
+ * shell as bash's does, the assignments before it landed; a malformed text
  * throws ArithError once the ones before the error land.
  */
 export async function evaluateInteger(
@@ -792,7 +828,9 @@ async function setVar(
       // bash bound what the expression assigned before it failed
       // (`declare -i n; x='y=5,1/0'; n=x` leaves y at 5, and a RANDOM
       // seed in it seeds); they land, gated, before the refusal reports.
-      if (err instanceof ArithError) await landCoercion(session, store, coercion)
+      if (err instanceof ArithError || err instanceof ExitSignal) {
+        await landCoercion(session, store, coercion)
+      }
       throw err
     }
   }
@@ -804,15 +842,22 @@ async function setVar(
     sessionId: session.sessionId,
   })
   if (name === RANDOM && session.randomSeed !== RANDOM_UNSET && typeof shaped === 'string') {
+    // A seed that fails or writes a readonly name seeds nothing: its
+    // earlier writes land and the error is reported, but the line goes on,
+    // unless the write was in a subscript.
     try {
-      const value = BigInt(coercion.run(shaped))
+      const value = BigInt(coercion.evaluate(shaped))
       const modulus = BigInt(RANDOM_MODULUS)
       session.randomState = Number(((value % modulus) + modulus) % modulus)
     } catch (err) {
-      if (!(err instanceof ArithError)) throw err
+      if (err instanceof ExitSignal) await landCoercion(session, store, coercion)
+      if (!(err instanceof ArithError || err instanceof ReadonlyError)) throw err
+      await landCoercion(session, store, coercion)
+      if (err instanceof ReadonlyError && (err.inSubscript || diagnostics === undefined)) {
+        throw err.signal()
+      }
       if (diagnostics === undefined) throw err
       diagnostics.push(err.message)
-      await landCoercion(session, store, coercion)
       return
     }
     session.randomSeed = shaped

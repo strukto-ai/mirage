@@ -311,47 +311,31 @@ describe('getListParts', () => {
   })
 })
 
-describe('getWhileParts', () => {
-  it('while returns condition + body from do_group', () => {
-    const cond = node('command', 'cond')
-    const body1 = node('command', 'body1')
-    const body2 = node('command', 'body2')
-    const doGroup = node(NT.DO_GROUP, '', { namedChildren: [body1, body2] })
-    const n = node('while_statement', '', { namedChildren: [cond, doGroup] })
-    const [c, b] = getWhileParts(n)
-    expect(c).toBe(cond)
-    expect(b).toEqual([body1, body2])
-  })
-})
+describe('getWhileParts / getIfBranches', () => {
+  async function firstOf(line: string): Promise<TSNodeLike> {
+    const parser = await getTestParser()
+    return parser.parse(line).children[0] as TSNodeLike
+  }
+  const texts = (nodes: readonly TSNodeLike[]): string[] => nodes.map(getText)
 
-describe('getIfBranches', () => {
-  it('single if/else returns one branch + else body', () => {
-    const cond = node('command', 'cond')
-    const thenBody = node('command', 'then')
-    const elseBody = node('command', 'else')
-    const elseClause = node(NT.ELSE_CLAUSE, '', { namedChildren: [elseBody] })
-    const n = node('if_statement', '', { namedChildren: [cond, thenBody, elseClause] })
-    const [branches, elseArr] = getIfBranches(n)
-    expect(branches).toHaveLength(1)
-    expect(branches[0]?.[0]).toBe(cond)
-    expect(branches[0]?.[1]).toEqual([thenBody])
-    expect(elseArr).toEqual([elseBody])
+  it('reads every statement before the do_group as the test', async () => {
+    const [test, body] = getWhileParts(await firstOf('while a; b; do echo loop; done'))
+    expect(texts(test)).toEqual(['a', 'b'])
+    expect(texts(body)).toEqual(['echo loop'])
   })
 
-  it('if/elif/else returns multiple branches', () => {
-    const cond1 = node('c1', 'c1')
-    const body1 = node('command', 'b1')
-    const cond2 = node('c2', 'c2')
-    const body2 = node('command', 'b2')
-    const elseBody = node('command', 'e')
-    const elif = node(NT.ELIF_CLAUSE, '', { namedChildren: [cond2, body2] })
-    const elseCl = node(NT.ELSE_CLAUSE, '', { namedChildren: [elseBody] })
-    const n = node('if_statement', '', { namedChildren: [cond1, body1, elif, elseCl] })
-    const [branches, elseArr] = getIfBranches(n)
-    expect(branches).toHaveLength(2)
-    expect(branches[0]?.[0]).toBe(cond1)
-    expect(branches[1]?.[0]).toBe(cond2)
-    expect(elseArr).toEqual([elseBody])
+  it('splits each branch at its then', async () => {
+    const [branches, elseBody] = getIfBranches(
+      await firstOf('if a; b; then c; d; elif e\nf\nthen g; else h; fi'),
+    )
+    expect(branches.map(([test, body]) => [texts(test), texts(body)])).toEqual([
+      [
+        ['a', 'b'],
+        ['c', 'd'],
+      ],
+      [['e', 'f'], ['g']],
+    ])
+    expect(texts(elseBody ?? [])).toEqual(['h'])
   })
 })
 

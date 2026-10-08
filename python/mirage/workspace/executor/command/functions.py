@@ -29,6 +29,7 @@ from mirage.shell.errors import ReturnSignal
 from mirage.shell.helpers import parse_function
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse.scope import ParseScope
+from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import ShellVar
 from mirage.types import PathSpec, word_text
 from mirage.workspace.evaluation import EvaluationContext
@@ -138,6 +139,8 @@ async def run_shell_function(
         last_exec = ExecutionNode(command=cmd_name, exit_code=0)
         bound = fd0_binding(session)
         for cmd in func_body:
+            if cmd.type == NT.COMMENT:
+                continue
             try:
                 stdout, io, last_exec = await run_statement(
                     execute_node,

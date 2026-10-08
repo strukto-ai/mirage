@@ -30,15 +30,35 @@ export class ArithError extends Error {
   writes: ArithWrite[] = []
 }
 
-// An arithmetic assignment to a readonly shell variable. Mirrors
-// Python's mirage.shell.errors.ReadonlyError.
+/**
+ * An arithmetic assignment to a readonly shell variable. The evaluation
+ * stops at it, as bash's does: `writes` carries the assignments made before
+ * it, which bind (`(( X=5, R=3 ))` leaves X at 5), and nothing after it
+ * runs. `inSubscript` marks one made while an array subscript evaluated
+ * (`${a[R=3]}`, `(( a[R=3] ))`), which ends the shell wherever the
+ * subscript is. Mirrors Python's mirage.shell.errors.ReadonlyError.
+ */
 export class ReadonlyError extends Error {
   readonly varName: string
+  readonly inSubscript: boolean
+  writes: ArithWrite[] = []
 
-  constructor(name: string) {
+  constructor(name: string, inSubscript = false) {
     super(`${name}: readonly variable`)
     this.name = 'ReadonlyError'
     this.varName = name
+    this.inSubscript = inSubscript
+  }
+
+  /**
+   * How the error unwinds where no status answers it: one in a subscript,
+   * or in an `-i` value (`fatal`), ends the shell with 1; any other
+   * discards the line, as `$((R=3))` does.
+   */
+  signal(fatal = false): ExitSignal {
+    const stderr = encodeText(`bash: ${this.message}\n`)
+    if (fatal || this.inSubscript) return new ExitSignal(1, stderr, null, 1)
+    return new DiscardSignal(stderr)
   }
 }
 
@@ -55,12 +75,16 @@ export class ExitSignal extends Error {
   // Status a containing boundary reports instead of exitCode. GNU bash
   // exits 127 on a fatal expansion error but a subshell wrapping one
   // returns 1; `exit N` uses N in both positions (the default).
-  readonly containedCode: number
+  containedCode: number
   // The id of the command whose own words were being expanded when it was
   // raised. bash expands a simple command's words before it applies the
   // command's redirects, so that diagnostic goes around them; any other
   // goes through the redirects it was written under.
   expanding: number | null = null
+  // Whether it was raised in text `eval` or `source` ran: a forked stage or
+  // job reports its contained status even for a simple command
+  // (`eval ': ${U?}' | cat` is 1, `: ${U?} | cat` 127).
+  sourced = false
 
   constructor(
     exitCode = 0,
@@ -83,11 +107,14 @@ export class ExitSignal extends Error {
  * the command never runs, and neither do the statements after it on its line,
  * but the next line does, with `$?` at 1. The line loop of a shell, of `eval`
  * and of `source` resumes there; a child shell ends on it with status 1, and
- * so does `set -e`. Mirrors Python's mirage.shell.errors.DiscardSignal.
+ * so does `set -e`. `containedCode` is the status a `( )` subshell, or a
+ * compound command forked as a stage or job, ends with when the error
+ * reaches it rather than a line loop: 2 for a refused `${var:=word}`, 1 for
+ * any other. Mirrors Python's mirage.shell.errors.DiscardSignal.
  */
 export class DiscardSignal extends ExitSignal {
-  constructor(stderr: Uint8Array = new Uint8Array()) {
-    super(1, stderr, null, 1)
+  constructor(stderr: Uint8Array = new Uint8Array(), containedCode = 1) {
+    super(1, stderr, null, containedCode)
     this.name = 'DiscardSignal'
   }
 }

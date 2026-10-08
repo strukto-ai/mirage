@@ -64,9 +64,9 @@ describe('handleIf', () => {
       }
       return Promise.resolve([encode(`${n.text}-out`), new IOResult(), new ExecutionNode()])
     }
-    const branches: [TSNodeLike, TSNodeLike[]][] = [
-      [node('c1'), [node('b1')]],
-      [node('c2'), [node('b2')]],
+    const branches: [TSNodeLike[], TSNodeLike[]][] = [
+      [[node('c1')], [node('b1')]],
+      [[node('c2')], [node('b2')]],
     ]
     const [stdout, io] = await handleIf(
       execute,
@@ -88,7 +88,7 @@ describe('handleIf', () => {
     }
     const [stdout, io] = await handleIf(
       execute,
-      [[node('c'), [node('b')]]],
+      [[[node('c')], [node('b')]]],
       [node('e')],
       new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
@@ -211,7 +211,7 @@ describe('handleWhile / handleUntil', () => {
     }
     const [stdout] = await handleWhile(
       execute,
-      node('cond'),
+      [node('cond')],
       [node('body')],
       new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
@@ -230,7 +230,7 @@ describe('handleWhile / handleUntil', () => {
     }
     const [stdout] = await handleUntil(
       execute,
-      node('cond'),
+      [node('cond')],
       [node('body')],
       new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
@@ -245,7 +245,7 @@ describe('handleWhile / handleUntil', () => {
     }
     const [, io] = await handleWhile(
       execute,
-      node('cond'),
+      [node('cond')],
       [node('body')],
       new EvaluationContext(new SessionState({ sessionId: 'test' })),
     )
@@ -370,7 +370,7 @@ describe('& inside a body', () => {
     const ran: string[] = []
     const { execute, release } = parked(ran)
     const s = new SessionState({ sessionId: 'test' })
-    const branches: [TSNodeLike, TSNodeLike[]][] = [[node('c'), [bg('slow')]]]
+    const branches: [TSNodeLike[], TSNodeLike[]][] = [[[node('c')], [bg('slow')]]]
     const [, io] = await handleIf(
       execute,
       branches,
@@ -445,7 +445,7 @@ describe('& inside a body', () => {
   it('fails loud without a job table', async () => {
     const execute: ExecuteNodeFn = () =>
       Promise.resolve([null, new IOResult(), new ExecutionNode()])
-    const branches: [TSNodeLike, TSNodeLike[]][] = [[node('c'), [bg('x')]]]
+    const branches: [TSNodeLike[], TSNodeLike[]][] = [[[node('c')], [bg('x')]]]
     await expect(
       handleIf(
         execute,

@@ -22,17 +22,15 @@ import type { HandOff } from '../../policy/types.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import { type Policies } from '../../policy/index.ts'
-import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { ArithError, ExitSignal, ReadonlyError, ReturnSignal } from '../../shell/errors.ts'
 import { fd0Binding, finishStatement, recordStatus } from './statement.ts'
-import { pipelineTransparent } from '../../shell/node_kind.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { readReply } from './builtins/read/index.ts'
 import type { PathSpec } from '../../types.ts'
 import { wordText } from '../../types.ts'
-import type { TSNodeLike } from '../../shell/types.ts'
+import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 
 import { sessionView, visibleEnv } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
@@ -77,7 +75,9 @@ export class ContinueSignal extends Error {
  *
  * A statement ending in `&` is launched as a job through `runStatement`
  * rather than run inline; `jobTable` and `agentId` are the job plane it
- * needs.
+ * needs. `test` marks an `if`/`while`/`until` test, whose failures
+ * `set -e` ignores; `bound` is `fd0Binding` as the construct running the
+ * list started, so an `exec <&-` in a loop body reaches the next test.
  */
 async function executeBody(
   executeNode: ExecuteNodeFn,
@@ -89,13 +89,16 @@ async function executeBody(
   agentId: string | null,
   handed: HandOff | null,
   decisions: Decisions | null,
+  test = false,
+  bound: ReturnType<typeof fd0Binding> = fd0Binding(context.session),
 ): Promise<Result> {
   const session = context.session
   const allStdout: (ByteSource | null)[] = []
   let mergedIo = new IOResult()
   let lastExec = new ExecutionNode({ command: '', exitCode: 0 })
-  const bound = fd0Binding(session)
   for (const cmd of body) {
+    // A comment is no statement: it leaves `$?` as it was.
+    if (cmd.type === NT.COMMENT) continue
     try {
       const [rawStdout, io, execNode] = await runStatement(
         executeNode,
@@ -115,6 +118,7 @@ async function executeBody(
       mergedIo = await mergedIo.merge(io)
       if (
         io.exitCode !== 0 &&
+        !test &&
         session.shellOptions.errexit === true &&
         !ERREXIT_EXEMPT_TYPES.has(cmd.type) &&
         !session.errexitImmune
@@ -138,7 +142,9 @@ async function executeBody(
 }
 
 function chainNonNull(sources: readonly (ByteSource | null)[]): ByteSource | null {
-  const nonNull = sources.filter((s): s is ByteSource => s !== null)
+  const nonNull = sources.filter(
+    (s): s is ByteSource => s !== null && !(s instanceof Uint8Array && s.byteLength === 0),
+  )
   if (nonNull.length === 0) return null
   return asyncChain(nonNull)
 }
@@ -181,16 +187,20 @@ export async function carried(
 /**
  * What a child shell reports when an `Unwinding` ends it: what it wrote, its
  * diagnostic, and its status, `exit`'s contained one, `return`'s own, or that
- * of `break` or `continue`. Mirrors Python's ended.
+ * of `break` or `continue`. A child running one simple command is the shell
+ * `exit` ends (`simple`), so it reports `exit`'s own status (`: ${U?} | cat`
+ * is 127, `( : ${U?} ) | cat` is 1), unless the signal left text `eval` or
+ * `source` ran. Mirrors Python's ended.
  */
-export function ended(sig: Unwinding): IOResult {
+export function ended(sig: Unwinding, simple = false): IOResult {
   if (sig instanceof BreakSignal || sig instanceof ContinueSignal) {
     return new IOResult({ stdout: sig.stdout, stderr: sig.io.stderr, exitCode: sig.io.exitCode })
   }
   return new IOResult({
     stdout: sig.stdout,
     stderr: sig.stderr.byteLength > 0 ? sig.stderr : null,
-    exitCode: sig instanceof ExitSignal ? sig.containedCode : sig.exitCode,
+    exitCode:
+      sig instanceof ExitSignal && (!simple || sig.sourced) ? sig.containedCode : sig.exitCode,
   })
 }
 
@@ -240,7 +250,7 @@ function collectLoopResult(
 
 export async function handleIf(
   executeNode: ExecuteNodeFn,
-  branches: readonly [TSNodeLike, TSNodeLike[]][],
+  branches: readonly [TSNodeLike[], TSNodeLike[]][],
   elseBody: TSNodeLike[] | null,
   context: EvaluationContext,
   stdin: ByteSource | null = null,
@@ -250,51 +260,43 @@ export async function handleIf(
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
 ): Promise<Result> {
-  const session = context.session
-  const bound = fd0Binding(session)
-  for (const [condition, body] of branches) {
-    const [condStdout, condIo] = await runStatement(
+  // Each test reads the fd 0 the `if` started with, so an `exec <&-` in one
+  // reaches the next.
+  const bound = fd0Binding(context.session)
+  const run = (nodes: readonly TSNodeLike[], isTest = false): Promise<Result> =>
+    executeBody(
       executeNode,
-      condition,
+      nodes,
       context,
       stdin,
-      bound,
       callStack,
       jobTable,
       agentId,
       handed,
       decisions,
+      isTest,
+      isTest ? bound : fd0Binding(context.session),
     )
-    await applyBarrier(condStdout, condIo, BarrierPolicy.STATUS)
-    recordStatus(session, condIo.exitCode, pipelineTransparent(condition))
-    if (condIo.exitCode === 0) {
-      return executeBody(
-        executeNode,
-        body,
-        context,
-        stdin,
-        callStack,
-        jobTable,
-        agentId,
-        handed,
-        decisions,
-      )
+  // What the tests wrote stays, ahead of what the branch writes.
+  const leadStdout: (ByteSource | null)[] = []
+  let lead = new IOResult()
+  try {
+    let chosen = elseBody ?? []
+    for (const [test, body] of branches) {
+      const [stdout, io] = await run(test, true)
+      leadStdout.push(stdout)
+      lead = await lead.merge(io)
+      if (io.exitCode === 0) {
+        chosen = body
+        break
+      }
     }
+    const [stdout, io, lastExec] = await run(chosen)
+    return [chainNonNull([...leadStdout, stdout]), await lead.merge(io), lastExec]
+  } catch (sig) {
+    if (!isUnwinding(sig)) throw sig
+    throw await carried(sig, chainNonNull(leadStdout), lead)
   }
-  if (elseBody !== null) {
-    return executeBody(
-      executeNode,
-      elseBody,
-      context,
-      stdin,
-      callStack,
-      jobTable,
-      agentId,
-      handed,
-      decisions,
-    )
-  }
-  return [null, new IOResult(), new ExecutionNode({ exitCode: 0 })]
 }
 
 // `set -n` inside a loop body has to stop the *driver* too, not only the
@@ -372,7 +374,7 @@ export async function handleFor(
 
 async function conditionLoop(
   executeNode: ExecuteNodeFn,
-  condition: TSNodeLike,
+  test: readonly TSNodeLike[],
   body: readonly TSNodeLike[],
   context: EvaluationContext,
   stdin: ByteSource | null,
@@ -389,49 +391,43 @@ async function conditionLoop(
   const allStdout: (ByteSource | null)[] = []
   let hitLimit = true
   const bound = fd0Binding(session)
-  for (let i = 0; i < MAX_WHILE; i++) {
-    if (session.shellOptions.noexec === true) {
-      hitLimit = false
-      break
-    }
-    const [condStdout, condIo] = await runStatement(
+  const run = (nodes: readonly TSNodeLike[], isTest = false): Promise<Result> =>
+    executeBody(
       executeNode,
-      condition,
+      nodes,
       context,
       stdin,
-      bound,
       callStack,
       jobTable,
       agentId,
       handed,
       decisions,
+      isTest,
+      isTest ? bound : fd0Binding(session),
     )
-    await applyBarrier(condStdout, condIo, BarrierPolicy.STATUS)
-    recordStatus(session, condIo.exitCode, pipelineTransparent(condition))
-    if (breakOnZero && condIo.exitCode === 0) {
-      hitLimit = false
-      break
-    }
-    if (!breakOnZero && condIo.exitCode !== 0) {
+  for (let i = 0; i < MAX_WHILE; i++) {
+    if (session.shellOptions.noexec === true) {
       hitLimit = false
       break
     }
     try {
-      const [stdout, io] = await executeBody(
-        executeNode,
-        body,
-        context,
-        stdin,
-        callStack,
-        jobTable,
-        agentId,
-        handed,
-        decisions,
+      const [condStdout, condIo] = await run(test, true)
+      allStdout.push(condStdout)
+      mergedIo = await mergedIo.merge(
+        new IOResult({ stderr: condIo.stderr, exitCode: mergedIo.exitCode }),
       )
+      if ((condIo.exitCode === 0) === breakOnZero) {
+        hitLimit = false
+        break
+      }
+      const [stdout, io] = await run(body)
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
     } catch (sig) {
-      if (!(sig instanceof BreakSignal || sig instanceof ContinueSignal)) throw sig
+      if (!(sig instanceof BreakSignal || sig instanceof ContinueSignal)) {
+        if (isUnwinding(sig)) throw await carried(sig, chainNonNull(allStdout), mergedIo)
+        throw sig
+      }
       mergedIo = await absorbed(sig, allStdout, mergedIo)
       if (sig instanceof BreakSignal) {
         hitLimit = false
@@ -559,7 +555,7 @@ export async function handleCfor(
 
 export function handleWhile(
   executeNode: ExecuteNodeFn,
-  condition: TSNodeLike,
+  test: readonly TSNodeLike[],
   body: readonly TSNodeLike[],
   context: EvaluationContext,
   stdin: ByteSource | null = null,
@@ -571,7 +567,7 @@ export function handleWhile(
 ): Promise<Result> {
   return conditionLoop(
     executeNode,
-    condition,
+    test,
     body,
     context,
     stdin,
@@ -587,7 +583,7 @@ export function handleWhile(
 
 export function handleUntil(
   executeNode: ExecuteNodeFn,
-  condition: TSNodeLike,
+  test: readonly TSNodeLike[],
   body: readonly TSNodeLike[],
   context: EvaluationContext,
   stdin: ByteSource | null = null,
@@ -599,7 +595,7 @@ export function handleUntil(
 ): Promise<Result> {
   return conditionLoop(
     executeNode,
-    condition,
+    test,
     body,
     context,
     stdin,
@@ -636,6 +632,7 @@ export async function handleCase(
     if (!(fallthrough || patterns.some((p) => fnmatch(word, p)))) continue
     ran = true
     for (const stmt of body) {
+      if (stmt.type === NT.COMMENT) continue
       let result: Result
       try {
         result = await runStatement(

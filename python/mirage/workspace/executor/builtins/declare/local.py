@@ -478,8 +478,8 @@ async def _aim_reference(
 
     Raises:
         PolicyDenied: the gate refused a write or a mark.
-        DiscardSignal: an ``-i`` value assigned a readonly variable,
-            which ends the line.
+        ExitSignal: an ``-i`` value assigned a readonly variable,
+            which ends the shell.
         ArithError: an ``-i`` value did not evaluate.
     """
     own = visible_record(session, key)

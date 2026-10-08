@@ -38,8 +38,8 @@ from mirage.shell.constants import (
     RANDOM_MODULUS,
     RANDOM_UNSET,
 )
-from mirage.shell.errors import ArithError, DiscardSignal
-from mirage.shell.types import ArithWrite, ElementOps
+from mirage.shell.errors import ArithError, ExitSignal, ReadonlyError
+from mirage.shell.types import ArithResult, ArithWrite, ElementOps
 from mirage.shell.variable import (
     ShellValue,
     ShellVar,
@@ -406,10 +406,10 @@ async def _land_writes(
     reference on its target, a bare name over an array at element 0
     (``A=(old keep); n='A=9'`` keeps ``keep``), naming the element it
     assigns so an ``-i`` array never runs its other elements again
-    (``A=(0 'x++'); declare -i A; (( A[0]=9 ))`` leaves ``x++``). A
-    readonly name is an error in the expression, which discards the
-    line as bash's does (``declare -i n; ( n='R=3'; echo no )`` ends
-    only the subshell).
+    (``A=(0 'x++'); declare -i A; (( A[0]=9 ))`` leaves ``x++``). Both
+    of its contexts, a subscript and an ``-i`` value, end the shell on
+    a readonly name (``declare -i n; ( n='R=3'; echo no )`` ends only
+    the subshell).
 
     Args:
         session (SessionState): the session the writes read.
@@ -417,7 +417,7 @@ async def _land_writes(
         writes (Sequence[ArithWrite]): the assignments, in order.
 
     Raises:
-        DiscardSignal: an assignment named a readonly variable.
+        ExitSignal: an assignment named a readonly variable.
         PolicyDenied: the door refused an assignment.
     """
     for write in writes:
@@ -432,14 +432,17 @@ async def _land_writes(
             assigned = frozenset({key})
         elif write.key is not None or arr is not None:
             index = 0 if write.key is None else int(write.key)
-            value = array_with(
-                arr if arr is not None else make_array([]), index, write.value
-            )
+            if arr is None:
+                # A scalar becomes element 0, as `assign_element` turns
+                # it (`x=7; n='x[1]=5'` keeps the 7).
+                scalar = conversion_scalar(session, name)
+                arr = make_array([] if scalar is None else [scalar])
+            value = array_with(arr, index, write.value)
             assigned = frozenset({index})
         try:
             await store(name, value, assigned=assigned)
         except ReadonlyVariableError as exc:
-            raise DiscardSignal(encode_text(f"{exc}\n")) from exc
+            raise ReadonlyError(exc.name).signal(fatal=True) from exc
 
 
 async def subscript_index(
@@ -465,7 +468,8 @@ async def subscript_index(
 
     Raises:
         PolicyDenied: the door refused an assignment.
-        ReadonlyVariableError: an assignment named a readonly variable.
+        ExitSignal: an assignment named a readonly variable, which ends
+            the shell wherever a subscript is (``${a[R=3]}``).
         ArithError: the subscript does not evaluate, or an assigned name
             carries ``-i`` and the value does not evaluate.
     """
@@ -474,19 +478,17 @@ async def subscript_index(
     except ValueError:
         pass
     reader = random_reader(session)
-    error: ArithError | None = None
+    error: ArithError | ReadonlyError | None = None
     idx = 0
     try:
-        result = evaluate_arith(
+        result = session_arith(
+            session,
             subscript,
-            visible_env(session),
-            elements=session_elements(session, reader),
-            read_var=reader.read,
-            wrote_var=reader.wrote,
+            reader,
             nounset=bool(session.shell_options.get("nounset")),
         )
         idx, writes = result.value, result.writes
-    except ArithError as exc:
+    except (ArithError, ReadonlyError) as exc:
         error, writes = exc, exc.writes
     await _land_writes(
         session,
@@ -496,6 +498,8 @@ async def subscript_index(
         writes,
     )
     reader.settle()
+    if isinstance(error, ReadonlyError):
+        raise error.signal(fatal=True) from error
     if error is not None:
         raise ArithError(f"{subscript.strip()}: {error}") from error
     return idx
@@ -804,6 +808,52 @@ def random_reader(session: SessionState) -> RandomReader:
     return RandomReader(session)
 
 
+def session_arith(
+    session: SessionState,
+    text: str,
+    reader: RandomReader,
+    nounset: bool = False,
+) -> ArithResult:
+    """Evaluate ``text`` as every arithmetic context of the shell does:
+    against the visible env and the session's elements, drawing through
+    ``reader``, and stopping at a write to a readonly name, as bash's
+    evaluation does (``(( X=5, R=3 ))`` binds X and refuses R).
+
+    Args:
+        session (SessionState): the session the expression reads.
+        text (str): the expression.
+        reader (RandomReader): the expression's ``RANDOM`` reader.
+        nounset (bool): ``set -u`` for the names it reads.
+
+    Raises:
+        ArithError: the text does not evaluate.
+        ReadonlyError: an assignment named a readonly variable; its
+            ``writes`` are the ones made before it.
+    """
+    return evaluate_arith(
+        text,
+        visible_env(session),
+        elements=session_elements(session, reader),
+        read_var=reader.read,
+        wrote_var=reader.wrote,
+        nounset=nounset,
+        frozen=functools.partial(_readonly_target, session),
+    )
+
+
+def _readonly_target(session: SessionState, name: str) -> str | None:
+    """The readonly variable a write to ``name`` reaches, through a
+    ``declare -n`` reference, which the refusal names; None when the
+    write lands.
+
+    Args:
+        session (SessionState): the session holding the readonly marks.
+        name (str): the name the expression writes.
+    """
+    target = deref(session, name)
+    return target if env_is_readonly(session, target, False) else None
+
+
 class _IntegerCoercion:
     """The `-i` coercion and the ``RANDOM`` seed, as one evaluation.
 
@@ -817,7 +867,9 @@ class _IntegerCoercion:
     (``_land_coercion``): bash binds `x` in `n='x=5'` and in
     `RANDOM='x=5'`, before the error too if the expression then fails.
     A malformed expression raises ArithError with the offending text
-    leading, the way every caller voices it.
+    leading, the way every caller voices it; a write to a readonly name
+    ends the shell (``ExitSignal``), as bash's coercion does, where a
+    seed (``evaluate``) reports it the way it reports a malformed one.
 
     Args:
         session (SessionState): the session the expression reads.
@@ -829,22 +881,30 @@ class _IntegerCoercion:
         self.writes: list[ArithWrite] = []
 
     def __call__(self, text: str) -> str:
+        try:
+            return self.evaluate(text)
+        except ReadonlyError as exc:
+            raise exc.signal(fatal=True) from exc
+
+    def evaluate(self, text: str) -> str:
+        """The value ``text`` evaluates to, keeping the writes it made
+        before an ``ArithError`` or a ``ReadonlyError``.
+
+        Args:
+            text (str): the expression.
+        """
         session = self.session
         # Inside a `declare -g` the expression still reads the
         # function's scope, as bash's does (`local H=2; declare -gi
         # G=H` stores 2), while the value lands on the global.
         reach_again = _step_back(session)
         try:
-            result = evaluate_arith(
-                text,
-                visible_env(session),
-                elements=session_elements(session, self.reader),
-                read_var=self.reader.read,
-                wrote_var=self.reader.wrote,
-            )
-        except ArithError as exc:
+            result = session_arith(session, text, self.reader)
+        except (ArithError, ReadonlyError) as exc:
             self.writes.extend(exc.writes)
-            raise ArithError(f"{text}: {exc}") from exc
+            if isinstance(exc, ArithError):
+                raise ArithError(f"{text}: {exc}") from exc
+            raise
         finally:
             reach_again()
         self.writes.extend(result.writes)
@@ -891,8 +951,8 @@ async def evaluate_integer(
     Raises:
         PolicyDenied: an assignment named a hidden variable or the gate
             refused it; the ones before it have landed.
-        DiscardSignal: an assignment named a readonly variable, which
-            ends the line, as bash's does.
+        ExitSignal: an assignment named a readonly variable, which
+            ends the shell, as bash's does.
         ArithError: the text does not evaluate; the assignments made
             before the error have landed.
     """
@@ -1059,7 +1119,7 @@ async def set_var(
     if existing is not None and existing.attrs:
         try:
             value = coerce_value(value, existing.attrs, coercion, assigned)
-        except ArithError:
+        except (ArithError, ExitSignal):
             # bash bound what the expression assigned before it failed
             # (`declare -i n; x='y=5,1/0'; n=x` leaves y at 5, and a
             # RANDOM seed in it seeds); they land, gated, before the
@@ -1081,13 +1141,23 @@ async def set_var(
         and session._random_seed != RANDOM_UNSET
         and isinstance(value, str)
     ):
+        # A seed that fails or writes a readonly name seeds nothing: its
+        # earlier writes land and the error is reported, but the line
+        # goes on, unless the write was in a subscript.
         try:
-            seed = int(coercion(value)) % RANDOM_MODULUS
-        except ArithError as exc:
+            seed = int(coercion.evaluate(value)) % RANDOM_MODULUS
+        except ExitSignal:
+            await _land_coercion(session, store, coercion)
+            raise
+        except (ArithError, ReadonlyError) as exc:
+            await _land_coercion(session, store, coercion)
+            if isinstance(exc, ReadonlyError) and (
+                exc.in_subscript or diagnostics is None
+            ):
+                raise exc.signal() from exc
             if diagnostics is None:
                 raise
             diagnostics.append(str(exc))
-            await _land_coercion(session, store, coercion)
             return
         session._random_state = seed
         session._random_seed = value
