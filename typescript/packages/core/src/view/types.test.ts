@@ -17,10 +17,10 @@ import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
-import { NO_FOLLOW_OPS, STAMP_WRITE_OPS, type NamespaceLinks } from './config.ts'
+import type { NamespaceLinks } from './types.ts'
 
 // The seam's members in declaration order. The Python twin
-// (tests/ops/test_config.py) pins this same list snake_cased and in
+// (tests/view/test_types.py) pins this same list snake_cased and in
 // this same order, so a member added, dropped or moved in one language
 // fails the other language's test instead of drifting quietly.
 const MEMBERS = ['follow', 'isLink', 'readlink', 'linkStatAt', 'symlinkTargets'] as const
@@ -28,7 +28,7 @@ const MEMBERS = ['follow', 'isLink', 'readlink', 'linkStatAt', 'symlinkTargets']
 // An interface has no runtime shape, so order is read back off the
 // source the way Python reads it off the class dict.
 function declared(): string[] {
-  const src = readFileSync(new URL('./config.ts', import.meta.url), 'utf8')
+  const src = readFileSync(new URL('./types.ts', import.meta.url), 'utf8')
   const body = src.slice(src.indexOf('export interface NamespaceLinks {'))
   return [...body.slice(0, body.indexOf('\n}')).matchAll(/^ {2}(\w+)\(/gm)].map((m) => m[1] ?? '')
 }
@@ -66,19 +66,5 @@ describe('NamespaceLinks', () => {
     expect(links.symlinkTargets()).toBeInstanceOf(Map)
     expect(typeof ws.namespace.symlink).toBe('function')
     expect(typeof ws.namespace.unlink).toBe('function')
-  })
-
-  it('never follows a link-entry op', () => {
-    // lstat semantics: the operand names the link itself, so no stat
-    // surface may rewrite it through the table.
-    expect([...NO_FOLLOW_OPS].sort()).toEqual(
-      ['readlink', 'rename', 'rmdir', 'symlink', 'unlink'].sort(),
-    )
-  })
-
-  it('does not stamp an mtime for a removal', () => {
-    expect(STAMP_WRITE_OPS.has('unlink')).toBe(false)
-    expect(STAMP_WRITE_OPS.has('rmdir')).toBe(false)
-    expect(STAMP_WRITE_OPS.has('write')).toBe(true)
   })
 })

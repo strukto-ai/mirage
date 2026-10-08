@@ -44,10 +44,10 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.types import FileTooLargeError
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.namespace_view import paths_scoped
 from mirage.shell.bytes import utf8_locale
 from mirage.types import FileType, JsonValue, PathSpec
 from mirage.vfs.types import SearchQuery
+from mirage.view.namespace_view import paths_scoped
 
 logger = logging.getLogger(__name__)
 

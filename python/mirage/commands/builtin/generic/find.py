@@ -28,12 +28,12 @@ from mirage.errors.fs import fs_strerror, walk_refusal
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, StatPath
 from mirage.types import FileStat, FileType, FindType, PathSpec, Visibility
 from mirage.utils.dates import matches_mtime
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import respell_one, respell_raw
+from mirage.view.types import LinkView, StatPath
 
 
 def parse_find_args(

@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../../io/types.ts'
-import type { LinkView } from '../../../ops/types.ts'
+import type { LinkView } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { FileStat, FileType, PathSpec, type WalkErrno } from '../../../types.ts'
 import { isDotWalkError } from '../../../errors/fs.ts'
@@ -158,7 +158,7 @@ describe('the link door', () => {
 
   it('is absent without links or a door', () => {
     const [dispatch] = recorder()
-    const base: CommandOpts = { stdin: null, flags: {}, filetypeFns: null, cwd: '/' }
+    const base: CommandOpts = { stdin: null, flags: {}, cwd: '/' }
     expect(linkDoor(base)).toBeNull()
     expect(linkDoor({ ...base, ns: { links: LINKS } })).toBeNull()
     expect(linkDoor({ ...base, ns: { links: LINKS }, dispatch })?.cwd).toBe('/')

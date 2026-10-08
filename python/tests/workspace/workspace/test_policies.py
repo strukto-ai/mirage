@@ -331,9 +331,6 @@ class CachingRAM(RAMVFS):
     caches_reads = True
     name = "s3"
 
-    def ops(self):
-        return [replace(ro, vfs=self.name) for ro in super().ops()]
-
     def commands(self):
         return [replace(rc, vfs=self.name) for rc in super().commands()]
 
@@ -393,9 +390,6 @@ class HardCapProdReads(Policy):
 class ColdRemote(RAMVFS):
     caches_reads = False
     name = "s3"
-
-    def ops(self):
-        return [replace(ro, vfs=self.name) for ro in super().ops()]
 
     def commands(self):
         return [replace(rc, vfs=self.name) for rc in super().commands()]

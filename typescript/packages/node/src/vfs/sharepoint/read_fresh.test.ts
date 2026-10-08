@@ -124,7 +124,7 @@ describe('sharepoint under read: fresh', () => {
       const mount = w.mount('/m')
       const index = mount.index
       const items = graph.count('item')
-      const listed = (await mount.callOp(
+      const listed = (await mount.callKeyed(
         'stat',
         new PathSpec({ virtual: '/m/a.txt', directory: '/m/', vfsPath: 'a.txt' }),
         [],

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Ops } from '@struktoai/mirage-core/ops/ops'
+import type { Files } from '@struktoai/mirage-core/workspace/files'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { ExecuteResult, Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type {
@@ -50,7 +50,7 @@ export interface MirageOperationsBundle {
   ls: LsOperations
 }
 
-async function ensureParent(vfs: Ops, dir: string): Promise<void> {
+async function ensureParent(vfs: Files, dir: string): Promise<void> {
   const norm = rstripSlash(dir) || '/'
   if (norm === '/' || (await vfs.exists(norm))) return
   const parent = norm.substring(0, norm.lastIndexOf('/')) || '/'
@@ -69,7 +69,7 @@ interface WalkOptions {
 }
 
 async function walkDirectory(
-  vfs: Ops,
+  vfs: Files,
   dir: string,
   cwdPrefix: string,
   matcher: (relativePath: string) => boolean,

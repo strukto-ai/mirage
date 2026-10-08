@@ -370,7 +370,7 @@ describe('captureFingerprints op sets', () => {
 
   it('orders records by timestamp, not by position', () => {
     // A backend record reaches the list when its line ends, while an
-    // `Ops` facade record appends as it happens, so a retraction can sit
+    // `Files` facade record appends as it happens, so a retraction can sit
     // ahead of the write it precedes in time.
     const entries = captureFingerprints(
       [opRecord('write', '/s3/a', 'fp-a', null, 2), opRecord('unlink', '/s3/a', null, null, 1)],

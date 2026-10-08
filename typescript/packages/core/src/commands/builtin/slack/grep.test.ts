@@ -44,7 +44,6 @@ describe('slack grep on a time-scoped mount', () => {
       {
         stdin: null,
         flags: { w: true },
-        filetypeFns: null,
         io: ioFor(SlackVFSBase, accessor),
         cwd: '/',
         index: idx,

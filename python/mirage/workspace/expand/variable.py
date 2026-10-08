@@ -16,7 +16,6 @@ from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from functools import partial
 
-from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.array import (
     ShellArray,
@@ -47,6 +46,7 @@ from mirage.shell.types import NodeType as NT
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.glob_walk import escape_glob, mark_globs
 from mirage.utils.path import expand_tilde
+from mirage.view.types import SessionView
 from mirage.workspace.expand.constants import OPERAND_DQUOTE_ESCAPES
 from mirage.workspace.expand.fields import (
     chunks_text,

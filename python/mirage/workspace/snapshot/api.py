@@ -104,7 +104,7 @@ async def snapshot(
 ) -> int:
     """Serialize a Workspace to a tar archive.
 
-    Fingerprints come from ``ws._ops.records`` (each read carries the
+    Fingerprints come from ``ws._files.records`` (each read carries the
     backend's version marker captured at the moment of the read), so
     no live network round-trips are needed at snapshot time. Archive
     compression and host file I/O run off the workspace loop.

@@ -32,7 +32,6 @@ from mirage.context import (
 )
 from mirage.errors.fs import no_mount
 from mirage.errors.types import NoMountError
-from mirage.ops.config import OpsMount
 from mirage.policy import Decisions, MountRootPolicy, OutputCapPolicy, Policies
 from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
@@ -44,6 +43,7 @@ from mirage.vfs.dev import DevVFS
 from mirage.workspace.cli import CLIRegistry
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.session.session import SessionState
+from mirage.workspace.types import MountRow
 
 DEV_PREFIX = "/dev/"
 
@@ -645,14 +645,12 @@ class MountRegistry:
     def visible_mounts(self) -> list[MountEntry]:
         return [m for m in self._mounts if m.visible is None or m.visible()]
 
-    def ops_mounts(self) -> list[OpsMount]:
-        """Build OpsMount list from registered mounts for Ops layer."""
+    def mount_rows(self) -> list[MountRow]:
+        """One row per registered mount, for the ``Files`` facade."""
         return [
-            OpsMount(
+            MountRow(
                 prefix=m.prefix,
                 resource_type=m.vfs.name,
-                accessor=m.vfs.accessor,
-                index=m.index_store,
                 mode=m.mode,
                 sizes_always_known=m.vfs.sizes_always_known,
             )

@@ -49,10 +49,10 @@ from mirage.io import IOResult
 from mirage.io.cooperative import chunks as byte_chunks
 from mirage.io.stream import discard_streams, ensure_stream, materialize
 from mirage.io.types import ByteSource
-from mirage.ops.types import LinkView
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import FileType, PathSpec, PrimitiveCopy, Visibility
+from mirage.view.types import LinkView
 
 
 async def relay(

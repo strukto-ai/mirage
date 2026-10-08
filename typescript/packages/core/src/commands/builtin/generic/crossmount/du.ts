@@ -22,7 +22,7 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import { boundedMap } from '../../../../concurrency/limiter.ts'
 import { IOResult, materialize, type ByteSource, type SizedRun } from '../../../../io/types.ts'
-import type { NamespaceView } from '../../../../ops/types.ts'
+import type { NamespaceView } from '../../../../view/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { PathSpec } from '../../../../types.ts'
 import { stripSlash } from '../../../../utils/slash.ts'
@@ -57,7 +57,7 @@ export async function runDu(
   signal?: AbortSignal,
   nested = false,
 ): Promise<CrossResult> {
-  const rendering = parseFlags({ stdin: null, flags: bag, filetypeFns: null, cwd })
+  const rendering = parseFlags({ stdin: null, flags: bag, cwd })
   const bounded = new FlagView(bag, specOf('du')).asBool('one_file_system')
   const measuring = Object.fromEntries(Object.entries(bag).filter(([k]) => !RENDERING.has(k)))
   // Each start is then one mount's own part, and keeps only what that mount

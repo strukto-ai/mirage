@@ -32,7 +32,6 @@ async function runDate(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags,
-    filetypeFns: null,
     cwd: '/',
   })
   if (result === null) return ''
@@ -52,7 +51,6 @@ async function runDateIo(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags,
-    filetypeFns: null,
     cwd: '/',
   })
   if (result === null) return ['', '', 0]
@@ -116,7 +114,6 @@ async function runDateEnv(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags,
-    filetypeFns: null,
     cwd: '/',
     env,
   })
@@ -184,7 +181,6 @@ async function runDateStderr(d: string): Promise<[string, number]> {
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
     stdin: null,
     flags: { date: d },
-    filetypeFns: null,
     cwd: '/',
   })
   if (result === null) throw new Error('date returned no result')

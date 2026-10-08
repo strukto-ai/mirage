@@ -34,7 +34,6 @@ async function runUniq(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, [], {
     stdin,
     flags,
-    filetypeFns: null,
     io: commandIo(vfs),
     cwd: '/',
   })

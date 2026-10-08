@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult, materialize } from '../../../io/types.ts'
-import type { LinkView, MountView, StatPath } from '../../../ops/types.ts'
+import type { LinkView, MountView, StatPath } from '../../../view/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
 import { FileType } from '../../../types.ts'
 import { eisdir, isDotWalkError, isEisdir, isFsError } from '../../../errors/fs.ts'

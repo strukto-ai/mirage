@@ -51,13 +51,7 @@ from mirage.errors.fs import (
 from mirage.io import IOResult, OpReport
 from mirage.observe.context import record, start_op
 from mirage.observe.record import OpRecord
-from mirage.ops.boundary import OpBoundary
-from mirage.ops.config import NO_FOLLOW_OPS, STAMP_WRITE_OPS
-from mirage.ops.namespace_view import (
-    merge_readdir,
-    namespace_listing,
-    namespace_stat,
-)
+from mirage.policy.boundary import Boundary
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.types import EntryGate
 from mirage.shell.bytes import encode_text
@@ -78,6 +72,11 @@ from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import CycleError, norm, norm_dir, owner_prefix, parent
 from mirage.utils.ranges import slice_window
 from mirage.utils.remnants import remove_remnants, visible_below
+from mirage.view.namespace_view import (
+    merge_readdir,
+    namespace_listing,
+    namespace_stat,
+)
 from mirage.workspace.dispatcher.constants import (
     DISPATCH_READ_OPS,
     DISPATCH_WRITE_OPS,
@@ -86,9 +85,11 @@ from mirage.workspace.dispatcher.constants import (
     HIDDEN_CREATE_OPS,
     LINK_ENTRY_OPS,
     NAMESPACE_TABLE_OPS,
+    NO_FOLLOW_OPS,
     POLICY_WRITE_OPS,
     SERIAL_WRITE_OPS,
     SETATTR_KEYS,
+    STAMP_WRITE_OPS,
     XATTR_OPS,
 )
 from mirage.workspace.mount import MountEntry
@@ -135,17 +136,17 @@ def _served(report: OpReport | None, result: Any) -> None:
         )
 
 
-def _appends_nothing(op: str, kwargs: dict[str, Any]) -> bool:
+def _appends_nothing(name: str, kwargs: dict[str, Any]) -> bool:
     """Whether a completed write op was an append of no bytes.
 
     That is an open for appending (``true >> f``): it may create the
     file, but it leaves an existing one's times as they were.
 
     Args:
-        op (str): the write op that ran.
+        name (str): the write op that ran.
         kwargs (dict[str, Any]): its kwargs; an append's ``data``.
     """
-    return op == "append" and not kwargs.get("data")
+    return name == "append" and not kwargs.get("data")
 
 
 def _visible_entries(entries: list[str], parent: str) -> list[str]:
@@ -242,7 +243,7 @@ class _MountChannel:
 
     Args:
         mount (MountEntry): the mount owning the subtree.
-        boundary (OpBoundary): the dispatcher's op boundary for that
+        boundary (Boundary): the dispatcher's op boundary for that
             mount; its admit raises to refuse a deletion. A deletion is
             not completed through post_vfs, which could only refuse
             after the entry is gone and strand the cascade.
@@ -251,7 +252,7 @@ class _MountChannel:
     """
 
     mount: MountEntry
-    boundary: OpBoundary
+    boundary: Boundary
     invalidate: Callable[[PathSpec], Awaitable[None]]
 
     async def readdir(self, spec: PathSpec) -> list[str]:
@@ -289,12 +290,54 @@ def _judge(gate: EntryGate, *paths: PathSpec | None) -> None:
         gate.check(virtual)
 
 
+def _follow_or_loop(
+    namespace: Namespace,
+    path: PathSpec,
+    last: bool,
+    spelled: str | None = None,
+) -> str:
+    """The door's link follow of one path, with a loop as ELOOP.
+
+    Args:
+        namespace (Namespace): the namespace whose links are followed.
+        path (PathSpec): the path the follow answers for.
+        last (bool): follow the final name too, not only the names above.
+        spelled (str | None): the spelling to follow, ``path.virtual``
+            when None.
+    """
+    virtual = path.virtual if spelled is None else spelled
+    try:
+        if last:
+            return namespace.follow(virtual)
+        return namespace.follow_parent(virtual)
+    except CycleError:
+        raise eloop(path) from None
+
+
+def _operands(name: str, kwargs: dict[str, Any]) -> list[tuple[str, PathSpec]]:
+    """A custom function's other path arguments, by keyword.
+
+    A rename's destination is walked on its own and is not one.
+
+    Args:
+        name (str): the dispatched function name.
+        kwargs (dict[str, Any]): its arguments.
+    """
+    if name == "rename":
+        return []
+    return [
+        (key, value)
+        for key, value in kwargs.items()
+        if isinstance(value, PathSpec)
+    ]
+
+
 @dataclass(slots=True)
 class _Call:
     """One op on its way through the door, as the stages hand it on.
 
     Args:
-        op (str): the dispatched op name.
+        name (str): the dispatched op name.
         path (PathSpec): the op's path: walked, then followed.
         typed (PathSpec): the path as the caller named it.
         dst (PathSpec | None): a rename's walked destination.
@@ -308,7 +351,7 @@ class _Call:
             name, or the effect the mount's VFS declares for it.
     """
 
-    op: str
+    name: str
     path: PathSpec
     typed: PathSpec
     dst: PathSpec | None
@@ -355,7 +398,7 @@ class Dispatcher:
     addressing), cache store, and consistency policy; holds no other
     workspace state. The snapshot drift queue rides along because this
     is the one door: a strict restore's pending fingerprint checks must
-    run before ANY op can touch a mount, and FUSE and the ops facade
+    run before ANY op can touch a mount, and FUSE and ``ws.vfs``
     reach here without passing Workspace.dispatch. So does the
     workspace's write admission, which holds a write while a capture
     reads.
@@ -376,7 +419,7 @@ class Dispatcher:
         self._admit_write = admit_write
         self._writers = KeyLock()
 
-    def _boundary(self, mount: MountEntry | None) -> OpBoundary:
+    def _boundary(self, mount: MountEntry | None) -> Boundary:
         """The policy boundary for an op on a path ``mount`` owns.
 
         The mount's prefix and mode, or for a path above every mount an
@@ -387,7 +430,7 @@ class Dispatcher:
             mount (MountEntry | None): the mount owning the path, None
                 when no mount does.
         """
-        return OpBoundary(
+        return Boundary(
             self._namespace.registry.policies,
             mount.prefix if mount is not None else "",
             mount.mode if mount is not None else MountMode.WRITE,
@@ -400,7 +443,7 @@ class Dispatcher:
         return self._reconciler
 
     def _namespace_result(
-        self, op: str, virtual: str
+        self, name: str, virtual: str
     ) -> list[str] | FileStat | None:
         """The namespace's own answer for a path no backend serves.
 
@@ -410,22 +453,22 @@ class Dispatcher:
         namespace knows nothing at ``virtual``.
 
         Args:
-            op (str): the dispatched op name.
+            name (str): the dispatched op name.
             virtual (str): the virtual path being answered.
         """
         prefixes = [
             m.prefix for m in self._namespace.registry.visible_mounts()
         ]
         vis = session_visibility()
-        if op == "readdir":
+        if name == "readdir":
             return namespace_listing(vis, prefixes, self._namespace, virtual)
-        if op == "stat":
+        if name == "stat":
             return namespace_stat(vis, prefixes, self._namespace, virtual)
         return None
 
     async def _gated_namespace(
         self,
-        op: str,
+        name: str,
         path: PathSpec,
         fallback: "list[str] | FileStat",
         report: OpReport | None,
@@ -437,39 +480,41 @@ class Dispatcher:
         path must cover the synthetic answer too.
 
         Args:
-            op (str): the dispatched op name.
+            name (str): the dispatched op name.
             path (PathSpec): the op's path scope.
             fallback (list[str] | FileStat): the namespace's answer.
             report (OpReport | None): the caller's report, stamped when
                 the answer is in hand.
         """
         boundary = self._boundary(None)
-        write = op in POLICY_WRITE_OPS
+        write = name in POLICY_WRITE_OPS
         # A pre gate refuses before the answer exists, so it is not a
         # completed op and stays before the stamp.
-        await boundary.admit(op, path, write)
+        await boundary.admit(name, path, write)
         _memory_answered(report)
-        if op == "readdir" and isinstance(fallback, list):
+        if name == "readdir" and isinstance(fallback, list):
             fallback = _visible_entries(fallback, path.virtual)
-        return await boundary.complete(op, path, write, fallback)
+        return await boundary.complete(name, path, write, fallback)
 
     async def dispatch(
         self,
-        op: str,
+        name: str,
         path: PathSpec,
+        /,
         *,
         report: OpReport | None = None,
         **kwargs: Any,
     ) -> tuple[Any, IOResult]:
-        if self._admit_write is None or op not in POLICY_WRITE_OPS:
-            return await self._dispatch(op, path, report=report, **kwargs)
+        if self._admit_write is None or name not in POLICY_WRITE_OPS:
+            return await self._dispatch(name, path, report=report, **kwargs)
         async with self._admit_write():
-            return await self._dispatch(op, path, report=report, **kwargs)
+            return await self._dispatch(name, path, report=report, **kwargs)
 
     async def _dispatch(
         self,
-        op: str,
+        name: str,
         path: PathSpec,
+        /,
         *,
         report: OpReport | None = None,
         **kwargs: Any,
@@ -477,20 +522,21 @@ class Dispatcher:
         # with_dispatch_rule_guard's mark, never forwarded to an op.
         rule_gate: EntryGate | None = kwargs.pop("rule_gate", None)
         await self._prepare()
-        call = await self._walk(op, path, kwargs, rule_gate, report)
+        call = await self._walk(name, path, kwargs, rule_gate, report)
         await self._refuse_rename(call)
-        if self._table_answers(op, call.path.virtual, kwargs):
+        if self._table_answers(name, call.path.virtual, kwargs):
             return (
-                await self._namespace_table_op(op, call.path, kwargs, report),
+                await self._table_call(name, call.path, kwargs, report),
                 IOResult(),
             )
         self._follow(call)
-        if op in XATTR_OPS:
+        await self._walk_operands(call)
+        if name in XATTR_OPS:
             return (
-                await self._xattr_op(op, call.path, kwargs, report),
+                await self._answer_xattr(name, call.path, kwargs, report),
                 IOResult(),
             )
-        if op == "statfs":
+        if name == "statfs":
             return await self._statfs(call.path), IOResult()
         mount = self._namespace.try_mount_for(call.path.virtual)
         if mount is None:
@@ -505,11 +551,11 @@ class Dispatcher:
             call, await self._call(call, mount, self._filler(call, mount))
         )
         if (
-            op in DISPATCH_WRITE_OPS
-            or (call.write and op not in POLICY_WRITE_OPS)
-        ) and op not in SERIAL_WRITE_OPS:
-            await self._settle_write(mount, op, call.path, kwargs)
-        result = await boundary.complete(op, call.path, call.write, result)
+            name in DISPATCH_WRITE_OPS
+            or (call.write and name not in POLICY_WRITE_OPS)
+        ) and name not in SERIAL_WRITE_OPS:
+            await self._settle_write(mount, name, call.path, kwargs)
+        result = await boundary.complete(name, call.path, call.write, result)
         return result, IOResult()
 
     async def _prepare(self) -> None:
@@ -517,7 +563,7 @@ class Dispatcher:
 
         Pending fingerprint checks from a strict snapshot restore run
         before the op can touch a mount, whichever surface called: FUSE
-        and the ops facade come straight here, so a drain that lived any
+        and ``ws.vfs`` come straight here, so a drain that lived any
         higher would let a first write clobber drifted state. drain()
         clears pending before it stats, so its own probes cannot recurse
         into it. A dry run leaves them pending, its policies' reads
@@ -534,7 +580,7 @@ class Dispatcher:
 
     async def _walk(
         self,
-        op: str,
+        name: str,
         path: PathSpec,
         kwargs: dict[str, Any],
         rule_gate: EntryGate | None,
@@ -549,12 +595,12 @@ class Dispatcher:
         link above the final name is then followed, whatever the op does
         with the name: command dispatch walks the operands it classifies,
         and this is the same walk for every other caller (a relative word
-        ln resolves itself, the ops facade, a runtime's os.symlink), so a
+        ln resolves itself, ``ws.vfs``, a runtime's os.symlink), so a
         link made, read or removed under a linked directory lands in the
         directory the link names.
 
         Args:
-            op (str): the dispatched op name.
+            name (str): the dispatched op name.
             path (PathSpec): the path as the caller named it.
             kwargs (dict[str, Any]): the op's arguments; a rename's
                 ``dst`` is replaced by its walked spelling.
@@ -563,10 +609,10 @@ class Dispatcher:
         """
         vis = session_visibility()
         if not path_visible(vis, path.virtual):
-            raise hidden_refusal(vis, path.virtual, op in HIDDEN_CREATE_OPS)
+            raise hidden_refusal(vis, path.virtual, name in HIDDEN_CREATE_OPS)
         dst = kwargs.get("dst")
         if (
-            op == "rename"
+            name == "rename"
             and isinstance(dst, PathSpec)
             and not path_visible(vis, dst.virtual)
         ):
@@ -582,28 +628,28 @@ class Dispatcher:
         # `nope/..`, the typed spelling (`dotted`) does not. A trailing
         # slash is part of that spelling: `x/` must be a directory, so a
         # create of one is EISDIR before anything is looked up.
-        if op in FILE_CREATE_OPS and (path.dotted or "").endswith("/"):
+        if name in FILE_CREATE_OPS and (path.dotted or "").endswith("/"):
             raise eisdir(path)
         follow = self._namespace.follow
         refusal = await dot_refusal(
-            self._walk_stat, path, follow, op in ENTRY_CREATE_OPS
+            self._walk_stat, path, follow, name in ENTRY_CREATE_OPS
         )
-        if refusal is None and op == "rename" and isinstance(dst, PathSpec):
+        if refusal is None and name == "rename" and isinstance(dst, PathSpec):
             refusal = await dot_refusal(self._walk_stat, dst, follow)
         if refusal is not None:
             raise refusal
         typed, typed_dst = path, dst
-        path = self._walked(path, op in HIDDEN_CREATE_OPS)
-        if op == "rename" and isinstance(dst, PathSpec):
+        path = self._walked(path, name in HIDDEN_CREATE_OPS)
+        if name == "rename" and isinstance(dst, PathSpec):
             dst = kwargs["dst"] = self._walked(dst, True)
         # The command's gate judges each spelling, as handed in and as
         # walked, once both walks have answered for hidden space: here
         # for an op on the name itself, in ``_follow`` for the rest.
-        no_follow = op in NO_FOLLOW_OPS or bool(kwargs.get("nofollow"))
+        no_follow = name in NO_FOLLOW_OPS or bool(kwargs.get("nofollow"))
         if rule_gate is not None and no_follow:
             _judge(rule_gate, typed, path, typed_dst, dst)
         return _Call(
-            op=op,
+            name=name,
             path=path,
             typed=typed,
             dst=dst if isinstance(dst, PathSpec) else None,
@@ -612,7 +658,7 @@ class Dispatcher:
             rule_gate=rule_gate,
             report=report,
             no_follow=no_follow,
-            write=op in POLICY_WRITE_OPS,
+            write=name in POLICY_WRITE_OPS,
         )
 
     async def _refuse_rename(self, call: _Call) -> None:
@@ -635,7 +681,7 @@ class Dispatcher:
             call (_Call): the walked op.
         """
         dst = call.dst
-        if call.op != "rename" or dst is None:
+        if call.name != "rename" or dst is None:
             return
         if move_reveals(
             call.vis, call.path.virtual, dst.virtual
@@ -655,23 +701,35 @@ class Dispatcher:
             call (_Call): the walked op; its ``path`` becomes the target.
         """
         walked = call.path
-        if call.op not in NO_FOLLOW_OPS and not call.kwargs.pop(
-            "nofollow", False
-        ):
-            try:
-                followed = self._namespace.follow(call.path.virtual)
-            except CycleError:
-                raise eloop(call.path) from None
+        nofollow = call.kwargs.pop("nofollow", False)
+        if call.name not in NO_FOLLOW_OPS and not nofollow:
+            followed = _follow_or_loop(self._namespace, call.path, True)
             if followed != call.path.virtual:
                 call.path = PathSpec.from_str_path(followed)
                 if not path_visible(call.vis, call.path.virtual):
                     raise hidden_refusal(
                         call.vis,
                         call.path.virtual,
-                        call.op in HIDDEN_CREATE_OPS,
+                        call.name in HIDDEN_CREATE_OPS,
                     )
         if call.rule_gate is not None and not call.no_follow:
             _judge(call.rule_gate, call.typed, walked, call.path)
+
+    async def _walk_operands(self, call: _Call) -> None:
+        """Walk and follow each other path argument as the path is.
+
+        The same hides, spelling checks and rule gate apply, so a second
+        path is no way around them; the followed spelling replaces it.
+
+        Args:
+            call (_Call): the followed op; its path arguments are walked.
+        """
+        for key, typed in _operands(call.name, call.kwargs):
+            other = await self._walk(
+                call.name, typed, {}, call.rule_gate, None
+            )
+            self._follow(other)
+            call.kwargs[key] = other.path
 
     async def _answer_unmounted(self, call: _Call) -> Any:
         """Answer an op on a path no mount serves.
@@ -685,18 +743,18 @@ class Dispatcher:
         Args:
             call (_Call): the followed op.
         """
-        if call.op == "setattr":
+        if call.name == "setattr":
             boundary = self._boundary(None)
-            await boundary.admit(call.op, call.path, True)
+            await boundary.admit(call.name, call.path, True)
             applied = await self._overlay_setattr(call.path, call.kwargs)
             _memory_answered(call.report)
-            await boundary.complete(call.op, call.path, True, applied)
+            await boundary.complete(call.name, call.path, True, applied)
             return applied
-        fallback = self._namespace_result(call.op, call.path.virtual)
+        fallback = self._namespace_result(call.name, call.path.virtual)
         if fallback is None:
             raise no_mount(call.path.virtual)
         return await self._gated_namespace(
-            call.op, call.path, fallback, call.report
+            call.name, call.path, fallback, call.report
         )
 
     async def _refuse_cross_mount(
@@ -717,15 +775,20 @@ class Dispatcher:
         """
         dst = call.dst
         if (
-            call.op == "rename"
+            call.name == "rename"
             and dst is not None
             and self._namespace.try_mount_for(dst.virtual) is not mount
         ):
             refusal = await self._parent_refusal(call.path)
             refusal = refusal or await self._parent_refusal(dst)
             raise refusal or exdev(call.path)
+        # A function runs on one backend, so every path it is handed
+        # must be on the mount that serves it.
+        for _, other in _operands(call.name, call.kwargs):
+            if self._namespace.try_mount_for(other.virtual) is not mount:
+                raise exdev(other)
 
-    async def _admit(self, call: _Call, mount: MountEntry) -> OpBoundary:
+    async def _admit(self, call: _Call, mount: MountEntry) -> Boundary:
         """Run admission for an op on a mounted path.
 
         Admission policies fire at the door, before the warm-cache early
@@ -741,26 +804,28 @@ class Dispatcher:
             mount (MountEntry): the mount serving its path.
 
         Returns:
-            OpBoundary: the boundary the op completes through.
+            Boundary: the boundary the op completes through.
         """
         # A function the VFS declares a write is judged as one, whatever
         # its name: the POSIX names are known here, a custom one only to
         # the VFS that defines it.
-        call.write = call.write or mount.writes(call.op)
+        call.write = call.write or mount.writes(call.name)
         boundary = self._boundary(mount)
         await boundary.admit(
-            call.op,
+            call.name,
             call.path,
             call.write,
-            create=call.op in HIDDEN_CREATE_OPS,
-            subtree=call.op == "rename",
-            final=call.op != "rename",
+            create=call.name in HIDDEN_CREATE_OPS,
+            subtree=call.name == "rename",
+            final=call.name != "rename",
         )
-        if call.op == "rename" and call.dst is not None:
+        if call.name == "rename" and call.dst is not None:
             await self._boundary(
                 self._namespace.try_mount_for(call.dst.virtual)
-            ).admit(call.op, call.dst, True, create=True, subtree=True)
-        if call.op == "rmdir" and any(
+            ).admit(call.name, call.dst, True, create=True, subtree=True)
+        for _, other in _operands(call.name, call.kwargs):
+            await boundary.admit(call.name, other, call.write)
+        if call.name == "rmdir" and any(
             path_visible(call.vis, link)
             for link, _ in self._namespace.link_stats_below(call.path.virtual)
         ):
@@ -768,7 +833,7 @@ class Dispatcher:
         return boundary
 
     async def _serve_cached(
-        self, call: _Call, mount: MountEntry, boundary: OpBoundary
+        self, call: _Call, mount: MountEntry, boundary: Boundary
     ) -> bytes | None:
         """Answer a read from the file cache, or None to read the backend.
 
@@ -785,12 +850,12 @@ class Dispatcher:
         Args:
             call (_Call): the admitted op.
             mount (MountEntry): the mount serving its path.
-            boundary (OpBoundary): the boundary the op completes through.
+            boundary (Boundary): the boundary the op completes through.
         """
         if (
             not mount.vfs.caches_reads
             or call.raw
-            or call.op not in DISPATCH_READ_OPS
+            or call.name not in DISPATCH_READ_OPS
         ):
             return None
         cached = await self._cache.get(call.path.virtual)
@@ -804,6 +869,7 @@ class Dispatcher:
             or self._namespace.try_mount_for(call.path.virtual) is not mount
         ):
             return None
+        mount.refuse_keywords(call.name, call.kwargs)
         offset, size = call.window
         served = slice_window(cached, offset, size)
         # Nothing crossed the network, and neither a gate nor a hard cap
@@ -811,7 +877,9 @@ class Dispatcher:
         # warm read is recorded against the backend and counted as
         # traffic that never happened.
         _memory_answered(call.report, len(served))
-        return await boundary.complete(call.op, call.path, call.write, served)
+        return await boundary.complete(
+            call.name, call.path, call.write, served
+        )
 
     def _filler(self, call: _Call, mount: MountEntry) -> CacheManager | None:
         """The cache manager a cold read fills, or None to keep nothing.
@@ -834,7 +902,7 @@ class Dispatcher:
         if (
             mount.vfs.caches_reads
             and not call.raw
-            and call.op in DISPATCH_READ_OPS
+            and call.name in DISPATCH_READ_OPS
             and size != 0
             and (
                 (offset, size) == (0, None)
@@ -862,19 +930,20 @@ class Dispatcher:
             Any: the op's answer (each op has its own shape).
         """
         kwargs = call.kwargs
-        if call.op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
-            # Ops.rename addresses both endpoints against the source's
-            # mount; mirror that here so the backend sees a
-            # mount-relative destination.
-            dst = kwargs["dst"]
-            kwargs["dst"] = PathSpec(
-                virtual=dst.virtual,
-                directory=dst.virtual.rsplit("/", 1)[0] or "/",
-                vfs_path=mount_key(dst.virtual, mount.prefix.rstrip("/")),
-            )
+        # Every path argument beside the path (a rename's destination, a
+        # custom function's other paths) is addressed against the same
+        # mount, so the backend sees a mount-relative path.
+        prefix = mount.prefix.rstrip("/")
+        for key, value in list(kwargs.items()):
+            if isinstance(value, PathSpec):
+                kwargs[key] = PathSpec(
+                    virtual=value.virtual,
+                    directory=value.virtual.rsplit("/", 1)[0] or "/",
+                    vfs_path=mount_key(value.virtual, prefix),
+                )
         result: Any
         try:
-            if call.op == "setattr":
+            if call.name == "setattr":
                 result = await self._apply_setattr(mount, call.path, kwargs)
             elif filler is not None:
                 offset, size = call.window
@@ -882,7 +951,7 @@ class Dispatcher:
                     call.path,
                     functools.partial(
                         mount.call,
-                        call.op,
+                        call.name,
                         call.path.virtual,
                         **_whole_read(kwargs),
                     ),
@@ -893,20 +962,22 @@ class Dispatcher:
                     if (offset, size) == (0, None)
                     else slice_window(kept, offset, size)
                 )
-            elif call.op in SERIAL_WRITE_OPS:
+            elif call.name in SERIAL_WRITE_OPS:
                 result = await self._serial_write(call, mount)
             else:
-                result = await mount.call(call.op, call.path.virtual, **kwargs)
+                result = await mount.call(
+                    call.name, call.path.virtual, **kwargs
+                )
         except (FileNotFoundError, NotADirectoryError):
-            result = self._namespace_result(call.op, call.path.virtual)
+            result = self._namespace_result(call.name, call.path.virtual)
             if result is None:
-                await self._reconciler.on_op_missing(
-                    mount, call.op, call.path.virtual
+                await self._reconciler.on_enoent(
+                    mount, call.name, call.path.virtual
                 )
                 raise
             _memory_answered(call.report)
         except OSError as exc:
-            if call.op != "rmdir" or exc.errno not in (
+            if call.name != "rmdir" or exc.errno not in (
                 errno.ENOTEMPTY,
                 errno.EEXIST,
             ):
@@ -946,9 +1017,9 @@ class Dispatcher:
         async with AsyncExitStack() as held:
             for key in sorted(keys):
                 await held.enter_async_context(self._writers.with_lock(key))
-            result = await mount.call(call.op, call.path.virtual, **kwargs)
+            result = await mount.call(call.name, call.path.virtual, **kwargs)
             _served(call.report, result)
-            await self._settle_write(mount, call.op, call.path, kwargs)
+            await self._settle_write(mount, call.name, call.path, kwargs)
         return result
 
     def _filter(self, call: _Call, result: Any) -> Any:
@@ -962,7 +1033,7 @@ class Dispatcher:
             call (_Call): the op that ran.
             result (Any): the backend's answer.
         """
-        if call.op == "readdir":
+        if call.name == "readdir":
             return _visible_entries(
                 merge_readdir(
                     call.vis,
@@ -976,7 +1047,7 @@ class Dispatcher:
                 ),
                 call.path.virtual,
             )
-        if call.op == "stat" and isinstance(result, FileStat):
+        if call.name == "stat" and isinstance(result, FileStat):
             return merge_overlay_stat(
                 self._namespace.meta_for(call.path.virtual), result
             )
@@ -985,7 +1056,7 @@ class Dispatcher:
     async def _settle_write(
         self,
         mount: MountEntry,
-        op: str,
+        name: str,
         path: PathSpec,
         kwargs: dict[str, Any],
     ) -> None:
@@ -994,25 +1065,27 @@ class Dispatcher:
 
         Args:
             mount (MountEntry): the mount the write ran on.
-            op (str): the write op that ran.
+            name (str): the write op that ran.
             path (PathSpec): the path it wrote, after any follow.
             kwargs (dict[str, Any]): the op's kwargs; a rename's ``dst``
                 is the moved name.
         """
-        opened = _appends_nothing(op, kwargs)
+        opened = _appends_nothing(name, kwargs)
         observed = (
-            time.time() if op in STAMP_WRITE_OPS and not opened else None
+            time.time() if name in STAMP_WRITE_OPS and not opened else None
         )
         await self.invalidate_after_write(
             mount, path, observed=observed, times=not opened
         )
-        if op in ("unlink", "rmdir"):
+        for _, other in _operands(name, kwargs):
+            await self.invalidate_after_write(mount, other)
+        if name in ("unlink", "rmdir"):
             # The name no longer holds that file, so what was set on
             # it (overlay mode and owner, extended attributes) goes
             # with it, as the shell's rm already drops it: a file
             # created there next starts bare on every surface.
             await self._namespace.drop_overlay(path.virtual)
-            if op == "rmdir":
+            if name == "rmdir":
                 # The link check ran before the backend was asked, so
                 # a visible link below now was created since: it is
                 # younger than this rmdir, lands after it in the
@@ -1028,7 +1101,7 @@ class Dispatcher:
                     if path_visible(vis, link)
                 )
                 await self._namespace.purge_under(path.virtual, keep=arrived)
-        if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
+        if name == "rename" and isinstance(kwargs.get("dst"), PathSpec):
             await self.invalidate_after_rename(mount, path, kwargs["dst"])
             # rename(2) replaces the destination, so a node the
             # table holds at that name does not survive the move.
@@ -1189,10 +1262,7 @@ class Dispatcher:
                 OSError every caller's per-operand catch words.
         """
         spelled = walk_spelling(path, self._namespace.follow)
-        try:
-            walked = self._namespace.follow_parent(spelled)
-        except CycleError:
-            raise eloop(path) from None
+        walked = _follow_or_loop(self._namespace, path, False, spelled)
         if spelled != path.virtual:
             walked = posixpath.normpath(walked)
         if walked == path.virtual:
@@ -1203,7 +1273,7 @@ class Dispatcher:
         return PathSpec.from_str_path(walked)
 
     def _table_answers(
-        self, op: str, virtual: str, kwargs: dict[str, Any]
+        self, name: str, virtual: str, kwargs: dict[str, Any]
     ) -> bool:
         """Whether the node table answers this op instead of a backend.
 
@@ -1217,22 +1287,22 @@ class Dispatcher:
         the target.
 
         Args:
-            op (str): the dispatched op name.
+            name (str): the dispatched op name.
             virtual (str): the op's virtual path.
             kwargs (dict[str, Any]): the op's arguments, read for the
                 caller's ``nofollow``.
         """
-        if op in NAMESPACE_TABLE_OPS:
+        if name in NAMESPACE_TABLE_OPS:
             return True
-        if op not in LINK_ENTRY_OPS:
+        if name not in LINK_ENTRY_OPS:
             return False
-        if op == "stat" and not kwargs.get("nofollow"):
+        if name == "stat" and not kwargs.get("nofollow"):
             return False
         return self._namespace.is_link(virtual)
 
-    async def _namespace_table_op(
+    async def _table_call(
         self,
-        op: str,
+        name: str,
         path: PathSpec,
         kwargs: dict[str, Any],
         report: OpReport | None,
@@ -1246,7 +1316,7 @@ class Dispatcher:
         reads for), session grants and both gates run, and the write
         leaves an OpRecord — a scoped kernel mount refuses exactly like
         a scoped shell. The turf's mode gates the write too
-        (``MountModePolicy`` at the ``OpBoundary``), so a read-only
+        (``MountModePolicy`` at the ``Boundary``), so a read-only
         mount or grant answers EROFS for a link exactly as for a file;
         a link above every mount is bare namespace structure, gated
         with an empty prefix and governed by ``/``. A rename's
@@ -1254,7 +1324,7 @@ class Dispatcher:
         not share one.
 
         Args:
-            op (str): ``symlink`` or ``readlink``, or the ``unlink``,
+            name (str): ``symlink`` or ``readlink``, or the ``unlink``,
                 ``rename`` or no-follow ``stat`` of a path the node
                 table holds a link for.
             path (PathSpec): the link's own path, never followed.
@@ -1266,19 +1336,19 @@ class Dispatcher:
         timer = start_op()
         mount = self._namespace.try_mount_for(path.virtual)
         boundary = self._boundary(mount)
-        write = op in POLICY_WRITE_OPS
+        write = name in POLICY_WRITE_OPS
         await boundary.admit(
-            op,
+            name,
             path,
             write,
-            create=op in HIDDEN_CREATE_OPS,
-            final=op != "rename",
+            create=name in HIDDEN_CREATE_OPS,
+            final=name != "rename",
         )
         result: str | FileStat | None = None
-        if op == "unlink":
+        if name == "unlink":
             target = self._namespace.readlink(path.virtual) or ""
             await self._namespace.unlink(path.virtual)
-        elif op == "rename":
+        elif name == "rename":
             target = self._namespace.readlink(path.virtual) or ""
             dst = kwargs["dst"]
             # The destination is a create there, gated like the source
@@ -1287,7 +1357,7 @@ class Dispatcher:
             # replaces it: any node the table holds at that name (a
             # link, an attr overlay) goes.
             dst_mount = self._namespace.try_mount_for(dst.virtual)
-            await self._boundary(dst_mount).admit(op, dst, True, create=True)
+            await self._boundary(dst_mount).admit(name, dst, True, create=True)
             # The name the link moves to must have a directory above it,
             # as for a new link: the table alone would file it under an
             # absent parent and synthesize the directories above it.
@@ -1302,7 +1372,7 @@ class Dispatcher:
                     await self.dispatch("unlink", dst)
             await self._namespace.unlink(dst.virtual)
             await self._namespace.rename(path.virtual, dst.virtual)
-        elif op == "symlink":
+        elif name == "symlink":
             target = str(kwargs["target"])
             # symlink(2) refuses an occupied name and a name its parent
             # cannot hold, and the door is the only place that can tell:
@@ -1316,7 +1386,7 @@ class Dispatcher:
             if refusal is not None:
                 raise refusal
             await self._namespace.symlink(path.virtual, target, time.time())
-        elif op == "stat":
+        elif name == "stat":
             row = self._namespace.link_stat_at(path.virtual)
             if row is None:
                 raise enoent(path.virtual)
@@ -1329,14 +1399,14 @@ class Dispatcher:
             target = found
             result = found
         record(
-            op,
+            name,
             path.virtual,
             VFSName.RAM.value,
             len(encode_text(target)),
             timer,
         )
         _memory_answered(report)
-        return await boundary.complete(op, path, write, result)
+        return await boundary.complete(name, path, write, result)
 
     async def _readlink_miss(self, path: PathSpec) -> OSError:
         """The error a readlink of something that is not a link answers.
@@ -1404,7 +1474,7 @@ class Dispatcher:
         if norm_dir(mount.prefix) == norm_dir(path.virtual):
             return True, None
         try:
-            row = await self._probe_op("stat", mount, path)
+            row = await self._probe_read("stat", mount, path)
             if row is not None and row.type is not FileType.DIRECTORY:
                 return True, None
             listing = await self._parent_listing(path)
@@ -1504,7 +1574,7 @@ class Dispatcher:
         if norm_dir(mount.prefix) == norm_dir(virtual):
             return FileType.DIRECTORY
         spec = PathSpec.from_str_path(virtual)
-        row = await self._probe_op("stat", mount, spec)
+        row = await self._probe_read("stat", mount, spec)
         if row is not None:
             return row.type
         listing = await self._parent_listing(spec)
@@ -1525,12 +1595,12 @@ class Dispatcher:
         mount = self._namespace.try_mount_for(above or "/")
         if not name or mount is None:
             return None
-        return await self._probe_op(
+        return await self._probe_read(
             "readdir", mount, PathSpec.from_str_path(above or "/")
         )
 
-    async def _probe_op(
-        self, op: str, mount: MountEntry, path: PathSpec
+    async def _probe_read(
+        self, name: str, mount: MountEntry, path: PathSpec
     ) -> Any:
         """Run one read op for a probe, or None when it found nothing.
 
@@ -1541,17 +1611,17 @@ class Dispatcher:
         caller knows what to answer when a channel goes dark.
 
         Args:
-            op (str): ``stat`` or ``readdir``.
+            name (str): ``stat`` or ``readdir``.
             mount (MountEntry): the mount owning the path.
             path (PathSpec): the path to probe.
         """
-        if not mount.supports_op(op, path.virtual):
+        if not mount.answers_at(name, path.virtual):
             return None
         boundary = self._boundary(mount)
-        await boundary.admit(op, path, False)
+        await boundary.admit(name, path, False)
         try:
-            result = await mount.call(op, path.virtual)
-            return await boundary.complete(op, path, False, result)
+            result = await mount.call(name, path.virtual)
+            return await boundary.complete(name, path, False, result)
         except NotADirectoryError:
             # Final on every channel: a plain file above the path means
             # nothing can be at it or under it, and symlink(2) and
@@ -1562,9 +1632,9 @@ class Dispatcher:
             # not absence on its own, so the caller tries the other.
             return None
 
-    async def _xattr_op(
+    async def _answer_xattr(
         self,
-        op: str,
+        name: str,
         path: PathSpec,
         kwargs: dict[str, Any],
         report: OpReport | None,
@@ -1579,7 +1649,7 @@ class Dispatcher:
         turf, and a write needs a writable turf.
 
         Args:
-            op (str): ``getxattr``, ``listxattr``, ``setxattr`` or
+            name (str): ``getxattr``, ``listxattr``, ``setxattr`` or
                 ``removexattr``.
             path (PathSpec): the path, already followed unless the
                 caller asked for its link node itself.
@@ -1591,33 +1661,33 @@ class Dispatcher:
         timer = start_op()
         mount = self._namespace.try_mount_for(path.virtual)
         boundary = self._boundary(mount)
-        write = op in POLICY_WRITE_OPS
-        await boundary.admit(op, path, write)
+        write = name in POLICY_WRITE_OPS
+        await boundary.admit(name, path, write)
         await self._xattr_target(mount, path)
         stored = self._namespace.xattrs(path.virtual)
-        name = str(kwargs.get("name", ""))
+        attr = str(kwargs.get("name", ""))
         result: bytes | list[str] | None = None
-        if op == "listxattr":
+        if name == "listxattr":
             result = sorted(stored)
-        elif op == "getxattr":
-            found = stored.get(name)
+        elif name == "getxattr":
+            found = stored.get(attr)
             if found is None:
                 raise no_xattr(path)
             result = found
-        elif op == "setxattr":
-            if kwargs.get("create") and name in stored:
+        elif name == "setxattr":
+            if kwargs.get("create") and attr in stored:
                 raise eexist(path.virtual)
-            if kwargs.get("replace") and name not in stored:
+            if kwargs.get("replace") and attr not in stored:
                 raise no_xattr(path)
             await self._namespace.set_xattr(
-                path.virtual, name, bytes(kwargs.get("value") or b"")
+                path.virtual, attr, bytes(kwargs.get("value") or b"")
             )
         else:
-            if name not in stored:
+            if attr not in stored:
                 raise no_xattr(path)
-            await self._namespace.remove_xattr(path.virtual, name)
+            await self._namespace.remove_xattr(path.virtual, attr)
         record(
-            op,
+            name,
             path.virtual,
             VFSName.RAM.value,
             len(result) if isinstance(result, bytes) else 0,
@@ -1625,7 +1695,7 @@ class Dispatcher:
         )
         if report is not None:
             report.served(None, None)
-        return await boundary.complete(op, path, write, result)
+        return await boundary.complete(name, path, write, result)
 
     async def _statfs(self, path: PathSpec) -> tuple[str, CapacityResult]:
         """Answer statfs(2) for a path: the type name and the capacity of
@@ -1676,9 +1746,7 @@ class Dispatcher:
                 stat = await mount.call("stat", path.virtual)
             except (FileNotFoundError, NotADirectoryError) as exc:
                 missing = exc
-                await self._reconciler.on_op_missing(
-                    mount, "stat", path.virtual
-                )
+                await self._reconciler.on_enoent(mount, "stat", path.virtual)
         if stat is not None or isinstance(
             self._namespace_result("stat", path.virtual), FileStat
         ):
@@ -1708,7 +1776,7 @@ class Dispatcher:
             kwargs (dict[str, Any]): the requested attribute fields.
         """
         requested = {key: kwargs.get(key) for key in SETATTR_KEYS}
-        if self._namespace.is_link(path.virtual) or not mount.supports_op(
+        if self._namespace.is_link(path.virtual) or not mount.answers_at(
             "setattr", path.virtual
         ):
             # No backend inode answers for the path here, so nothing

@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.ops.namespace_view import (
+from mirage.types import FileType, HiddenPaths, Visibility
+from mirage.view.namespace_view import (
     child_mount_names,
     merge_readdir,
     namespace_listing,
@@ -20,7 +21,6 @@ from mirage.ops.namespace_view import (
     namespace_stat,
     visible_child_segments,
 )
-from mirage.types import FileType, HiddenPaths, Visibility
 
 PREFIXES = ["/base/", "/base/inner/", "/base/inner/deep/", "/other/", "/"]
 

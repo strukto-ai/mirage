@@ -23,12 +23,15 @@ from typing import Any
 from mirage.commands.builtin.utils.identity import UNKNOWN_NAME
 from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.commands.errors import CommandTimeoutError
-from mirage.context import program_invocation
+from mirage.context import (
+    program_invocation,
+    reset_current_session,
+    set_current_evaluation,
+)
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
-from mirage.ops.types import SessionView
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.process.types import ProcessInfo, ProcessState
@@ -56,12 +59,8 @@ from mirage.shell.node_kind import NodeKind, node_kind, simple_command
 from mirage.shell.parse.program import retain_programs
 from mirage.shell.types import TSNodeLike
 from mirage.utils.timezone import zone_from_env
-from mirage.workspace.evaluation import (
-    EvaluationContext,
-    child_context,
-    reset_current_evaluation,
-    set_current_evaluation,
-)
+from mirage.view.types import SessionView
+from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.executor.statement import failed_read, statement_stdin
@@ -303,7 +302,7 @@ async def handle_background(
             return io, exec_node
         finally:
             release_job()
-            reset_current_evaluation(token)
+            reset_current_session(token)
             if job_handed is not None and decisions is not None:
                 await decisions.revoke(session.session_id, job_handed)
 

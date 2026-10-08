@@ -20,7 +20,6 @@ from mirage.errors.render import operand_spelling
 from mirage.errors.types import (
     FsCondition,
 )
-from mirage.ops.types import LinkView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec, StatFn
 from mirage.utils.key_prefix import rekey
@@ -31,6 +30,7 @@ from mirage.utils.path import (
     parent,
     resolve_path,
 )
+from mirage.view.types import LinkView, StatPath
 
 
 def has_unresolved_glob(paths: list[PathSpec]) -> bool:

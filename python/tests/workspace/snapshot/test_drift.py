@@ -375,7 +375,7 @@ def test_a_mount_root_retraction_leaves_a_nested_mount_alone():
 
 def test_records_are_ordered_by_timestamp_not_by_position():
     """A backend record reaches the list when its line ends, while an
-    `Ops` facade record appends as it happens, so a retraction can sit
+    `Files` facade record appends as it happens, so a retraction can sit
     ahead of the write it precedes in time."""
     entries = capture_fingerprints(
         *_log(

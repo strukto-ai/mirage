@@ -56,7 +56,6 @@ it.each([undefined, enoent('/format'), eacces('/format')])(
         cmd.fn(new RAMVFS().accessor, [], ['https://example.test/hello'], {
           stdin: null,
           cwd: '/',
-          filetypeFns: null,
           flags: {
             write_out: '@/format',
             silent: silent ?? false,

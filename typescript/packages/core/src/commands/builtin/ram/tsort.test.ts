@@ -29,7 +29,6 @@ async function runTsort(stdin: Uint8Array | null): Promise<{ out: string; exitCo
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
     stdin,
     flags: {},
-    filetypeFns: null,
     io: commandIo(vfs),
     cwd: '/',
   })

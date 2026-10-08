@@ -38,7 +38,7 @@ import {
   subscriptIndex,
 } from '../../../session/state.ts'
 import type { SessionState } from '../../../session/session.ts'
-import type { SessionView } from '../../../../ops/types.ts'
+import type { SessionView } from '../../../../view/types.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { arithRefusal, isValidName, readonlyLine, refusal, requireView } from '../shared.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'

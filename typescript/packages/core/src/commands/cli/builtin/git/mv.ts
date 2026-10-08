@@ -15,7 +15,7 @@
 import { visiblePath, repoRelative, under as inside } from './pathspec.ts'
 import { type PathSpec, FileType, type FileStat } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { LinkView, MountView, StatPath } from '../../../../ops/types.ts'
+import type { LinkView, MountView, StatPath } from '../../../../view/types.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 import { isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import type { CommandFnResult } from '../../../config.ts'

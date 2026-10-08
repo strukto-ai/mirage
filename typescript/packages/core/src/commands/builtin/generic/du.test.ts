@@ -25,7 +25,7 @@ import {
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { enoent } from '../../../errors/fs.ts'
 import type { CommandOpts } from '../../config.ts'
-import type { LinkView, MountView } from '../../../ops/types.ts'
+import type { LinkView, MountView } from '../../../view/types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
 const DEC = new TextDecoder()
@@ -43,7 +43,6 @@ function opts(flags: Record<string, string | boolean> = {}): CommandOpts {
   return {
     stdin: null,
     flags,
-    filetypeFns: null,
     cwd: '/',
     vfs: {} as never,
   } as unknown as CommandOpts

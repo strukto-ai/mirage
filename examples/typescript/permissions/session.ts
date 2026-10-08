@@ -19,14 +19,14 @@ import {
   parseSessionProfile,
 } from "@struktoai/mirage-node";
 import type {
-  Ops,
+  Files,
   SessionExecuteOptions,
   Session,
 } from "@struktoai/mirage-node";
 
 // One agent, one session. `ws.session(id, { profile })` creates a session
 // under a role and hands back its two doors bound together: `shell`
-// runs a shell line as the session and `vfs` is the op facade run as it.
+// runs a shell line as the session and `vfs` is the file API run as it.
 // Whichever door an agent's tools use, the same profile answers.
 //
 // Two roles read one world and see two filesystems. The reviewer's
@@ -92,7 +92,7 @@ interface Doors {
     stderr: Uint8Array | null;
     exitCode: number;
   }>;
-  vfs: Ops;
+  vfs: Files;
 }
 
 async function line(

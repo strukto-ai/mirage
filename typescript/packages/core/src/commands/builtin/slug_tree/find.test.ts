@@ -41,7 +41,7 @@ import { DIFY_COMMANDS } from '../dify/index.ts'
 import { CHROMA_COMMANDS } from '../chroma/index.ts'
 import { parseFindExpression } from '../find_parse.ts'
 import { readsSizes, readsTimes } from './find.ts'
-import type { NamespaceView } from '../../../ops/types.ts'
+import type { NamespaceView } from '../../../view/types.ts'
 import type { Visibility } from '../../../types.ts'
 import { hiddenUnder } from '../../../utils/hidden.ts'
 import { ioFor } from '../../../test-utils.ts'
@@ -100,7 +100,6 @@ describe('slug-tree find under a hide', () => {
     const opts = {
       stdin: null,
       flags: {},
-      filetypeFns: null,
       io: ioFor(DifyVFS, accessor),
       cwd: '/',
       index: new RAMIndexCacheStore(),
@@ -176,7 +175,6 @@ describe('chroma find', () => {
       const opts = {
         stdin: null,
         flags,
-        filetypeFns: null,
         io: ioFor(ChromaVFS, accessor),
         cwd: '/',
         index: new RAMIndexCacheStore(),

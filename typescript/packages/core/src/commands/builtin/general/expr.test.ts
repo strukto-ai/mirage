@@ -30,7 +30,6 @@ async function runExpr(texts: string[]): Promise<{ out: string; err: string; exi
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags: {},
-    filetypeFns: null,
     cwd: '/',
   })
   if (result === null) return { out: '', err: '', exitCode: -1 }
@@ -73,7 +72,6 @@ async function runExprByteView(texts: string[]): Promise<{ out: string; exitCode
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags: {},
-    filetypeFns: null,
     cwd: '/',
   })
   if (result === null) throw new Error('expr answered nothing')

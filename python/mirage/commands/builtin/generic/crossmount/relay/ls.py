@@ -22,10 +22,10 @@ from mirage.commands.builtin.generic.ls import ls as generic_ls
 from mirage.commands.builtin.generic_bind.adapter import overlaid_stat
 from mirage.commands.builtin.utils.identity import identity_from
 from mirage.commands.spec.types import FlagValue
-from mirage.ops.types import LinkView, NamespaceView, SessionView
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec
 from mirage.utils.path import gnu_basename
+from mirage.view.types import LinkView, NamespaceView, SessionView
 
 
 async def relayed_readdir(

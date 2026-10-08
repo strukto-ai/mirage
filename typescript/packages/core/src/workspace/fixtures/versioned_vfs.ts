@@ -103,9 +103,9 @@ export function versionedWorkspace(
 ): { ws: Workspace; mount: MountEntry; rec: Reconciler; asked: string[] } {
   const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE, read: { policy, ttl: 600 } })
   const mount = ws.namespace.mountFor('/m/a')
-  const call = mount.callOp.bind(mount)
+  const call = mount.callKeyed.bind(mount)
   const asked: string[] = []
-  vi.spyOn(mount, 'callOp').mockImplementation((name, ...rest) => {
+  vi.spyOn(mount, 'callKeyed').mockImplementation((name, ...rest) => {
     asked.push(name)
     return call(name, ...rest)
   })

@@ -15,7 +15,7 @@
 import type { ProcessView } from '../../process/view.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
 import type { Limit, PathSpec } from '../../types.ts'
-import type { NamespaceView, SessionView, StatPath } from '../../ops/types.ts'
+import type { NamespaceView, SessionView, StatPath } from '../../view/types.ts'
 import { type ScriptSource, type DispatchFn } from '../../runtime/types.ts'
 import type { CommandFnResult } from '../config.ts'
 import type { ZodObject, ZodRawShape } from 'zod'
@@ -93,6 +93,8 @@ export interface CLIInvocation<ConfigT = unknown> {
   paths: readonly PathSpec[]
   /** Text-typed operands of the leaf. */
   texts: readonly string[]
+  /** The session's working directory, the one the paths were resolved against. */
+  cwd: PathSpec
   /** Merged group and leaf flags keyed by kwarg name, read via FlagView. */
   flags: Record<string, FlagValue>
   /** Piped input, null when the line has none. */

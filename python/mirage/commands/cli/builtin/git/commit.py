@@ -58,7 +58,7 @@ from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import SessionView
+from mirage.view.types import SessionView
 
 # git tags the first commit on a branch so the reflog reads
 # "commit (initial): ..." rather than plain "commit: ...".

@@ -29,9 +29,9 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource
-from mirage.ops.types import NamespaceView
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec, PrimitiveMove
+from mirage.view.types import NamespaceView
 
 
 async def run_mv(

@@ -222,7 +222,7 @@ def capture_fingerprints(
     """
     out: dict[str, dict[str, Any]] = {}
     # By timestamp, not by position: a backend record reaches this list
-    # only when its line ends (`execute.py`), while an `Ops` facade
+    # only when its line ends (`execute.py`), while a `Files` facade
     # record appends as it happens, so the list is flush-ordered and a
     # retraction can otherwise sit before the write it retracts. The
     # sort is stable, so same-millisecond records keep their order.

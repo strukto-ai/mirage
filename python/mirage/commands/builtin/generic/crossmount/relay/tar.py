@@ -24,9 +24,9 @@ from mirage.commands.builtin.generic_bind.archive_io import (
 )
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource
-from mirage.ops.types import NamespaceView
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
+from mirage.view.types import NamespaceView
 
 
 async def run_tar(

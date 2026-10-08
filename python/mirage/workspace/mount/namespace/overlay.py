@@ -24,7 +24,7 @@ def merge_overlay_stat(meta: NodeMeta | None, stat: FileStat) -> FileStat:
 
     Backends without a native attribute slot store chmod/chown/touch
     results in the namespace node table; every stat surface (dispatch,
-    the ops facade, FUSE) merges through here (overlay wins per-field)
+    ``ws.vfs``, FUSE) merges through here (overlay wins per-field)
     so they cannot disagree.
 
     Args:

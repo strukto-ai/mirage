@@ -25,7 +25,7 @@ import type {
   ReaddirPath,
   SessionView,
   StatPath,
-} from '../ops/types.ts'
+} from '../view/types.ts'
 import type { TargetStat } from '../utils/glob_walk.ts'
 import type {
   ContentSearchOps,
@@ -55,7 +55,7 @@ import type { CommandSpec, FlagValue } from './spec/types.ts'
  * What the workspace hands `Mount.runCommand` for one command.
  *
  * `runCommand` copies these fields onto `CommandOpts`, next to the facts only
- * the mount knows (`mountPrefix`, `index`, `filetypeFns`). Each field is named
+ * the mount knows (`mountPrefix`, `index`). Each field is named
  * as on `CommandOpts` and means the same; a mapped type in
  * workspace/mount/mount.test.ts pins that. `limitOverride` is the caller's
  * output limit, which `runCommand` applies itself instead of forwarding.
@@ -146,11 +146,6 @@ export interface CommandOpts {
   stdin: ByteSource | null
   /** The parsed flags. Read them through a spec-bound `FlagView`. */
   flags: Record<string, FlagValue>
-  /**
-   * Handlers of the same command for one file extension, so a generic can
-   * hand an operand to one; null inside such a handler.
-   */
-  filetypeFns: Record<string, CommandFn> | null
   /** The prefix of the mount running the command. */
   mountPrefix?: string
   /** The working directory. */

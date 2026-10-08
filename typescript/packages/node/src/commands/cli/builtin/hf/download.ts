@@ -343,7 +343,7 @@ export async function downloadCmd(inv: CLIInvocation): Promise<CommandFnResult> 
   const cacheWord = cacheRoot(inv.env)
   const cacheDir =
     fl.asPath('cache_dir') ??
-    (cacheWord ? PathSpec.fromStrPath(cacheWord, undefined, inv.env.PWD ?? '/') : undefined)
+    (cacheWord ? PathSpec.fromStrPath(cacheWord, undefined, inv.cwd) : undefined)
   if (localDir === undefined && cacheDir === undefined) {
     throw new UsageError(
       'nothing to download into: pass --local-dir, or --cache-dir (or set ' +

@@ -58,7 +58,6 @@ describe('mongodb cat error surfacing', () => {
       cmd.fn(accessor, [mk('users.jsonl')], [], {
         stdin: null,
         flags: {},
-        filetypeFns: null,
         io: ioFor(MongoDBVFSBase, accessor),
         cwd: '/',
       }),

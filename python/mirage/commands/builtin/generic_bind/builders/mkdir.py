@@ -37,12 +37,12 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.render import operand_spelling
 from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.mode import DEFAULT_DIR_MODE, parse_chmod
 from mirage.utils.path import CycleError, norm, parent, walk_nodes
 from mirage.vfs.types import OperationFn
+from mirage.view.types import LinkView
 
 
 async def mkdir(

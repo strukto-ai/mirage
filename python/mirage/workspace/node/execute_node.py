@@ -21,14 +21,15 @@ from typing import Any, Callable
 from mirage.cache.index.scope import command_scope
 from mirage.context import (
     program_invocation,
+    reset_current_session,
     reset_program_invocation,
+    set_current_evaluation,
     set_program_invocation,
 )
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
-from mirage.ops.types import SessionView
 from mirage.policy import HandOff, PolicyDenied
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.routing import RouteDecision
@@ -67,12 +68,8 @@ from mirage.shell.parse.names import literal_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import PipelineStages, Redirect, RedirectKind
 from mirage.types import PathSpec
-from mirage.workspace.evaluation import (
-    EvaluationContext,
-    child_context,
-    reset_current_evaluation,
-    set_current_evaluation,
-)
+from mirage.view.types import SessionView
+from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins import handle_test, handle_unset
 from mirage.workspace.executor.builtins.exec import install_exec_redirects
@@ -1278,7 +1275,7 @@ async def _execute_node(
                 results.append(result)
                 return result[1].exit_code
             finally:
-                reset_current_evaluation(token)
+                reset_current_session(token)
                 if program_token is not None:
                     reset_program_invocation(program_token)
 

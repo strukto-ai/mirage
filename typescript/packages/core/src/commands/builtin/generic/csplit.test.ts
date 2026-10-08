@@ -32,7 +32,6 @@ async function runCsplit(
   const opts = {
     stdin: ENC.encode('a\nb\n'),
     flags,
-    filetypeFns: null,
     cwd,
     mountPrefix: '/data',
   } as CommandOpts

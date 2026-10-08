@@ -26,7 +26,6 @@ function opts(overrides: Partial<CommandOpts> = {}): CommandOpts {
   return {
     stdin: null,
     flags: {},
-    filetypeFns: null,
     cwd: '/',
     ...overrides,
   }

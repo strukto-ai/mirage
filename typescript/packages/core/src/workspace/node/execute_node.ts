@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { runWithEvaluation, type EvaluationContext, childContext } from '../evaluation.ts'
+import { type EvaluationContext, childContext } from '../evaluation.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 
 import { ExecutionScope } from '../execution.ts'
@@ -20,7 +20,11 @@ import { timingReport } from './timing.ts'
 import { PathSpec } from '../../types.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
 
-import { isProgramInvocation, runAsProgram } from '../../context/session_context.ts'
+import {
+  isProgramInvocation,
+  runAsProgram,
+  runWithEvaluation,
+} from '../../context/session_context.ts'
 import type { ProcessHandle } from '../../process/handle.ts'
 import type { ProcessSupervisor } from '../../process/supervisor.ts'
 import type { Runtime } from '../../runtime/base.ts'
@@ -100,7 +104,7 @@ import { executeDeclaration } from './declaration.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { HandOff } from '../../policy/types.ts'
 import { definedAt } from './occurrence.ts'
-import type { SessionView } from '../../ops/types.ts'
+import type { SessionView } from '../../view/types.ts'
 import { randomReader, sessionArith, sessionView } from '../session/state.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import { drained, runStatement } from '../executor/jobs.ts'

@@ -162,10 +162,7 @@ export async function uploadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   }
   const local = operands[0] ?? '.'
   const inRepo = operands[1] ?? ''
-  const collected = await collect(
-    dispatch,
-    PathSpec.fromStrPath(local, undefined, inv.env.PWD ?? '/'),
-  )
+  const collected = await collect(dispatch, PathSpec.fromStrPath(local, undefined, inv.cwd))
   const rows = keep(collected.rows, include, exclude)
   if (rows.length === 0) throw new UsageError(`no files matched under ${local}`)
   const base = inRepoBase(inRepo)

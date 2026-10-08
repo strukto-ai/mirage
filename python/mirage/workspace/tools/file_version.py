@@ -15,7 +15,7 @@
 import base64
 import hashlib
 
-from mirage.ops.ops import Ops
+from mirage.workspace.files import Files
 
 
 class StaleMirageFileError(Exception):
@@ -54,12 +54,12 @@ class FileVersionTracker:
     this side's read tool has always rendered.
 
     Args:
-        vfs (Ops): The file API to read and write through, run as the
+        vfs (Files): The file API to read and write through, run as the
             session whose reads are tracked.
         enabled (bool): False serves every call unchecked.
     """
 
-    def __init__(self, vfs: Ops, enabled: bool = True) -> None:
+    def __init__(self, vfs: Files, enabled: bool = True) -> None:
         self.vfs = vfs
         self._enabled = enabled
         self._read_versions: dict[str, str] = {}

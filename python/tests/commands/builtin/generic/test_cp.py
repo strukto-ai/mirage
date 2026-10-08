@@ -26,7 +26,6 @@ from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.fs import enotsup
 from mirage.io.types import IOResult
-from mirage.ops.types import LinkView
 from mirage.types import (
     LINK_TARGET_KEY,
     ContentType,
@@ -39,6 +38,7 @@ from mirage.types import (
     PrimitiveCopy,
 )
 from mirage.vfs.ram import RAMVFS
+from mirage.view.types import LinkView
 from mirage.workspace import Workspace
 
 

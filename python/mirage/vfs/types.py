@@ -7,7 +7,7 @@ from collections.abc import (
 )
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol
 
 from mirage.cache.index import IndexCacheStore
 from mirage.types import FileStat, JsonValue, PathSpec
@@ -18,12 +18,45 @@ DuEntries = tuple[list[tuple[str, int]], int]
 class Effect(StrEnum):
     """What a dispatchable VFS function does to the mount.
 
-    READ leaves the mount as it was. WRITE changes what it stores, so a
-    read-only mount refuses the call and admission judges it as a write.
+    READ returns content and METADATA an entry's metadata; neither
+    changes the mount. WRITE changes a file's bytes, CREATE makes a name
+    that must not exist yet, REMOVE drops a name, RENAME moves one with
+    everything under it, and ATTR changes an entry's metadata. Every
+    effect but READ and METADATA is a write: a read-only mount refuses
+    the call and admission judges it as one.
     """
 
     READ = "read"
+    METADATA = "metadata"
     WRITE = "write"
+    CREATE = "create"
+    REMOVE = "remove"
+    RENAME = "rename"
+    ATTR = "attr"
+
+
+class Target(StrEnum):
+    """What kind of entry a dispatchable function's path names."""
+
+    FILE = "file"
+    DIR = "dir"
+    LINK = "link"
+    ANY = "any"
+
+
+class Declaration(NamedTuple):
+    """What ``vfs_call`` declares for one function.
+
+    Args:
+        effect (Effect): what the call does to the mount.
+        target (Target): the kind of entry its path names.
+        creates (bool): a WRITE that makes a missing file, as open(2)
+            with O_CREAT.
+    """
+
+    effect: Effect
+    target: Target
+    creates: bool
 
 
 OperationFn = Callable[..., Any]

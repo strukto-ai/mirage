@@ -23,7 +23,7 @@ import { normalizeIndexConfig, type IndexConfig } from '../../cache/index/config
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { type EventDict, Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
-import type { OpKwargs } from '../../ops/types.ts'
+import type { OpKwargs } from '../../view/types.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import { HISTORY_PREFIX, HistoryViewVFS } from '../../vfs/history/history.ts'
@@ -69,7 +69,7 @@ import {
 import type { Policies } from '../../policy/index.ts'
 import { DryRun, Outcome, type ShellExplanation } from '../../policy/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import { Ops } from '../../ops/ops.ts'
+import { Files } from '../files.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { checkReadCapability } from '../mount/read_policy.ts'
 import { MountRegistry } from '../mount/registry.ts'
@@ -183,7 +183,7 @@ export class Workspace {
   readonly namespace: Namespace
   private readonly dispatcher: Dispatcher
   readonly observer: Observer
-  readonly vfs: Ops
+  readonly vfs: Files
   private readonly toolTables = new Map<string | null, MirageToolOperations>()
   private readonly reads = new Map<string, FileVersionTracker>()
   private closed = false
@@ -405,8 +405,8 @@ export class Workspace {
     this.registry.mount(
       BIN_PREFIX,
       new BinViewVFS(
-        () => programs(this.opSession(), this.registry),
-        (name) => programNote(name, this.opSession(), this.registry),
+        () => programs(this.callSession(), this.registry),
+        (name) => programNote(name, this.callSession(), this.registry),
       ),
       MountMode.READ,
       DEFAULT_READ_SPEC,
@@ -463,7 +463,7 @@ export class Workspace {
     // ledger, which is its own; the sink is only the observer's copy.
     // It runs as the default session, as a bare `shell` does, so the
     // default profile confines it too.
-    this.vfs = new Ops(
+    this.vfs = new Files(
       (op, path, args, kwargs, report) => {
         if (this.isShuttingDown()) throw new Error('Workspace is closed')
         return this.dispatcher.dispatch(op, path, args, kwargs, report)
@@ -482,7 +482,7 @@ export class Workspace {
       this.registry,
       this.vfs,
       this.sessionManager,
-      () => getCurrentSessionUnlessForeign(this.sessionManager) ?? this.opSession(),
+      () => getCurrentSessionUnlessForeign(this.sessionManager) ?? this.callSession(),
       (name) => compileProfile(this.baseProfile(name), name),
       () => this.ensureSessionsLoaded(),
       (path) => this.unmount(path),
@@ -579,7 +579,7 @@ export class Workspace {
   }
 
   /** The session an op runs under: the bound one, else the default. */
-  private opSession(): SessionState {
+  private callSession(): SessionState {
     return (
       getCurrentSessionFor(this.sessionManager) ??
       this.sessionManager.get(this.sessionManager.defaultId)
@@ -588,7 +588,8 @@ export class Workspace {
 
   /** Capture local adapter doors under this workspace's active or explicitly named session. */
   runtimeContext(sessionId?: string): RuntimeContext {
-    const session = sessionId === undefined ? this.opSession() : this.sessionManager.get(sessionId)
+    const session =
+      sessionId === undefined ? this.callSession() : this.sessionManager.get(sessionId)
     const scope = new ContextScope([
       ...captureSessionContext(session, this.sessionManager),
       ...captureOpPolicies(),
@@ -611,7 +612,7 @@ export class Workspace {
   spawn(request: SpawnRequest, sessionId?: string): ChildProcess {
     return this.spawnForSession(
       request,
-      sessionId === undefined ? this.opSession() : this.sessionManager.get(sessionId),
+      sessionId === undefined ? this.callSession() : this.sessionManager.get(sessionId),
     )
   }
 
@@ -726,7 +727,7 @@ export class Workspace {
   }
 
   // The sandboxed runtimes' sole data path (quickjs, pyodide, monty).
-  // Routes through the private dispatch continuation, not the raw Ops facade,
+  // Routes through the private dispatch continuation, not the raw Files facade,
   // so runtime journal replay stays open during close and sandbox I/O takes
   // the same path as shell commands — cache read-through on
   // reads, post-write invalidation, and mount-mode enforcement narrowed
@@ -739,17 +740,12 @@ export class Workspace {
   // its own, as an argument rather than ambient state.
   private buildWorkspaceBridge(issuer?: symbol): BridgeDispatchFn {
     const dispatch = (
-      opName: string,
+      name: string,
       path: string,
       args: readonly unknown[] = [],
       kwargs: OpKwargs = {},
     ): Promise<unknown> =>
-      this.dispatchInternal(
-        opName,
-        path,
-        args,
-        issuer === undefined ? kwargs : { ...kwargs, issuer },
-      )
+      this.dispatchInternal(name, path, args, issuer === undefined ? kwargs : { ...kwargs, issuer })
     return async (op, path, bytes, dst, attrs) => {
       switch (op) {
         case 'read': {
@@ -1352,7 +1348,7 @@ export class Workspace {
   }
 
   /**
-   * The op ledger. It lives on the `Ops` facade (python parity); these
+   * The op ledger. It lives on the `Files` facade (python parity); these
    * are thin delegates so the public workspace API keeps reading.
    */
   get records(): OpRecord[] {
@@ -1481,7 +1477,7 @@ export class Workspace {
     // unrestricted default instead.
     await this.ensureSessionsLoaded()
     const session = this.sessionManager.get(sessionId ?? this.sessionManager.defaultId)
-    return runWithSession(session, run, this.sessionManager)
+    return runWithSession(session, run, { owner: this.sessionManager })
   }
 
   /** The ambient session the op door keeps for a facade, or null. */
@@ -1511,18 +1507,18 @@ export class Workspace {
   }
 
   async dispatch(
-    opName: string,
+    name: string,
     path: string,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     // Runs as the default session unless one is bound, like `ws.vfs`.
-    return this.bindSession(null, () => this.dispatchInternal(opName, path, args, kwargs))
+    return this.bindSession(null, () => this.dispatchInternal(name, path, args, kwargs))
   }
 
   private async dispatchInternal(
-    opName: string,
+    name: string,
     path: string,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
@@ -1534,12 +1530,7 @@ export class Workspace {
     // enforcement, per-op commandLimits on the executing mount,
     // revisions, overlay stat, and post-write invalidation. The same
     // single path Python's Workspace.dispatch delegates to.
-    const [result] = await this.dispatcher.dispatch(
-      opName,
-      PathSpec.fromStrPath(path),
-      args,
-      kwargs,
-    )
+    const [result] = await this.dispatcher.dispatch(name, PathSpec.fromStrPath(path), args, kwargs)
     return result
   }
 
@@ -2121,7 +2112,7 @@ export class Workspace {
 /**
  * One session's doors, bound together.
  *
- * `shell` runs a line as the session, `vfs` is the op facade run as it,
+ * `shell` runs a line as the session, `vfs` is the file API run as it,
  * `tools` the agent tools over both and `explain` the same doors as a dry
  * run, so a host holds one object per agent and every door answers under the same profile: hides, mount
  * modes, grants and standing decisions. Nothing is stored here; the session record stays with the
@@ -2159,8 +2150,8 @@ export class Session {
     return this.ws.mounts()
   }
 
-  /** The op facade run as this session. */
-  get vfs(): Ops {
+  /** The file API run as this session. */
+  get vfs(): Files {
     return this.id === null ? this.ws.vfs : this.ws.vfs.forSession(this.id)
   }
 

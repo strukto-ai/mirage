@@ -64,7 +64,6 @@ describe('discord grep push-down fallback', () => {
       {
         stdin: null,
         flags: { w: true },
-        filetypeFns: null,
         io: commandIo(vfs),
         cwd: '/',
         index: idx,
@@ -100,7 +99,6 @@ describe('discord rg push-down fallback', () => {
       {
         stdin: null,
         flags: { word_regexp: true },
-        filetypeFns: null,
         io: commandIo(vfs),
         cwd: '/',
         index: idx,

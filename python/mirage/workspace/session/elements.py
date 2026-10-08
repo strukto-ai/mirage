@@ -15,7 +15,6 @@
 import re
 from collections.abc import Sequence
 
-from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.array import (
     array_count,
@@ -26,6 +25,7 @@ from mirage.shell.array import (
 )
 from mirage.shell.types import ArithWrite
 from mirage.shell.variable import ShellValue
+from mirage.view.types import SessionView
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import (
     RandomReader,

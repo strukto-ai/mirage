@@ -7,8 +7,8 @@ from mirage.context.session_context import (
     reset_current_session,
     set_current_session,
 )
-from mirage.ops.ops import Ops
 from mirage.policy import Outcome, VfsContext
+from mirage.workspace.files import Files
 from mirage.workspace.store.ram import RAMWorkspaceStateStore
 from mirage.workspace.tools.tool_operations import TOOL_NAMES, number_lines
 
@@ -379,14 +379,14 @@ async def test_a_file_refused_down_to_its_stat_is_a_tool_error():
 async def test_a_probe_that_fails_leaves_the_tool_error(monkeypatch):
     # A backend that cannot answer the existence probe proves nothing, so
     # the tool reports the failure as its result instead of raising it.
-    real = Ops.exists
+    real = Files.exists
 
     async def flaky(self, path, *, session_id=None):
         if path == "/d/flaky.txt":
             raise OSError(errno.EIO, "Input/output error", path)
         return await real(self, path, session_id=session_id)
 
-    monkeypatch.setattr(Ops, "exists", flaky)
+    monkeypatch.setattr(Files, "exists", flaky)
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     await ws.shell("mkdir /d")
     try:

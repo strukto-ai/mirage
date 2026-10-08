@@ -16,16 +16,46 @@ import type {
 export type DuEntries = [entries: [string, number][], total: number]
 
 /**
- * What a dispatchable VFS function does to the mount. READ leaves the mount
- * as it was. WRITE changes what it stores, so a read-only mount refuses the
- * call and admission judges it as a write. Mirrors Python's `Effect`.
+ * What a dispatchable VFS function does to the mount. READ returns content
+ * and METADATA an entry's metadata; neither changes the mount. WRITE changes
+ * a file's bytes, CREATE makes a name that must not exist yet, REMOVE drops a
+ * name, RENAME moves one with everything under it, and ATTR changes an
+ * entry's metadata. Every effect but READ and METADATA is a write: a
+ * read-only mount refuses the call and admission judges it as one. Mirrors
+ * Python's `Effect`.
  */
 export const Effect = Object.freeze({
   READ: 'read',
+  METADATA: 'metadata',
   WRITE: 'write',
+  CREATE: 'create',
+  REMOVE: 'remove',
+  RENAME: 'rename',
+  ATTR: 'attr',
 } as const)
 
 export type Effect = (typeof Effect)[keyof typeof Effect]
+
+/** What kind of entry a dispatchable function's path names. Mirrors Python's `Target`. */
+export const Target = Object.freeze({
+  FILE: 'file',
+  DIR: 'dir',
+  LINK: 'link',
+  ANY: 'any',
+} as const)
+
+export type Target = (typeof Target)[keyof typeof Target]
+
+/**
+ * What `vfsCall` declares for one function: its effect, the kind of entry
+ * its path names, and whether a WRITE makes a missing file, as open(2) with
+ * O_CREAT. Mirrors Python's `Declaration`.
+ */
+export interface Declaration {
+  readonly effect: Effect
+  readonly target: Target
+  readonly creates: boolean
+}
 
 export type ReaddirOp<A extends Accessor = Accessor> = ReaddirFn<
   [accessor: A, path: PathSpec, index?: IndexCacheStore]

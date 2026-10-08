@@ -35,8 +35,8 @@ from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import CommandIO, CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.errors.fs import eisdir
-from mirage.ops.types import NamespaceView
 from mirage.types import PathSpec
+from mirage.view.types import NamespaceView
 
 
 def _cached_stat(

@@ -20,10 +20,10 @@ from mirage.context import program_invocation
 from mirage.io import IOResult
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource
-from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.errors import ArithError
+from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import TARGET_RE
 from mirage.workspace.executor.builtins.printf.format import run_printf
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result

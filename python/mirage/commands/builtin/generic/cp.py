@@ -43,7 +43,6 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.types import DotWalkLoop, DotWalkMissing, FsCondition
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView
 from mirage.runtime.types import DispatchFn
 from mirage.types import (
     LINK_TARGET_KEY,
@@ -65,6 +64,7 @@ from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import CycleError, resolve_path
 from mirage.utils.quote import shell_quote_always
+from mirage.view.types import LinkView
 
 UPDATE_MODES = ("all", "none", "none-fail", "older")
 

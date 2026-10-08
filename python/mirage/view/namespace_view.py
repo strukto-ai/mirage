@@ -14,11 +14,10 @@
 
 from collections.abc import Iterable, Sequence
 
-from mirage.ops.config import NamespaceLinks
-from mirage.ops.types import NamespaceView
 from mirage.types import FileStat, FileType, PathSpec, Visibility
 from mirage.utils.hidden import path_visible
 from mirage.utils.path import norm_dir
+from mirage.view.types import NamespaceLinks, NamespaceView
 
 
 def visible_child_segments(

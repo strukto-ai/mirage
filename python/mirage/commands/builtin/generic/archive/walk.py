@@ -10,10 +10,10 @@ from mirage.commands.builtin.generic.archive.types import (
 from mirage.errors.classify import classify
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
-from mirage.ops.types import LinkView, MountView
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import CycleError
+from mirage.view.types import LinkView, MountView
 
 # A mount boundary is a filesystem boundary, so both archivers stop at
 # one and say so in GNU tar's --one-file-system wording. Descending would

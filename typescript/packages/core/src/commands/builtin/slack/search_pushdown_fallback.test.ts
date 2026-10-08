@@ -36,7 +36,6 @@ async function runGrep(
   const result = await cmd.fn(vfs.accessor, paths, texts, {
     stdin: null,
     flags: { w: true },
-    filetypeFns: null,
     io: commandIo(vfs),
     cwd: '/',
     index: options.index,
@@ -68,7 +67,6 @@ async function runRg(
   const result = await cmd.fn(vfs.accessor, paths, texts, {
     stdin: null,
     flags: { word_regexp: true },
-    filetypeFns: null,
     io: commandIo(vfs),
     cwd: '/',
     index: options.index,

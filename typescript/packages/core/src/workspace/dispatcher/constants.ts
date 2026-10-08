@@ -12,40 +12,50 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { BaseVFS } from '../../vfs/base.ts'
+import { callNames, declaredCalls } from '../../vfs/call.ts'
+import { WRITE_EFFECTS } from '../../vfs/constants.ts'
+import { type Declaration, Effect, Target } from '../../vfs/types.ts'
+
+// The ops the namespace answers itself, declared the way `vfsCall` declares
+// a VFS function: a link and an extended attribute live on the path's node,
+// never in a backend.
+export const NAMESPACE_CALLS: ReadonlyMap<string, Declaration> = new Map([
+  ['symlink', { effect: Effect.CREATE, target: Target.LINK, creates: false }],
+  ['readlink', { effect: Effect.READ, target: Target.LINK, creates: false }],
+  ['getxattr', { effect: Effect.READ, target: Target.ANY, creates: false }],
+  ['listxattr', { effect: Effect.READ, target: Target.ANY, creates: false }],
+  ['setxattr', { effect: Effect.ATTR, target: Target.ANY, creates: false }],
+  ['removexattr', { effect: Effect.ATTR, target: Target.ANY, creates: false }],
+])
+
+// The built-in functions every mount answers, as `BaseVFS` declares them;
+// every op class below is read off these and the namespace's.
+const VFS_CALLS = declaredCalls(BaseVFS)
+const CALLS: ReadonlyMap<string, Declaration> = new Map([...VFS_CALLS, ...NAMESPACE_CALLS])
+
 // The content reads the warm file cache may answer: a cached whole-file
 // value can serve them (sliced for ranged reads) without touching the
 // backend, subject to the reconciler's consistency check.
-export const DISPATCH_READ_OPS: ReadonlySet<string> = new Set(['read', 'read_bytes'])
+export const DISPATCH_READ_OPS = callNames(VFS_CALLS, {
+  effects: [Effect.READ],
+  targets: [Target.FILE],
+})
 
 // Backend mutations that run the dispatcher's post-write bookkeeping:
 // file-cache eviction, parent index invalidation, and overlay time
 // clearing (plus the observed-mtime stamp for the content writes in
-// STAMP_WRITE_OPS).
-export const DISPATCH_WRITE_OPS: ReadonlySet<string> = new Set([
-  'write',
-  'write_bytes',
-  'append',
-  'pwrite',
-  'unlink',
-  'create',
-  'truncate',
-  'mkdir',
-  'rmdir',
-  'rename',
-])
+// STAMP_WRITE_OPS). An attribute change keeps its own overlay bookkeeping
+// in applySetattr.
+export const DISPATCH_WRITE_OPS = callNames(VFS_CALLS, {
+  effects: WRITE_EFFECTS.filter((effect) => effect !== Effect.ATTR),
+})
 
-// What the admission gates classify as a write (VfsContext.write). A
-// superset of DISPATCH_WRITE_OPS: setattr mutates the mount but keeps
-// its own overlay bookkeeping in applySetattr, and symlink writes only
-// the node table, so both need write admission without joining the
+// What the admission gates classify as a write (VfsContext.write): every op
+// that changes the mount, including the attribute changes and the
+// namespace's own writes, which need write admission without joining the
 // post-write invalidation path.
-export const POLICY_WRITE_OPS: ReadonlySet<string> = new Set([
-  ...DISPATCH_WRITE_OPS,
-  'setattr',
-  'symlink',
-  'setxattr',
-  'removexattr',
-])
+export const POLICY_WRITE_OPS = callNames(CALLS, { effects: WRITE_EFFECTS })
 
 // The extended-attribute ops, which the node table answers: what a caller
 // sets is stored on the path's node beside the overlay's mode and times.
@@ -59,7 +69,7 @@ export const XATTR_OPS: ReadonlySet<string> = new Set([
 // Ops the node table itself answers: a symlink is namespace state with
 // no backend behind it, so the door is the authority for both
 // directions (create and readlink) rather than a router to a mount.
-export const NAMESPACE_TABLE_OPS: ReadonlySet<string> = new Set(['symlink', 'readlink'])
+export const NAMESPACE_TABLE_OPS = callNames(NAMESPACE_CALLS, { targets: [Target.LINK] })
 
 // Ops the node table answers when the path itself is a link, and only
 // then. The name is the whole of what exists there, so forwarding one
@@ -78,26 +88,18 @@ export const SETATTR_KEYS = ['mode', 'uid', 'gid', 'atime', 'mtime'] as const
 // and writing it back whole, so two of these on one path at once could each
 // put back bytes the other had just replaced; the dispatcher runs them one
 // at a time per path, as a kernel's inode lock orders writers to one file.
-export const SERIAL_WRITE_OPS: ReadonlySet<string> = new Set([
-  'write',
-  'write_bytes',
-  'append',
-  'pwrite',
-  'truncate',
-  'create',
-  'unlink',
-  'rename',
-])
+export const SERIAL_WRITE_OPS = callNames(VFS_CALLS, {
+  effects: [Effect.WRITE, Effect.REMOVE, Effect.RENAME],
+  targets: [Target.FILE, Target.ANY],
+})
 
 // Ops that open the regular file they name with O_CREAT, which answers a
 // slash-terminated name (`x/`, only ever a directory) with EISDIR.
-export const FILE_CREATE_OPS: ReadonlySet<string> = new Set([
-  'write',
-  'write_bytes',
-  'append',
-  'pwrite',
-  'create',
-])
+export const FILE_CREATE_OPS = callNames(VFS_CALLS, { effects: [Effect.WRITE], creates: true })
+
+// Ops that create the name itself: an existing one answers EEXIST, before a
+// trailing slash on it is judged.
+export const ENTRY_CREATE_OPS = callNames(CALLS, { effects: [Effect.CREATE] })
 
 // Ops that create the path they name. A hidden target refuses these
 // through `hiddenRefusal` with `create` set: EACCES when the directory
@@ -107,11 +109,17 @@ export const FILE_CREATE_OPS: ReadonlySet<string> = new Set([
 // path answers ENOENT, the no-name-leak rule.
 export const HIDDEN_CREATE_OPS: ReadonlySet<string> = new Set([
   ...FILE_CREATE_OPS,
-  'truncate',
-  'mkdir',
-  'symlink',
+  ...ENTRY_CREATE_OPS,
 ])
 
-// Ops that create the name itself: an existing one answers EEXIST, before a
-// trailing slash on it is judged.
-export const ENTRY_CREATE_OPS: ReadonlySet<string> = new Set(['mkdir', 'symlink'])
+// Ops with lstat semantics: they act on the entry named by the path, so
+// no stat surface (dispatch, the Files facade, FUSE) may rewrite their
+// operand through the symlink table.
+export const NO_FOLLOW_OPS: ReadonlySet<string> = new Set([
+  ...callNames(CALLS, { effects: [Effect.REMOVE, Effect.RENAME] }),
+  ...callNames(CALLS, { targets: [Target.LINK] }),
+])
+
+// Content-writing ops whose completion stamps an observed mtime on the
+// namespace node (removals invalidate but must not stamp).
+export const STAMP_WRITE_OPS = callNames(VFS_CALLS, { effects: [Effect.WRITE, Effect.CREATE] })

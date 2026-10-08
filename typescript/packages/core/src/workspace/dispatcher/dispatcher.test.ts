@@ -763,8 +763,8 @@ describe('the door answers extended attributes from the node table', () => {
   it("keeps a backend stat's extra out of the attributes", async () => {
     const ws = await open()
     const mount = ws.mount('/r')
-    const call = mount.callOp.bind(mount)
-    const stat = vi.spyOn(mount, 'callOp')
+    const call = mount.callKeyed.bind(mount)
+    const stat = vi.spyOn(mount, 'callKeyed')
     stat.mockImplementation(async (op, ...rest) => {
       if (op === 'stat') {
         return new FileStat({ name: 'd', type: FileType.DIRECTORY, extra: { file_id: '1AbC' } })
@@ -807,13 +807,37 @@ describe('shell mutations share read-only admission', () => {
     try {
       await ws.dispatch('write', '/ro/file', [ENC.encode('original')])
       ws.namespace.mountFor('/ro/file').mode = MountMode.READ
-      const read = vi.spyOn(ws.mount('/ro'), 'callOp')
+      const read = vi.spyOn(ws.mount('/ro'), 'callKeyed')
       const result = await ws.shell(command)
       expect(result.exitCode).toBe(1)
       expect(DEC.decode(await materialize(result.stderr))).toBe(diagnostic)
       expect(read.mock.calls.some(([op]) => op === 'read' || op === 'read_bytes')).toBe(false)
       expect(ws.namespace.isLink('/ro/link')).toBe(false)
       expect(DEC.decode((await ws.dispatch('read', '/ro/file')) as Uint8Array)).toBe('original')
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('a write reads the mode again as it starts', () => {
+  it('refuses a write whose mount turned read-only while it waited', async () => {
+    // Admission judged the mount writable before the write waited for the
+    // mount; made read-only meanwhile, the mount refuses the write as the
+    // backend call starts.
+    const ram = new RAMVFS()
+    const ws = new Workspace({ '/rw': ram }, { mode: MountMode.WRITE })
+    try {
+      const mount = ws.namespace.mountFor('/rw/file')
+      const ready = mount.ensureReady.bind(mount)
+      vi.spyOn(mount, 'ensureReady').mockImplementation(async () => {
+        ws.setMountMode('/rw', MountMode.READ)
+        await ready()
+      })
+      await expect(ws.dispatch('write', '/rw/file', [ENC.encode('x')])).rejects.toMatchObject({
+        code: 'EROFS',
+      })
+      expect(await ram.exists(PathSpec.fromStrPath('/file'))).toBe(false)
     } finally {
       await ws.close()
     }
@@ -854,8 +878,8 @@ describe('rmdir namespace entries', () => {
     try {
       await ws.shell('mkdir /data/d; ln -s nowhere /data/d/old')
       const mount = ws.mount('/data')
-      const call = mount.callOp.bind(mount)
-      vi.spyOn(mount, 'callOp').mockImplementation(async (name, ...rest) => {
+      const call = mount.callKeyed.bind(mount)
+      vi.spyOn(mount, 'callKeyed').mockImplementation(async (name, ...rest) => {
         if (name === 'rmdir')
           await ws.dispatch('symlink', '/data/d/late', [], { target: 'nowhere' })
         return call(name, ...rest)
@@ -1142,7 +1166,7 @@ describe('a marked op is judged on the paths the door reaches', () => {
   // arguments. A null mark is no mark, as Python's rule_gate=None.
   it('never forwards the mark to the op', async () => {
     const ws = await linkedWs()
-    const spy = vi.spyOn(MountEntry.prototype, 'callOp')
+    const spy = vi.spyOn(MountEntry.prototype, 'callKeyed')
     try {
       const { gate, asked } = refusing('/nothing')
       await ws.dispatch('read', '/data/real/secret', [], { ruleGate: gate })

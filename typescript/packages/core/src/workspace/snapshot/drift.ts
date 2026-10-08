@@ -231,7 +231,7 @@ export function captureFingerprints(
 ): FingerprintEntry[] {
   const out = new Map<string, FingerprintEntry>()
   // By timestamp, not by position: a backend record reaches this list
-  // only when its line ends, while an `Ops` facade record appends as it
+  // only when its line ends, while a `Files` facade record appends as it
   // happens, so the list is flush-ordered and a retraction can otherwise
   // sit before the write it retracts. The sort is stable, so
   // same-millisecond records keep their order.

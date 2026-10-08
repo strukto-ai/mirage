@@ -82,7 +82,7 @@ const roomSearcher: Searcher<FakeAccessor> = (_accessor, match, query) =>
 const emptySearcher: Searcher<FakeAccessor> = () => Promise.resolve([])
 
 function opts(flags: CommandOpts['flags'] = {}): CommandOpts {
-  return { stdin: null, flags, filetypeFns: null, cwd: '/' }
+  return { stdin: null, flags, cwd: '/' }
 }
 
 function unwrap(result: CommandFnResult): [ByteSource | null, IOResult] {

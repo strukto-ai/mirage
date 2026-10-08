@@ -64,6 +64,15 @@ describe('Mount constructor validation', () => {
     const m = new MountEntry({ prefix: '/ram/', vfs: new StubVFS() })
     expect(m.mode).toBe(MountMode.READ)
   })
+
+  it('rejects a renderer that names no method', () => {
+    class MisnamedRenderer extends StubVFS {
+      override readonly renderers: Readonly<Record<string, string>> = { '.doc': 'renderDoc' }
+    }
+    expect(() => new MountEntry({ prefix: '/ram/', vfs: new MisnamedRenderer() })).toThrow(
+      "'renderDoc', which is not a method",
+    )
+  })
 })
 
 describe('Mount.resolveCommand fallback chain', () => {
@@ -150,25 +159,6 @@ describe('Mount.specFor', () => {
 
   it('returns null for unknown commands', () => {
     expect(makeMount().specFor('nope')).toBeNull()
-  })
-})
-
-describe('Mount.filetypeHandlers', () => {
-  it('returns only filetype-specific variants of a command', () => {
-    const m = makeMount()
-    const [generic] = command({ name: 'cat', vfs: 'ram', spec: BASIC_SPEC, fn: OK_CMD })
-    const [json] = command({
-      name: 'cat',
-      vfs: 'ram',
-      spec: BASIC_SPEC,
-      fn: OK_CMD,
-      filetype: '.json',
-    })
-    if (generic === undefined || json === undefined) throw new Error('missing')
-    m.register(generic)
-    m.register(json)
-    const fns = m.filetypeHandlers('cat')
-    expect(Object.keys(fns)).toEqual(['.json'])
   })
 })
 
@@ -442,16 +432,6 @@ describe('Mount.call', () => {
   it('throws on unknown op', async () => {
     const m = makeMount()
     await expect(m.call('nope', '/x')).rejects.toThrow(/no op/)
-  })
-
-  it('rejects write ops on READ mount', async () => {
-    class Writing extends StubVFS {
-      override write(): Promise<void> {
-        return Promise.resolve()
-      }
-    }
-    const m = makeMount(MountMode.READ, new Writing())
-    await expect(m.call('write', '/x')).rejects.toThrow(/read-only/)
   })
 })
 

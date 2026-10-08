@@ -21,8 +21,8 @@ from typing import Any, Callable
 from mirage.fuse.core import MountCore
 from mirage.fuse.darwin import rename_flags_check
 from mirage.fuse.errors import classify_error
-from mirage.ops import Ops
 from mirage.types import JsonValue
+from mirage.workspace.files import Files
 from mirage.workspace.session.session import SessionState
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ class MirageFS:
     File Provider adapter can reuse them unchanged.
 
     Args:
-        ops (Ops): the workspace op facade every callback routes to.
+        files (Files): the workspace's ``ws.vfs`` every callback routes to.
         root_prefix (str): mount root; non-empty scopes the tree to one mount.
         session (SessionState | None): bind every op to this
             session's mount grants.
@@ -54,11 +54,11 @@ class MirageFS:
 
     def __init__(
         self,
-        ops: Ops,
+        files: Files,
         root_prefix: str = "",
         session: SessionState | None = None,
     ) -> None:
-        self.core = MountCore(ops, root_prefix=root_prefix, session=session)
+        self.core = MountCore(files, root_prefix=root_prefix, session=session)
 
     def _call(self, fn: Callable[..., Any], *args: Any) -> Any:
         """Run a core call, translating failures into FUSE error codes.
