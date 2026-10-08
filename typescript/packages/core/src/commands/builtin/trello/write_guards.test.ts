@@ -17,7 +17,7 @@ import { TrelloAccessor } from '../../../accessor/trello.ts'
 import { runWithMountGate } from '../../../context/session_context.ts'
 import type { TrelloTransport } from '../../../core/trello/client.ts'
 import { MountMode } from '../../../types.ts'
-import type { CommandOpts, RegisteredCommand } from '../../config.ts'
+import type { CommandOpts, Command } from '../../config.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { TRELLO_CARD_ASSIGN } from './trello_card_assign.ts'
 import { TRELLO_CARD_COMMENT_ADD } from './trello_card_comment_add.ts'
@@ -38,7 +38,7 @@ const accessor = new TrelloAccessor(transport)
 // Every card write, with the flags that pass its own validation, so the
 // refusal below is the guard's and not a missing-flag error. The guard
 // fires before the client, so no case reaches the transport.
-const CASES: readonly [readonly RegisteredCommand[], Record<string, FlagValue>][] = [
+const CASES: readonly [readonly Command[], Record<string, FlagValue>][] = [
   [TRELLO_CARD_CREATE, { list_id: 'l1', name: 'card' }],
   [TRELLO_CARD_COMMENT_ADD, { card_id: 'c1', text: 'hi' }],
   [TRELLO_CARD_COMMENT_UPDATE, { card_id: 'c1', comment_id: 'm1', text: 'hi' }],
@@ -54,7 +54,7 @@ describe('trello card writes hold the mount-wide write grant', () => {
     const rc = cmds[0]
     if (rc === undefined) throw new Error('command registered nothing')
     it(`${rc.name} declares write and refuses under a READ gate`, async () => {
-      // Mount.executeCmd's write-command gate keys on the registration
+      // Mount.runCommand's write-command gate keys on the registration
       // flag, and the in-handler guard covers the id-addressed write a
       // per-path check cannot judge. Nothing pinned the per-command
       // wiring before, which is how the Python side drifted to 3 of 8.

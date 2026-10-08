@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry, type RegisteredOp } from '../../ops/registry.ts'
+import { BaseVFS } from '../../vfs/base.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { MountMode } from '../../types.ts'
+import { type FileStat, MountMode } from '../../types.ts'
 import { getTestParser, stdoutStr } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
@@ -29,12 +29,9 @@ async function makeWs(): Promise<Workspace> {
   const parser = await getTestParser()
   const root = new RAMVFS()
   const inner = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(root)
-  registry.registerVfs(inner)
   const ws = new Workspace(
     { '/': root, '/base/inner': inner },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+    { mode: MountMode.WRITE, shellParser: parser },
   )
   ws.createSession('s')
   await ws.shell('mkdir -p /base/sub', { sessionId: 's' })
@@ -205,12 +202,9 @@ async function makeDirsWs(): Promise<Workspace> {
   const parser = await getTestParser()
   const root = new RAMVFS()
   const inner = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(root)
-  registry.registerVfs(inner)
   const ws = new Workspace(
     { '/': root, '/data/records/inner': inner },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+    { mode: MountMode.WRITE, shellParser: parser },
   )
   ws.createSession('s')
   await ws.shell('mkdir -p /data/records/2026-09-10 /data/records/2026-09-11', { sessionId: 's' })
@@ -226,13 +220,8 @@ async function makeDirsWs(): Promise<Workspace> {
 // by the shell tier on the way (which is what a nested mount forces).
 async function makeFlatWs(): Promise<Workspace> {
   const parser = await getTestParser()
-  const registry = new OpsRegistry()
   const data = new RAMVFS()
-  registry.registerVfs(data)
-  const ws = new Workspace(
-    { '/data': data },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  const ws = new Workspace({ '/data': data }, { mode: MountMode.WRITE, shellParser: parser })
   ws.createSession('s')
   await ws.shell('mkdir -p /data/records/2026-09-10 /data/records/2026-09-11', { sessionId: 's' })
   await ws.shell('echo sample > /data/records/2026-09-10/sample.txt', { sessionId: 's' })
@@ -322,24 +311,14 @@ describe('trailing-slash globs', () => {
   })
 })
 
-// A RAM mount that answers listings but can stat nothing: no stat op, and
-// no vfs.stat either.
+// A RAM mount that answers listings but defines no stat.
 class NoStatRAM extends RAMVFS {
-  constructor() {
-    super()
-    Object.defineProperty(this, 'stat', { value: undefined })
-  }
-
-  override ops(): readonly RegisteredOp[] {
-    return super.ops().filter((op) => op.name !== 'stat')
-  }
-}
-
-// A custom VFS whose stat lives only in its op table, not as a method.
-class OpsOnlyStatRAM extends RAMVFS {
-  constructor() {
-    super()
-    Object.defineProperty(this, 'stat', { value: undefined })
+  static {
+    Object.defineProperty(
+      this.prototype,
+      'stat',
+      Object.getOwnPropertyDescriptor(BaseVFS.prototype, 'stat') ?? {},
+    )
   }
 }
 
@@ -371,60 +350,15 @@ describe('trailing-slash globs on a mount that cannot stat', () => {
     const vfs = stat === 'missing' ? new NoStatRAM() : new RAMVFS()
     const ws = await flatWs(vfs)
     if (stat !== 'missing') {
-      const ramStat = vfs.ops().find((op) => op.name === 'stat')
-      ws.opsRegistry.register({
-        name: 'stat',
-        vfs: 'ram',
-        filetype: null,
-        write: false,
-        fn: (accessor, path, args, kwargs) =>
-          stat === 'none' || path.virtual === '/m/f'
-            ? Promise.resolve(undefined)
-            : ramStat?.fn(accessor, path, args, kwargs),
-      })
+      const ramStat = vfs.stat.bind(vfs)
+      vfs.stat = (path, index) =>
+        stat === 'none' || path.virtual === '/m/f'
+          ? Promise.resolve(undefined as unknown as FileStat)
+          : ramStat(path, index)
     }
     try {
       expect(await out(ws, 'echo /m/*')).toBe('/m/a /m/b /m/f\n')
       expect(await out(ws, 'echo /m/*/')).toBe(expected)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  // A stat op registered for one filetype answers a match with that
-  // extension, as it answers `stat` of the same path: the glob's stat is
-  // stamped with the path's filetype the way dispatch stamps it.
-  it('asks a filetype-scoped stat op for a match with that extension', async () => {
-    const ramStat = new RAMVFS().ops().find((op) => op.name === 'stat')
-    const vfs = new NoStatRAM()
-    vfs.loadState({ type: 'ram', dirs: ['/', '/x.d', '/y'] })
-    const ws = new Workspace(
-      { '/m': vfs },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
-    ws.createSession('s')
-    ws.opsRegistry.register({
-      name: 'stat',
-      vfs: 'ram',
-      filetype: '.d',
-      write: false,
-      fn: (accessor, path, args, kwargs) => ramStat?.fn(accessor, path, args, kwargs),
-    })
-    try {
-      expect(await out(ws, 'stat -c %F /m/x.d')).toBe('directory\n')
-      expect(await out(ws, 'echo /m/*/')).toBe('/m/x.d/\n')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  // The glob asks the op the dispatcher runs, so it agrees with `stat` and
-  // `test -d` on a VFS that registers stat as an op but has no stat method.
-  it('agrees with stat on a VFS whose stat is an op only', async () => {
-    const ws = await flatWs(new OpsOnlyStatRAM())
-    try {
-      expect(await out(ws, 'stat -c %F /m/a; test -d /m/a && echo dir')).toBe('directory\ndir\n')
-      expect(await out(ws, 'echo /m/*/')).toBe('/m/a/ /m/b/\n')
     } finally {
       await ws.close()
     }

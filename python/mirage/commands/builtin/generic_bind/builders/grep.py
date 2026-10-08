@@ -16,8 +16,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.generic.grep import grep_generic, labelled
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
+    GenericCommand,
     bound_op,
 )
 from mirage.commands.builtin.generic_bind.search import (
@@ -26,7 +25,7 @@ from mirage.commands.builtin.generic_bind.search import (
 )
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import grep_needs_every_file
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -74,4 +73,4 @@ async def grep(
     )
 
 
-BUILDER = Builder("grep", grep, aggregate=prefix_aggregate, read=True)
+BUILDER = GenericCommand("grep", grep, aggregate=prefix_aggregate, read=True)

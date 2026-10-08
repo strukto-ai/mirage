@@ -13,7 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type ShellValue, type VarAttr } from '../shell/variable.ts'
+import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { FileStat, PathSpec, Visibility } from '../types.ts'
+
+/**
+ * The keywords an op carries through the door: the mount's index, the
+ * filetype a read resolves by (null asks for the stored bytes), and the
+ * op's own (`offset`, `size`, `parents`, `no_create`, the setattr fields).
+ */
+export interface OpKwargs {
+  index?: IndexCacheStore
+  filetype?: string | null
+  [k: string]: unknown
+}
 
 export type StatOverlay = (path: string, stat: FileStat) => FileStat
 
@@ -108,8 +120,14 @@ export interface SessionView {
   // `followRef` (default true) resolves a `declare -n` reference to its
   // target first, which is what every ordinary assignment does;
   // `declare -n r=w` on an existing reference re-aims it and passes
-  // false.
-  set(name: string, value: ShellValue, followRef?: boolean): Promise<void>
+  // false. `assigned` names the elements an array write assigns; the rest
+  // are carried over as stored.
+  set(
+    name: string,
+    value: ShellValue,
+    followRef?: boolean,
+    assigned?: ReadonlySet<number | string> | null,
+  ): Promise<void>
   // Drop one variable through the session plane; a missing name is quiet.
   // `followRef` (default true) resolves a reference to its target;
   // `unset -n r` drops the reference itself and passes false.
@@ -120,10 +138,12 @@ export interface SessionView {
   // and a bare `local NAME` on a fresh name leave it *unset* and merely
   // declared, which is a state `set` cannot express. Gated all the same
   // -- a mark is a session write, so a hidden name refuses and
-  // `preSession` rules.
-  mark(name: string, attr: VarAttr | null, on: boolean): Promise<void>
-  // Whether `readonly` has marked the name.
-  isReadonly(name: string): boolean
+  // `preSession` rules. `followRef` is `set`'s: `declare -rn r` marks the
+  // reference itself.
+  mark(name: string, attr: VarAttr | null, on: boolean, followRef?: boolean): Promise<void>
+  // Whether `readonly` has marked the name; `followRef` false asks about
+  // a `declare -n` reference itself rather than its target.
+  isReadonly(name: string, followRef?: boolean): boolean
   // The name of the profile the session runs under, null for an
   // unrestricted session. What an owner-rendering command (ls -l, stat
   // %g, find -printf %g) prints in the group column: the profile is the
@@ -166,7 +186,7 @@ export interface LinkView {
 // symlinks, mount boundaries, the chmod/chown/touch attr overlay, and the
 // child names the namespace owes a directory. One view per plane means a
 // command that grows a new name-plane need reads another field instead of
-// threading a new keyword through `executeCmd` and every builder. A
+// threading a new keyword through `runCommand` and every builder. A
 // command opts in by reading `ns` off its opts; fields are absent when
 // the plane has nothing to offer (no links, no overlay) or outside a
 // workspace.

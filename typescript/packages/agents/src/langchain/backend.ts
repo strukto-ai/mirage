@@ -14,7 +14,7 @@
 
 import type { Workspace } from '@struktoai/mirage-node'
 import type { Ops } from '@struktoai/mirage-core/ops/ops'
-import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type {
   EditResult,
   ExecuteResponse,

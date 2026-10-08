@@ -18,9 +18,8 @@ import pytest
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.object_store import make_object_store_commands
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.context import (
     reset_current_session,
     reset_mount_gate,
@@ -90,8 +89,8 @@ def _io(writes: list[str]) -> CommandIO:
     )
 
 
-def _tee(writes: list[str]):
-    cmds = make_object_store_commands("s3", _io(writes))
+def _tee():
+    cmds = make_object_store_commands("s3")
     return next(c for c in cmds if c._registered_commands[0].name == "tee")
 
 
@@ -102,7 +101,7 @@ async def test_tee_holds_each_path_to_its_regions_mode():
     # writes, and the write below the read-only cap still refuses
     # before the backend sees it.
     writes: list[str] = []
-    tee = _tee(writes)
+    tee = _tee()
     sess = SessionState(
         session_id="agent",
         mount_modes={"/s3": MountMode.READ},
@@ -119,7 +118,7 @@ async def test_tee_holds_each_path_to_its_regions_mode():
             cast(Accessor, object()),
             [PathSpec.from_str_path("/s3/data.txt")],
             [],
-            CommandOpts(index=NULL_INDEX),
+            CommandOpts(index=NULL_INDEX, io=_io(writes)),
         )
     finally:
         reset_mount_gate(gate_token)
@@ -132,7 +131,7 @@ async def test_tee_holds_each_path_to_its_regions_mode():
 @pytest.mark.asyncio
 async def test_tee_writes_inside_the_granted_region():
     writes: list[str] = []
-    tee = _tee(writes)
+    tee = _tee()
     sess = SessionState(
         session_id="agent",
         mount_modes={"/s3": MountMode.READ},
@@ -149,7 +148,7 @@ async def test_tee_writes_inside_the_granted_region():
             cast(Accessor, object()),
             [PathSpec.from_str_path("/s3/build/out.txt")],
             [],
-            CommandOpts(index=NULL_INDEX),
+            CommandOpts(index=NULL_INDEX, io=_io(writes)),
         )
     finally:
         reset_mount_gate(gate_token)

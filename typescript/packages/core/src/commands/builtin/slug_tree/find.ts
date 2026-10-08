@@ -25,7 +25,8 @@ import {
   command,
   type CommandFnResult,
   type CommandOpts,
-  type RegisteredCommand,
+  type Command,
+  type CommandIO,
 } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -34,10 +35,10 @@ import { treeHasMtime } from '../find_eval.ts'
 import { parseFindExpression, type FindExpr } from '../find_parse.ts'
 import { findGeneric } from '../generic/find.ts'
 import {
+  mountIo,
   resolveGlobOf,
   withCommandGuards,
   withPolicyGuard,
-  type CommandIO,
 } from '../generic_bind/adapter.ts'
 import { findWalk } from '../generic_bind/builders/find.ts'
 
@@ -89,7 +90,6 @@ function flagsTest(fl: FlagView): boolean {
  *
  * Args:
  *   vfs: the backend the command registers for.
- *   io: the backend's command IO.
  *   tree: the backend's tree.
  *   stat: the full stat.
  *   statLight: the index-only stat, used unless the expression tests a
@@ -100,21 +100,17 @@ function flagsTest(fl: FlagView): boolean {
  */
 export function makeFind<A extends Accessor>(
   vfs: VFSName,
-  io: CommandIO<A>,
   tree: SlugTree<A>,
   stat: StatOp<A>,
   statLight: StatOp<A>,
   needsFull: (expr: FindExpr) => boolean,
-): RegisteredCommand[] {
-  const resolveGlob = resolveGlobOf(io)
+): Command[] {
   const findFull = makeSearchBackedFind<A>({ resolvePath: tree.resolve, stat, walk: tree.walk })
   const findLight = makeSearchBackedFind<A>({
     resolvePath: tree.resolve,
     stat: statLight,
     walk: tree.walk,
   })
-  const walkFull = withCommandGuards(withPolicyGuard(io))
-  const walkLight = withCommandGuards(withPolicyGuard({ ...io, stat: statLight }))
   return command({
     name: 'find',
     vfs,
@@ -125,8 +121,9 @@ export function makeFind<A extends Accessor>(
       texts: string[],
       opts: CommandOpts,
     ): Promise<CommandFnResult> => {
+      const io = mountIo(opts) as CommandIO<A>
       const index = opts.index ?? undefined
-      const resolved = paths.length > 0 ? await resolveGlob(accessor, paths, index) : []
+      const resolved = paths.length > 0 ? await resolveGlobOf(io)(accessor, paths, index) : []
       const searchPath = resolved[0]
       // Push-down choices: a bare word acts as the -name filter, and the
       // heavier stat is only paid when a test needs what it adds.
@@ -143,10 +140,16 @@ export function makeFind<A extends Accessor>(
       // see; the walk classifies through the guarded readdir/stat, the fork
       // the factory builder takes.
       const result = pathsScoped(opts.ns, resolved)
-        ? await findWalk(full ? walkFull : walkLight, accessor, resolved, words, {
-            ...opts,
-            flags: bag,
-          })
+        ? await findWalk(
+            withCommandGuards(withPolicyGuard(full ? io : { ...io, stat: statLight })),
+            accessor,
+            resolved,
+            words,
+            {
+              ...opts,
+              flags: bag,
+            },
+          )
         : await findGeneric(
             resolved,
             words,

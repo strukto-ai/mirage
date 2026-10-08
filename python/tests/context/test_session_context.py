@@ -19,6 +19,7 @@ import pytest
 from mirage.context import (
     effective_mount_mode,
     effective_path_mode,
+    get_current_evaluation,
     get_current_session,
     get_current_session_for,
     get_current_session_unless_foreign,
@@ -30,12 +31,12 @@ from mirage.context import (
     reset_mount_gate,
     reset_program_invocation,
     session_visibility,
+    set_current_evaluation,
     set_current_session,
     set_mount_gate,
     set_program_invocation,
     strongest_mode_under,
 )
-from mirage.context.session_context import bound_evaluation
 from mirage.errors.types import ReadOnlyError
 from mirage.types import (
     HiddenPaths,
@@ -46,11 +47,7 @@ from mirage.types import (
     weaker_mode,
 )
 from mirage.utils.hidden import hidden_under, path_visible
-from mirage.workspace.evaluation import (
-    EvaluationContext,
-    reset_current_evaluation,
-    set_current_evaluation,
-)
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.session import SessionManager, SessionState
 
 
@@ -215,24 +212,6 @@ def test_the_admission_binding_is_scoped_to_one_command():
     finally:
         reset_admission(token)
     assert get_admission() is None
-
-
-def test_the_op_policies_binding_is_scoped_to_one_command():
-    from mirage.context import (
-        get_op_policies,
-        reset_op_policies,
-        set_op_policies,
-    )
-    from mirage.policy.policies import Policies
-
-    assert get_op_policies() is None
-    policies = Policies([])
-    token = set_op_policies(policies)
-    try:
-        assert get_op_policies() is policies
-    finally:
-        reset_op_policies(token)
-    assert get_op_policies() is None
 
 
 def test_effective_path_mode_is_the_anchor_depth_rule():
@@ -509,13 +488,13 @@ def test_an_evaluation_binds_with_its_own_session_only():
     evaluation = EvaluationContext(session)
     token = set_current_evaluation(evaluation)
     try:
-        assert bound_evaluation() is evaluation
+        assert get_current_evaluation() is evaluation
         for rebound, expected in ((session, evaluation), (other, None)):
             inner = set_current_session(rebound)
             try:
-                assert bound_evaluation() is expected
+                assert get_current_evaluation() is expected
             finally:
                 reset_current_session(inner)
     finally:
-        reset_current_evaluation(token)
-    assert bound_evaluation() is None
+        reset_current_session(token)
+    assert get_current_evaluation() is None

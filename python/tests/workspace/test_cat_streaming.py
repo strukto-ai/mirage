@@ -15,18 +15,9 @@
 import asyncio
 from collections.abc import AsyncIterator
 
-from mirage.commands.builtin.ram import COMMANDS
-from mirage.commands.config import CommandCatalog
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-
-_CMDS = CommandCatalog(COMMANDS)
-ram_cat = _CMDS.require("cat").fn
-
-
-def _cat_ops():
-    return ram_cat.__wrapped__.args[0]
 
 
 def _spying_stream(real_stream, pulled: list[str]):
@@ -59,7 +50,7 @@ def _seeded_ws() -> Workspace:
 
 
 def _spy_cat_reads(ws, command, pulled):
-    ops = _cat_ops()
+    ops = ws.mount("/data/").io
     real = ops.read_stream
     object.__setattr__(ops, "read_stream", _spying_stream(real, pulled))
     try:

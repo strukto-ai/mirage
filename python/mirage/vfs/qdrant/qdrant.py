@@ -15,14 +15,15 @@
 from typing import Any
 
 from mirage.accessor.qdrant import QdrantAccessor
-from mirage.commands.builtin.qdrant import COMMANDS
-from mirage.commands.config import RegisteredCommand, registered_commands
-from mirage.ops.qdrant import OPS as QDRANT_OPS
-from mirage.ops.registry import RegisteredOp
-from mirage.types import VFSName
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.qdrant.tree import SEARCH, read, readdir, stat
+from mirage.errors.fs import enotsup
+from mirage.types import FileStat, PathSpec, VFSName
+from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.qdrant.config import QdrantConfig
 from mirage.vfs.qdrant.prompt import PROMPT
+from mirage.vfs.types import SearchQuery
 
 
 class QdrantVFS(BaseVFS):
@@ -39,11 +40,44 @@ class QdrantVFS(BaseVFS):
         self.config = config
         self.accessor = QdrantAccessor(self.config)
 
-    def ops(self) -> list[RegisteredOp]:
-        return QDRANT_OPS
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await readdir(self.accessor, path, index)
 
-    def commands(self) -> list[RegisteredCommand]:
-        return registered_commands(COMMANDS)
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        data = await read(self.accessor, path, index)
+        return slice_window(data, offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await stat(self.accessor, path, index)
+
+    async def search(
+        self,
+        path: PathSpec,
+        query: SearchQuery,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> list[str] | None:
+        return await SEARCH.search(self.accessor, path, query, index)
+
+    async def search_many(
+        self,
+        paths: list[PathSpec],
+        query: SearchQuery,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> list[str] | None:
+        many = SEARCH.search_many
+        if many is None:
+            raise enotsup(self.name, "search", paths[0])
+        return await many(self.accessor, paths, query, index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

@@ -641,7 +641,7 @@ async def test_exec_isolates_each_invocation(action, terminator):
     # function, so a function head would not run at all.
     ws = await _exec_ws()
     try:
-        await ws.shell("KEEP=parent; set -- original", session_id="s")
+        await ws.shell("export KEEP=parent; set -- original", session_id="s")
         io = await ws.shell(
             f'find d -name "*.txt" -exec {action} {terminator}; '
             'echo "$KEEP:$PWD:$1"; echo "${UNSET_FOR_TEST}"',

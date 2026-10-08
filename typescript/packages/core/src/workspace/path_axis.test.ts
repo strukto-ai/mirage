@@ -13,15 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { parseSessionProfile } from '../policy/profile.ts'
 import type { Action, VfsContext, VfsResultContext, Policy } from '../policy/index.ts'
 import { runWithSession } from '../context/session_context.ts'
 import { getTestParser, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
-import { Session } from './workspace/handle.ts'
-import { Workspace } from './workspace/workspace.ts'
+import { Session, Workspace } from './workspace/workspace.ts'
 
 /** Refuse the unlink of one exact path, whatever door asked. */
 class DenyRemnantUnlink implements Policy {
@@ -69,11 +67,9 @@ async function hiding(): Promise<Workspace> {
 async function seeded(mode: MountMode = MountMode.WRITE): Promise<Workspace> {
   const parser = await getTestParser()
   const repo = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(repo)
   const ws = new Workspace(
     { '/repo': [repo, mode] as const },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+    { mode: MountMode.WRITE, shellParser: parser },
   )
   open.push(ws)
   const io = await ws.shell(
@@ -284,11 +280,9 @@ describe('the path axis end to end', () => {
     // stating rw on a READ-configured mount changes nothing.
     const parser = await getTestParser()
     const repo = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(repo)
     const ws = new Workspace(
       { '/repo': [repo, MountMode.READ] as const },
-      { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+      { mode: MountMode.WRITE, shellParser: parser },
     )
     open.push(ws)
     ws.createSession('rev', {
@@ -443,11 +437,9 @@ describe('the path axis end to end', () => {
 async function boxed(profile: object): Promise<Workspace> {
   const parser = await getTestParser()
   const repo = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(repo)
   const ws = new Workspace(
     { '/repo': [repo, MountMode.WRITE] as const },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+    { mode: MountMode.WRITE, shellParser: parser },
   )
   open.push(ws)
   const io = await ws.shell(
@@ -586,12 +578,9 @@ describe('subtree mutations against hides', () => {
     const parser = await getTestParser()
     const repo = new RAMVFS()
     const m = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(repo)
-    registry.registerVfs(m)
     const ws = new Workspace(
       { '/repo': [repo, MountMode.WRITE] as const, '/repo/only/m': [m, MountMode.WRITE] as const },
-      { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+      { mode: MountMode.WRITE, shellParser: parser },
     )
     open.push(ws)
     const io = await ws.shell("mkdir -p /repo/only && printf 'h\\n' > /repo/only/h")
@@ -614,11 +603,9 @@ describe('the ops door against hides', () => {
     // cannot destroy a mode-protected remnant either.
     const parser = await getTestParser()
     const repo = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(repo)
     const ws = new Workspace(
       { '/repo': [repo, MountMode.WRITE] as const },
-      { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+      { mode: MountMode.WRITE, shellParser: parser },
     )
     open.push(ws)
     const io = await ws.shell("mkdir -p /repo/only && printf 'h\\n' > /repo/only/h")
@@ -646,12 +633,9 @@ describe('the ops door against hides', () => {
     const parser = await getTestParser()
     const a = new RAMVFS()
     const m = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(a)
-    registry.registerVfs(m)
     const ws = new Workspace(
       { '/a': [a, MountMode.WRITE] as const, '/a/d/m': [m, MountMode.WRITE] as const },
-      { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+      { mode: MountMode.WRITE, shellParser: parser },
     )
     open.push(ws)
     const io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
@@ -676,13 +660,10 @@ describe('the ops door against hides', () => {
     // and the protected content survives.
     const parser = await getTestParser()
     const a = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(a)
     const ws = new Workspace(
       { '/a': [a, MountMode.WRITE] as const },
       {
         mode: MountMode.WRITE,
-        ops: registry,
         shellParser: parser,
         policies: [new DenyRemnantUnlink()],
       },
@@ -708,13 +689,10 @@ describe('the ops door against hides', () => {
     // rather than refusing with a child already gone.
     const parser = await getTestParser()
     const a = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(a)
     const ws = new Workspace(
       { '/a': [a, MountMode.WRITE] as const },
       {
         mode: MountMode.WRITE,
-        ops: registry,
         shellParser: parser,
         policies: [new DenyUnlinkAfter()],
       },
@@ -736,11 +714,9 @@ describe('the ops door against hides', () => {
     // back once the hide lifts, resurfacing the removed tree.
     const parser = await getTestParser()
     const a = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(a)
     const ws = new Workspace(
       { '/a': [a, MountMode.WRITE] as const },
-      { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+      { mode: MountMode.WRITE, shellParser: parser },
     )
     open.push(ws)
     const io = await ws.shell(
@@ -766,11 +742,9 @@ describe('the ops door against hides', () => {
     // destroyed.
     const parser = await getTestParser()
     const a = new RAMVFS()
-    const registry = new OpsRegistry()
-    registry.registerVfs(a)
     const ws = new Workspace(
       { '/a': [a, MountMode.WRITE] as const },
-      { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+      { mode: MountMode.WRITE, shellParser: parser },
     )
     open.push(ws)
     const io = await ws.shell(
@@ -796,12 +770,9 @@ async function twoMounts(profile: object): Promise<Workspace> {
   const parser = await getTestParser()
   const a = new RAMVFS()
   const b = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(a)
-  registry.registerVfs(b)
   const ws = new Workspace(
     { '/a': [a, MountMode.WRITE] as const, '/b': [b, MountMode.WRITE] as const },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+    { mode: MountMode.WRITE, shellParser: parser },
   )
   open.push(ws)
   const io = await ws.shell(

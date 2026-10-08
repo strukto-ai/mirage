@@ -28,8 +28,7 @@ import { registerSecrets } from '../../secrets/registry.ts'
 import { MountMode } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
-import { Workspace } from '../workspace/workspace.ts'
-import { Session } from '../workspace/handle.ts'
+import { Session, Workspace } from '../workspace/workspace.ts'
 import { explainLine, type Judgment } from './explain.ts'
 
 const DEC = new TextDecoder()

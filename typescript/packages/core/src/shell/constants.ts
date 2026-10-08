@@ -88,7 +88,7 @@ export const OUTPUT_ONLY_BUILTINS: ReadonlySet<string> = new Set([
 export const PIPESTATUS = 'PIPESTATUS'
 export const FUNCNAME = 'FUNCNAME'
 export const RANDOM = 'RANDOM'
-// bash 5.2's generator (lib/sh/random.c): a Park-Miller minimal-standard
+// bash 5.2's RANDOM generator: a Park-Miller minimal-standard
 // step through Schrage's method, the value folding the state's two halves
 // and keeping 15 bits, and a draw that never repeats the value before it.
 // A seed is the assigned integer truncated to 32 bits, and a zero state

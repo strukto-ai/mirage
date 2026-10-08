@@ -58,11 +58,3 @@ async function readFile(
 }
 
 export const read = makeRead<GSlidesAccessor>(detectScope, { file: readFile })
-
-export async function* readStream(
-  accessor: GSlidesAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  yield await read(accessor, path, index)
-}

@@ -19,7 +19,6 @@ import { Outcome, type ShellExplanation, type VfsExplanation } from '../../polic
 import type { SetAttrFields } from '../../types.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { isFsError } from '../../errors/fs.ts'
-import type { Workspace } from './workspace.ts'
 
 /**
  * A session's calls explained instead of run, under the session's own
@@ -36,7 +35,7 @@ import type { Workspace } from './workspace.ts'
  */
 export class Explainer {
   constructor(
-    private readonly ws: Workspace,
+    private readonly explain: (line: string, sessionId: string) => Promise<ShellExplanation>,
     private readonly sessionId: string | null,
     private readonly ops: Ops,
   ) {}
@@ -46,7 +45,7 @@ export class Explainer {
    * command in it, as a tree (`Workspace.explain`).
    */
   shell(line: string): Promise<ShellExplanation> {
-    return this.ws.explain(line, this.sessionId ?? '')
+    return this.explain(line, this.sessionId ?? '')
   }
 
   /** The session's VFS calls, explained. */

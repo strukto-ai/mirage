@@ -15,16 +15,21 @@
 import importlib
 import logging
 import tempfile
+from contextlib import AbstractAsyncContextManager
 from pathlib import Path, PurePosixPath
-from typing import Any, cast, get_args
+from typing import Any, Protocol, cast, get_args
 
 from pydantic import BaseModel
 
+from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.commands.cli.types import CLISpec
 from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.utils import open_regular
 from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
+from mirage.observe.observer import Observer
+from mirage.ops.ops import Ops
+from mirage.policy.policies import Policies
 from mirage.runtime.types import Language, ScriptSource
 from mirage.shell.console import (
     KILLED_OUTCOME,
@@ -35,7 +40,7 @@ from mirage.shell.console import (
     exit_outcome,
 )
 from mirage.shell.constants import BIN_PREFIX
-from mirage.shell.job_table import Job, JobStatus
+from mirage.shell.job_table import Job, JobStatus, JobTable
 from mirage.shell.variable import ShellVar
 from mirage.types import JsonValue, MountMode, ReadSpec, VFSName
 from mirage.version import __version__
@@ -54,9 +59,12 @@ from mirage.vfs.secrets import (
     redacted_config_dump,
     revealed_config_dump,
 )
-from mirage.workspace.mount.namespace import NodeMeta
+from mirage.workspace.documentation.documents import Documents
+from mirage.workspace.mount.namespace import Namespace, NodeMeta
 from mirage.workspace.mount.read_policy import resolve_read_spec
+from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.mount.spec import Mount
+from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.session.resolve import narrow
 from mirage.workspace.session.session import (
     SessionState,
@@ -86,6 +94,40 @@ from mirage.workspace.snapshot.keys import (
 from mirage.workspace.snapshot.utils import FORMAT_VERSION, norm_mount_prefix
 
 logger = logging.getLogger(__name__)
+
+
+class WorkspaceLike(Protocol):
+    """What a snapshot reads from a workspace and restores into it
+    (``Workspace``)."""
+
+    observer: Observer
+    job_table: JobTable
+    _session_mgr: SessionManager
+    _default_agent_id: str | None
+    _implicit_root: bool
+    _documents: Documents
+
+    @property
+    def registry(self) -> MountRegistry: ...
+
+    @property
+    def cache(self) -> FileCacheMixin: ...
+
+    @property
+    def vfs(self) -> Ops: ...
+
+    @property
+    def namespace(self) -> Namespace: ...
+
+    @property
+    def policies(self) -> Policies: ...
+
+    def _forget_reads(self) -> None: ...
+
+    async def _adopt_default_session(self, session_id: str) -> None: ...
+
+    def _quiesced(self) -> AbstractAsyncContextManager[None]: ...
+
 
 # A per-name override for restoring installed CLIs: a plain mapping is a
 # fresh config (the spec resolves from the snapshot's registry key); a
@@ -194,14 +236,14 @@ def cli_spec_from_entry(entry: dict[str, Any]) -> str | CLISpec:
     )
 
 
-async def to_state_dict(ws) -> dict[str, Any]:
+async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
     auto_prefixes = {
         "/dev/",
         norm_mount_prefix(HISTORY_PREFIX),
         norm_mount_prefix(BIN_PREFIX),
     }
 
-    mounted = ws._registry.mounts()
+    mounted = ws.registry.mounts()
     for mount in mounted:
         await mount.ensure_ready()
     mounts_state = []
@@ -235,7 +277,7 @@ async def to_state_dict(ws) -> dict[str, Any]:
     # Only a RAM cache holds entries the snapshot can carry; a Redis
     # cache lives outside the workspace and is skipped on both sides
     # (see `_restore_cache`), as TypeScript's `toStateDict` does.
-    cache = ws._cache
+    cache = ws.cache
     cache_entries = (
         [
             {
@@ -260,7 +302,7 @@ async def to_state_dict(ws) -> dict[str, Any]:
 
     clis_state = [
         cli_snapshot(name, install)
-        for name, install in ws._registry.clis.items().items()
+        for name, install in ws.registry.clis.items().items()
     ]
 
     finished_jobs = [
@@ -269,10 +311,10 @@ async def to_state_dict(ws) -> dict[str, Any]:
         if j.status != JobStatus.RUNNING
     ]
 
-    if mounted != ws._registry.mounts() or any(m.retiring for m in mounted):
+    if mounted != ws.registry.mounts() or any(m.retiring for m in mounted):
         raise RuntimeError("mounts changed during snapshot")
-    fingerprints = capture_fingerprints(ws)
-    live_only_mounts = live_only_mount_prefixes(ws)
+    fingerprints = capture_fingerprints(ws.vfs.records, ws.registry)
+    live_only_mounts = live_only_mount_prefixes(ws.registry, ws._implicit_root)
 
     return {
         StateKey.VERSION: FORMAT_VERSION,
@@ -294,8 +336,7 @@ async def to_state_dict(ws) -> dict[str, Any]:
         StateKey.FINGERPRINTS: fingerprints,
         StateKey.LIVE_ONLY_MOUNTS: live_only_mounts,
         StateKey.NODES: {
-            path: meta.to_fields()
-            for path, meta in ws._namespace.nodes.items()
+            path: meta.to_fields() for path, meta in ws.namespace.nodes.items()
         },
     }
 
@@ -464,7 +505,7 @@ def build_mount_args(
 
 
 async def apply_state_dict(
-    ws, state: dict[str, Any], *, replace_cache: bool = False
+    ws: WorkspaceLike, state: dict[str, Any], *, replace_cache: bool = False
 ) -> None:
     """Restore post-construction state into an already-built Workspace.
 
@@ -482,7 +523,7 @@ async def apply_state_dict(
     exact prefix here is not restored and is reported at warning level.
 
     Args:
-        ws (Workspace): the target workspace.
+        ws (WorkspaceLike): the target workspace.
         state (dict[str, Any]): the snapshot state.
         replace_cache (bool): drop the live cache once the gate has
             passed, ahead of the mounts' load_state, so the snapshot's
@@ -500,7 +541,7 @@ async def apply_state_dict(
     # snapshot restores at the same path.
     await ws._documents.clear()
     if replace_cache:
-        await ws._cache.clear()
+        await ws.cache.clear()
     # load_state runs for ALL mounts (overridden too), so disk content
     # is written into the new root, redis content into the new URL, etc.
     # Cred-only mounts (S3 et al.) define load_state as no-op. Every
@@ -508,7 +549,7 @@ async def apply_state_dict(
     # that is gone or now a link fails the load with no mount changed.
     loads = []
     for m in state[StateKey.MOUNTS]:
-        mount = ws._registry.try_mount_for_prefix(m[MountKey.PREFIX])
+        mount = ws.registry.try_mount_for_prefix(m[MountKey.PREFIX])
         if mount is None:
             # Exact-prefix lookup: a snapshot prefix this workspace does
             # not mount is never resolved to an ancestor (that would load
@@ -582,15 +623,17 @@ def _disk_state_as_ram(vfs_state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def _restore_nodes(ws, state: dict[str, Any]) -> None:
+async def _restore_nodes(ws: WorkspaceLike, state: dict[str, Any]) -> None:
     entries = {
         path: NodeMeta.from_fields(d)
         for path, d in (state.get(StateKey.NODES) or {}).items()
     }
-    await ws._namespace.replace_nodes(entries)
+    await ws.namespace.replace_nodes(entries)
 
 
-async def _gate_restored_state(ws, state: dict[str, Any]) -> RestoredEnv:
+async def _gate_restored_state(
+    ws: WorkspaceLike, state: dict[str, Any]
+) -> RestoredEnv:
     """Vet every env input the snapshot carries before any of it lands.
 
     Each session table and the env template fire the ``pre_session``
@@ -610,7 +653,7 @@ async def _gate_restored_state(ws, state: dict[str, Any]) -> RestoredEnv:
     ``_restore_sessions`` then puts the created session under.
 
     Args:
-        ws (Workspace): the target workspace.
+        ws (WorkspaceLike): the target workspace.
         state (dict[str, Any]): the snapshot state.
 
     Returns:
@@ -637,25 +680,16 @@ async def _gate_restored_state(ws, state: dict[str, Any]) -> RestoredEnv:
 
 
 async def _restore_sessions(
-    ws, state: dict[str, Any], tables: list[SessionState]
+    ws: WorkspaceLike, state: dict[str, Any], tables: list[SessionState]
 ) -> None:
     default_sid = state.get(StateKey.DEFAULT_SESSION_ID)
     # Every session the snapshot restores is a new one to the agent
     # tools, so none keeps what was read before.
-    ws._reads.clear()
+    ws._forget_reads()
     if default_sid is not None:
         # The snapshot's default session identity wins over the live
         # one, and the discovery record's pointer follows it.
-        ws._session_mgr.adopt_default(default_sid)
-        ws._default_session_id = default_sid
-        await ws._state_store.replace_meta(
-            ws._workspace_id,
-            {
-                "workspace_id": ws._workspace_id,
-                "default_session_id": default_sid,
-            },
-        )
-        ws._meta_written = True
+        await ws._adopt_default_session(default_sid)
     restored: list[Any] = []
     for fields in tables:
         sid = fields.session_id
@@ -683,6 +717,7 @@ async def _restore_sessions(
         session.vars = fields.vars
         session.functions = fields.functions
         session.readonly_functions = fields.readonly_functions
+        session.exported_functions = fields.exported_functions
         session.mount_modes = fields.mount_modes
         restored.append(session)
     # The snapshot's session table wins over prior store contents,
@@ -690,12 +725,12 @@ async def _restore_sessions(
     await ws._session_mgr.replace_from_snapshot(restored)
 
 
-def _restore_cache(ws, state: dict[str, Any]) -> None:
+def _restore_cache(ws: WorkspaceLike, state: dict[str, Any]) -> None:
     cache_state = state.get(StateKey.CACHE) or {}
-    if hasattr(ws._cache, "max_drain_bytes"):
-        ws._cache.max_drain_bytes = cache_state.get(CacheKey.MAX_DRAIN_BYTES)
-    cache = ws._cache
-    if not hasattr(cache, "_entries") or not hasattr(cache, "_store"):
+    if hasattr(ws.cache, "max_drain_bytes"):
+        ws.cache.max_drain_bytes = cache_state.get(CacheKey.MAX_DRAIN_BYTES)
+    cache = ws.cache
+    if not isinstance(cache, RAMFileCacheStore):
         # Non-RAM cache backend (e.g. Redis) — skip; its content lives
         # outside the workspace and isn't part of the snapshot anyway.
         return
@@ -717,13 +752,13 @@ def _restore_cache(ws, state: dict[str, Any]) -> None:
         cache._cache_size += entry.get(CacheKey.SIZE, len(data))
 
 
-async def _restore_history(ws, state: dict[str, Any]) -> None:
+async def _restore_history(ws: WorkspaceLike, state: dict[str, Any]) -> None:
     # Always load (load_events clears first): a snapshot with empty
     # history still rewinds the recorder, same as the cache clear.
     await ws.observer.load_events(state.get(StateKey.HISTORY) or [])
 
 
-def _restore_jobs(ws, state: dict[str, Any]) -> None:
+def _restore_jobs(ws: WorkspaceLike, state: dict[str, Any]) -> None:
     for job_d in state.get(StateKey.JOBS, []):
         ws.job_table.load(_job_from_dict(job_d))
 
@@ -881,7 +916,7 @@ def requires_vfs_override(mount_state: dict[str, Any]) -> bool:
     return has_redacted_secret(vfs_state.get(VFSStateKey.CONFIG))
 
 
-def reusable_clis(ws) -> CLIOverrides:
+def reusable_clis(ws: WorkspaceLike) -> CLIOverrides:
     """Live-install overrides a same-process copy reinstalls from.
 
     Each override carries the live CLISpec and the revealed config, the
@@ -890,10 +925,10 @@ def reusable_clis(ws) -> CLIOverrides:
     both survive without a registry lookup.
 
     Args:
-        ws: the origin workspace.
+        ws (WorkspaceLike): the origin workspace.
     """
     overrides: CLIOverrides = {}
-    for name, install in ws._registry.clis.items().items():
+    for name, install in ws.registry.clis.items().items():
         overrides[name] = (
             install.spec,
             cli_config_dump(install.config, reveal=True),

@@ -12,19 +12,32 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
+from typing import Any
+
 from mirage.accessor.ram import RAMAccessor
-from mirage.commands.builtin.dev import COMMANDS
-from mirage.commands.config import RegisteredCommand, registered_commands
-from mirage.ops.dev import OPS as DEV_OPS
-from mirage.ops.registry import RegisteredOp
-from mirage.types import VFSName
-from mirage.vfs.base import BaseVFS
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.dev.read import read as dev_read
+from mirage.core.dev.stat import stat as dev_stat
+from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.dev.store import DevStore
+from mirage.vfs.ram.ram import RAMVFS
 
 
-class DevVFS(BaseVFS):
+class DevVFS(RAMVFS):
+    """``/dev``: a RAM mount whose read and stat know the two synthetic
+    character devices, ``null`` and ``zero``.
+
+    Its stream is finite: a command that consumes a whole input reads the
+    refusing read, and only the two bounded streaming commands opt into
+    the endless source (``commands/builtin/dev``).
+    """
+
     accessor: RAMAccessor
+    _store: DevStore
     name: str = VFSName.RAM
+    prompt: str = ""
+    index_ttl: float = 600
     # Device metadata is synthetic and needs no content fetch.
     sizes_always_known: bool = True
 
@@ -33,11 +46,36 @@ class DevVFS(BaseVFS):
         self._store = DevStore()
         self.accessor = RAMAccessor(self._store)
 
-    def ops(self) -> list[RegisteredOp]:
-        return DEV_OPS
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        return await dev_read(self.accessor, path, index, offset, size)
 
-    def commands(self) -> list[RegisteredCommand]:
-        return registered_commands(COMMANDS)
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await dev_stat(self.accessor, path, index)
+
+    async def read_stream(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> AsyncIterator[bytes]:
+        data = await self.read(path, index)
+        if data:
+            yield data
+
+    def get_state(self) -> dict[str, Any]:
+        return {"type": self.name}
+
+    def load_state(self, state: dict[str, Any]) -> None:
+        """Nothing to restore: the devices are synthetic.
+
+        Args:
+            state (dict[str, Any]): the payload ``get_state`` produced.
+        """
 
     def allocate_input(self) -> tuple[str, int]:
         return self._store.files.allocate_input()

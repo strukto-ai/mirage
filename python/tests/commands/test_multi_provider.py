@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.config import RegisteredCommand, command
+from mirage.commands.config import Command, command
 from mirage.commands.spec import CommandSpec
 
 
@@ -29,7 +29,7 @@ def test_command_registers_multiple_vfs_names():
     assert "gdrive" in mounts
     assert len(dummy_fn._registered_commands) == 2
     for rc in dummy_fn._registered_commands:
-        assert isinstance(rc, RegisteredCommand)
+        assert isinstance(rc, Command)
         assert rc.name == "cat"
 
 

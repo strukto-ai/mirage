@@ -12,18 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { GSlidesAccessor } from '../../../accessor/gslides.ts'
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
+import type { Command } from '../../config.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 import { GSLIDES_RM } from './rm.ts'
 
 // Slides API passthroughs live in the gws CLI
 // (commands/cli/builtin/gws), installed by name; the mount only serves
 // the filesystem surface.
-export const GSLIDES_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<GSlidesAccessor>(VFSName.GSLIDES, IO, {
+export const GSLIDES_COMMANDS: readonly Command[] = [
+  ...genericCommands(VFSName.GSLIDES, {
     overrides: new Set(['rm']),
   }),
   ...GSLIDES_RM,

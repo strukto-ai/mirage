@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export const IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
-// bash's `legal_number`: strtoimax's leading whitespace and sign, then the
-// trailing blanks bash skips itself.
+// A number as bash's builtins read one: strtoimax's leading whitespace and
+// sign, then the trailing blanks bash skips itself.
 export const COUNT_WORD_RE = /^[ \t\n\v\f\r]*[+-]?[0-9]+[ \t]*$/
 
 // An assignment target with an optional subscript (`name` or `name[sub]`).
@@ -24,6 +24,6 @@ export const TARGET_RE = /^([A-Za-z_][A-Za-z0-9_]*)(?:\[(.+)\])?$/
 
 // What makes bash's bare `set` single-quote a value: IFS whitespace,
 // quoting and control characters, reserved-word and glob characters, and
-// the expansion introducers (`sh_contains_shell_metas`). A `~` counts at
+// the expansion introducers (`$` and a backquote). A `~` counts at
 // the start or after `=` or `:`, and a `#` only at the start.
 export const SET_QUOTED_CHARS: ReadonlySet<string> = new Set(' \t\n\'"\\|&;()<>!{}*[?]^$`')

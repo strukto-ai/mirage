@@ -14,8 +14,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '@struktoai/mirage-core/ops/registry'
-import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
+import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
@@ -31,13 +30,15 @@ function makeStore(prefix: string): RedisNamespaceStore {
     : new RedisNamespaceStore({ keyPrefix: prefix })
 }
 
-// Ops resolve by VFS kind in the workspace registry, so blocking
-// setattr registration simulates an API backend with no attribute slot
-// (attrs land in the namespace overlay).
-class NoSetattrRegistry extends OpsRegistry {
-  override register(ro: RegisteredOp): void {
-    if (ro.name === 'setattr') return
-    super.register(ro)
+class OverlayRAMVFS extends RAMVFS {
+  static {
+    // No setattr of its own, as an API backend with no attribute slot:
+    // attrs land in the namespace overlay.
+    Object.defineProperty(
+      this.prototype,
+      'setattr',
+      Object.getOwnPropertyDescriptor(BaseVFS.prototype, 'setattr') ?? {},
+    )
   }
 }
 
@@ -99,8 +100,8 @@ describe.skipIf(skip)('RedisNamespaceStore', () => {
   it('namespace state survives a workspace restart', async () => {
     const prefix = `mirage:test:namespace:${randomUUID().slice(0, 8)}:`
     const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, ops: new NoSetattrRegistry(), namespaceStore: makeStore(prefix) },
+      { '/data': new OverlayRAMVFS() },
+      { mode: MountMode.WRITE, namespaceStore: makeStore(prefix) },
     )
     await ws.shell('echo alpha > /data/f.txt')
     await ws.shell('chmod 601 /data/f.txt && chown 500:dev /data/f.txt')
@@ -108,8 +109,8 @@ describe.skipIf(skip)('RedisNamespaceStore', () => {
     await ws.close()
 
     const reborn = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, ops: new NoSetattrRegistry(), namespaceStore: makeStore(prefix) },
+      { '/data': new OverlayRAMVFS() },
+      { mode: MountMode.WRITE, namespaceStore: makeStore(prefix) },
     )
     await reborn.shell('echo alpha > /data/f.txt')
     const st = (await reborn.dispatch('stat', '/data/f.txt')) as FileStat

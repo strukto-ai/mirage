@@ -22,6 +22,8 @@ from mirage.commands.builtin.email.find import find
 from mirage.commands.config import CommandOpts
 from mirage.core.email.config import EmailConfig
 from mirage.types import PathSpec
+from mirage.vfs.email import EmailVFS
+from tests.fixtures.vfs_io import io_for
 
 
 def _spec(virtual: str) -> PathSpec:
@@ -74,7 +76,11 @@ async def test_type_f_lists_attachments():
             _accessor(),
             [_spec("/")],
             [],
-            CommandOpts(index=RAMIndexCacheStore(), flags={"type": "f"}),
+            CommandOpts(
+                io=io_for(EmailVFS, _accessor()),
+                index=RAMIndexCacheStore(),
+                flags={"type": "f"},
+            ),
         )
     lines = (
         (stdout if isinstance(stdout, bytes) else b"").decode().splitlines()
@@ -93,7 +99,9 @@ async def test_name_only_folder_level_pushes_down_to_imap_search():
             [_spec("/INBOX")],
             [],
             CommandOpts(
-                index=RAMIndexCacheStore(), flags={"name": "*report*"}
+                io=io_for(EmailVFS, _accessor()),
+                index=RAMIndexCacheStore(),
+                flags={"name": "*report*"},
             ),
         )
     search.assert_awaited_once()
@@ -123,6 +131,7 @@ async def test_name_with_size_falls_through_to_walk():
             [_spec("/INBOX")],
             [],
             CommandOpts(
+                io=io_for(EmailVFS, _accessor()),
                 index=RAMIndexCacheStore(),
                 flags={"name": "*report*", "size": "+0c"},
             ),

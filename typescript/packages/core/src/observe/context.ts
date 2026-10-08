@@ -34,9 +34,33 @@ interface RevisionsState {
 
 const revisionsStorage = createAsyncContext<RevisionsState>()
 
+/**
+ * The running command's own records. A storage of its own, not a field on
+ * `RecordingState`: {@link runWithMountContext} rebuilds that state inside
+ * every `runCommand` and dispatcher op, and binding one would flip
+ * {@link recordingActive} for an unrecorded command.
+ */
+const commandSink = createAsyncContext<OpRecord[]>()
+
 /** Preserve attribution and revision pins when an operation crosses a worker boundary. */
 export function captureRecordingContext(): ContextCall[] {
-  return [storage.capture(), revisionsStorage.capture()]
+  return [storage.capture(), revisionsStorage.capture(), commandSink.capture()]
+}
+
+/**
+ * Collect the records the running command itself emits.
+ *
+ * `fn` gets a fresh list that {@link record} and {@link recordStream}
+ * append to, beside the line's records, while it runs. A nested call opens
+ * its own list, and where async context isolates tasks (node) a concurrent
+ * task keeps its own, so a pipeline stage never sees a sibling stage's
+ * records; the browser's shared frame stack cannot promise that (see
+ * `asyncContextIsolatesTasks`). Nothing is collected outside a recording
+ * scope. Mirrors python's `command_records`.
+ */
+export async function commandRecords<T>(fn: (records: OpRecord[]) => Promise<T>): Promise<T> {
+  const mine: OpRecord[] = []
+  return commandSink.run(mine, () => fn(mine))
 }
 
 export function activeRecords(): readonly OpRecord[] | undefined {
@@ -183,7 +207,9 @@ export function record(
 ): void {
   const state = storage.getStore()
   if (state === undefined) return
-  state.records.push(finishRecord(op, path, source, nbytes, timer, options))
+  const rec = finishRecord(op, path, source, nbytes, timer, options)
+  state.records.push(rec)
+  commandSink.getStore()?.push(rec)
 }
 
 /**
@@ -211,6 +237,7 @@ export function recordStream(
     mountId: storage.getStore()?.mountId ?? null,
   })
   state.records.push(rec)
+  commandSink.getStore()?.push(rec)
   return rec
 }
 

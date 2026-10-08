@@ -12,16 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '../base.ts'
+import { BaseVFS, type VFSStateBase } from '../base.ts'
 import { HistoryAccessor } from '../../accessor/history.ts'
 
-import { HISTORY_COMMANDS } from '../../commands/builtin/history/index.ts'
-import type { RegisteredCommand } from '../../commands/config.ts'
 import type { Observer } from '../../observe/observer.ts'
-import { HISTORY_OPS } from '../../ops/history/index.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 
 import { VFSName } from '../../types.ts'
+import type { PathSpec, FileStat } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
+import type { FindOptions } from '../base.ts'
+import { readdir as historyReaddir } from '../../core/history/readdir.ts'
+import { read as historyRead } from '../../core/history/read.ts'
+import { stat as historyStat } from '../../core/history/stat.ts'
+import { find } from '../../core/history/find.ts'
 
 export const HISTORY_PREFIX = '/.bash_history'
 
@@ -44,11 +48,30 @@ export class HistoryViewVFS extends BaseVFS {
     this.accessor = new HistoryAccessor(observer)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return HISTORY_OPS
+  override readdir(path: PathSpec, _index?: IndexCacheStore): Promise<string[]> {
+    return historyReaddir(this.accessor, path)
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return HISTORY_COMMANDS
+  override async read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const data = await historyRead(this.accessor, path)
+    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override stat(path: PathSpec, _index?: IndexCacheStore): Promise<FileStat> {
+    return historyStat(this.accessor, path)
+  }
+
+  override find(path: PathSpec, options: FindOptions, _index?: IndexCacheStore): Promise<string[]> {
+    return find(this.accessor, path, options)
+  }
+
+  /** The view owns nothing, so its type alone rebuilds it. */
+  override getState(): VFSStateBase {
+    return { type: this.name }
   }
 }

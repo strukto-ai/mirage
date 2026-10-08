@@ -147,10 +147,9 @@ async function runProgram(
       continue
     }
     if (child.type === NT.ERROR) {
-      // ERROR nodes that contain only stray statement separators (`& ;`)
-      // are filtered out at parse-time by findSyntaxError, so anything
-      // reaching here is a recovered fragment we deliberately skip;
-      // structural errors would have raised before executeNode ran.
+      // A line bash refuses never gets here (checkSyntax gates it), so an
+      // ERROR node is a fragment the grammar recovered from in a line bash
+      // reads, which we deliberately skip.
       i += 1
       continue
     }

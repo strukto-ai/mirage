@@ -21,7 +21,7 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { Accessor } from '../accessor/base.ts'
 import { record, revisionFor, runWithRecording, startOp } from '../observe/context.ts'
-import { type OpKwargs, OpsRegistry, type RegisteredOp } from '../ops/registry.ts'
+import type { IndexCacheStore } from '../cache/index/store.ts'
 import { BaseVFS } from '../vfs/base.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { splitManifestAndBlobs } from './snapshot/manifest.ts'
@@ -88,15 +88,9 @@ class FakeRemoteVFS extends BaseVFS {
   override getState(): { type: string; config: { token: string } } {
     return { type: this.name, config: { token: '<REDACTED>' } }
   }
-}
 
-const readOp: RegisteredOp = {
-  name: 'read',
-  vfs: 'fake-remote',
-  filetype: null,
-  write: false,
-  fn: (accessor: Accessor, scope: PathSpec, _args: readonly unknown[], _kwargs: OpKwargs) => {
-    const acc = accessor as unknown as FakeRemoteAccessor
+  override read(scope: PathSpec): Promise<Uint8Array> {
+    const acc = this.accessor
     const pinned = revisionFor(scope.virtual)
     const entry = acc.blobs.get(scope.virtual)
     if (entry === undefined) {
@@ -120,45 +114,33 @@ const readOp: RegisteredOp = {
       revision: entry.revision,
     })
     return Promise.resolve(entry.bytes)
-  },
-}
+  }
 
-const statOp: RegisteredOp = {
-  name: 'stat',
-  vfs: 'fake-remote',
-  filetype: null,
-  write: false,
-  fn: async (accessor: Accessor, scope: PathSpec, _args, { index }) => {
+  override async stat(scope: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     const cached = await index?.get(scope.virtual)
     if (cached?.entry !== undefined && cached.entry !== null) {
       return new FileStat({ name: cached.entry.name, type: FileType.FILE })
     }
-    const acc = accessor as unknown as FakeRemoteAccessor
-    const entry = acc.blobs.get(scope.virtual)
+    const entry = this.accessor.blobs.get(scope.virtual)
     if (entry === undefined) {
       const err = new Error(`not found: ${scope.virtual}`) as Error & { code: string }
       err.code = 'ENOENT'
-      return Promise.reject(err)
+      throw err
     }
-    return Promise.resolve(
-      new FileStat({
-        name: scope.virtual.split('/').pop() ?? scope.virtual,
-        size: entry.bytes.byteLength,
-        type: FileType.FILE,
-        content: ContentType.TEXT,
-        fingerprint: entry.fingerprint,
-        revision: entry.revision,
-      }),
-    )
-  },
+    return new FileStat({
+      name: scope.virtual.split('/').pop() ?? scope.virtual,
+      size: entry.bytes.byteLength,
+      type: FileType.FILE,
+      content: ContentType.TEXT,
+      fingerprint: entry.fingerprint,
+      revision: entry.revision,
+    })
+  }
 }
 
 function build(accessor: FakeRemoteAccessor): Workspace {
-  const ops = new OpsRegistry()
-  ops.register(readOp)
-  ops.register(statOp)
   const res = new FakeRemoteVFS(accessor)
-  return new Workspace({ '/remote': res }, { mode: MountMode.WRITE, ops, shellParser: parser })
+  return new Workspace({ '/remote': res }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 // Wrap a dispatch call in runWithRecording so the captured OpRecord
@@ -194,12 +176,9 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
 
     accessor.put('/remote/a.txt', new TextEncoder().encode('v2-upstream'))
 
-    const ops = new OpsRegistry()
-    ops.register(readOp)
-    ops.register(statOp)
     const loaded = await Workspace.load(
       snap,
-      { mode: MountMode.WRITE, ops, shellParser: parser },
+      { mode: MountMode.WRITE, shellParser: parser },
       { '/remote/': new FakeRemoteVFS(accessor) },
     )
     expect(Object.keys(loaded.revisions).length).toBe(1)
@@ -230,12 +209,9 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
 
       accessor.put('/remote/a.txt', new TextEncoder().encode('v2'))
 
-      const ops = new OpsRegistry()
-      ops.register(readOp)
-      ops.register(statOp)
       const loaded = await Workspace.load(
         snap,
-        { mode: MountMode.WRITE, ops, shellParser: parser, driftPolicy: DriftPolicy.STRICT },
+        { mode: MountMode.WRITE, shellParser: parser, driftPolicy: DriftPolicy.STRICT },
         { '/remote/': new FakeRemoteVFS(accessor) },
       )
       const index = loaded.namespace.mountFor('/remote/a.txt').index
@@ -272,22 +248,17 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
     writeFileSync(snap, await writeSnapshotTar(manifest, blobs))
 
     const seen: boolean[] = []
-    const hintingStat: RegisteredOp = {
-      ...statOp,
-      fn: (accessor, scope, args, kwargs) => {
-        const index = kwargs.index
-        if (index === undefined) throw new Error('the drift check passed no index')
-        seen.push(index instanceof ListingCheckStore)
-        return statOp.fn(accessor, scope, args, kwargs)
-      },
+    const hinting = new FakeRemoteVFS(accessor)
+    const stat = hinting.stat.bind(hinting)
+    hinting.stat = (scope, index) => {
+      if (index === undefined) throw new Error('the drift check passed no index')
+      seen.push(index instanceof ListingCheckStore)
+      return stat(scope, index)
     }
-    const ops = new OpsRegistry()
-    ops.register(readOp)
-    ops.register(hintingStat)
     const loaded = await Workspace.load(
       snap,
-      { mode: MountMode.WRITE, ops, shellParser: parser, driftPolicy: DriftPolicy.STRICT },
-      { '/remote/': new FakeRemoteVFS(accessor) },
+      { mode: MountMode.WRITE, shellParser: parser, driftPolicy: DriftPolicy.STRICT },
+      { '/remote/': hinting },
     )
     try {
       const index = loaded.namespace.mountFor('/remote/a.txt').index
@@ -327,12 +298,9 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
 
     accessor.put('/remote/a.txt', new TextEncoder().encode('v2'))
 
-    const ops = new OpsRegistry()
-    ops.register(readOp)
-    ops.register(statOp)
     const loaded = await Workspace.load(
       snap,
-      { mode: MountMode.WRITE, ops, shellParser: parser, driftPolicy: DriftPolicy.STRICT },
+      { mode: MountMode.WRITE, shellParser: parser, driftPolicy: DriftPolicy.STRICT },
       { '/remote/': new FakeRemoteVFS(accessor) },
     )
     await expect(loaded.vfs.read('/remote/a.txt')).rejects.toBeInstanceOf(ContentDriftError)
@@ -349,12 +317,9 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
     await ws.snapshot(snap)
     accessor.put('/remote/a.txt', new TextEncoder().encode('v2-upstream'))
 
-    const ops = new OpsRegistry()
-    ops.register(readOp)
-    ops.register(statOp)
     const loaded = await Workspace.load(
       snap,
-      { mode: MountMode.WRITE, ops, shellParser: parser, driftPolicy: DriftPolicy.OFF },
+      { mode: MountMode.WRITE, shellParser: parser, driftPolicy: DriftPolicy.OFF },
       { '/remote/': new FakeRemoteVFS(accessor) },
     )
     expect(Object.keys(loaded.revisions).length).toBe(0)
@@ -390,12 +355,9 @@ it.each(['state', 'copy'])(
       } else {
         const state = await toStateDict(ws)
         expect(state.cache.entries.map((e) => e.key)).not.toContain('/remote/data/file')
-        const ops = new OpsRegistry()
-        ops.register(readOp)
-        ops.register(statOp)
         clone = await Workspace.fromState(
           state,
-          { ops, shellParser: parser },
+          { shellParser: parser },
           {
             '/remote': ws.mount('/remote').vfs,
             '/remote/data': replacement,
@@ -431,15 +393,12 @@ it.each([
     fresh.put('/remote/data/file', new TextEncoder().encode('newer'))
     const keep = new FakeRemoteAccessor()
     keep.put('/remote/data/nested/file', new TextEncoder().encode('keep'))
-    const ops = new OpsRegistry()
-    ops.register(readOp)
-    ops.register(statOp)
     const ws = new Workspace(
       {
         [shadow ? '/remote' : '/remote/data']: new FakeRemoteVFS(old),
         '/remote/data/nested': new FakeRemoteVFS(keep),
       },
-      { ops, shellParser: parser },
+      { shellParser: parser },
     )
     let enter = (): void => undefined
     let resume = (): void => undefined
@@ -492,20 +451,23 @@ it.each([
 it('snapshot rejects fingerprints from a retired lazy op', async () => {
   const old = new FakeRemoteAccessor()
   old.put('/remote/file', new TextEncoder().encode('old'))
-  const ops = new OpsRegistry()
-  ops.register({
-    ...readOp,
-    fn: async function* (accessor, scope) {
-      const entry = (accessor as FakeRemoteAccessor).blobs.get(scope.virtual)
-      if (entry === undefined) throw new Error('missing fixture')
-      record('read', scope.virtual, 'fake-remote', entry.bytes.length, startOp(), {
-        fingerprint: entry.fingerprint,
-        revision: entry.revision,
-      })
-      yield await Promise.resolve(entry.bytes)
-    },
-  })
-  const ws = new Workspace({ '/remote': new FakeRemoteVFS(old) }, { ops, shellParser: parser })
+  // A read that answers with a stream, recorded only as it is drained.
+  class LazyRemoteVFS extends FakeRemoteVFS {
+    override read(scope: PathSpec): Promise<Uint8Array> {
+      const accessor = this.accessor
+      async function* lazy(): AsyncIterable<Uint8Array> {
+        const entry = accessor.blobs.get(scope.virtual)
+        if (entry === undefined) throw new Error('missing fixture')
+        record('read', scope.virtual, 'fake-remote', entry.bytes.length, startOp(), {
+          fingerprint: entry.fingerprint,
+          revision: entry.revision,
+        })
+        yield await Promise.resolve(entry.bytes)
+      }
+      return Promise.resolve(lazy() as unknown as Uint8Array)
+    }
+  }
+  const ws = new Workspace({ '/remote': new LazyRemoteVFS(old) }, { shellParser: parser })
   try {
     const id = ws.mount('/remote').mountId
     const [, records] = await runWithRecording(async () => {
@@ -533,25 +495,16 @@ it.each([false, true])(
     const ancestor = new FakeRemoteVFS(new FakeRemoteAccessor())
     const fresh = new FakeRemoteAccessor()
     fresh.put('/remote/data/file', new TextEncoder().encode('new'))
-    const ops = new OpsRegistry()
-    ops.register(readOp)
-    ops.register(statOp)
-    const source = new Workspace({ [prefix]: ancestor }, { ops, shellParser: parser })
+    const source = new Workspace({ [prefix]: ancestor }, { shellParser: parser })
     let loaded: Workspace | undefined
     try {
       const state = await toStateDict(source)
       state.fingerprints = [
         { path: '/remote/data/file', mount_prefix: prefix, fingerprint: 'old-account' },
       ]
-      loaded = await Workspace.fromState(
-        state,
-        { ops, shellParser: parser },
-        { [prefix]: ancestor },
-      )
+      loaded = await Workspace.fromState(state, { shellParser: parser }, { [prefix]: ancestor })
       if (!shadow) await loaded.unmount('/remote/data')
       loaded.addMount('/remote/data', new FakeRemoteVFS(fresh))
-      ops.register(readOp)
-      ops.register(statOp)
       expect(await loaded.dispatch('read', '/remote/data/file')).toEqual(
         new TextEncoder().encode('new'),
       )

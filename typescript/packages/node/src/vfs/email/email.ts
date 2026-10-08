@@ -14,21 +14,22 @@
 
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
-
 import { VFSName } from '@struktoai/mirage-core/types'
 
 import { EmailAccessor } from '../../accessor/email.ts'
-import { EMAIL_COMMANDS } from '../../commands/builtin/email/index.ts'
 
-import { EMAIL_OPS } from '../../ops/email/index.ts'
 import {
   redactEmailConfig,
   type EmailConfig,
   type EmailConfigRedacted,
 } from '../../core/email/config.ts'
 import { PROMPT, WRITE_PROMPT } from './prompt.ts'
+import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
+import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
+import { sliceWindow } from '@struktoai/mirage-core/utils/ranges'
+import { readdir as emailReaddir } from '../../core/email/readdir.ts'
+import { read as emailRead } from '../../core/email/read.ts'
+import { stat as emailStat } from '../../core/email/stat.ts'
 
 export interface EmailVFSState {
   type: string
@@ -59,12 +60,22 @@ export class EmailVFS extends BaseVFS {
     await super.close()
   }
 
-  override commands(): readonly RegisteredCommand[] {
-    return EMAIL_COMMANDS
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    return emailReaddir(this.accessor, path, index)
   }
 
-  override ops(): readonly RegisteredOp[] {
-    return EMAIL_OPS
+  override async read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    const data = await emailRead(this.accessor, path, index)
+    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+    return emailStat(this.accessor, path, index)
   }
 
   override getState(): Promise<EmailVFSState> {

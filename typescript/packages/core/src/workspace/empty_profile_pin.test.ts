@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
@@ -54,15 +53,12 @@ async function seeded(): Promise<Workspace> {
   const parser = await getTestParser()
   const a = new RAMVFS()
   const b = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(a)
-  registry.registerVfs(b)
   const ws = new Workspace(
     {
       '/a': [a, MountMode.WRITE] as const,
       '/b': [b, MountMode.WRITE] as const,
     },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+    { mode: MountMode.WRITE, shellParser: parser },
   )
   open.push(ws)
   const io = await ws.shell(

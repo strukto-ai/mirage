@@ -14,8 +14,7 @@
 
 import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import { countDocuments } from '../../../core/mongodb/client.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
+import { resolveGlobOf, mountIo } from '../generic_bind/index.ts'
 import { streamAny } from '../../../core/mongodb/read.ts'
 import { documentsExist } from '../../../core/mongodb/readdir.ts'
 import { detectScope } from '../../../core/mongodb/scope.ts'
@@ -31,8 +30,6 @@ import {
 } from '../generic/wc.ts'
 
 const ENC = new TextEncoder()
-
-const resolveGlob = resolveGlobOf(IO)
 
 function documentsScope(p: PathSpec): { database: string; name: string } | null {
   const scope = detectScope(p)
@@ -63,7 +60,9 @@ async function wc(
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
   }
   const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+    paths.length > 0
+      ? await resolveGlobOf(mountIo(opts))(accessor, paths, opts.index ?? undefined)
+      : []
   // Line counts on collections come from a server-side countDocuments
   // instead of reading every document. -l only (default prints words and
   // bytes too, which needs the content).

@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { command, type RegisteredCommand } from '@struktoai/mirage-core/commands/config'
+import { command, type Command } from '@struktoai/mirage-core/commands/config'
 import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
@@ -33,7 +33,7 @@ async function runOn(shell: ShellExecutor, spec: ShellExecSpec): Promise<ShellRu
 class ServiceVFS extends RAMVFS {
   calls = 0
 
-  override commands(): readonly RegisteredCommand[] {
+  override commands(): readonly Command[] {
     return [
       ...super.commands(),
       ...command({

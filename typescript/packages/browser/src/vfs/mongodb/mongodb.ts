@@ -12,15 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { MongoDBVFSBase } from '@struktoai/mirage-core/vfs/mongodb/mongodb'
 import { MongoDBAccessor } from '@struktoai/mirage-core/accessor/mongodb'
 
-import { MONGODB_COMMANDS } from '@struktoai/mirage-core/commands/builtin/mongodb/index'
-import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import type { MongoDriver } from '@struktoai/mirage-core/core/mongodb/_driver'
-
-import { MONGODB_OPS } from '@struktoai/mirage-core/ops/mongodb/index'
-import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 
 import {
   redactMongoDBConfig,
@@ -49,7 +44,7 @@ export interface MongoDBVFSState {
   needs_override: true
 }
 
-export class MongoDBVFS extends BaseVFS {
+export class MongoDBVFS extends MongoDBVFSBase {
   override readonly name: string = VFSName.MONGODB
   override readonly cachesReads: boolean = false
   override readonly indexTtl: number = 0
@@ -86,13 +81,5 @@ export class MongoDBVFS extends BaseVFS {
   override async close(): Promise<void> {
     await this.driver.close()
     await super.close()
-  }
-
-  override ops(): readonly RegisteredOp[] {
-    return MONGODB_OPS
-  }
-
-  override commands(): readonly RegisteredCommand[] {
-    return MONGODB_COMMANDS
   }
 }

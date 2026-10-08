@@ -12,15 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import importlib
-import pkgutil
+from typing import Any
 
-import mirage.commands.builtin as builtin_pkg
-from mirage.commands.builtin.generic_bind import CommandIO
+from mirage.vfs.base import BaseVFS
+from mirage.vfs.registry import REGISTRY, resolve_class
 
 
-def _origin(fn: object) -> tuple[str, str]:
-    """Where a wired op's body was written.
+def _origin(fn: Any) -> tuple[str, str]:
+    """Where a function's body was written.
 
     ``(module, qualname)`` rather than the object, so a closure built by
     calling one factory twice reports the one body it came from.
@@ -28,30 +27,42 @@ def _origin(fn: object) -> tuple[str, str]:
     return (getattr(fn, "__module__", ""), getattr(fn, "__qualname__", ""))
 
 
-def _command_ios() -> dict[str, CommandIO]:
-    """Every backend's wired ``CommandIO``, keyed by backend package name."""
-    found: dict[str, CommandIO] = {}
-    for info in pkgutil.iter_modules(builtin_pkg.__path__):
-        if not info.ispkg:
-            continue
-        try:
-            module = importlib.import_module(
-                f"{builtin_pkg.__name__}.{info.name}.io"
-            )
-        except ModuleNotFoundError:
-            continue
-        io = getattr(module, "IO", None)
-        if isinstance(io, CommandIO):
-            found[info.name] = io
-    return found
+def _callee(cls: type[BaseVFS], name: str) -> tuple[str, str] | None:
+    """The function a VFS's ``name`` method hands its work to.
+
+    A builtin's method calls one backend function by a module-level name;
+    the first such name the method's code reads is that function.
+    """
+    method = cls.__dict__.get(name)
+    if method is None:
+        for klass in cls.__mro__[1:]:
+            if klass is BaseVFS:
+                return None
+            method = klass.__dict__.get(name)
+            if method is not None:
+                break
+    if method is None:
+        return None
+    for global_name in method.__code__.co_names:
+        target = method.__globals__.get(global_name)
+        if callable(target) and not isinstance(target, type):
+            return _origin(target)
+    return None
 
 
-def test_every_backend_io_is_discovered():
-    ios = _command_ios()
-    # A guard on the guard: an import that silently stopped resolving would
-    # make every assertion below vacuous.
-    assert len(ios) > 20
-    assert {"ram", "s3", "nextcloud", "gdrive", "onedrive"} <= set(ios)
+def _vfs_classes() -> dict[str, type[BaseVFS]]:
+    """Every builtin VFS class, keyed by registry name."""
+    return {
+        name: resolve_class(entry.vfs_path) for name, entry in REGISTRY.items()
+    }
+
+
+def test_every_builtin_vfs_is_discovered():
+    classes = _vfs_classes()
+    # A guard on the guard: a lookup that silently stopped resolving would
+    # make the assertion below vacuous.
+    assert len(classes) > 20
+    assert {"ram", "s3", "nextcloud", "gdrive", "onedrive"} <= set(classes)
 
 
 def test_rmdir_is_never_the_recursive_removal():
@@ -77,8 +88,9 @@ def test_rmdir_is_never_the_recursive_removal():
     """
     shared = sorted(
         name
-        for name, io in _command_ios().items()
-        if io.rmdir is not None and _origin(io.rmdir) == _origin(io.rm_r)
+        for name, cls in _vfs_classes().items()
+        if (removal := _callee(cls, "rmdir")) is not None
+        and removal == _callee(cls, "rm_r")
     )
     assert not shared, (
         f"these backends wire rmdir to their recursive removal: {shared}"

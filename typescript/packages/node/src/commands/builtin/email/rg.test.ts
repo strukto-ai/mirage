@@ -16,6 +16,8 @@ import type * as BindModule from '@struktoai/mirage-core/commands/builtin/generi
 import type * as SearchModule from '../../../core/email/search.ts'
 import type * as RgModule from '@struktoai/mirage-core/commands/builtin/generic/rg'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ioFor } from '@struktoai/mirage-core/test-utils'
+import { EmailVFS } from '../../../vfs/email/email.ts'
 
 vi.mock('../../../core/email/search.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof SearchModule>()),
@@ -51,7 +53,13 @@ const ACCESSOR = { config: { maxMessages: 10 } } as unknown as EmailAccessor
 async function run(texts: string[], flags: Record<string, FlagValue>) {
   const cmd = EMAIL_RG[0]
   if (cmd === undefined) throw new Error('rg not registered')
-  return cmd.fn(ACCESSOR, [FOLDER], texts, { stdin: null, flags, filetypeFns: null, cwd: '/' })
+  return cmd.fn(ACCESSOR, [FOLDER], texts, {
+    stdin: null,
+    flags,
+    filetypeFns: null,
+    io: ioFor(EmailVFS, ACCESSOR),
+    cwd: '/',
+  })
 }
 
 beforeEach(() => {

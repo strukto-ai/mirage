@@ -19,7 +19,7 @@ describe('@struktoai/mirage-browser barrel exports', () => {
   it('re-exports core symbols', () => {
     expect(browserPkg.MountMode).toBeDefined()
     expect(browserPkg.RAMVFS).toBeDefined()
-    expect(browserPkg.OpsRegistry).toBeDefined()
+    expect(browserPkg.vfsCall).toBeDefined()
     expect(browserPkg.PathSpec).toBeDefined()
   })
 
@@ -49,11 +49,6 @@ describe('@struktoai/mirage-browser barrel exports', () => {
   it('exports OPFSVFS', () => {
     expect(browserPkg.OPFSVFS).toBeDefined()
     expect(typeof browserPkg.OPFSVFS).toBe('function')
-  })
-
-  it('exports OPFS_OPS array', () => {
-    expect(Array.isArray(browserPkg.OPFS_OPS)).toBe(true)
-    expect(browserPkg.OPFS_OPS.length).toBeGreaterThan(0)
   })
 
   it('exports OPFS_PROMPT string', () => {

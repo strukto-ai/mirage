@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { teeGeneric } from '../../generic/tee.ts'
-import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const tee: BuilderFn = async (ops, accessor, paths, texts, opts) => {
+const tee: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
   const idx = opts.index ?? undefined
   const { append } = ops
   const write = requireOp(ops.write, 'write')
@@ -33,7 +33,7 @@ const tee: BuilderFn = async (ops, accessor, paths, texts, opts) => {
   )
 }
 
-export const BUILDER: Builder = {
+export const BUILDER: GenericCommand = {
   name: 'tee',
   write: true,
   fn: tee,

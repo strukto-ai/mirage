@@ -28,6 +28,7 @@ from mirage.core.box.client import (
     box_upload_multipart,
 )
 from mirage.errors.fs import enoent
+from mirage.types import JsonValue
 from mirage.utils.ranges import ByteWindow
 
 T = TypeVar("T")
@@ -278,7 +279,7 @@ async def search_content(
 
 async def upload_new_file(
     tm: BoxTokenManager, parent_id: str, name: str, data: bytes
-) -> dict[str, Any]:
+) -> JsonValue:
     return await box_upload_multipart(
         tm,
         f"{tm.upload_base}/files/content",
@@ -290,7 +291,7 @@ async def upload_new_file(
 
 async def upload_file_version(
     tm: BoxTokenManager, file_id: str, name: str, data: bytes
-) -> dict[str, Any]:
+) -> JsonValue:
     return await box_upload_multipart(
         tm,
         f"{tm.upload_base}/files/{file_id}/content",

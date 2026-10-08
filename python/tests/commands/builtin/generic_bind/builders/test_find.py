@@ -14,9 +14,8 @@
 
 import pytest
 
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders.find import find
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
 

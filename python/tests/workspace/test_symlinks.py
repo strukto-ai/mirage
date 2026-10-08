@@ -1292,7 +1292,7 @@ async def test_readlink_reads_the_listing_channel_for_a_marker_less_dir():
     await ws.shell("mkdir /data/d")
     await ws.shell("echo x > /data/d/under.txt")
     mount = ws._registry.try_mount_for("/data/d")
-    original = mount.execute_op
+    original = mount.call
 
     async def prefix_store(op_name, path, *args, **kwargs):
         if op_name == "stat":
@@ -1310,7 +1310,7 @@ async def test_readlink_reads_the_listing_channel_for_a_marker_less_dir():
             if str(e).rstrip("/").rsplit("/", 1)[-1] != "hollow"
         ]
 
-    mount.execute_op = prefix_store
+    mount.call = prefix_store
     with pytest.raises(OSError) as caught:
         await ws.vfs.readlink("/data/d")
     assert caught.value.errno == errno.EINVAL
@@ -1376,7 +1376,7 @@ async def test_ln_into_a_synthesized_tree_is_not_an_occupied_name():
     """
     ws = _ws()
     mount = ws._registry.try_mount_for("/data")
-    original = mount.execute_op
+    original = mount.call
 
     async def synthesized(op_name, path, *args, **kwargs):
         if op_name == "stat":
@@ -1387,11 +1387,11 @@ async def test_ln_into_a_synthesized_tree_is_not_an_occupied_name():
             return ["tables", "views"]
         return await original(op_name, path, *args, **kwargs)
 
-    mount.execute_op = synthesized
+    mount.call = synthesized
     r = await ws.shell("ln -s /data/x /data/meta_link")
     assert r.exit_code == 0
     assert not r.stderr
-    mount.execute_op = original
+    mount.call = original
     assert (await ws.shell("readlink /data/meta_link")).stdout == b"/data/x\n"
 
 

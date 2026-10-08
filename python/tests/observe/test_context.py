@@ -13,9 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import AsyncIterator
+from typing import Any
 
 import pytest
 
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.observe import context as observe_context
 from mirage.observe.context import (
     RecordingScope,
     active_recorder,
@@ -30,7 +34,6 @@ from mirage.observe.context import (
     with_mount_context,
     with_revisions,
 )
-from mirage.ops.registry import RegisteredOp, op
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -343,11 +346,10 @@ def test_inactive_scope_joins_enclosing():
 async def _dispatch_recording_read(
     recorded: list[str], stream: bool
 ) -> list[str]:
-    # A custom read on a RAM mount at /m records exactly the paths it is
-    # given, inside a real mount frame, so the recorder's own treatment of
-    # the path is what the ledger shows.
-    @op("read", vfs="ram")
-    async def recording_read(accessor, scope, **kwargs):
+    # A RAM mount at /m whose read records exactly the paths it is given,
+    # inside a real mount frame, so the recorder's own treatment of the
+    # path is what the ledger shows.
+    async def recording_read() -> AsyncIterator[bytes]:
         for path in recorded:
             if stream:
                 record_stream("read", path, "ram")
@@ -356,8 +358,14 @@ async def _dispatch_recording_read(
         yield b""
 
     class RecordingRAMVFS(RAMVFS):
-        def ops(self) -> list[RegisteredOp]:
-            return [*super().ops(), *recording_read._registered_ops]
+        async def read(
+            self,
+            path: PathSpec,
+            index: IndexCacheStore = NULL_INDEX,
+            offset: int = 0,
+            size: int | None = None,
+        ) -> Any:
+            return recording_read()
 
     ws = Workspace({"/m": RecordingRAMVFS()})
     scope = RecordingScope()
@@ -383,3 +391,66 @@ async def test_record_stream_stores_the_path_as_given_inside_a_mount_frame():
     # The record_stream twin: same rule, separate code path.
     paths = await _dispatch_recording_read(["/x/y", "/m/k.txt"], stream=True)
     assert paths == ["/x/y", "/m/k.txt"]
+
+
+def test_command_records_collects_only_its_own_commands_records():
+    scope = RecordingScope()
+    try:
+        with observe_context.command_records() as outer:
+            record("write", "/a", "ram", 1, start_op())
+            with observe_context.command_records() as inner:
+                record("write", "/b", "ram", 1, start_op())
+                record_stream("write", "/c", "ram")
+            record("write", "/post", "ram", 1, start_op())
+    finally:
+        scope.close()
+    assert [r.path for r in inner] == ["/b", "/c"]
+    assert [r.path for r in outer] == ["/a", "/post"]
+    assert [r.path for r in scope.records] == ["/a", "/b", "/c", "/post"]
+    # The marks land on the line's own records, so the lists share them.
+    sink = {id(r) for r in scope.records}
+    assert all(id(r) in sink for r in [*inner, *outer])
+
+
+def test_command_records_stays_empty_outside_a_recording_scope():
+    with observe_context.command_records() as mine:
+        record("write", "/a", "ram", 1, start_op())
+        assert record_stream("write", "/b", "ram") is None
+    assert mine == []
+
+
+async def _record_in_own_command(
+    path: str, opened: set[str], recorded: set[str], me: str, other: str
+) -> list[str]:
+    with observe_context.command_records() as mine:
+        opened.add(me)
+        while other not in opened:
+            await asyncio.sleep(0)
+        record("write", path, "ram", 1, start_op())
+        recorded.add(me)
+        # Both lists stay open until both have recorded, so a shared
+        # variable that restores the previous list on exit still holds
+        # the other command's list when this one records.
+        while other not in recorded:
+            await asyncio.sleep(0)
+    return [r.path for r in mine]
+
+
+@pytest.mark.asyncio
+async def test_command_records_is_task_local_across_concurrent_commands():
+    # Each command records only after the other has opened its own list.
+    scope = RecordingScope()
+    opened: set[str] = set()
+    recorded: set[str] = set()
+    try:
+        first, second = await asyncio.gather(
+            asyncio.create_task(
+                _record_in_own_command("/a/x.txt", opened, recorded, "A", "B")
+            ),
+            asyncio.create_task(
+                _record_in_own_command("/b/y.txt", opened, recorded, "B", "A")
+            ),
+        )
+    finally:
+        scope.close()
+    assert (first, second) == (["/a/x.txt"], ["/b/y.txt"])

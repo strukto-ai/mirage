@@ -17,6 +17,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any, Callable, ClassVar
 
+from mirage.runtime.binding import RuntimeContext
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.python.base import PythonRuntime
@@ -31,7 +32,6 @@ from mirage.runtime.types import (
     FilesystemOperation,
     RunArgs,
     RunResult,
-    RuntimeContext,
     RuntimeReach,
     ScriptSource,
 )

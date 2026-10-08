@@ -1,10 +1,7 @@
-import { afterEach, assert, describe, expect, it, vi } from 'vitest'
-import { Parser, Tree } from 'web-tree-sitter'
+import { assert, describe, expect, it } from 'vitest'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
 import { getFunctionBody } from '../helpers.ts'
 import { retainPrograms } from './program.ts'
-
-afterEach(() => vi.restoreAllMocks())
 
 describe('owned programs', () => {
   it('retains invocation nodes independently of the parsing scope', async () => {
@@ -25,26 +22,4 @@ describe('owned programs', () => {
     expect(program.references).toBe(0)
     expect(() => first.children[0]?.text).toThrow('released')
   })
-})
-
-it('diagnoses a program once, when first read, and frees what it parsed', async () => {
-  const parser = await getTestParser()
-  const parses = vi.spyOn(Parser.prototype, 'parse')
-  const releases = vi.spyOn(Tree.prototype, 'delete')
-  const program = parser.parseProgram('echo $(echo a |)')
-  try {
-    const parsed = parses.mock.calls.length
-    expect(program.diagnostics).toHaveLength(1)
-    expect(program.diagnostics).toBe(program.diagnostics)
-    const nested = parses.mock.results
-      .slice(parsed)
-      .filter((r) => r.type === 'return' && r.value !== null)
-      .map((r) => r.value as Tree)
-    expect(nested.length).toBeGreaterThan(0)
-    for (const tree of nested)
-      expect(releases.mock.contexts.filter((t) => t === tree)).toHaveLength(1)
-  } finally {
-    program.release()
-  }
-  expect(() => program.diagnostics).toThrow('released')
 })

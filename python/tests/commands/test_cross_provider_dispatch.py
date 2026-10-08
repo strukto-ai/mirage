@@ -14,7 +14,7 @@
 
 import asyncio
 
-from mirage.commands.config import RegisteredCommand
+from mirage.commands.config import Command
 from mirage.commands.spec import CommandSpec, Operand
 from mirage.io.types import IOResult
 from mirage.types import MountMode
@@ -52,9 +52,7 @@ def _register_on_both(ws, rc):
 def test_cross_vfs_no_aggregate_returns_error():
     ws = _make_ws()
     _seed(ws)
-    rc = RegisteredCommand(
-        "nocross", spec=_SPEC, vfs="ram", filetype=None, fn=_noop_fn
-    )
+    rc = Command("nocross", spec=_SPEC, vfs="ram", filetype=None, fn=_noop_fn)
     _register_on_both(ws, rc)
     io = asyncio.run(ws.shell("nocross /m1/a.txt /m2/b.txt"))
     assert io.exit_code == 1
@@ -64,9 +62,7 @@ def test_cross_vfs_no_aggregate_returns_error():
 def test_cross_vfs_no_aggregate_names_mounts():
     ws = _make_ws()
     _seed(ws)
-    rc = RegisteredCommand(
-        "nocross", spec=_SPEC, vfs="ram", filetype=None, fn=_noop_fn
-    )
+    rc = Command("nocross", spec=_SPEC, vfs="ram", filetype=None, fn=_noop_fn)
     _register_on_both(ws, rc)
     io = asyncio.run(ws.shell("nocross /m1/a.txt /m2/b.txt"))
     stderr = io.stderr.decode()
@@ -84,9 +80,7 @@ def test_cross_vfs_with_aggregate_works():
 def test_cross_vfs_single_mount_still_works():
     ws = _make_ws()
     _seed(ws)
-    rc = RegisteredCommand(
-        "nocross", spec=_SPEC, vfs="ram", filetype=None, fn=_noop_fn
-    )
+    rc = Command("nocross", spec=_SPEC, vfs="ram", filetype=None, fn=_noop_fn)
     _register_on_both(ws, rc)
     io = asyncio.run(ws.shell("nocross /m1/a.txt"))
     assert io.exit_code == 0
@@ -104,9 +98,7 @@ def test_cross_vfs_three_mounts():
     asyncio.run(ws.vfs.write("/m1/a.txt", b"a"))
     asyncio.run(ws.vfs.write("/m2/b.txt", b"b"))
     asyncio.run(ws.vfs.write("/m3/c.txt", b"c"))
-    rc = RegisteredCommand(
-        "nocross", spec=_SPEC, vfs="ram", filetype=None, fn=_noop_fn
-    )
+    rc = Command("nocross", spec=_SPEC, vfs="ram", filetype=None, fn=_noop_fn)
     ws._registry.mount_for("/m1/").register(rc)
     ws._registry.mount_for("/m2/").register(rc)
     ws._registry.mount_for("/m3/").register(rc)

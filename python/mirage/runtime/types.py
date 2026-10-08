@@ -12,20 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias
+from typing import Any, Literal, Protocol, TypeAlias
 
 from mirage.io import IOResult, OpReport
 from mirage.io.types import ByteSource
 from mirage.types import PathSpec
-
-if TYPE_CHECKING:
-    from mirage.ops.types import NamespaceView, SessionView
-    from mirage.process.types import ProcessView
-    from mirage.runtime.binding import WorkspaceBinding
-    from mirage.runtime.resolver import MountResolver
-    from mirage.utils.context_scope import ContextScope
 
 # The value contract of eval: never richer than JSON plus bytes, so any
 # evaluator (in-process or remote over a serialized transport) can carry
@@ -327,25 +320,6 @@ class RuntimeCapabilities:
     evaluate: bool = False
     reach: RuntimeReach = "process"
     filesystem: tuple[FilesystemOperation, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class RuntimeContext:
-    """Local workspace binding captured for one execution, never guest globals.
-
-    The scoped doors retain session, policy, and observation context even
-    when called later from a worker callback. No workspace stores are exposed.
-    """
-
-    binding: "WorkspaceBinding"
-    dispatch: DispatchFn
-    resolver: "MountResolver"
-    ns: "NamespaceView"
-    session_view: "SessionView | None"
-    cwd: PathSpec
-    env: Mapping[str, str]
-    scope: "ContextScope"
-    processes: "ProcessView | None" = None
 
 
 @dataclass(frozen=True, slots=True)

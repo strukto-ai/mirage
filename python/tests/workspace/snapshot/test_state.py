@@ -15,7 +15,6 @@
 import logging
 import os
 from dataclasses import replace
-from functools import partial
 from pathlib import Path
 
 import pytest
@@ -25,14 +24,12 @@ from mirage import (
     NULL_INDEX,
     Accessor,
     BaseVFS,
-    CommandIO,
     FileStat,
     IndexCacheStore,
     Mount,
     MountMode,
     PathSpec,
     Workspace,
-    stream_from_bytes,
 )
 from mirage.cache.file.config import RedisCacheConfig
 from mirage.cache.index import IndexConfig, RedisIndexConfig
@@ -48,6 +45,7 @@ from mirage.types import (
     ReadPolicy,
     ReadSpec,
 )
+from mirage.utils.ranges import slice_window
 from mirage.vfs import registry as vfs_registry
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.errors import VFSConfigError
@@ -174,62 +172,52 @@ class NotesAccessor(Accessor):
         self.pages = pages
 
 
-async def _notes_readdir(
-    accessor: NotesAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
-    parent = path.virtual.rstrip("/")
-    return [f"{parent}/{name}" for name in sorted(accessor.pages)]
+class _NotesVFS(BaseVFS):
+    """Pages held by its accessor, read whole."""
+
+    accessor: NotesAccessor
+
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        parent = path.virtual.rstrip("/")
+        return [f"{parent}/{name}" for name in sorted(self.accessor.pages)]
+
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        key = path.vfs_path.strip("/")
+        if key not in self.accessor.pages:
+            raise FileNotFoundError(path.virtual)
+        return slice_window(self.accessor.pages[key].encode(), offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        key = path.vfs_path.strip("/")
+        name = path.virtual.rstrip("/").rsplit("/", 1)[-1] or "/"
+        if not key:
+            return FileStat(name=name, size=None, type=FileType.DIRECTORY)
+        if key not in self.accessor.pages:
+            raise FileNotFoundError(path.virtual)
+        return FileStat(
+            name=name,
+            size=len(self.accessor.pages[key].encode()),
+            type=FileType.FILE,
+            content=ContentType.TEXT,
+        )
 
 
-async def _notes_read(
-    accessor: NotesAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> bytes:
-    key = path.vfs_path.strip("/")
-    if key not in accessor.pages:
-        raise FileNotFoundError(path.virtual)
-    return accessor.pages[key].encode()
-
-
-async def _notes_stat(
-    accessor: NotesAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> FileStat:
-    key = path.vfs_path.strip("/")
-    name = path.virtual.rstrip("/").rsplit("/", 1)[-1] or "/"
-    if not key:
-        return FileStat(name=name, size=None, type=FileType.DIRECTORY)
-    if key not in accessor.pages:
-        raise FileNotFoundError(path.virtual)
-    return FileStat(
-        name=name,
-        size=len(accessor.pages[key].encode()),
-        type=FileType.FILE,
-        content=ContentType.TEXT,
-    )
-
-
-def _notes_io() -> CommandIO:
-    return CommandIO(
-        readdir=_notes_readdir,
-        read_bytes=_notes_read,
-        read_stream=partial(stream_from_bytes, _notes_read),
-        stat=_notes_stat,
-        is_mounted=lambda a: True,
-        local=False,
-    )
-
-
-class Notes(BaseVFS):
+class Notes(_NotesVFS):
     """Content the VFS owns rides its state, so a version restores it."""
 
     def __init__(self, pages: dict[str, str] | None = None) -> None:
         self.notes = NotesAccessor(dict(pages or {}))
-        super().__init__(name="notes", accessor=self.notes, io=_notes_io())
+        super().__init__(name="notes", accessor=self.notes)
 
     def get_state(self) -> dict:
         return {"type": self.name, "pages": dict(self.notes.pages)}
@@ -238,13 +226,11 @@ class Notes(BaseVFS):
         self.notes.pages = dict(state.get("pages", {}))
 
 
-class Bare(BaseVFS):
+class Bare(_NotesVFS):
     """Keeps the default state, so it has to be handed back live."""
 
     def __init__(self) -> None:
-        super().__init__(
-            name="bare", accessor=NotesAccessor({}), io=_notes_io()
-        )
+        super().__init__(name="bare", accessor=NotesAccessor({}))
 
 
 @pytest.mark.asyncio
@@ -329,12 +315,9 @@ async def test_a_generic_vfs_keeping_the_default_state_needs_an_override():
 
 
 TAGGED_MODULE = '''
-from functools import partial
-
 from pydantic import BaseModel
 
-from mirage import (NULL_INDEX, Accessor, BaseVFS, CommandIO, FileStat,
-                    stream_from_bytes)
+from mirage import NULL_INDEX, Accessor, BaseVFS, FileStat
 from mirage.types import FileType
 
 
@@ -347,32 +330,21 @@ class ZetaConfig(BaseModel):
     label: str
 
 
-async def readdir(accessor, path, index=NULL_INDEX):
-    return []
-
-
-async def read_bytes(accessor, path, index=NULL_INDEX):
-    raise FileNotFoundError(path.virtual)
-
-
-async def stat(accessor, path, index=NULL_INDEX):
-    return FileStat(name="/", size=None, type=FileType.DIRECTORY)
-
-
 class Tagged(BaseVFS):
     CONFIG_CLS = ZetaConfig
 
     def __init__(self, config: ZetaConfig) -> None:
         self.config = config
-        super().__init__(name="tagged",
-                         accessor=Accessor(),
-                         io=CommandIO(readdir=readdir,
-                                      read_bytes=read_bytes,
-                                      read_stream=partial(
-                                          stream_from_bytes, read_bytes),
-                                      stat=stat,
-                                      is_mounted=lambda a: True,
-                                      local=False))
+        super().__init__(name="tagged", accessor=Accessor())
+
+    async def readdir(self, path, index=NULL_INDEX):
+        return []
+
+    async def read(self, path, index=NULL_INDEX, offset=0, size=None):
+        raise FileNotFoundError(path.virtual)
+
+    async def stat(self, path, index=NULL_INDEX):
+        return FileStat(name="/", size=None, type=FileType.DIRECTORY)
 
     def get_state(self) -> dict:
         return {"type": self.name, "config": {"label": self.config.label}}

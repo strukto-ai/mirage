@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { TrelloAccessor } from '../../../accessor/trello.ts'
 import type { TrelloTransport } from '../../../core/trello/client.ts'
-import type { CommandOpts, RegisteredCommand } from '../../config.ts'
+import type { CommandOpts, Command } from '../../config.ts'
 import { makeTrelloReadCommands } from './reads.ts'
 
 const DEC = new TextDecoder()
@@ -46,7 +46,7 @@ function transport(table: Record<string, unknown>): TrelloTransport {
   }
 }
 
-function read(name: string): RegisteredCommand {
+function read(name: string): Command {
   const rc = makeTrelloReadCommands().find((c) => c.name === name)
   if (rc === undefined) throw new Error(`${name} is not registered`)
   return rc

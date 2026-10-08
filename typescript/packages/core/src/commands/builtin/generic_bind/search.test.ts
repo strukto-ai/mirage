@@ -21,10 +21,9 @@ import type { SearchQuery } from '../../../vfs/types.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import { efbig, enoent } from '../../../errors/fs.ts'
 import { stripSlash } from '../../../utils/slash.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, CommandOpts, CommandIO } from '../../config.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 
-import type { CommandIO } from './adapter.ts'
 import { narrowScope, runSearch } from './search.ts'
 import { makeSearchOp } from '../../../core/hierarchy/search.ts'
 

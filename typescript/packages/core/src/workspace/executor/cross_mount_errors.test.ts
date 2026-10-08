@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from '../fixtures/workspace_fixture.ts'
@@ -32,14 +31,7 @@ async function makeTwoRamWs(): Promise<Workspace> {
   ram1.store.files.set('/file.txt', ENC.encode('line1\nline2\nline3\nline4\nline5\n'))
   ram2.store.files.set('/file.txt', ENC.encode('aaa\nbbb\nccc\n'))
 
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram1)
-  registry.registerVfs(ram2)
-
-  return new Workspace(
-    { '/a': ram1, '/b': ram2 },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  return new Workspace({ '/a': ram1, '/b': ram2 }, { mode: MountMode.WRITE, shellParser: parser })
 }
 
 async function runCmd(
@@ -105,13 +97,9 @@ async function makeReadonlySrcWs(): Promise<Workspace> {
   const rw = new RAMVFS()
   ro.store.files.set('/report.csv', ENC.encode('name,age\nalice,30\n'))
 
-  const registry = new OpsRegistry()
-  registry.registerVfs(ro)
-  registry.registerVfs(rw)
-
   return new Workspace(
     { '/mail': [ro, MountMode.READ], '/scratch': [rw, MountMode.EXEC] },
-    { ops: registry, shellParser: parser },
+    { shellParser: parser },
   )
 }
 

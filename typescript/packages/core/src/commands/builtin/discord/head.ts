@@ -14,16 +14,13 @@
 
 import type { DiscordAccessor } from '../../../accessor/discord.ts'
 import type { IndexCacheStore } from '../../../cache/index/index.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
+import { resolveGlobOf, mountIo } from '../generic_bind/index.ts'
 import { read as discordRead } from '../../../core/discord/read.ts'
 import { stat as discordStat } from '../../../core/discord/stat.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { headGeneric } from '../generic/head.ts'
-
-const resolveDiscordGlob = resolveGlobOf(IO)
 
 async function* discordStream(
   accessor: DiscordAccessor,
@@ -40,7 +37,9 @@ async function head(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const resolved =
-    paths.length > 0 ? await resolveDiscordGlob(accessor, paths, opts.index ?? undefined) : []
+    paths.length > 0
+      ? await resolveGlobOf(mountIo(opts))(accessor, paths, opts.index ?? undefined)
+      : []
   return headGeneric(
     resolved,
     texts,

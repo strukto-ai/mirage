@@ -14,7 +14,6 @@
 
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -354,11 +353,9 @@ describe('heredocs across nested mounts', () => {
     const parent = new RAMVFS()
     const child = new RAMVFS()
     const ghost = new RAMVFS()
-    const ops = new OpsRegistry()
-    for (const vfs of [parent, child, ghost]) ops.registerVfs(vfs)
     const ws = new Workspace(
       { '/data': parent, '/data/inner': child, '/ghost/deep': ghost },
-      { mode: MountMode.WRITE, ops, shellParser: await getTestParser() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
     )
     try {
       const [exit, stdout, stderr] = await runResult(ws, testCase.command)

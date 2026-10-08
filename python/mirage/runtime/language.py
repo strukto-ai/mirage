@@ -17,6 +17,7 @@ from dataclasses import replace
 from typing import ClassVar
 
 from mirage.runtime.base import Runtime
+from mirage.runtime.binding import RuntimeContext
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.types import (
     CodeExecution,
@@ -25,7 +26,6 @@ from mirage.runtime.types import (
     RunArgs,
     RunResult,
     RuntimeCapabilities,
-    RuntimeContext,
 )
 
 

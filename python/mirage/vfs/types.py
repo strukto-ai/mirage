@@ -6,12 +6,25 @@ from collections.abc import (
     Sequence,
 )
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, Protocol
 
 from mirage.cache.index import IndexCacheStore
 from mirage.types import FileStat, JsonValue, PathSpec
 
 DuEntries = tuple[list[tuple[str, int]], int]
+
+
+class Effect(StrEnum):
+    """What a dispatchable VFS function does to the mount.
+
+    READ leaves the mount as it was. WRITE changes what it stores, so a
+    read-only mount refuses the call and admission judges it as a write.
+    """
+
+    READ = "read"
+    WRITE = "write"
+
 
 OperationFn = Callable[..., Any]
 
@@ -212,45 +225,6 @@ class DuOps:
 
     size: DuSizeOp
     entries: DuEntriesOp
-
-
-@dataclass(frozen=True, kw_only=True)
-class ReadOps:
-    """Required resource reads: child paths, rendered bytes, and metadata."""
-
-    readdir: ReaddirOp
-    read_bytes: ReadBytesOp
-    stat: StatOp
-
-
-@dataclass(frozen=True, kw_only=True)
-class NativeReadOps:
-    """Optional read accelerators with the same semantics as generic reads."""
-
-    read_stream: ReadStreamOp | None = None
-    read_range: ReadRangeOp | None = None
-    exists: ExistsOp | None = None
-    find: OperationFn | None = None
-    du: DuOps | None = None
-
-
-@dataclass(frozen=True, kw_only=True)
-class WriteOps:
-    """Independent mutations; omitted operations remain unsupported."""
-
-    write: WriteOp | None = None
-    append: WriteOp | None = None
-    pwrite: PwriteOp | None = None
-    create: PathOp | None = None
-    mkdir: MkdirOp | None = None
-    unlink: PathOp | None = None
-    rmdir: RmdirOp | None = None
-    rm_r: RmTreeOp | None = None
-    rename: PairOp | None = None
-    copy: PairOp | None = None
-    dir_copy: PairOp | None = None
-    truncate: TruncateOp | None = None
-    set_attrs: OperationFn | None = None
 
 
 class NarrowPathsOp(Protocol):

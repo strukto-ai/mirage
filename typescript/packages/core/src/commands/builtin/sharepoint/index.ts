@@ -1,9 +1,5 @@
-import type { SharePointAccessor } from '../../../accessor/sharepoint.ts'
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
-import { IO } from './io.ts'
+import type { Command } from '../../config.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 
-export const SHAREPOINT_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<SharePointAccessor>(VFSName.SHAREPOINT, IO, {}),
-]
+export const SHAREPOINT_COMMANDS: readonly Command[] = [...genericCommands(VFSName.SHAREPOINT)]

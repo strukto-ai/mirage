@@ -13,12 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Callable
+from typing import Any
 
 from mirage.accessor.bin import BinAccessor
-from mirage.commands.builtin.bin import COMMANDS
-from mirage.commands.config import RegisteredCommand, registered_commands
-from mirage.ops.bin import OPS
-from mirage.ops.registry import RegisteredOp
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.bin.read import read as _read
+from mirage.core.bin.readdir import readdir as _readdir
+from mirage.core.bin.refuse import refuse
+from mirage.core.bin.stat import stat as _stat
+from mirage.types import FileStat, PathSpec
+from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 
 
@@ -49,8 +53,83 @@ class BinViewVFS(BaseVFS):
         super().__init__()
         self.accessor = BinAccessor(programs, note)
 
-    def ops(self) -> list[RegisteredOp]:
-        return OPS
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await _readdir(self.accessor, path, index)
 
-    def commands(self) -> list[RegisteredCommand]:
-        return registered_commands(COMMANDS)
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        data = await _read(self.accessor, path, index)
+        return slice_window(data, offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await _stat(self.accessor, path, index)
+
+    # What the view holds is the lookup's to say, so every write answers
+    # as a read-only file system does, rather than as a missing function,
+    # which would answer "Operation not supported".
+
+    async def write(self, path: PathSpec, data: bytes) -> None:
+        await refuse(self.accessor, path)
+
+    async def append(
+        self,
+        path: PathSpec,
+        data: bytes,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> None:
+        await refuse(self.accessor, path)
+
+    async def pwrite(
+        self,
+        path: PathSpec,
+        data: bytes,
+        offset: int,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> None:
+        await refuse(self.accessor, path)
+
+    async def create(self, path: PathSpec) -> None:
+        await refuse(self.accessor, path)
+
+    async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
+        await refuse(self.accessor, path)
+
+    async def unlink(self, path: PathSpec) -> None:
+        await refuse(self.accessor, path)
+
+    async def rmdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> None:
+        await refuse(self.accessor, path)
+
+    async def rename(self, src: PathSpec, dst: PathSpec) -> None:
+        await refuse(self.accessor, src)
+
+    async def truncate(
+        self, path: PathSpec, length: int, no_create: bool = False
+    ) -> None:
+        await refuse(self.accessor, path)
+
+    async def setattr(
+        self,
+        path: PathSpec,
+        *,
+        mode: int | None = None,
+        uid: int | str | None = None,
+        gid: int | str | None = None,
+        atime: str | None = None,
+        mtime: str | None = None,
+    ) -> dict[str, int | str]:
+        await refuse(self.accessor, path)
+
+    def get_state(self) -> dict[str, Any]:
+        return {"type": self.name}

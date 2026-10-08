@@ -8,7 +8,6 @@ it.each([
 ])('preserves source and siblings through assignment recovery: %s', async (line) => {
   const program = (await getTestParser()).parseProgram(line)
   try {
-    expect(program.diagnostics).toEqual([])
     const pending = [program.root]
     while (pending.length) {
       const node = pending.pop()

@@ -7,7 +7,6 @@ import { IOResult, materialize } from '../../io/types.ts'
 import { PathSpec } from '../../types.ts'
 import { eacces } from '../../errors/fs.ts'
 import { MountEntry } from '../mount/mount.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 
@@ -61,14 +60,8 @@ it.each([
 })
 
 class FailingListing extends RAMVFS {
-  override ops(): readonly RegisteredOp[] {
-    return super
-      .ops()
-      .map((ro) =>
-        ro.name === 'readdir'
-          ? { ...ro, fn: () => Promise.reject(new Error('remote failure')) }
-          : ro,
-      )
+  override readdir(): Promise<string[]> {
+    return Promise.reject(new Error('remote failure'))
   }
 }
 
@@ -103,6 +96,6 @@ it('does not convert a lazy timeout into a normal failure', async () => {
   const vfs = new RAMVFS()
   const mount = new MountEntry({ prefix: '/bad/', vfs })
   for (const cmd of failingCommand('cat', new CommandTimeoutError('cat', 1))) mount.register(cmd)
-  const [out] = await mount.executeCmd('cat', [PathSpec.fromStrPath('/bad/f')], [], {})
+  const [out] = await mount.runCommand('cat', [PathSpec.fromStrPath('/bad/f')], [], {})
   await expect(materialize(out)).rejects.toBeInstanceOf(CommandTimeoutError)
 })

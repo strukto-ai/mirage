@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
 import { PyodideRuntime } from '../runtime/python/pyodide/runtime.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
@@ -24,9 +23,7 @@ describe('Workspace + Python mount', () => {
   it('Workspace.addMount makes paths visible inside Python after it loads', async () => {
     const parser = await getTestParser()
     const ram = new RAMVFS()
-    const ops = new OpsRegistry()
-    ops.registerVfs(ram)
-    const ws = new Workspace({}, { mode: MountMode.EXEC, ops, shellParser: parser })
+    const ws = new Workspace({}, { mode: MountMode.EXEC, shellParser: parser })
     ws.addMount('/ram', ram, MountMode.EXEC)
     await ws.vfs.write('/ram/hello.txt', 'world')
     const io = await ws.shell(`python3 -c "with open('/ram/hello.txt') as f: print(f.read())"`)
@@ -38,9 +35,7 @@ describe('Workspace + Python mount', () => {
   it('Python writes flush back through the bridge', async () => {
     const parser = await getTestParser()
     const ram = new RAMVFS()
-    const ops = new OpsRegistry()
-    ops.registerVfs(ram)
-    const ws = new Workspace({}, { mode: MountMode.EXEC, ops, shellParser: parser })
+    const ws = new Workspace({}, { mode: MountMode.EXEC, shellParser: parser })
     ws.addMount('/ram', ram, MountMode.EXEC)
     const io = await ws.shell(`python3 -c "with open('/ram/out.txt', 'wb') as f: f.write(b'data')"`)
     expect(io.exitCode, new TextDecoder().decode(io.stderr)).toBe(0)
@@ -52,9 +47,7 @@ describe('Workspace + Python mount', () => {
   it('Workspace.addMount does not load Pyodide when no Python ever runs', async () => {
     const parser = await getTestParser()
     const ram = new RAMVFS()
-    const ops = new OpsRegistry()
-    ops.registerVfs(ram)
-    const ws = new Workspace({}, { mode: MountMode.EXEC, ops, shellParser: parser })
+    const ws = new Workspace({}, { mode: MountMode.EXEC, shellParser: parser })
     ws.addMount('/ram', ram, MountMode.EXEC)
     await ws.vfs.write('/ram/never.txt', 'unused')
     const io = await ws.shell('echo hello')
@@ -66,16 +59,13 @@ describe('Workspace + Python mount', () => {
   it('unmount drains in-flight Python addMount before closing the VFS', async () => {
     const parser = await getTestParser()
     const ram = new RAMVFS()
-    const ops = new OpsRegistry()
-    ops.registerVfs(ram)
-    const ws = new Workspace({}, { mode: MountMode.EXEC, ops, shellParser: parser })
+    const ws = new Workspace({}, { mode: MountMode.EXEC, shellParser: parser })
     ws.addMount('/ram', ram, MountMode.EXEC)
     await ws.vfs.write('/ram/seed.txt', 'seed')
     const io = await ws.shell(`python3 -c "pass"`)
     expect(io.exitCode, new TextDecoder().decode(io.stderr)).toBe(0)
     await ws.unmount('/ram/')
     const ram2 = new RAMVFS()
-    ops.registerVfs(ram2)
     ws.addMount('/ram', ram2, MountMode.WRITE)
     await ws.vfs.write('/ram/post.txt', 'post')
     expect(new TextDecoder().decode(await ws.vfs.read('/ram/post.txt'))).toBe('post')
@@ -85,9 +75,7 @@ describe('Workspace + Python mount', () => {
   it('Python writes a 50KB chunked file end-to-end', async () => {
     const parser = await getTestParser()
     const ram = new RAMVFS()
-    const ops = new OpsRegistry()
-    ops.registerVfs(ram)
-    const ws = new Workspace({}, { mode: MountMode.EXEC, ops, shellParser: parser })
+    const ws = new Workspace({}, { mode: MountMode.EXEC, shellParser: parser })
     ws.addMount('/ram', ram, MountMode.EXEC)
     const code =
       "data = b'X' * 1024\n" +
@@ -107,13 +95,10 @@ describe('Workspace + Python mount', () => {
   it('PIL saves an image to a mounted prefix and loads it back', async () => {
     const parser = await getTestParser()
     const ram = new RAMVFS()
-    const ops = new OpsRegistry()
-    ops.registerVfs(ram)
     const ws = new Workspace(
       {},
       {
         mode: MountMode.EXEC,
-        ops,
         shellParser: parser,
         runtimes: [new PyodideRuntime({ config: { autoLoadFromImports: true } }), 'workspace'],
       },

@@ -15,8 +15,9 @@
 import errno
 import inspect
 import logging
+from contextvars import ContextVar, Token
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from mirage.commands.spec.usage import operand_exit_code
 from mirage.context import (
@@ -34,6 +35,7 @@ from mirage.policy.base import Policy
 from mirage.policy.builtin.hidden_paths import HiddenPathsPolicy
 from mirage.policy.builtin.mount_mode import MountModePolicy
 from mirage.policy.constants import POLICY_DENIED_EXIT
+from mirage.policy.decisions import Decisions
 from mirage.policy.errors import Explained, PolicyDenied, PolicyError
 from mirage.policy.match.decide import source_of
 from mirage.policy.mixin import SessionScopedMixin
@@ -56,9 +58,6 @@ from mirage.policy.types import (
 )
 from mirage.runtime.routing.types import RouteContext
 from mirage.types import Limit, MountMode, PathSpec, Refusal
-
-if TYPE_CHECKING:
-    from mirage.policy.decisions import Decisions
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +206,7 @@ async def pre_vfs_gate(
     create: bool = False,
     subtree: bool = False,
     check_hidden: bool = True,
-    decisions: "Decisions | None" = None,
+    decisions: Decisions | None = None,
     final: bool = True,
 ) -> None:
     """Fire pre_vfs at an op door; a Deny becomes EACCES.
@@ -310,7 +309,7 @@ async def pre_vfs_gate(
 
 
 async def _explained_op(
-    policies: "Policies", ctx: VfsContext, decisions: "Decisions | None"
+    policies: "Policies", ctx: VfsContext, decisions: Decisions | None
 ) -> VfsExplanation:
     """What the gate would answer one VFS call, as ``pre_vfs_gate``
     decides it and without its consequences: every policy's answer, the
@@ -833,3 +832,36 @@ class Policies:
         """
         action, limit, _ = await self._fire("post_execute", ctx)
         return _deny_only("post_execute", action), limit
+
+
+_op_policies: ContextVar[Policies | None] = ContextVar(
+    "mirage_op_policies",
+    default=None,
+)
+
+
+def set_op_policies(policies: Policies) -> Token[Any]:
+    """Bind the workspace's admission policies to the current async
+    context, for the run of one command.
+
+    Set by command dispatch around routing, the same window the
+    admission gate binds in, so the command tier's policy guard can
+    fire ``pre_vfs`` for the backend I/O a handler performs. Read at
+    call time by ``with_policy_guard``; unset outside a dispatched
+    command (a generic invoked directly in a test), where the guard
+    is inert.
+
+    Args:
+        policies (Policies): the workspace's admission policies.
+    """
+    return _op_policies.set(policies)
+
+
+def reset_op_policies(token: Token[Any]) -> None:
+    """Restore the previous policies binding."""
+    _op_policies.reset(token)
+
+
+def get_op_policies() -> Policies | None:
+    """The policies bound to the running command, None outside one."""
+    return _op_policies.get()

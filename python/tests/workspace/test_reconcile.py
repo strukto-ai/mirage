@@ -39,7 +39,10 @@ from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace.mount.namespace.namespace import NodeMeta
 from mirage.workspace.reconcile import Reconciler
 from tests.e2e.s3_mock import patch_s3_multi
-from tests.fixtures.versioned_vfs import VersionedVFS
+from tests.fixtures.versioned_vfs import (
+    StatlessVersionedVFS,
+    VersionedVFS,
+)
 
 
 async def _ws_with_overlay():
@@ -195,7 +198,7 @@ async def test_may_serve_cached_no_fingerprint_forces_reread():
         mount = ws.namespace.mount_for("/data/f.txt")
         mount.read = ReadSpec(policy=ReadPolicy.FRESH)
         await ws.cache.set("/data/f.txt", b"v1", fingerprint="fp1")
-        stat = await mount.execute_op("stat", "/data/f.txt")
+        stat = await mount.call("stat", "/data/f.txt")
         assert stat is not None and stat.fingerprint is None
         rec = Reconciler(ws.cache, ws.namespace)
         assert await rec.may_serve_cached(mount, "/data/f.txt") is False
@@ -221,7 +224,7 @@ async def test_may_serve_cached_serves_a_fingerprinted_live_only_backend():
         mount = ws.namespace.mount_for("/data/f.txt")
         mount.read = ReadSpec(policy=ReadPolicy.FRESH)
         assert mount.vfs.supports_snapshot is False
-        real = mount.execute_op
+        real = mount.call
 
         async def fingerprinted(op, path, **kwargs):
             stat = await real(op, path, **kwargs)
@@ -231,7 +234,7 @@ async def test_may_serve_cached_serves_a_fingerprinted_live_only_backend():
                 else stat
             )
 
-        mount.execute_op = fingerprinted
+        mount.call = fingerprinted
         await ws.cache.set("/data/f.txt", b"v1", fingerprint="fp1")
         rec = Reconciler(ws.cache, ws.namespace)
         assert await rec.may_serve_cached(mount, "/data/f.txt") is True
@@ -298,7 +301,7 @@ async def test_an_unverifiable_probe_drops_the_entry(caplog, failure):
                 raise enotsup("stubborn", op, path)
             raise OSError(errno.EIO, "backend stat unavailable")
 
-        mount.execute_op = failing
+        mount.call = failing
         await ws.cache.set("/data/f.txt", b"v1", fingerprint="fp1")
         rec = Reconciler(ws.cache, ws.namespace)
         with caplog.at_level(
@@ -391,7 +394,7 @@ async def test_unverified_probe_cannot_serve_cached_bytes(
                 fingerprint="fp1" if probe == "fresh" else None,
             )
 
-        monkeypatch.setattr(mount, "execute_op", stat)
+        monkeypatch.setattr(mount, "call", stat)
         rec = Reconciler(ws.cache, ws.namespace)
         if surface == "shell":
             # Routing-time reconcile drops what it could not verify and
@@ -439,7 +442,7 @@ async def test_reconcile_read_never_raises_and_drops_the_entry(failure):
                 raise TypeError("probe bug")
             raise OSError(errno.EIO, "backend stat unavailable")
 
-        mount.execute_op = failing
+        mount.call = failing
         await ws.cache.set("/data/f.txt", b"v1", fingerprint="fp1")
         rec = Reconciler(ws.cache, ws.namespace)
         await rec.reconcile_read(mount, "/data/f.txt")
@@ -734,7 +737,7 @@ async def _gated(fingerprint: str = "fp1"):
     mount = ws.namespace.mount_for("/data/f.txt")
     mount.read = ReadSpec(policy=ReadPolicy.FRESH)
     stat = _CountingStat(fingerprint)
-    mount.execute_op = stat
+    mount.call = stat
     await ws.cache.set("/data/f.txt", b"v1", fingerprint="fp1")
     return ws, mount, stat, Reconciler(ws.cache, ws.namespace)
 
@@ -765,7 +768,7 @@ async def test_a_write_during_a_probe_prevents_reusing_its_answer():
             await release.wait()
         return result
 
-    mount.execute_op = delayed
+    mount.call = delayed
     try:
         async with command_scope():
             probing = asyncio.create_task(
@@ -858,7 +861,7 @@ async def _versioned(
     *,
     has_stat: bool = True,
 ):
-    vfs = VersionedVFS(kind, remote, has_stat=has_stat)
+    vfs = (VersionedVFS if has_stat else StatlessVersionedVFS)(kind, remote)
     ws = Workspace({"/m/": vfs}, read=ReadSpec(policy=ReadPolicy.FRESH))
     mount = ws.namespace.mount_for("/m/a")
     try:
@@ -962,13 +965,13 @@ async def test_listing_gate_refuses_silently_without_a_stat_op(
 ):
     async with _versioned(has_stat=False) as (vfs, mount, rec):
         asked: list[str] = []
-        execute = mount.execute_op
+        execute = mount.call
 
         async def recording(op_name, path, *args, **kwargs):
             asked.append(op_name)
             return await execute(op_name, path, *args, **kwargs)
 
-        monkeypatch.setattr(mount, "execute_op", recording)
+        monkeypatch.setattr(mount, "call", recording)
         caplog.set_level(logging.DEBUG, logger="mirage.workspace.reconcile")
         await _store(mount, "/m/a", "v1")
         async with command_scope():
@@ -1136,7 +1139,7 @@ async def test_the_probe_hints_the_mount_index_row():
                 name="f.txt", type=FileType.FILE, fingerprint="fp1"
             )
 
-        mount.execute_op = capture
+        mount.call = capture
         await ws.cache.set("/data/f.txt", b"v1", fingerprint="fp1")
         rec = Reconciler(ws.cache, ws.namespace)
         assert await rec.may_serve_cached(mount, "/data/f.txt") is True

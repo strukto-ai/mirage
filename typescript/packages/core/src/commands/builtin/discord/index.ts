@@ -12,19 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { DiscordAccessor } from '../../../accessor/discord.ts'
 import { VFSName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
+import type { Command } from '../../config.ts'
+import { genericCommands } from '../generic_bind/index.ts'
 import { DISCORD_GREP } from './grep.ts'
 import { DISCORD_HEAD } from './head.ts'
-import { IO } from './io.ts'
 import { DISCORD_RG } from './rg.ts'
 
 const DISCORD_OVERRIDES = new Set(['grep', 'rg', 'head'])
 
-export const DISCORD_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<DiscordAccessor>(VFSName.DISCORD, IO, {
+export const DISCORD_COMMANDS: readonly Command[] = [
+  ...genericCommands(VFSName.DISCORD, {
     overrides: DISCORD_OVERRIDES,
   }),
   ...DISCORD_GREP,

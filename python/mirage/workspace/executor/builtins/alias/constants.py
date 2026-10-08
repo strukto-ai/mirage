@@ -17,8 +17,8 @@ import re
 ALIAS_USAGE = "alias: usage: alias [-p] [name[=value] ... ]"
 UNALIAS_USAGE = "unalias: usage: unalias [-a] name [name ...]"
 
-# bash's `legal_alias_name`: a shell metacharacter, a quote, `/`, `$`
-# or a backtick anywhere in the name makes it unusable, since the parser
+# The names bash's `alias` refuses: a shell metacharacter, a quote, `/`,
+# `$` or a backtick anywhere in the name makes it unusable, since the parser
 # would never read such a word as one command name.
 BAD_NAME_CHARS = frozenset(" \t\n/=$`'\"|&;()<>")
 

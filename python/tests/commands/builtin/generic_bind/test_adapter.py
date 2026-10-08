@@ -20,7 +20,18 @@ import pytest
 import mirage.commands.builtin.generic_bind.adapter as adapter
 from mirage.accessor.base import NOOPAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.config import CommandOpts
+from mirage.commands.builtin.generic_bind.adapter import (
+    Operation,
+    dir_aware_stat,
+    dir_aware_stream,
+    require_op,
+    resolve_or_empty,
+    with_command_guards,
+    with_dir_guard,
+    with_dispatch_rule_guard,
+    with_policy_guard,
+)
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.context import (
     reset_admission,
     reset_current_session,
@@ -33,6 +44,11 @@ from mirage.errors.render import format_fs_error
 from mirage.errors.types import OperationNotSupportedError
 from mirage.ops.types import NamespaceView
 from mirage.policy import Action, Deny, Policy, VfsContext
+from mirage.policy.policies import (
+    Policies,
+    reset_op_policies,
+    set_op_policies,
+)
 from mirage.types import (
     ContentType,
     FileStat,
@@ -47,16 +63,6 @@ from mirage.types import (
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
 from mirage.vfs.types import ContentSearchOps
 from mirage.workspace.session import SessionState
-
-from mirage.commands.builtin.generic_bind.adapter import (  # isort: skip
-    CommandIO,
-    Operation,
-    dir_aware_stat,
-    dir_aware_stream,
-    resolve_or_empty,
-    with_command_guards,
-    with_dir_guard,
-)
 
 TREE = {
     "/notion/pages": [
@@ -127,15 +133,18 @@ async def test_command_io_require_missing_op():
     src = PathSpec.from_str_path("/a.txt")
     dst = PathSpec.from_str_path("/b.txt")
     with pytest.raises(OperationNotSupportedError) as write_exc:
-        await io.require(Operation.WRITE)(NOOPAccessor(), src, b"x")
+        await require_op(io, Operation.WRITE)(NOOPAccessor(), src, b"x")
     assert (write_exc.value.errno, write_exc.value.filename) == (
         errno.ENOTSUP,
         "/a.txt",
     )
     with pytest.raises(OperationNotSupportedError) as copy_exc:
-        await io.require(Operation.COPY)(NOOPAccessor(), src, dst)
+        await require_op(io, Operation.COPY)(NOOPAccessor(), src, dst)
     assert copy_exc.value.filename == "/b.txt"
-    assert make_io(write=fake_readdir).require(Operation.WRITE) is fake_readdir
+    assert (
+        require_op(make_io(write=fake_readdir), Operation.WRITE)
+        is fake_readdir
+    )
 
 
 def _probe_ops(
@@ -356,10 +365,6 @@ def test_scoped_io_sets_a_content_index_aside():
 
 @pytest.mark.asyncio
 async def test_dispatch_rule_guard_marks_an_op_with_the_bound_gate():
-    from mirage.commands.builtin.generic_bind.adapter import (
-        with_dispatch_rule_guard,
-    )
-
     seen: list[tuple[str, _Gate | None]] = []
 
     async def door(op, path, **kwargs):
@@ -994,11 +999,11 @@ async def test_capability_and_mode_share_path_guards(
         if operation in (Operation.COPY, Operation.RENAME):
             args = [NOOPAccessor(), _spec("/data/build/src"), path]
         if available and region == "build":
-            await ops.require(operation)(*args)
+            await require_op(ops, operation)(*args)
             assert len(calls) == 1
         else:
             with pytest.raises(OSError) as error:
-                await ops.require(operation)(*args)
+                await require_op(ops, operation)(*args)
             assert error.value.errno == expected
             named = path
             if operation == Operation.RENAME and region == "build":
@@ -1048,17 +1053,17 @@ async def test_copy_reads_source_but_rename_mutates_source_and_subtrees(
         )
         src, dst = _spec("/data/src"), _spec("/data/dst")
         if available:
-            await ops.require(Operation.COPY)(NOOPAccessor(), src, dst)
+            await require_op(ops, Operation.COPY)(NOOPAccessor(), src, dst)
         else:
             with pytest.raises(OperationNotSupportedError) as error:
-                await ops.require(Operation.COPY)(NOOPAccessor(), src, dst)
+                await require_op(ops, Operation.COPY)(NOOPAccessor(), src, dst)
             assert error.value.filename == dst.virtual
         for source, blame in [
             (src, src.virtual),
             (_spec("/data/tree"), "/data/tree/locked"),
         ]:
             with pytest.raises(OSError) as error:
-                await ops.require(Operation.RENAME)(
+                await require_op(ops, Operation.RENAME)(
                     NOOPAccessor(), source, dst
                 )
             assert (error.value.errno, error.value.filename) == (
@@ -1078,7 +1083,7 @@ async def test_missing_copy_checks_command_paths_before_capability_failure(
     gate = _Gate("/data/secret")
     monkeypatch.setattr(adapter, "get_admission", lambda: gate)
     with pytest.raises(PermissionError):
-        await make_io().require(Operation.COPY)(
+        await require_op(make_io(), Operation.COPY)(
             NOOPAccessor(), _spec("/data/secret"), _spec("/data/dst")
         )
     assert gate.asked == ["/data/secret"]
@@ -1148,16 +1153,6 @@ async def test_mode_guard_refuses_a_taken_name_on_a_writable_mount(
 
 @pytest.mark.asyncio
 async def test_policy_guard_admits_slots_and_leaves_stat_alone():
-    from mirage.commands.builtin.generic_bind.adapter import with_policy_guard
-    from mirage.context import (
-        reset_mount_gate,
-        reset_op_policies,
-        set_mount_gate,
-        set_op_policies,
-    )
-    from mirage.policy.policies import Policies
-    from mirage.types import MountMode
-
     calls: list[tuple[str, ...]] = []
     raw = _policy_probe_ops(calls)
     acc = NOOPAccessor()
@@ -1206,16 +1201,6 @@ async def test_policy_guard_admits_slots_and_leaves_stat_alone():
 async def test_policy_guard_admits_before_a_warm_serve():
     # The guard wraps outside the cache tier (`finish` in the factory),
     # so a warm reader below it never answers a refused read.
-    from mirage.commands.builtin.generic_bind.adapter import with_policy_guard
-    from mirage.context import (
-        reset_mount_gate,
-        reset_op_policies,
-        set_mount_gate,
-        set_op_policies,
-    )
-    from mirage.policy.policies import Policies
-    from mirage.types import MountMode
-
     calls: list[tuple[str, ...]] = []
     warm = dataclasses.replace(_policy_probe_ops(calls), read_bytes=_warm_read)
     acc = NOOPAccessor()
@@ -1237,16 +1222,6 @@ async def test_policy_guard_wrap_time_capture_covers_late_drains():
     # head/tail/wc bind lazy readers the pipeline drains after dispatch
     # has reset the context; the guard captured at wrap time still
     # answers (_live_policy_scope).
-    from mirage.commands.builtin.generic_bind.adapter import with_policy_guard
-    from mirage.context import (
-        reset_mount_gate,
-        reset_op_policies,
-        set_mount_gate,
-        set_op_policies,
-    )
-    from mirage.policy.policies import Policies
-    from mirage.types import MountMode
-
     calls: list[tuple[str, ...]] = []
     raw = _policy_probe_ops(calls)
     acc = NOOPAccessor()

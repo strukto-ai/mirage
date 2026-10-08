@@ -15,6 +15,5 @@
 import { unlink } from '../../../core/gcal/unlink.ts'
 import { VFSName } from '../../../types.ts'
 import { makeRm } from '../generic/rm_cmd.ts'
-import { IO } from './io.ts'
 
-export const GCAL_RM = makeRm(VFSName.GCAL, IO, unlink)
+export const GCAL_RM = makeRm(VFSName.GCAL, unlink)

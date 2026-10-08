@@ -1,0 +1,36 @@
+Third-party notices for mirage-ai, the Python package.
+
+The package includes the third-party code each section below names.
+Every section is a copy of licenses/third_party/<name>.txt in
+https://github.com/strukto-ai/mirage and reproduces the notice that
+code came with.
+
+------------------------------------------------------------------------
+
+The JSON parser in python/mirage/core/jq/parse.py and
+typescript/packages/core/src/core/jq/parse.ts follows src/jv_parse.c of jq
+1.8.2 (https://github.com/jqlang/jq), and the input reader in
+python/mirage/core/jq/stream.py and
+typescript/packages/core/src/core/jq/stream.ts follows its src/util.c. jq
+carries this notice:
+
+jq is copyright (C) 2012 Stephen Dolan
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

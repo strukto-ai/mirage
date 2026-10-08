@@ -25,13 +25,15 @@ from mirage.commands.builtin.postgres.tail import tail
 from mirage.commands.config import CommandOpts
 from mirage.io.types import IOResult
 from mirage.types import PathSpec
+from mirage.vfs.postgres import PostgresVFS
 from mirage.vfs.postgres.config import PostgresConfig
+from tests.fixtures.vfs_io import io_for
 
 CONCRETE = "/public/tables/books/rows.jsonl"
 GLOB = "/public/tables/*/rows.jsonl"
 
 GENERICS = "mirage.commands.builtin.generic_bind.search._GENERICS"
-RESOLVE = "mirage.commands.builtin.generic_bind.adapter.make_resolve_glob"
+RESOLVE = "mirage.commands.config.make_resolve_glob"
 SEARCH_ENTITY = "mirage.core.postgres.search.search_entity"
 
 
@@ -102,7 +104,10 @@ async def test_grep_glob_skips_pushdown_and_expands(accessor):
         patch.dict(GENERICS, {"grep": fake_generic}),
     ):
         _, io = await grep(
-            accessor, [_glob_path()], ["ada"], CommandOpts(index=NULL_INDEX)
+            accessor,
+            [_glob_path()],
+            ["ada"],
+            CommandOpts(io=io_for(PostgresVFS, accessor), index=NULL_INDEX),
         )
 
     assert io.exit_code == 0
@@ -148,7 +153,7 @@ async def test_grep_regex_pattern_skips_pushdown(accessor):
             accessor,
             [_concrete_path()],
             ["a.b"],
-            CommandOpts(index=NULL_INDEX),
+            CommandOpts(io=io_for(PostgresVFS, accessor), index=NULL_INDEX),
         )
 
     assert seen["generic"] == [CONCRETE]
@@ -174,7 +179,10 @@ async def test_rg_glob_skips_pushdown_and_expands(accessor):
         patch.dict(GENERICS, {"rg": fake_generic}),
     ):
         _, io = await rg(
-            accessor, [_glob_path()], ["ada"], CommandOpts(index=NULL_INDEX)
+            accessor,
+            [_glob_path()],
+            ["ada"],
+            CommandOpts(io=io_for(PostgresVFS, accessor), index=NULL_INDEX),
         )
 
     assert io.exit_code == 0
@@ -219,7 +227,9 @@ async def test_tail_follow_reads_the_relation_whole(accessor, flags):
             accessor,
             [concrete],
             [],
-            CommandOpts(index=NULL_INDEX, flags=flags),
+            CommandOpts(
+                io=io_for(PostgresVFS, accessor), index=NULL_INDEX, flags=flags
+            ),
         )
     assert io.exit_code == 0
     assert reached == [[concrete]]
@@ -255,7 +265,11 @@ async def test_tail_glob_does_not_query_a_relation_named_star(accessor):
             accessor,
             [_glob_path()],
             [],
-            CommandOpts(index=NULL_INDEX, flags={"n": "1"}),
+            CommandOpts(
+                io=io_for(PostgresVFS, accessor),
+                index=NULL_INDEX,
+                flags={"n": "1"},
+            ),
         )
 
     assert io.exit_code == 0

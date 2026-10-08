@@ -3,12 +3,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.commands.builtin.generic_bind.adapter import (
-    CommandIO,
-    with_command_guards,
-)
+from mirage.commands.builtin.generic_bind.adapter import with_command_guards
 from mirage.commands.builtin.object_store.rm import make_rm
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.types import FileStat, FileType, PathSpec
 
 
@@ -32,24 +29,22 @@ async def test_rm_refused_operand_keeps_spelling_and_continues(
 ):
     stat = AsyncMock(return_value=FileStat(name="ok", type=FileType.FILE))
     unlink = AsyncMock()
-    io = with_command_guards(
-        CommandIO(
-            readdir=AsyncMock(return_value=[]),
-            read_bytes=AsyncMock(),
-            read_stream=AsyncMock(),
-            stat=stat,
-            is_mounted=lambda _: True,
-            unlink=unlink,
-            rmdir=AsyncMock(),
-            rm_r=AsyncMock(),
-        )
+    io = CommandIO(
+        readdir=AsyncMock(return_value=[]),
+        read_bytes=AsyncMock(),
+        read_stream=AsyncMock(),
+        stat=stat,
+        is_mounted=lambda _: True,
+        unlink=unlink,
+        rmdir=AsyncMock(),
+        rm_r=AsyncMock(),
     )
     refused = replace(
         PathSpec.from_str_path("/data"), raw_path=raw, walk_error=refusal
     )
     valid = PathSpec.from_str_path("/data/ok")
-    _, result = await make_rm("s3", io)(
-        None, [refused, valid], [], CommandOpts(flags={"f": force})
+    _, result = await make_rm("s3", with_command_guards)(
+        None, [refused, valid], [], CommandOpts(flags={"f": force}, io=io)
     )
     assert (result.exit_code, result.stderr) == (code, stderr)
     assert stat.await_count == 1

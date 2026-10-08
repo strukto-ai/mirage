@@ -117,12 +117,14 @@ export async function assignElement(
   if (session.readonlyVars.has(name)) return 'readonly'
   const amap = session.assocs[name]
   let stored: ShellValue
+  let assigned: ReadonlySet<number | string> | null = null
   if (amap !== undefined) {
     const key = subscript ?? '0'
     if (key === '') return 'subscript'
     const updated = { ...amap }
     updated[key] = append ? (amap[key] ?? '') + value : value
     stored = updated
+    assigned = new Set([key])
   } else {
     let arr = session.arrays[name]
     if (subscript === null && arr === undefined) {
@@ -139,10 +141,11 @@ export async function assignElement(
       if (idx < 0) return 'subscript'
       const base = append ? arrayGet(arr, idx) : ''
       stored = arrayWith(arr, idx, base + value)
+      assigned = new Set([idx])
     }
   }
   if (view !== null) {
-    await view.set(name, stored)
+    await view.set(name, stored, true, assigned)
     return 'ok'
   }
   seedVar(session, name, stored)

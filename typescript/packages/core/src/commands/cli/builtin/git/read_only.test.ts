@@ -21,7 +21,6 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 
 import { IOResult } from '../../../../io/types.ts'
-import { OpsRegistry } from '../../../../ops/registry.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
@@ -68,13 +67,8 @@ beforeAll(async () => {
   execFileSync('bash', [BUILDER, repoPath], { stdio: 'ignore' })
 
   const ram = new RAMVFS()
-  const registry = new OpsRegistry()
-  registry.registerVfs(ram)
   parser = await createShellParser({ engineWasm, grammarWasm })
-  ws = new Workspace(
-    { '/repo': ram },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  ws = new Workspace({ '/repo': ram }, { mode: MountMode.WRITE, shellParser: parser })
   const dispatch: Dispatch = async (op, path, args = [], kwargs = {}) => [
     await ws.dispatch(op, path.virtual, args, kwargs),
     new IOResult(),

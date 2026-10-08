@@ -30,6 +30,7 @@ from mirage.types import (
     PathSpec,
     Visibility,
 )
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.session import (
@@ -53,11 +54,10 @@ class DenyOp(Policy):
 
 
 class _OverlayRAMVFS(RAMVFS):
-    """RAM VFS with the native setattr op stripped, standing in for
+    """RAM VFS with no native setattr, standing in for
     an API backend that has no attribute slot."""
 
-    def ops(self):
-        return [ro for ro in super().ops() if ro.name != "setattr"]
+    setattr = BaseVFS.setattr
 
 
 def _two_mounts(policies=None) -> Workspace:
@@ -377,6 +377,46 @@ def test_a_hidden_name_cannot_be_marked_readonly():
     assert io.exit_code != 0
     assert b"permission denied" in (io.stderr or b"")
     assert session.vars["SECRET"].attrs == frozenset()
+
+
+@pytest.mark.parametrize(
+    "line", ["declare -n SECRET", "declare -n SECRET+=x", "declare +n SECRET"]
+)
+def test_a_reference_refusal_never_quotes_a_hidden_value(line: str):
+    # A reference checks the value its name holds; a hidden one reads as
+    # unset, so the refusal is the door's and not a line quoting it.
+    ws = _two_mounts()
+    session = ws.get_session(ws.default_session_id)
+    seed_var(session, "SECRET", "token-with-dashes")
+    session.visibility = Visibility(vars=HiddenVars(names=("SECRET",)))
+
+    async def run():
+        return await ws.shell(line)
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    assert b"token-with-dashes" not in (io.stderr or b"")
+    assert b"permission denied" in (io.stderr or b"")
+    assert session.vars["SECRET"].value == "token-with-dashes"
+    assert session.vars["SECRET"].attrs == frozenset()
+
+
+def test_an_integer_reference_value_stops_at_a_hidden_write():
+    # `declare -ni r=M` evaluates M through the `-i` door, so a hidden
+    # name it assigns is refused there and nothing after it lands.
+    ws = _two_mounts()
+    session = ws.get_session(ws.default_session_id)
+    seed_var(session, "SECRET", "token-with-dashes")
+    session.visibility = Visibility(vars=HiddenVars(names=("SECRET",)))
+
+    async def run():
+        return await ws.shell("X=0; M='SECRET=5,X=7'; declare -ni r=M")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    assert b"permission denied" in (io.stderr or b"")
+    assert session.vars["SECRET"].value == "token-with-dashes"
+    assert session.vars["X"].value == "0"
 
 
 def test_command_env_is_a_snapshot_not_the_live_dict():

@@ -812,7 +812,7 @@
       "command": "readonly -f qcbnothere; echo rc=$?; qcbf(){ :; }; readonly -f qcbf; readonly -f | grep qcbf",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\ndeclare -fr qcbf\n",
+        "stdout": "rc=1\nqcbf () \ndeclare -fr qcbf\n",
         "stderr": "bash: readonly: qcbnothere: not a function\n"
       }
     },
@@ -984,6 +984,278 @@
         "exit": 0,
         "stdout": "yes\nyes\n",
         "stderr": ""
+      }
+    },
+    {
+      "id": "readonly_a_A_shape_values_only",
+      "seq": 930529,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "env -i bash -c 'S=1; readonly -a S; readonly -A Z; X=(1 2); readonly -A X; echo \"rc=$?\"; W=(1 2); readonly -A W=9; echo \"rc=$?\"; readonly -a T=1; declare -i N=1; readonly N; declare -A M=([k]=v); readonly M; readonly -A; readonly -p | grep -E \" [NSTWXZ](=|\\$)\"'",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrc=1\ndeclare -Ar M=([k]=\"v\" )\ndeclare -ir N=\"1\"\ndeclare -r S=\"1\"\ndeclare -ar T=([0]=\"1\")\ndeclare -ar W=([0]=\"1\" [1]=\"2\")\ndeclare -ar X=([0]=\"1\" [1]=\"2\")\ndeclare -r Z\n",
+        "stderr": "bash: readonly: W: cannot convert indexed to associative array\n"
+      }
+    },
+    {
+      "id": "array_kind_conflict_on_a_literal_is_fatal",
+      "seq": 930530,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( X=(1 2); declare -A X=([k]=v); echo not-reached ); echo \"rc=$?\"; ( declare -A M=([k]=v); readonly -a M=(1); echo not-reached ); echo \"rc=$?\"; ( f() { declare -A X=([k]=v); declare -p X; }; X=(1 2); f; declare -p X )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\ndeclare -A X=([k]=\"v\" )\ndeclare -a X=([0]=\"1\" [1]=\"2\")\n",
+        "stderr": "bash: X: cannot convert indexed to associative array\nbash: M: cannot convert associative to indexed array\n"
+      }
+    },
+    {
+      "id": "declare_r_in_a_function_is_local",
+      "seq": 930531,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( A=(outer); S=outer; f(){ declare -r A=(inner) S=inner; local -r L=1; typeset -r T=(t); declare -p A S L T; }; f; declare -p A S; A=(w); S=w; echo \"rc=$? ${A[0]} $S\"; declare -p L T 2>/dev/null; echo \"rc=$?\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "declare -ar A=([0]=\"inner\")\ndeclare -r S=\"inner\"\ndeclare -r L=\"1\"\ndeclare -ar T=([0]=\"t\")\ndeclare -a A=([0]=\"outer\")\ndeclare -- S=\"outer\"\nrc=0 w w\nrc=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "declaration_values_keep_the_array_kind",
+      "seq": 930532,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( X=(1 2); declare X=9; declare -a S=1; declare -A M=1; Y=(1 2); declare -A Y=9; echo \"rc=$?\"; readonly R=1; declare R=2; echo \"rc=$?\"; declare -p X S M Y )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\ndeclare -a X=([0]=\"9\" [1]=\"2\")\ndeclare -a S=([0]=\"1\")\ndeclare -A M=([0]=\"1\" )\ndeclare -a Y=([0]=\"1\" [1]=\"2\")\n",
+        "stderr": "bash: declare: Y: cannot convert indexed to associative array\nbash: declare: R: readonly variable\n"
+      }
+    },
+    {
+      "id": "declaration_targets_globals_refs_and_listings",
+      "seq": 930533,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( G=outer; f(){ local G=(l0 l1); declare -g G=new; }; f; declare -p G; A=(old keep); declare -n ref=A; export -a ref=new; export -A ref=x; echo \"rc=$?\"; declare -p A; x=4; N=(0 'x++'); declare -i N; export N=9; N[0]=8; echo \"x=$x\"; declare -p N; readonly R=1; declare -r | grep -E ' (R|G)='; declare -ix | grep -E ' (N|A)='; typeset -rp | grep -c ' G=' )",
+      "expect": {
+        "exit": 1,
+        "stdout": "declare -- G=\"new\"\nrc=1\ndeclare -ax A=([0]=\"new\" [1]=\"keep\")\nx=4\ndeclare -aix N=([0]=\"8\" [1]=\"x++\")\ndeclare -r R=\"1\"\ndeclare -ax A=([0]=\"new\" [1]=\"keep\")\ndeclare -aix N=([0]=\"8\" [1]=\"x++\")\n0\n",
+        "stderr": "bash: export: ref: cannot convert indexed to associative array\n"
+      }
+    },
+    {
+      "id": "local_array_shadows_the_callers_reference_and_attributes",
+      "seq": 930534,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( A=(outer); declare -n ref=A; f(){ local -A ref; ref[k]=v; declare -p ref; }; f; declare -p A ref; declare -i I=1; export E=1; g(){ local -a I E; I[0]=1+1; E[0]=x; declare -p I E; }; g; declare -p I E )",
+      "expect": {
+        "exit": 0,
+        "stdout": "declare -A ref=([k]=\"v\" )\ndeclare -a A=([0]=\"outer\")\ndeclare -n ref=\"A\"\ndeclare -a I=([0]=\"1+1\")\ndeclare -ax E=([0]=\"x\")\ndeclare -i I=\"1\"\ndeclare -x E=\"1\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "fresh_local_keeps_export_or_inherits_with_I",
+      "seq": 930535,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( readonly R=outer; f(){ local -a R; echo \"rc=$?\"; }; f 2>/dev/null; declare -p R; declare -i I=7; g(){ declare -ap I; I=2+3; echo \"${I[0]}\"; }; g; h(){ local -Ia I; I[0]=2+3; local -I K=1+1; declare -p I K; }; declare -i K=0; h; k(){ local I=2+3; declare -p I; }; k )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\ndeclare -r R=\"outer\"\ndeclare -i I=\"7\"\n5\ndeclare -ai I=([0]=\"5\")\ndeclare -i K=\"2\"\ndeclare -- I=\"2+3\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "assoc_stray_words_warn_without_failing",
+      "seq": 930536,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( MAP(){ :; }; readonly -Af MAP=([k]=v stray); echo rc=$?; export -A M2=([k]=v s2); echo rc=$?; declare -A M3; M3=([k]=v s3); echo rc=$?; declare -A M4=([k]=v s4) 1BAD=x; echo rc=$?; declare -p MAP M2 M3 M4 )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrc=0\nrc=0\nrc=1\ndeclare -A MAP=([k]=\"v\" )\ndeclare -Ax M2=([k]=\"v\" )\ndeclare -A M3=([k]=\"v\" )\ndeclare -A M4=([k]=\"v\" )\n",
+        "stderr": "bash: MAP: 'stray': must use subscript when assigning associative array\nbash: M2: 's2': must use subscript when assigning associative array\nbash: M3: s3: must use subscript when assigning associative array\nbash: M4: 's4': must use subscript when assigning associative array\nbash: declare: `1BAD=x': not a valid identifier\n"
       }
     }
   ]

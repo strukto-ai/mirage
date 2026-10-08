@@ -32,19 +32,18 @@ import {
   MountMode,
   type PathSpec,
   registerVfsFactory,
-  VFSAdapter,
   Workspace,
 } from "@struktoai/mirage-node";
 import { rstripSlash } from "@struktoai/mirage-core/utils/slash";
 
-// A whole custom backend in one script: core functions over your
-// data source, a read adapter with optional writes, one BaseVFS. Every generic
-// command (ls, cat, grep, find, head, wc, ...) works for free, and so
-// does versioning, in the shape the content calls for: the wiki's pages
-// are the VFS's own, so they ride its state and a snapshot rebuilds
-// the mount through the registered name with the pages as they were; the
-// feed's live in a service, so the VFS is only observed and a load
-// asks for it back rather than restoring a copy.
+// A whole custom backend in one script: a BaseVFS whose methods answer
+// over your data source. readdir, read and stat are enough for every
+// generic command (ls, cat, grep, find, head, wc, ...); write and mkdir
+// make the mount writable. Versioning works too, in the shape the content
+// calls for: the wiki's pages are the VFS's own, so they ride its state
+// and a snapshot rebuilds the mount through the registered name with the
+// pages as they were; the feed's live in a service, so the VFS is only
+// observed and a load asks for it back rather than restoring a copy.
 
 const ENC = new TextEncoder();
 const DEC = new TextDecoder();
@@ -82,91 +81,53 @@ function node(pages: Tree, key: string): Tree | string {
   return current;
 }
 
-function readdir(accessor: WikiAccessor, path: PathSpec): Promise<string[]> {
-  const found = node(accessor.pages, path.vfsPath);
-  if (typeof found === "string") throw enotdir(path);
-  const parent = rstripSlash(path.virtual);
-  return Promise.resolve(
-    Object.entries(found).map(
-      ([name, child]) =>
-        `${parent}/${name}${typeof child === "string" ? "" : "/"}`,
-    ),
-  );
-}
-
-function readBytes(
-  accessor: WikiAccessor,
-  path: PathSpec,
-): Promise<Uint8Array> {
-  const found = node(accessor.pages, path.vfsPath);
-  if (typeof found !== "string") throw eisdir(path);
-  return Promise.resolve(ENC.encode(found));
-}
-
-function stat(accessor: WikiAccessor, path: PathSpec): Promise<FileStat> {
-  const found = node(accessor.pages, path.vfsPath);
-  const trimmed = rstripSlash(path.virtual);
-  const name = trimmed.slice(trimmed.lastIndexOf("/") + 1) || "/";
-  if (typeof found !== "string")
+// Markdown pages read from the accessor's tree.
+class PagesVFS extends BaseVFS<WikiAccessor> {
+  override readdir(path: PathSpec): Promise<string[]> {
+    const found = node(this.accessor.pages, path.vfsPath);
+    if (typeof found === "string") throw enotdir(path);
+    const parent = rstripSlash(path.virtual);
     return Promise.resolve(
-      new FileStat({ name, size: null, type: FileType.DIRECTORY }),
+      Object.entries(found).map(
+        ([name, child]) =>
+          `${parent}/${name}${typeof child === "string" ? "" : "/"}`,
+      ),
     );
-  const data = ENC.encode(found);
-  // The fingerprint is the content's own hash: the stable identity a
-  // snapshot records for every read and a load checks for drift.
-  const fingerprint = createHash("sha256")
-    .update(data)
-    .digest("hex")
-    .slice(0, 16);
-  return Promise.resolve(
-    new FileStat({
-      name,
-      size: accessor.knownSizes ? data.length : null,
-      type: FileType.FILE,
-      content: ContentType.TEXT,
-      fingerprint,
-    }),
-  );
-}
-
-function write(
-  accessor: WikiAccessor,
-  path: PathSpec,
-  data: Uint8Array,
-): Promise<void> {
-  const parts = path.vfsPath.split("/").filter((p) => p !== "");
-  const name = parts.pop() ?? "";
-  let current: Tree = accessor.pages;
-  for (const part of parts) {
-    const next = (current[part] ??= {});
-    if (typeof next === "string") throw enotdir(path);
-    current = next;
   }
-  current[name] = DEC.decode(data);
-  return Promise.resolve();
-}
 
-function mkdir(
-  accessor: WikiAccessor,
-  path: PathSpec,
-  parents = false,
-): Promise<void> {
-  const parts = path.vfsPath.split("/").filter((p) => p !== "");
-  let current: Tree = accessor.pages;
-  for (const [i, part] of parts.entries()) {
-    const leaf = i === parts.length - 1;
-    let next = current[part];
-    if (next === undefined) {
-      if (!leaf && !parents) throw enoent(path);
-      next = current[part] = {};
-    } else if (leaf && (!parents || typeof next === "string")) {
-      throw eexist(path);
-    }
-    if (typeof next === "string") throw enotdir(path);
-    current = next;
+  // readsRanges stays false, so a byte window is cut from the whole page
+  // for us and the offset and size can be left off here.
+  override read(path: PathSpec): Promise<Uint8Array> {
+    const found = node(this.accessor.pages, path.vfsPath);
+    if (typeof found !== "string") throw eisdir(path);
+    return Promise.resolve(ENC.encode(found));
   }
-  if (parts.length === 0 && !parents) throw eexist(path);
-  return Promise.resolve();
+
+  override stat(path: PathSpec): Promise<FileStat> {
+    const found = node(this.accessor.pages, path.vfsPath);
+    const trimmed = rstripSlash(path.virtual);
+    const name = trimmed.slice(trimmed.lastIndexOf("/") + 1) || "/";
+    if (typeof found !== "string")
+      return Promise.resolve(
+        new FileStat({ name, size: null, type: FileType.DIRECTORY }),
+      );
+    const data = ENC.encode(found);
+    // The fingerprint is the content's own hash: the stable identity a
+    // snapshot records for every read and a load checks for drift.
+    const fingerprint = createHash("sha256")
+      .update(data)
+      .digest("hex")
+      .slice(0, 16);
+    return Promise.resolve(
+      new FileStat({
+        name,
+        size: this.accessor.knownSizes ? data.length : null,
+        type: FileType.FILE,
+        content: ContentType.TEXT,
+        fingerprint,
+      }),
+    );
+  }
 }
 
 // Optional: a bespoke domain verb, registered alongside the generics.
@@ -187,14 +148,7 @@ const wikiTitles = command({
   },
 });
 
-function makeIO(writable = true): VFSAdapter<WikiAccessor> {
-  return new VFSAdapter({
-    read: { readdir, readBytes, stat },
-    ...(writable ? { writes: { write, mkdir } } : {}),
-  });
-}
-
-class WikiVFS extends BaseVFS<WikiAccessor> {
+class WikiVFS extends PagesVFS {
   readonly wiki: WikiAccessor;
 
   constructor(pages: Tree = PAGES) {
@@ -204,12 +158,43 @@ class WikiVFS extends BaseVFS<WikiAccessor> {
     super({
       name: "wiki",
       accessor: wiki,
-      io: makeIO(),
       prompt: "A team wiki rendered as markdown files.",
       commands: wikiTitles,
       supportsSnapshot: true,
     });
     this.wiki = wiki;
+  }
+
+  override write(path: PathSpec, data: Uint8Array): Promise<void> {
+    const parts = path.vfsPath.split("/").filter((p) => p !== "");
+    const name = parts.pop() ?? "";
+    let current: Tree = this.wiki.pages;
+    for (const part of parts) {
+      const next = (current[part] ??= {});
+      if (typeof next === "string") throw enotdir(path);
+      current = next;
+    }
+    current[name] = DEC.decode(data);
+    return Promise.resolve();
+  }
+
+  override mkdir(path: PathSpec, parents = false): Promise<void> {
+    const parts = path.vfsPath.split("/").filter((p) => p !== "");
+    let current: Tree = this.wiki.pages;
+    for (const [i, part] of parts.entries()) {
+      const leaf = i === parts.length - 1;
+      let next = current[part];
+      if (next === undefined) {
+        if (!leaf && !parents) throw enoent(path);
+        next = current[part] = {};
+      } else if (leaf && (!parents || typeof next === "string")) {
+        throw eexist(path);
+      }
+      if (typeof next === "string") throw enotdir(path);
+      current = next;
+    }
+    if (parts.length === 0 && !parents) throw eexist(path);
+    return Promise.resolve();
   }
 
   // The pages are this VFS's own content, not a remote backend's,
@@ -234,15 +219,15 @@ class WikiVFS extends BaseVFS<WikiAccessor> {
 // back live, so a snapshot pins what it read (through the fingerprints
 // stat reports) and a load without the live VFS is refused rather
 // than answered with an empty mount. Nothing registers it: a mount that
-// is handed back needs no name in any registry.
+// is handed back needs no name in any registry. It defines no write, so
+// the mount is read-only.
 const FEED: Tree = { "status.md": "All systems go.\n" };
 
-class FeedVFS extends BaseVFS<WikiAccessor> {
+class FeedVFS extends PagesVFS {
   constructor() {
     super({
       name: "feed",
       accessor: new WikiAccessor(FEED, false),
-      io: makeIO(false),
       prompt: "A status feed rendered as markdown.",
       supportsSnapshot: true,
     });

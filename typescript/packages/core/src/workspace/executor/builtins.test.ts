@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { commandsFor } from '../../commands/builtin/backends.ts'
 import { EvaluationContext } from '../evaluation.ts'
 import { helpPage, versionLine } from '../../commands/spec/standard.ts'
 import { HELP as PRINTF_HELP } from './builtins/printf/printf.ts'
@@ -67,7 +68,7 @@ import { parseDuration, parseSignal, signalName } from './builtins/timeout/timeo
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 
 function wireMount(mount: MountEntry): void {
-  for (const cmd of mount.vfs.commands()) {
+  for (const cmd of commandsFor(mount.vfs)) {
     if (cmd.filetype !== null) mount.register(cmd)
     else if (cmd.vfs === null) mount.registerGeneral(cmd)
     else mount.register(cmd)
@@ -166,7 +167,9 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     const text = decode(out as Uint8Array)
     expect(text).toContain('declare -ar AR=([0]="a" [1]="b c")\n')
     expect(text).toContain('declare -r ONLY\n')
-    expect(text).toContain('declare -r VAL="x"\n')
+    // VAL came from the environment, so it is exported too, and the whole
+    // cluster prints, as bash's `readonly -p` does.
+    expect(text).toContain('declare -rx VAL="x"\n')
   })
 
   it('readonly -z is invalid option exit 2', async () => {
@@ -541,7 +544,7 @@ describe('handlePrintf', () => {
     )
   })
 
-  // bash's `internal_getopt` takes single letters, so it reports the first
+  // bash's option scan takes single letters, so it reports the first
   // character it does not know spelled with ONE dash: a long spelling answers
   // for its second dash and its own text never reaches the message. Measured
   // on bash 5.2.21, where the coreutils binary of the same name is lenient
@@ -563,7 +566,7 @@ describe('handlePrintf', () => {
   })
 
   // bash answers the EXACT word `--help` for every builtin ahead of
-  // `internal_getopt`, writing the page to STDOUT and exiting 2, where `--hel`
+  // its option scan, writing the page to STDOUT and exiting 2, where `--hel`
   // and `--version` take the invalid-option path above (measured on bash
   // 5.2.37). Mirrors test_printf.py.
   it('prints the help page to stdout and exits 2', async () => {
@@ -757,7 +760,7 @@ describe('handlePrintf', () => {
     expect(s.env.V).toBe('0')
   })
 
-  // bash 5.2.37: an escape missing its digits writes builtin_error's
+  // bash 5.2.37: an escape missing its digits writes a `bash: printf:`
   // warning to stderr and leaves the status alone. Mirrors test_printf.py.
   it('warns for an escape missing its digits and exits 0', async () => {
     const [out, io, node] = await handlePrintf(['\\x|'], new SessionState({ sessionId: 'test' }))
@@ -1525,7 +1528,9 @@ describe('handleSet', () => {
   it('no args → print env', () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ A: '1' }) })
     const [out] = handleSet([], s)
-    expect(decode(out as Uint8Array)).toBe("A=1\nIFS=$' \\t\\n'\nPATH=/usr/bin\nPWD=/\n")
+    expect(decode(out as Uint8Array)).toBe(
+      "A=1\nIFS=$' \\t\\n'\nOPTERR=1\nOPTIND=1\nPATH=/usr/bin\nPWD=/\n",
+    )
   })
 
   it.each([
@@ -1612,7 +1617,7 @@ describe('handleReturn / handleLocal', () => {
 
   it('handleLocal assigns to session.env under the declare spelling', async () => {
     const s = new SessionState({ sessionId: 'test' })
-    await handleLocal(['X=1'], s, sessionView(s), null, 'declare')
+    await handleLocal(['X=1'], s, sessionView(s), 'declare')
     expect(s.env.X).toBe('1')
   })
 })

@@ -20,10 +20,10 @@ from mirage.commands.spec import SPECS
 from mirage.errors.fs import eacces
 from mirage.io import IOResult
 from mirage.io.types import SizedRun
-from mirage.ops.registry import op
 from mirage.types import FileStat, FileType, MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from tests.fixtures.vfs_io import install, replaces
 
 
 async def _resolve(targets):
@@ -63,7 +63,7 @@ async def _partly_measured(accessor, paths, texts, opts):
     )
 
 
-@op("readdir", vfs="ram")
+@replaces("readdir")
 async def _unlisted(accessor, path, **kwargs):
     raise eacces(path)
 
@@ -81,7 +81,7 @@ async def _workspace(fn) -> Workspace:
     ws = Workspace(
         {"/a": outer, "/a/n": inner, "/b": other}, mode=MountMode.WRITE
     )
-    ws.mount("/a/n").register_fns([fn])
+    install(ws.mount("/a/n"), [fn])
     return ws
 
 
@@ -130,7 +130,7 @@ async def test_a_mount_below_a_failed_part_counts_where_the_walk_reaches(
     fns, expected
 ):
     ws = await _workspace(_measured)
-    ws.mount("/a").register_fns(fns)
+    install(ws.mount("/a"), fns)
     try:
         result = await ws.shell("du -s /a")
         assert (await result.materialize_stdout()).decode() == expected

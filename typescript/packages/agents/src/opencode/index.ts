@@ -18,7 +18,7 @@ import type { Ops } from '@struktoai/mirage-core/ops/ops'
 import { encodeBase64 } from '@struktoai/mirage-core/utils/base64'
 import { gnuDirname } from '@struktoai/mirage-core/utils/path'
 import { FileVersionTracker } from '@struktoai/mirage-core/workspace/tools/file_version'
-import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { readWorkspaceFile } from '@struktoai/mirage-core/workspace/tools/read_file'
 import { decode, replaceText, withRefusal } from '@struktoai/mirage-core/workspace/tools/io_text'
 

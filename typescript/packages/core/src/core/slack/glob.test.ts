@@ -19,11 +19,12 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import type { SlackResponse, SlackTransport } from './client.ts'
-import { resolveGlobOf } from '../../commands/builtin/generic_bind/index.ts'
-import { IO } from '../../commands/builtin/slack/io.ts'
+import { makeResolveGlob } from '../../utils/glob_walk.ts'
+import { readdir as slackReaddir } from './readdir.ts'
+import { stat as slackStat } from './stat.ts'
 import { DEFAULT_MAX_GLOB_MATCHES } from '../../utils/glob_walk.ts'
 
-const resolveSlackGlob = resolveGlobOf(IO)
+const resolveSlackGlob = makeResolveGlob(slackReaddir, undefined, undefined, slackStat)
 
 class FakeSlackTransport implements SlackTransport {
   public readonly calls: string[] = []

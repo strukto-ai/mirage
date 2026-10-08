@@ -68,25 +68,19 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
         const release = new Promise<void>((resolve) => {
           resume = resolve
         })
-        ws.opsRegistry.register({
-          name: 'stat',
-          vfs: 'ram',
-          filetype: null,
-          write: false,
-          fn: async (_accessor, _path, _args, { index }) => {
-            if (index === undefined) throw new Error('missing index')
-            enter()
-            await release
-            await index.put(
-              '/data/stale',
-              new IndexEntry({ id: 'old', name: 'stale', resourceType: 'file' }),
-            )
-            return new FileStat({
-              name: 'source',
-              type: op === 'rename' ? FileType.DIRECTORY : FileType.FILE,
-            })
-          },
-        })
+        vfs.stat = async (_path, index) => {
+          if (index === undefined) throw new Error('missing index')
+          enter()
+          await release
+          await index.put(
+            '/data/stale',
+            new IndexEntry({ id: 'old', name: 'stale', resourceType: 'file' }),
+          )
+          return new FileStat({
+            name: 'source',
+            type: op === 'rename' ? FileType.DIRECTORY : FileType.FILE,
+          })
+        }
         const session = new SessionState({
           sessionId: 'agent',
           visibility: { paths: { paths: ['/data/source/private'] } },
@@ -176,21 +170,15 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
             })
           }
         }
-        ws.opsRegistry.register({
-          name: 'readdir',
-          vfs: 'ram',
-          filetype: null,
-          write: false,
-          fn: async (_accessor, _path, _args, { index }) => {
-            if (index === undefined) throw new Error('missing index')
-            if (phase === 'backend') await pause()
-            if (method === 'put') await index.put('/data/stale', entry)
-            else if (method === 'setPartialDir')
-              await index.setPartialDir('/data', [['stale', entry]])
-            else await index.setDir('/data', [['stale', entry]])
-            return ['/data/stale']
-          },
-        })
+        vfs.readdir = async (_path, index) => {
+          if (index === undefined) throw new Error('missing index')
+          if (phase === 'backend') await pause()
+          if (method === 'put') await index.put('/data/stale', entry)
+          else if (method === 'setPartialDir')
+            await index.setPartialDir('/data', [['stale', entry]])
+          else await index.setDir('/data', [['stale', entry]])
+          return ['/data/stale']
+        }
         const reading = ws.vfs.readdir('/data')
         let changing: Promise<unknown> | undefined
         const replacement = new RAMVFS()

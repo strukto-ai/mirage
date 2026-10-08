@@ -14,7 +14,6 @@
 
 import { KeyLock } from '../../cache/lock.ts'
 import { runWithSession } from '../../context/session_context.ts'
-import type { OpsRegistry } from '../../ops/registry.ts'
 import type { Ops } from '../../ops/ops.ts'
 import type { CompiledProfile } from '../../policy/profile.ts'
 import { DEFAULT_READ_SPEC, FileType, MountMode, PathSpec } from '../../types.ts'
@@ -34,7 +33,6 @@ export class Documents {
 
   constructor(
     private readonly registry: MountRegistry,
-    private readonly opsRegistry: OpsRegistry,
     private readonly ops: Ops,
     private readonly manager: SessionManager,
     private readonly session: () => SessionState,
@@ -131,7 +129,6 @@ export class Documents {
         { owner: this.manager },
       )
       view = new DocumentVFS(path.slice(path.lastIndexOf('/') + 1), () => this.render(kind), kind)
-      this.opsRegistry.registerVfs(view)
       const document = view
       const mount = this.registry.mount(path, view, MountMode.READ, DEFAULT_READ_SPEC)
       mount.visible = () =>

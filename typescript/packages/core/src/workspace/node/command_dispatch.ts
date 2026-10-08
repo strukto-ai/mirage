@@ -21,8 +21,8 @@ import {
   redirectOpenerFor,
   redirectPathsFor,
   runWithAdmission,
-  runWithOpPolicies,
 } from '../../context/session_context.ts'
+import { runWithOpPolicies } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { guardDispatch, mergeSignals } from '../abort.ts'
@@ -55,7 +55,8 @@ import {
   aliasCommandText,
   expandingAliases,
 } from '../executor/builtins/alias/index.ts'
-import { findSyntaxError, syntaxErrorResult } from '../../shell/parse/index.ts'
+import { checkSyntax, syntaxErrorResult } from '../../shell/parse/index.ts'
+import { findSyntaxIssue } from '../../shell/parse/syntax.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import { INTERPRETER_NAMES } from '../lookup/constants.ts'
 import { guardIO, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
@@ -196,16 +197,9 @@ export async function executeCommand(
           own.set(alias, [at, at + text.length])
           at += text.length
         }
-        const reparse = (text: string): TSNodeLike => scope.parse(text)
-        const offending = findSyntaxError(
-          ast,
-          reparse,
-          expandingAliases(session),
-          own,
-          scope.sourceOffsets(line, ast),
-        )
-        if (offending !== null) {
-          const io = syntaxErrorResult(offending, ast)
+        const found = checkSyntax(line, expandingAliases(session), own) ?? findSyntaxIssue(ast)
+        if (found !== null) {
+          const io = syntaxErrorResult(found)
           const bad = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
           return [
             null,
@@ -708,7 +702,7 @@ async function runArgv(
 // Drop the refusal lines the command tier already wrote.
 //
 // A mount-mode refusal names the mount, not the operand, so the line the
-// node table wrote for a refused link is the very line Mount.executeCmd
+// node table wrote for a refused link is the very line Mount.runCommand
 // writes for the backend operands beside it on the same mount, and
 // `rm dlink file` would say it twice. Compared on the trimmed text, so a
 // trailing-newline difference between the two renderers cannot defeat

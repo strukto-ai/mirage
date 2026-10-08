@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { TRELLO_OPS } from '../../ops/trello/index.ts'
 import { ops } from '../../test-utils.ts'
 import { PathSpec, VFSName } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
@@ -45,11 +44,6 @@ describe('TrelloVFS', () => {
     expect(r.config).toEqual({ apiKey: 'k', apiToken: 't' })
     expect(typeof r.prompt).toBe('string')
     expect(typeof r.writePrompt).toBe('string')
-  })
-
-  it('ops() returns TRELLO_OPS', () => {
-    const r = new TrelloVFS({ apiKey: 'k', apiToken: 't' })
-    expect(r.ops()).toBe(TRELLO_OPS)
   })
 
   it('getState() redacts apiKey/apiToken', async () => {

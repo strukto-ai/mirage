@@ -162,6 +162,11 @@ export async function handleEnv(
   }
   Object.assign(swapped, varsFromEnv(base))
   session.vars = swapped
+  // The command gets its own copy of the functions `export -f` marked,
+  // empty under `-i`: they are part of bash's environment, as its
+  // `BASH_FUNC_NAME%%` entries.
+  const exported = session.exportedFunctions
+  session.exportedFunctions = ignoreEnv ? new Set() : new Set(exported)
   try {
     // env execs its command, so a builtin that is also a program answers as
     // the program.
@@ -171,6 +176,7 @@ export async function handleEnv(
     return [io.stdout, io, new ExecutionNode({ command: 'env', exitCode: io.exitCode })]
   } finally {
     session.vars = saved
+    session.exportedFunctions = exported
   }
 }
 

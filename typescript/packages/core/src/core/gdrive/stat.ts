@@ -20,9 +20,48 @@ import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { driveFingerprint, entryFingerprint } from './fingerprint.ts'
 import { DIRECTORY_RESOURCE_TYPES, readdir as coreReaddir, resourceTypeFor } from './readdir.ts'
 import { enoent } from '../../errors/fs.ts'
-import { FOLDER_MIME, MIME_TO_EXT, getFile } from '../google/drive.ts'
+import { type DriveFile, FOLDER_MIME, MIME_TO_EXT, getFile } from '../google/drive.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { resolveKey } from './resolve.ts'
+
+/**
+ * The stat of one Drive file resource, as `files.get` returns it.
+ *
+ * Pure, so an upload's reply parses the same as a stat. A missing
+ * `mimeType` reads as a plain file: natives are refused before any upload,
+ * so a reply without one names bytes.
+ *
+ * @param item a Drive file resource with `ITEM_FIELDS`
+ */
+export function statFromItem(item: DriveFile): FileStat {
+  const mime = item.mimeType ?? ''
+  const modified = item.modifiedTime ?? ''
+  if (mime === FOLDER_MIME) {
+    return new FileStat({
+      name: item.name,
+      type: FileType.DIRECTORY,
+      modified,
+      extra: { file_id: item.id },
+    })
+  }
+  const resourceType = resourceTypeFor(mime)
+  const ext = MIME_TO_EXT[mime]
+  const vfsName = ext !== undefined ? `${item.name}${ext}` : item.name
+  // Native renders are size-unknown (see the CLAUDE.md FileStat.size rule).
+  const size = ext === undefined && item.size !== undefined ? parseInt(item.size, 10) : null
+  return new FileStat({
+    name: vfsName,
+    size,
+    type: FileType.FILE,
+    content: contentTypeForPath(vfsName),
+    modified,
+    fingerprint: driveFingerprint(resourceType, item.md5Checksum, item.headRevisionId, modified),
+    extra: {
+      file_id: item.id,
+      resource_type: resourceType,
+    },
+  })
+}
 
 // Resolve a stat with direct Drive queries when the index can't answer.
 // Generic write commands (cp/mv/rm) stat without an index, and gdrive is
@@ -35,32 +74,9 @@ async function statFromApi(
   const node = await resolveKey(accessor, key)
   if (node === null) throw enoent(virtual)
   const item = await getFile(accessor.tokenManager, node.id)
-  const modified = item.modifiedTime ?? ''
-  if (node.mimeType === FOLDER_MIME) {
-    return new FileStat({
-      name: node.name,
-      type: FileType.DIRECTORY,
-      modified,
-      extra: { file_id: node.id },
-    })
-  }
-  const resourceType = resourceTypeFor(node.mimeType)
-  const ext = MIME_TO_EXT[node.mimeType]
-  const vfsName = ext !== undefined ? `${node.name}${ext}` : node.name
-  // Native renders are size-unknown (see the CLAUDE.md FileStat.size rule).
-  const size = ext === undefined && item.size !== undefined ? parseInt(item.size, 10) : null
-  return new FileStat({
-    name: vfsName,
-    size,
-    type: FileType.FILE,
-    content: contentTypeForPath(vfsName),
-    modified,
-    fingerprint: driveFingerprint(resourceType, item.md5Checksum, item.headRevisionId, modified),
-    extra: {
-      file_id: node.id,
-      resource_type: resourceType,
-    },
-  })
+  // The resolved node names the path: a shared drive resolves to a
+  // synthesized folder whose Drive item says otherwise.
+  return statFromItem({ ...item, id: node.id, name: node.name, mimeType: node.mimeType })
 }
 
 export async function stat(

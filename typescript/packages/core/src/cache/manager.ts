@@ -14,7 +14,6 @@
 
 import { captureRead } from './context.ts'
 import { activeRecords } from '../observe/context.ts'
-import { READ_FINGERPRINT_OPS } from '../observe/record.ts'
 import { DEFAULT_READ_TTL, type FileStat, PathSpec } from '../types.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
@@ -393,7 +392,7 @@ export class CacheManager {
    * the mount-relative spelling `mountKey` produces on the way there.
    *
    * Only `virtual` is read, and the key is rebuilt against this manager's own
-   * prefix, exactly as `Mount.executeOp` rebuilds one before handing a path to
+   * prefix, exactly as `Mount.call` rebuilds one before handing a path to
    * a backend. The caller's `vfsPath` is deliberately ignored: it is not
    * a fact this class can trust, because `PathSpec.fromStrPath` fabricates one
    * ("assumed root-mounted") for any caller that does not know its mount.
@@ -479,12 +478,7 @@ export class CacheManager {
           generation === this.readGeneration &&
           (keep === undefined || keep())
         ) {
-          let fingerprint = latestFingerprint(
-            records?.slice(start),
-            key,
-            READ_FINGERPRINT_OPS,
-            data.byteLength,
-          )
+          let fingerprint = latestFingerprint(records?.slice(start), key)
           if (facts.length > 0) {
             fingerprint = facts.every((fp) => fp === facts[0]) ? (facts[0] ?? null) : null
           }

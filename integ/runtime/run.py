@@ -29,8 +29,6 @@ import shlex  # noqa: E402
 import shutil  # noqa: E402
 import tempfile  # noqa: E402
 import uuid  # noqa: E402
-from collections.abc import Awaitable, Callable  # noqa: E402
-from dataclasses import replace  # noqa: E402
 from typing import Any  # noqa: E402
 
 from mirage import (  # noqa: E402
@@ -40,15 +38,9 @@ from mirage import (  # noqa: E402
     ProcessExecutorMixin,
     Workspace,
 )
-from mirage.accessor.base import Accessor  # noqa: E402
-from mirage.commands.builtin.generic_bind import (  # noqa: E402
-    make_generic_commands,
-)
-from mirage.commands.builtin.ram.io import IO as RAM_IO  # noqa: E402
+from mirage.cache.index import NULL_INDEX, IndexCacheStore  # noqa: E402
 from mirage.commands.cli.types import CLISpec  # noqa: E402
-from mirage.commands.config import RegisteredCommand  # noqa: E402
 from mirage.errors import classify  # noqa: E402
-from mirage.ops.registry import RegisteredOp  # noqa: E402
 from mirage.policy import Policy  # noqa: E402
 from mirage.policy.types import (  # noqa: E402
     CommandContext,
@@ -63,7 +55,8 @@ from mirage.runtime.mixin import LineExecutorMixin  # noqa: E402
 from mirage.runtime.routing import RouteContext, ScriptSource  # noqa: E402
 from mirage.runtime.table import build_runtime, register_runtime  # noqa: E402
 from mirage.runtime.types import RunResult  # noqa: E402
-from mirage.types import Limit, PathSpec  # noqa: E402
+from mirage.types import FileStat, Limit, PathSpec  # noqa: E402
+from mirage.vfs.base import BaseVFS  # noqa: E402
 from mirage.vfs.ram import RAMVFS  # noqa: E402
 
 HOST = "python"
@@ -487,50 +480,41 @@ class FailingRAMVFS(RAMVFS):
 
     The shape of one broken record behind a REST collection: the
     listing names it, and every question about it errors with whatever
-    the upstream said, which is no filesystem error at all. The stat
-    its commands ask fails too, so ``ls`` and ``find`` meet the record
-    where a remote mount's commands do, and with no native find op, as
-    such a mount has none, ``find`` walks.
+    the upstream said, which is no filesystem error at all. Its commands
+    ask the same functions, so ``ls`` and ``find`` meet the record where
+    a remote mount's commands do, and with no find of its own, as such a
+    mount has none, ``find`` walks.
 
     Args:
         failing (list[str]): names, spelled as a mount's ``files``
             spells them, whose stat and read fail.
     """
 
+    find = BaseVFS.find
+
     def __init__(self, failing: list[str]) -> None:
         super().__init__()
         self._failing = frozenset(failing)
-        self._guarded_commands = [
-            rc
-            for fn in make_generic_commands(
-                "ram",
-                replace(RAM_IO, stat=self._guard(RAM_IO.stat), find=None),
-            )
-            for rc in fn._registered_commands
-        ]
 
-    def commands(self) -> list[RegisteredCommand]:
-        return self._guarded_commands
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        self._refuse(path)
+        return await super().stat(path, index)
 
-    def ops(self) -> list[RegisteredOp]:
-        return [
-            replace(ro, fn=self._guard(ro.fn))
-            if ro.name in ("stat", "read")
-            else ro
-            for ro in super().ops()
-        ]
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        self._refuse(path)
+        return await super().read(path, index, offset, size)
 
-    def _guard(
-        self, fn: Callable[..., Awaitable[Any]]
-    ) -> Callable[..., Awaitable[Any]]:
-        async def guarded(
-            accessor: Accessor, path: PathSpec, *args: Any, **kwargs: Any
-        ) -> Any:
-            if path.vfs_path.strip("/") in self._failing:
-                raise RuntimeError("upstream 502 Bad Gateway")
-            return await fn(accessor, path, *args, **kwargs)
-
-        return guarded
+    def _refuse(self, path: PathSpec) -> None:
+        if path.vfs_path.strip("/") in self._failing:
+            raise RuntimeError("upstream 502 Bad Gateway")
 
 
 async def _build_vfs(spec: dict[str, Any], run_id: str) -> Any:

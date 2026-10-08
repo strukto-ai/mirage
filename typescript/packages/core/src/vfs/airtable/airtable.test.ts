@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { commandsFor } from '../../commands/builtin/backends.ts'
 import { describe, expect, it } from 'vitest'
 import { FakeAirtable, TOKEN } from '../../core/airtable/_test_util.ts'
 import { VFSName } from '../../types.ts'
@@ -41,19 +42,11 @@ describe('AirtableVFS', () => {
   })
 
   it('exposes a read-only file surface', () => {
-    const names = new Set(
-      vfs(new FakeAirtable())
-        .commands()
-        .map((c) => c.name),
-    )
+    const names = new Set(commandsFor(vfs(new FakeAirtable())).map((c) => c.name))
     for (const name of ['cat', 'ls', 'find', 'grep', 'head', 'jq', 'wc']) {
       expect(names.has(name)).toBe(true)
     }
-    expect(
-      vfs(new FakeAirtable())
-        .ops()
-        .filter((op) => op.write),
-    ).toEqual([])
+    expect(vfs(new FakeAirtable()).supports('write')).toBe(false)
   })
 
   it('redacts the token from its state', () => {

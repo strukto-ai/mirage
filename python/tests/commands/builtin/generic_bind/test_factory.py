@@ -21,17 +21,16 @@ from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.cache.manager import CacheManager
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
 from mirage.commands.builtin.generic_bind.factory import (
     _run_with_namespace_globs,
-    make_generic_commands,
+    generic_commands,
     scan_io,
     with_probe_answers,
     with_read_cache,
     with_slash_guard,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.ops.types import LinkView, NamespaceView
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -79,6 +78,10 @@ def _spec() -> PathSpec:
     )
 
 
+def _same_table(io: CommandIO) -> CommandIO:
+    return io
+
+
 async def _drain(source) -> bytes:
     return b"".join([c async for c in source])
 
@@ -88,8 +91,8 @@ def test_factory_registers_every_command_whatever_the_backend_lacks():
     # `gzip -c`, `tar -t` and `split -n 1/2` only read, and a line that
     # writes is refused at the missing op instead of the command being
     # absent.
-    backend = _CountingBackend(b"payload")
-    commands = make_generic_commands("limited", _ops(backend))
+    _CountingBackend(b"payload")
+    commands = generic_commands("limited")
     names = {
         registered.name
         for command in commands
@@ -228,13 +231,15 @@ async def test_namespace_globs_stamp_the_link_target_stat():
         ns=NamespaceView(links=links, child_mounts=_owes_nothing)
     )
     await _run_with_namespace_globs(
-        _ops(_CountingBackend(b"")),
         lambda ops: ops,
         capture,
         None,
+        None,
+        False,
+        None,
         [],
         [],
-        opts,
+        replace(opts, io=_ops(_CountingBackend(b""))),
     )
     assert seen[0].glob_children is _owes_nothing
     assert seen[0].glob_target_stat is _no_target
@@ -249,13 +254,15 @@ async def test_namespace_globs_stamp_nothing_without_links():
 
     opts = CommandOpts(ns=NamespaceView(child_mounts=_owes_nothing))
     await _run_with_namespace_globs(
-        _ops(_CountingBackend(b"")),
         lambda ops: ops,
         capture,
         None,
+        None,
+        False,
+        None,
         [],
         [],
-        opts,
+        replace(opts, io=_ops(_CountingBackend(b""))),
     )
     assert seen[0].glob_target_stat is None
 
@@ -306,7 +313,7 @@ async def test_slash_guard_leaves_write_absent_when_the_backend_has_none():
     "option",
     [
         {"overrides": {"cat", "search"}},
-        {"ops_overrides": {"lss": _ops(_CountingBackend(b""))}},
+        {"adapt": {"lss": _same_table}},
     ],
 )
 def test_a_name_no_builder_has_is_refused(option):
@@ -314,7 +321,7 @@ def test_a_name_no_builder_has_is_refused(option):
     registered beside the bespoke command, and mem0's ``search`` read as
     if it displaced something."""
     with pytest.raises(ValueError, match="no generic builder named"):
-        make_generic_commands("fake", _ops(_CountingBackend(b"")), **option)
+        generic_commands("fake", **option)
 
 
 @pytest.mark.asyncio
@@ -409,10 +416,19 @@ async def test_a_probed_stat_without_a_size_still_gets_the_cached_length():
     assert (served.size, stat.calls) == (10, 0)
 
 
-def _bound_ops(commands, name: str) -> CommandIO:
+async def _bound_ops(commands, name: str, io: CommandIO) -> CommandIO:
+    """The table the builder of command ``name`` is handed over ``io``."""
     fn = next(c for c in commands if c._registered_commands[0].name == name)
-    raw, finish, _ = fn.__wrapped__.args
-    return finish(raw)
+    seen: list[CommandIO] = []
+
+    async def capture(ops, accessor, paths, texts, opts):
+        seen.append(ops)
+
+    finish, _builder, table, adapt, write = fn.__wrapped__.args
+    await _run_with_namespace_globs(
+        finish, capture, table, adapt, write, None, [], [], CommandOpts(io=io)
+    )
+    return seen[0]
 
 
 @pytest.mark.asyncio
@@ -423,16 +439,20 @@ async def test_a_command_with_its_own_stat_never_serves_the_probe():
     table = _CountingStat(_BACKEND)
     light = _CountingStat(FileStat(name="a.txt", size=1, type=FileType.FILE))
     base = _stat_ops(table)
-    commands = make_generic_commands(
-        "s3", base, ops_overrides={"ls": replace(base, stat=light)}
+    commands = generic_commands(
+        "s3", adapt={"ls": lambda io: replace(io, stat=light)}
     )
     manager = CacheManager(RAMFileCacheStore(), None, "/s3/", True)
     prev = push_cache_manager(manager)
     try:
         async with command_scope():
             manager.note_probed(_spec(), _PROBED)
-            ls_stat = await _bound_ops(commands, "ls").stat(None, _spec())
-            stat_stat = await _bound_ops(commands, "stat").stat(None, _spec())
+            ls_stat = await (await _bound_ops(commands, "ls", base)).stat(
+                None, _spec()
+            )
+            stat_stat = await (await _bound_ops(commands, "stat", base)).stat(
+                None, _spec()
+            )
     finally:
         push_cache_manager(prev)
     assert (ls_stat.size, light.calls) == (1, 1)

@@ -408,6 +408,108 @@
         "stderr": ""
       },
       "note": "bash draws RANDOM more than once inside some operators (`${#RANDOM}` consumes two draws, `${RANDOM/1/X}` three, pinned on 5.2); that re-evaluation is bash's own and is not modelled, so only the single-draw forms are pinned."
+    },
+    {
+      "id": "integer_array_element_writes_leave_the_rest",
+      "seq": 746,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( x=4; A=(0 'x++'); declare -i A; let 'A[0]=1'; (( A[0]+=1 )); : $(( A[0]*=3 )); read 'A[2]' <<< 5; printf -v 'A[3]' 7; declare -i n; n='A[4]=9'; echo \"x=$x n=$n\"; declare -p A )",
+      "expect": {
+        "exit": 0,
+        "stdout": "x=4 n=9\ndeclare -ai A=([0]=\"6\" [1]=\"x++\" [2]=\"5\" [3]=\"7\" [4]=\"9\")\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arith_bare_write_lands_at_element_zero",
+      "seq": 859,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( A=(old keep); M='A=9'; declare -ni r=M; declare -p A; B=(old keep); declare -i n; n='B=8'; declare -p B; declare -A M2=([k]=v); n='M2=7'; echo \"${M2[0]} ${M2[k]}\"; C=(old keep); declare -n ref=C; M='ref=6'; declare -ni q=M; declare -p C; D=(old keep); let 'D=5'; declare -p D )",
+      "expect": {
+        "exit": 0,
+        "stdout": "declare -a A=([0]=\"9\" [1]=\"keep\")\ndeclare -a B=([0]=\"8\" [1]=\"keep\")\n7 v\ndeclare -a C=([0]=\"6\" [1]=\"keep\")\ndeclare -a D=([0]=\"5\" [1]=\"keep\")\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "declare_g_arithmetic_writes_the_local",
+      "seq": 860,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( G=0; f(){ local G=3; declare -gi G='G=G+10'; echo \"in G=$G\"; }; f; echo \"out G=$G\"; H=0; g(){ local H=3; declare -gi H='H++'; echo \"in H=$H\"; }; g; echo \"out H=$H\"; r=1; M='r[k]=5'; h(){ local -A r=([keep]=2); declare -gni r=M; echo \"in ${r[k]} ${r[keep]}\"; }; h; declare -p r )",
+      "expect": {
+        "exit": 0,
+        "stdout": "in G=13\nout G=13\nin H=4\nout H=3\nin 5 2\ndeclare -i r=\"1\"\n",
+        "stderr": ""
+      }
     }
   ]
 }

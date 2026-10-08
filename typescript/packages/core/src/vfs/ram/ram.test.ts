@@ -13,29 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { Accessor } from '../../accessor/base.ts'
 import { mkdir as coreMkdir } from '../../core/ram/mkdir.ts'
-import { OpsRegistry } from '../../ops/registry.ts'
 import { ops } from '../../test-utils.ts'
 import { FileType, MountMode, PathSpec, VFSName } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RAMVFS } from './ram.ts'
 
-function setup(): { ram: RAMVFS; registry: OpsRegistry; ws: Workspace } {
+function setup(): { ram: RAMVFS; ws: Workspace } {
   const ram = new RAMVFS()
-  const registry = new OpsRegistry()
-  const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE, ops: registry })
-  return { ram, registry, ws }
+  const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE })
+  return { ram, ws }
 }
 
-function call(
-  registry: OpsRegistry,
-  name: string,
-  ram: RAMVFS,
-  path: string,
-  ...args: unknown[]
-): Promise<unknown> {
-  return registry.call(name, VFSName.RAM, ram.accessor, PathSpec.fromStrPath(path), args)
+function call(name: string, ram: RAMVFS, path: string, ...args: unknown[]): Promise<unknown> {
+  return ops(ram).call(name, PathSpec.fromStrPath(path), args)
 }
 
 describe('RAMVFS.kind', () => {
@@ -46,82 +37,78 @@ describe('RAMVFS.kind', () => {
 
 describe('RAMVFS write + read', () => {
   it('round-trips bytes under a nested path after mkdir of the parent', async () => {
-    const { ram, registry } = setup()
-    await call(registry, 'mkdir', ram, '/data')
+    const { ram } = setup()
+    await call('mkdir', ram, '/data')
     const payload = new TextEncoder().encode('hello')
-    await call(registry, 'write', ram, '/data/hello.txt', payload)
-    const read = await call(registry, 'read', ram, '/data/hello.txt')
+    await call('write', ram, '/data/hello.txt', payload)
+    const read = await call('read', ram, '/data/hello.txt')
     expect(read).toEqual(payload)
   })
 
   it('write under /root works without mkdir', async () => {
-    const { ram, registry } = setup()
+    const { ram } = setup()
     const payload = new TextEncoder().encode('x')
-    await call(registry, 'write', ram, '/x', payload)
-    expect(await call(registry, 'read', ram, '/x')).toEqual(payload)
+    await call('write', ram, '/x', payload)
+    expect(await call('read', ram, '/x')).toEqual(payload)
   })
 
   it('write under nested missing parent throws', async () => {
     // The operand is what a GNU stderr line names, so the error carries the
     // virtual path and an errno, not the internal parent phrasing.
-    const { ram, registry } = setup()
+    const { ram } = setup()
     const payload = new TextEncoder().encode('x')
-    await expect(call(registry, 'write', ram, '/missing/x', payload)).rejects.toMatchObject({
+    await expect(call('write', ram, '/missing/x', payload)).rejects.toMatchObject({
       code: 'ENOENT',
       virtualPath: '/missing/x',
     })
   })
 
   it('read missing file throws', async () => {
-    const { ram, registry } = setup()
-    await expect(call(registry, 'read', ram, '/nope')).rejects.toMatchObject({ code: 'ENOENT' })
+    const { ram } = setup()
+    await expect(call('read', ram, '/nope')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
 
 describe('RAMVFS readdir', () => {
   it('lists immediate children of a directory', async () => {
-    const { ram, registry } = setup()
-    await call(registry, 'mkdir', ram, '/data')
-    await call(registry, 'write', ram, '/data/a', new Uint8Array())
-    await call(registry, 'write', ram, '/data/b', new Uint8Array())
-    await call(registry, 'mkdir', ram, '/data/sub')
-    expect(await call(registry, 'readdir', ram, '/data')).toEqual([
-      '/data/a',
-      '/data/b',
-      '/data/sub',
-    ])
+    const { ram } = setup()
+    await call('mkdir', ram, '/data')
+    await call('write', ram, '/data/a', new Uint8Array())
+    await call('write', ram, '/data/b', new Uint8Array())
+    await call('mkdir', ram, '/data/sub')
+    expect(await call('readdir', ram, '/data')).toEqual(['/data/a', '/data/b', '/data/sub'])
   })
 
   it('returns [] for empty directory', async () => {
-    const { ram, registry } = setup()
-    await call(registry, 'mkdir', ram, '/empty')
-    expect(await call(registry, 'readdir', ram, '/empty')).toEqual([])
+    const { ram } = setup()
+    await call('mkdir', ram, '/empty')
+    expect(await call('readdir', ram, '/empty')).toEqual([])
   })
 
   it('lists root entries from the auto-created / directory', async () => {
-    const { ram, registry } = setup()
-    await call(registry, 'mkdir', ram, '/a')
-    await call(registry, 'write', ram, '/b', new Uint8Array())
-    expect(await call(registry, 'readdir', ram, '/')).toEqual(['/a', '/b'])
+    const { ram } = setup()
+    await call('mkdir', ram, '/a')
+    await call('write', ram, '/b', new Uint8Array())
+    expect(await call('readdir', ram, '/')).toEqual(['/a', '/b'])
   })
 
   it('throws ENOENT when the path does not exist', async () => {
-    const { ram, registry } = setup()
-    await expect(call(registry, 'readdir', ram, '/missing')).rejects.toMatchObject({
+    const { ram } = setup()
+    await expect(call('readdir', ram, '/missing')).rejects.toMatchObject({
       code: 'ENOENT',
     })
-    await expect(call(registry, 'readdir', ram, '/missing/deeper')).rejects.toMatchObject({
+    await expect(call('readdir', ram, '/missing/deeper')).rejects.toMatchObject({
       code: 'ENOENT',
     })
   })
 
   it('throws ENOTDIR when a path component is a file', async () => {
-    const { ram, registry } = setup()
-    await call(registry, 'write', ram, '/a.txt', new Uint8Array())
-    await expect(call(registry, 'readdir', ram, '/a.txt')).rejects.toMatchObject({
+    const { ram } = setup()
+    await call('write', ram, '/a.txt', new Uint8Array())
+    await expect(call('readdir', ram, '/a.txt')).rejects.toMatchObject({
       code: 'ENOTDIR',
     })
-    await expect(call(registry, 'readdir', ram, '/a.txt/x')).rejects.toMatchObject({
+    await expect(call('readdir', ram, '/a.txt/x')).rejects.toMatchObject({
       code: 'ENOTDIR',
     })
   })
@@ -132,10 +119,10 @@ describe('RAMVFS readdir', () => {
     // Redis can seed one, so readdir stays defensive about it. Seeded
     // directly rather than through rename, which now refuses to create one.
     // The walk must stop at /missing, the way the kernel would.
-    const { ram, registry } = setup()
+    const { ram } = setup()
     ram.store.files.set('/missing/a.txt', new Uint8Array())
     for (const p of ['/missing', '/missing/a.txt/x', '/missing/a.txt/x/y']) {
-      await expect(call(registry, 'readdir', ram, p)).rejects.toMatchObject({
+      await expect(call('readdir', ram, p)).rejects.toMatchObject({
         code: 'ENOENT',
       })
     }
@@ -144,106 +131,106 @@ describe('RAMVFS readdir', () => {
 
 describe('RAMVFS stat', () => {
   it('reports type=DIRECTORY for known directories', async () => {
-    const { ram, registry } = setup()
-    await call(registry, 'mkdir', ram, '/data')
-    const s = (await call(registry, 'stat', ram, '/data')) as { type: string; name: string }
+    const { ram } = setup()
+    await call('mkdir', ram, '/data')
+    const s = (await call('stat', ram, '/data')) as { type: string; name: string }
     expect(s.type).toBe(FileType.DIRECTORY)
     expect(s.name).toBe('data')
   })
 
   it('reports size for files', async () => {
-    const { ram, registry } = setup()
-    await call(registry, 'write', ram, '/x', new TextEncoder().encode('hello'))
-    const s = (await call(registry, 'stat', ram, '/x')) as { size: number; name: string }
+    const { ram } = setup()
+    await call('write', ram, '/x', new TextEncoder().encode('hello'))
+    const s = (await call('stat', ram, '/x')) as { size: number; name: string }
     expect(s.size).toBe(5)
     expect(s.name).toBe('x')
   })
 
   it('throws for missing files', async () => {
-    const { ram, registry } = setup()
-    await expect(call(registry, 'stat', ram, '/gone')).rejects.toMatchObject({ code: 'ENOENT' })
+    const { ram } = setup()
+    await expect(call('stat', ram, '/gone')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
 
 describe('RAMVFS unlink + rmdir', () => {
   it('removes files', async () => {
-    const { ram, registry } = setup()
-    await call(registry, 'write', ram, '/x', new Uint8Array([1]))
-    await call(registry, 'unlink', ram, '/x')
-    await expect(call(registry, 'read', ram, '/x')).rejects.toMatchObject({ code: 'ENOENT' })
+    const { ram } = setup()
+    await call('write', ram, '/x', new Uint8Array([1]))
+    await call('unlink', ram, '/x')
+    await expect(call('read', ram, '/x')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('removes directories', async () => {
-    const { ram, registry } = setup()
-    await call(registry, 'mkdir', ram, '/d')
-    await call(registry, 'rmdir', ram, '/d')
-    await expect(call(registry, 'readdir', ram, '/d')).rejects.toMatchObject({ code: 'ENOENT' })
+    const { ram } = setup()
+    await call('mkdir', ram, '/d')
+    await call('rmdir', ram, '/d')
+    await expect(call('readdir', ram, '/d')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
 
 describe('RAMVFS append + create + truncate', () => {
   it('append extends existing files', async () => {
-    const { ram, registry } = setup()
-    await call(registry, 'write', ram, '/x', new TextEncoder().encode('hello'))
-    await call(registry, 'append', ram, '/x', new TextEncoder().encode(' world'))
-    const read = (await call(registry, 'read', ram, '/x')) as Uint8Array
+    const { ram } = setup()
+    await call('write', ram, '/x', new TextEncoder().encode('hello'))
+    await call('append', ram, '/x', new TextEncoder().encode(' world'))
+    const read = (await call('read', ram, '/x')) as Uint8Array
     expect(new TextDecoder().decode(read)).toBe('hello world')
   })
 
   it('append creates a new file when missing', async () => {
-    const { ram, registry } = setup()
-    await call(registry, 'append', ram, '/y', new TextEncoder().encode('new'))
-    const read = (await call(registry, 'read', ram, '/y')) as Uint8Array
+    const { ram } = setup()
+    await call('append', ram, '/y', new TextEncoder().encode('new'))
+    const read = (await call('read', ram, '/y')) as Uint8Array
     expect(new TextDecoder().decode(read)).toBe('new')
   })
 
   it('create makes an empty file', async () => {
-    const { ram, registry } = setup()
-    await call(registry, 'create', ram, '/z')
-    expect(await call(registry, 'read', ram, '/z')).toEqual(new Uint8Array())
+    const { ram } = setup()
+    await call('create', ram, '/z')
+    expect(await call('read', ram, '/z')).toEqual(new Uint8Array())
   })
 
   it('truncate pads with zeros when extending', async () => {
-    const { ram, registry } = setup()
-    await call(registry, 'write', ram, '/f', new TextEncoder().encode('hi'))
-    await call(registry, 'truncate', ram, '/f', 5)
-    const read = (await call(registry, 'read', ram, '/f')) as Uint8Array
+    const { ram } = setup()
+    await call('write', ram, '/f', new TextEncoder().encode('hi'))
+    await call('truncate', ram, '/f', 5)
+    const read = (await call('read', ram, '/f')) as Uint8Array
     expect(read).toEqual(new Uint8Array([104, 105, 0, 0, 0]))
   })
 
   it('truncate shortens existing files', async () => {
-    const { ram, registry } = setup()
-    await call(registry, 'write', ram, '/f', new TextEncoder().encode('hello'))
-    await call(registry, 'truncate', ram, '/f', 2)
-    const read = (await call(registry, 'read', ram, '/f')) as Uint8Array
+    const { ram } = setup()
+    await call('write', ram, '/f', new TextEncoder().encode('hello'))
+    await call('truncate', ram, '/f', 2)
+    const read = (await call('read', ram, '/f')) as Uint8Array
     expect(new TextDecoder().decode(read)).toBe('he')
   })
 })
 
 describe('RAMVFS rename', () => {
   it('renames a file', async () => {
-    const { ram, registry } = setup()
-    await call(registry, 'write', ram, '/src', new TextEncoder().encode('x'))
-    await call(registry, 'rename', ram, '/src', PathSpec.fromStrPath('/dst'))
-    await expect(call(registry, 'read', ram, '/src')).rejects.toMatchObject({ code: 'ENOENT' })
-    expect(await call(registry, 'read', ram, '/dst')).toEqual(new TextEncoder().encode('x'))
+    const { ram } = setup()
+    await call('write', ram, '/src', new TextEncoder().encode('x'))
+    await call('rename', ram, '/src', PathSpec.fromStrPath('/dst'))
+    await expect(call('read', ram, '/src')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await call('read', ram, '/dst')).toEqual(new TextEncoder().encode('x'))
   })
 
   it('renames a directory with its children', async () => {
-    const { ram, registry } = setup()
-    await call(registry, 'mkdir', ram, '/old')
-    await call(registry, 'write', ram, '/old/a', new Uint8Array([1]))
-    await call(registry, 'write', ram, '/old/b', new Uint8Array([2]))
-    await call(registry, 'rename', ram, '/old', PathSpec.fromStrPath('/new'))
-    expect(await call(registry, 'read', ram, '/new/a')).toEqual(new Uint8Array([1]))
-    expect(await call(registry, 'read', ram, '/new/b')).toEqual(new Uint8Array([2]))
+    const { ram } = setup()
+    await call('mkdir', ram, '/old')
+    await call('write', ram, '/old/a', new Uint8Array([1]))
+    await call('write', ram, '/old/b', new Uint8Array([2]))
+    await call('rename', ram, '/old', PathSpec.fromStrPath('/new'))
+    expect(await call('read', ram, '/new/a')).toEqual(new Uint8Array([1]))
+    expect(await call('read', ram, '/new/b')).toEqual(new Uint8Array([2]))
   })
 
   it('throws when source does not exist', async () => {
-    const { ram, registry } = setup()
-    await expect(
-      call(registry, 'rename', ram, '/nope', PathSpec.fromStrPath('/dst')),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    const { ram } = setup()
+    await expect(call('rename', ram, '/nope', PathSpec.fromStrPath('/dst'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })
 
@@ -259,8 +246,8 @@ describe('RAMVFS mkdir -p parents', () => {
   it('the mkdir op throws if an intermediate directory is missing', async () => {
     // A bare Error here would not be classified as a filesystem failure, so
     // the command layer could not report it with a GNU strerror.
-    const { ram, registry } = setup()
-    await expect(call(registry, 'mkdir', ram, '/x/y')).rejects.toMatchObject({
+    const { ram } = setup()
+    await expect(call('mkdir', ram, '/x/y')).rejects.toMatchObject({
       code: 'ENOENT',
       virtualPath: '/x/y',
     })
@@ -297,16 +284,14 @@ describe('RAMVFS mkdir -p parents', () => {
 })
 
 describe('RAMVFS through Workspace', () => {
-  it('Workspace auto-registers VFS.ops() when ops registry is provided', async () => {
-    const { ram, registry, ws } = setup()
-    const [resolvedRes, resolvedPath, mode] = await ws.resolve('/ram/hello.txt')
+  it('the workspace door serves the VFS functions', async () => {
+    const { ram, ws } = setup()
+    const [resolvedRes] = await ws.resolve('/ram/hello.txt')
     expect(resolvedRes).toBe(ram)
 
     const payload = new TextEncoder().encode('mirage')
-    const acc = resolvedRes as unknown as Accessor
-    await registry.call('write', resolvedRes.name, acc, resolvedPath, [payload])
-    const read = await registry.call('read', resolvedRes.name, acc, resolvedPath)
-    void mode
+    await ws.dispatch('write', '/ram/hello.txt', [payload])
+    const read = await ws.dispatch('read', '/ram/hello.txt')
     expect(read).toEqual(payload)
     await ws.close()
   })

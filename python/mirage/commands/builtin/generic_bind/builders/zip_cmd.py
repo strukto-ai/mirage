@@ -17,13 +17,13 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.zip_cmd import zip_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    Builder,
-    CommandIO,
+    GenericCommand,
     Operation,
     bound_op,
+    require_op,
 )
 from mirage.commands.builtin.generic_bind.archive_io import walk_of
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -43,10 +43,10 @@ async def zip_cmd(
         list(texts),
         opts,
         bound_op(ops.read_bytes, accessor, opts.index),
-        partial(ops.require(Operation.WRITE), accessor),
+        partial(require_op(ops, Operation.WRITE), accessor),
         partial(ops.stat, accessor, index=opts.index),
         walk_of(ops, accessor, opts.index),
     )
 
 
-BUILDER = Builder("zip", zip_cmd, write=True)
+BUILDER = GenericCommand("zip", zip_cmd, write=True)

@@ -14,6 +14,7 @@
 
 import { strongestUnderSession } from '../../context/session_context.ts'
 import type { Ops } from '../../ops/ops.ts'
+import type { Decisions } from '../../policy/decisions.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import { patternMatches } from '../../policy/match/pattern.ts'
 import { MOUNT_MODE_RANK, MountMode } from '../../types.ts'
@@ -24,8 +25,7 @@ import { commandVisible } from '../lookup/lookup.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { DEV_PREFIX } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
-import type { Session, SessionExecuteOptions } from '../workspace/handle.ts'
-import type { ExecuteResult } from '../workspace/types.ts'
+import type { ExecuteResult, SessionExecuteOptions } from '../workspace/types.ts'
 import { FileVersionTracker, StaleMirageFileError } from './file_version.ts'
 import { decode, errorText, ioToStr, replaceText } from './io_text.ts'
 import { mediaOf, type WorkspaceMediaRead } from './read_file.ts'
@@ -34,6 +34,19 @@ export interface ToolResult {
   [key: string]: unknown
   content: { type: 'text'; text: string }[]
   isError?: boolean
+}
+
+/** What a tool table acts through: one session's doors (`Session`). */
+export interface SessionLike {
+  readonly sessionId: string
+  readonly state: SessionState
+  readonly decisions: Decisions
+  readonly vfs: Ops
+  mounts(): readonly MountEntry[]
+  shell(command: string, options?: SessionExecuteOptions): Promise<ExecuteResult>
+  glob(pattern: string): Promise<string[]>
+  loaded(): Promise<void>
+  reads(): Promise<FileVersionTracker>
 }
 
 /** What an adapter takes to pick a session's tool table. */
@@ -139,7 +152,7 @@ export function writes(session: SessionState, mounts: readonly MountEntry[]): bo
  * (`Decisions.withinCall`): an approval for a path runs every op the call
  * makes on it, and the call's end spends it. Mirrors Python's `one_call`.
  */
-function oneCall<T>(session: Session, run: () => Promise<T>): Promise<T> {
+function oneCall<T>(session: SessionLike, run: () => Promise<T>): Promise<T> {
   return session.decisions.withinCall(session.sessionId, run)
 }
 
@@ -160,7 +173,7 @@ export class MirageToolOperations {
    *   changed since it read it.
    */
   constructor(
-    private readonly session: Session,
+    private readonly session: SessionLike,
     staleWriteProtection = true,
   ) {
     this.own = staleWriteProtection ? null : new FileVersionTracker(session.vfs, false)
