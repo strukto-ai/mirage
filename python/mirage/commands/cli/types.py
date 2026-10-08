@@ -18,6 +18,7 @@ from typing import Any, Callable, Generic, Literal, TypeVar
 
 from pydantic import BaseModel
 
+from mirage.commands.constants import ROOT_CWD
 from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import CommandSpec, FlagValue, UsageStyle
@@ -108,6 +109,8 @@ class CLIInvocation(Generic[ConfigT]):
         paths (tuple[PathSpec, ...]): path-typed operands of the leaf,
             cwd-resolved.
         texts (tuple[str, ...]): text-typed operands of the leaf.
+        cwd (PathSpec): the session's working directory, the one the
+            paths were resolved against.
         flags (Mapping[str, FlagValue]): merged group and leaf flags keyed
             by kwarg name (``flag_kwarg_name`` spelling), read through
             FlagView. PATH-typed flag values arrive as PathSpec.
@@ -136,6 +139,7 @@ class CLIInvocation(Generic[ConfigT]):
     argv: tuple[str, ...] = ()
     paths: tuple[PathSpec, ...] = ()
     texts: tuple[str, ...] = ()
+    cwd: PathSpec = ROOT_CWD
     flags: Mapping[str, FlagValue] = field(default_factory=dict)
     stdin: ByteSource | None = None
     env: Mapping[str, str] = field(default_factory=dict)

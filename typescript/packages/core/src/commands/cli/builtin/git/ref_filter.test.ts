@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest'
 import type { CLIInvocation } from '../../types.ts'
 import { GIT } from './index.ts'
 import { filterWords, listModeOption, withoutFilterValues } from './ref_filter.ts'
+import { PathSpec } from '../../../../types.ts'
 
 function words(verb: string, argv: string[]): ReturnType<typeof filterWords> {
   const spec = GIT.subcommands.find((node) => node.name === verb)
@@ -27,6 +28,7 @@ function words(verb: string, argv: string[]): ReturnType<typeof filterWords> {
     texts: [],
     flags: {},
     stdin: null,
+    cwd: PathSpec.fromStrPath('/'),
     env: {},
     ...(spec === undefined ? {} : { spec }),
   }

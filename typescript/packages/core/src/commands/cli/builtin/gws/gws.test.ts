@@ -35,6 +35,7 @@ import { cliSpecFor } from '../../specs.ts'
 import { fillPath, runGwsMethod } from './api.ts'
 import { GWS } from './index.ts'
 import { GWS_METHODS } from './methods.ts'
+import { PathSpec } from '../../../../types.ts'
 
 const DEC = new TextDecoder()
 
@@ -43,7 +44,16 @@ const METHODS = new Map(GWS_METHODS.map((m) => [`${m.service}.${m.resource}.${m.
 const CONFIG: GoogleConfig = { clientId: 'cid', refreshToken: 'rt' }
 
 function makeInv(config: GoogleConfig, flags: CLIInvocation['flags']): CLIInvocation<GoogleConfig> {
-  return { config, argv: [], paths: [], texts: [], flags, stdin: null, env: {} }
+  return {
+    config,
+    argv: [],
+    paths: [],
+    texts: [],
+    flags,
+    stdin: null,
+    cwd: PathSpec.fromStrPath('/'),
+    env: {},
+  }
 }
 
 function method(key: string) {

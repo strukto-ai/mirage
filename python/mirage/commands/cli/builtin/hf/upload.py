@@ -172,7 +172,7 @@ async def upload_cmd(
     local = operands[0] if operands else "."
     in_repo = operands[1] if len(operands) > 1 else ""
     collected, from_dir = await collect(
-        inv.doors, PathSpec.from_str_path(local, cwd=inv.env.get("PWD", "/"))
+        inv.doors, PathSpec.from_str_path(local, cwd=inv.cwd)
     )
     rows = keep(collected, include, exclude)
     if not rows:

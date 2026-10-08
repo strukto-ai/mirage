@@ -179,7 +179,6 @@ async def _script_output(
     script: ScriptSource,
     runtime: LanguageRuntime,
     prog: str,
-    cwd: PathSpec,
 ) -> CommandOutput:
     """Render the invocation onto the selected runtime as one CodeExecution.
 
@@ -196,7 +195,6 @@ async def _script_output(
         script (ScriptSource): the install's embedded program.
         runtime (Runtime): the selected interpreter entry.
         prog (str): the installed head word, the program's own name.
-        cwd (PathSpec): the session's virtual working directory.
     """
     env = dict(inv.env)
     if inv.config is not None:
@@ -212,7 +210,7 @@ async def _script_output(
             args=list(inv.argv),
             prog=prog,
             script_cli=True,
-            cwd=cwd,
+            cwd=inv.cwd,
             env=env,
             stdin=stdin,
             flags=flags,
@@ -487,6 +485,7 @@ async def handle_cli(
         argv=tuple(argv),
         paths=tuple(parsed.paths),
         texts=tuple(parsed.texts),
+        cwd=PathSpec.from_str_path(session.cwd),
         flags=kw,
         stdin=stdin,
         env=env_snapshot(session),
@@ -523,7 +522,6 @@ async def handle_cli(
             leaf.script,
             runtime,
             prog,
-            PathSpec.from_str_path(session.cwd),
         )
     else:
         fn = leaf.fn

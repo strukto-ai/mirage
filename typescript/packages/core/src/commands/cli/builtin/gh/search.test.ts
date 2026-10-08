@@ -4,6 +4,7 @@ import { GitHubApiError } from '../../../../core/github/client.ts'
 import { search } from '../../../../core/github/search.ts'
 import { materialize } from '../../../../io/types.ts'
 import { searchSpec } from './search.ts'
+import { PathSpec } from '../../../../types.ts'
 
 vi.mock('../../../../core/github/search.ts', () => ({ search: vi.fn(() => Promise.resolve([])) }))
 
@@ -51,6 +52,7 @@ describe('search qualifiers match native gh', () => {
       texts: ['two words'],
       flags: { ...flags, limit: '30', json: 'url' },
       stdin: null,
+      cwd: PathSpec.fromStrPath('/'),
       env: {},
       spec: leaf,
     })
@@ -93,6 +95,7 @@ describe('a failed search reads as gh words it', () => {
       texts: ['needle'],
       flags: { limit: '30' },
       stdin: null,
+      cwd: PathSpec.fromStrPath('/'),
       env: {},
       spec: leaf,
     })

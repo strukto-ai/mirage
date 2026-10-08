@@ -99,6 +99,7 @@ function inv(
     texts,
     flags,
     stdin: extra.stdin ?? null,
+    cwd: PathSpec.fromStrPath('/'),
     env: {},
     ...(extra.doors === undefined ? {} : { doors: extra.doors }),
   }

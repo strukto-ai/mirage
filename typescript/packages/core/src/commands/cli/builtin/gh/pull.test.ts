@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as AccessorModule from './accessor.ts'
 import type * as PullModule from '../../../../core/github/pull.ts'
 import type { CLIInvocation } from '../../types.ts'
+import { PathSpec } from '../../../../types.ts'
 
 let ROWS: Record<string, unknown>[] = []
 // What real gh 2.85 printed for `gh pr diff --name-only` over this diff: the
@@ -67,6 +68,7 @@ function inv(flags: CLIInvocation['flags'] = {}): CLIInvocation {
     texts: ['5'],
     flags: { repo: 'o/r', ...flags },
     stdin: null,
+    cwd: PathSpec.fromStrPath('/'),
     env: {},
   }
 }

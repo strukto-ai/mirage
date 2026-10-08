@@ -93,6 +93,8 @@ export interface CLIInvocation<ConfigT = unknown> {
   paths: readonly PathSpec[]
   /** Text-typed operands of the leaf. */
   texts: readonly string[]
+  /** The session's working directory, the one the paths were resolved against. */
+  cwd: PathSpec
   /** Merged group and leaf flags keyed by kwarg name, read via FlagView. */
   flags: Record<string, FlagValue>
   /** Piped input, null when the line has none. */

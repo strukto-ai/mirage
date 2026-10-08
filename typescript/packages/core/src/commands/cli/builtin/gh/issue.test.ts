@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as AccessorModule from './accessor.ts'
 import type * as IssueModule from '../../../../core/github/issue.ts'
 import type { CLIInvocation } from '../../types.ts'
+import { PathSpec } from '../../../../types.ts'
 
 const FIELDS = vi.fn<typeof IssueModule.issueFields>()
 const LIST = vi.fn<typeof IssueModule.listIssueFields>()
@@ -44,6 +45,7 @@ function inv(flags: CLIInvocation['flags'] = {}): CLIInvocation {
     texts: ['4'],
     flags: { repo: 'o/r', ...flags },
     stdin: null,
+    cwd: PathSpec.fromStrPath('/'),
     env: {},
   }
 }

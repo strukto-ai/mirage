@@ -438,6 +438,7 @@ describe('himalaya verbs', () => {
         texts: [],
         flags: { to: 'a@b.com', subject: 'Hi', body: 'yo' },
         stdin: null,
+        cwd: PathSpec.fromStrPath('/'),
         env: {},
       }),
     )) as [Uint8Array, IOResult]
@@ -461,6 +462,7 @@ describe('himalaya verbs', () => {
         texts: [],
         flags: { to: 'a@b.com', subject: 'Hi', body: 'yo', send: true },
         stdin: null,
+        cwd: PathSpec.fromStrPath('/'),
         env: {},
       }),
     )) as [Uint8Array, IOResult]
@@ -497,6 +499,7 @@ describe('himalaya verbs', () => {
           attach: [PathSpec.fromStrPath('/scratch/note.txt')],
         },
         stdin: null,
+        cwd: PathSpec.fromStrPath('/'),
         env: {},
         doors,
       }),
@@ -521,6 +524,7 @@ describe('himalaya verbs', () => {
           texts: [],
           flags: { to: 'a@b.com', body: 'yo', attach: [PathSpec.fromStrPath('/scratch/gone.txt')] },
           stdin: null,
+          cwd: PathSpec.fromStrPath('/'),
           env: {},
           doors,
         }),
@@ -538,6 +542,7 @@ describe('himalaya verbs', () => {
           texts: [],
           flags: { to: 'a@b.com', body: 'yo', attach: [PathSpec.fromStrPath('/scratch/note.txt')] },
           stdin: null,
+          cwd: PathSpec.fromStrPath('/'),
           env: {},
         }),
       ),
@@ -553,6 +558,7 @@ describe('himalaya verbs', () => {
       texts: ['7'],
       flags: { body: 'thanks' },
       stdin: null,
+      cwd: PathSpec.fromStrPath('/'),
       env: {},
     })) as [Uint8Array, IOResult]
     const text = decode(await materialize(out))
@@ -573,6 +579,7 @@ describe('himalaya verbs', () => {
       texts: ['7'],
       flags: { to: 'carol@example.com' },
       stdin: null,
+      cwd: PathSpec.fromStrPath('/'),
       env: {},
     })) as [Uint8Array, IOResult]
     const text = decode(await materialize(out))
@@ -593,6 +600,7 @@ describe('himalaya verbs', () => {
       texts: ['7'],
       flags: {},
       stdin: null,
+      cwd: PathSpec.fromStrPath('/'),
       env: {},
     })) as [Uint8Array, IOResult]
     const bytes = await materialize(out)
@@ -603,7 +611,16 @@ describe('himalaya verbs', () => {
 
   it('reply without an id is a usage error', async () => {
     await expect(
-      reply({ config: CONFIG, argv: [], paths: [], texts: [], flags: {}, stdin: null, env: {} }),
+      reply({
+        config: CONFIG,
+        argv: [],
+        paths: [],
+        texts: [],
+        flags: {},
+        stdin: null,
+        cwd: PathSpec.fromStrPath('/'),
+        env: {},
+      }),
     ).rejects.toThrow('message id is required')
   })
 
@@ -618,6 +635,7 @@ describe('himalaya verbs', () => {
       texts: [],
       flags: {},
       stdin: raw,
+      cwd: PathSpec.fromStrPath('/'),
       env: {},
     })) as [Uint8Array, IOResult]
     expect(sendRawMock.mock.calls[0]?.[1]).toEqual(raw)
@@ -639,6 +657,7 @@ describe('himalaya verbs', () => {
       texts: [],
       flags: {},
       stdin: raw,
+      cwd: PathSpec.fromStrPath('/'),
       env: {},
     })) as [Uint8Array, IOResult]
     expect(appendMock).toHaveBeenCalledWith('Sent', Buffer.from(raw), ['\\Seen'])
@@ -657,6 +676,7 @@ describe('himalaya verbs', () => {
       texts: [],
       flags: {},
       stdin: raw,
+      cwd: PathSpec.fromStrPath('/'),
       env: {},
     })) as [Uint8Array, IOResult]
     // The message is already delivered, so the copy's failure is
@@ -679,6 +699,7 @@ describe('himalaya verbs', () => {
       texts: [],
       flags: { to: 'a@b.com', subject: 'Hi', body: 'yo', send: true },
       stdin: null,
+      cwd: PathSpec.fromStrPath('/'),
       env: {},
     }
     await compose(invocation)
@@ -697,6 +718,7 @@ describe('himalaya verbs', () => {
       texts: [],
       flags: { to: 'a@b.com', subject: 'Draft it', body: 'yo', save: 'Drafts' },
       stdin: null,
+      cwd: PathSpec.fromStrPath('/'),
       env: {},
     })) as [Uint8Array, IOResult]
     expect(sendRawMock).not.toHaveBeenCalled()
@@ -723,6 +745,7 @@ describe('himalaya verbs', () => {
         texts: [],
         flags: { to: 'a@b.com', body: 'yo', save: 'Drafts' },
         stdin: null,
+        cwd: PathSpec.fromStrPath('/'),
         env: {},
       }),
     ).rejects.toThrow('Drafts: no such mailbox')
@@ -738,6 +761,7 @@ describe('himalaya verbs', () => {
         texts: [],
         flags: {},
         stdin: new TextEncoder().encode('  \n '),
+        cwd: PathSpec.fromStrPath('/'),
         env: {},
       }),
     ).rejects.toThrow('no message provided')
@@ -753,6 +777,7 @@ describe('himalaya verbs', () => {
       texts: [],
       flags: {},
       stdin: null,
+      cwd: PathSpec.fromStrPath('/'),
       env: {},
     })) as [Uint8Array, IOResult]
     const rows = JSON.parse(decode(await materialize(out))) as Record<string, unknown>[]
@@ -778,6 +803,7 @@ describe('himalaya verbs', () => {
       texts: ['order', 'by', 'subject'],
       flags: {},
       stdin: null,
+      cwd: PathSpec.fromStrPath('/'),
       env: {},
     })) as [Uint8Array, IOResult]
     const rows = JSON.parse(decode(await materialize(out))) as Record<string, unknown>[]

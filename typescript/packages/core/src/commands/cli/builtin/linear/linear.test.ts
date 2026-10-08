@@ -24,6 +24,7 @@ import { addLabel } from './issue/add_label.ts'
 import { create } from './issue/create.ts'
 import { setProject } from './issue/set_project.ts'
 import * as reads from './reads.ts'
+import { PathSpec } from '../../../../types.ts'
 
 const DEC = new TextDecoder()
 
@@ -54,7 +55,16 @@ function unwrap(result: CommandFnResult): [ByteSource | null, IOResult] {
 }
 
 function makeInv(config: unknown, flags: CLIInvocation['flags']): CLIInvocation {
-  return { config, argv: [], paths: [], texts: [], flags, stdin: null, env: {} }
+  return {
+    config,
+    argv: [],
+    paths: [],
+    texts: [],
+    flags,
+    stdin: null,
+    cwd: PathSpec.fromStrPath('/'),
+    env: {},
+  }
 }
 
 function leaf(...path: string[]) {

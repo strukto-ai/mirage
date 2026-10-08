@@ -20,6 +20,7 @@ import { PartialOutputError, UsageError } from '../../../errors.ts'
 import type { CLIInvocation } from '../../types.ts'
 import { crc32 } from '../../../../utils/compress.ts'
 import { runViewCmd, workflowViewCmd } from './actions.ts'
+import { PathSpec } from '../../../../types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -62,6 +63,7 @@ function inv(texts: string[], flags: CLIInvocation['flags'] = {}): CLIInvocation
     texts,
     flags,
     stdin: null,
+    cwd: PathSpec.fromStrPath('/'),
     env: {},
   }
 }

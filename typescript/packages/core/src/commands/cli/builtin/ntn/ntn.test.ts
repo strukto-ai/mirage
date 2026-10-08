@@ -28,6 +28,7 @@ import { query } from './datasources/query.ts'
 import { whoamiRow } from './whoami.ts'
 import { propertyCell } from './util.ts'
 import { yieldBytes } from '../../../../io/stream.ts'
+import { PathSpec } from '../../../../types.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -68,7 +69,16 @@ function makeInv(
   texts: string[] = [],
   stdin: ByteSource | null = null,
 ): CLIInvocation {
-  return { config: {}, argv: [], paths: [], texts, flags, stdin, env: {} }
+  return {
+    config: {},
+    argv: [],
+    paths: [],
+    texts,
+    flags,
+    stdin,
+    cwd: PathSpec.fromStrPath('/'),
+    env: {},
+  }
 }
 
 function leaf(...path: string[]) {
