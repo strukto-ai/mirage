@@ -107,6 +107,8 @@ class MountRegistry:
             WeakValueDictionary()
         )
         self._root: MountEntry | None = None
+        # The root the workspace adds when no mount claims `/`.
+        self._anchor: MountEntry | None = None
         # Workspace-level command -> runtime bindings (first listed
         # capturer wins). The three runtime fields below are written
         # only by the workspace's Runtimes, on construction and on every
@@ -414,6 +416,8 @@ class MountRegistry:
                 del self._mounts[i]
                 if m is self._root:
                     self._root = None
+                if m is self._anchor:
+                    self._anchor = None
                 return m
         raise ValueError(f"no mount at prefix: {norm_prefix!r}")
 
@@ -660,6 +664,15 @@ class MountRegistry:
     def root_mount(self) -> MountEntry | None:
         return self._root
 
+    def anchor_root(self, entry: MountEntry) -> None:
+        """Mark `entry` as the root the workspace added, not one mounted.
+
+        Args:
+            entry (MountEntry): the scratch root ``install_mounts`` made
+                because no mount claims ``/``.
+        """
+        self._anchor = entry
+
     @property
     def file_cache(self) -> FileCacheMixin | None:
         return self._file_cache
@@ -678,6 +691,7 @@ class MountRegistry:
                 resource_type=m.vfs.name,
                 mode=m.mode,
                 sizes_always_known=m.vfs.sizes_always_known,
+                anchor=m is self._anchor,
             )
             for m in self._mounts
         ]

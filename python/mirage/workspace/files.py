@@ -933,25 +933,27 @@ class Files:
         return sum(r.bytes for r in self.records if r.is_cache)
 
     def is_mounted(self, path: str) -> bool:
-        """Check if a path is under an explicit mount.
+        """Check if a path is under a mount someone made.
 
         Used by the open()/os interception to decide whether a path is a
         workspace path (route through ops) or a real OS path (pass through).
-        The catch-all virtual root at ``/`` is skipped on purpose: it matches
-        every absolute path, so counting it would hijack real filesystem
-        paths (a FUSE mountpoint, ``/tmp``) into ops. Routing to the root for
-        ops themselves still happens at the door; this gate is only about
-        what the interception should leave alone.
+        The scratch root the workspace adds when no mount claims ``/`` is
+        skipped on purpose: nobody mounted it, and it matches every
+        absolute path, so counting it would hijack real filesystem paths
+        (a FUSE mountpoint, ``/tmp``) into ops. A mount made at ``/`` is the
+        workspace's root and claims every path, as it does for a guest.
+        Routing to the anchor for ops themselves still happens at the door;
+        this gate is only about what the interception should leave alone.
 
         Args:
             path (str): Virtual path.
 
         Returns:
-            bool: True if path is under a mount other than the virtual root.
+            bool: True if path is under a mount other than the anchor.
         """
         return (
             owner_prefix(
-                (m.prefix for m in self._mounts if m.prefix != "/"), path
+                (m.prefix for m in self._mounts if not m.anchor), path
             )
             is not None
         )

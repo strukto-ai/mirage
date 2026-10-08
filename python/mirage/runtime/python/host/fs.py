@@ -175,10 +175,10 @@ def make_rmtree(files: Files) -> Callable[..., None]:
         root = spelled.rstrip("/")
         for prefix in files.mount_prefixes():
             mount = prefix.rstrip("/")
-            if mount and (mount == root or mount.startswith(root + "/")):
+            if mount == root or mount.startswith(root + "/"):
                 if kwargs.get("ignore_errors", args[0] if args else False):
                     return
-                raise as_raised(ebusy(mount))
+                raise as_raised(ebusy(mount or "/"))
         saved = module["_use_fd_functions"]
         module["_use_fd_functions"] = False
         try:

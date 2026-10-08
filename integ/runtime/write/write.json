@@ -180,7 +180,8 @@
         "monty",
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "world": {
         "mounts": {
@@ -193,7 +194,8 @@
         {
           "program": {
             "python": "from pathlib import Path\nPath('/mine.txt').write_text('R')",
-            "js": "const w = std.open('/mine.txt', 'w')\nw.puts('R')\nw.close()"
+            "js": "const w = std.open('/mine.txt', 'w')\nw.puts('R')\nw.close()",
+            "node": "await require('node:fs').promises.writeFile('/mine.txt', 'R')"
           },
           "expect": {
             "exit": 0
@@ -221,7 +223,8 @@
         {
           "program": {
             "python": "print(open('/f.txt').read().strip())",
-            "js": "console.log(std.open('/f.txt', 'r').readAsString().trim())"
+            "js": "console.log(std.open('/f.txt', 'r').readAsString().trim())",
+            "node": "console.log((await require('node:fs').promises.readFile('/f.txt', 'utf8')).trim())"
           },
           "expect": {
             "exit": 0,

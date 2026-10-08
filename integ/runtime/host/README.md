@@ -15,5 +15,6 @@ above the mounts and a relative path are the process's own. So the shared
 cases that pin a guest's view of those (`open/view.json`, the structure
 above mounts, `stat` of `/`, the working directory) do not list `host`, and
 neither do `os.pread` and `os.pwrite`, since the door has no descriptors.
-A mount at `/` is not served on the python host, where the door leaves the
-process its root; the typescript door serves one.
+A mount made at `/` is the workspace's root, and both doors serve every
+path under it; the root the workspace adds when nothing is mounted there
+stays the process's.
