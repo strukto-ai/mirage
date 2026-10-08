@@ -101,6 +101,9 @@ logger = logging.getLogger(__name__)
 # each of those answers for its own path above.
 _SUBTREE_OPS = frozenset({"rename"})
 
+# What the mount itself hands every function, taken or not.
+_MOUNT_KEYWORDS = frozenset({"index"})
+
 
 async def _command_output(
     source: AsyncIterator[bytes],
@@ -232,18 +235,25 @@ def _parameters(fn: Callable[..., Any]) -> frozenset[str] | None:
 def _taken(fn: Callable[..., Any], kwargs: dict[str, Any]) -> dict[str, Any]:
     """The keywords of ``kwargs`` that ``fn`` takes.
 
-    The op door hands every op the mount's ``index`` and whatever its
-    caller passed; a function that does not name one of them never sees
-    it, as the table's wrappers dropped what their core did not take.
+    The mount hands every function its ``index``; a function that does
+    not name it never sees it. Every other keyword is the caller's, and
+    one the function does not take is the TypeError a direct call would
+    raise, never silently dropped.
 
     Args:
         fn (Callable[..., Any]): the function about to run.
-        kwargs (dict[str, Any]): the op's keywords.
+        kwargs (dict[str, Any]): the call's keywords.
     """
     target = fn.func if isinstance(fn, functools.partial) else fn
     names = _parameters(getattr(target, "__func__", target))
     if names is None:
         return kwargs
+    unknown = sorted(set(kwargs) - names - _MOUNT_KEYWORDS)
+    if unknown:
+        raise TypeError(
+            f"{getattr(target, '__name__', target)}() got an unexpected "
+            f"keyword argument {unknown[0]!r}"
+        )
     return {k: v for k, v in kwargs.items() if k in names}
 
 

@@ -139,6 +139,18 @@ async def test_a_custom_function_runs_through_the_door():
 
 
 @pytest.mark.asyncio
+async def test_a_keyword_the_function_does_not_take_is_refused():
+    ws = Workspace({"/notes/": Notes()}, mode=MountMode.WRITE)
+    try:
+        with pytest.raises(TypeError, match="'qeury'"):
+            await ws.dispatch(
+                "search_abc", PathSpec.from_str_path("/notes/a.txt"), qeury="x"
+            )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_writing_function_is_refused_on_a_read_only_mount():
     notes = Notes()
     ws = Workspace({"/notes/": notes}, mode=MountMode.READ)
