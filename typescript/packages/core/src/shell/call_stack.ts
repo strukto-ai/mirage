@@ -41,13 +41,18 @@ export class CallStack {
   // A fork is a child shell's stack: an error that discards the rest of
   // the line ends the child instead of resuming.
   subshell = false
+  // A `( )` subshell, a compound command forked as a stage or job, or a
+  // fork of one: a refused `${var:=word}` ends it with 2.
+  paren = false
 
   /**
    * The stack a child shell runs on, a copy of every frame. `loops` keeps
    * the loops the caller is in, as a pipeline stage and `$( )` do; a `( )`
    * or `&` child starts outside every loop (bash 5.2, POSIX interp 842).
+   * `paren` is true for a child running a `( )` or a compound command,
+   * false for a substitution, and null keeps the caller's.
    */
-  fork(loops = true): CallStack {
+  fork(loops = true, paren: boolean | null = null): CallStack {
     const child = new CallStack()
     child.frames.splice(
       0,
@@ -64,6 +69,7 @@ export class CallStack {
       ),
     )
     child.subshell = true
+    child.paren = paren ?? this.paren
     return child
   }
 

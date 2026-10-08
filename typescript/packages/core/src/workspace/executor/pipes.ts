@@ -42,6 +42,7 @@ import { ExitSignal, PipeClosed, ReturnSignal } from '../../shell/errors.ts'
 import { carried, ended, isUnwinding } from './control.ts'
 import { FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
 import { NodeType as NT } from '../../shell/types.ts'
+import { simpleCommand } from '../../shell/node_kind.ts'
 import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
 
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -87,6 +88,9 @@ export async function handlePipe(
   session.errexitImmune = false
   const pipes = commands.map((_, i) => new PipeConsole(stderrFlags[i] === true))
   const ios: IOResult[] = commands.map(() => new IOResult())
+  // A stage the top shell forks for a simple command is that command's
+  // shell; one a child shell forks is a child of a child.
+  const forked = callStack?.subshell === true
   const childNodes: ExecutionNode[] = commands.map(() => new ExecutionNode())
   const abort = new AbortController()
   const parentSignal = mergeSignals(signal, context.frame.abortSignal)
@@ -116,7 +120,7 @@ export async function handlePipe(
     const run = async (): Promise<void> => {
       let io = new IOResult()
       let childExec = new ExecutionNode({ command: cmd.text })
-      const stageStack = (callStack ?? new CallStack()).fork()
+      const stageStack = (callStack ?? new CallStack()).fork(true, simpleCommand(cmd) ? null : true)
       // A job a stage before the last starts writes into the pipe, and
       // the reader sees end of input only once the job has closed it.
       const waits =
@@ -153,8 +157,9 @@ export async function handlePipe(
         if (error instanceof PipeClosed) {
           io.exitCode = 141
         } else if (isUnwinding(error)) {
-          // A stage is a subshell: whatever unwinds ends it there.
-          const unwound = ended(error)
+          // A stage is a subshell: whatever unwinds ends it there, a simple
+          // command the top shell forked as that shell would.
+          const unwound = ended(error, simpleCommand(cmd) && !forked)
           io.exitCode = unwound.exitCode
           await pump(output, Channel.STDOUT, unwound.stdout)
           await pump(output, Channel.STDERR, unwound.stderr)
@@ -435,7 +440,7 @@ export async function handleSubshell(
   session.lineOpen = true
   // A child shell: `shift` or `set --` in it leaves the caller's
   // parameters alone, and it runs in none of the caller's loops.
-  callStack = (callStack ?? new CallStack()).fork(false)
+  callStack = (callStack ?? new CallStack()).fork(false, true)
   // The subshell's actions run as its own lines: their `wait` and `jobs`
   // see the subshell's jobs, not the caller's.
   const runAction: ExecuteStringFn | null =

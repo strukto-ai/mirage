@@ -22,7 +22,7 @@ from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
-from mirage.shell.errors import ReturnSignal
+from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.types import PathSpec, word_text
 from mirage.workspace.executor.builtins.scope import _scope_path
 from mirage.workspace.executor.builtins.script.constants import SOURCE_USAGE
@@ -124,6 +124,9 @@ async def handle_source(
         stdout, io = await returning(
             execute_fn, session, stdin, cs, io.stdout, io
         )
+    except ExitSignal as sig:
+        sig.sourced = True
+        raise
     finally:
         frame = cs.pop()
         if session.function_names is not None:

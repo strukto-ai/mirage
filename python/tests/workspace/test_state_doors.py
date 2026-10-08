@@ -933,7 +933,8 @@ def test_assign_default_of_a_hidden_var_is_refused():
 
 def test_arith_assign_of_a_hidden_var_is_refused():
     # $((X=5)) and ((X=5)) write the raw env on purpose, but a hidden
-    # name is not theirs to clobber; both spellings refuse.
+    # name is not theirs to clobber; both spellings refuse. The writes
+    # before it land in order and their RANDOM draws settle.
     ws = _hidden_vars_ws()
 
     async def run():
@@ -941,11 +942,17 @@ def test_arith_assign_of_a_hidden_var_is_refused():
             'echo "$((SLACK_TOKEN=5))"', session_id="agent"
         )
         command = await ws.shell("((SLACK_TOKEN=7))", session_id="agent")
-        return expansion, command
+        partial = await ws.shell(
+            "let 'X=1,SLACK_TOKEN=3,X=7'; let 'RANDOM=42,Y=RANDOM,"
+            "SLACK_TOKEN=1'; echo $X $Y $RANDOM",
+            session_id="agent",
+        )
+        return expansion, command, partial
 
-    expansion, command = asyncio.run(run())
+    expansion, command, partial = asyncio.run(run())
     assert expansion.exit_code != 0
     assert command.exit_code != 0
+    assert partial.stdout == b"1 17772 26794\n"
     assert ws.get_session("agent").env["SLACK_TOKEN"] == "xoxb-real"
 
 

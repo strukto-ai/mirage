@@ -413,6 +413,12 @@ async def _unwound(
                 stderr=sig.stderr,
             ),
         )
+    if isinstance(sig, DiscardSignal):
+        # A line loop a child shell runs ends it on a discard with the
+        # discard's own status: `( eval ': ${R:=x}' )` and
+        # `$( : ${R:=x} )` end with 1, where the `( )` around a bare
+        # `: ${R:=x}` ends with 2.
+        sig.contained_code = sig.exit_code
     if inline:
         raise await carried(
             sig,

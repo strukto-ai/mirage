@@ -127,6 +127,38 @@
         "stdout": "/api/bb/9.json\n/api/bb/9.json\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "rv_arithmetic_target",
+      "seq": 603224,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( mkdir -p /data/ra && cd /data/ra && echo hi > $((1+2)) && echo more >> $((1+2)) && cat < $((1+2)) && ls ); rm -r /data/ra",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\nmore\n3\n",
+        "stderr": ""
+      }
     }
   ]
 }
