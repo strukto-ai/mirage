@@ -29,7 +29,6 @@ def test_authoring_surface_is_stable():
         "Accessor",
         "BaseVFS",
         "CLISpec",
-        "CommandIO",
         "CommandSpec",
         "Effect",
         "FileStat",
@@ -52,6 +51,5 @@ def test_authoring_surface_is_stable():
         "register_vfs",
         "register_runtime",
         "register_secrets",
-        "stream_from_bytes",
         "vfs_call",
     }
