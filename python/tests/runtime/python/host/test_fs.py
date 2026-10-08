@@ -251,6 +251,17 @@ class TestWrites:
         patched.removedirs("/data/deep/x/y")
         assert patched.path.isdir("/data/deep") is False
 
+    def test_rmdir_refuses_a_mount_root_as_busy(self):
+        ws = Workspace(
+            {"/data/": RAMVFS(), "/data/m/": RAMVFS()}, mode=MountMode.WRITE
+        )
+        patched = make_os_module(ws.vfs)
+        for root in ("/data/m", "/data"):
+            with pytest.raises(OSError) as caught:
+                patched.rmdir(root)
+            assert caught.value.errno == errno.EBUSY
+        assert patched.path.isdir("/data/m") is True
+
     def test_remove_and_unlink_are_one_op(self):
         ops, patched = seeded()
         patched.remove("/data/dir/a.txt")

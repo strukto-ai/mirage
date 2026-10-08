@@ -23,7 +23,7 @@ from collections.abc import Callable, Iterator
 from typing import Any, cast
 
 from mirage.errors import FsCondition
-from mirage.errors.fs import eexist, fs_error
+from mirage.errors.fs import ebusy, eexist, fs_error
 from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.runtime.files import RuntimeFiles, stat_row
 from mirage.runtime.python.host.constants import (
@@ -680,6 +680,11 @@ class HostFs:
         if virtual is None:
             self._host.rmdir(path, dir_fd=dir_fd)
             return
+        # rmdir(2) on a mount point is EBUSY. A mount root is the
+        # deployment's own, which the shell's rm refuses the same way.
+        owner = owner_prefix(self._files.mount_prefixes(), virtual)
+        if owner is not None and owner.rstrip("/") == virtual.rstrip("/"):
+            raise ebusy(virtual)
         self._door.rmdir(virtual)
 
     def removedirs(self, name: Any) -> None:

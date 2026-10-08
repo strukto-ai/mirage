@@ -13,11 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type fs from 'node:fs'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { render } from '@struktoai/mirage-core/test-utils'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { DiskVFS } from '../../../vfs/disk/disk.ts'
@@ -148,6 +150,49 @@ describe('patchNodeFs — routed calls', () => {
     await ws.close()
   })
 
+  it('copies the stored bytes of a rendered file', async () => {
+    const vfs = render(new RAMVFS(), '.tally', () =>
+      Promise.resolve(new TextEncoder().encode('rendered')),
+    )
+    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
+    await ws.vfs.write('/data/a.tally', 'stored')
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+
+    await fs.promises.copyFile('/data/a.tally', '/data/b.tally')
+    await fs.promises.copyFile('/data/a.tally', join(scratch, 'a.tally'))
+    expect(new TextDecoder().decode(await ws.vfs.read('/data/b.tally', { raw: true }))).toBe(
+      'stored',
+    )
+    expect(await fs.promises.readFile(join(scratch, 'a.tally'), 'utf-8')).toBe('stored')
+    await ws.close()
+  })
+
+  it('answers in the shapes node does', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+
+    expect(await fs.promises.mkdir('/data/a/b', { recursive: true })).toBe('/data/a')
+    expect(await fs.promises.mkdir('/data/a/b', { recursive: true })).toBeUndefined()
+    await fs.promises.writeFile('/data/f.txt', 'one')
+    await fs.promises.appendFile('/data/f.txt', 'two', { flag: 'w' })
+    expect(await fs.promises.readFile('/data/f.txt', 'utf-8')).toBe('two')
+    await fs.promises.symlink('f.txt', '/data/l')
+    const target = await fs.promises.readlink('/data/l', { encoding: 'buffer' })
+    expect(Buffer.isBuffer(target) && target.toString()).toBe('f.txt')
+    const big = await fs.promises.lstat('/data/f.txt', { bigint: true })
+    expect([big.size, typeof big.mtimeNs, big.isFile()]).toEqual([3n, 'bigint', true])
+    expect(typeof (await fs.promises.stat('/data/f.txt', { bigint: true })).ino).toBe('bigint')
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
+    expect(await promisify(fs.exists)('/data/f.txt')).toBe(true)
+    expect(fs.realpathSync.native(scratch)).toBe(realpathSync(scratch))
+    expect(() => fs.realpathSync.native('/data/f.txt')).toThrow(
+      expect.objectContaining({ code: 'ENOTSUP' }),
+    )
+    await ws.close()
+  })
+
   it('leaves every spelling to node on a path no mount owns', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     restore = patchNodeFs(ws)
@@ -224,6 +269,23 @@ describe('patchNodeFs — what a mount cannot serve', () => {
       'EEXIST',
       (fs: Fs) => fs.promises.writeFile('/data/f.txt', 'x', { flag: 'wx' }),
     ],
+    [
+      'an exclusive append to a name that is there',
+      'EEXIST',
+      (fs: Fs) => fs.promises.writeFile('/data/f.txt', 'x', { flag: 'ax' }),
+    ],
+    [
+      'a watch, on its first event',
+      'ENOTSUP',
+      async (fs: Fs) => {
+        for await (const _ of fs.promises.watch('/data/f.txt')) return
+      },
+    ],
+    [
+      'a watch listener',
+      'ENOTSUP',
+      (fs: Fs) => Promise.resolve().then(() => fs.watch('/data/f.txt', () => undefined)),
+    ],
     ['rm of a directory without recursive', 'EISDIR', (fs: Fs) => fs.promises.rm('/data/d')],
     [
       'a sync spelling',
@@ -237,6 +299,31 @@ describe('patchNodeFs — what a mount cannot serve', () => {
     restore = patchNodeFs(ws)
     const fs = requireCjs('fs') as Fs
     await expect(call(fs)).rejects.toMatchObject({ code })
+    await ws.close()
+  })
+
+  it('refuses a mount root anywhere in a removal, removing nothing', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS(), '/data/d/m': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
+    await ws.vfs.mkdir('/data/d')
+    await ws.vfs.write('/data/d/f.txt', 'f')
+    await ws.vfs.write('/data/d/m/g.txt', 'g')
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+
+    await expect(fs.promises.rm('/data/d', { recursive: true })).rejects.toMatchObject({
+      code: 'EBUSY',
+      path: '/data/d/m',
+    })
+    await expect(fs.promises.rm('/data', { recursive: true })).rejects.toMatchObject({
+      code: 'EBUSY',
+      path: '/data',
+    })
+    await expect(fs.promises.rmdir('/data/d/m')).rejects.toMatchObject({ code: 'EBUSY' })
+    expect(await fs.promises.readFile('/data/d/f.txt', 'utf-8')).toBe('f')
+    expect(await fs.promises.readFile('/data/d/m/g.txt', 'utf-8')).toBe('g')
     await ws.close()
   })
 

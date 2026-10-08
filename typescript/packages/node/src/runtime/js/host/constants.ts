@@ -74,6 +74,11 @@ export const REFUSED_CALLS: Readonly<Record<string, FsCondition>> = {
   watchFile: 'ENOTSUP',
 }
 
+// The refused calls whose function argument is a listener rather than a
+// callback (`fs.watch`, `fs.watchFile`): node answers their failure by
+// throwing, so the refusal throws too instead of calling the listener.
+export const LISTENED_CALLS: ReadonlySet<string> = new Set(['watch', 'watchFile'])
+
 // Descriptor calls take an fd, which a mounted path never opens, and
 // unwatchFile undoes a watch that could not have started on a mount.
 export const PASSTHROUGH_CALLS: ReadonlySet<string> = new Set([

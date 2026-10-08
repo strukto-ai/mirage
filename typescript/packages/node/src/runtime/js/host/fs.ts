@@ -27,7 +27,13 @@ import { PrefixResolver } from '@struktoai/mirage-core/runtime/resolver'
 import type { VFSEntry, VFSStat } from '@struktoai/mirage-core/runtime/types'
 import { MountMode, type SetAttrFields } from '@struktoai/mirage-core/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { PATH_ARGS, REFUSED_CALLS, ROUTED_CALLS, type RoutedCall } from './constants.ts'
+import {
+  LISTENED_CALLS,
+  PATH_ARGS,
+  REFUSED_CALLS,
+  ROUTED_CALLS,
+  type RoutedCall,
+} from './constants.ts'
 
 type FsObject = Record<string, unknown>
 type Fn = (...args: unknown[]) => unknown
@@ -81,6 +87,17 @@ function bytesOf(data: unknown, options: Options): Uint8Array {
   throw new TypeError('mirage.patchNodeFs: data must be a string or an ArrayBufferView')
 }
 
+/** An async iterator whose first read throws `err`: the shape node's
+ * `fs.promises.glob` and `watch` answer in, failures included. */
+function refusedIterator(err: Error): AsyncIterableIterator<never> {
+  return {
+    next: () => Promise.reject(err),
+    [Symbol.asyncIterator]() {
+      return this
+    },
+  }
+}
+
 function leaf(entry: string): string {
   const trimmed = entry.endsWith('/') ? entry.slice(0, -1) : entry
   return trimmed.slice(trimmed.lastIndexOf('/') + 1)
@@ -132,12 +149,12 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     return !(this.ws.syntheticRoot && mount === this.ws.registry.rootMount)
   }
 
-  private statsOf(path: string, st: VFSStat): unknown {
+  private statsOf(path: string, st: VFSStat, options?: Options): unknown {
     const kind = st.mode & S_IFMT
     const mtime = new Date(st.mtimeMs ?? this.born)
     const atime = st.atimeMs === undefined ? mtime : new Date(st.atimeMs)
     const prefix = this.ws.registry.tryMountFor(path)?.prefix ?? '/'
-    return {
+    const kinds = {
       isFile: () => kind === S_IFREG,
       isDirectory: () => kind === S_IFDIR,
       isBlockDevice: () => false,
@@ -145,6 +162,9 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
       isSymbolicLink: () => kind === S_IFLNK,
       isFIFO: () => false,
       isSocket: () => false,
+    }
+    const dates = { atime, mtime, ctime: mtime, birthtime: mtime }
+    const fields: Record<string, number> = {
       dev: ident(prefix),
       ino: ident(path),
       mode: st.mode,
@@ -155,14 +175,26 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
       size: st.size,
       blksize: 4096,
       blocks: Math.ceil(st.size / 512),
-      atime,
       atimeMs: atime.getTime(),
-      mtime,
       mtimeMs: mtime.getTime(),
-      ctime: mtime,
       ctimeMs: mtime.getTime(),
-      birthtime: mtime,
       birthtimeMs: mtime.getTime(),
+    }
+    if (typeof options !== 'object' || options.bigint !== true)
+      return { ...kinds, ...fields, ...dates }
+    // node's BigIntStats: every number a bigint, plus the stamps in ns.
+    const big = Object.fromEntries(
+      Object.entries(fields).map(([k, v]) => [k, BigInt(Math.trunc(v))]),
+    )
+    const ns = (date: Date): bigint => BigInt(date.getTime()) * 1_000_000n
+    return {
+      ...kinds,
+      ...big,
+      atimeNs: ns(atime),
+      mtimeNs: ns(mtime),
+      ctimeNs: ns(mtime),
+      birthtimeNs: ns(mtime),
+      ...dates,
     }
   }
 
@@ -198,7 +230,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
   }
 
   async appendFile(path: string, data: unknown, options?: Options): Promise<void> {
-    await this.files.append(path, bytesOf(data, options))
+    await this.put(path, data, options, 'a')
   }
 
   async chmod(path: string, mode: number | string): Promise<void> {
@@ -223,8 +255,10 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
   }
 
   async copyFile(src: string, dst: string, mode = 0): Promise<void> {
+    // The stored bytes, as cp copies them: a rendering is what a read
+    // shows, not what the file holds.
     const data = this.mounted(src)
-      ? await this.files.read(src)
+      ? await this.files.read(src, { raw: true })
       : await this.nativeCall('readFile', src)
     if (mode & COPYFILE_EXCL && (await this.exists(dst))) throw refusal('EEXIST', 'copyfile', dst)
     if (this.mounted(dst)) await this.files.write(dst, data as Uint8Array)
@@ -235,25 +269,30 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     if (!this.mounted(path)) {
       return this.nativeCall('access', path).then(
         () => true,
-        () => false,
+        (err: unknown) => {
+          console.debug(`exists: ${String(err)}`)
+          return false
+        },
       )
     }
+    // exists answers a boolean for any failure, as node's does.
     try {
       return (await this.files.statOrNull(path)) !== null
-    } catch {
+    } catch (err) {
+      console.debug(`exists: ${path}: ${String(err)}`)
       return false
     }
   }
 
-  async lstat(path: string): Promise<unknown> {
-    return this.statsOf(path, await this.files.stat(path, true))
+  async lstat(path: string, options?: Options): Promise<unknown> {
+    return this.statsOf(path, await this.files.stat(path, true), options)
   }
 
   async lutimes(path: string, atime: unknown, mtime: unknown): Promise<void> {
     await this.files.setattr(path, { atime: stampOf(atime), mtime: stampOf(mtime), nofollow: true })
   }
 
-  async mkdir(path: string, options?: Options): Promise<undefined> {
+  async mkdir(path: string, options?: Options): Promise<string | undefined> {
     if (typeof options !== 'object' || options.recursive !== true) {
       await this.files.mkdir(path)
       return undefined
@@ -272,8 +311,10 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
       missing.push(probe)
       probe = posix.dirname(probe)
     }
-    for (const dir of missing.reverse()) await this.files.mkdir(dir)
-    return undefined
+    // node answers the first directory it made, undefined for none.
+    missing.reverse()
+    for (const dir of missing) await this.files.mkdir(dir)
+    return missing[0]
   }
 
   async readFile(path: string, options?: Options): Promise<Buffer | string> {
@@ -299,8 +340,12 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     return out
   }
 
-  async readlink(path: string): Promise<string> {
-    return this.files.readlink(path)
+  async readlink(path: string, options?: Options): Promise<Buffer | string> {
+    const target = await this.files.readlink(path)
+    const encoding = encodingOf(options) as string | undefined
+    if (encoding === undefined || encoding === 'utf8') return target
+    const bytes = Buffer.from(target)
+    return encoding === 'buffer' ? bytes : bytes.toString(encoding as BufferEncoding)
   }
 
   async rename(src: string, dst: string): Promise<void> {
@@ -325,18 +370,36 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
       return
     }
     if (!recursive) throw refusal('EISDIR', 'rm', path)
-    for (const row of await this.files.readdir(path, false)) {
-      await this.rm(posix.join(path, leaf(row.path)), options)
+    for (const [doomed, isDir] of await this.doomed(path, true)) {
+      if (isDir) await this.files.rmdir(doomed)
+      else await this.files.unlink(doomed)
     }
-    await this.files.rmdir(path)
+  }
+
+  /** Every name under `path`, children before their directory. The whole
+   * tree is planned before anything goes, as the agent adapters plan it,
+   * so a mount root anywhere in it refuses the call with nothing removed. */
+  private async doomed(path: string, isDir: boolean): Promise<[string, boolean][]> {
+    if (this.ws.registry.isMountRoot(path)) throw refusal('EBUSY', 'rm', path)
+    if (!isDir) return [[path, false]]
+    const out: [string, boolean][] = []
+    for (const row of await this.files.readdir(path)) {
+      const child = posix.join(path, leaf(row.path))
+      out.push(...(await this.doomed(child, row.isDir && row.isLink !== true)))
+    }
+    out.push([path, true])
+    return out
   }
 
   async rmdir(path: string): Promise<void> {
+    // rmdir(2) on a mount point is EBUSY. A mount root is the
+    // deployment's own, which the shell's rm refuses the same way.
+    if (this.ws.registry.isMountRoot(path)) throw refusal('EBUSY', 'rmdir', path)
     await this.files.rmdir(path)
   }
 
-  async stat(path: string): Promise<unknown> {
-    return this.statsOf(path, await this.files.stat(path))
+  async stat(path: string, options?: Options): Promise<unknown> {
+    return this.statsOf(path, await this.files.stat(path), options)
   }
 
   async symlink(target: unknown, path: string): Promise<void> {
@@ -356,17 +419,26 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
   }
 
   async writeFile(path: string, data: unknown, options?: Options): Promise<void> {
+    await this.put(path, data, options, 'w')
+  }
+
+  /** writeFile and appendFile, which differ only in the flag they default
+   * to. An exclusive flag (`wx`, `ax`) refuses a name already there
+   * before anything is written. */
+  private async put(
+    path: string,
+    data: unknown,
+    options: Options,
+    fallback: string,
+  ): Promise<void> {
     const flag =
-      typeof options === 'object' && typeof options.flag === 'string' ? options.flag : 'w'
+      typeof options === 'object' && typeof options.flag === 'string' ? options.flag : fallback
     const bytes = bytesOf(data, options)
-    if (flag.startsWith('a')) {
-      await this.files.append(path, bytes)
-      return
-    }
     if (flag.includes('x') && (await this.files.statOrNull(path, true)) !== null) {
       throw refusal('EEXIST', 'open', path)
     }
-    await this.files.write(path, bytes)
+    if (flag.startsWith('a')) await this.files.append(path, bytes)
+    else await this.files.write(path, bytes)
   }
 }
 
@@ -393,7 +465,17 @@ export function patchNodeFs(ws: Workspace): () => void {
     const original = target[name]
     if (typeof original !== 'function') return
     swapped.push([target, name, original])
-    target[name] = make(original as Fn)
+    const wrapped = make(original as Fn)
+    // node hangs helpers off a few functions (`realpath.native`, the
+    // promisify hooks), and they stay: a named one is swapped the same
+    // way, a symbol one is node's and calls back through `fs`.
+    for (const key of Reflect.ownKeys(original)) {
+      if (key === 'length' || key === 'name' || key === 'prototype') continue
+      const helper: unknown = Reflect.get(original, key)
+      const own = typeof key === 'string' && typeof helper === 'function'
+      Reflect.set(wrapped, key, own ? make(helper as Fn) : helper)
+    }
+    target[name] = wrapped
   }
   // The mounted path a call names, or null when every path it takes is
   // the host's, which leaves the call to node.
@@ -445,16 +527,22 @@ export function patchNodeFs(ws: Workspace): () => void {
   }
 
   for (const [name, condition] of Object.entries(REFUSED_CALLS)) {
-    swap(fs.promises, name, (original) => (...args) => {
-      const path = mountedIn(name, args)
-      return path === null ? original(...args) : Promise.reject(refusal(condition, name, path))
+    swap(fs.promises, name, (original) => {
+      const iterated =
+        Object.prototype.toString.call(original) === '[object AsyncGeneratorFunction]'
+      return (...args) => {
+        const path = mountedIn(name, args)
+        if (path === null) return original(...args)
+        const err = refusal(condition, name, path)
+        return iterated ? refusedIterator(err) : Promise.reject(err)
+      }
     })
     swap(fs, name, (original) => (...args) => {
       const path = mountedIn(name, args)
       if (path === null) return original(...args)
       const err = refusal(condition, name, path)
       const done = args.at(-1)
-      if (typeof done !== 'function') throw err
+      if (typeof done !== 'function' || LISTENED_CALLS.has(name)) throw err
       process.nextTick(done as Callback, err)
       return undefined
     })

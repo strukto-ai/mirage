@@ -14,7 +14,7 @@
 
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
-import { PASSTHROUGH_CALLS, REFUSED_CALLS, ROUTED_CALLS } from './constants.ts'
+import { LISTENED_CALLS, PASSTHROUGH_CALLS, REFUSED_CALLS, ROUTED_CALLS } from './constants.ts'
 
 const fs = createRequire(import.meta.url)('node:fs') as Record<string, unknown> & {
   promises: Record<string, unknown>
@@ -41,5 +41,9 @@ describe('the call tables', () => {
     for (const name of names) {
       expect(tables.filter((table) => table.has(name)).length, name).toBe(1)
     }
+  })
+
+  it('name only refused calls as listened', () => {
+    for (const name of LISTENED_CALLS) expect(REFUSED_CALLS[name], name).toBeDefined()
   })
 })
