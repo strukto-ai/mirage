@@ -25,6 +25,7 @@ from mirage.workspace.executor.builtins.declare.declare import (
     identifier_refusal,
     kind_conflict,
     local_attrs,
+    nameref_refusal,
     operand_parts,
     plus_refusal,
     premark,
@@ -349,7 +350,7 @@ async def _declare_operand(
         )
         if append and own is not None and isinstance(own.value, str):
             val = own.value + val
-        bad_ref = reference_refusal(cmd, key, own, val)
+        bad_ref = nameref_refusal(cmd, key, val)
         if bad_ref is not None:
             return bad_ref
     if view.is_readonly(key, not nameref):
@@ -358,6 +359,15 @@ async def _declare_operand(
         shadow_local(session, local_vars, key)
     if fresh and not in_call_env(session, key):
         start_local(session, key, inherit)
+    if nameref:
+        # Checked on the local, which exists from here on even when the
+        # array it inherited cannot become a reference, as bash's does,
+        # so the function's later writes stay its own.
+        bad_ref = reference_refusal(
+            cmd, key, visible_record(session, key), val
+        )
+        if bad_ref is not None:
+            return bad_ref
     line = plus_refusal(cmd, session, view, key, plus)
     if line is not None:
         return line

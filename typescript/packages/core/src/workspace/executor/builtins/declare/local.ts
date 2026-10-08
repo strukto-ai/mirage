@@ -41,6 +41,7 @@ import {
   identifierRefusal,
   kindConflict,
   localAttrs,
+  namerefRefusal,
   operandParts,
   plusRefusal,
   premark,
@@ -268,12 +269,19 @@ async function declareOperand(
     const own =
       fresh && !inherit && !inCallEnv(session, key) ? undefined : visibleRecord(session, key)
     if (append && typeof own?.value === 'string') val = own.value + val
-    const badRef = referenceRefusal(cmd, key, own, val)
+    const badRef = namerefRefusal(cmd, key, val)
     if (badRef !== null) return badRef
   }
   if (view.isReadonly(key, !nameref)) return readonlyLine(cmd, key)
   if (locals !== null) shadowLocal(session, locals, key)
   if (fresh && !inCallEnv(session, key)) startLocal(session, key, inherit)
+  if (nameref) {
+    // Checked on the local, which exists from here on even when the array
+    // it inherited cannot become a reference, as bash's does, so the
+    // function's later writes stay its own.
+    const badRef = referenceRefusal(cmd, key, visibleRecord(session, key), val)
+    if (badRef !== null) return badRef
+  }
   const line = plusRefusal(cmd, session, view, key, plus)
   if (line !== null) return line
   // A new local holds nothing of the caller's but what `startLocal` kept;
