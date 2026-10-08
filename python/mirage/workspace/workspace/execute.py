@@ -30,7 +30,7 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope, active_records
 from mirage.observe.observer import Observer
-from mirage.observe.record import READ_FINGERPRINT_OPS, OpRecord
+from mirage.observe.record import OpRecord
 from mirage.policy import Deny, HandOff
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.routing import RouteDecision, RouteError
@@ -650,9 +650,8 @@ async def run_prepared_line(
     scope = RecordingScope(active=is_line)
     parse_scope = ParseScope()
     # A nested line applies against the records added to the enclosing
-    # line's since it began, copied at apply, reads left out: a
-    # concurrent sibling stage records into the same list, and its read
-    # token would label bytes this line read before the change.
+    # line's since it began, copied at apply; apply_io keeps their reads
+    # out of the tokens it labels bytes with.
     outer = None if is_line else active_records()
     nested_start = len(outer) if outer is not None else 0
 
@@ -996,15 +995,7 @@ async def run_prepared_line(
         record_status(session, io.exit_code, transparent=True)
         applied: list[OpRecord] | None = scope.records
         if not is_line:
-            applied = (
-                None
-                if outer is None
-                else [
-                    r
-                    for r in outer[nested_start:]
-                    if r.op not in READ_FINGERPRINT_OPS
-                ]
-            )
+            applied = None if outer is None else outer[nested_start:]
         # The line's own end keeps the versions its nested lines saw.
         await ws.dispatcher.apply_io(
             io, records=applied, cache_facts=cache_facts, nested=not is_line

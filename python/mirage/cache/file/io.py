@@ -340,6 +340,9 @@ async def apply_io(
         lost (LostPaths | None): the line's lost paths.
         nested (bool): a nested line's (``eval``, ``$(...)``): it keeps
             only the versions of paths still lost; its line keeps the rest.
+            Its read records only order reads after writes: a concurrent
+            sibling stage records into the same list, and its read token
+            would label bytes this line read before the change.
     """
     # A path both read and written is dropped: neither side is the file.
     # A read at the door reaches here as the backend's read record, and
@@ -351,6 +354,8 @@ async def apply_io(
             read_after.discard(rec.path)
         elif rec.op in READ_FINGERPRINT_OPS:
             read_after.add(rec.path)
+    if nested and records is not None:
+        records = [r for r in records if r.op not in READ_FINGERPRINT_OPS]
     read = set(io.reads) | read_after
     kept = [p for p in io.cache if p not in read or p not in io.writes]
     cache_set = set(kept)

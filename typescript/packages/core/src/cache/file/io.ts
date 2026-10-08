@@ -269,7 +269,10 @@ async function keepVersions(
  * Python's `apply_io`.
  *
  * @param nested a nested line's (`eval`, `$(...)`): it keeps only the
- *   versions of paths still lost; its line keeps the rest.
+ *   versions of paths still lost; its line keeps the rest. Its read records
+ *   only order reads after writes: a concurrent sibling stage records into
+ *   the same list, and its read token would label bytes this line read
+ *   before the change.
  */
 export async function applyIo(
   cache: FileCache,
@@ -290,6 +293,9 @@ export async function applyIo(
     else if (READ_FINGERPRINT_OPS.has(rec.op)) readAfter.add(rec.path)
   }
   for (const p of readAfter) read.add(p)
+  if (nested && records !== undefined) {
+    records = records.filter((r) => !READ_FINGERPRINT_OPS.has(r.op))
+  }
   const kept = io.cache.filter((p) => !read.has(p) || !(p in io.writes))
   const cacheSet = new Set(kept)
   const index = records !== undefined ? new RecordIndex(records) : undefined

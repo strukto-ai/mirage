@@ -25,7 +25,7 @@ import { IOResult, materialize } from '../../io/types.ts'
 import { concat } from '../../io/cachable_iterator.ts'
 import { activeRecords, lostPaths, runWithRecording } from '../../observe/context.ts'
 import type { Observer } from '../../observe/observer.ts'
-import { READ_FINGERPRINT_OPS, type OpRecord } from '../../observe/record.ts'
+import type { OpRecord } from '../../observe/record.ts'
 import { Channel } from '../../shell/console/types.ts'
 import type { JobConsole } from '../../shell/console/job_console.ts'
 import { Terminal } from '../../shell/console/index.ts'
@@ -775,9 +775,8 @@ async function runParsedLine(
   const isLine = options.record !== false
   // A nested line collects no records of its own and hands only its
   // streams back, so it applies against the records added to the enclosing
-  // line's since it began, copied at apply, reads left out: a concurrent
-  // sibling stage records into the same list, and its read token would label
-  // bytes this line read before the change.
+  // line's since it began, copied at apply; applyIo keeps their reads out of
+  // the tokens it labels bytes with.
   const nestedStart = isLine ? 0 : (activeRecords()?.length ?? 0)
   // The session's kill channel folded in, as the dispatcher folds it
   // for the tree: a question put to a host has to answer to both, and
@@ -1086,11 +1085,7 @@ async function runParsedLine(
     if (!callerError) recordStatus(targetSession, io.exitCode, true)
     try {
       if (executionFailure === undefined) {
-        const applied = isLine
-          ? opRecords
-          : activeRecords()
-              ?.slice(nestedStart)
-              .filter((r) => !READ_FINGERPRINT_OPS.has(r.op))
+        const applied = isLine ? opRecords : activeRecords()?.slice(nestedStart)
         const lost = lostPaths(isLine ? opRecords : activeRecords())
         // The line's own end keeps the versions its nested lines saw.
         await abortable(env.dispatcher.applyIo(io, applied, cacheFacts, lost, !isLine), killed)

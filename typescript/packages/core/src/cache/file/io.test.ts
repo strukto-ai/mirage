@@ -504,19 +504,30 @@ function boundOf(cache: RAMFileCacheStore, key: string): number | null | undefin
 }
 
 describe('a path read at the door and written', () => {
-  it('keeps nothing', async () => {
+  it.each([
+    ['line', false],
+    ['nested', true],
+  ] as const)('keeps nothing: %s', async (_name, nested) => {
     // SharePoint rewrites an uploaded Office file, so the bytes `tee` sent
     // are not the file the door read back and kept; the read's record is
-    // what tells applyIo the line read the path too. Mirrors Python's
+    // what tells applyIo the line read the path too, a nested line's
+    // (`eval`) as well, whose read tokens label nothing. Mirrors Python's
     // test_a_path_read_at_the_door_and_written_keeps_nothing.
     const cache = new RAMFileCacheStore()
     await cache.set('/s3/f.pptx', ENC.encode('abc<meta/>'))
     const written = ENC.encode('abc')
     const io = new IOResult({ writes: { '/s3/f.pptx': written }, cache: ['/s3/f.pptx'] })
-    await applyIo(cache, io, undefined, [
-      opRecord('write', '/s3/f.pptx', 'etag-put-2', 3, written),
-      readRecord('/s3/f.pptx', 'etag-put-2'),
-    ])
+    await applyIo(
+      cache,
+      io,
+      undefined,
+      [
+        opRecord('write', '/s3/f.pptx', 'etag-put-2', 3, written),
+        readRecord('/s3/f.pptx', 'etag-put-2'),
+      ],
+      null,
+      nested,
+    )
     expect(await cache.exists('/s3/f.pptx')).toBe(false)
   })
 })
