@@ -4,14 +4,12 @@ from functools import partial
 
 from mirage.cache.context import active_cache_manager
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin import find_eval
 from mirage.commands.builtin.find_parse import (
     parse_depth,
     parse_find_expression,
     parse_mtime,
     parse_size,
 )
-from mirage.commands.builtin.find_printf import printf_kind
 from mirage.commands.builtin.utils.paths import (
     dot_refusal,
     link_follow,
@@ -21,7 +19,9 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.core.generic import find_eval
 from mirage.core.generic.find import link_results, modified_ts, walk_find
+from mirage.core.generic.find_eval import printf_kind
 from mirage.errors.classify import failure_text
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import fs_strerror, walk_refusal

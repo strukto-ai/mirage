@@ -308,7 +308,7 @@ it.each(['abort', 'timeout'])(
   async (kind) => {
     const { CachableAsyncIterator } = await import('../../io/cachable_iterator.ts')
     const { asyncChain } = await import('../../io/stream.ts')
-    const { CommandTimeoutError } = await import('../../commands/errors.ts')
+    const { CommandTimeoutError } = await import('../../errors/types.ts')
     let closed = false
     async function* source() {
       await Promise.resolve()

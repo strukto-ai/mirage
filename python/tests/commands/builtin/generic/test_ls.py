@@ -19,7 +19,7 @@ from mirage.commands.builtin.generic.ls import (
     walk,
 )
 from mirage.commands.builtin.utils.formatting import LsColumns
-from mirage.commands.errors import CommandTimeoutError
+from mirage.errors.types import CommandTimeoutError
 from mirage.types import (
     ContentType,
     FileStat,

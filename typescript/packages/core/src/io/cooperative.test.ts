@@ -258,7 +258,7 @@ it('discards hidden cache reads when a value barrier fails', async () => {
 it.each(['timeout', 'read failure'])('records %s while finalizing a shell reader', async (kind) => {
   const { Workspace } = await import('../workspace/workspace/workspace.ts')
   const { getTestParser } = await import('../workspace/fixtures/workspace_fixture.ts')
-  const { CommandTimeoutError } = await import('../commands/errors.ts')
+  const { CommandTimeoutError } = await import('../errors/types.ts')
   const ws = new Workspace({}, { shellParser: await getTestParser() })
   async function* source() {
     yield ENC.encode('partial\n')

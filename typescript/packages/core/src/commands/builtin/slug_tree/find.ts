@@ -31,7 +31,7 @@ import {
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { treeHasMtime } from '../find_eval.ts'
+import { treeHasMtime } from '../../../core/generic/find_eval.ts'
 import { parseFindExpression, type FindExpr } from '../find_parse.ts'
 import { findGeneric } from '../generic/find.ts'
 import {

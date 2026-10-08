@@ -15,7 +15,7 @@
 import { enotsup } from '../../errors/fs.ts'
 import { IndexEntry, ResourceType } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { buildTree, emitStartPath, keep, type PredNode } from '../../commands/builtin/find_eval.ts'
+import { buildTree, emitStartPath, keep, type PredNode } from '../generic/find_eval.ts'
 import {
   record,
   recordStream,

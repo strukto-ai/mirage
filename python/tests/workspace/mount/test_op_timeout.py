@@ -17,7 +17,7 @@ import asyncio
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.commands.errors import CommandTimeoutError
+from mirage.errors.types import CommandTimeoutError
 from mirage.types import Limit
 from mirage.vfs.ram import RAMVFS
 from tests.fixtures.vfs_io import override

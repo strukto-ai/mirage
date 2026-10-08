@@ -16,8 +16,8 @@ import re
 from collections.abc import Mapping
 from enum import Enum
 
-from mirage.commands.builtin.types import RowActionKind
 from mirage.commands.builtin.utils.size_suffix import size_suffixes
+from mirage.core.generic.find_eval import RowActionKind
 
 
 class PatternType(str, Enum):

@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { CommandTimeoutError } from '../../commands/errors.ts'
+import { CommandTimeoutError } from '../../errors/types.ts'
 import { UsageError } from '../../commands/errors.ts'
 import { ContentDriftError } from '../snapshot/drift.ts'
 import { failureResult, isControlFlowError } from './failure.ts'

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { HistoryAccessor } from '../../accessor/history.ts'
-import { buildTree, type FindEntry, keep } from '../../commands/builtin/find_eval.ts'
+import { buildTree, type FindEntry, keep } from '../generic/find_eval.ts'
 import type { FindOptions } from '../ram/find.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { PathSpec } from '../../types.ts'

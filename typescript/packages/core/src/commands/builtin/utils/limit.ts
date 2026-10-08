@@ -17,7 +17,8 @@ import { chunks } from '../../../io/cooperative.ts'
 import { ensureStream } from '../../../io/stream.ts'
 import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
 import { type Limit, OnExceed } from '../../../types.ts'
-import { CommandTimeoutError, LimitExceededError } from '../../errors.ts'
+import { LimitExceededError } from '../../errors.ts'
+import { CommandTimeoutError } from '../../../errors/types.ts'
 
 const NEWLINE = 0x0a
 const ENC = new TextEncoder()

@@ -14,7 +14,7 @@
 
 import { Limit } from '../../types.ts'
 import { guardOutput, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
-import { CommandTimeoutError } from '../../commands/errors.ts'
+import { CommandTimeoutError } from '../../errors/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { materialize } from '../../io/types.ts'
 import type { Runtime } from '../../runtime/base.ts'

@@ -17,7 +17,6 @@ from dataclasses import replace
 from functools import partial
 from typing import Any, cast
 
-from mirage.commands.builtin.find_eval import tree_has_mtime
 from mirage.commands.builtin.find_parse import FindExpr, parse_find_expression
 from mirage.commands.builtin.generic.find import (
     find_generic,
@@ -34,6 +33,7 @@ from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.generic.find import make_search_backed_find
+from mirage.core.generic.find_eval import tree_has_mtime
 from mirage.core.slug_tree.tree import SlugTree
 from mirage.core.slug_tree.types import A
 from mirage.io.types import ByteSource, IOResult, materialize

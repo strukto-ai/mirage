@@ -20,7 +20,8 @@ from mirage.commands.builtin.utils.identity import (
     group_name,
     owner_name,
 )
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.core.generic.find_eval import printf_kind
+from mirage.types import FileStat, PathSpec
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.stat_view import (
     CHAR_MODE,
@@ -42,14 +43,6 @@ _PRINTF_ESCAPES = {
     "v": "\v",
 }
 _STAT_DIRECTIVES = frozenset("syYmMTuUgG")
-_TYPE_LETTER = {
-    FileType.DIRECTORY: "d",
-    FileType.SYMLINK: "l",
-    FileType.CHAR_DEVICE: "c",
-    FileType.BLOCK_DEVICE: "b",
-    FileType.FIFO: "p",
-    FileType.SOCKET: "s",
-}
 # One mode per kind, spelled from the same constants every stat
 # translator uses (utils/stat_view.py); links are 777 the way ls draws
 # them.
@@ -115,17 +108,6 @@ def _warn_unrecognized(src: str, warnings: list[str]) -> None:
     line = f"find: warning: unrecognized {kind} '{src}'"
     if line not in warnings:
         warnings.append(line)
-
-
-def printf_kind(st: FileStat | None) -> str:
-    """The one-letter kind a -printf %y/%Y directive renders for a stat.
-
-    Args:
-        st (FileStat | None): the row's stat, None when unknown.
-    """
-    if st is None or st.type is None:
-        return "f"
-    return _TYPE_LETTER.get(st.type, "f")
 
 
 def _mode_bits(st: FileStat | None, kind: str) -> int:

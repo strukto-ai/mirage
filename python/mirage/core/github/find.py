@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.github import GitHubAccessor
-from mirage.commands.builtin.find_eval import (
+from mirage.core.generic.find_eval import (
     FindEntry,
     PredNode,
     build_tree,

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { WorkspaceBinding } from '../runtime/binding.ts'
-import { CommandTimeoutError } from '../commands/errors.ts'
+import { CommandTimeoutError } from '../errors/types.ts'
 import type { Runtime } from '../runtime/base.ts'
 import { EvalError } from '../runtime/errors.ts'
 import type { Evaluator } from '../runtime/mixin.ts'
