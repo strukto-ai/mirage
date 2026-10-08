@@ -61,6 +61,8 @@ def test_env_override_layers_on_top_of_the_session_env():
         "PWD": "/home",
         "PATH": "/usr/bin",
         "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
     }
     assert session.env == {
         "A": "1",
@@ -68,4 +70,6 @@ def test_env_override_layers_on_top_of_the_session_env():
         "PWD": "/home",
         "PATH": "/usr/bin",
         "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
     }

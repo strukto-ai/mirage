@@ -77,10 +77,16 @@ EnvSnapshot = Callable[[], dict[str, str]]
 
 
 class EnvSet(Protocol):
-    """Store one variable through the session plane."""
+    """Store one variable through the session plane; ``assigned`` names
+    the elements an array write assigns."""
 
     def __call__(
-        self, name: str, value: ShellValue, follow_ref: bool = True
+        self,
+        name: str,
+        value: ShellValue,
+        follow_ref: bool = True,
+        *,
+        assigned: frozenset[int | str] | None = None,
     ) -> Awaitable[None]: ...
 
 
@@ -99,9 +105,28 @@ class EnvUnset(Protocol):
 # `local NAME` on a fresh name leave it *unset* and merely declared,
 # which is a state `EnvSet` cannot express. Gated all the same -- a mark
 # is a session write, so a hidden name refuses and `pre_session` rules.
-EnvMark = Callable[[str, VarAttr | None, bool], Awaitable[None]]
-# Whether `readonly` has marked the name.
-EnvIsReadonly = Callable[[str], bool]
+# `follow_ref` is `EnvSet`'s: `declare -rn r` marks the reference itself.
+
+
+class EnvMark(Protocol):
+    """Turn one attribute on or off through the session plane."""
+
+    def __call__(
+        self,
+        name: str,
+        attr: VarAttr | None,
+        on: bool,
+        follow_ref: bool = True,
+    ) -> Awaitable[None]: ...
+
+
+class EnvIsReadonly(Protocol):
+    """Whether ``readonly`` has marked the name; ``follow_ref`` asks
+    about a ``declare -n`` reference's target rather than itself."""
+
+    def __call__(self, name: str, follow_ref: bool = True) -> bool: ...
+
+
 # The name of the profile the session runs under, None for an
 # unrestricted session. What an owner-rendering command (ls -l, stat %g,
 # find -printf %g) prints in the group column: the profile is the

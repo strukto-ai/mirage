@@ -12,8 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { makeVar, type ShellVar, VarAttr } from '../../shell/variable.ts'
+
 /**
  * The profile a session is created from when none is named and the
  * workspace defines one of this name.
  */
 export const DEFAULT_PROFILE = 'default'
+
+/**
+ * What bash starts these at whatever its environment holds (OPTIND an
+ * integer), unexported: every new shell seeds them, and a nested shell
+ * restarts an exported one, which keeps only its export mark.
+ */
+export const STARTUP_VALUES: Readonly<Record<string, ShellVar>> = {
+  OPTIND: makeVar('1', new Set([VarAttr.Integer])),
+  OPTERR: makeVar('1'),
+}

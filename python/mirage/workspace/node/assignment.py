@@ -33,7 +33,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, DiscardSignal, ExitSignal
 from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
-from mirage.shell.variable import ShellValue, VarAttr
+from mirage.shell.variable import ShellValue, VarAttr, appended
 from mirage.shell.xtrace import trace_assignment
 from mirage.types import word_text
 from mirage.workspace.evaluation import EvaluationContext
@@ -103,7 +103,12 @@ async def _fatal_index_literal(
         raise _arith_fatal(exc) from exc
 
 
-async def _assign_var(view: SessionView, key: str, value: ShellValue) -> None:
+async def _assign_var(
+    view: SessionView,
+    key: str,
+    value: ShellValue,
+    assigned: frozenset[int | str] | None = None,
+) -> None:
     """One assignment through the session door; denial is fatal.
 
     Every assignment spelling (scalar, array literal, subscript,
@@ -116,9 +121,11 @@ async def _assign_var(view: SessionView, key: str, value: ShellValue) -> None:
         view (SessionView): the session plane's gated door.
         key (str): the variable being written.
         value (ShellValue): the resulting value to store.
+        assigned (frozenset[int | str] | None): the elements written,
+            None for the whole value.
     """
     try:
-        await view.set(key, value)
+        await view.set(key, value, assigned=assigned)
     except PolicyDenied as exc:
         raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
     except ArithError as exc:
@@ -265,6 +272,9 @@ async def execute_assignment(
     # spelling is kept for slicing the subscript out of the source.
     key = deref(session, spelled) or spelled
     append = any(c.type == "+=" for c in node.children)
+    # `+=` on an integer adds, element by element too (`appended`).
+    held_var = session.vars.get(key)
+    integer = held_var is not None and VarAttr.INTEGER in held_var.attrs
     if key in session.readonly_vars:
         # A bare assignment to a readonly variable is a
         # variable-assignment error: the rest of the line is discarded
@@ -291,25 +301,21 @@ async def execute_assignment(
         if amap is not None:
             built, bad_words = build_assoc_literal(amap, items, append)
             await _assign_var(view, key, built)
-            if bad_words:
-                err = encode_text(
-                    "\n".join(
-                        f"bash: {key}: '{word}': must use subscript when "
-                        "assigning associative array"
-                        for word in bad_words
-                    )
-                    + "\n"
+            # A plain word in a keyed literal is dropped with a warning
+            # and the assignment still succeeds; unlike a declaration's,
+            # this voice does not quote the word (pinned on 5.2.37).
+            err = encode_text(
+                "".join(
+                    f"bash: {key}: {word}: must use subscript when "
+                    "assigning associative array\n"
+                    for word in bad_words
                 )
-                return (
-                    None,
-                    IOResult(exit_code=1, stderr=err),
-                    ExecutionNode(command=text, exit_code=1, stderr=err),
-                )
+            )
             code = assignment_status(context.frame, sub_seq)
             return (
                 None,
-                IOResult(exit_code=code),
-                ExecutionNode(command=text, exit_code=code),
+                IOResult(exit_code=code, stderr=err or None),
+                ExecutionNode(command=text, exit_code=code, stderr=err),
             )
         held = session.arrays.get(key)
         if append and held is None:
@@ -360,9 +366,11 @@ async def execute_assignment(
             # writes the key "1+1".
             new_map = dict(amap)
             new_map[sub_text] = (
-                (amap.get(sub_text, "") + val) if append else val
+                appended(amap.get(sub_text, ""), val, integer)
+                if append
+                else val
             )
-            await _assign_var(view, key, new_map)
+            await _assign_var(view, key, new_map, frozenset({sub_text}))
             code = assignment_status(context.frame, sub_seq)
             return (
                 None,
@@ -384,8 +392,12 @@ async def execute_assignment(
             raise DiscardSignal(
                 encode_text(f"bash: {name_text}: bad array subscript\n")
             )
-        array_set(arr, idx, array_get(arr, idx) + val if append else val)
-        await _assign_var(view, key, arr)
+        array_set(
+            arr,
+            idx,
+            appended(array_get(arr, idx), val, integer) if append else val,
+        )
+        await _assign_var(view, key, arr, frozenset({idx}))
         code = assignment_status(context.frame, sub_seq)
         return (
             None,
@@ -398,26 +410,26 @@ async def execute_assignment(
         # `m=x` on an associative array writes the literal key "0"
         # and keeps every other key, as bash does.
         new_map = dict(held_map)
-        new_map["0"] = (held_map.get("0", "") + val) if append else val
-        await _assign_var(view, key, new_map)
+        new_map["0"] = (
+            appended(held_map.get("0", ""), val, integer) if append else val
+        )
+        await _assign_var(view, key, new_map, frozenset({"0"}))
     elif held_arr is not None:
         # `a=x` writes element 0 and keeps the rest; `a+=x` appends
         # onto element 0.
         new_arr = list(held_arr)
-        array_set(new_arr, 0, (array_get(new_arr, 0) + val) if append else val)
-        await _assign_var(view, key, new_arr)
+        array_set(
+            new_arr,
+            0,
+            appended(array_get(new_arr, 0), val, integer) if append else val,
+        )
+        await _assign_var(view, key, new_arr, frozenset({0}))
     else:
-        held_var = session.vars.get(key)
-        if (
-            append
-            and held_var is not None
-            and VarAttr.INTEGER in held_var.attrs
-        ):
-            # `n+=3` on an integer name adds: the door evaluates
-            # `old + new`, so `declare -i n=5; n+=3` stores 8, not 53.
-            new_val = f"{session.env.get(key, '0')} + ({val})"
-        else:
-            new_val = session.env.get(key, "") + val if append else val
+        # `n+=3` on an integer name adds: `declare -i n=5; n+=3` stores
+        # 8, not 53.
+        new_val = (
+            appended(session.env.get(key, ""), val, integer) if append else val
+        )
         await _assign_var(view, key, new_val)
     # Reassigning OPTIND (even to its current value) restarts the
     # getopts scan, matching bash's internal char pointer.

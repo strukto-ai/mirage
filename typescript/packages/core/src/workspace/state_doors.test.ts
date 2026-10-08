@@ -835,6 +835,39 @@ describe('hidden vars across the shell tier', () => {
     expect(ws.getSession('agent').env.SLACK_TOKEN).toBe('xoxb-real')
   })
 
+  for (const line of [
+    'declare -n SLACK_TOKEN',
+    'declare -n SLACK_TOKEN+=x',
+    'declare +n SLACK_TOKEN',
+  ]) {
+    it(`${line} never quotes the hidden value`, async () => {
+      // A reference checks the value its name holds; a hidden one reads as
+      // unset, so the refusal is the door's and not a line quoting it.
+      const ws = await makeHiddenVarsWs()
+      const io = await ws.shell(line, { sessionId: 'agent' })
+      expect(io.exitCode).not.toBe(0)
+      expect(stderrStr(io)).not.toContain('xoxb-real')
+      expect(stderrStr(io)).toContain('permission denied')
+      const record = ws.getSession('agent').vars.SLACK_TOKEN
+      expect(record?.value).toBe('xoxb-real')
+      expect(record?.attrs.size).toBe(0)
+    })
+  }
+
+  it('declare -ni stops its value at a hidden write', async () => {
+    // `declare -ni r=M` evaluates M through the `-i` door, so a hidden name
+    // it assigns is refused there and nothing after it lands.
+    const ws = await makeHiddenVarsWs()
+    const io = await ws.shell("X=0; M='SLACK_TOKEN=5,X=7'; declare -ni r=M", {
+      sessionId: 'agent',
+    })
+    expect(io.exitCode).not.toBe(0)
+    expect(stderrStr(io)).toContain('permission denied')
+    const session = ws.getSession('agent')
+    expect(session.vars.SLACK_TOKEN?.value).toBe('xoxb-real')
+    expect(session.vars.X?.value).toBe('0')
+  })
+
   it('printf -v of a hidden var is refused', async () => {
     const ws = await makeHiddenVarsWs()
     const io = await ws.shell('printf -v SLACK_TOKEN fake', { sessionId: 'agent' })

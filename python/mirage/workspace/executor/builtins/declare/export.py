@@ -15,7 +15,6 @@
 from mirage.doors.types import SessionView
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.policy import PolicyDenied
 from mirage.shell.bytes import encode_text
 from mirage.shell.variable import VarAttr
 from mirage.workspace.executor.builtins.declare.constants import (
@@ -24,23 +23,21 @@ from mirage.workspace.executor.builtins.declare.constants import (
 )
 from mirage.workspace.executor.builtins.declare.declare import (
     declare_line,
-    identifier_failure,
-    identifier_refusal,
+    declared_kind,
+    kind_listed,
+    mark_functions,
+    mark_variables,
     split_decl_flags,
-    store_staged_arrays,
 )
-from mirage.workspace.executor.builtins.shared import (
-    readonly_refusal,
-    refusal,
-    require_view,
+from mirage.workspace.executor.builtins.declare.types import (
+    DeclarationOperand,
 )
+from mirage.workspace.executor.builtins.shared import require_view
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     exported_names,
-    outlive_call,
     session_view,
-    set_attr,
 )
 from mirage.workspace.types import ExecutionNode
 
@@ -49,10 +46,9 @@ def _export_lines(session: SessionState, flags: set[str]) -> list[str]:
     """Build sorted declaration lines for every exported name.
 
     The exported set, not every shell variable: ``X=hello`` is absent
-    and ``export Y=world`` is present, which is what bash prints. ``-f``
-    selects shell functions instead of variables; mirage tracks no
-    export attribute on functions, so that form lists nothing, as bash
-    does with none exported.
+    and ``export Y=world`` is present, which is what bash prints.
+    ``-a`` / ``-A`` narrow it to exported indexed / associative arrays
+    (``kind_listed``).
 
     Rendering is ``declare_line``'s, not a second spelling of it: GNU's
     ``export -p`` prints the *whole* cluster, so a readonly exported
@@ -68,17 +64,18 @@ def _export_lines(session: SessionState, flags: set[str]) -> list[str]:
     Returns:
         list[str]: one declaration line per exported name.
     """
-    if "f" in flags:
-        return []
-    lines = [declare_line(session, name) for name in exported_names(session)]
+    lines = [
+        declare_line(session, name)
+        for name in exported_names(session)
+        if kind_listed(session, name, flags)
+    ]
     return [line for line in lines if line is not None]
 
 
 async def handle_export(
-    assignments: list[str],
+    assignments: list[DeclarationOperand],
     session: SessionState,
     state: SessionView | None = None,
-    arrays: list[tuple[str, bool, list[str]]] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Export names, or print them (``export -p`` / bare ``export``).
 
@@ -86,7 +83,10 @@ async def handle_export(
     ``declare -x NAME="value"`` (bash's ``-p`` form). Invalid option
     characters fail with status 2 and the GNU usage line. Writes go
     through the session view, so readonly refusal and the pre_session
-    policy gate fire here exactly as for any other writer.
+    policy gate fire here exactly as for any other writer. ``-f`` marks
+    functions instead, for a nested shell to inherit (``mark_functions``).
+    ``-a`` / ``-A`` shape only an assigned value, as ``readonly``'s do;
+    bash accepts them although its usage line names only ``-fn``.
     """
     flags, names, bad = split_decl_flags(assignments, EXPORT_FLAGS)
     if bad is not None:
@@ -98,62 +98,30 @@ async def handle_export(
             IOResult(exit_code=2, stderr=err),
             ExecutionNode(command="export", exit_code=2, stderr=err),
         )
+    # -n is the off direction, and applies to every spelling, since
+    # `export -n K=v` assigns and unexports.
+    on = "n" not in flags
+    kind = declared_kind(flags)
+    if "f" in flags:
+        return await mark_functions(
+            "export",
+            session,
+            session.exported_functions,
+            names,
+            on,
+            state,
+            kind,
+        )
     # -p with names is ignored for display; bare / -p alone print.
-    if not names and not arrays:
+    if not names:
         lines = _export_lines(session, flags)
         out = encode_text(("\n".join(lines) + "\n") if lines else "")
         return out, IOResult(), ExecutionNode(command="export", exit_code=0)
-    # -f is accepted and marks nothing: mirage carries no export
-    # attribute on functions. -n is the off direction, and applies to
-    # both spellings, since `export -n K=v` assigns and unexports.
-    view = require_view(state)
-    on = "n" not in flags
-    if arrays:
-        # `export ARR=(a b)` marks the array as surely as it marks a
-        # scalar: GNU prints `declare -ax ARR=([0]="a" [1]="b")`.
-        refused = await store_staged_arrays(
-            "export",
-            session,
-            view,
-            arrays,
-            mark=VarAttr.EXPORT,
-            on=on,
-            fatal=True,
-        )
-        if refused is not None:
-            return refused
-    errors: list[str] = []
-    for assign in names:
-        bad_name = identifier_refusal("export", assign)
-        if bad_name is not None:
-            errors.append(bad_name)
-            continue
-        if "=" in assign:
-            key, _, val = assign.partition("=")
-            if view.is_readonly(key):
-                return readonly_refusal("export", key)
-            try:
-                await view.set(key, val)
-            except PolicyDenied as exc:
-                return refusal("export", exc)
-            set_attr(session, key, VarAttr.EXPORT, on)
-        else:
-            # The bare form writes no value, so it marks through the
-            # plane's no-value door rather than inventing an empty
-            # string. On a name that does not exist yet that leaves it
-            # *unset and exported*, which is bash's own third state --
-            # `export Z` prints `declare -x Z` and stays out of `env`
-            # until something gives it a value. Still gated: marking a
-            # hidden or policy-refused name is a session write.
-            try:
-                await view.mark(assign, VarAttr.EXPORT, on)
-            except PolicyDenied as exc:
-                return refusal("export", exc)
-        if on:
-            outlive_call(session, assign.partition("=")[0])
-    if errors:
-        return identifier_failure("export", errors)
-    return None, IOResult(), ExecutionNode(command="export", exit_code=0)
+    # `export ARR=(a b)` marks the array as surely as it marks a scalar:
+    # GNU prints `declare -ax ARR=([0]="a" [1]="b")`.
+    return await mark_variables(
+        "export", session, require_view(state), names, VarAttr.EXPORT, on, kind
+    )
 
 
 async def export_builtin(call: BuiltinCall) -> Result:

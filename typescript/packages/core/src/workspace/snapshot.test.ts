@@ -395,7 +395,14 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     const state = await toStateDict(ws)
     const workerSnap = state.sessions.find((s) => s.session_id === 'worker')
     expect(workerSnap?.cwd).toBe('/data')
-    expect(workerSnap?.env).toEqual({ ROLE: 'bg', PWD: '/data', PATH: '/usr/bin', IFS: ' \t\n' })
+    expect(workerSnap?.env).toEqual({
+      ROLE: 'bg',
+      PWD: '/data',
+      PATH: '/usr/bin',
+      IFS: ' \t\n',
+      OPTIND: '1',
+      OPTERR: '1',
+    })
     expect(state.jobs.length).toBe(1)
     expect(state.jobs[0]?.command).toBe('sleep 0')
     expect(state.jobs[0]?.status).toBe('completed')
@@ -409,7 +416,14 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     expect(def.env.FOO).toBe('bar')
     const w2 = ws2.sessionManager.get('worker')
     expect(w2.cwd).toBe('/data')
-    expect(w2.env).toEqual({ ROLE: 'bg', PWD: '/data', PATH: '/usr/bin', IFS: ' \t\n' })
+    expect(w2.env).toEqual({
+      ROLE: 'bg',
+      PWD: '/data',
+      PATH: '/usr/bin',
+      IFS: ' \t\n',
+      OPTIND: '1',
+      OPTERR: '1',
+    })
     const jobs2 = ws2.jobTable.listJobs('worker')
     expect(jobs2.length).toBe(1)
     expect(jobs2[0]?.command).toBe('sleep 0')

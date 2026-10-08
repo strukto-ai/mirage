@@ -22,7 +22,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import DiscardSignal
 from mirage.shell.helpers import get_declaration_keyword, get_text
 from mirage.shell.types import NodeType as NT
-from mirage.shell.variable import VarAttr
+from mirage.shell.variable import VarAttr, VarKind
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import (
     handle_declare_functions,
@@ -31,6 +31,20 @@ from mirage.workspace.executor.builtins import (
     handle_local,
     handle_readonly,
     note_local_array,
+)
+from mirage.workspace.executor.builtins.declare.constants import (
+    LISTED_ATTRIBUTES,
+    VISIBLE_SCOPE_BUILTINS,
+)
+from mirage.workspace.executor.builtins.declare.declare import (
+    declared_kind,
+    held_value,
+    kind_conflict,
+    start_local,
+)
+from mirage.workspace.executor.builtins.declare.types import (
+    AttrMarks,
+    DeclarationOperand,
 )
 from mirage.workspace.expand import expand_node
 from mirage.workspace.mount import MountRegistry
@@ -41,7 +55,6 @@ from mirage.workspace.session.state import (
     ensure_var_visible,
     seed_var,
     session_view,
-    set_attr,
 )
 from mirage.workspace.types import ExecutionNode
 
@@ -98,6 +111,10 @@ _ATTR_LETTERS = {
     "x": VarAttr.EXPORT,
     "r": VarAttr.READONLY,
 }
+# `-l` displaces `-u` and vice versa; the record keeps one.
+_DISPLACES = {"l": VarAttr.UPPER, "u": VarAttr.LOWER}
+# The attributes that shape a value as it stores.
+_SHAPING = frozenset({VarAttr.INTEGER, VarAttr.LOWER, VarAttr.UPPER})
 
 
 def _declare_option_refusal(
@@ -140,202 +157,37 @@ def _declare_option_refusal(
     )
 
 
-async def _plus_refusals(
-    cmd: str,
-    context: EvaluationContext,
-    view: SessionView,
-    plus_chars: set[str],
-    assignments: list[str],
-    staged: list[tuple[str, bool, list[str]]] | None,
-) -> tuple[Any, IOResult, ExecutionNode] | None:
-    """The per-name refusals a `+letter` earns after the operands are
-    known.
-
-    Two letters cannot be taken off. `+r` on a readonly name is
-    `declare: R: readonly variable`, exit 1, and the name stays frozen.
-    `+a` / `+A` on an array is `cannot destroy array variables in this
-    way`, exit 1, since the kind is what the value is, not a mark. Both
-    are pinned on 5.2.37 and neither stops the other operands from
-    declaring; the first refusal is what the builtin reports.
-
-    Args:
-        cmd (str): the builtin's own name for the diagnostic.
-        context (EvaluationContext): the evaluation's session and frame.
-        view (SessionView): the session plane's gated door.
-        plus_chars (set[str]): the `+` letters.
-        assignments (list[str]): `NAME` / `NAME=value` operands.
-        staged (list[tuple[str, bool, list[str]]] | None): staged array
-            literals from the same declaration.
-    """
-    session = context.session
-    if not (plus_chars & {"r", "a", "A"}):
-        return None
-    names = [a.partition("=")[0] for a in assignments]
-    names += [name for name, _, _ in staged or []]
-    for name in names:
-        if "r" in plus_chars and view.is_readonly(name):
-            err = encode_text(f"bash: {cmd}: {name}: readonly variable\n")
-            return (
-                None,
-                IOResult(exit_code=1, stderr=err),
-                ExecutionNode(command=cmd, exit_code=1, stderr=err),
-            )
-        if ("a" in plus_chars and name in session.arrays) or (
-            "A" in plus_chars and name in session.assocs
-        ):
-            err = encode_text(
-                f"bash: {cmd}: {name}: cannot destroy array variables "
-                "in this way\n"
-            )
-            return (
-                None,
-                IOResult(exit_code=1, stderr=err),
-                ExecutionNode(command=cmd, exit_code=1, stderr=err),
-            )
-    return None
-
-
-async def _stamp_attrs(
-    context: EvaluationContext,
-    view: SessionView,
-    flag_chars: set[str],
-    plus_chars: set[str],
-    assignments: list[str],
-    staged: list[tuple[str, bool, list[str]]] | None,
-    stored: list[str],
-) -> tuple[Any, IOResult, ExecutionNode] | None:
-    """Apply every `-attr` / `+attr` letter to the names a declaration
-    stored, on top of the export stamp.
+def _declared_marks(flag_chars: set[str], plus_chars: set[str]) -> AttrMarks:
+    """The attribute marks a declaration puts on each operand once it
+    lands, in order, readonly last.
 
     The letters that shape a value (`-i -l -u`) are stored as
     attributes and applied by the door on every *later* write, which is
     GNU's rule: `v=MiXeD; declare -l v` keeps `MiXeD`, and the next
-    `v=ABC` stores `abc`. So this stamps and never rewrites. `-l` and
+    `v=ABC` stores `abc`. So this marks and never rewrites. `-l` and
     `-u` are exclusive: setting one clears the other, and a cluster
-    naming both (`-lu`, `-ul`) sets neither, both pinned on 5.2.37.
-    A `+` letter clears; `+r` is refused by the door as a readonly write
-    would be, in the builtin's voice.
+    naming both (`-lu`, `-ul`) sets neither, both pinned on 5.2.37. A
+    `+` letter clears; `+r` is not an off toggle, since it is refused on
+    a readonly name (`plus_refusal`) and a no-op otherwise. `r` lands
+    last, as each operand's own last step: `declare -rl L=ABC L=DEF`
+    keeps `abc` and refuses the second write.
 
     Args:
-        context (EvaluationContext): the evaluation's session and frame.
-        view (SessionView): the session plane's gated door.
         flag_chars (set[str]): the `-` letters.
         plus_chars (set[str]): the `+` letters.
-        assignments (list[str]): `NAME` / `NAME=value` operands.
-        staged (list[tuple[str, bool, list[str]]] | None): staged array
-            literals from the same declaration.
-        stored (list[str]): the names the handler actually stored.
     """
-    refused = await _stamp_export(
-        context, view, flag_chars, assignments, staged, stored
-    )
-    if refused is not None:
-        return refused
-    on_attrs = [
-        _ATTR_LETTERS[c]
-        for c in "ilunt"
-        if c in flag_chars and c not in plus_chars
-    ]
-    if "l" in flag_chars and "u" in flag_chars:
-        on_attrs = [
-            a for a in on_attrs if a not in (VarAttr.LOWER, VarAttr.UPPER)
-        ]
-    # `+r` is refused earlier on a readonly name and a no-op otherwise,
-    # so it is not an off toggle; every other stored letter clears.
-    off_attrs = [_ATTR_LETTERS[c] for c in "iluntx" if c in plus_chars]
-    if not on_attrs and not off_attrs:
-        return None
-    # Through the gated mark door for every name, covered or not: the
-    # handler already cleared the gate for these names, so this is one
-    # redundant policy call per attribute, and it keeps this stamp out
-    # of the ungated-write allowlist that `set_attr` sites must justify.
-    try:
-        for name in stored:
-            for attr in on_attrs:
-                await view.mark(name, attr, True)
-                # `-l` displaces `-u` and vice versa; the record keeps one.
-                if attr == VarAttr.LOWER:
-                    await view.mark(name, VarAttr.UPPER, False)
-                elif attr == VarAttr.UPPER:
-                    await view.mark(name, VarAttr.LOWER, False)
-            for attr in off_attrs:
-                await view.mark(name, attr, False)
-    except PolicyDenied as exc:
-        err = encode_text(f"{exc.strerror}\n")
-        return (
-            None,
-            IOResult(exit_code=1, stderr=err),
-            ExecutionNode(command="declare", exit_code=1, stderr=err),
-        )
-    return None
-
-
-async def _stamp_export(
-    context: EvaluationContext,
-    view: SessionView,
-    flag_chars: set[str],
-    assignments: list[str],
-    staged: list[tuple[str, bool, list[str]]] | None,
-    stored: list[str],
-) -> tuple[Any, IOResult, ExecutionNode] | None:
-    """Mark every name a `-x` declaration stored as exported.
-
-    `declare -x NAME` marks an existing name without touching its value
-    and `declare -x NAME=v` assigns then marks, so the stamp lands after
-    the assignment either way. Staged array literals are stamped too,
-    since an array is as exportable as a scalar: GNU answers
-    `declare -x A=(a b)` with `declare -ax A=([0]="a" [1]="b")`, and
-    reading only `assignments` left every `declare -x NAME=(...)`
-    unmarked.
-
-    Shared by the readonly and the plain declaration branch because
-    `declare -rx X=1` goes down the readonly one and still owes the
-    export attribute.
-
-    Only the names the handler reports storing are marked, and marking
-    is not gated on the aggregate status: a declaration keeps its valid
-    operands when a sibling refuses, so `declare -x GOOD=1 1BAD=x` exits
-    1 and still answers `declare -x GOOD="1"`. Reading the exit code
-    instead left `GOOD` unexported.
-
-    A name that carried a value went through `view.set`, so its mark
-    rides on that decision; a bare name did not, and on an *existing*
-    name the handler writes nothing at all, so the mark is the only
-    session write there is and has to clear `pre_session` itself.
-    Stamping it through `set_attr` let `declare -x AWS_TOKEN` export a
-    host-seeded credential the deployment had refused.
-
-    Args:
-        context (EvaluationContext): the evaluation's session and frame.
-        view (SessionView): the session plane's gated door.
-        flag_chars (set[str]): the declaration's collected flag letters.
-        assignments (list[str]): `NAME` / `NAME=value` operands.
-        staged (list[tuple[str, bool, list[str]]] | None): staged array
-            literals from the same declaration.
-        stored (list[str]): the names the handler actually stored.
-
-    Returns:
-        A refusal result when the gate denied a mark, else None.
-    """
-    session = context.session
-    if "x" not in flag_chars:
-        return None
-    covered = {a.partition("=")[0] for a in assignments if "=" in a}
-    covered |= {name for name, _, _ in staged or []}
-    for name in stored:
-        if name in covered:
-            set_attr(session, name, VarAttr.EXPORT)
-            continue
-        try:
-            await view.mark(name, VarAttr.EXPORT, True)
-        except PolicyDenied as exc:
-            err = encode_text(f"{exc.strerror}\n")
-            return (
-                None,
-                IOResult(exit_code=1, stderr=err),
-                ExecutionNode(command="declare", exit_code=1, stderr=err),
-            )
-    return None
+    on = {c for c in "iluntxr" if c in flag_chars and c not in plus_chars}
+    if {"l", "u"} <= on:
+        on -= {"l", "u"}
+    marks: list[tuple[VarAttr, bool]] = []
+    for c in "xiluntr":
+        if c in on:
+            marks.append((_ATTR_LETTERS[c], True))
+            if c in _DISPLACES:
+                marks.append((_DISPLACES[c], False))
+        elif c in plus_chars and c != "r":
+            marks.append((_ATTR_LETTERS[c], False))
+    return tuple(marks)
 
 
 async def execute_declaration(
@@ -349,11 +201,12 @@ async def execute_declaration(
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Execute one declaration statement (export/local/declare/readonly).
 
-    The executor only reads the operands: it expands them, sorts them
-    into option letters, plain names and staged array literals, then
-    hands the result to the builtin handler that owns the keyword. The
-    attribute letters (`-x`, `-i`, `-l`) are stamped afterwards through
-    the same gated door, so `declare -rx X=1` keeps both marks.
+    The executor only reads the operands: it expands them and sorts out
+    the option letters, keeping the words and the staged array literals
+    in the order typed, then hands them to the builtin handler that owns
+    the keyword, which marks each operand with the attribute letters
+    (`-x`, `-i`, `-l`) at its place, so `declare -rx X=1` keeps both
+    marks.
 
     Args:
         node (Any): the tree-sitter ``declaration_command`` node.
@@ -368,10 +221,11 @@ async def execute_declaration(
     """
     session = context.session
     keyword = get_declaration_keyword(node)
-    assignments = []
     # Array literals are staged, not stored: `readonly -a a=(y)` on an
-    # already-readonly name has to fail with the old value intact.
-    staged: list[tuple[str, bool, list[str]]] = []
+    # already-readonly name has to fail with the old value intact. They
+    # keep their place among the words, since bash marks each name in
+    # the order typed.
+    operands: list[DeclarationOperand] = []
     # Option words are kept verbatim, in order, so `--` survives as an
     # end-of-options marker and the handlers can name the *first* bad
     # option letter the way bash does.
@@ -389,14 +243,14 @@ async def execute_declaration(
                 items = await expand_array_items(
                     val_nodes[0], context, execute_fn, registry, namespace, cs
                 )
-                staged.append(
+                operands.append(
                     (key.removesuffix("+"), key.endswith("+"), items)
                 )
                 continue
             expanded = await expand_node(
                 child, context, execute_fn, cs, view=view
             )
-            assignments.append(expanded)
+            operands.append(expanded)
         elif child.type in (
             NT.SIMPLE_EXPANSION,
             NT.EXPANSION,
@@ -449,8 +303,9 @@ async def execute_declaration(
                 # there.
                 plus_chars.update(expanded[1:])
             else:
-                assignments.append(expanded)
+                operands.append(expanded)
     cmd_word = "local" if keyword == NT.LOCAL else str(keyword)
+    words = [operand for operand in operands if isinstance(operand, str)]
     if keyword in (NT.LOCAL, "declare", "typeset"):
         refused = _declare_option_refusal(
             cmd_word, flag_chars, plus_chars, context
@@ -463,30 +318,36 @@ async def execute_declaration(
         "typeset",
     ):
         # `-f`/`-F` select functions, not variables: `-rf` freezes,
-        # `-f NAME` prints the body, `-F NAME` prints the name, and
-        # a missing name is exit 1 without a word.
+        # `-xf` exports, `-f NAME` prints the body, `-F NAME` prints the
+        # name, and a missing name is exit 1 without a word.
         return handle_declare_functions(
-            cmd_word, session, flag_chars, assignments
+            cmd_word, session, flag_chars, words, frozenset(plus_chars)
         )
-    is_readonly = keyword == "readonly" or "r" in flag_chars
-    # `-l` and `-u` cannot both hold; a cluster naming both sets
-    # neither (pinned: `declare -lu s=aBc` prints `declare -- s`).
-    shaping = frozenset(
-        _ATTR_LETTERS[c]
-        for c in "ilu"
-        if c in flag_chars and c not in plus_chars
-    )
-    if VarAttr.LOWER in shaping and VarAttr.UPPER in shaping:
-        shaping = shaping - {VarAttr.LOWER, VarAttr.UPPER}
+    # The value-shaping marks go on or off before a value stores, the
+    # rest once it has (`_declared_marks`).
+    marks = _declared_marks(flag_chars, plus_chars)
+    shaping = tuple(mark for mark in marks if mark[0] in _SHAPING)
+    # `-p` prints rather than declares, so it is answered before anything
+    # declares (`declare -ap NAME` converts nothing); with no names, an
+    # attribute letter lists the names carrying it, `-p` or not.
+    listing = not operands
+    if (
+        "p" in flag_chars
+        or "p" in plus_chars
+        or (listing and flag_chars & (LISTED_ATTRIBUTES | {"a", "A"}))
+    ) and keyword in ("declare", "typeset"):
+        return await handle_declare_print(words, session, flag_chars)
     conversion_errors: list[str] = []
-    if "A" in flag_chars or "a" in flag_chars:
+    kind = declared_kind(flag_chars)
+    if kind is not None and keyword not in VISIBLE_SCOPE_BUILTINS:
         # `declare -a NAME` / `declare -A NAME` with no value declare
         # an empty array of that kind, so ${#NAME[@]} is 0 and an
         # element write leaves the other slots unassigned. GNU
         # refuses to convert between the two kinds and says so per
-        # name while the rest of the operands still declare.
-        want_assoc = "A" in flag_chars
-        for bare in assignments:
+        # name while the rest of the operands still declare. `export`
+        # and `readonly` leave a bare name's value alone.
+        want_assoc = kind is VarKind.ASSOC
+        for bare in words:
             if "=" in bare:
                 continue
             # Both branches below write array storage raw (the
@@ -497,139 +358,94 @@ async def execute_declaration(
                 ensure_var_visible(session, bare)
             except PolicyDenied as exc:
                 raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
-            if want_assoc and bare in session.arrays:
+            fresh = (
+                "g" not in flag_chars
+                and session._local_vars is not None
+                and bare not in session._local_vars
+            )
+            held_var = session.vars.get(bare)
+            if (
+                fresh
+                and held_var is not None
+                and VarAttr.READONLY in held_var.attrs
+            ):
+                # `handle_local` refuses the readonly name in its voice.
+                continue
+            # Inside a function the name is a local of the declared kind,
+            # a new one starting as `start_local` leaves it (with `-I`,
+            # the value it shadows); `-g` declares at global scope.
+            local = "g" not in flag_chars and note_local_array(session, bare)
+            if local and fresh:
+                start_local(session, bare, "I" in flag_chars)
+            held = held_value(session, bare)
+            conflict = kind_conflict(held, kind)
+            if conflict is not None:
                 conversion_errors.append(
-                    f"bash: {cmd_word}: {bare}: cannot convert indexed "
-                    "to associative array"
+                    f"bash: {cmd_word}: {bare}: {conflict}"
                 )
                 continue
-            if not want_assoc and bare in session.assocs:
-                conversion_errors.append(
-                    f"bash: {cmd_word}: {bare}: cannot convert "
-                    "associative to indexed array"
-                )
+            if isinstance(held, dict if want_assoc else list):
                 continue
-            if "g" not in flag_chars and note_local_array(session, bare):
-                # Inside a function this shadows whatever the caller
-                # had with a fresh empty array of the declared kind;
-                # `-g` declares at global scope instead.
-                seed_var(session, bare, {} if want_assoc else [])
-            elif want_assoc and bare not in session.assocs:
-                # At top level an existing scalar becomes the value
-                # at the literal key "0" (GNU allows scalar-to-
-                # associative conversion, unlike indexed).
-                scalar = conversion_scalar(session, bare)
+            # A local of another kind starts empty; at top level an
+            # existing scalar becomes element 0, or the value at the
+            # literal key "0" (GNU allows scalar-to-associative
+            # conversion, unlike indexed).
+            scalar = None if local else conversion_scalar(session, bare)
+            if want_assoc:
                 seed_var(
                     session, bare, {} if scalar is None else {"0": scalar}
                 )
-            elif not want_assoc and bare not in session.arrays:
-                # At top level an existing scalar becomes element 0.
-                scalar = conversion_scalar(session, bare)
+            else:
                 seed_var(session, bare, [] if scalar is None else [scalar])
     # Array literals travel as data: the handler stores them through
     # the session door and owns both refusal voices, so the executor
     # only expands and stages.
-    if is_readonly:
-        decl_view = session_view(
+    if keyword == "readonly":
+        result = await handle_readonly(
+            [*flag_words, *operands],
             session,
-            namespace.registry.policies,
-            diagnostics=context.frame.diagnostics,
-        )
-        stored: list[str] = []
-        # Only the `readonly` keyword owns -p / illegal-option
-        # handling; `declare -r` keeps names only.
-        if keyword == "readonly":
-            result = await handle_readonly(
-                flag_words + assignments,
+            session_view(
                 session,
-                decl_view,
-                arrays=staged,
-                stored=stored,
-                assoc="A" in flag_chars,
-                shaping=shaping,
-            )
-        else:
-            result = await handle_readonly(
-                assignments,
-                session,
-                decl_view,
-                arrays=staged,
-                stored=stored,
-                assoc="A" in flag_chars,
-                shaping=shaping,
-            )
-        # `declare -rx X=1` carries both attributes: GNU prints
-        # `declare -rx X="1"`. Readonly answers first, so the export
-        # stamp has to land here too, or `-r` silently ate the `-x`.
-        refused = await _stamp_attrs(
-            context,
-            decl_view,
-            flag_chars,
-            plus_chars,
-            assignments,
-            staged,
-            stored,
+                namespace.registry.policies,
+                diagnostics=context.frame.diagnostics,
+            ),
+            kind=kind,
         )
-        if refused is not None:
-            return refused
         return _merge_conversion_errors(result, conversion_errors)
     # declare/typeset scope like `local` inside a function (bash
     # semantics) and assign globally at top level, which is exactly
-    # handle_local's fallback when no function scope is active.
+    # handle_local's fallback when no function scope is active. `-r`
+    # rides the same path and lands on what each operand wrote, so
+    # `f() { local -r A=(x); }` freezes f's own A, not the caller's.
     if keyword in (NT.LOCAL, "declare", "typeset"):
-        # `-p` prints rather than declares, so it is answered before
-        # the assignment path runs at all.
-        if ("p" in flag_chars or "p" in plus_chars) and keyword in (
-            "declare",
-            "typeset",
-        ):
-            return await handle_declare_print(assignments, session)
-        decl_view = session_view(
-            session,
-            namespace.registry.policies,
-            diagnostics=context.frame.diagnostics,
-        )
-        stored = []
         result = await handle_local(
-            assignments,
+            operands,
             session,
-            decl_view,
-            arrays=staged,
+            session_view(
+                session,
+                namespace.registry.policies,
+                diagnostics=context.frame.diagnostics,
+            ),
             # `declare`/`typeset` share this handler but have to name
             # themselves in a diagnostic rather than say `local`.
             cmd=cmd_word,
-            stored=stored,
-            assoc="A" in flag_chars,
+            kind=kind,
             shaping=shaping,
+            marks=marks,
+            plus="".join(sorted(plus_chars)),
             nameref="n" in flag_chars and "n" not in plus_chars,
             global_scope="g" in flag_chars,
+            inherit="I" in flag_chars,
         )
-        plus_refused = await _plus_refusals(
-            cmd_word, context, decl_view, plus_chars, assignments, staged
-        )
-        if plus_refused is not None:
-            return plus_refused
-        refused = await _stamp_attrs(
-            context,
-            decl_view,
-            flag_chars,
-            plus_chars,
-            assignments,
-            staged,
-            stored,
-        )
-        if refused is not None:
-            return refused
         return _merge_conversion_errors(result, conversion_errors)
     # Pass export flags through so -p / bare print and bad options work.
     result = await handle_export(
-        flag_words + assignments,
+        [*flag_words, *operands],
         session,
         session_view(
             session,
             namespace.registry.policies,
             diagnostics=context.frame.diagnostics,
         ),
-        arrays=staged,
     )
     return _merge_conversion_errors(result, conversion_errors)

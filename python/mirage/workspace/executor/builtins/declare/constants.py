@@ -20,9 +20,19 @@ READONLY_USAGE = (
     "readonly: usage: readonly [-aAf] [name[=value] ...] or readonly -p\n"
 )
 
-EXPORT_FLAGS = frozenset("fnp")
+# bash takes `-a` / `-A` too, though its usage line names only `-fn`.
+EXPORT_FLAGS = frozenset("aAfnp")
 
 READONLY_FLAGS = frozenset("aAfp")
+
+# The attribute letters a no-name `declare` listing filters on: a name
+# carrying any of them is listed (`declare -ix` lists both kinds).
+LISTED_ATTRIBUTES = frozenset("ilnrtux")
+
+# The declaration builtins that assign whichever variable is visible, a
+# function's local or else the global; `declare` and `local` make a new
+# local inside a function instead.
+VISIBLE_SCOPE_BUILTINS = frozenset({"export", "readonly"})
 
 ANSI_C_ESCAPES = {
     "\\": "\\\\",
