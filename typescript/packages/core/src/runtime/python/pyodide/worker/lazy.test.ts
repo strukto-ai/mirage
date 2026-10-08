@@ -453,13 +453,13 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
   )
 
   it('interrupts compute and a blocked file read, then keeps serving requests', async () => {
-    let release: (() => void) | undefined
+    const entered = gate()
+    const release = gate()
     const dispatch: BridgeDispatchFn = async (op, path) => {
       if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 4 })
       if (op === 'read') {
-        await new Promise<void>((resolve) => {
-          release = resolve
-        })
+        entered.resolve()
+        await release.promise
         return ENC.encode('late')
       }
       throw new Error(`unexpected op: ${op}`)
@@ -486,17 +486,15 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       const blocked = expect(
         rt.run({ ...runArgs("open('/data/hang').read()"), timeoutSeconds: 0.1 }),
       ).rejects.toBeInstanceOf(CommandTimeoutError)
-      await vi.waitFor(() => {
-        expect(release).toBeDefined()
-      })
+      await entered.promise
       await new Promise((resolve) => setTimeout(resolve, 300))
-      release?.()
+      release.resolve()
       await blocked
       const fresh = await rt.run(runArgs('print(42)'))
       expect(fresh.exitCode).toBe(0)
       expect(DEC.decode(fresh.stdout)).toBe('42\n')
     } finally {
-      release?.()
+      release.resolve()
       await rt.close()
     }
   })

@@ -216,5 +216,5 @@ async def test_grep_files_dir_redirects_to_per_file_scan(accessor, index):
         )
     assert mock_msgs.await_count == 0
     assert mock_files.await_count == 0
-    assert mock_read.await_count >= 1
     assert b"foo line" in await materialize(out)
+    assert mock_read.await_count >= 1

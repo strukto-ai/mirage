@@ -57,8 +57,9 @@ class EvaluatorMixin(ABC):
                 program sees as globals, bound in the evaluator's own
                 idiom.
             session (str | None): a session id for stateful console
-                semantics (globals persist per id); None evaluates
-                one-shot.
+                semantics (interpreter state persists per id, isolated
+                from other sessions and runs); None evaluates with
+                fresh interpreter state for this call only.
 
         Raises:
             EvalError: the program failed to parse, raised, or its

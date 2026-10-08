@@ -1218,6 +1218,67 @@
           }
         }
       ]
+    },
+    {
+      "id": "grep_truncation_preserves_matches_and_diagnostics",
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "alice\nalice\nalice\nalice\n"
+            },
+            "limits": {
+              "grep": {
+                "max_lines": 2,
+                "on_exceed": "truncate"
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "grep alice /data/a.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "alice\nalice\n",
+            "stderr": "grep: output truncated at limit (2 lines); narrow the selection or raise command_limits for this command\n"
+          }
+        },
+        {
+          "command": "grep alice /data/missing /data/a.txt",
+          "expect": {
+            "exit": 2,
+            "stdout": "/data/a.txt:alice\n/data/a.txt:alice\n",
+            "stderr": "grep: output truncated at limit (2 lines); narrow the selection or raise command_limits for this command\ngrep: /data/missing: No such file or directory\n"
+          }
+        },
+        {
+          "command": "grep -s alice /data/missing /data/a.txt",
+          "expect": {
+            "exit": 2,
+            "stdout": "/data/a.txt:alice\n/data/a.txt:alice\n",
+            "stderr": "grep: output truncated at limit (2 lines); narrow the selection or raise command_limits for this command\n"
+          }
+        },
+        {
+          "command": "grep -sq alice /data/missing /data/a.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "grep -r alice /data",
+          "expect": {
+            "exit": 0,
+            "stdout": "/data/a.txt:alice\n/data/a.txt:alice\n",
+            "stderr": "grep: output truncated at limit (2 lines); narrow the selection or raise command_limits for this command\n"
+          }
+        }
+      ]
     }
   ]
 }

@@ -49,7 +49,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.synopsis import SYNOPSES
 from mirage.commands.spec.usage import usage_hint
-from mirage.errors.constants import WALK_ERRORS
+from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import fs_strerror, walk_refusal
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import byte_view, utf8_locale
@@ -179,6 +179,7 @@ def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
         syntax=matcher_syntax(fl),
         only_matching=fl.as_bool("o"),
         quiet=fl.as_bool("q"),
+        no_messages=fl.as_bool("no_messages"),
         recursive=fl.as_bool("r") or fl.as_bool("R"),
         with_filename=filename is True,
         no_filename=filename is False,
@@ -268,56 +269,22 @@ async def grep_generic(
     )
     st = mount_parent_stat(partial(call_stat, stat, prefix=prefix), mounts)
     rb = partial(call_read_bytes, read_bytes, prefix=prefix)
-    if (
-        not f.recursive
-        and len(paths) == 1
-        and not (f.files_only or f.quiet or f.files_without_match)
-    ):
-        p = paths[0]
-        try:
-            if p.walk_error is not None:
-                raise walk_refusal(p)
-            info = (
-                FileStat(name="-", type=FileType.FIFO)
-                if is_stdin(p)
-                else await st(p.virtual)
-            )
-            if info.type == FileType.DIRECTORY:
-                return b"", IOResult(
-                    exit_code=2,
-                    stderr=f"grep: {p.raw_path}: Is a directory\n".encode(),
-                )
-            if not file_admitted(p.virtual, f.filters):
-                return b"", io
-            # Start the reader while the mount's cache context is still active.
-            source = (
-                operand_stream(p)
-                if is_stdin(p) or read_stream is not None
-                else wrap_bytes(await rb(p.virtual))
-            )
-        except WALK_ERRORS as exc:
-            return b"", IOResult(
-                exit_code=2,
-                stderr=f"grep: {p.raw_path}: {fs_strerror(exc) or exc}\n".encode(),
-            )
-        io = IOResult(stderr=warning or None)
-        return grep_input(
-            source,
-            pat,
-            f,
-            operand_label(p, "(standard input)"),
-            f.with_filename and not f.no_filename,
-            io,
-            utf8=utf8,
-        ), io
-    warnings: list[str] = []
-    diagnostics: list[bytes] = [warning] if warning else []
+    failed = False
+    diagnostics: list[bytes] = []
     matched = False
     printed = False
 
     def warn(message: str) -> None:
-        warnings.append(message)
-        diagnostics.append((message + "\n").encode())
+        nonlocal failed
+        failed = True
+        io.exit_code = exit_code_for(matched, failed, f.quiet)
+        if not f.no_messages:
+            diagnostics.append((message + "\n").encode())
+
+    def update_status(file_io: IOResult) -> None:
+        io.exit_code = exit_code_for(
+            matched or file_io.exit_code == 0, failed, f.quiet
+        )
 
     async def scan(
         p: PathSpec, walked: bool = False
@@ -333,88 +300,104 @@ async def grep_generic(
                 if is_stdin(p)
                 else await st(p.virtual)
             )
-            if info.type == FileType.DIRECTORY:
-                if not f.recursive:
-                    warn(f"grep: {p.raw_path}: Is a directory")
-                    # GNU 3.11 still lists it under -L: nothing was read
-                    # from it, so nothing in it matched. -q suppresses
-                    # the row like every other normal output.
-                    if f.files_without_match and not f.quiet:
-                        yield p.raw_path.encode() + b"\n"
-                    return
-                for entry in await rd(p.virtual):
-                    child = PathSpec(
-                        virtual=entry,
-                        directory=entry,
-                        vfs_path=mount_key(entry, prefix),
-                        raw_path=respell_one(entry, p.virtual, p.raw_path),
-                    )
-                    if not dir_admitted(entry, f.filters):
-                        try:
-                            if (await st(entry)).type == FileType.DIRECTORY:
-                                continue
-                        except WALK_ERRORS as exc:
-                            warn(
-                                f"grep: {child.raw_path}: "
-                                f"{fs_strerror(exc) or exc}"
-                            )
-                            continue
-                    async with aclosing(scan(child, True)) as child_stream:
-                        async for chunk in child_stream:
-                            yield chunk
-                    if f.quiet and matched:
-                        break
-                return
-            if walked and info.type != FileType.FILE:
-                return
-            if (
-                walked
-                and not f.filters.text
-                and get_extension(p.virtual) in BINARY_EXTENSIONS
-            ):
-                return
-            if not file_admitted(p.virtual, f.filters):
-                return
-            source = (
-                operand_stream(p)
-                if is_stdin(p) or read_stream is not None
-                else wrap_bytes(await rb(p.virtual))
+            entries = (
+                await rd(p.virtual)
+                if info.type == FileType.DIRECTORY and f.recursive
+                else []
             )
-            file_io = IOResult(exit_code=1)
-            show = not f.no_filename and (
-                f.with_filename or walked or len(paths) > 1
-            )
-            async with aclosing(
-                grep_input(
-                    source,
-                    pat,
-                    f,
-                    operand_label(p, "(standard input)"),
-                    show,
-                    file_io,
-                    printed,
-                    utf8,
-                )
-            ) as output:
-                async for chunk in output:
-                    printed = True
-                    yield chunk
-            matched = matched or file_io.exit_code == 0
-            if file_io.stderr:
-                diagnostics.append(await materialize(file_io.stderr))
         except WALK_ERRORS as exc:
+            warn(f"grep: {p.raw_path}: {fs_strerror(exc) or exc}")
+            return
+        if info.type == FileType.DIRECTORY:
+            if not f.recursive:
+                warn(f"grep: {p.raw_path}: Is a directory")
+                # GNU 3.11 still lists it under -L: nothing was read
+                # from it, so nothing in it matched. -q suppresses
+                # the row like every other normal output.
+                if f.files_without_match and not f.quiet:
+                    yield p.raw_path.encode() + b"\n"
+                return
+            for entry in entries:
+                child = PathSpec(
+                    virtual=entry,
+                    directory=entry,
+                    vfs_path=mount_key(entry, prefix),
+                    raw_path=respell_one(entry, p.virtual, p.raw_path),
+                )
+                if not dir_admitted(entry, f.filters):
+                    try:
+                        if (await st(entry)).type == FileType.DIRECTORY:
+                            continue
+                    except WALK_ERRORS as exc:
+                        warn(
+                            f"grep: {child.raw_path}: "
+                            f"{fs_strerror(exc) or exc}"
+                        )
+                        continue
+                async with aclosing(scan(child, True)) as child_stream:
+                    async for chunk in child_stream:
+                        yield chunk
+                if f.quiet and matched:
+                    break
+            return
+        if walked and info.type != FileType.FILE:
+            return
+        if (
+            walked
+            and not f.filters.text
+            and get_extension(p.virtual) in BINARY_EXTENSIONS
+        ):
+            return
+        if not file_admitted(p.virtual, f.filters):
+            return
+        file_io = IOResult(exit_code=1)
+        try:
+            try:
+                source = (
+                    operand_stream(p)
+                    if is_stdin(p) or read_stream is not None
+                    else wrap_bytes(await rb(p.virtual))
+                )
+                show = not f.no_filename and (
+                    f.with_filename or walked or len(paths) > 1
+                )
+                async with aclosing(
+                    grep_input(
+                        source,
+                        pat,
+                        f,
+                        operand_label(p, "(standard input)"),
+                        show,
+                        file_io,
+                        printed,
+                        utf8,
+                    )
+                ) as output:
+                    async for chunk in output:
+                        update_status(file_io)
+                        printed = True
+                        yield chunk
+            finally:
+                matched = matched or file_io.exit_code == 0
+                update_status(file_io)
+                if file_io.stderr:
+                    diagnostics.append(await materialize(file_io.stderr))
+        except FS_ERRORS as exc:
             warn(f"grep: {p.raw_path}: {fs_strerror(exc) or exc}")
 
     async def run() -> AsyncIterator[bytes]:
-        for path in paths:
-            async with aclosing(scan(path)) as output:
-                async for chunk in output:
-                    yield chunk
-            if f.quiet and matched:
-                break
-        if diagnostics:
-            io.stderr = b"".join(diagnostics)
-        io.exit_code = exit_code_for(matched, bool(warnings), f.quiet)
+        try:
+            for path in paths:
+                async with aclosing(scan(path)) as output:
+                    async for chunk in output:
+                        yield chunk
+                if f.quiet and matched:
+                    break
+        finally:
+            if diagnostics:
+                io.stderr = (await materialize(io.stderr)) + b"".join(
+                    diagnostics
+                )
 
     return run(), io
 

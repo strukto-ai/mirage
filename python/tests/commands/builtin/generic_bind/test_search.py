@@ -139,8 +139,8 @@ def test_unmatched_kind_takes_the_generic_scan():
             FakeAccessor(), [spec("/rooms/red/a.json")], ["ada"], CommandOpts()
         )
     )
-    assert result.exit_code == 0
     assert b"x ada" in asyncio.run(_drain(out))
+    assert result.exit_code == 0
 
 
 def test_shaping_flag_defers_to_the_generic_scan():
@@ -153,8 +153,8 @@ def test_shaping_flag_defers_to_the_generic_scan():
             CommandOpts(flags={"v": True}),
         )
     )
-    assert result.exit_code == 0
     drained = asyncio.run(_drain(out))
+    assert result.exit_code == 0
     assert b"y" in drained
     assert b"x ada" not in drained
 
@@ -200,11 +200,12 @@ def test_stream_first_pull_failure_falls_back_to_bytes():
             FakeAccessor(), [spec("/rooms/red/a.json")], ["ada"], CommandOpts()
         )
     )
-    assert result.exit_code == 0
     assert b"x ada" in asyncio.run(_drain(out))
+    assert result.exit_code == 0
 
 
-def test_stream_failure_after_data_propagates():
+def test_stream_failure_after_data_is_reported():
+
     async def _breaking_stream(
         accessor: FakeAccessor, path: PathSpec, index=NULL_INDEX
     ):
@@ -220,16 +221,16 @@ def test_stream_failure_after_data_propagates():
         local=False,
     )
     search = _search_command({"room": _room_searcher}, io, stream=True)
-    with pytest.raises(FileNotFoundError):
-        out, _ = asyncio.run(
-            search(
-                FakeAccessor(),
-                [spec("/rooms/red/a.json")],
-                ["ada"],
-                CommandOpts(),
-            )
+    out, result = asyncio.run(
+        search(
+            FakeAccessor(), [spec("/rooms/red/a.json")], ["ada"], CommandOpts()
         )
-        asyncio.run(_drain(out))
+    )
+    asyncio.run(_drain(out))
+    assert result.exit_code == 2
+    assert result.stderr == (
+        b"grep: /h/rooms/red/a.json: No such file or directory\n"
+    )
 
 
 def test_refused_pushdown_falls_back_to_the_scan():

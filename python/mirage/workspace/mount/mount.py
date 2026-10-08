@@ -63,6 +63,7 @@ from mirage.errors.fs import ebusy, enotsup
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
 from mirage.io.cachable_iterator import CachableAsyncIterator
+from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.observe.context import (
     push_mount_context,
@@ -127,6 +128,8 @@ async def _command_output(
             if isinstance(exc, UsageError)
             else read_fail_exit_code(command, exc)
         )
+    finally:
+        await close_quietly(source)
 
 
 def _wrap_mount_streams(

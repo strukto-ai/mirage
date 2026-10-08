@@ -450,6 +450,109 @@
           }
         }
       ]
+    },
+    {
+      "id": "workspace_imports_follow_edits_and_working_directory",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "first/m.py": "def f():\n    return 1\n",
+              "second/m.py": "def f():\n    return 3\n",
+              "first/ns_pkg/value.py": "def f():\n    return 4\n",
+              "second/ns_pkg/value.py": "def f():\n    return 6\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /ram/first",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 -c \"import m; print(m.f())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'def f():\\n    return 2\\n' > /ram/first/m.py",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 -B -c \"import m; print(m.f())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "2\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"from ns_pkg.value import f; print(f())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "4\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'def f():\\n    return 5\\n' > /ram/first/ns_pkg/value.py",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 -c \"from ns_pkg.value import f; print(f())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "5\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cd /ram/second",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 -c \"import m; from ns_pkg.value import f; print(m.f(), f())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "3 6\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cd /ram/first",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 -c \"import m; from ns_pkg.value import f; print(m.f(), f())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "2 5\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

@@ -1,7 +1,10 @@
+from json import JSONDecodeError
+
 import pytest
 
 from mirage.commands.builtin.generic.grep import grep_generic, labelled
 from mirage.commands.config import CommandOpts
+from mirage.errors.fs import no_mount
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.view.types import MountView, NamespaceView
@@ -438,3 +441,240 @@ async def test_recursive_quiet_no_match_visits_every_file():
     assert await _drain_async(output) == b""
     assert io.exit_code == 1
     assert opened == ["/d/a", "/d/b"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "paths,flags,expected,status",
+    [
+        (["/missing"], {}, b"", 2),
+        (["/data"], {}, b"", 2),
+        (["/data/bad.txt"], {}, b"", 2),
+        (["/missing", "/data/a.txt"], {}, b"/data/a.txt:alice\n", 2),
+        (["/missing", "/data/a.txt"], {"q": True}, b"", 0),
+        (["/data"], {"r": True}, b"/data/a.txt:alice\n", 2),
+    ],
+)
+@pytest.mark.parametrize("streamed", [False, True])
+async def test_grep_no_messages_keeps_operand_failures(
+    paths, flags, expected, status, streamed
+):
+    readdir, stat, rb, _ = _make_backend(
+        {
+            "/data/a.txt": b"alice\n",
+            "/data/bad.txt": b"alice\n",
+        }
+    )
+
+    async def read_bytes(path):
+        if path.virtual == "/data/bad.txt":
+            raise PermissionError(path.virtual)
+        return await rb(path)
+
+    async def read_stream(path):
+        yield await read_bytes(path)
+
+    output, io = await grep_generic(
+        [_spec(path) for path in paths],
+        ["alice"],
+        CommandOpts(flags={"no_messages": True, **flags}),
+        readdir=readdir,
+        stat=stat,
+        read_bytes=read_bytes,
+        read_stream=read_stream if streamed else None,
+    )
+    assert await _drain_async(output) == expected
+    assert await _drain_async(io.stderr) == b""
+    assert io.exit_code == status
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [
+        ValueError("invalid backend value"),
+        no_mount("/data/a.txt"),
+        JSONDecodeError("invalid backend JSON", "{", 0),
+        UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid backend text"),
+    ],
+)
+@pytest.mark.parametrize(
+    "paths,recursive",
+    [
+        (["/data/a.txt"], False),
+        (["/data/a.txt", "/data/b.txt"], False),
+        (["/data"], True),
+    ],
+)
+@pytest.mark.parametrize("no_messages", [False, True])
+@pytest.mark.parametrize("streamed", [False, True])
+async def test_grep_propagates_non_filesystem_read_failures(
+    error, paths, recursive, no_messages, streamed
+):
+    readdir, stat, rb, _ = _make_backend(
+        {
+            "/data/a.txt": b"alice\n",
+            "/data/b.txt": b"alice\n",
+        }
+    )
+
+    async def read_bytes(path):
+        await rb(path)
+        raise error
+
+    async def read_stream(path):
+        yield await read_bytes(path)
+
+    output, _ = await grep_generic(
+        [_spec(path) for path in paths],
+        ["alice"],
+        CommandOpts(flags={"no_messages": no_messages, "r": recursive}),
+        readdir=readdir,
+        stat=stat,
+        read_bytes=read_bytes,
+        read_stream=read_stream if streamed else None,
+    )
+    with pytest.raises(type(error)) as raised:
+        await _drain_async(output)
+    assert raised.value is error
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "paths,flags",
+    [
+        (["/data/a.txt"], {}),
+        (["/data/a.txt", "/data/b.txt"], {}),
+        (["/data"], {"r": True}),
+    ],
+)
+@pytest.mark.parametrize("missing", [False, True])
+async def test_grep_publishes_status_before_output_and_on_close(
+    paths, flags, missing
+):
+    readdir, stat, rb, _ = _make_backend(
+        {"/data/a.txt": b"alice\nalice\n", "/data/b.txt": b"alice\n"}
+    )
+    closed = []
+
+    async def read_stream(path):
+        try:
+            yield await rb(path)
+        finally:
+            closed.append(path.virtual)
+
+    output, io = await grep_generic(
+        [_spec(path) for path in (["/missing"] if missing else []) + paths],
+        ["alice"],
+        CommandOpts(flags=flags),
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=read_stream,
+    )
+    expected = 2 if missing else 0
+    assert b"alice" in await anext(output)
+    assert io.exit_code == expected
+    await output.aclose()
+    assert io.exit_code == expected
+    assert closed == ["/data/a.txt"]
+    expected_stderr = (
+        b"grep: /missing: No such file or directory\n" if missing else b""
+    )
+    assert (io.stderr or b"") == expected_stderr
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("no_messages", [False, True])
+async def test_grep_preserves_binary_notice_before_read_failure(no_messages):
+    readdir, stat, rb, _ = _make_backend({"/data/a.txt": b"alice\xff\n"})
+
+    async def read_stream(path):
+        yield await rb(path)
+        raise PermissionError(path.virtual)
+
+    output, io = await grep_generic(
+        [_spec("/data/a.txt")],
+        ["alice"],
+        CommandOpts(
+            flags={"no_messages": no_messages}, env={"LC_ALL": "C.UTF-8"}
+        ),
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=read_stream,
+    )
+    assert await _drain_async(output) == b""
+    assert io.exit_code == 2
+    expected = b"grep: /data/a.txt: binary file matches\n"
+    if not no_messages:
+        expected += b"grep: /data/a.txt: Permission denied\n"
+    assert io.stderr == expected
+
+
+@pytest.mark.asyncio
+async def test_grep_preserves_stderr_added_before_drain():
+    readdir, stat, rb, rs = _make_backend({"/data/a.txt": b"alice\n"})
+    output, io = await grep_generic(
+        [_spec("/missing"), _spec("/data/a.txt")],
+        ["*alice"],
+        CommandOpts(flags={"E": True}),
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    io.stderr = b"backend: scan fallback\n" + (io.stderr or b"")
+    assert await _drain_async(output) == b"/data/a.txt:alice\n"
+    assert io.exit_code == 2
+    assert io.stderr == (
+        b"backend: scan fallback\n"
+        b"grep: warning: * at start of expression\n"
+        b"grep: /missing: No such file or directory\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_grep_settles_late_binary_detection_after_a_match():
+    readdir, stat, rb, _ = _make_backend({"/data/a.txt": b"alice\n"})
+
+    async def read_stream(path):
+        yield await rb(path)
+        yield b"\0"
+
+    output, io = await grep_generic(
+        [_spec("/data/a.txt")],
+        ["alice"],
+        CommandOpts(flags={"args_I": True}),
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=read_stream,
+    )
+    assert await anext(output) == b"alice\n"
+    assert io.exit_code == 0
+    assert await _drain_async(output) == b""
+    assert io.exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_grep_flushes_binary_notice_on_early_close():
+    readdir, stat, rb, _ = _make_backend({"/data/a.txt": b"alice\xff\n"})
+
+    async def read_stream(path):
+        yield await rb(path)
+        yield b"alice\n"
+
+    output, io = await grep_generic(
+        [_spec("/data/a.txt")],
+        ["alice"],
+        CommandOpts(env={"LC_ALL": "C.UTF-8"}),
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=read_stream,
+    )
+    assert await anext(output) == b"alice\n"
+    await output.aclose()
+    assert io.exit_code == 0
+    assert io.stderr == b"grep: /data/a.txt: binary file matches\n"

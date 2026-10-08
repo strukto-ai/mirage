@@ -90,6 +90,12 @@ class LanguageRuntime(Runtime):
     async def run(self, args: RunArgs) -> RunResult:
         """Execute one program and return its captured outcome.
 
+        Each call represents an independent language command, such as
+        python3 or node. Guest globals, imports and builtin mutations
+        do not carry over from earlier commands or evaluator sessions.
+        The adapter owns engine reuse; this does not reset workspace
+        state or undo external effects.
+
         Args:
             args (RunArgs): the execution request.
         """
