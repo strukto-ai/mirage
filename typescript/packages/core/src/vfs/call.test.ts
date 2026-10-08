@@ -151,6 +151,9 @@ describe('VFS functions', () => {
         "read() got an unexpected keyword argument 'offest'",
       )
       await ws.dispatch('read', '/shelf/a.txt')
+      expect(
+        DEC.decode((await ws.dispatch('read', '/shelf/a.txt', [], { offset: 1 })) as Uint8Array),
+      ).toBe('ld\n')
       await expect(misspelled('read')).rejects.toThrow(
         "read() got an unexpected keyword argument 'offest'",
       )

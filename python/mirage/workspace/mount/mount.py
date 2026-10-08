@@ -705,18 +705,17 @@ class MountEntry:
         """Refuse a keyword the function ``name`` does not take.
 
         The door asks before it answers a read from the cache, so a warm
-        read refuses the keyword a cold one would.
+        read is judged by what a cold one runs, the mount's read window
+        included, and refuses the keyword a cold one would.
 
         Args:
             name (str): the function name.
             kwargs (dict[str, Any]): the call's keywords; ``filetype`` is
                 the mount's own and passes.
         """
-        fn = getattr(self.vfs, name, None)
-        if callable(fn):
-            _taken(
-                name, fn, {k: v for k, v in kwargs.items() if k != "filetype"}
-            )
+        taken = {k: v for k, v in kwargs.items() if k != "filetype"}
+        for fn in self._callers(name, None):
+            _taken(name, fn, taken)
 
     def renders(self, filetype: str | None) -> bool:
         """Whether the VFS renders a read of ``filetype``.

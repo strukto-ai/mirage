@@ -53,11 +53,7 @@ class Shelf(BaseVFS):
         return [f"/shelf/{name}" for name in sorted(self.files)]
 
     async def read(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-        offset: int = 0,
-        size: int | None = None,
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> bytes:
         return self.files[path.vfs_path.strip("/")]
 
@@ -180,6 +176,7 @@ async def test_a_function_takes_its_own_keywords_only():
         with pytest.raises(TypeError, match="read.*'offest'"):
             await ws.dispatch("read", page, offest=1)
         await ws.dispatch("read", page)
+        assert (await ws.dispatch("read", page, offset=1))[0] == b"ld\n"
         with pytest.raises(TypeError, match="read.*'offest'"):
             await ws.dispatch("read", page, offest=1)
     finally:
