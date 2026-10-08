@@ -18,6 +18,7 @@ import { IOResult, materialize, type ByteSource } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
+import { isProgramInvocation } from '../../context/session_context.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import type { SessionState } from '../session/session.ts'
 import type { ExecutionNode } from '../types.ts'
@@ -106,10 +107,18 @@ export function restoreFunctionTraps(
 /**
  * Whether the ERR action is set and seen here, taken as a statement starts:
  * bash answers a failure only when the action was armed before the command
- * ran, so a function that sets one is not answered for.
+ * ran, so a function that sets one is not answered for. A line run as a
+ * program (`env`, `timeout`, `find -exec`, a `/usr/bin` path) is no shell,
+ * so its statements arm nothing: the shell's statement running it answers
+ * its failure once.
  */
 export function errTrapArmed(session: SessionState): boolean {
-  return session.errTrap !== null && session.errTrap !== '' && !session.errTrapHidden
+  return (
+    session.errTrap !== null &&
+    session.errTrap !== '' &&
+    !session.errTrapHidden &&
+    !isProgramInvocation(session)
+  )
 }
 
 /**
@@ -160,9 +169,6 @@ export async function runErrTrap(
     (ERR_TRAP_EXEMPT_TYPES.has(statement.type) && !unopened && !arithmetic(statement))
   )
     return []
-  // `$?` is the failed status while the action runs; a list's right command
-  // has not recorded it yet.
-  recordStatus(session, status, true)
   session.errTrapRunning = true
   try {
     return await runAction(executeFn, action, session, stdin, callStack)

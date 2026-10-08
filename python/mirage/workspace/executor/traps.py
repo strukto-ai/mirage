@@ -15,6 +15,7 @@
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from mirage.context import program_invocation
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, materialize
@@ -121,11 +122,18 @@ def err_trap_armed(session: SessionState) -> bool:
     """Whether the ERR action is set and seen here, taken as a statement
     starts: bash answers a failure only when the action was armed before
     the command ran, so a function that sets one is not answered for.
+    A line run as a program (``env``, ``timeout``, ``find -exec``, a
+    ``/usr/bin`` path) is no shell, so its statements arm nothing: the
+    shell's statement running it answers its failure once.
 
     Args:
         session (SessionState): the shell about to run the statement.
     """
-    return bool(session.err_trap) and not session.err_trap_hidden
+    return (
+        bool(session.err_trap)
+        and not session.err_trap_hidden
+        and not program_invocation(session)
+    )
 
 
 async def run_err_trap(
@@ -191,9 +199,6 @@ async def run_err_trap(
         )
     ):
         return []
-    # `$?` is the failed status while the action runs; a list's right
-    # command has not recorded it yet.
-    record_status(session, status, transparent=True)
     session.err_trap_running = True
     try:
         return await _run_action(

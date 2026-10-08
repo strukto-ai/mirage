@@ -61,10 +61,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( trap 'echo ERR' ERR; if false; then :; fi; false || true; ! true; true && false; echo end ); ( trap 'echo ERR' ERR; { false; }; for i in 1; do false; done; echo end ); ( trap 'echo ERR' ERR; (( 0 )); [[ a == b ]]; echo end ); ( trap 'echo ERR' ERR; { { :; } < /data/missing; }; echo \"end $?\" ); ( trap 'echo ERR' ERR; { false; echo A0; }; if true; then false; echo A1; fi; case x in x) false; echo A2;; esac; while true; do false; echo A3; break; done; until false; do false; echo A4; break; done; for ((i=0; i<1; i++)); do false; echo A5; done; for i in 1; do false; echo A6; done; set -E; f() { false; echo A7; }; f )",
+      "command": "( trap 'echo ERR' ERR; if false; then :; fi; false || true; ! true; true && false; echo end ); ( trap 'echo ERR' ERR; { false; }; for i in 1; do false; done; echo end ); ( trap 'echo ERR' ERR; (( 0 )); [[ a == b ]]; echo end ); ( trap 'echo ERR' ERR; { { :; } < /data/missing; }; echo \"end $?\" ); ( trap 'echo ERR' ERR; { false; echo A0; }; if true; then false; echo A1; fi; case x in x) false; echo A2;; esac; while true; do false; echo A3; break; done; until false; do false; echo A4; break; done; for ((i=0; i<1; i++)); do false; echo A5; done; for i in 1; do false; echo A6; done; set -E; f() { false; echo A7; }; f ); ( trap 'echo \"E ${PIPESTATUS[*]} $?\"' ERR; true && false; false | true && false; true && true | false; echo \"after ${PIPESTATUS[*]}\"; false || false | false; echo \"after ${PIPESTATUS[*]}\" )",
       "expect": {
         "exit": 0,
-        "stdout": "ERR\nend\nERR\nERR\nend\nERR\nERR\nend\nERR\nend 1\nERR\nA0\nERR\nA1\nERR\nA2\nERR\nA3\nERR\nA4\nERR\nA5\nERR\nA6\nERR\nA7\n",
+        "stdout": "ERR\nend\nERR\nERR\nend\nERR\nERR\nend\nERR\nend 1\nERR\nA0\nERR\nA1\nERR\nA2\nERR\nA3\nERR\nA4\nERR\nA5\nERR\nA6\nERR\nA7\nE 1 1\nE 1 1\nE 0 1 1\nafter 0 1\nE 1 1 1\nafter 1 1\n",
         "stderr": "/data/missing: No such file or directory\n"
       }
     },
@@ -129,10 +129,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( trap '' ERR; false; trap -p ERR; trap 'echo E' ERR; trap - ERR; false; echo \"end $?\" ); ( trap 'echo E' ERR; ( trap -p ERR; false; echo in ); f() { false; }; ( f ); echo \"end $?\" ); ( trap '(trap \"echo CHILD\" ERR; false); echo PARENT' ERR; false ); echo \"rc=$?\"; if bash -ec 'false; echo BAD'; then echo WRONG; else echo EXPECTED; fi",
+      "command": "( trap '' ERR; false; trap -p ERR; trap 'echo E' ERR; trap - ERR; false; echo \"end $?\" ); ( trap 'echo E' ERR; ( trap -p ERR; false; echo in ); f() { false; }; ( f ); echo \"end $?\" ); ( trap '(trap \"echo CHILD\" ERR; false); echo PARENT' ERR; false ); echo \"rc=$?\"; if bash -ec 'false; echo BAD'; then echo WRONG; else echo EXPECTED; fi; ( trap 'echo E' ERR; env false; echo \"env $?\"; timeout 5 false; echo \"timeout $?\"; find /data -maxdepth 0 -exec false \\; ; echo \"find $?\"; /usr/bin/false; echo \"bin $?\" )",
       "expect": {
         "exit": 0,
-        "stdout": "trap -- '' ERR\nend 1\ntrap -- 'echo E' ERR\nin\nE\nend 1\nCHILD\nPARENT\nrc=1\nEXPECTED\n",
+        "stdout": "trap -- '' ERR\nend 1\ntrap -- 'echo E' ERR\nin\nE\nend 1\nCHILD\nPARENT\nrc=1\nEXPECTED\nE\nenv 1\nE\ntimeout 1\nfind 0\nE\nbin 1\n",
         "stderr": ""
       }
     },

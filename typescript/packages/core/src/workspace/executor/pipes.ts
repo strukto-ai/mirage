@@ -343,7 +343,10 @@ export async function handleConnection(
     throw err
   }
   children.push(rightExec)
-  const rightBytes = await materialize(rightStdout)
+  // The right command closes here, so its ERR action reads its status and
+  // `${PIPESTATUS[@]}`; the list's boundary claims them again once the
+  // action is done.
+  const rightBytes = await finishStatement(rightStdout, rightIo, session, right)
   let merged = await leftIo.merge(rightIo)
   const outputs: (ByteSource | null)[] = [leftBytes, rightBytes]
   try {
@@ -366,6 +369,7 @@ export async function handleConnection(
     if (isUnwinding(err)) throw await carried(err, asyncChain(outputs), merged)
     throw err
   }
+  carryStatus(session)
   const combined = asyncChain(outputs)
   return [
     combined,

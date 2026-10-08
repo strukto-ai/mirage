@@ -328,10 +328,12 @@ async def handle_connection(
     except UNWINDING as sig:
         raise await carried(sig, left_bytes, left_io)
     children.append(right_exec)
-    # Materialize right side to match && and || behavior, ensuring
-    # lazy exit codes (e.g. from exit_on_empty) are finalized before
-    # the combined stream is returned to the caller.
-    right_bytes = await materialize(right_stdout)
+    # The right command closes here, so its ERR action reads its status
+    # and ``${PIPESTATUS[@]}``; the list's boundary claims them again
+    # once the action is done.
+    right_bytes = await finish_statement(
+        right_stdout, right_io, session, right
+    )
     merged = await left_io.merge(right_io)
     outputs: list[ByteSource | None] = [left_bytes, right_bytes]
     try:
@@ -352,6 +354,7 @@ async def handle_connection(
         )
     except UNWINDING as sig:
         raise await carried(sig, async_chain(outputs), merged)
+    carry_status(session)
     return (
         async_chain(outputs),
         merged,

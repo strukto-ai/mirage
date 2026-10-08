@@ -324,8 +324,9 @@ export async function handleIf(
   executeFn: ExecuteStringFn | null = null,
   sink: JobConsole | null = null,
 ): Promise<Result> {
-  // Each test reads the fd 0 the `if` started with, so an `exec <&-` in one
-  // reaches the next, and runs with `set -e` ignored.
+  // Each test and the branch read the fd 0 the `if` started with, so an
+  // `exec < f` or `exec <&-` in one reaches the next; a test runs with
+  // `set -e` ignored.
   const session = context.session
   const bound = fd0Binding(session)
   const run = (nodes: readonly TSNodeLike[], test = false): Promise<Result> => {
@@ -342,7 +343,7 @@ export async function handleIf(
         decisions,
         executeFn,
         sink,
-        test ? bound : undefined,
+        bound,
       )
     return test ? ignoringErrexit(session, go) : go()
   }
@@ -400,6 +401,9 @@ export async function handleFor(
     const err = encodeText(`bash: ${variable}: readonly variable\n`)
     return collectLoopResult([], new IOResult({ exitCode: 1, stderr: err }), 'for')
   }
+  // Each iteration reads the fd 0 the loop started with, so an `exec < f` in
+  // one reaches the next.
+  const bound = fd0Binding(session)
   for (const val of values) {
     if (session.shellOptions.noexec === true) break
     // env stores strings only; bash keeps `for f in sub/*.txt`
@@ -429,6 +433,7 @@ export async function handleFor(
         decisions,
         executeFn,
         sink,
+        bound,
       )
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
@@ -465,6 +470,8 @@ async function conditionLoop(
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
   let hitLimit = true
+  // Each test and body reads the fd 0 the loop started with, so an
+  // `exec < f` in one reaches the rest.
   const bound = fd0Binding(session)
   const run = (nodes: readonly TSNodeLike[], test = false): Promise<Result> => {
     const go = (): Promise<Result> =>
@@ -480,7 +487,7 @@ async function conditionLoop(
         decisions,
         executeFn,
         sink,
-        test ? bound : undefined,
+        bound,
       )
     return test ? ignoringErrexit(session, go) : go()
   }
@@ -564,6 +571,7 @@ export async function handleCfor(
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
   let hitLimit = true
+  const bound = fd0Binding(session)
   try {
     await evalExpr(exprs[0] ?? [], 0)
     for (let i = 0; i < MAX_WHILE; i++) {
@@ -588,6 +596,7 @@ export async function handleCfor(
           decisions,
           executeFn,
           sink,
+          bound,
         )
         allStdout.push(stdout)
         mergedIo = await mergedIo.merge(io)
@@ -723,6 +732,9 @@ export async function handleCase(
   let mergedIo = new IOResult()
   let lastExec = new ExecutionNode({ command: 'case', exitCode: 0 })
   let fallthrough = false
+  // Each arm reads the fd 0 the `case` started with, so an `exec < f` in one
+  // reaches an arm it falls into.
+  const bound = fd0Binding(context.session)
   for (const [patterns, body, terminator] of items) {
     if (!(fallthrough || patterns.some((p) => fnmatch(word, p)))) continue
     try {
@@ -738,6 +750,7 @@ export async function handleCase(
         decisions,
         executeFn,
         sink,
+        bound,
       )
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
@@ -816,6 +829,7 @@ export async function handleSelect(
   const allStdout: (ByteSource | null)[] = []
   const view = sessionView(session, policies, context.frame.diagnostics)
   const lines = stdin !== null ? lineBuffer(stdin) : null
+  const bound = fd0Binding(session)
   const words = values.map((v) => wordText(v))
   let showMenu = words.length > 0
   for (let i = 0; i < (words.length > 0 ? MAX_WHILE : 0); i++) {
@@ -868,6 +882,7 @@ export async function handleSelect(
         decisions,
         executeFn,
         sink ?? null,
+        bound,
       )
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
