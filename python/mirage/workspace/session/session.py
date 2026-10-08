@@ -922,8 +922,9 @@ class SessionState:
         place, the call stack, any test its caller is in (``if bash -ec
         'false; ...'`` still ends at ``false``) and the startup
         variables, which bash never reads from its environment: IFS is
-        dropped and ``STARTUP_VALUES`` restart. A managed variable not yet fetched crosses as its
-        pointer, which the nested shell fetches through.
+        dropped and ``STARTUP_VALUES`` restart. A managed variable not
+        yet fetched crosses as its pointer, which the nested shell
+        fetches through.
 
         Args:
             None
