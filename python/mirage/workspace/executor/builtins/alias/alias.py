@@ -14,7 +14,7 @@
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.constants import SHOPT_DEFAULTS
 from mirage.shell.helpers import get_text
 from mirage.shell.types import TSNodeLike
@@ -147,7 +147,7 @@ def alias_value(
     session: SessionState,
     name: str,
     mark: AliasMark,
-    blocked: frozenset[str] | None = None,
+    blocked: frozenset[str],
 ) -> str | None:
     """The alias text a command word expands to, or None.
 
@@ -161,16 +161,12 @@ def alias_value(
         session (SessionState): shell session state.
         name (str): the command word.
         mark (AliasMark): the parse and row of the use.
-        blocked (frozenset[str] | None): guards at this word; absent,
-            guards inherited by a separately parsed line.
+        blocked (frozenset[str]): guards at this word.
     """
     if not session.shopts.get(
         "expand_aliases", SHOPT_DEFAULTS["expand_aliases"]
     ):
         return None
-    if blocked is None:
-        scope = session._alias_expansion
-        blocked = scope.names if scope is not None else frozenset()
     value = session.aliases.get(name)
     if value is None or name in blocked:
         return None
@@ -198,83 +194,67 @@ def expanding_aliases(session: SessionState) -> frozenset[str]:
     return frozenset(session.aliases) - blocked
 
 
-def alias_owners(
-    session: SessionState,
-    node: TSNodeLike,
-    start: int,
-    end: int,
-) -> tuple[frozenset[str], ...]:
-    """Aliases in progress at the node's source bytes.
-
-    Args:
-        session (SessionState): active expansion, if any.
-        node (TSNodeLike): identifies the tree the offsets belong to.
-        start (int): first parsed byte.
-        end (int): exclusive last parsed byte.
-    """
-    scope = session._alias_expansion
-    if scope is None:
-        return (frozenset(),) * (end - start)
-    root = node
-    while root.parent is not None:
-        root = root.parent
-    if root.id != scope.root:
-        return (scope.names,) * (end - start)
-    return scope.owners[start:end]
-
-
 def alias_command_text(
     session: SessionState,
     node: TSNodeLike,
-    rest: str,
+    head: TSNodeLike,
     mark: AliasMark,
 ) -> tuple[str, tuple[frozenset[str], ...]] | None:
-    """Rewrite an alias and retain who owns each byte of the result.
+    """Replace alias words, preserving the rest of the command and its guards.
 
-    Inserted text inherits the replaced word's guards and adds its own.
-    Retained text keeps its guards, so neither a nested rewrite nor a
-    trailing-blank chain extends an alias into the caller's words.
+    Each insertion inherits the replaced word's guards and adds its name.
+    A trailing blank checks the next caller word through the same loop.
 
     Args:
         session (SessionState): shell session state.
-        node (TSNodeLike): the command's head word.
-        rest (str): parsed source after the head word.
+        node (TSNodeLike): the full command, including assignments.
+        head (TSNodeLike): its unquoted command word.
         mark (AliasMark): the parse and row of the use.
     """
-    name = get_text(node)
-    blocked = alias_owners(
-        session, node, node.start_byte, node.start_byte + 1
-    )[0]
-    value = alias_value(session, name, mark, blocked)
-    if value is None:
-        return None
-    seen = {name}
-    out = value
-    owners = (blocked | {name},) * len(encode_text(value))
-    at = node.end_byte
-    while out.endswith((" ", "\t")):
-        stripped = rest.lstrip()
-        match = FIRST_WORD.match(stripped)
-        if match is None or match.group(0) in seen:
-            break
-        word_at = at + len(encode_text(rest[: len(rest) - len(stripped)]))
-        blocked = alias_owners(session, node, word_at, word_at + 1)[0]
-        name = match.group(0)
-        nxt = alias_value(session, name, mark, blocked)
-        if nxt is None:
+    source = node.text or b""
+    scope = session._alias_expansion
+    root = node
+    while root.parent is not None:
+        root = root.parent
+    inherited = (
+        scope.owners[node.start_byte : node.end_byte]
+        if scope is not None and root.id == scope.root
+        else (scope.names if scope is not None else frozenset(),) * len(source)
+    )
+    at, end = (
+        head.start_byte - node.start_byte,
+        head.end_byte - node.start_byte,
+    )
+    name = get_text(head)
+    seen: set[str] = set()
+    parts: list[bytes] = []
+    owners: list[frozenset[str]] = []
+    cursor = 0
+    while name not in seen:
+        blocked = inherited[at]
+        value = alias_value(session, name, mark, blocked)
+        if value is None:
             break
         seen.add(name)
-        out += nxt
-        owners += (blocked | {name},) * len(encode_text(nxt))
-        rest = stripped[match.end() :]
-        at = word_at + len(encode_text(name))
-    tail = rest.strip()
-    if not tail:
-        return out, owners
-    at += len(encode_text(rest[: len(rest) - len(rest.lstrip())]))
-    return out + " " + tail, owners + (frozenset(),) + alias_owners(
-        session, node, at, at + len(encode_text(tail))
-    )
+        inserted = encode_text(value)
+        parts.extend((source[cursor:at], inserted))
+        owners.extend(inherited[cursor:at])
+        owners.extend((blocked | {name},) * len(inserted))
+        cursor = end
+        if not value.endswith((" ", "\t")):
+            break
+        rest = decode_text(source[cursor:])
+        match = FIRST_WORD.search(rest)
+        if match is None:
+            break
+        name = match.group(0)
+        at = cursor + len(encode_text(rest[: match.start()]))
+        end = at + len(encode_text(name))
+    if not seen:
+        return None
+    parts.append(source[cursor:])
+    owners.extend(inherited[cursor:])
+    return decode_text(b"".join(parts)), tuple(owners)
 
 
 async def alias_builtin(call: BuiltinCall) -> Result:

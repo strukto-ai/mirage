@@ -142,7 +142,7 @@ export function aliasValue(
   session: SessionState,
   name: string,
   mark: AliasMark,
-  blocked: ReadonlySet<string> = session.aliasExpansion?.names ?? new Set(),
+  blocked: ReadonlySet<string>,
 ): string | null {
   if (!aliasesOn(session)) return null
   const value = sessionEntry(session.aliases, name)
@@ -152,65 +152,55 @@ export function aliasValue(
   return value
 }
 
-/** Aliases in progress at the node's parsed source positions. */
-export function aliasOwners(
-  session: SessionState,
-  node: TSNodeLike,
-  start: number,
-  end: number,
-): readonly ReadonlySet<string>[] {
-  const scope = session.aliasExpansion
-  if (scope === null) return Array<ReadonlySet<string>>(end - start).fill(new Set())
-  let root = node
-  while (root.parent != null) root = root.parent
-  if (root.id !== scope.root) return Array<ReadonlySet<string>>(end - start).fill(scope.names)
-  return scope.owners.slice(start, end)
-}
-
 /**
- * Rewrite an alias and retain who owns each character. Inserted text
- * inherits the replaced word's guards and adds its own; retained text
- * keeps its guards across nested rewrites and trailing-blank chains.
+ * Replace alias words, preserving the rest of the command and its guards.
+ * Each insertion inherits the replaced word's guards and adds its name.
+ * A trailing blank checks the next caller word through the same loop.
  */
 export function aliasCommandText(
   session: SessionState,
   node: TSNodeLike,
-  rest: string,
+  head: TSNodeLike,
   mark: AliasMark,
 ): [string, readonly ReadonlySet<string>[]] | null {
-  let name = getText(node)
-  let blocked = aliasOwners(session, node, node.startIndex ?? 0, (node.startIndex ?? 0) + 1)[0]
-  if (blocked === undefined) throw new Error('alias head has no source')
-  const value = aliasValue(session, name, mark, blocked)
-  if (value === null) return null
-  const seen = new Set([name])
-  let out = value
-  let owners = Array<ReadonlySet<string>>(value.length).fill(new Set([...blocked, name]))
-  let at = node.endIndex ?? 0
-  let tailSource = rest
-  while (out.endsWith(' ') || out.endsWith('\t')) {
-    const stripped = tailSource.trimStart()
-    const match = FIRST_WORD.exec(stripped)
-    if (match === null || seen.has(match[0])) break
-    const wordAt = at + tailSource.length - stripped.length
-    blocked = aliasOwners(session, node, wordAt, wordAt + 1)[0]
+  const source = getText(node)
+  const scope = session.aliasExpansion
+  let root = node
+  while (root.parent != null) root = root.parent
+  const base = node.startIndex ?? 0
+  const inherited =
+    scope !== null && root.id === scope.root
+      ? scope.owners.slice(base, node.endIndex)
+      : Array<ReadonlySet<string>>(source.length).fill(scope?.names ?? new Set())
+  let at = (head.startIndex ?? 0) - base
+  let end = (head.endIndex ?? 0) - base
+  let name = getText(head)
+  const seen = new Set<string>()
+  const parts: string[] = []
+  const owners: ReadonlySet<string>[] = []
+  let cursor = 0
+  while (!seen.has(name)) {
+    const blocked = inherited[at]
     if (blocked === undefined) throw new Error('alias word has no source')
-    name = match[0]
-    const nxt = aliasValue(session, name, mark, blocked)
-    if (nxt === null) break
+    const value = aliasValue(session, name, mark, blocked)
+    if (value === null) break
     seen.add(name)
-    out += nxt
-    owners = owners.concat(Array<ReadonlySet<string>>(nxt.length).fill(new Set([...blocked, name])))
-    tailSource = stripped.slice(name.length)
-    at = wordAt + name.length
+    parts.push(source.slice(cursor, at), value)
+    for (const owner of inherited.slice(cursor, at)) owners.push(owner)
+    const guard = new Set([...blocked, name])
+    for (const owner of Array<ReadonlySet<string>>(value.length).fill(guard)) owners.push(owner)
+    cursor = end
+    if (!value.endsWith(' ') && !value.endsWith('\t')) break
+    const match = FIRST_WORD.exec(source.slice(cursor))
+    if (match === null) break
+    name = match[0]
+    at = cursor + match.index
+    end = at + name.length
   }
-  const tail = tailSource.trim()
-  if (tail === '') return [out, owners]
-  at += tailSource.length - tailSource.trimStart().length
-  return [
-    out + ' ' + tail,
-    [...owners, new Set(), ...aliasOwners(session, node, at, at + tail.length)],
-  ]
+  if (seen.size === 0) return null
+  parts.push(source.slice(cursor))
+  for (const owner of inherited.slice(cursor)) owners.push(owner)
+  return [parts.join(''), owners]
 }
 
 /** The `alias` arm; the row marks where the definition was made. */

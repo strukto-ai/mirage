@@ -14,7 +14,6 @@
 
 from mirage.workspace.executor.builtins.alias.alias import (
     alias_command_text,
-    alias_owners,
     alias_value,
     expanding_aliases,
     handle_alias,
@@ -25,7 +24,6 @@ from mirage.workspace.executor.builtins.alias.types import AliasMark
 __all__ = [
     "AliasMark",
     "alias_command_text",
-    "alias_owners",
     "alias_value",
     "expanding_aliases",
     "handle_alias",

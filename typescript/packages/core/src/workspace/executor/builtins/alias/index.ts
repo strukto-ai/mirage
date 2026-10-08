@@ -14,7 +14,6 @@
 
 export {
   aliasCommandText,
-  aliasOwners,
   aliasValue,
   expandingAliases,
   handleAlias,

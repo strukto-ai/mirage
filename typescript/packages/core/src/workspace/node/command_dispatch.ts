@@ -53,7 +53,6 @@ import type { ExecuteNodeOpts } from '../executor/command/types.ts'
 import {
   type AliasMark,
   aliasCommandText,
-  aliasOwners,
   expandingAliases,
 } from '../executor/builtins/alias/index.ts'
 import { checkSyntax, syntaxErrorResult } from '../../shell/parse/index.ts'
@@ -182,15 +181,9 @@ export async function executeCommand(
       session.parseCurrent,
       session.parseRow + (node.startPosition?.row ?? 0),
     ]
-    const source = getText(node)
-    const base = node.startIndex ?? 0
-    const rest = source.slice((headNode.endIndex ?? 0) - base)
-    const rewrite = aliasCommandText(session, headNode, rest, mark)
+    const rewrite = aliasCommandText(session, node, headNode, mark)
     if (rewrite !== null) {
-      const [rewritten, inserted] = rewrite
-      const at = (headNode.startIndex ?? 0) - base
-      const line = source.slice(0, at) + rewritten
-      const owners = [...aliasOwners(session, headNode, base, base + at), ...inserted]
+      const [line, owners] = rewrite
       const names = new Set(owners.flatMap((names) => [...names]))
       const previous = session.aliasExpansion
       const scope = parser.fork()

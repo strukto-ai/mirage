@@ -16,6 +16,7 @@ import asyncio
 import dataclasses
 from collections.abc import Awaitable, Callable
 from functools import partial
+from itertools import accumulate
 from types import SimpleNamespace
 from typing import Any, TypeVar
 
@@ -78,7 +79,6 @@ from mirage.workspace.executor.builtins import (
 )
 from mirage.workspace.executor.builtins.alias import (
     alias_command_text,
-    alias_owners,
     expanding_aliases,
 )
 from mirage.workspace.executor.builtins.table import BUILTINS
@@ -176,17 +176,11 @@ async def execute_command(
             session._parse_current,
             session._parse_row + node.start_point[0],
         )
-        source = node.text or b""
-        base = node.start_byte
-        rest = decode_text(source[head_node.end_byte - base :])
-        rewrite = alias_command_text(session, head_node, rest, mark)
+        rewrite = alias_command_text(session, node, head_node, mark)
         if rewrite is not None:
-            rewritten, owners = rewrite
-            lead = decode_text(source[: head_node.start_byte - base])
-            line = lead + rewritten
-            owners = (
-                alias_owners(session, head_node, base, head_node.start_byte)
-                + owners
+            line, owners = rewrite
+            offsets = tuple(
+                accumulate((len(encode_text(c)) for c in line), initial=0)
             )
             names = frozenset(name for names in owners for name in names)
             previous = session._alias_expansion
@@ -196,9 +190,7 @@ async def execute_command(
                 found = check_syntax(
                     line,
                     expanding_aliases(session) | names,
-                    lambda name, at: (
-                        name in owners[len(encode_text(line[:at]))]
-                    ),
+                    lambda name, at: name in owners[offsets[at]],
                 ) or find_syntax_issue(ast)
                 if found is not None:
                     io = syntax_error_result(found)

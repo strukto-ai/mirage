@@ -660,6 +660,8 @@ async def run_prepared_line(
         # This coroutine is the line's whole task, so every statement
         # and every nested evaluation under it inherits the identity.
         set_line_writer(frame.writer)
+    previous_alias_expansion = effective_session._alias_expansion
+    effective_session._alias_expansion = None
     try:
         ast = (
             parse_scope.parse(command) if argv is None else literal_tree(argv)
@@ -1034,6 +1036,7 @@ async def run_prepared_line(
         # fingerprints/drift) and as observer op events. The command
         # event's exit_code says whether the line that emitted them
         # succeeded.
+        effective_session._alias_expansion = previous_alias_expansion
         parse_scope.release()
         scope.close()
         reset_current_session(session_token)
