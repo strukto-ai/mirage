@@ -146,13 +146,20 @@ export async function dropboxRpc(
   })
 }
 
+/**
+ * Upload one file, overwriting, and return the reply as decoded.
+ *
+ * The reply is the stored FileMetadata; it is not checked here, since the
+ * upload has landed once the call returns and the writer's `uploadToken`
+ * reads it without throwing.
+ */
 export async function dropboxUpload(
   tm: DropboxTokenManager,
   path: string,
   data: Uint8Array,
-): Promise<void> {
+): Promise<unknown> {
   const headers = await dropboxAuthHeaders(tm)
-  await apiRequest('POST', `${tm.contentBase}/files/upload`, {
+  const resp = (await apiRequest('POST', `${tm.contentBase}/files/upload`, {
     errorOf: (r, text) =>
       new DropboxApiError(
         `Dropbox upload ${path} → ${String(r.status)} ${text}`,
@@ -165,8 +172,9 @@ export async function dropboxUpload(
       'Content-Type': 'application/octet-stream',
     },
     body: data as unknown as BodyInit,
-    read: 'none',
-  })
+    read: 'response',
+  })) as ApiResponse
+  return resp.data
 }
 
 /**

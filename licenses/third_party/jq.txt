@@ -1,6 +1,9 @@
 The JSON parser in python/mirage/core/jq/parse.py and
 typescript/packages/core/src/core/jq/parse.ts follows src/jv_parse.c of jq
-1.8.2 (https://github.com/jqlang/jq), which carries this notice:
+1.8.2 (https://github.com/jqlang/jq), and the input reader in
+python/mirage/core/jq/stream.py and
+typescript/packages/core/src/core/jq/stream.ts follows its src/util.c. jq
+carries this notice:
 
 jq is copyright (C) 2012 Stephen Dolan
 

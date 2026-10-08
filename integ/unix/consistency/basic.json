@@ -92,6 +92,43 @@
         "stderr": ""
       },
       "note": "Narrowed to the backends that may declare `read: fresh` (the S3 family, OneDrive and SharePoint, the Hugging Face buckets, flat and key-prefixed, the Hub repos, whose hf-hub target changes the file by commit, GitHub, whose target changes it by a contents PUT, Google Drive, whose token is the file's md5, and Dropbox, flat and under a root_path, whose token is the content_hash a listing row, get_metadata and every download's Dropbox-API-Result carry, and Box, whose token is the sha1 a listing row and GET /files/{id} carry; a read checks its bytes against it): ssh, the other, caches reads but stamps no comparable content token, so the mount-time verdict refuses the policy and the workspace never constructs. The bounded control keeps the full list, hf-prefix included so the pair measures the same buckets. The github fake is one shared world, and needs no reset: every scenario starts by writing v1, create or update."
+    },
+    {
+      "id": "read_bounded_drops_bytes_a_later_writer_replaced",
+      "seq": 310067,
+      "targets": [
+        "s3",
+        "s3-prefix",
+        "dropbox",
+        "dropbox-root",
+        "box",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "gdrive",
+        "hf",
+        "hf-prefix"
+      ],
+      "read": "bounded",
+      "ttl": 600,
+      "scenario": [
+        {
+          "command": "echo aaaa | tee /data/prov.txt > /dev/null; echo bbbb | sed -n 'w /data/prov.txt'"
+        },
+        {
+          "command": "cat /data/prov.txt"
+        },
+        {
+          "command": "rm /data/prov.txt"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "bbbb\n",
+        "stderr": ""
+      },
+      "note": "tee reports the bytes it wrote; sed's `w` writes the same path later on the line without reporting them, so the newest write record is not tee's and the line keeps nothing: the bounded cat reads what the backend holds, not tee's bytes. Both writes are four bytes, so only the provenance check, not the size check, can drop tee's copy."
     }
   ]
 }

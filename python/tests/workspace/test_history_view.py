@@ -424,7 +424,7 @@ def test_failed_line_ops_still_in_audit(monkeypatch):
 
 
 # bash 5.2 adds a line to history only when it is non-empty
-# (`shell_input_line[0]`): a blank line is never recorded, while a
+# (anything before its newline): a blank line is never recorded, while a
 # whitespace-only or comment-only line is. Pinned in debian:stable-slim
 # with `printf 'echo one\n\n   \n# comment\n' | bash -i; history -w`.
 def test_a_blank_line_is_not_recorded_but_whitespace_and_comments_are():

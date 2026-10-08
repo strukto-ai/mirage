@@ -20,10 +20,10 @@ from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.gdrive.readdir import readdir
-from mirage.core.gdrive.stat import stat
+from mirage.core.gdrive.stat import stat, stat_from_api
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
-from mirage.types import FileType, PathSpec
+from mirage.types import ContentType, FileStat, FileType, PathSpec
 
 
 @pytest.fixture
@@ -355,3 +355,41 @@ async def test_stat_stamps_a_doc_by_its_modified_time(accessor, index):
         accessor, PathSpec.from_str_path("/doc.gdoc.json"), index
     )
     assert result.fingerprint == STAMP
+
+
+@pytest.mark.asyncio
+async def test_stat_from_api_renders_every_kind_in_full(
+    fake_drive, gdrive_accessor
+):
+    # Each kind's name suffix, size, token and extras.
+    fake_drive.add("Report", mime="application/vnd.google-apps.document")
+    fake_drive.folder("d")
+    fake_drive.add("a.bin", content=b"hello")
+    assert await stat_from_api(
+        gdrive_accessor, "Report", "/Report"
+    ) == FileStat(
+        name="Report.gdoc.json",
+        size=None,
+        modified="2026-01-01T00:00:00Z",
+        fingerprint="2026-01-01T00:00:00Z",
+        type=FileType.FILE,
+        content=ContentType.JSON,
+        extra={"file_id": "id1", "resource_type": "gdrive/gdoc"},
+    )
+    assert await stat_from_api(gdrive_accessor, "d", "/d") == FileStat(
+        name="d",
+        modified="2026-01-01T00:00:00Z",
+        type=FileType.DIRECTORY,
+        extra={"file_id": "id2"},
+    )
+    assert await stat_from_api(gdrive_accessor, "a.bin", "/a.bin") == (
+        FileStat(
+            name="a.bin",
+            size=5,
+            modified="2026-01-01T00:00:00Z",
+            fingerprint="5d41402abc4b2a76b9719d911017c592",
+            type=FileType.FILE,
+            content=ContentType.BINARY,
+            extra={"file_id": "id3", "resource_type": "gdrive/file"},
+        )
+    )

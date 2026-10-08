@@ -48,7 +48,13 @@ export function quotedBody(doc: Heredoc): [string, number[]] {
   return [out, offsets]
 }
 
-export function lowerHeredocs(text: string, documents: Heredoc[]): HeredocSource {
+/** Give the grammar inline input words; keep heredoc identity separately,
+ * with the plan's substitutions that close with bodies still to read. */
+export function lowerHeredocs(
+  text: string,
+  documents: Heredoc[],
+  closes: HeredocSource['closes'] = [],
+): HeredocSource {
   const edits: [number, number, string, number[], Heredoc | null][] = []
   for (const doc of documents) {
     const [word, positions] = quotedBody(doc)
@@ -69,7 +75,7 @@ export function lowerHeredocs(text: string, documents: Heredoc[]): HeredocSource
   }
   out += text.slice(cursor)
   for (let i = cursor; i <= text.length; i += 1) offsets.push(i)
-  return { original: text, source: out, offsets, documents: attached }
+  return { original: text, source: out, offsets, documents: attached, closes }
 }
 
 export function rebaseSource(source: HeredocSource, repaired: string): HeredocSource {

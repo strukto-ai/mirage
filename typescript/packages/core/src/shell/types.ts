@@ -433,6 +433,7 @@ export interface TSNodeLike {
   readonly heredoc?: Heredoc | undefined
   readonly warnings?: string
   readonly sourceText?: string
+  readonly inlined?: string | undefined
   readonly hasError?: boolean
   type: string
   text: string

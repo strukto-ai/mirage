@@ -37,7 +37,7 @@ class OptionScan:
 def scan_options(args: Sequence[str], known: str) -> OptionScan:
     """Scan a bash builtin's leading option letters.
 
-    bash builtins take single letters only (``internal_getopt``), which
+    bash builtins take single letters only (bash's own getopt), which
     is a different grammar from the GNU tools ``parse_shell_options``
     serves: scanning is non-permuting and stops at ``--`` or the first
     non-option word, a token carries options only when it starts with a

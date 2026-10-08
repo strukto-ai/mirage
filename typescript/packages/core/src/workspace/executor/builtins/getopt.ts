@@ -29,7 +29,7 @@ export interface OptionScan {
 /**
  * Scan a bash builtin's leading option letters.
  *
- * bash builtins take single letters only (`internal_getopt`), which is a
+ * bash builtins take single letters only (bash's own getopt), which is a
  * different grammar from the GNU tools `parseShellOptions` serves:
  * scanning is non-permuting and stops at `--` or the first non-option
  * word, a token carries options only when it starts with a dash and is

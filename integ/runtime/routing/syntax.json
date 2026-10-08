@@ -17,7 +17,7 @@
           "command": "echo (",
           "expect": {
             "exit": 2,
-            "stderr": "mirage: syntax error near '('\n"
+            "stderr": "mirage: syntax error near 'newline'\n"
           }
         }
       ]
@@ -36,10 +36,10 @@
       },
       "steps": [
         {
-          "command": "if ; this-is-a-deliberately-long-unparsable-line-well-past-forty-chars",
+          "command": "echo ( this-is-a-deliberately-long-unparsable-line-well-past-forty-chars",
           "expect": {
             "exit": 2,
-            "stderr": "mirage: syntax error near 'if ; this-is-a-deliberately-long-unparsable-line-well-past-forty-chars'\n"
+            "stderr": "mirage: syntax error near 'this-is-a-deliberately-long-unparsable-line-well-past-forty-chars'\n"
           }
         }
       ]

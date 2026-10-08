@@ -14,12 +14,14 @@
 
 from unittest.mock import AsyncMock, patch
 
+import aiohttp
 import pytest
 
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.core.dropbox.client import DropboxTokenManager
 from mirage.core.dropbox.create import create
 from mirage.core.dropbox.write import write
+from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.vfs.dropbox.config import DropboxConfig
 
@@ -32,6 +34,19 @@ def make_accessor(root_path: str = "/") -> DropboxAccessor:
         root_path=root_path,
     )
     return DropboxAccessor(config, DropboxTokenManager(config))
+
+
+def _file_metadata() -> dict:
+    # Dropbox's upload reply: the stored file's FileMetadata.
+    return {
+        ".tag": "file",
+        "name": "note.txt",
+        "id": "id:abc",
+        "path_display": "/note.txt",
+        "server_modified": "2026-01-01T00:00:00Z",
+        "size": 5,
+        "content_hash": "h5",
+    }
 
 
 @pytest.mark.asyncio
@@ -56,3 +71,87 @@ async def test_create_uploads_empty_bytes():
         await create(make_accessor(), PathSpec.from_str_path("/new.txt"))
     assert upload.await_args.args[1] == "/new.txt"
     assert upload.await_args.args[2] == b""
+
+
+async def _write_recorded(reply):
+    order: list[tuple[str, int]] = []
+    scope = RecordingScope()
+
+    async def _spy(path):
+        order.append(("invalidate", len(scope.records)))
+
+    try:
+        with (
+            patch(
+                "mirage.core.dropbox.write.dropbox_upload",
+                new_callable=AsyncMock,
+                return_value=reply,
+            ),
+            patch(
+                "mirage.core.dropbox.write.invalidate_after_write", new=_spy
+            ),
+            patch(
+                "mirage.core.dropbox.write.invalidate_ancestors",
+                new_callable=AsyncMock,
+            ),
+        ):
+            await write(
+                make_accessor(), PathSpec.from_str_path("/note.txt"), b"hello"
+            )
+    finally:
+        scope.close()
+    rows = [
+        (r.op, r.path, r.bytes, r.fingerprint, r.revision)
+        for r in scope.records
+    ]
+    return rows, order
+
+
+@pytest.mark.asyncio
+async def test_a_write_whose_reply_fails_still_evicts_the_path():
+    # Dropbox may have stored the bytes before the reply broke off, so the
+    # cached copy is stale either way.
+    scope = RecordingScope()
+    evicted: list[str] = []
+
+    async def _spy(path):
+        evicted.append(path.virtual)
+
+    try:
+        with (
+            patch(
+                "mirage.core.dropbox.write.dropbox_upload",
+                new_callable=AsyncMock,
+                side_effect=aiohttp.ClientPayloadError("reply cut off"),
+            ),
+            patch(
+                "mirage.core.dropbox.write.invalidate_after_write", new=_spy
+            ),
+            patch(
+                "mirage.core.dropbox.write.invalidate_ancestors",
+                new_callable=AsyncMock,
+            ),
+            pytest.raises(aiohttp.ClientPayloadError),
+        ):
+            await write(
+                make_accessor(), PathSpec.from_str_path("/note.txt"), b"hello"
+            )
+    finally:
+        scope.close()
+    assert evicted == ["/note.txt"]
+    assert scope.records == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reply", "token"),
+    [(_file_metadata(), "h5"), (None, None)],
+    ids=["agrees", "empty-reply"],
+)
+async def test_write_records_the_reply_token(reply, token):
+    # "h5" is a token no local hash produces.
+    rows, order = await _write_recorded(reply)
+    assert rows == [("write", "/note.txt", 5, token, None)]
+    # Recorded before the eviction, so the record exists when the cache
+    # reacts to the write.
+    assert order == [("invalidate", 1)]

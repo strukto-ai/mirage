@@ -318,7 +318,7 @@ def is_valid_name(name: str) -> bool:
 
 
 def is_count_word(word: str) -> bool:
-    """Whether the word is a number as bash's ``legal_number`` reads it,
+    """Whether the word is a number as bash's builtins read one,
     which is what ``shift``, ``return``, ``exit``, ``break`` and
     ``continue`` accept: blanks around an optionally signed run of
     digits that fits in 64 bits.
@@ -352,7 +352,7 @@ def builtin_error(name: str, message: str) -> bytes:
 
 def numeric_operands(args: list[str]) -> list[str]:
     """The words a numeric builtin reads: a leading ``--`` ends its
-    options, as bash's ``get_numeric_arg`` skips it.
+    options, and bash skips it before it reads the number.
 
     Args:
         args (list[str]): words after the builtin name.

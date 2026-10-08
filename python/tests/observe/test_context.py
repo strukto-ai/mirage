@@ -16,6 +16,7 @@ import asyncio
 
 import pytest
 
+from mirage.observe import context as observe_context
 from mirage.observe.context import (
     RecordingScope,
     active_recorder,
@@ -383,3 +384,66 @@ async def test_record_stream_stores_the_path_as_given_inside_a_mount_frame():
     # The record_stream twin: same rule, separate code path.
     paths = await _dispatch_recording_read(["/x/y", "/m/k.txt"], stream=True)
     assert paths == ["/x/y", "/m/k.txt"]
+
+
+def test_command_records_collects_only_its_own_commands_records():
+    scope = RecordingScope()
+    try:
+        with observe_context.command_records() as outer:
+            record("write", "/a", "ram", 1, start_op())
+            with observe_context.command_records() as inner:
+                record("write", "/b", "ram", 1, start_op())
+                record_stream("write", "/c", "ram")
+            record("write", "/post", "ram", 1, start_op())
+    finally:
+        scope.close()
+    assert [r.path for r in inner] == ["/b", "/c"]
+    assert [r.path for r in outer] == ["/a", "/post"]
+    assert [r.path for r in scope.records] == ["/a", "/b", "/c", "/post"]
+    # The marks land on the line's own records, so the lists share them.
+    sink = {id(r) for r in scope.records}
+    assert all(id(r) in sink for r in [*inner, *outer])
+
+
+def test_command_records_stays_empty_outside_a_recording_scope():
+    with observe_context.command_records() as mine:
+        record("write", "/a", "ram", 1, start_op())
+        assert record_stream("write", "/b", "ram") is None
+    assert mine == []
+
+
+async def _record_in_own_command(
+    path: str, opened: set[str], recorded: set[str], me: str, other: str
+) -> list[str]:
+    with observe_context.command_records() as mine:
+        opened.add(me)
+        while other not in opened:
+            await asyncio.sleep(0)
+        record("write", path, "ram", 1, start_op())
+        recorded.add(me)
+        # Both lists stay open until both have recorded, so a shared
+        # variable that restores the previous list on exit still holds
+        # the other command's list when this one records.
+        while other not in recorded:
+            await asyncio.sleep(0)
+    return [r.path for r in mine]
+
+
+@pytest.mark.asyncio
+async def test_command_records_is_task_local_across_concurrent_commands():
+    # Each command records only after the other has opened its own list.
+    scope = RecordingScope()
+    opened: set[str] = set()
+    recorded: set[str] = set()
+    try:
+        first, second = await asyncio.gather(
+            asyncio.create_task(
+                _record_in_own_command("/a/x.txt", opened, recorded, "A", "B")
+            ),
+            asyncio.create_task(
+                _record_in_own_command("/b/y.txt", opened, recorded, "B", "A")
+            ),
+        )
+    finally:
+        scope.close()
+    assert (first, second) == (["/a/x.txt"], ["/b/y.txt"])

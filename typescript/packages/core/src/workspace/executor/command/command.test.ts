@@ -236,3 +236,35 @@ describe('door options route nothing', () => {
     await ws.close()
   })
 })
+
+class CachedRAM extends RAMVFS {
+  override readonly cachesReads = true
+}
+
+describe('the cross-mount door', () => {
+  it('keeps both edited files cached', async () => {
+    // The sed relay is its own write path, apart from runDispatch: it claims
+    // each -i file, and the line keeps the edited bytes on both mounts, which
+    // then serve a cat after the backend changes.
+    const enc = new TextEncoder()
+    const left = new CachedRAM()
+    const right = new CachedRAM()
+    left.loadState({ type: 'ram', files: { '/f': enc.encode('a1\n') } })
+    right.loadState({ type: 'ram', files: { '/g': enc.encode('a2\n') } })
+    const ws = new Workspace(
+      { '/a': left, '/b': right },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      const result = await ws.shell('sed -i s/a/b/ /a/f /b/g')
+      expect(result.exitCode).toBe(0)
+      expect(await ws.cache.get('/a/f')).toEqual(enc.encode('b1\n'))
+      expect(await ws.cache.get('/b/g')).toEqual(enc.encode('b2\n'))
+      left.loadState({ type: 'ram', files: { '/f': enc.encode('changed\n') } })
+      const again = await ws.shell('cat /a/f')
+      expect(again.stdout).toEqual(enc.encode('b1\n'))
+    } finally {
+      await ws.close()
+    }
+  })
+})

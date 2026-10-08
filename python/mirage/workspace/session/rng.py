@@ -45,7 +45,7 @@ def initial_seed(session_id: str) -> int:
 
 
 def step_state(state: int) -> int:
-    """One step of bash's generator (``intrand32``): Park-Miller through
+    """One step of bash's RANDOM generator: Park-Miller through
     Schrage's method, a zero state stepping from the fixed seed.
 
     Args:
@@ -59,7 +59,7 @@ def step_state(state: int) -> int:
 
 
 def value_of(state: int) -> int:
-    """The ``$RANDOM`` value a state renders as (``brand``): the two
+    """The ``$RANDOM`` value a state renders as in bash: the two
     16-bit halves folded, keeping 15 bits.
 
     Args:
@@ -70,7 +70,7 @@ def value_of(state: int) -> int:
 
 def draw(state: int, last: int) -> tuple[int, int]:
     """One ``$RANDOM`` draw: step until the value differs from the last
-    one, as bash's ``get_random`` does, and return the new state with it.
+    one, as bash does, and return the new state with it.
 
     Args:
         state (int): the generator state before the draw.

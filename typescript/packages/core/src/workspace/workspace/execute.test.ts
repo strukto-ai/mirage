@@ -20,7 +20,14 @@ import { IOResult } from '../../io/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode, VFSName } from '../../types.ts'
 import type { Action, CommandContext, Policy } from '../../policy/index.ts'
-import { getTestParser, stderrStr, stdoutStr } from '../fixtures/workspace_fixture.ts'
+import {
+  cachingRamWorkspace,
+  captureMarks,
+  getTestParser,
+  type Mark,
+  stderrStr,
+  stdoutStr,
+} from '../fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace.ts'
 
 const ENC = new TextEncoder()
@@ -401,5 +408,24 @@ describe('same-session lines run one at a time', () => {
     await interrupted
     await refused
     await closing
+  })
+})
+
+describe('a nested line', () => {
+  it('applies against only the writes since it began', async () => {
+    // Neither the outer line's earlier write nor any read reaches the nested
+    // apply: a concurrent sibling records into the same list, so a read token
+    // there could label bytes it never described.
+    const ws = await cachingRamWorkspace()
+    open.push(ws)
+    expect((await ws.shell('echo a > /r/f')).exitCode).toBe(0)
+    const captured = captureMarks(ws)
+    const line = 'cat /r/f; echo b | tee /r/g; x=$(cat /r/f; echo c | tee /r/h)'
+    expect((await ws.shell(line)).exitCode).toBe(0)
+    const opPaths = (marks: Mark[] | undefined) => (marks ?? []).map(([op, path]) => [op, path])
+    expect(opPaths(captured[0]?.[0])).toEqual([['write', '/r/h']])
+    expect(
+      opPaths(captured[1]?.[0]).filter(([op, path]) => op === 'read' && path === '/r/f'),
+    ).toHaveLength(2)
   })
 })

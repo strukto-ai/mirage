@@ -93,8 +93,8 @@ describe('decodeAnsiC', () => {
   })
 
   it('encodes surrogate halves like a UTF-8 locale', () => {
-    // bash 5.2 (docker, LC_ALL=C.UTF-8 at startup) writes \u/\U through
-    // u32toutf8, so a surrogate half comes out as its raw three-byte
+    // bash 5.2 (docker, LC_ALL=C.UTF-8 at startup) UTF-8-encodes \u/\U
+    // values, so a surrogate half comes out as its raw three-byte
     // form; U+E000, one past the range, is an ordinary character.
     expect(encodeText(decodeAnsiC('\\uD800'))).toEqual(new Uint8Array([0xed, 0xa0, 0x80]))
     expect(encodeText(decodeAnsiC('\\udbff'))).toEqual(new Uint8Array([0xed, 0xaf, 0xbf]))
@@ -103,7 +103,7 @@ describe('decodeAnsiC', () => {
   })
 
   it('encodes values past Unicode or drops them at 0x80000000', () => {
-    // u32toutf8 keeps the old-style four- to six-byte forms alive past
+    // bash keeps the old-style four- to six-byte forms alive past
     // Unicode, and 0x80000000 and past produce nothing - without
     // truncating the rest of the segment the way NUL does.
     expect(encodeText(decodeAnsiC('\\U00110000'))).toEqual(new Uint8Array([0xf4, 0x90, 0x80, 0x80]))
@@ -127,7 +127,7 @@ describe('codePointText', () => {
     [0x110000, [0xf4, 0x90, 0x80, 0x80]],
     [0x7fffffff, [0xfd, 0xbf, 0xbf, 0xbf, 0xbf, 0xbf]],
     [0x80000000, []],
-  ])('writes %s through u32toutf8', (value, expected) => {
+  ])('UTF-8-encodes %s as bash does', (value, expected) => {
     expect([...encodeText(codePointText(value))]).toEqual(expected)
   })
 })

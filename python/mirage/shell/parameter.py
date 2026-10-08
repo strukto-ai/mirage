@@ -16,10 +16,10 @@ import re
 
 from mirage.shell.constants import PARAMETER_NAME
 
-# What bash's parameter_brace_expand (subst.c) reads a braced name
-# against: what ends a name, what ends one after a special parameter,
-# the specials a `#` measures and a `!` follows, the special parameters
-# themselves, the operators a `:` arms, and what may follow a name.
+# What bash reads a braced name against when it expands `${...}`: what
+# ends a name, what ends one after a special parameter, the specials a
+# `#` measures and a `!` follows, the special parameters themselves, the
+# operators a `:` arms, and what may follow a name.
 _NAME_ENDS = "#%^,~:-=?+/@}"
 _SPECIAL_ENDS = "#%:-=?+/@}"
 _LENGTH_SPECIALS = "-?#@"
@@ -72,9 +72,9 @@ def bad_substitution(text: str) -> bool:
     positional or special parameter (``${a b}``, ``${ a}``, ``${}``), an
     element reference that is not one whole (``${a[1]x}``), a ``#``
     measuring more than a name (``${#a-x}``), or a name followed by
-    anything but an operator (``${a:}``, ``${a*}``). This follows
-    ``parameter_brace_expand`` in subst.c, so ``${!a b*}``, which bash
-    reads as a prefix, passes as it does there.
+    anything but an operator (``${a:}``, ``${a*}``). The braces are
+    read as bash reads them, so ``${!a b*}``, which bash reads as a
+    prefix, passes here as it does in bash.
 
     Args:
         text (str): the expansion, from ``${`` through its closing ``}``.

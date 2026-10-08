@@ -16,6 +16,7 @@ import asyncio
 import datetime
 import functools
 import hashlib
+import importlib
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -300,6 +301,13 @@ class _Bucket:
     def __init__(self, files: dict[str, dict]) -> None:
         self._files = files
         self.opened: list[ObjectId] = []
+
+    async def upload_from_stream(self, filename: str, data: bytes) -> ObjectId:
+        # A new revision is a new doc with a new _id, dated after every
+        # seeded one, so it is what latest_file answers next.
+        oid = ObjectId()
+        self._files[filename] = _gridfs_doc(filename, data, str(oid), 2030)
+        return oid
 
     async def open_download_stream(self, file_id: ObjectId) -> _Download:
         self.opened.append(file_id)
@@ -920,6 +928,20 @@ def test_each_family_runs_exactly_its_rows():
     }
     assert {c.id for c in A_CASES} == expected_a
     assert {c.id for c in B_CASES} == expected_b
+    assert {c.id for c in WRITE_CASES} == {
+        f"{family}-write-{target}"
+        for family in (
+            "s3",
+            "gridfs",
+            "hf_buckets",
+            "onedrive",
+            "sharepoint",
+            "gdrive",
+            "box",
+            "dropbox",
+        )
+        for target in ("new", "seeded")
+    }
     assert not any(
         c.id.startswith(
             ("github-", "gdrive-", "gdocs-", "gsheets-", "gslides-")
@@ -1219,6 +1241,86 @@ def test_a_changed_object_is_refetched(name, shape, monkeypatch):
     assert third_fetched == 0
     assert third == CHANGED
     assert fake.reach == []
+
+
+# The command packages the aliases share: every s3 alias is wired through
+# s3's, every hf repo type through hf_hub's. Any other name keys itself, so
+# a new declarer with no package of its own fails the lookup loudly.
+IO_KEYS = {
+    **{name: "s3" for name in S3_FAMILY},
+    **{name: "hf_hub" for name in HF_FAMILY},
+}
+
+
+def _wires_write(key: str) -> bool:
+    io = importlib.import_module(f"mirage.commands.builtin.{key}.io").IO
+    return getattr(io, "write", None) is not None
+
+
+def _writable_names() -> set[str]:
+    # Derived from the registry and each backend's wired write slot (the
+    # CommandIO the spec generator reads), not listed: a declarer that gains
+    # a write op joins the write rows.
+    return {
+        name for name in _declared() if _wires_write(IO_KEYS.get(name, name))
+    }
+
+
+def _write_families() -> set[str]:
+    return {HARNESSES[n] for n in _writable_names() if n in HARNESSES}
+
+
+# hf_buckets, onedrive and sharepoint record no write token, as on main, so
+# the next fresh read downloads once.
+WRITE_EXCEPTIONS = {"hf_buckets": 1, "onedrive": 1, "sharepoint": 1}
+WRITE_TARGETS = {"new": "w.txt", "seeded": KEYS["root"]}
+WRITE_FAMILIES = sorted(_write_families())
+WRITE_CASES = [
+    pytest.param(family, target, id=f"{family}-write-{target}")
+    for family in WRITE_FAMILIES
+    for target in WRITE_TARGETS
+]
+
+
+def test_every_writable_family_has_a_write_harness_or_an_exception():
+    # The write rows run each family's own harness through _fake, so a
+    # writable family is covered exactly when it has a harness; the
+    # exception table may name only writable families.
+    names = _writable_names()
+    assert names
+    assert names <= set(HARNESSES)
+    assert set(WRITE_EXCEPTIONS) <= _write_families()
+
+
+@pytest.mark.parametrize(("family", "target"), WRITE_CASES)
+def test_a_written_file_is_served_without_a_download(
+    family, target, monkeypatch
+):
+    # The new target takes the create path (box/gdrive new upload, Graph
+    # create), the seeded one the update path (version, update by id).
+    with _fake(family, "root", SEED, monkeypatch) as fake:
+        virtual = "/m/" + WRITE_TARGETS[target]
+
+        async def run():
+            ws = _fresh_workspace(fake.vfs)
+            try:
+                await _line(ws, f"echo new | tee {virtual}")
+                written = list(fake.reach)
+                before = fake.fetches()
+                out = await _line(ws, f"cat {virtual}")
+                return out, fake.fetches() - before, written
+            finally:
+                await ws.close()
+
+        out, downloads, written = asyncio.run(run())
+
+    assert out == b"new\n"
+    assert downloads == WRITE_EXCEPTIONS.get(family, 0)
+    # A new gridfs key's stat miss asks files_coll whether the key names a
+    # folder, a door the read rows refuse; the read itself reaches nothing.
+    stat_miss = family == "gridfs" and target == "new"
+    assert written == (["files_coll"] if stat_miss else [])
+    assert fake.reach == written
 
 
 def test_a_dropbox_fresh_probe_asks_for_the_file_not_its_folder():
@@ -1649,7 +1751,6 @@ def _box_case(scenario, root: str = ""):
 
 
 def test_a_cold_fresh_box_read_lists_each_level_once_then_downloads():
-
     out, log, walk, fid = _box_case(
         _a_cold_fresh_box_read_lists_each_level_once_then_downloads_case
     )
@@ -1667,6 +1768,19 @@ def test_a_warm_fresh_box_read_is_one_request_by_id(root):
     )
     assert out == SEED
     assert log == [f"info:{fid}"]
+
+
+def test_a_fresh_box_read_after_a_tee_probes_once_without_a_download():
+    async def scenario(ws, box):
+        await _line(ws, f"echo new | tee /m/{DEEP}")
+        before = len(box.log)
+        out = await _line(ws, f"cat /m/{DEEP}")
+        return out, box.log[before:], _walk(box)
+
+    out, log, walk = _box_case(scenario)
+    assert out == b"new\n"
+    # The probe after a write is one parent walk, not an info by id.
+    assert log == walk
 
 
 async def _direct_box_read_case(ws, box):
@@ -1706,7 +1820,6 @@ def test_a_same_size_box_rewrite_in_the_same_second_is_refetched():
 
 
 def test_a_box_file_moved_outside_is_gone_and_drops_its_overlay():
-
     code, err, log, meta, moved, fid, walk = _box_case(
         _a_box_file_moved_outside_is_gone_and_drops_its_overlay_case
     )
@@ -1748,7 +1861,6 @@ def test_a_box_file_deleted_and_recreated_is_read_anew(mode):
 
 
 def test_a_box_file_recreated_with_the_same_bytes_is_served_warm():
-
     logs, old, new, walk = _box_case(
         _a_box_file_recreated_with_the_same_bytes_is_served_warm_case
     )
@@ -1756,7 +1868,6 @@ def test_a_box_file_recreated_with_the_same_bytes_is_served_warm():
 
 
 def test_a_box_file_under_a_renamed_parent_is_gone():
-
     code, err, renamed, log, fid, to_a = _box_case(
         _a_box_file_under_a_renamed_parent_is_gone_case
     )
@@ -1784,7 +1895,6 @@ def test_a_box_file_under_a_trashed_mount_root_is_gone():
 
 
 def test_a_box_file_the_user_lost_info_access_to_is_checked_by_the_walk():
-
     out, log, again, mode_bits, fid, walk = _box_case(
         _a_box_file_the_user_lost_info_access_to_is_checked_by_the_walk_case
     )
@@ -1818,7 +1928,6 @@ def test_a_warm_box_ls_shows_what_a_cold_one_does_from_one_request():
 
 
 async def _replaced_box_folder_case(ws, box, root="", operand="/m/a/b"):
-
     await _line(ws, f"ls {operand}")
     box.rename_folder(f"{root}a/b", "old")
     box.create(f"{root}a/b/new.txt", b"new listing")

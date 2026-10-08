@@ -111,7 +111,7 @@ async def test_printf_no_args_is_a_usage_error():
     assert io.stderr == b"printf: usage: printf [-v var] format [arguments]\n"
 
 
-# bash's `internal_getopt` takes single letters, so it reports the first
+# bash's option scan takes single letters, so it reports the first
 # character it does not know spelled with ONE dash: a long spelling
 # answers for its second dash and its own text never reaches the
 # message. Measured on bash 5.2.21, where the coreutils binary of the
@@ -142,7 +142,7 @@ async def test_printf_unknown_option_reports_the_first_character(args, bad):
 
 
 # bash answers the EXACT word `--help` for every builtin ahead of
-# `internal_getopt`, writing the page to STDOUT and exiting 2, where
+# its option scan, writing the page to STDOUT and exiting 2, where
 # `--hel` and `--version` take the invalid-option path above (measured
 # on bash 5.2.37).
 @pytest.mark.asyncio
@@ -494,7 +494,7 @@ async def test_printf_in_a_function_a_command_runner_runs_is_the_builtin(
     assert io.exit_code == 0
 
 
-# bash 5.2.37: an escape missing its digits writes builtin_error's
+# bash 5.2.37: an escape missing its digits writes a `bash: printf:`
 # warning to stderr and leaves the status alone.
 @pytest.mark.asyncio
 async def test_printf_missing_digit_warns_and_exits_0():

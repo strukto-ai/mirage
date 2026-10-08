@@ -116,8 +116,8 @@ export async function handleMapfile(
     arraySet(arr, index, text)
     stored++
     if (callback !== null && stored % quantum === 0) {
-      // The record is data, not source: bash builds the callback line
-      // with `sh_single_quote`, so a record reading `x; rm f` arrives as
+      // The record is data, not source: bash single-quotes it in the
+      // callback line, so a record reading `x; rm f` arrives as
       // one argument rather than running a second command.
       const io = await executeFn(`${callback} ${String(index)} ${singleQuote(text)}`, {
         sessionId: session.sessionId,

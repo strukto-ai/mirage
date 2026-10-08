@@ -1009,7 +1009,17 @@ def input_substitution_redirect(node: TSNodeLike) -> Redirect | None:
 
 
 def get_process_sub_body(node: TSNodeLike) -> str:
-    text = decode_text(getattr(node, "source_text", node.text) or b"")
+    """A process substitution's command text, with the heredoc bodies the
+    line reads after it moved inside it.
+
+    Args:
+        node (TSNodeLike): the process_substitution node.
+    """
+    text = decode_text(
+        getattr(node, "inlined", None)
+        or getattr(node, "source_text", node.text)
+        or b""
+    )
     if text.startswith(("<(", ">(")) and text.endswith(")"):
         return text[2:-1]
     return text

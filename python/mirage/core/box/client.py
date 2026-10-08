@@ -27,6 +27,7 @@ from mirage.core.box.constants import (
     BOX_UPLOAD_BASE,
     TOKEN_BUFFER_SECONDS,
 )
+from mirage.types import JsonValue
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.box.config import BoxConfig
 from mirage.vfs.secrets import reveal_secret
@@ -349,7 +350,7 @@ async def box_upload_multipart(
     attributes: dict[str, Any],
     filename: str,
     data: bytes,
-) -> dict[str, Any]:
+) -> JsonValue:
     form = aiohttp.FormData()
     form.add_field("attributes", json.dumps(attributes))
     form.add_field(
@@ -358,7 +359,7 @@ async def box_upload_multipart(
         filename=filename,
         content_type="application/octet-stream",
     )
-    payload: dict[str, Any] = await api_request(
+    payload: JsonValue = await api_request(
         "POST",
         url,
         error_of=partial(_error_of, label="upload", url=url),

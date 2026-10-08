@@ -23,22 +23,20 @@ from mirage.commands.errors import CommandTimeoutError
 from mirage.context import reset_refusal_sink, set_refusal_sink
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.observe.context import RecordingScope
+from mirage.observe.context import RecordingScope, active_records
+from mirage.observe.record import READ_FINGERPRINT_OPS, OpRecord
 from mirage.policy import Deny, HandOff
 from mirage.runtime.routing import RouteDecision, RouteError
-from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole, Terminal
 from mirage.shell.constants import FORK_FAILED, FORK_FAILED_STATUS
+from mirage.shell.errors import DiscardSignal, ExitSignal
 from mirage.shell.helpers import input_substitution_redirect
 from mirage.shell.job_table import JobTable, JobWaits
 from mirage.shell.literal import literal_tree
-from mirage.shell.parse import (
-    find_syntax_error,
-    find_unterminated_backtick,
-    syntax_error_result,
-)
+from mirage.shell.parse import check_syntax, syntax_error_result
 from mirage.shell.parse.scope import ParseScope
+from mirage.shell.parse.syntax import find_syntax_issue
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, Refusal
@@ -588,6 +586,12 @@ async def run_prepared_line(
     is_line = record
     scope = RecordingScope(active=is_line)
     parse_scope = ParseScope()
+    # A nested line applies against the records added to the enclosing
+    # line's since it began, copied at apply, reads left out: a
+    # concurrent sibling stage records into the same list, and its read
+    # token would label bytes this line read before the change.
+    outer = None if is_line else active_records()
+    nested_start = len(outer) if outer is not None else 0
 
     session_token = set_current_evaluation(context, owner=ws._session_mgr)
     # Taken before any statement stamps, so a cancelled line can put
@@ -606,20 +610,29 @@ async def run_prepared_line(
         )
         # Syntax gates before policy, mirroring the TS order and
         # bash: an unparsable line exits 2 and the policy is never
-        # consulted about it.
-        offending = find_syntax_error(
-            ast,
-            expanding_aliases(effective_session),
-            parse_fn=parse_scope.parse,
-        )
-        if offending is None and argv is None:
-            # tree-sitter accepts an unclosed backtick as a complete
-            # command, so the region is scanned separately.
-            offending = find_unterminated_backtick(
-                decode_text(ast.text or b"")
-            )
-        if offending is not None:
-            io = syntax_error_result(offending, ast)
+        # consulted about it. bash's reading of the line decides; the
+        # grammar's own errors only stop a line it cannot build.
+        found = None
+        if argv is None:
+            found = check_syntax(
+                command, expanding_aliases(effective_session)
+            ) or find_syntax_issue(ast)
+        if found is not None:
+            io = syntax_error_result(found)
+            if call_stack is not None and io.exit_code == 127:
+                # A substitution bash cannot parse ends the shell, from
+                # `eval` and `source` too: 127, or 1 out of a child.
+                raise ExitSignal(
+                    127, await io.materialize_stderr(), contained_code=1
+                )
+            if (
+                call_stack is not None
+                and call_stack.subshell
+                and io.exit_code == 1
+            ):
+                # An array bash cannot read discards its line: `eval`
+                # and `source` return 1, and a child shell ends there.
+                raise DiscardSignal(await io.materialize_stderr())
             record_status(session, io.exit_code)
             return io
         nested = NestedRefusal()
@@ -916,7 +929,18 @@ async def run_prepared_line(
         if warnings:
             io.stderr = warnings + await io.materialize_stderr()
         record_status(session, io.exit_code, transparent=True)
-        await ws.apply_io(io, records=scope.records, cache_facts=cache_facts)
+        applied: list[OpRecord] | None = scope.records
+        if not is_line:
+            applied = (
+                None
+                if outer is None
+                else [
+                    r
+                    for r in outer[nested_start:]
+                    if r.op not in READ_FINGERPRINT_OPS
+                ]
+            )
+        await ws.apply_io(io, records=applied, cache_facts=cache_facts)
         return io
     except CommandTimeoutError as exc:
         # The caller's event is read, never written: a timeout is this
@@ -955,10 +979,19 @@ async def run_prepared_line(
         parse_scope.release()
         scope.close()
         reset_current_evaluation(session_token)
-        await ws._session_mgr.flush(session.session_id)
+        # The marks were only for this line's apply_io, so they go however
+        # the save ends, with any a background job added during it; the
+        # seal stops a background command that returns later from marking
+        # a record persisted here, which nothing outside FUSE ever trims.
+        try:
+            await ws._session_mgr.flush(session.session_id)
+        finally:
+            for rec in scope.records:
+                rec.claimed = None
+                rec.sealed = True
         ws._ops.records.extend(scope.records)
         # bash adds a line to history only when it is non-empty
-        # (`shell_input_line[0]`): a blank line is skipped, while a
+        # (anything before its newline): a blank line is skipped, while a
         # whitespace-only or comment-only line is kept.
         if is_line and command.strip("\n"):
             await ws.observer.log_execution(
