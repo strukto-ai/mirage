@@ -40,7 +40,13 @@ def test_session_defaults():
     assert s.cwd == "/"
     # bash exports `$PWD` from startup, so even a session that never
     # ran `cd` has one.
-    assert s.env == {"PWD": "/", "PATH": "/usr/bin", "IFS": " \t\n"}
+    assert s.env == {
+        "PWD": "/",
+        "PATH": "/usr/bin",
+        "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
+    }
     assert s.functions == {}
     assert s.last_exit_code == 0
 
@@ -88,6 +94,8 @@ def test_session_to_dict():
         "PWD": "/data",
         "PATH": "/usr/bin",
         "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
     }
     assert "created_at" in d
 
@@ -160,6 +168,8 @@ def test_fork_copies_every_field_including_mount_modes():
         "PWD": "/disk",
         "PATH": "/usr/bin",
         "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
     }
     assert forked.mount_modes == {
         "/s3": MountMode.READ,
@@ -210,6 +220,8 @@ def test_fork_overrides_apply_without_mutating_original():
         "PWD": "/ram",
         "PATH": "/usr/bin",
         "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
     }
     assert original.cwd == "/disk"
     assert original.env == {
@@ -217,6 +229,8 @@ def test_fork_overrides_apply_without_mutating_original():
         "PWD": "/disk",
         "PATH": "/usr/bin",
         "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
     }
 
 
@@ -283,10 +297,17 @@ def test_to_dict_carries_the_attributes_beside_the_values():
         "PWD": "/",
         "PATH": "/usr/bin",
         "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
         "PLAIN": "hello",
         "EXPO": "world",
     }
-    assert data["var_attrs"] == {"PWD": "x", "EXPO": "x", "MARKED": "rx"}
+    assert data["var_attrs"] == {
+        "PWD": "x",
+        "OPTIND": "i",
+        "EXPO": "x",
+        "MARKED": "rx",
+    }
 
 
 def test_var_attrs_is_written_even_when_empty():
@@ -296,8 +317,10 @@ def test_var_attrs_is_written_even_when_empty():
     # environment, and the reload re-exported everything it held.
     s = SessionState(session_id="s1")
     seed_var(s, "X", "secret")
-    # `export -n PWD` clears the one attribute a fresh session carries.
+    # `export -n PWD` and `unset OPTIND` clear the attributes a fresh
+    # session carries.
     set_attr(s, "PWD", VarAttr.EXPORT, False)
+    del s.vars["OPTIND"]
     data = s.to_dict()
     assert data["var_attrs"] == {}
     back = SessionState.from_dict(data)
@@ -634,6 +657,7 @@ def test_new_shell_starts_from_the_environment():
         "OUT": ShellVar("o", exported),
         "TOKEN": ShellVar(None, exported, token),
         "OPTIND": ShellVar("1", exported | {VarAttr.INTEGER}),
+        "OPTERR": ShellVar("1"),
         "RANDOM": ShellVar("42", exported),
         "PWD": ShellVar("/w", exported),
         "PATH": ShellVar("/usr/bin"),

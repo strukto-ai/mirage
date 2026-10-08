@@ -21,8 +21,9 @@ import { makeVar, type ShellVar, VarAttr } from '../../shell/variable.ts'
 export const DEFAULT_PROFILE = 'default'
 
 /**
- * What a new shell starts these at whatever its environment holds, as bash's
- * startup does (OPTIND an integer); an exported one keeps its export mark.
+ * What bash starts these at whatever its environment holds (OPTIND an
+ * integer), unexported: every new shell seeds them, and a nested shell
+ * restarts an exported one, which keeps only its export mark.
  */
 export const STARTUP_VALUES: Readonly<Record<string, ShellVar>> = {
   OPTIND: makeVar('1', new Set([VarAttr.Integer])),

@@ -546,6 +546,11 @@ export class SessionState {
     // `${#IFS}` as 3 and `OLDIFS=$IFS ... IFS=$OLDIFS` puts the default
     // back rather than an empty IFS that splits nothing.
     if (!Object.hasOwn(this.vars, 'IFS')) this.vars.IFS = makeVar(IFS_DEFAULT, new Set())
+    // bash starts OPTIND (an integer) and OPTERR at 1 and never exports them,
+    // so `shift $((OPTIND-1))` works before any `getopts`.
+    for (const [name, start] of Object.entries(STARTUP_VALUES)) {
+      if (!Object.hasOwn(this.vars, name)) this.vars[name] = copyVar(start)
+    }
   }
 
   /**
@@ -599,6 +604,10 @@ export class SessionState {
       pipelineTimeoutSeconds: overrides.pipelineTimeoutSeconds ?? this.pipelineTimeoutSeconds,
       lastBgJobId: overrides.lastBgJobId ?? this.lastBgJobId,
     })
+    // A fork is the same shell going on, so a startup variable the source
+    // unset stays unset (`unset IFS; ( ... )`) rather than being seeded
+    // again; a fork given new variables starts them.
+    if (overrides.vars === undefined) forked.vars = vars
     if (this.randomSeed === RANDOM_UNSET) forked.randomSeed = RANDOM_UNSET
     forked.terminalOutput = this.terminalOutput
     forked.pipeStatus = [...this.pipeStatus]

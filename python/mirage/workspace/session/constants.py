@@ -80,9 +80,9 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "_function_sites",
 )
 
-# What a new shell starts these at whatever its environment holds, as
-# bash's startup does (OPTIND an integer); an exported one keeps its
-# export mark.
+# What bash starts these at whatever its environment holds (OPTIND an
+# integer), unexported: every new shell seeds them, and a nested shell
+# restarts an exported one, which keeps only its export mark.
 STARTUP_VALUES: dict[str, ShellVar] = {
     "OPTIND": ShellVar("1", frozenset({VarAttr.INTEGER})),
     "OPTERR": ShellVar("1"),

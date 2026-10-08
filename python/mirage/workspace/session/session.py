@@ -782,6 +782,10 @@ class SessionState:
         # reads `${#IFS}` as 3 and `OLDIFS=$IFS ... IFS=$OLDIFS` puts the
         # default back rather than an empty IFS that splits nothing.
         self.vars.setdefault("IFS", ShellVar(IFS_DEFAULT, frozenset()))
+        # bash starts OPTIND (an integer) and OPTERR at 1 and never exports
+        # them, so `shift $((OPTIND-1))` works before any `getopts`.
+        for name, var in STARTUP_VALUES.items():
+            self.vars.setdefault(name, var)
 
     def fork(self, **overrides: Any) -> "SessionState":
         """Return a copy of this session with overrides applied.
@@ -814,7 +818,13 @@ class SessionState:
                 **defaults["vars"],
                 "PWD": ShellVar(overrides["cwd"], frozenset({VarAttr.EXPORT})),
             }
+        kept = None if "vars" in overrides else dict(defaults["vars"])
         forked = SessionState(**defaults)
+        if kept is not None:
+            # A fork is the same shell going on, so a startup variable the
+            # source unset stays unset (`unset IFS; ( ... )`) rather than
+            # being seeded again; a fork given new variables starts them.
+            forked.vars = kept
         if self._random_seed == RANDOM_UNSET:
             forked._random_seed = RANDOM_UNSET
         return forked

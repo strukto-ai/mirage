@@ -67,9 +67,15 @@ def test_manager_default_cwd():
 
 def test_manager_default_env():
     mgr = SessionManager("default")
-    # A fresh session carries the seeded `$PWD`, `$PATH` and `$IFS`, nothing
-    # else.
-    assert mgr.env == {"PWD": "/", "PATH": "/usr/bin", "IFS": " \t\n"}
+    # A fresh session carries the seeded `$PWD`, `$PATH`, `$IFS`, `$OPTIND`
+    # and `$OPTERR`, nothing else.
+    assert mgr.env == {
+        "PWD": "/",
+        "PATH": "/usr/bin",
+        "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
+    }
     mgr.env = {"A": "1"}
     assert mgr.env == {"A": "1"}
     assert mgr.get("default").env == {"A": "1"}
@@ -187,7 +193,14 @@ async def test_manager_hydrates_from_store():
     await mgr.ensure_loaded()
     s = mgr.get("restored")
     assert s.cwd == "/w"
-    assert s.env == {"K": "v", "PWD": "/w", "PATH": "/usr/bin", "IFS": " \t\n"}
+    assert s.env == {
+        "K": "v",
+        "PWD": "/w",
+        "PATH": "/usr/bin",
+        "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
+    }
     assert s.mount_modes == {"/data": MountMode.READ}
     assert s.functions == {"f": "f() { echo persisted; }"}
     assert s.readonly_functions == {"f"}
@@ -230,6 +243,8 @@ async def test_manager_default_adopts_stored_fields():
         "PWD": "/w",
         "PATH": "/usr/bin",
         "IFS": " \t\n",
+        "OPTIND": "1",
+        "OPTERR": "1",
     }
 
 

@@ -1525,7 +1525,9 @@ describe('handleSet', () => {
   it('no args → print env', () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ A: '1' }) })
     const [out] = handleSet([], s)
-    expect(decode(out as Uint8Array)).toBe("A=1\nIFS=$' \\t\\n'\nPATH=/usr/bin\nPWD=/\n")
+    expect(decode(out as Uint8Array)).toBe(
+      "A=1\nIFS=$' \\t\\n'\nOPTERR=1\nOPTIND=1\nPATH=/usr/bin\nPWD=/\n",
+    )
   })
 
   it.each([
