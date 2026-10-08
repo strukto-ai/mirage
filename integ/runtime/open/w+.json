@@ -5,7 +5,8 @@
       "runtimes": [
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "backends": [
         "ram",
@@ -52,7 +53,8 @@
       "runtimes": [
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "backends": [
         "ram",

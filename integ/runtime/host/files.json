@@ -1,0 +1,150 @@
+{
+  "cases": [
+    {
+      "id": "reads_and_writes_reach_the_mount",
+      "runtimes": [
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import errno\nfrom pathlib import Path\nprint(Path('/data/seed.txt').read_text().rstrip())\nPath('/data/new.txt').write_text('fresh\\n')\nwith open('/data/new.txt', 'a') as f:\n    f.write('more\\n')\nprint(open('/data/new.txt').read().rstrip())\ntry:\n    open('/data/nope.txt')\nexcept OSError as e:\n    print(errno.errorcode[e.errno])",
+            "node": "const fsp = require('node:fs').promises\nconsole.log((await fsp.readFile('/data/seed.txt', 'utf8')).trimEnd())\nawait fsp.writeFile('/data/new.txt', 'fresh\\n')\nawait fsp.appendFile('/data/new.txt', 'more\\n')\nconsole.log((await fsp.readFile('/data/new.txt', 'utf8')).trimEnd())\ntry {\n  await fsp.readFile('/data/nope.txt')\n} catch (e) {\n  console.log(e.code)\n}"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "seed\nfresh\nmore\nENOENT\n",
+            "ops_contain": [
+              "read /data/seed.txt",
+              "append /data/new.txt"
+            ],
+            "ops_absent": [
+              "create /data/nope.txt"
+            ]
+          }
+        },
+        {
+          "command": "cat /data/new.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "fresh\nmore\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "the_tree_ops_reach_the_mount",
+      "runtimes": [
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nyes = lambda b: 'yes' if b else 'no'\nos.makedirs('/data/a/b')\nwith open('/data/a/b/f.txt', 'w') as f:\n    f.write('hi')\nos.rename('/data/a/b/f.txt', '/data/a/g.txt')\nos.symlink('g.txt', '/data/a/l')\nprint(' '.join(sorted(os.listdir('/data/a'))))\nprint(os.readlink('/data/a/l'), yes(os.path.islink('/data/a/l')), yes(os.path.isdir('/data/a/b')), os.path.getsize('/data/a/g.txt'))\nos.unlink('/data/a/l')\nos.rmdir('/data/a/b')\nprint(' '.join(sorted(os.listdir('/data/a'))))",
+            "node": "const fsp = require('node:fs').promises\nconst yes = (b) => (b ? 'yes' : 'no')\nawait fsp.mkdir('/data/a/b', { recursive: true })\nawait fsp.writeFile('/data/a/b/f.txt', 'hi')\nawait fsp.rename('/data/a/b/f.txt', '/data/a/g.txt')\nawait fsp.symlink('g.txt', '/data/a/l')\nconsole.log((await fsp.readdir('/data/a')).sort().join(' '))\nconst link = (await fsp.lstat('/data/a/l')).isSymbolicLink()\nconst dir = (await fsp.stat('/data/a/b')).isDirectory()\nconsole.log(await fsp.readlink('/data/a/l'), yes(link), yes(dir), (await fsp.stat('/data/a/g.txt')).size)\nawait fsp.unlink('/data/a/l')\nawait fsp.rmdir('/data/a/b')\nconsole.log((await fsp.readdir('/data/a')).sort().join(' '))"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "b g.txt l\ng.txt yes yes 2\ng.txt\n",
+            "ops_contain": [
+              "mkdir /data/a/b",
+              "rename /data/a/b/f.txt",
+              "unlink /data/a/l",
+              "rmdir /data/a/b"
+            ]
+          }
+        },
+        {
+          "command": "ls /data/a",
+          "expect": {
+            "exit": 0,
+            "stdout": "g.txt\n"
+          }
+        },
+        {
+          "command": "cat /data/a/g.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "hi"
+          }
+        }
+      ]
+    },
+    {
+      "id": "times_modes_and_owner_reach_the_mount",
+      "runtimes": [
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "t.txt": "t\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nos.utime('/data/t.txt', (1000000000, 1700000000))\nos.chmod('/data/t.txt', 0o640)\nos.chown('/data/t.txt', 1234, 5678)\nst = os.stat('/data/t.txt')\nprint(int(st.st_atime), int(st.st_mtime), oct(st.st_mode & 0o777), st.st_uid, st.st_gid)",
+            "node": "const fsp = require('node:fs').promises\nawait fsp.utimes('/data/t.txt', 1000000000, 1700000000)\nawait fsp.chmod('/data/t.txt', 0o640)\nawait fsp.chown('/data/t.txt', 1234, 5678)\nconst st = await fsp.stat('/data/t.txt')\nconst mode = '0o' + (st.mode & 0o777).toString(8)\nconsole.log(Math.trunc(st.atimeMs / 1000), Math.trunc(st.mtimeMs / 1000), mode, st.uid, st.gid)"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "1000000000 1700000000 0o640 1234 5678\n"
+          }
+        },
+        {
+          "command": "stat -c '%a %u %g %X %Y' /data/t.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "640 1234 5678 1000000000 1700000000\n"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
+import { Console } from 'node:console'
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -27,6 +29,7 @@ import {
   Limit,
   MongoDBVFS,
   MountMode,
+  patchNodeFs,
   PathSpec,
   RAMVFS,
   RedisVFS,
@@ -89,6 +92,7 @@ interface Expect {
   // answer for the step.
   python?: Expect
   js?: Expect
+  node?: Expect
 }
 
 interface FacadeSpec {
@@ -104,9 +108,13 @@ interface Step {
   script?: string | Record<string, string>
   // A guest program per language, run as `python3 -c` or `node -e`.
   program?: Record<string, string>
+  // The host door's program, run in this process under patchNodeFs.
+  host_program?: string
   runtime?: string
   stdin?: string
   add_runtime?: string
+  // The default session's profile from this step on.
+  profile?: Record<string, unknown>
   s3_put?: { key: string; body: string }
   rename?: { src: string; dst: string }
   read_op?: string
@@ -819,6 +827,9 @@ async function runStep(
   // The ledger slice this step adds: ws.records delegates to the Files
   // facade's account, so the step's own ops are the tail.
   const ledgerBefore = ws.records.length
+  if (step.host_program !== undefined) {
+    return runHostProgram(ws, caseId, label, step.host_program, expect)
+  }
   if (step.facade !== undefined) {
     const problems = await runFacade(ws, expect, step.facade)
     const seen = ws.records.slice(ledgerBefore).map((r) => `${r.op} ${r.path}`)
@@ -831,6 +842,16 @@ async function runStep(
   }
   if (step.add_runtime !== undefined) {
     ws.addRuntime(step.add_runtime)
+    return []
+  }
+  if (step.profile !== undefined) {
+    // The default session's profile from here on: a world's own profile
+    // applies before its files are seeded, so a case that hides a seeded
+    // file sets it as a step. Mirrors run.py.
+    await ws.setSessionProfile(
+      ws.defaultSessionId,
+      parseSessionProfile(step.profile, 'step profile'),
+    )
     return []
   }
   if (step.rename !== undefined) {
@@ -898,6 +919,56 @@ async function runStep(
   return problems
 }
 
+const requireCjs = createRequire(import.meta.url)
+const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor as new (
+  ...params: string[]
+) => (...args: unknown[]) => Promise<unknown>
+
+/** A console writing into `out` and `err`, as a program's streams. */
+function capture(out: string[], err: string[]): Console {
+  const sink = (into: string[]): NodeJS.WritableStream =>
+    ({
+      write: (chunk: string) => {
+        into.push(chunk)
+        return true
+      },
+    }) as unknown as NodeJS.WritableStream
+  return new Console({ stdout: sink(out), stderr: sink(err), ignoreErrors: false })
+}
+
+/**
+ * Run one program the way `node -e` would, with node's `fs` pointed at the
+ * workspace: the host door, `patchNodeFs`, for the program's run. The
+ * program gets `require` and a `console` of its own; a throw prints what
+ * node prints for it and exits 1. Mirrors run.py `_run_host_program`.
+ */
+async function runHostProgram(
+  ws: Workspace,
+  caseId: string,
+  label: string,
+  source: string,
+  expect: Expect,
+): Promise<string[]> {
+  const ledgerBefore = ws.records.length
+  const out: string[] = []
+  const err: string[] = []
+  const guest = capture(out, err)
+  const restore = patchNodeFs(ws)
+  let exitCode = 0
+  try {
+    await new AsyncFunction('require', 'console', source)(requireCjs, guest)
+  } catch (thrown) {
+    guest.error(thrown)
+    exitCode = 1
+  } finally {
+    restore()
+  }
+  const problems = check(caseId, label, expect, exitCode, out.join(''), err.join(''))
+  const seen = ws.records.slice(ledgerBefore).map((r) => `${r.op} ${r.path}`)
+  problems.push(...checkOps(expect, seen).map((p) => `${caseId} ${label}: ${p}`))
+  return problems
+}
+
 // What a case's `backends` entry needs on this host before it can run.
 const BACKEND_REQUIRES: Record<string, string[]> = {
   ram: [],
@@ -916,6 +987,7 @@ const RUNTIME_LANGUAGE: Record<string, string | null> = {
   quickjs: 'js',
   local: 'python',
   sandlock: 'python',
+  host: 'node',
   docker: null,
   ssh: null,
   e2b: null,
@@ -923,6 +995,13 @@ const RUNTIME_LANGUAGE: Record<string, string | null> = {
   apple_container: null,
 }
 const PROGRAM_HEAD: Record<string, string> = { python: 'python3 -c', js: 'node -e' }
+// Every language a program or an `expect` may be keyed by. `node` is the
+// host door's: node's own `fs`, where `js` is QuickJS's std/os.
+const LANGUAGES = new Set(['python', 'js', 'node'])
+// The runtime that is no runtime: the SDK's in-process door (`patchNodeFs`
+// here, `with ws:` on the python host), which runs a program in the
+// runner's own process with node's `fs` pointed at the workspace.
+const HOST_DOOR = 'host'
 // The expect keys that read the workspace's op ledger.
 const LEDGER_CHECKS = new Set(['ops_contain', 'ops_absent', 'ops_count'])
 // What a `runtimes` entry needs on this host before it can run. A runtime
@@ -935,6 +1014,7 @@ const RUNTIME_REQUIRES: Record<string, string[]> = {
   quickjs: [],
   local: [],
   sandlock: ['env:MIRAGE_INTEG_SANDLOCK'],
+  host: [],
   docker: ['env:MIRAGE_INTEG_DOCKER_CONTAINER'],
   ssh: ['env:MIRAGE_INTEG_SSH_HOST'],
   smolvm: ['env:MIRAGE_INTEG_SMOLVM_MACHINE'],
@@ -999,11 +1079,14 @@ function overlay(step: Step, keys: string[]): Step {
  * source) or `script` (a fixture path) maps a guest language to what that
  * language runs, under `python3 -c` or `node -e`, and a `command` map
  * gives the whole line per language. An `expect` keyed by language, as
- * `program` is, gives each language its own answer. A parallel step keeps
- * the branches that run there. Mirrors run.py `_step_for`.
+ * `program` is, gives each language its own answer, and must hold one for
+ * the language. A parallel step keeps the branches that run there. The
+ * host door runs a program in the runner itself (`host_program`), so it
+ * has no line for a `command` map to give. Mirrors run.py `_step_for`.
  */
-function stepFor(step: Step, language: string | null): [Step | null, boolean] {
+function stepFor(step: Step, language: string | null, door = false): [Step | null, boolean] {
   if (step.parallel !== undefined) {
+    if (door) throw new Error('the host door runs no parallel step')
     const mapped = step.parallel.map((branch) => stepFor(branch, language))
     const branches = mapped.flatMap(([branch]) => (branch === null ? [] : [branch]))
     if (branches.length === 0) return [null, false]
@@ -1016,15 +1099,27 @@ function stepFor(step: Step, language: string | null): [Step | null, boolean] {
   const head = PROGRAM_HEAD[language] ?? ''
   const rest = { ...step }
   delete rest.program
-  const mapped: Step =
-    key === 'program'
-      ? { ...rest, command: `${head} ${singleQuote(source)}` }
-      : key === 'script'
-        ? { ...rest, command: head, script: source }
-        : { ...rest, command: source }
+  delete rest.script
+  let mapped: Step
+  if (door) {
+    if (key === 'command') throw new Error('the host door has no line for a command map')
+    const program =
+      key === 'script'
+        ? readFileSync(join(SUITE_DIR, '../fixtures/runtime', source), 'utf8')
+        : source
+    mapped = { ...rest, host_program: program }
+  } else if (key === 'program') {
+    mapped = { ...rest, command: `${head} ${singleQuote(source)}` }
+  } else if (key === 'script') {
+    mapped = { ...rest, command: head, script: source }
+  } else {
+    mapped = { ...rest, command: source }
+  }
   const expect = step.expect ?? {}
-  if (Object.keys(expect).some((k) => k in PROGRAM_HEAD)) {
-    mapped.expect = (expect as Record<string, Expect | undefined>)[language] ?? {}
+  if (Object.keys(expect).some((k) => LANGUAGES.has(k))) {
+    const own = (expect as Record<string, Expect | undefined>)[language]
+    if (own === undefined) throw new Error(`an expect keyed by language holds no ${language}`)
+    mapped.expect = own
   }
   return [mapped, true]
 }
@@ -1040,17 +1135,24 @@ function stepFor(step: Step, language: string | null): [Step | null, boolean] {
  */
 function forRuntime(testCase: Case, runtime: string): Case | null {
   const language = RUNTIME_LANGUAGE[runtime] ?? null
+  const door = runtime === HOST_DOOR
   const steps: Step[] = []
   let programs = 0
   for (const listed of testCase.steps ?? []) {
-    const [step, guest] = stepFor(listed, language)
+    let mapped: [Step | null, boolean]
+    try {
+      mapped = stepFor(listed, language, door)
+    } catch (err) {
+      throw new Error(`${testCase.id}@${runtime}: ${(err as Error).message}`, { cause: err })
+    }
+    const [step, guest] = mapped
     if (step === null) continue
     if (guest) programs += 1
     steps.push(overlay(step, [runtime, `${runtime}@${HOST}`]))
   }
   if (programs === 0 && language !== null) return null
   const world = structuredClone(testCase.world ?? {})
-  world.runtimes = [runtimeEntry(runtime, testCase.entry ?? {}), 'workspace']
+  if (!door) world.runtimes = [runtimeEntry(runtime, testCase.entry ?? {}), 'workspace']
   return {
     ...testCase,
     id: `${testCase.id}@${runtime}`,

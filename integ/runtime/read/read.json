@@ -6,7 +6,8 @@
         "monty",
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "backends": [
         "ram",
@@ -55,6 +56,9 @@
               "ops_absent": [
                 "read /data/seed.txt"
               ]
+            },
+            "host@s3": {
+              "ops_absent": []
             }
           }
         },
@@ -130,7 +134,8 @@
         "monty",
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "world": {
         "mounts": {
@@ -333,7 +338,8 @@
         "monty",
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "world": {
         "mounts": {

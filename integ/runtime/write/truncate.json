@@ -4,7 +4,8 @@
       "id": "truncate_cuts_then_a_write_past_the_cut_leaves_zeros",
       "runtimes": [
         "wasi",
-        "pyodide"
+        "pyodide",
+        "host"
       ],
       "backends": [
         "ram",
@@ -42,7 +43,8 @@
       "id": "os_truncate_needs_no_handle",
       "runtimes": [
         "wasi",
-        "pyodide"
+        "pyodide",
+        "host"
       ],
       "backends": [
         "ram",

@@ -1,0 +1,115 @@
+{
+  "cases": [
+    {
+      "id": "a_copy_crosses_the_mount_edge_and_a_move_does_not",
+      "runtimes": [
+        "host"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import errno, os, shutil, tempfile\nd = tempfile.mkdtemp()\nwith open(os.path.join(d, 'h.txt'), 'w') as f:\n    f.write('from the host')\nshutil.copyfile(os.path.join(d, 'h.txt'), '/data/in.txt')\nshutil.copyfile('/data/in.txt', os.path.join(d, 'out.txt'))\nwith open(os.path.join(d, 'out.txt')) as f:\n    print(f.read())\nprint(' '.join(sorted(os.listdir(d))))\ntry:\n    os.rename('/data/in.txt', os.path.join(d, 'moved.txt'))\nexcept OSError as e:\n    print(errno.errorcode[e.errno])\nshutil.rmtree(d)\nprint('there' if os.path.exists(d) else 'gone')",
+            "node": "const fs = require('node:fs')\nconst fsp = fs.promises\nconst { join } = require('node:path')\nconst { tmpdir } = require('node:os')\nconst d = await fsp.mkdtemp(join(tmpdir(), 'mirage-host-'))\nawait fsp.writeFile(join(d, 'h.txt'), 'from the host')\nawait fsp.copyFile(join(d, 'h.txt'), '/data/in.txt')\nawait fsp.copyFile('/data/in.txt', join(d, 'out.txt'))\nconsole.log(await fsp.readFile(join(d, 'out.txt'), 'utf8'))\nconsole.log((await fsp.readdir(d)).sort().join(' '))\ntry {\n  await fsp.rename('/data/in.txt', join(d, 'moved.txt'))\n} catch (e) {\n  console.log(e.code)\n}\nawait fsp.rm(d, { recursive: true })\nconsole.log(fs.existsSync(d) ? 'there' : 'gone')"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "from the host\nh.txt out.txt\nEXDEV\ngone\n",
+            "ops_absent": [
+              "rename /data/in.txt"
+            ]
+          }
+        },
+        {
+          "command": "cat /data/in.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "from the host"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_mount_root_is_busy",
+      "runtimes": [
+        "host"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "f\n",
+              "d/keep.txt": "k\n"
+            }
+          },
+          "/data/d/m": {
+            "vfs": "ram",
+            "files": {
+              "g.txt": "g\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import errno, os, shutil\ncalls = [(os.rmdir, '/data/d/m'), (shutil.rmtree, '/data/d/m'), (shutil.rmtree, '/data/d'), (os.rmdir, '/data')]\nfor call, path in calls:\n    try:\n        call(path)\n        print('removed')\n    except OSError as e:\n        print(errno.errorcode[e.errno])",
+            "node": "const fsp = require('node:fs').promises\nconst calls = [\n  () => fsp.rmdir('/data/d/m'),\n  () => fsp.rm('/data/d/m', { recursive: true }),\n  () => fsp.rm('/data/d', { recursive: true }),\n  () => fsp.rmdir('/data'),\n]\nfor (const call of calls) {\n  try {\n    await call()\n    console.log('removed')\n  } catch (e) {\n    console.log(e.code)\n  }\n}"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "EBUSY\nEBUSY\nEBUSY\nEBUSY\n",
+            "ops_absent": [
+              "unlink",
+              "rmdir"
+            ]
+          }
+        },
+        {
+          "command": "cat /data/f.txt /data/d/keep.txt /data/d/m/g.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "f\nk\ng\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_sync_call_or_a_watch_refuses_a_mount",
+      "runtimes": [
+        "host"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "f\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "node": "const fs = require('node:fs')\nconst { tmpdir } = require('node:os')\nconst calls = [\n  () => fs.readFileSync('/data/f.txt'),\n  () => fs.statSync('/data/f.txt'),\n  () => fs.existsSync('/data/f.txt'),\n  () => fs.watch('/data/f.txt', () => undefined),\n]\nfor (const call of calls) {\n  try {\n    call()\n    console.log('served')\n  } catch (e) {\n    console.log(e.code)\n  }\n}\ntry {\n  for await (const _ of fs.promises.watch('/data/f.txt')) break\n} catch (e) {\n  console.log(e.code)\n}\nconsole.log(fs.existsSync(tmpdir()) ? 'host' : 'none')"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "ENOTSUP\nENOTSUP\nENOTSUP\nENOTSUP\nENOTSUP\nhost\n",
+            "ops_absent": [
+              "read /data/f.txt"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
