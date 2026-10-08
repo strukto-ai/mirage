@@ -77,7 +77,7 @@ export function isFileAttrs(attrs: { mode?: number }): boolean {
 }
 
 /**
- * Open a remote file for writing, creating it and cutting nothing.
+ * Open a remote file for writing, creating it and optionally truncating it.
  *
  * OpenSSH answers an open of a directory with SFTP 3's one generic refusal
  * (SSH_FX_FAILURE), so a stat decides whether it was one; a missing parent
@@ -87,10 +87,11 @@ export async function openForWrite(
   sftp: SFTPWrapper,
   remote: string,
   p: PathSpec,
+  truncate = false,
 ): Promise<Buffer> {
   try {
     return await new Promise<Buffer>((resolveFn, rejectFn) => {
-      sftp.open(remote, FXF_WRITE | FXF_CREAT, (err, opened) => {
+      sftp.open(remote, truncate ? 'w' : FXF_WRITE | FXF_CREAT, (err, opened) => {
         if (err) rejectFn(err)
         else resolveFn(opened)
       })

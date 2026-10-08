@@ -30,6 +30,7 @@ from mirage.errors.types import FsCondition
 from mirage.shell.bytes import encode_text
 
 if TYPE_CHECKING:
+    from mirage.commands.spec.parser import ParsedArgs
     from mirage.workspace.executor.command.types import ParsedCommand
 
 ARGPARSE_EXIT = 2
@@ -229,7 +230,7 @@ def clap_missing_operands(
 def leaf_refusal(
     style: UsageStyle,
     argparse_message: bytes,
-    parsed: "ParsedCommand",
+    parsed: "ParsedCommand | ParsedArgs",
     path: str,
     spec: CommandSpec,
 ) -> tuple[bytes, int, bytes | None]:

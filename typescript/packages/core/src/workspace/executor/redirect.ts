@@ -42,12 +42,13 @@ import {
   unreadableStdin,
   unsupportedDescriptor,
 } from '../../shell/descriptors.ts'
-import { getText } from '../../shell/helpers.ts'
+import { getText, literalWord } from '../../shell/helpers.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import { type Redirect, RedirectKind } from '../../shell/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { SessionState } from '../session/session.ts'
+import { homeDir } from '../session/shell_dirs.ts'
 import { ExecutionNode } from '../types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { createFile, writeDescription } from './create.ts'
@@ -235,11 +236,10 @@ export async function handleRedirect(
     outputs.set(fd, descriptorOutput(descriptor))
     if (descriptor.identity === EXEC_CLOSED) closed.add(fd)
   }
-  const failed = async (result: Result): Promise<Result> => {
+  const failed = async (result: Result, target = outputs.get(2)): Promise<Result> => {
     let [stdout] = result
     const [, io, node] = result
     const data = await io.materializeStderr()
-    const target = outputs.get(2)
     if (target === TO_STDERR) return result
     io.stderr = null
     if (target === TO_STDOUT) stdout = data
@@ -252,11 +252,11 @@ export async function handleRedirect(
     return [stdout, io, node]
   }
   const files: FileDescription[] = []
+  let openStderr: FdDest | undefined
   const expanded: Redirect[] = []
   const targets: PathSpec[] = []
-  // Admission needs the final input binding before any target can be opened.
-  // An empty source marks redirected stdin without reading it ahead of its gate.
-  const admissionStdin = redirects.some((r) => r.fd === FD_STDIN) ? new Uint8Array() : stdin
+  const admissionStdin =
+    guard === undefined ? stdin : await redirectStdin(dispatch, redirects, context, stdin)
   const readPaths = new Map<number, string>()
   for (const raw of redirects) {
     const r = expand === undefined ? raw : await expand(raw)
@@ -363,7 +363,8 @@ export async function handleRedirect(
         )
       }
     } else {
-      const deferred = redirects.length === 1 && outputOnly(name, args)
+      const deferred = expanded.length === redirects.length && outputOnly(name, args)
+      if (deferred) openStderr = outputs.get(2)
       try {
         const open = () =>
           deferred
@@ -524,11 +525,11 @@ export async function handleRedirect(
     const routed: [Channel | Inherited, Uint8Array][] = []
     const writeFiles = async () => {
       const consumed = new Set<FileDescription>()
-      let failedScope: PathSpec | null = null
+      let failedFile: FileDescription | null = null
       try {
         if (!refused)
           for (const file of files) {
-            failedScope = file.scope
+            failedFile = file
             const unique =
               files.filter((other) => other.scope.virtual === file.scope.virtual).length === 1
             const data = unique
@@ -550,15 +551,21 @@ export async function handleRedirect(
           else if (target === TO_STDERR) routed.push([Channel.STDERR, data])
           else if (target instanceof Inherited) routed.push([target, data])
           else if (target instanceof FileDescription && !consumed.has(target)) {
-            failedScope = target.scope
+            failedFile = target
             await writeDescription(dispatch, session, target, data)
             io.writes[target.scope.virtual] = data
             io.cache = io.cache.filter((p) => p !== target.scope.virtual)
           }
         }
       } catch (error) {
-        if (!isFsError(error) || failedScope === null) throw error
-        routed.push([Channel.STDERR, redirectErrorLine(failedScope, error)])
+        if (!isFsError(error) || failedFile === null) throw error
+        const [out, refusal] = await failed(
+          redirectFailure(failedFile.scope, error),
+          failedFile.opened ? outputs.get(2) : openStderr,
+        )
+        if (out !== null) routed.push([Channel.STDOUT, await materialize(out)])
+        const diagnostic = await materialize(refusal.stderr)
+        if (diagnostic.byteLength > 0) routed.push([Channel.STDERR, diagnostic])
         io.exitCode = 1
       }
     }
@@ -712,6 +719,47 @@ function redirectFailure(scope: PathSpec, err: unknown): Result {
 function shellFailure(line: Uint8Array, status = 1): Result {
   const io = new IOResult({ exitCode: status, stderr: line })
   return [null, io, new ExecutionNode({ command: 'redirect', exitCode: status })]
+}
+
+/** Classify input without expanding or reading targets; unknown bindings retain cwd scope. */
+export async function redirectStdin(
+  dispatch: DispatchFn,
+  redirects: readonly Redirect[],
+  context: EvaluationContext,
+  stdin: ByteSource | null,
+): Promise<ByteSource | null> {
+  const session = context.session
+  const sources = new Map<number, ByteSource | null>(
+    [...session.descriptors].map(([fd, d]) => [fd, d.source]),
+  )
+  sources.set(0, stdin)
+  for (const r of redirects) {
+    if (typeof r.target === 'number') sources.set(r.fd, sources.get(r.target) ?? new DeviceInput())
+    else if (
+      r.kind === RedirectKind.HEREDOC ||
+      r.kind === RedirectKind.HERESTRING ||
+      r.kind === RedirectKind.READWRITE
+    )
+      sources.set(r.fd, new Uint8Array())
+    else if (r.kind === RedirectKind.STDIN) {
+      const target =
+        r.targetNode == null ? r.target : literalWord(r.targetNode as TSNodeLike, homeDir(session))
+      if (target === null) {
+        sources.set(r.fd, new DeviceInput())
+        continue
+      }
+      const scope = PathSpec.fromStrPath(target as string | PathSpec, undefined, session.cwd)
+      sources.set(
+        r.fd,
+        scope.virtual === '/dev/stdin'
+          ? stdin
+          : (await isDevice(dispatch, scope))
+            ? new DeviceInput()
+            : new Uint8Array(),
+      )
+    } else sources.set(r.fd, new DeviceInput())
+  }
+  return sources.get(FD_STDIN) ?? null
 }
 
 /** Whether a redirect target is a character device (`/dev/null`). */

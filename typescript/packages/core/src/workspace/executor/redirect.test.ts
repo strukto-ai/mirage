@@ -368,9 +368,15 @@ describe('fd-table routing end-to-end', () => {
   })
 
   it('multiple stdout redirects truncate all, write last', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws, data } = await makeIntegrationWS()
     try {
-      await ws.shell('echo body > /data/m1 > /data/m2')
+      const read = vi.spyOn(data, 'read').mockRejectedValue(new Error('read refused'))
+      const pwrite = vi.spyOn(data, 'pwrite').mockRejectedValue(new Error('pwrite needs read'))
+      expect(await runExit(ws, 'echo body > /data/m1 > /data/m2')).toBe(0)
+      expect(read).not.toHaveBeenCalled()
+      expect(pwrite).not.toHaveBeenCalled()
+      read.mockRestore()
+      pwrite.mockRestore()
       expect(await run(ws, 'cat /data/m1')).toBe('')
       expect(await run(ws, 'cat /data/m2')).toBe('body\n')
     } finally {

@@ -527,11 +527,11 @@
         "ram-commands"
       ],
       "session": "redirects",
-      "command": "cat /scratch/redirect-output; cd /scratch/redirect-private; rg x < /scratch/redirect-input; rg x > /scratch/redirect-search < /scratch/redirect-input; cat /scratch/redirect-search; cd /scratch; rm redirect-output redirect-input redirect-search; rmdir redirect-private",
+      "command": "cat /scratch/redirect-output; cd /scratch/redirect-private; ln -s /dev/null /scratch/redirect-device; rg x > /scratch/redirect-output < /scratch/redirect-device; cat /scratch/redirect-output; rg x > /scratch/redirect-output 3< /dev/null 0<&3; cat /scratch/redirect-output; rg x < /scratch/redirect-input; rg x > /scratch/redirect-search < /scratch/redirect-input; cat /scratch/redirect-search; cd /scratch; rm redirect-device redirect-output redirect-input redirect-search; rmdir redirect-private",
       "expect": {
         "exit": 0,
-        "stdout": "KEEP\nx\nx\n",
-        "stderr": ""
+        "stdout": "KEEP\nKEEP\nKEEP\nx\nx\n",
+        "stderr": "rg: /scratch/redirect-private: Permission denied\nrg: /scratch/redirect-private: Permission denied\n"
       }
     }
   ]

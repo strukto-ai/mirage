@@ -14,7 +14,7 @@
 
 from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.context import invalidate_after_write
-from mirage.core.ssh.utils import join_root
+from mirage.core.ssh.utils import join_root, open_for_write
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
@@ -27,7 +27,9 @@ async def write(
     sftp = await accessor.sftp()
     timer = start_op()
     remote_path = join_root(config.root, path)
-    async with sftp.open(remote_path, "wb") as f:
+    async with await open_for_write(
+        sftp, remote_path, path_spec, truncate=True
+    ) as f:
         await f.write(data)
     record("write", path_spec.virtual, "ssh", len(data), timer)
     await invalidate_after_write(path_spec)

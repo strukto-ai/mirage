@@ -11,6 +11,7 @@ import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { CommandSpec, Operand, Option, type FlagValue } from '../../../spec/types.ts'
 import { parseCommand, parseToKwargs } from '../../../spec/parser.ts'
+import { UsageStyle } from '../../../spec/types.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
 import {
@@ -41,7 +42,7 @@ import {
   STDOUT,
   verbUsage,
 } from './util.ts'
-import { HELP_SWITCH, gitOptionRefusal, gitUsage } from '../../refusal.ts'
+import { HELP_SWITCH, gitOptionRefusal, gitUsage, leafRefusal } from '../../refusal.ts'
 import { GIT_LONG_OPTIONS } from '../../constants.ts'
 import { isBare } from './discover.ts'
 import type { Dispatch, RepoLocation } from './types.ts'
@@ -145,9 +146,19 @@ export async function remoteGetUrl(inv: CLIInvocation): Promise<CommandFnResult>
       inv.cwd.virtual,
       '',
       undefined,
-      true,
+      false,
       GIT_LONG_OPTIONS.get('remote get-url'),
     )
+    if (parsed.optionErrorKinds.length > 0) {
+      const [stderr, exitCode, stdout] = leafRefusal(
+        UsageStyle.GIT,
+        new Uint8Array(),
+        parsed,
+        'remote get-url',
+        GET_URL,
+      )
+      return [stdout, new IOResult({ exitCode, stderr })]
+    }
     const names = parsed.args.map(([word]) => word)
     const bad = offending(names, escaped(inv.argv), new Set())
     if (bad !== null) throw new UsageError(...gitOptionRefusal(bad, 'remote get-url', GET_URL))

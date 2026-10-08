@@ -60,11 +60,18 @@ from mirage.commands.cli.refusal import (
     HELP_SWITCH,
     git_option_refusal,
     git_usage,
+    leaf_refusal,
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import parse_command, parse_to_kwargs
-from mirage.commands.spec.types import CommandSpec, FlagValue, Operand, Option
+from mirage.commands.spec.types import (
+    CommandSpec,
+    FlagValue,
+    Operand,
+    Option,
+    UsageStyle,
+)
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
@@ -196,9 +203,13 @@ async def remote_get_url(
             GET_URL,
             list(inv.texts[1:]),
             inv.cwd.virtual,
-            unknown_is_operand=True,
             abbreviations=GIT_LONG_OPTIONS["remote get-url"],
         )
+        if parsed.option_error_kinds:
+            stderr, code, stdout = leaf_refusal(
+                UsageStyle.GIT, b"", parsed, "remote get-url", GET_URL
+            )
+            return stdout, IOResult(exit_code=code, stderr=stderr)
         names = tuple(word for word, _ in parsed.args)
         bad = offending(names, escaped(inv.argv), frozenset())
         if bad is not None:

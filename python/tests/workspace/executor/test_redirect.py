@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
@@ -263,9 +265,22 @@ async def test_fd_table_stdout_dup_then_stderr_file():
 
 
 @pytest.mark.asyncio
-async def test_multiple_stdout_redirects_truncate_all_write_last():
-    ws = await _workspace()
-    await ws.shell("echo body > /data/m1 > /data/m2")
+async def test_multiple_stdout_redirects_truncate_all_write_last(monkeypatch):
+    vfs = RAMVFS()
+    ws = Workspace({"data": vfs}, mode=MountMode.WRITE)
+    with monkeypatch.context() as patched:
+        patched.setattr(
+            vfs, "read", AsyncMock(side_effect=PermissionError("read refused"))
+        )
+        patched.setattr(
+            vfs,
+            "pwrite",
+            AsyncMock(side_effect=PermissionError("pwrite needs read")),
+        )
+        io = await ws.shell("echo body > /data/m1 > /data/m2")
+        assert io.exit_code == 0
+        vfs.read.assert_not_awaited()
+        vfs.pwrite.assert_not_awaited()
     assert await _out(ws, "cat /data/m1") == ""
     assert await _out(ws, "cat /data/m2") == "body\n"
 

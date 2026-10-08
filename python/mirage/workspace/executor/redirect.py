@@ -53,7 +53,7 @@ from mirage.shell.descriptors import (
     unsupported_descriptor,
 )
 from mirage.shell.errors import ExitSignal
-from mirage.shell.helpers import get_text
+from mirage.shell.helpers import get_text, literal_word
 from mirage.shell.types import Redirect, RedirectKind, TSNodeLike
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.workspace.evaluation import EvaluationContext
@@ -75,6 +75,7 @@ from mirage.workspace.executor.control import (
 )
 from mirage.workspace.executor.create import create_file, write_description
 from mirage.workspace.executor.jobs import drained, pump
+from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
@@ -362,10 +363,14 @@ async def handle_redirect(
         if descriptor.identity == CLOSED:
             closed.add(fd)
 
-    async def failed(result: RedirectResult) -> RedirectResult:
+    async def failed(
+        result: RedirectResult,
+        target: _Fd | FileDescription | Inherited | None = None,
+    ) -> RedirectResult:
         stdout, io, node = result
         data = await io.materialize_stderr()
-        target = outputs[2]
+        if target is None:
+            target = outputs[2]
         if target is _TO_STDERR:
             return result
         io.stderr = None
@@ -382,12 +387,13 @@ async def handle_redirect(
         return stdout, io, node
 
     files: list[FileDescription] = []
+    open_stderr: _Fd | FileDescription | Inherited | None = None
     expanded: list[Redirect] = []
     targets: tuple[PathSpec, ...] = ()
-    # Admission needs the final input binding before any target can be opened.
-    # An empty source marks redirected stdin without reading it ahead of its gate.
     admission_stdin = (
-        b"" if any(r.fd == FD_STDIN for r in redirects) else stdin
+        await redirect_stdin(dispatch, redirects, context, stdin)
+        if guard is not None
+        else stdin
     )
     read_paths: dict[int, str] = {}
     for raw in redirects:
@@ -495,8 +501,12 @@ async def handle_redirect(
                     else SharedInput(data)
                 )
         else:
-            deferred = len(redirects) == 1 and _output_only(name, args)
-            if not deferred:
+            deferred = len(expanded) == len(redirects) and _output_only(
+                name, args
+            )
+            if deferred:
+                open_stderr = outputs[2]
+            else:
                 token = (
                     set_redirect_paths(command.id, targets)
                     if command is not None and guard is not None
@@ -661,11 +671,11 @@ async def handle_redirect(
             else None
         )
         consumed: set[int] = set()
-        failed_scope: PathSpec | None = None
+        failed_file: FileDescription | None = None
         try:
             if not refused:
                 for file in files:
-                    failed_scope = file.scope
+                    failed_file = file
                     unique = (
                         sum(
                             other.scope.virtual == file.scope.virtual
@@ -701,17 +711,23 @@ async def handle_redirect(
                     isinstance(target, FileDescription)
                     and id(target) not in consumed
                 ):
-                    failed_scope = target.scope
+                    failed_file = target
                     await write_description(dispatch, session, target, data)
                     io.writes[target.scope.virtual] = data
                     io.cache = [
                         p for p in io.cache if p != target.scope.virtual
                     ]
         except FS_ERRORS as exc:
-            assert failed_scope is not None
-            routed.append(
-                (Channel.STDERR, _redirect_error_line(failed_scope, exc))
+            assert failed_file is not None
+            out, error, _ = await failed(
+                _redirect_failure(failed_file.scope, exc),
+                open_stderr if not failed_file.opened else None,
             )
+            if out:
+                routed.append((Channel.STDOUT, await materialize(out) or b""))
+            diagnostic = await error.materialize_stderr()
+            if diagnostic:
+                routed.append((Channel.STDERR, diagnostic))
             io.exit_code = 1
         finally:
             if write_token is not None:
@@ -936,6 +952,60 @@ def _shell_failure(
     """
     io = IOResult(exit_code=status, stderr=line)
     return None, io, ExecutionNode(command="redirect", exit_code=status)
+
+
+async def redirect_stdin(
+    dispatch: DispatchFn,
+    redirects: list[Redirect],
+    context: EvaluationContext,
+    stdin: ByteSource | None,
+) -> ByteSource | None:
+    """Classify input for admission without expanding or reading targets.
+
+    Literal files are stat'd, including symlinks and replaced devices.
+    An unreadable or computed binding conservatively retains the cwd
+    search scope until the actual redirect can be resolved in order.
+
+    Args:
+        dispatch (DispatchFn): workspace operation dispatcher.
+        redirects (list[Redirect]): redirects in source order.
+        context (EvaluationContext): enclosing descriptor bindings.
+        stdin (ByteSource | None): inherited input.
+    """
+    session = context.session
+    sources: dict[int, ByteSource | None] = {
+        fd: d.source for fd, d in session.descriptors.items()
+    }
+    sources[0] = stdin
+    for r in redirects:
+        if isinstance(r.target, int):
+            sources[r.fd] = sources.get(r.target, DeviceInput())
+        elif r.kind in (
+            RedirectKind.HEREDOC,
+            RedirectKind.HERESTRING,
+            RedirectKind.READWRITE,
+        ):
+            sources[r.fd] = b""
+        elif r.kind == RedirectKind.STDIN:
+            target = (
+                literal_word(r.target_node, home_dir(session))
+                if r.target_node is not None
+                else r.target
+            )
+            if target is None:
+                sources[r.fd] = DeviceInput()
+                continue
+            scope = PathSpec.from_str_path(target, cwd=session.cwd)
+            sources[r.fd] = (
+                stdin
+                if scope.virtual == "/dev/stdin"
+                else DeviceInput()
+                if await _is_device(dispatch, scope)
+                else b""
+            )
+        else:
+            sources[r.fd] = DeviceInput()
+    return sources.get(FD_STDIN)
 
 
 async def _is_device(dispatch: DispatchFn, scope: PathSpec) -> bool:
