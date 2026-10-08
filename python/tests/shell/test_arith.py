@@ -1,7 +1,7 @@
 import pytest
 
 from mirage.shell.arith import evaluate_arith
-from mirage.shell.errors import ArithError, UnboundVariable
+from mirage.shell.errors import ArithError, ReadonlyError, UnboundVariable
 from mirage.shell.types import ArithResult, ElementOps
 
 
@@ -233,6 +233,22 @@ def test_an_indexed_subscript_evaluates_in_the_expression_record():
     # An associative subscript stays a key, never an expression.
     result = evaluate_arith("m[a] + 1", {}, elements=_fake_elements())
     assert result.value == 8 and result.writes == ()
+
+
+def test_a_frozen_name_stops_the_evaluation_after_the_writes_before_it():
+    # bash: `(( X=5, R=3, X=6 ))` with R readonly binds X=5 and stops; a
+    # refusal inside a subscript is marked, since it ends the shell.
+    frozen = {"R"}.__contains__
+    with pytest.raises(ReadonlyError) as exc:
+        evaluate_arith("X=5, R=3, X=6", {}, frozen=frozen)
+    assert (exc.value.name, exc.value.in_subscript) == ("R", False)
+    assert [(w.name, w.value) for w in exc.value.writes] == [("X", "5")]
+    with pytest.raises(ReadonlyError) as exc:
+        evaluate_arith(
+            "x=1, arr[R=3]", {}, elements=_fake_elements(), frozen=frozen
+        )
+    assert exc.value.in_subscript
+    assert [(w.name, w.value) for w in exc.value.writes] == [("x", "1")]
 
 
 # `set -u` for the names an expression reads, pinned on bash 5.2.37: an

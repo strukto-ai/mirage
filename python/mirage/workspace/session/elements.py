@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
+from collections.abc import Sequence
 
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
@@ -23,6 +24,7 @@ from mirage.shell.array import (
     array_has,
     array_with,
 )
+from mirage.shell.types import ArithWrite
 from mirage.shell.variable import ShellValue
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import (
@@ -180,3 +182,27 @@ async def assign_element(
         return "ok"
     seed_var(session, name, stored)
     return "ok"
+
+
+async def land_arith(
+    session: SessionState,
+    view: SessionView | None,
+    writes: Sequence[ArithWrite],
+) -> None:
+    """Land an arithmetic command's assignments in the order the
+    expression made them, each through the door: a hidden name refuses
+    and the ones after it never land, as a readonly name stopped the
+    evaluation itself (``let 'X=5, R=3'`` leaves X at 5).
+
+    Args:
+        session (SessionState): shell session state.
+        view (SessionView | None): the session plane's gated door.
+        writes (Sequence[ArithWrite]): the assignments, in order.
+
+    Raises:
+        PolicyDenied: a write named a hidden variable, or a
+            pre_session rule refused it.
+    """
+    for write in writes:
+        ensure_var_visible(session, write.name)
+        await assign_element(session, view, write.name, write.key, write.value)

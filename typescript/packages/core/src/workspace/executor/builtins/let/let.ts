@@ -14,14 +14,12 @@
 
 import { IOResult } from '../../../../io/types.ts'
 import type { ArithWrite } from '../../../../shell/types.ts'
-import { ArithError } from '../../../../shell/errors.ts'
-import { evaluateArith } from '../../../../shell/arith.ts'
+import { ArithError, ReadonlyError } from '../../../../shell/errors.ts'
 import type { ArithResult } from '../../../../shell/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
-import { assignElement } from '../../../session/elements.ts'
-import { ensureVarVisible, randomReader, sessionElements } from '../../../session/state.ts'
+import { landArith } from '../../../session/elements.ts'
+import { randomReader, sessionArith } from '../../../session/state.ts'
 import type { SessionState } from '../../../session/session.ts'
-import { visibleEnv } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { readonlyRefusal, refusal, requireView } from '../shared.ts'
@@ -33,7 +31,9 @@ import { encodeText } from '../../../../shell/bytes.ts'
  * `(( ))` as a builtin: every operand is one expression, the writes land
  * in order, and the status is 1 when the last expression evaluated to 0.
  * No operand is `expression expected`, exit 1; a malformed one aborts
- * the builtin at that word.
+ * the builtin at that word. A write to a readonly name stops it the same
+ * way, after the writes the expression made before it (`let 'X=5, R=3'`
+ * leaves X at 5); one inside a subscript ends the shell.
  */
 export async function handleLet(
   args: string[],
@@ -52,44 +52,30 @@ export async function handleLet(
   let value = 0n
   for (const expr of args) {
     const reader = randomReader(session)
-    let error: ArithError | null = null
+    let error: ArithError | ReadonlyError | null = null
     let writes: readonly ArithWrite[] = []
     let expected = 0n
     try {
-      const result: ArithResult = evaluateArith(
-        expr,
-        visibleEnv(session),
-        0,
-        sessionElements(session, reader),
-        reader.read,
-        reader.wrote,
-      )
+      const result: ArithResult = sessionArith(session, expr, reader)
       writes = result.writes
       expected = result.value
     } catch (err) {
-      if (!(err instanceof ArithError)) throw err
+      if (!(err instanceof ArithError || err instanceof ReadonlyError)) throw err
       // bash bound the assignments made before the error; they land
       // before the error is reported.
       error = err
       writes = err.writes
     }
-    for (const write of writes) {
-      try {
-        ensureVarVisible(session, write.name)
-      } catch (err) {
-        if (err instanceof PolicyDenied) return refusal('let', err)
-        throw err
-      }
-      if (view.isReadonly(write.name)) return readonlyRefusal('let', write.name)
-    }
     try {
-      for (const write of writes) {
-        await assignElement(session, view, write.name, write.key, write.value)
-      }
+      await landArith(session, view, writes)
       reader.settle()
     } catch (err) {
       if (err instanceof PolicyDenied) return refusal('let', err)
       throw err
+    }
+    if (error instanceof ReadonlyError) {
+      if (error.inSubscript) throw error.signal()
+      return readonlyRefusal('let', error.varName)
     }
     if (error !== null) {
       const errBytes = encodeText(`bash: let: ${expr}: ${error.message}\n`)

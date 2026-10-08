@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { evaluateArith } from './arith.ts'
-import { ArithError, UnboundVariable } from './errors.ts'
+import { ArithError, ReadonlyError, UnboundVariable } from './errors.ts'
 import type { ElementOps } from './types.ts'
 
 describe('evaluateArith', () => {
@@ -193,6 +193,32 @@ describe('evaluateArith elements', () => {
     expect(result.value).toBe(7n)
     expect(result.writes[0]?.value).toBe('8')
     expect(evaluateArith('m["a"] - 1', {}, 0, ops).value).toBe(6n)
+  })
+
+  it('stops at a frozen name after the writes before it', () => {
+    // bash: `(( X=5, R=3, X=6 ))` with R readonly binds X=5 and stops; a
+    // refusal inside a subscript is marked, since it ends the shell.
+    const frozen = (name: string) => name === 'R'
+    const refused = (expr: string): ReadonlyError => {
+      try {
+        evaluateArith(expr, {}, 0, fakeElements(), null, null, false, frozen)
+      } catch (err) {
+        if (err instanceof ReadonlyError) return err
+        throw err
+      }
+      throw new Error(`${expr} was not refused`)
+    }
+    const plain = refused('X=5, R=3, X=6')
+    expect([plain.varName, plain.inSubscript, plain.writes]).toEqual([
+      'R',
+      false,
+      [{ name: 'X', key: null, value: '5' }],
+    ])
+    const element = refused('x=1, arr[R=3]')
+    expect([element.inSubscript, element.writes]).toEqual([
+      true,
+      [{ name: 'x', key: null, value: '1' }],
+    ])
   })
 
   it('refuses subscripts with no element callbacks', () => {

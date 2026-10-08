@@ -24,7 +24,7 @@ from mirage.shell.constants import (
     ARITH_TOKEN,
     ARITH_WRAP,
 )
-from mirage.shell.errors import ArithError, UnboundVariable
+from mirage.shell.errors import ArithError, ReadonlyError, UnboundVariable
 from mirage.shell.types import ArithResult, ArithWrite, ElementOps
 
 
@@ -354,7 +354,9 @@ class ArithEvaluator:
     assignments are real assignments). ``writes`` keeps the one
     ordered record across both kinds, keyed by target and moved to the
     end on each write, so the caller lands them in the order the
-    expression made them.
+    expression made them. A write to a name ``frozen`` holds stops the
+    evaluation there (``ReadonlyError``), noting whether it was made
+    inside an array subscript (``subscript``).
     """
 
     def __init__(
@@ -368,6 +370,8 @@ class ArithEvaluator:
         read_var: Callable[[str], str | None] | None,
         wrote_var: Callable[[str, str], None] | None = None,
         nounset: bool = False,
+        frozen: Callable[[str], bool] | None = None,
+        subscript: bool = False,
     ) -> None:
         self.env = env
         self.updates = updates
@@ -378,6 +382,8 @@ class ArithEvaluator:
         self.read_var = read_var
         self.wrote_var = wrote_var
         self.nounset = nounset
+        self.frozen = frozen
+        self.subscript = subscript
 
     def _merged_env(self) -> dict[str, str]:
         merged = {
@@ -397,7 +403,7 @@ class ArithEvaluator:
         except (ValueError, ArithError):
             return self._nested(raw)
 
-    def _nested(self, raw: str) -> int:
+    def _nested(self, raw: str, subscript: bool = False) -> int:
         """Evaluate text as an expression in this expression's record.
 
         bash evaluates a variable's stored text, and an indexed
@@ -410,6 +416,7 @@ class ArithEvaluator:
 
         Args:
             raw (str): the text to evaluate.
+            subscript (bool): the text is an indexed subscript.
         """
         if self.depth >= ARITH_MAX_DEPTH:
             raise ArithError(
@@ -425,6 +432,8 @@ class ArithEvaluator:
             self.read_var,
             self.wrote_var,
             self.nounset,
+            self.frozen,
+            self.subscript or subscript,
         )
         return nested.run(ArithParser(_tokenize(raw)).parse())
 
@@ -476,7 +485,7 @@ class ArithEvaluator:
             try:
                 index = int(subscript.strip())
             except ValueError:
-                index = self._nested(subscript)
+                index = self._nested(subscript, subscript=True)
             return self.elements.resolve(name, str(index), self._merged_env())
         return self.elements.resolve(name, subscript, self._merged_env())
 
@@ -509,17 +518,20 @@ class ArithEvaluator:
     def write_target(
         self, target: tuple[Any, ...], value: int, key: str | None = None
     ) -> None:
+        name = target[1]
+        if target[0] == "elem" and key is None:
+            key = self.elem_key(name, target[2])
+        if self.frozen is not None and self.frozen(name):
+            raise ReadonlyError(name, self.subscript)
         text = str(value)
-        if target[0] == "var":
-            self.updates[target[1]] = text
-            self._record(target[1], None, text)
-            if self.wrote_var is not None:
-                self.wrote_var(target[1], text)
-            return
         if key is None:
-            key = self.elem_key(target[1], target[2])
-        self.elem_updates[(target[1], key)] = text
-        self._record(target[1], key, text)
+            self.updates[name] = text
+            self._record(name, None, text)
+            if self.wrote_var is not None:
+                self.wrote_var(name, text)
+            return
+        self.elem_updates[(name, key)] = text
+        self._record(name, key, text)
 
     def _record(self, name: str, key: str | None, text: str) -> None:
         self.writes.pop((name, key), None)
@@ -642,6 +654,7 @@ def evaluate_arith(
     read_var: Callable[[str], str | None] | None = None,
     wrote_var: Callable[[str, str], None] | None = None,
     nounset: bool = False,
+    frozen: Callable[[str], bool] | None = None,
 ) -> ArithResult:
     """Evaluate a bash arithmetic expression.
 
@@ -677,6 +690,8 @@ def evaluate_arith(
         nounset (bool): ``set -u`` for the names the expression reads:
             one that no variable holds raises UnboundVariable instead of
             reading 0.
+        frozen (Callable[[str], bool] | None): the names a write
+            refuses (readonly); None refuses none.
 
     Returns:
         ArithResult: the value plus the assignments made, in order, for
@@ -685,6 +700,8 @@ def evaluate_arith(
     Raises:
         ArithError: on syntax errors, division by zero, or a negative
             exponent, with a bash-style message.
+        ReadonlyError: an assignment named a ``frozen`` name; the
+            evaluation stopped there.
     """
     tokens = _tokenize(expr)
     if not tokens:
@@ -704,8 +721,9 @@ def evaluate_arith(
             read_var,
             wrote_var,
             nounset,
+            frozen,
         ).run(node)
-    except ArithError as exc:
+    except (ArithError, ReadonlyError) as exc:
         exc.writes = _arith_writes(writes)
         raise
     return ArithResult(value, _arith_writes(writes))

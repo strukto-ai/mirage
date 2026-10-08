@@ -18,7 +18,6 @@ from functools import partial
 
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
-from mirage.shell.arith import evaluate_arith
 from mirage.shell.array import (
     ShellArray,
     array_extent,
@@ -36,6 +35,7 @@ from mirage.shell.errors import (
     BadSubstitution,
     DiscardSignal,
     ExitSignal,
+    ReadonlyError,
     UnboundVariable,
     named,
 )
@@ -63,7 +63,6 @@ from mirage.workspace.session import (
     visible_env,
 )
 from mirage.workspace.session.elements import assign_element
-from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.session.state import (
     RandomReader,
@@ -71,7 +70,7 @@ from mirage.workspace.session.state import (
     next_random,
     positional_params,
     random_reader,
-    session_elements,
+    session_arith,
     subscript_index,
     visible_assocs,
 )
@@ -224,6 +223,7 @@ async def expansion_write(
     name: str,
     key: str | None,
     value: str,
+    contained: int = 1,
 ) -> None:
     """One expansion-time write, through the session plane's door.
 
@@ -253,14 +253,15 @@ async def expansion_write(
         key (str | None): the canonical subscript, None for a bare
             name.
         value (str): the value to store.
+        contained (int): the status a readonly name ends a ``( )``
+            subshell with (``DiscardSignal``).
 
     Raises:
         ExitSignal: the name is hidden, a pre_session rule refused the
             write, the subscript is bad, or the name carries ``-i``
             and the text does not evaluate; either way the line dies
-            with status 1, the shape ``${var:?}`` uses.
-        ReadonlyVariableError: the name is readonly, the same refusal
-            a plain assignment raises through the door.
+            with status 1, the shape ``${var:?}`` uses. A readonly name
+            discards the line too.
     """
     guard_expansion_write(session, name)
     try:
@@ -268,7 +269,10 @@ async def expansion_write(
     except (PolicyDenied, ArithError) as exc:
         raise _write_refusal(exc) from exc
     if status == "readonly":
-        raise ReadonlyVariableError(name)
+        raise DiscardSignal(
+            encode_text(f"bash: {name}: readonly variable\n"),
+            contained_code=contained,
+        )
     if status != "ok":
         raise DiscardSignal(
             encode_text(f"bash: {name}[{key}]: bad array subscript\n")
@@ -977,14 +981,17 @@ class _ArithOperand:
         """
         reader = random_reader(self.session)
         try:
-            result = evaluate_arith(
+            result = session_arith(
+                self.session,
                 text,
-                visible_env(self.session),
-                elements=session_elements(self.session, reader),
-                read_var=reader.read,
-                wrote_var=reader.wrote,
+                reader,
                 nounset=bool(self.session.shell_options.get("nounset")),
             )
+        except ReadonlyError as exc:
+            await land_arith_writes(
+                self.session, self.view, exc.writes, reader
+            )
+            raise exc.signal() from exc
         except ArithError as exc:
             await land_arith_writes(
                 self.session, self.view, exc.writes, reader
@@ -1390,6 +1397,16 @@ async def _expand_braces(
         default = chunks_text(
             await _operator_word(p, expand_child, quoted, session, call_stack)
         )
+        # A refused default ends a `( )` subshell, or a forked compound
+        # command, with 2, unless `set -e` ends it first with 1; a line
+        # loop reads it as a discard.
+        contained = (
+            2
+            if call_stack is not None
+            and call_stack.paren
+            and not session.shell_options.get("errexit")
+            else 1
+        )
         if p.var_name is not None and p.subscript is not None:
             # The default lands on the element the reference named,
             # never on element 0: `${m[k]:=v}` writes key k and
@@ -1398,7 +1415,7 @@ async def _expand_braces(
             if write_key is None:
                 raise _bad_subscript(p)
             await expansion_write(
-                session, view, p.var_name, write_key, default
+                session, view, p.var_name, write_key, default, contained
             )
         elif p.var_name is not None:
             if (
@@ -1407,7 +1424,9 @@ async def _expand_braces(
             ):
                 call_stack.set_local(p.var_name, default)
             else:
-                await expansion_write(session, view, p.var_name, None, default)
+                await expansion_write(
+                    session, view, p.var_name, None, default, contained
+                )
         return [value_piece(default, quoted)]
     if p.op in (":-", "-"):
         if val if p.op == ":-" else var_in_env:

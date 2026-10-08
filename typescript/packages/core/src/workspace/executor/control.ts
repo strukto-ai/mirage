@@ -181,17 +181,29 @@ export async function carried(
 /**
  * What a child shell reports when an `Unwinding` ends it: what it wrote, its
  * diagnostic, and its status, `exit`'s contained one, `return`'s own, or that
- * of `break` or `continue`. Mirrors Python's ended.
+ * of `break` or `continue`. A child running one simple command is the shell
+ * `exit` ends (`simple`), so it reports `exit`'s own status (`: ${U?} | cat`
+ * is 127, `( : ${U?} ) | cat` is 1). Mirrors Python's ended.
  */
-export function ended(sig: Unwinding): IOResult {
+export function ended(sig: Unwinding, simple = false): IOResult {
   if (sig instanceof BreakSignal || sig instanceof ContinueSignal) {
     return new IOResult({ stdout: sig.stdout, stderr: sig.io.stderr, exitCode: sig.io.exitCode })
   }
   return new IOResult({
     stdout: sig.stdout,
     stderr: sig.stderr.byteLength > 0 ? sig.stderr : null,
-    exitCode: sig instanceof ExitSignal ? sig.containedCode : sig.exitCode,
+    exitCode: sig instanceof ExitSignal && !simple ? sig.containedCode : sig.exitCode,
   })
+}
+
+/**
+ * What a condition wrote without streaming it (the diagnostic of a failed
+ * `(( 1/0 ))`), settled so its status is final, or null when it wrote
+ * nothing.
+ */
+async function conditionOutput(stdout: ByteSource | null, io: IOResult): Promise<ByteSource | null> {
+  const written = await applyBarrier(stdout, io, BarrierPolicy.VALUE)
+  return written instanceof Uint8Array && written.byteLength === 0 ? null : written
 }
 
 /**
@@ -252,6 +264,11 @@ export async function handleIf(
 ): Promise<Result> {
   const session = context.session
   const bound = fd0Binding(session)
+  // What a condition wrote without streaming it stays, ahead of what the
+  // branch writes.
+  const leadStdout: (ByteSource | null)[] = []
+  let lead = new IOResult()
+  let chosen = elseBody
   for (const [condition, body] of branches) {
     const [condStdout, condIo] = await runStatement(
       executeNode,
@@ -265,36 +282,33 @@ export async function handleIf(
       handed,
       decisions,
     )
-    await applyBarrier(condStdout, condIo, BarrierPolicy.STATUS)
+    leadStdout.push(await conditionOutput(condStdout, condIo))
+    lead = await lead.merge(condIo)
     recordStatus(session, condIo.exitCode, pipelineTransparent(condition))
     if (condIo.exitCode === 0) {
-      return executeBody(
-        executeNode,
-        body,
-        context,
-        stdin,
-        callStack,
-        jobTable,
-        agentId,
-        handed,
-        decisions,
-      )
+      chosen = body
+      break
     }
   }
-  if (elseBody !== null) {
-    return executeBody(
-      executeNode,
-      elseBody,
-      context,
-      stdin,
-      callStack,
-      jobTable,
-      agentId,
-      handed,
-      decisions,
-    )
+  if (chosen === null) {
+    return [
+      chainNonNull(leadStdout),
+      await lead.merge(new IOResult()),
+      new ExecutionNode({ exitCode: 0 }),
+    ]
   }
-  return [null, new IOResult(), new ExecutionNode({ exitCode: 0 })]
+  const [stdout, io, lastExec] = await executeBody(
+    executeNode,
+    chosen,
+    context,
+    stdin,
+    callStack,
+    jobTable,
+    agentId,
+    handed,
+    decisions,
+  )
+  return [chainNonNull([...leadStdout, stdout]), await lead.merge(io), lastExec]
 }
 
 // `set -n` inside a loop body has to stop the *driver* too, not only the
@@ -406,7 +420,10 @@ async function conditionLoop(
       handed,
       decisions,
     )
-    await applyBarrier(condStdout, condIo, BarrierPolicy.STATUS)
+    allStdout.push(await conditionOutput(condStdout, condIo))
+    mergedIo = await mergedIo.merge(
+      new IOResult({ stderr: condIo.stderr, exitCode: mergedIo.exitCode }),
+    )
     recordStatus(session, condIo.exitCode, pipelineTransparent(condition))
     if (breakOnZero && condIo.exitCode === 0) {
       hitLimit = false

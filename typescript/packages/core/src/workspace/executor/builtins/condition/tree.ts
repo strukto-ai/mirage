@@ -14,14 +14,12 @@
 
 import { compilePosixRegex } from '../../../../utils/posix.ts'
 import { BreError, PosixSyntax, translateEre } from '../../../../commands/builtin/utils/bre.ts'
-import { randomReader, seedVar, sessionElements } from '../../../session/state.ts'
-import { evaluateArith } from '../../../../shell/arith.ts'
+import { randomReader, seedVar, sessionArith } from '../../../session/state.ts'
 import type { ArithResult, ArithWrite } from '../../../../shell/types.ts'
 import { assignElement } from '../../../session/elements.ts'
-import { ArithError } from '../../../../shell/errors.ts'
+import { ArithError, ReadonlyError } from '../../../../shell/errors.ts'
 import { makeArray } from '../../../../shell/array.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
-import { visibleEnv } from '../../../session/state.ts'
 import { FILE_PAIR_BINARY, INT_COMPARATORS, UNARY_OPS } from './constants.ts'
 import { applyFilePair, applyUnary } from './operators.ts'
 import { CondError } from './types.ts'
@@ -95,22 +93,15 @@ async function evalCondBinary(
     const reader = randomReader(ctx.session)
     const values: bigint[] = []
     for (const operand of [node.left, node.right]) {
-      let error: ArithError | null = null
+      let error: ArithError | ReadonlyError | null = null
       let value = 0n
       let writes: readonly ArithWrite[]
       try {
-        const result: ArithResult = evaluateArith(
-          operand,
-          visibleEnv(ctx.session),
-          0,
-          sessionElements(ctx.session, reader),
-          reader.read,
-          reader.wrote,
-        )
+        const result: ArithResult = sessionArith(ctx.session, operand, reader)
         writes = result.writes
         value = result.value
       } catch (exc) {
-        if (!(exc instanceof ArithError)) throw exc
+        if (!(exc instanceof ArithError || exc instanceof ReadonlyError)) throw exc
         // bash bound what the operand assigned before it failed
         // (`y='x=6,1/0'; [[ 0 -eq y ]]` leaves x at 6, and a RANDOM seed
         // in it is drawn from); they land, and the reader settles, before
@@ -129,6 +120,12 @@ async function evalCondBinary(
         if (status !== 'ok') throw new CondError(`${ctx.name}: ${write.name}: ${status}`)
       }
       reader.settle()
+      // bash: `R: readonly variable`, status 1, and the line goes on; in
+      // a subscript it ends the shell.
+      if (error instanceof ReadonlyError) {
+        if (error.inSubscript) throw error.signal()
+        throw new CondError(`bash: ${error.message}`, 1, false)
+      }
       // bash: `[[: 1/0: division by 0`, status 1, and the line goes on;
       // only a grammar error is fatal.
       if (error !== null)

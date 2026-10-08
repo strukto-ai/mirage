@@ -19,7 +19,7 @@ from mirage.commands.builtin.utils.bre import (
     PosixSyntax,
     translate_ere,
 )
-from mirage.shell.arith import ArithError, evaluate_arith
+from mirage.shell.errors import ArithError, ReadonlyError
 from mirage.shell.array import make_array
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.posix import compile_posix_regex
@@ -42,12 +42,11 @@ from mirage.workspace.executor.builtins.condition.types import (
     CondOr,
     CondUnary,
 )
-from mirage.workspace.session import visible_env
 from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.state import (
     random_reader,
     seed_var,
-    session_elements,
+    session_arith,
 )
 
 
@@ -124,18 +123,12 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
         reader = random_reader(ctx.session)
         values = []
         for operand in (node.left, node.right):
-            error: ArithError | None = None
+            error: ArithError | ReadonlyError | None = None
             value = 0
             try:
-                result = evaluate_arith(
-                    operand,
-                    visible_env(ctx.session),
-                    elements=session_elements(ctx.session, reader),
-                    read_var=reader.read,
-                    wrote_var=reader.wrote,
-                )
+                result = session_arith(ctx.session, operand, reader)
                 writes, value = result.writes, result.value
-            except ArithError as exc:
+            except (ArithError, ReadonlyError) as exc:
                 # bash bound what the operand assigned before it failed
                 # (`y='x=6,1/0'; [[ 0 -eq y ]]` leaves x at 6, and a
                 # RANDOM seed in it is drawn from); they land, and the
@@ -148,6 +141,12 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
                 if status != "ok":
                     raise CondError(f"{ctx.name}: {write.name}: {status}")
             reader.settle()
+            if isinstance(error, ReadonlyError):
+                # bash: `R: readonly variable`, status 1, and the line
+                # goes on; in a subscript it ends the shell.
+                if error.in_subscript:
+                    raise error.signal()
+                raise CondError(f"bash: {error}", exit_code=1, fatal=False)
             if error is not None:
                 # bash: `[[: 1/0: division by 0`, status 1, and the line
                 # goes on; only a grammar error is fatal.

@@ -32,14 +32,20 @@ class CallStack:
         # A fork is a child shell's stack: an error that discards the
         # rest of the line ends the child instead of resuming.
         self.subshell = False
+        # A `( )` subshell, a compound command forked as a stage or job,
+        # or a fork of one: a refused `${var:=word}` ends it with 2.
+        self.paren = False
 
-    def fork(self, loops: bool = True) -> "CallStack":
+    def fork(self, loops: bool = True, paren: bool | None = None) -> "CallStack":
         """The stack a child shell runs on, a copy of every frame.
 
         Args:
             loops (bool): keep the loops the caller is in, as a pipeline
                 stage and ``$( )`` do; a ``( )`` or ``&`` child starts
                 outside every loop (bash 5.2, POSIX interp 842).
+            paren (bool | None): the child runs a ``( )`` or a compound
+                command (True) or a substitution (False); None keeps the
+                caller's.
         """
         child = CallStack()
         child._frames = [
@@ -52,6 +58,7 @@ class CallStack:
             for frame in self._frames
         ]
         child.subshell = True
+        child.paren = self.paren if paren is None else paren
         return child
 
     @property

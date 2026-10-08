@@ -163,13 +163,16 @@ async def carried(
     return sig
 
 
-def ended(sig: Exception) -> IOResult:
+def ended(sig: Exception, simple: bool = False) -> IOResult:
     """What a child shell reports when one of ``UNWINDING`` ends it:
     what it wrote, its diagnostic, and its status, ``exit``'s contained
     one, ``return``'s own, or that of ``break`` or ``continue``.
 
     Args:
         sig (Exception): one of ``UNWINDING``.
+        simple (bool): the child runs one simple command, which is the
+            shell ``exit`` ends, so it reports ``exit``'s own status
+            (``: ${U?} | cat`` is 127, ``( : ${U?} ) | cat`` is 1).
     """
     if isinstance(sig, (BreakSignal, ContinueSignal)):
         return IOResult(
@@ -181,10 +184,24 @@ def ended(sig: Exception) -> IOResult:
         stderr=sig.stderr or None,
         exit_code=(
             sig.contained_code
-            if isinstance(sig, ExitSignal)
+            if isinstance(sig, ExitSignal) and not simple
             else sig.exit_code
         ),
     )
+
+
+async def _condition_output(
+    stdout: ByteSource | None, io: IOResult
+) -> ByteSource | None:
+    """What a condition wrote without streaming it (the diagnostic of a
+    failed ``(( 1/0 ))``), settled so its status is final, or None when
+    it wrote nothing.
+
+    Args:
+        stdout (ByteSource | None): the condition's returned output.
+        io (IOResult): the condition's result.
+    """
+    return await apply_barrier(stdout, io, BarrierPolicy.VALUE) or None
 
 
 async def take_stderr(sig: Exception) -> bytes:
@@ -250,6 +267,11 @@ async def handle_if(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     session = context.session
     bound = fd0_binding(session)
+    # What a condition wrote without streaming it (the diagnostic of a
+    # failed `(( 1/0 ))`) stays, ahead of what the branch writes.
+    lead_stdout: list[ByteSource | None] = []
+    lead = IOResult()
+    chosen = else_body
     for condition, body in branches:
         cond_stdout, cond_io, _ = await run_statement(
             execute_node,
@@ -263,37 +285,38 @@ async def handle_if(
             handed,
             decisions,
         )
-        await apply_barrier(cond_stdout, cond_io, BarrierPolicy.STATUS)
+        lead_stdout.append(await _condition_output(cond_stdout, cond_io))
+        lead = await lead.merge(cond_io)
         record_status(
             session,
             cond_io.exit_code,
             transparent=pipeline_transparent(condition),
         )
         if cond_io.exit_code == 0:
-            return await _execute_body(
-                execute_node,
-                body,
-                context,
-                stdin,
-                call_stack,
-                job_table,
-                agent_id,
-                handed,
-                decisions,
-            )
-    if else_body is not None:
-        return await _execute_body(
-            execute_node,
-            else_body,
-            context,
-            stdin,
-            call_stack,
-            job_table,
-            agent_id,
-            handed,
-            decisions,
+            chosen = body
+            break
+    if chosen is None:
+        return (
+            _chain_streams(lead_stdout),
+            await lead.merge(IOResult()),
+            ExecutionNode(exit_code=0),
         )
-    return None, IOResult(), ExecutionNode(exit_code=0)
+    stdout, io, last_exec = await _execute_body(
+        execute_node,
+        chosen,
+        context,
+        stdin,
+        call_stack,
+        job_table,
+        agent_id,
+        handed,
+        decisions,
+    )
+    return (
+        _chain_streams([*lead_stdout, stdout]),
+        await lead.merge(io),
+        last_exec,
+    )
 
 
 # `set -n` inside a loop body has to stop the *driver* too, not only the
@@ -405,7 +428,10 @@ async def _condition_loop(
             handed,
             decisions,
         )
-        await apply_barrier(cond_stdout, cond_io, BarrierPolicy.STATUS)
+        all_stdout.append(await _condition_output(cond_stdout, cond_io))
+        merged_io = await merged_io.merge(
+            IOResult(stderr=cond_io.stderr, exit_code=merged_io.exit_code)
+        )
         record_status(
             session,
             cond_io.exit_code,

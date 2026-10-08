@@ -339,6 +339,176 @@
         "stdout": "rc=1\nrc=1\n",
         "stderr": "bash: R: readonly variable\nbash: R: readonly variable\n"
       }
+    },
+    {
+      "id": "readonly_expansion_write_ends_its_subshell",
+      "seq": 980119,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( readonly R=1 Q; ( : $((R=3)); echo no ); echo \"a=$?\"; ( : ${Q:=x}; echo no ); echo \"d=$?\"; x=$( : ${Q:=x}; echo no ); echo \"s=$?\"; ( eval ': ${Q:=x}'; echo no ); echo \"e=$?\"; : ${Q:=x} | cat; echo \"p=${PIPESTATUS[*]}\"; { : ${Q:=x}; } | cat; echo \"g=${PIPESTATUS[*]}\"; ( set -e; : ${Q:=x}; echo no ); echo \"x=$?\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "a=1\nd=2\ns=1\ne=1\np=2 0\ng=2 0\nx=1\n",
+        "stderr": "bash: R: readonly variable\nbash: Q: readonly variable\nbash: Q: readonly variable\nbash: Q: readonly variable\nbash: Q: readonly variable\nbash: Q: readonly variable\nbash: Q: readonly variable\n"
+      }
+    },
+    {
+      "id": "readonly_default_status_follows_the_child_shell",
+      "seq": 980120,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( readonly Q; x=$( : ${Q:=x} | cat; echo \"${PIPESTATUS[*]}\" ); echo \"cs=$x\"; x=$( ( : ${Q:=x} | cat; echo \"${PIPESTATUS[*]}\" ) ); echo \"sub=$x\"; { : ${Q:=x} & wait $!; echo \"job=$?\"; } | cat; cat <( : ${Q:=x} | cat; echo \"ps=${PIPESTATUS[*]}\" ) )",
+      "expect": {
+        "exit": 0,
+        "stdout": "cs=1 0\nsub=2 0\njob=2\nps=1 0\n",
+        "stderr": "bash: Q: readonly variable\nbash: Q: readonly variable\nbash: Q: readonly variable\nbash: Q: readonly variable\n"
+      }
+    },
+    {
+      "id": "readonly_expansion_write_discards_the_line",
+      "seq": 980121,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'readonly R=1; X=0; : $(( X=5, R=3 )); echo no\necho \"a=$? X=$X\"'; bash -c 'readonly Q; : ${Q:=x}; echo no\necho \"d=$?\"'; bash -c 'readonly Q; eval \": \\${Q:=x}; echo no\"; echo \"e=$?\"'",
+      "expect": {
+        "exit": 0,
+        "stdout": "a=1 X=5\nd=1\ne=1\n",
+        "stderr": "bash: R: readonly variable\nbash: Q: readonly variable\nbash: Q: readonly variable\n"
+      }
+    },
+    {
+      "id": "readonly_subscript_or_integer_write_ends_the_shell",
+      "seq": 980122,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'readonly R=1; B=(1 2); echo ${B[R=3]}; echo no\necho next'; echo \"s=$?\"; bash -c 'readonly R=1; declare -i n; n=R=3; echo no\necho next'; echo \"i=$?\"; bash -c 'readonly R=1; let \"B[R=3]=1\"; echo no\necho next'; echo \"l=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "s=1\ni=1\nl=1\n",
+        "stderr": "bash: R: readonly variable\nbash: R: readonly variable\nbash: R: readonly variable\n"
+      }
+    },
+    {
+      "id": "fatal_expansion_in_a_forked_simple_command",
+      "seq": 980123,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unset UZ; bash -c ': ${UZ?m} & wait $!; echo \"bg=$?\"; : ${UZ?m} | cat; echo \"p=${PIPESTATUS[*]}\"; { : ${UZ?m}; } & wait $!; echo \"g=$?\"'; ( : ${UZ?m} & wait $!; echo \"sub=$?\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "bg=127\np=127 0\ng=1\nsub=1\n",
+        "stderr": "bash: UZ: m\nbash: UZ: m\nbash: UZ: m\nbash: UZ: m\n"
+      }
     }
   ]
 }

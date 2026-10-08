@@ -19,7 +19,7 @@ import {
   ARITH_NAME,
   ARITH_TOKEN,
 } from './constants.ts'
-import { ArithError, UnboundVariable } from './errors.ts'
+import { ArithError, ReadonlyError, UnboundVariable } from './errors.ts'
 import type { ArithResult, ArithWrite, ElementOps } from './types.ts'
 
 type ArithTarget = { kind: 'var'; name: string } | { kind: 'elem'; name: string; sub: string }
@@ -356,7 +356,9 @@ class ArithParser {
 // decides what to apply to the session (bash arithmetic assignments are
 // real assignments). `writes` keeps the one ordered record across both
 // kinds, keyed by target and moved to the end on each write, so the
-// caller lands them in the order the expression made them.
+// caller lands them in the order the expression made them. A write to a
+// name `frozen` holds stops the evaluation there (`ReadonlyError`), noting
+// whether it was made inside an array subscript (`subscript`).
 class ArithEvaluator {
   constructor(
     private readonly env: Readonly<Record<string, string>>,
@@ -368,6 +370,8 @@ class ArithEvaluator {
     private readonly readVar: ((name: string) => string | null) | null,
     private readonly wroteVar: ((name: string, value: string) => void) | null = null,
     private readonly nounset = false,
+    private readonly frozen: ((name: string) => boolean) | null = null,
+    private readonly subscript = false,
   ) {}
 
   private coerce(raw: string | null): bigint {
@@ -389,7 +393,7 @@ class ArithEvaluator {
    * and a `RANDOM` seed reaches the reader. So the nested run shares this
    * evaluator's record rather than starting a fresh one.
    */
-  private nested(text: string): bigint {
+  private nested(text: string, subscript = false): bigint {
     if (this.depth >= ARITH_MAX_DEPTH)
       throw new ArithError(`expression recursion level exceeded (error token is "${text}")`)
     const nested = new ArithEvaluator(
@@ -402,6 +406,8 @@ class ArithEvaluator {
       this.readVar,
       this.wroteVar,
       this.nounset,
+      this.frozen,
+      this.subscript || subscript,
     )
     return nested.run(new ArithParser(tokenize(text)).parse())
   }
@@ -438,7 +444,7 @@ class ArithEvaluator {
       // index it is handed (a negative one counts from the extent). A
       // literal index skips the run.
       const trimmed = sub.trim()
-      const index = /^-?\d+$/.test(trimmed) ? BigInt(trimmed) : this.nested(sub)
+      const index = /^-?\d+$/.test(trimmed) ? BigInt(trimmed) : this.nested(sub, true)
       return this.elements.resolve(name, index.toString(), { ...this.env, ...this.updates })
     }
     return this.elements.resolve(name, sub, { ...this.env, ...this.updates })
@@ -463,14 +469,15 @@ class ArithEvaluator {
   }
 
   private writeTarget(target: ArithTarget, value: bigint, key: string | null = null): void {
+    if (target.kind !== 'var') key ??= this.elemKey(target.name, target.sub)
+    if (this.frozen?.(target.name) === true) throw new ReadonlyError(target.name, this.subscript)
     const text = value.toString()
-    if (target.kind === 'var') {
+    if (key === null) {
       this.updates[target.name] = text
       this.record(target.name, null, text)
       this.wroteVar?.(target.name, text)
       return
     }
-    key ??= this.elemKey(target.name, target.sub)
     this.elemUpdates.set(`${target.name} ${key}`, text)
     this.record(target.name, key, text)
   }
@@ -608,6 +615,8 @@ class ArithEvaluator {
  * Throws ArithError on syntax errors, division by zero, or a negative
  * exponent. `nounset` is `set -u` for the names the expression reads: one
  * that no variable holds throws UnboundVariable instead of reading 0.
+ * `frozen` names the variables a write refuses (readonly): the evaluation
+ * stops there with ReadonlyError, carrying the writes made before it.
  */
 export function evaluateArith(
   expr: string,
@@ -617,6 +626,7 @@ export function evaluateArith(
   readVar: ((name: string) => string | null) | null = null,
   wroteVar: ((name: string, value: string) => void) | null = null,
   nounset = false,
+  frozen: ((name: string) => boolean) | null = null,
 ): ArithResult {
   const tokens = tokenize(expr)
   if (tokens.length === 0) return { value: 0n, writes: [] }
@@ -636,9 +646,10 @@ export function evaluateArith(
       readVar,
       wroteVar,
       nounset,
+      frozen,
     ).run(node)
   } catch (err) {
-    if (err instanceof ArithError) err.writes = [...writes.values()]
+    if (err instanceof ArithError || err instanceof ReadonlyError) err.writes = [...writes.values()]
     throw err
   }
   return { value, writes: [...writes.values()] }
