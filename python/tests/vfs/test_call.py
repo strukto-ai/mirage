@@ -107,6 +107,17 @@ def test_a_vfs_supports_what_it_defines():
     assert {"read", "write", "stat"} <= served(RAMVFS())
 
 
+def test_a_function_set_on_the_instance_is_supported():
+    notes = Notes()
+
+    async def write(path: PathSpec, data: bytes) -> None:
+        return None
+
+    notes.write = write  # type: ignore[method-assign]
+    assert notes.supports("write")
+    assert MountEntry("/", notes).has_op("write")
+
+
 def test_the_door_serves_marked_functions_only():
     mount = MountEntry("/", Notes())
     assert mount.has_op("search_abc")
@@ -163,5 +174,60 @@ async def test_policies_judge_a_custom_function_by_its_effect():
         assert ("stamp", True) in recorder.seen
         assert ("search_abc", False) in recorder.seen
         assert notes.stamped == ["/notes/a.txt"]
+    finally:
+        await ws.close()
+
+
+class Shelf(BaseVFS):
+    """A cached flat store whose one custom function rewrites a file."""
+
+    name = "shelf"
+    caches_reads = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.files: dict[str, bytes] = {"a.txt": b"old\n"}
+
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return [f"/shelf/{name}" for name in sorted(self.files)]
+
+    async def read(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        return self.files[path.vfs_path.strip("/")]
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        key = path.vfs_path.strip("/")
+        if not key:
+            return FileStat(name="/", type=FileType.DIRECTORY, size=None)
+        if key not in self.files:
+            raise FileNotFoundError(path.virtual)
+        return FileStat(
+            name=key, type=FileType.FILE, size=len(self.files[key])
+        )
+
+    @vfs_call(effect=Effect.WRITE)
+    async def shelve(self, path: PathSpec) -> None:
+        self.files[path.vfs_path.strip("/")] = b"new\n"
+
+
+@pytest.mark.asyncio
+async def test_a_custom_write_drops_the_bytes_it_changed():
+    ws = Workspace({"/shelf/": Shelf()}, mode=MountMode.WRITE)
+    try:
+        page = PathSpec.from_str_path("/shelf/a.txt")
+        read, _ = await ws.dispatch("read", page)
+        assert read == b"old\n"
+        await ws.dispatch("shelve", page)
+        read, _ = await ws.dispatch("read", page)
+        assert read == b"new\n"
     finally:
         await ws.close()

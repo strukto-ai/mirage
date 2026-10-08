@@ -45,13 +45,13 @@ export function vfsCall(options: { effect: Effect }) {
  * unmarked override inherits its base's mark. Mirrors Python's
  * `call_effect`.
  */
-export function callEffect(cls: { prototype: object }, name: string): Effect | null {
-  let proto: object | null = cls.prototype
-  while (proto !== null) {
+export function callEffect(cls: { readonly prototype: unknown }, name: string): Effect | null {
+  let proto: unknown = cls.prototype
+  while (typeof proto === 'object' && proto !== null) {
     const fn: unknown = Object.getOwnPropertyDescriptor(proto, name)?.value
     const effect = typeof fn === 'function' ? (fn as Marked)[EFFECT] : undefined
     if (effect !== undefined) return effect
-    proto = Object.getPrototypeOf(proto) as object | null
+    proto = Object.getPrototypeOf(proto)
   }
   return null
 }

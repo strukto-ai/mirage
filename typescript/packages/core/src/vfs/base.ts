@@ -316,12 +316,12 @@ export class BaseVFS<A extends Accessor = Accessor> {
 
   /**
    * Whether this VFS defines the function `name`. A function the base
-   * declares is supported once a subclass overrides it; one only a
-   * subclass declares (a custom `@vfsCall`) is supported because it
-   * exists.
+   * declares is supported once a subclass or the instance itself replaces
+   * it; one only a subclass declares (a custom `@vfsCall`) is supported
+   * because it exists.
    */
   supports(name: string): boolean {
-    const own: unknown = (Object.getPrototypeOf(this) as Record<string, unknown>)[name]
+    const own: unknown = (this as unknown as Record<string, unknown>)[name]
     return (
       typeof own === 'function' &&
       own !== (BaseVFS.prototype as unknown as Record<string, unknown>)[name]

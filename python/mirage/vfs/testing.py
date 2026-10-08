@@ -1,3 +1,4 @@
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from mirage.cache.index import IndexCacheStore, RAMIndexCacheStore
@@ -13,6 +14,24 @@ class ReadFixture:
     directory: PathSpec
     missing: PathSpec
     content: bytes
+
+
+def _reader(vfs: BaseVFS, path: PathSpec) -> Callable[..., Awaitable[bytes]]:
+    """What a read of ``path`` runs: the renderer of the filetype its name
+    ends with, where the VFS renders one, else ``read``.
+
+    Args:
+        vfs (BaseVFS): the VFS being validated.
+        path (PathSpec): the path read.
+    """
+    for filetype, renderer in vfs.renderers.items():
+        if path.virtual.endswith(filetype):
+            render: Callable[..., Awaitable[bytes]] | None = getattr(
+                vfs, renderer, None
+            )
+            assert callable(render), f"renderer {renderer} is not a method"
+            return render
+    return vfs.read
 
 
 async def check_read_contract(
@@ -33,7 +52,8 @@ async def check_read_contract(
     store = (
         index if index is not None else RAMIndexCacheStore(ttl=vfs.index_ttl)
     )
-    data = await vfs.read(fixture.file, store)
+    read = _reader(vfs, fixture.file)
+    data = await read(fixture.file, store)
     assert data == fixture.content, "read differs from fixture content"
     info = await vfs.stat(fixture.file, store)
     assert info.type == FileType.FILE, "fixture must stat as a file"
@@ -55,7 +75,7 @@ async def check_read_contract(
         offset = min(1, len(data) - 1)
         for size in (min(3, len(data) - offset), None):
             end = None if size is None else offset + size
-            actual = await vfs.read(fixture.file, store, offset, size)
+            actual = await read(fixture.file, store, offset, size)
             assert actual == data[offset:end], (
                 "read must use offset and byte count"
             )
@@ -66,7 +86,7 @@ async def check_read_contract(
         assert not await vfs.exists(fixture.missing), (
             "exists accepted a missing file"
         )
-    for call in (vfs.stat, vfs.read):
+    for call in (vfs.stat, _reader(vfs, fixture.missing)):
         try:
             await call(fixture.missing, store)
         except FileNotFoundError:

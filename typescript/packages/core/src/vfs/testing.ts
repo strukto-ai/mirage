@@ -20,6 +20,25 @@ function sameBytes(actual: Uint8Array, expected: Uint8Array): boolean {
   return actual.length === expected.length && actual.every((byte, i) => byte === expected[i])
 }
 
+type ReadFn = (
+  path: PathSpec,
+  index?: IndexCacheStore,
+  offset?: number,
+  size?: number | null,
+) => Promise<Uint8Array>
+
+// What a read of `path` runs: the renderer of the filetype its name ends
+// with, where the VFS renders one, else `read`. Mirrors Python's `_reader`.
+function reader(vfs: BaseVFS, path: PathSpec): ReadFn {
+  for (const [filetype, renderer] of Object.entries(vfs.renderers)) {
+    if (!path.virtual.endsWith(filetype)) continue
+    const render = (vfs as unknown as Record<string, ReadFn | undefined>)[renderer]
+    check(render !== undefined, `renderer ${renderer} is not a method`)
+    return render.bind(vfs)
+  }
+  return vfs.read.bind(vfs)
+}
+
 /**
  * Verify a VFS's reads against a caller-owned fixture, mutating nothing.
  *
@@ -35,7 +54,8 @@ export async function checkReadContract(
   index?: IndexCacheStore,
 ): Promise<void> {
   const store = index ?? new RAMIndexCacheStore({ ttl: vfs.indexTtl })
-  const data = await vfs.read(fixture.file, store)
+  const read = reader(vfs, fixture.file)
+  const data = await read(fixture.file, store)
   check(sameBytes(data, fixture.content), 'read differs from fixture content')
   const info = await vfs.stat(fixture.file, store)
   check(info.type === FileType.FILE, 'fixture must stat as a file')
@@ -55,7 +75,7 @@ export async function checkReadContract(
   if (vfs.readsRanges && data.length > 0) {
     const offset = Math.min(1, data.length - 1)
     for (const size of [Math.min(3, data.length - offset), null]) {
-      const actual = await vfs.read(fixture.file, store, offset, size)
+      const actual = await read(fixture.file, store, offset, size)
       check(
         sameBytes(actual, data.slice(offset, size === null ? undefined : offset + size)),
         'read must use offset and byte count',
@@ -66,7 +86,11 @@ export async function checkReadContract(
     check(await vfs.exists(fixture.file), 'exists rejected the fixture file')
     check(!(await vfs.exists(fixture.missing)), 'exists accepted a missing file')
   }
-  for (const call of [(p: PathSpec) => vfs.stat(p, store), (p: PathSpec) => vfs.read(p, store)]) {
+  const readMissing = reader(vfs, fixture.missing)
+  for (const call of [
+    (p: PathSpec) => vfs.stat(p, store),
+    (p: PathSpec) => readMissing(p, store),
+  ]) {
     try {
       await call(fixture.missing)
     } catch (error) {

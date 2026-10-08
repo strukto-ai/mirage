@@ -252,8 +252,11 @@ interface Call {
   readonly issuer: symbol | undefined
   /** Whether the op acts on the final name itself. */
   readonly noFollow: boolean
-  /** Whether policy judges the op a write. */
-  readonly write: boolean
+  /**
+   * Whether policy judges the op a write: set from the op's name by the
+   * walk, and from the VFS's own declaration at admission.
+   */
+  write: boolean
 }
 
 /** Whether the caller asked for the stored bytes, no renderer. */
@@ -369,7 +372,7 @@ export class Dispatcher {
     const boundary = this.boundary(owner)
     if (owner !== null) {
       await this.refuseCrossMount(call, owner)
-      await this.admit(call, boundary)
+      await this.admit(call, owner, boundary)
     }
     let resolved: [BaseVFS, PathSpec, MountMode]
     try {
@@ -395,7 +398,10 @@ export class Dispatcher {
     }
     const [answer, renameDst, fullArgs] = await this.callBackend(call, mount, vfs, scope, mode)
     const result = this.filter(call, answer)
-    if (DISPATCH_WRITE_OPS.has(opName) && !SERIAL_WRITE_OPS.has(opName)) {
+    if (
+      (DISPATCH_WRITE_OPS.has(opName) || (call.write && !POLICY_WRITE_OPS.has(opName))) &&
+      !SERIAL_WRITE_OPS.has(opName)
+    ) {
       await this.settleWrite(opName, call.path, renameDst, fullArgs)
     }
     // The transfer already happened, so a limit changes what the caller
@@ -599,7 +605,11 @@ export class Dispatcher {
    * the way it holds against writing there, under the mode of the mount
    * that owns it. Mirrors Python's Dispatcher._admit.
    */
-  private async admit(call: Call, boundary: OpBoundary): Promise<void> {
+  private async admit(call: Call, mount: MountEntry, boundary: OpBoundary): Promise<void> {
+    // A function the VFS declares a write is judged as one, whatever its
+    // name: the POSIX names are known here, a custom one only to the VFS
+    // that defines it.
+    call.write = call.write || mount.writes(call.opName)
     await boundary.admit(
       call.opName,
       call.path,

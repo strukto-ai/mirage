@@ -509,7 +509,7 @@ export class MountEntry {
 
   /** Whether the VFS declares the function `opName` a write. */
   writes(opName: string): boolean {
-    return callEffect(this.vfs.constructor as { prototype: object }, opName) === Effect.WRITE
+    return callEffect(this.vfs.constructor, opName) === Effect.WRITE
   }
 
   /**
@@ -601,7 +601,7 @@ export class MountEntry {
               this.pwriteByRewrite(scope, writeData(args), offsetArg(args[1], scope), kw.index),
           ]
     }
-    if (callEffect(vfs.constructor as { prototype: object }, opName) === null) return []
+    if (callEffect(vfs.constructor, opName) === null) return []
     if (!vfs.supports(opName)) return []
     switch (opName) {
       case 'readdir':

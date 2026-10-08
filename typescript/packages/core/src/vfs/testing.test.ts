@@ -81,6 +81,28 @@ class LenientStat extends Minimal {
   }
 }
 
+/** Serves its one filetype through a renderer and defines no read. */
+class RenderedOnly extends BaseVFS<RAMAccessor> {
+  override readonly renderers: Readonly<Record<string, string>> = { '.gdoc.json': 'readDoc' }
+
+  override readdir(path: PathSpec): Promise<string[]> {
+    return ramReaddir(this.accessor, path)
+  }
+
+  async readDoc(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    return sliceWindow(await ramRead(this.accessor, path, index), offset, size)
+  }
+
+  override stat(path: PathSpec): Promise<FileStat> {
+    return ramStat(this.accessor, path)
+  }
+}
+
 async function seeded<V extends BaseVFS<RAMAccessor>>(
   cls: new (options: { name: string; accessor: RAMAccessor }) => V,
   content: Uint8Array,
@@ -100,6 +122,27 @@ describe('the read contract', () => {
     const ram = new RAMVFS()
     await ramWrite(ram.accessor, FILE, CONTENT)
     await checkReadContract(ram, FIXTURE)
+  })
+
+  it('a rendered filetype meets it through its renderer', async () => {
+    const doc = new PathSpec({
+      virtual: '/data/a.gdoc.json',
+      directory: '/data',
+      vfsPath: 'a.gdoc.json',
+    })
+    const missing = new PathSpec({
+      virtual: '/data/missing.gdoc.json',
+      directory: '/data',
+      vfsPath: 'missing.gdoc.json',
+    })
+    const accessor = new RAMAccessor(new RAMStore())
+    await ramWrite(accessor, doc, CONTENT)
+    await checkReadContract(new RenderedOnly({ name: 'custom', accessor }), {
+      file: doc,
+      directory: DIRECTORY,
+      missing,
+      content: CONTENT,
+    })
   })
 
   it('catches a range that uses the end instead of the size', async () => {

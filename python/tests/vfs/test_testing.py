@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from types import MappingProxyType
 from unittest.mock import AsyncMock
 
 import pytest
@@ -87,6 +88,33 @@ class LenientStat(Minimal):
         return await super().stat(path, index)
 
 
+class RenderedOnly(BaseVFS):
+    """Serves its one filetype through a renderer and defines no read."""
+
+    name = "custom"
+    renderers = MappingProxyType({".gdoc.json": "read_doc"})
+
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> list[str]:
+        return await ram_readdir(self.accessor, path, index)
+
+    async def read_doc(
+        self,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> bytes:
+        data = await ram_read(self.accessor, path, index)
+        return slice_window(data, offset, size)
+
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        return await ram_stat(self.accessor, path, index)
+
+
 async def _seeded(cls: type[BaseVFS], content: bytes) -> BaseVFS:
     store = RAMStore()
     accessor = RAMAccessor(store)
@@ -108,6 +136,24 @@ async def test_a_builtin_meets_the_contract():
     ram = RAMVFS()
     await ram_write(ram.accessor, FILE, CONTENT)
     await check_read_contract(ram, FIXTURE)
+
+
+@pytest.mark.asyncio
+async def test_a_rendered_filetype_meets_the_contract_through_its_renderer():
+    doc = PathSpec(
+        virtual="/data/a.gdoc.json", directory="/data", vfs_path="a.gdoc.json"
+    )
+    missing = PathSpec(
+        virtual="/data/missing.gdoc.json",
+        directory="/data",
+        vfs_path="missing.gdoc.json",
+    )
+    accessor = RAMAccessor(RAMStore())
+    await ram_write(accessor, doc, CONTENT)
+    await check_read_contract(
+        RenderedOnly(accessor=accessor),
+        ReadFixture(doc, DIRECTORY, missing, CONTENT),
+    )
 
 
 @pytest.mark.asyncio

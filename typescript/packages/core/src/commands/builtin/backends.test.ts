@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { IOResult } from '../../io/types.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -45,6 +45,16 @@ describe('mountCommands', () => {
     const served = mountCommands(new SlackVFS())
     expect(served.some((cmd) => cmd.name === 'cat')).toBe(true)
     expect(new Set(served.map((cmd) => cmd.vfs))).toEqual(new Set(['mychat']))
+  })
+
+  it('serves a family registered by another copy of the package', async () => {
+    vi.resetModules()
+    const copy = await import('../../vfs/ram/ram.ts')
+    const copyBackends = await import('./backends.ts')
+    class Foreign extends copy.RAMVFS {}
+    const served = mountCommands(new Foreign())
+    expect(served).toEqual(copyBackends.mountCommands(new Foreign()))
+    expect(served).not.toEqual(mountCommands(new RAMVFS()))
   })
 
   it('puts handed commands after the generic set they override', () => {

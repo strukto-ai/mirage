@@ -90,19 +90,31 @@ interface VFSClass {
   readonly prototype: BaseVFS
 }
 
-// The shell commands of each builtin VFS class. Keyed by the class itself,
-// not its name, so a minified bundle still finds them; a package registers
-// the backends it ships (core's below, node's and the browser's from their
-// own `commands/builtin/backends.ts`). Python finds the same tables by
-// class name and imports them on first mount.
-const BACKENDS = new Map<VFSClass, () => readonly RegisteredCommand[]>()
+// The shell commands of each builtin VFS class, kept on the class itself:
+// keyed by the class, not its name, so a minified bundle still finds them,
+// and under a global symbol, so a VFS extending a class from another copy
+// of this package finds that copy's commands, as the BaseVFS brand does. A
+// package registers the backends it ships (core's below, node's and the
+// browser's from their own `commands/builtin/backends.ts`). Python finds
+// the same tables by class path and imports them on first mount.
+const BACKEND_COMMANDS: unique symbol = Symbol.for('mirage.backendCommands')
+
+interface Registered {
+  readonly [BACKEND_COMMANDS]?: () => readonly RegisteredCommand[]
+}
 
 /** Serve `commands` on every mount of `cls` and its subclasses. */
 export function registerBackendCommands(
   cls: VFSClass,
   commands: () => readonly RegisteredCommand[],
 ): void {
-  BACKENDS.set(cls, commands)
+  Object.defineProperty(cls, BACKEND_COMMANDS, { value: commands, configurable: true })
+}
+
+// The commands registered for `cls` itself, not inherited from a base.
+function registeredFor(cls: unknown): readonly RegisteredCommand[] | undefined {
+  if (typeof cls !== 'function' || !Object.hasOwn(cls, BACKEND_COMMANDS)) return undefined
+  return (cls as Registered)[BACKEND_COMMANDS]?.()
 }
 
 // The one VFS name a backend's commands were registered under, or null for
@@ -141,7 +153,7 @@ export function mountCommands(vfs: BaseVFS): RegisteredCommand[] {
   let found: RegisteredCommand[] | null = null
   let cls: unknown = vfs.constructor
   while (typeof cls === 'function' && found === null) {
-    const commands = BACKENDS.get(cls as VFSClass)?.()
+    const commands = registeredFor(cls)
     if (commands !== undefined) {
       const family = familyOf(commands)
       found = commands.map((cmd) =>

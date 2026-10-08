@@ -258,15 +258,16 @@ class BaseVFS:
     def supports(self, name: str) -> bool:
         """Whether this VFS defines the function ``name``.
 
-        A function the base declares is supported once a subclass
-        overrides it; one only a subclass declares (a custom
-        ``@vfs_call``) is supported because it exists.
+        A function the base declares is supported once a subclass or the
+        instance itself replaces it; one only a subclass declares (a
+        custom ``@vfs_call``) is supported because it exists.
 
         Args:
             name (str): the function name.
         """
-        own = getattr(type(self), name, None)
-        return callable(own) and own is not getattr(BaseVFS, name, None)
+        own = getattr(self, name, None)
+        fn = getattr(own, "__func__", own)
+        return callable(own) and fn is not getattr(BaseVFS, name, None)
 
     def commands(self) -> list[Callable[..., Any]]:
         """The bespoke ``@command`` functions this VFS was handed."""
