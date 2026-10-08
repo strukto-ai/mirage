@@ -135,7 +135,6 @@ export function crossOpts(flagKwargs: Record<string, FlagValue>): CommandOpts {
   return {
     stdin: null,
     flags: flagKwargs,
-    filetypeFns: null,
     mountPrefix: '',
     cwd: '/',
   }

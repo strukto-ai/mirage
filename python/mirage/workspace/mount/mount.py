@@ -587,30 +587,6 @@ class MountEntry:
             out.append(rc)
         return out
 
-    def filetype_handlers(
-        self,
-        cmd_name: str,
-    ) -> dict[str, Callable[..., Any]]:
-        """Get filetype-specific command handlers.
-
-        Example::
-
-            mount.register(generic_cat)   # ("cat", None)
-            mount.register(parquet_cat)   # ("cat", ".parquet")
-
-            mount.filetype_handlers("cat")
-            # -> {".parquet": parquet_cat_fn}
-
-        Args:
-            cmd_name (str): command name, e.g. "cat".
-        """
-        fns: dict[str, Callable[..., Any]] = {}
-        for (name, ft), rc in self._cmds.items():
-            if name == cmd_name and ft is not None:
-                if ft not in fns:
-                    fns[ft] = rc.fn
-        return fns
-
     def register_commands(self, fns: Iterable[Any]) -> None:
         """Register decorated functions or command definitions.
 
@@ -764,7 +740,7 @@ class MountEntry:
                 is kept here.
         """
         async with self.use():
-            handlers, extension = await self._pick_handlers(
+            handlers = await self._pick_handlers(
                 cmd_name, paths, context.stat_path
             )
             if not handlers:
@@ -774,7 +750,7 @@ class MountEntry:
                 )
             paths = self._keyed_paths(cmd_name, paths)
             flags = self._keyed_flags(flag_kwargs)
-            opts = self._command_opts(cmd_name, extension, flags, context)
+            opts = self._command_opts(cmd_name, flags, context)
             with self._command_scope(context):
                 for cmd in handlers:
                     refusal = self._read_only_refusal(cmd_name, cmd, flags)
@@ -792,8 +768,8 @@ class MountEntry:
         cmd_name: str,
         paths: list[PathSpec],
         stat_path: StatPath | None,
-    ) -> tuple[list[Command], str | None]:
-        """The handlers to try in order, and the extension that chose them.
+    ) -> list[Command]:
+        """The handlers to try in order.
 
         A filetype handler is selected from the operand's NAME, and a
         directory can carry any extension, so the cascade would hand a
@@ -821,10 +797,9 @@ class MountEntry:
             entry = await stat_path(paths[0].virtual)
             if entry is not None and entry.type == FileType.DIRECTORY:
                 extension = None
-        handlers = self._resolve_cascade(
+        return self._resolve_cascade(
             cmd_name, extension, self._cmds, self._general_cmds
         )
-        return handlers, extension
 
     def _keyed_paths(
         self, cmd_name: str, paths: list[PathSpec]
@@ -896,7 +871,6 @@ class MountEntry:
     def _command_opts(
         self,
         cmd_name: str,
-        extension: str | None,
         flags: dict[str, FlagValue],
         context: ExecContext,
     ) -> CommandOpts:
@@ -908,15 +882,11 @@ class MountEntry:
 
         Args:
             cmd_name (str): command name.
-            extension (str | None): the extension that chose the handler.
             flags (dict[str, FlagValue]): the keyed flags.
             context (ExecContext): the invocation's execution context.
         """
         mount_prefix = self.prefix.rstrip("/")
         cwd = context.cwd
-        is_filetype_cmd = (
-            extension is not None and (cmd_name, extension) in self._cmds
-        )
         return CommandOpts(
             command=cmd_name,
             stdin=context.stdin,
@@ -928,11 +898,6 @@ class MountEntry:
                 vfs_path=mount_key(cwd, mount_prefix),
             ),
             mount_prefix=mount_prefix,
-            filetype_fns=(
-                self.filetype_handlers(cmd_name)
-                if not is_filetype_cmd
-                else None
-            ),
             index=self.index,
             io=self.io,
             dispatch=context.dispatch,

@@ -153,25 +153,6 @@ describe('Mount.specFor', () => {
   })
 })
 
-describe('Mount.filetypeHandlers', () => {
-  it('returns only filetype-specific variants of a command', () => {
-    const m = makeMount()
-    const [generic] = command({ name: 'cat', vfs: 'ram', spec: BASIC_SPEC, fn: OK_CMD })
-    const [json] = command({
-      name: 'cat',
-      vfs: 'ram',
-      spec: BASIC_SPEC,
-      fn: OK_CMD,
-      filetype: '.json',
-    })
-    if (generic === undefined || json === undefined) throw new Error('missing')
-    m.register(generic)
-    m.register(json)
-    const fns = m.filetypeHandlers('cat')
-    expect(Object.keys(fns)).toEqual(['.json'])
-  })
-})
-
 describe('Mount.unregister', () => {
   it('removes all cmd variants and general fallbacks with the same name', () => {
     const m = makeMount()

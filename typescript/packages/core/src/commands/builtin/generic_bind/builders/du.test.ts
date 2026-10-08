@@ -67,7 +67,6 @@ describe('du walk fallback (no native du op)', () => {
     const result = await BUILDER.fn(bounded, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
       stdin: null,
       flags: {},
-      filetypeFns: null,
       cwd: '/',
     })
     expect(result).not.toBeNull()
@@ -85,7 +84,6 @@ describe('du walk fallback (no native du op)', () => {
       BUILDER.fn(failing, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
         stdin: null,
         flags: {},
-        filetypeFns: null,
         cwd: '/',
       }),
     ).rejects.toThrow('403 Forbidden')
@@ -129,7 +127,6 @@ async function runScoped(
     BUILDER.fn(scopedIo(ops, SCOPED_VIEW, paths, ''), ACCESSOR, paths, [], {
       stdin: null,
       flags: {},
-      filetypeFns: null,
       cwd: '/',
       ns: SCOPED_VIEW,
     }),
@@ -247,7 +244,6 @@ describe('du rows for directories no file points at', () => {
     const result = await BUILDER.fn(ops, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
       stdin: null,
       flags,
-      filetypeFns: null,
       cwd: '/',
     })
     if (result === null) throw new Error('no result')

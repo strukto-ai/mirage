@@ -156,7 +156,6 @@ export async function runDispatch(
     {
       stdin,
       flags: rebased,
-      filetypeFns: null,
       mountPrefix: '',
       cwd,
       dispatch,

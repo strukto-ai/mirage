@@ -85,7 +85,6 @@ async function run(
   const result = await cmd.fn(accessor, paths, [], {
     stdin: null,
     flags,
-    filetypeFns: null,
     io: ioFor(MongoDBVFSBase, accessor),
     cwd: '/',
     ...(signal === undefined ? {} : { signal }),

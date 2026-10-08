@@ -23,7 +23,6 @@ const DEC = new TextDecoder()
 const OPTS: CommandOpts = {
   stdin: null,
   flags: {},
-  filetypeFns: null,
   cwd: '/',
   mountPrefix: '/trello',
 }

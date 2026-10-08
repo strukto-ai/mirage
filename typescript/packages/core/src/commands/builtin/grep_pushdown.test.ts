@@ -468,7 +468,6 @@ describe('an empty search answer', () => {
     const result = await cmd.fn(accessor, [spec], ['missing'], {
       stdin: null,
       flags,
-      filetypeFns: null,
       io,
       cwd: '/',
     })

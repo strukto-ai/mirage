@@ -87,7 +87,6 @@ describe('command() registers multiple mounts', () => {
     const opts = {
       stdin: null,
       flags: { help: true },
-      filetypeFns: null,
       cwd: '/',
       vfs: {} as never,
     }
@@ -125,7 +124,6 @@ describe('command() registers multiple mounts', () => {
     const opts = {
       stdin: null,
       flags: { version: true },
-      filetypeFns: null,
       cwd: '/',
       vfs: {} as never,
     }

@@ -76,7 +76,6 @@ describe('genericCommands', () => {
       const opts = {
         stdin: null,
         flags: { r: name === 'cp' },
-        filetypeFns: null,
         cwd: '/mnt',
         index,
         io,
@@ -352,7 +351,7 @@ describe('a command with its own stat', () => {
     const run = async (name: string): Promise<string> => {
       const command = commands.find((c) => c.name === name)
       if (command === undefined) throw new Error('command missing')
-      const opts = { stdin: null, flags: {}, filetypeFns: null, cwd: '/mnt', io: base }
+      const opts = { stdin: null, flags: {}, cwd: '/mnt', io: base }
       const out = await command.fn(new FakeAccessor(), [spec('/a.txt')], [], opts)
       return new TextDecoder().decode(await materialize(out?.[0] ?? null))
     }

@@ -45,7 +45,6 @@ it.each([
     const result = await command.fn({} as Accessor, [refused, valid], [], {
       flags: { f: force },
       stdin: null,
-      filetypeFns: null,
       cwd: '/',
       io,
     })

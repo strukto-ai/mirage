@@ -32,7 +32,6 @@ async function runCut(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
     stdin,
     flags,
-    filetypeFns: null,
     io: commandIo(vfs),
     cwd: '/',
   })
@@ -75,7 +74,6 @@ describe('cut', () => {
     const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
       stdin: null,
       flags: { fields: '1' },
-      filetypeFns: null,
       io: commandIo(vfs),
       cwd: '/',
     })

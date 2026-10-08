@@ -57,7 +57,6 @@ function opts(fmt: string): CommandOpts {
   return {
     stdin: null,
     flags: { format: fmt },
-    filetypeFns: null,
     cwd: '/',
     vfs: null,
   } as unknown as CommandOpts

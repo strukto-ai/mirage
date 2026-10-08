@@ -23,7 +23,6 @@ async function run(value: string, flags: CommandOpts['flags'] = {}): Promise<str
   const opts = {
     stdin: null,
     flags,
-    filetypeFns: null,
     cwd: '/',
     vfs: { kind: 'ram' } as never,
   } as CommandOpts

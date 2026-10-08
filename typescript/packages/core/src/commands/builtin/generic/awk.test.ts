@@ -33,7 +33,7 @@ function spec(path: string): PathSpec {
 }
 
 function opts(flags: CommandOpts['flags'] = {}, stdin: Uint8Array | null = null): CommandOpts {
-  return { stdin, flags, filetypeFns: null, cwd: '/', vfs: {} } as CommandOpts
+  return { stdin, flags, cwd: '/', vfs: {} } as CommandOpts
 }
 
 function makeStream(files: Record<string, string>) {

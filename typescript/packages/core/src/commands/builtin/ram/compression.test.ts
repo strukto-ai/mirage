@@ -41,7 +41,6 @@ async function runCmd(
   const result = await cmd.fn(vfs.accessor, paths, [], {
     stdin,
     flags,
-    filetypeFns: null,
     io: commandIo(vfs),
     cwd: '/',
   })

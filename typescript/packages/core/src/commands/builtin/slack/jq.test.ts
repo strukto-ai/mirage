@@ -38,7 +38,6 @@ async function runJq(
   const result = await cmd.fn(vfs.accessor, paths, texts, {
     stdin: null,
     flags,
-    filetypeFns: null,
     io: commandIo(vfs),
     cwd: '/',
     ...(options.index !== undefined ? { index: options.index } : {}),

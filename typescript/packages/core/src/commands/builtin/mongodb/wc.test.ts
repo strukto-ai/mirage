@@ -48,7 +48,6 @@ async function wcLines(path: PathSpec, counted: string[]): Promise<[string, numb
   const result = await cmd.fn(accessor, [path], [], {
     stdin: null,
     flags: { lines: true },
-    filetypeFns: null,
     io: ioFor(MongoDBVFSBase, accessor),
     cwd: '/',
   })

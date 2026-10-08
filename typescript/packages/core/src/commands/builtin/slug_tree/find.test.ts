@@ -100,7 +100,6 @@ describe('slug-tree find under a hide', () => {
     const opts = {
       stdin: null,
       flags: {},
-      filetypeFns: null,
       io: ioFor(DifyVFS, accessor),
       cwd: '/',
       index: new RAMIndexCacheStore(),
@@ -176,7 +175,6 @@ describe('chroma find', () => {
       const opts = {
         stdin: null,
         flags,
-        filetypeFns: null,
         io: ioFor(ChromaVFS, accessor),
         cwd: '/',
         index: new RAMIndexCacheStore(),

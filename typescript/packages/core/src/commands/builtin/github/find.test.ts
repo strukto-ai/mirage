@@ -95,7 +95,6 @@ describe('github find', () => {
     const opts: CommandOpts = {
       stdin: null,
       flags: {},
-      filetypeFns: null,
       io: ioFor(GitHubVFS, accessor),
       cwd: '/',
       index,
@@ -121,7 +120,6 @@ describe('github find', () => {
     const opts: CommandOpts = {
       stdin: null,
       flags: {},
-      filetypeFns: null,
       io: ioFor(GitHubVFS, accessor),
       cwd: '/',
       index,

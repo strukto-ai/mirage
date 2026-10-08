@@ -32,7 +32,7 @@ async function findGeneric(...args: Parameters<typeof streamFind>) {
 const DEC = new TextDecoder()
 
 function makeOpts(): CommandOpts {
-  return { stdin: null, flags: {}, filetypeFns: null, cwd: '/' } as unknown as CommandOpts
+  return { stdin: null, flags: {}, cwd: '/' } as unknown as CommandOpts
 }
 
 function enoent(p: string): Error {
@@ -55,7 +55,6 @@ function optsWith(stat: FileStat | null, flags: Record<string, unknown> = {}): C
   return {
     stdin: null,
     flags,
-    filetypeFns: null,
     cwd: '/',
     statPath: () => Promise.resolve(stat),
   } as unknown as CommandOpts
@@ -247,7 +246,6 @@ describe('generic command find', () => {
       const opts = {
         stdin: null,
         flags: { empty: true },
-        filetypeFns: null,
         cwd: '/',
         statPath: () => Promise.resolve(dirStat),
         ns: { links },

@@ -73,7 +73,7 @@ async function rm(
     {} as Accessor,
     paths.map((p) => PathSpec.fromStrPath(p)),
     [],
-    { stdin: null, flags, filetypeFns: null, cwd: '/', index: INDEX },
+    { stdin: null, flags, cwd: '/', index: INDEX },
   )
   if (result === null) throw new Error('rm returned no result')
   const [out, res] = result

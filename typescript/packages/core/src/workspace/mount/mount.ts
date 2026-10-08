@@ -29,7 +29,6 @@ import type { IndexConfig } from '../../cache/index/config.ts'
 import { buildIndex } from '../../cache/index/factory.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type {
-  CommandFn,
   CommandFnResult,
   CommandOpts,
   ExecContext,
@@ -463,18 +462,6 @@ export class MountEntry {
     return this.cmdSpecs.get(cmdName) ?? null
   }
 
-  filetypeHandlers(cmdName: string): Record<string, CommandFn> {
-    // Null prototype: filetype names are registration-controlled.
-    const fns: Record<string, CommandFn> = Object.create(null) as Record<string, CommandFn>
-    for (const [key, rc] of this.cmds) {
-      if (rc.name === cmdName && rc.filetype !== null) {
-        if (!(rc.filetype in fns)) fns[rc.filetype] = rc.fn
-      }
-      void key
-    }
-    return fns
-  }
-
   unregister(names: string[]): void {
     for (const name of names) {
       for (const [key, rc] of this.cmds) {
@@ -724,7 +711,7 @@ export class MountEntry {
     context: ExecContext = {},
   ): Promise<[ByteSource | null, IOResult]> {
     return this.use(async (): Promise<[ByteSource | null, IOResult]> => {
-      const [handlers, extension] = await this.pickHandlers(cmdName, paths, context)
+      const handlers = await this.pickHandlers(cmdName, paths, context)
       if (handlers.length === 0) {
         return [
           null,
@@ -735,7 +722,7 @@ export class MountEntry {
         ]
       }
       const keyedPaths = this.keyedPaths(cmdName, paths)
-      const cmdOpts = this.commandOpts(cmdName, extension, this.keyedFlags(flags), context)
+      const cmdOpts = this.commandOpts(cmdName, this.keyedFlags(flags), context)
       return this.inCommandScope(context, async (): Promise<[ByteSource | null, IOResult]> => {
         for (const cmd of handlers) {
           const refusal = this.readOnlyRefusal(cmdName, cmd, flags)
@@ -749,7 +736,7 @@ export class MountEntry {
   }
 
   /**
-   * The handlers to try in order, and the extension that chose them.
+   * The handlers to try in order.
    *
    * A filetype handler is selected from the operand's NAME, and a
    * directory can carry any extension, so the cascade would hand a
@@ -766,7 +753,7 @@ export class MountEntry {
     cmdName: string,
     paths: PathSpec[],
     context: ExecContext,
-  ): Promise<[Command[], string | null]> {
+  ): Promise<Command[]> {
     let extension =
       paths.length > 0 && paths[0] !== undefined ? getExtension(paths[0].virtual) : null
     const first = paths[0]
@@ -780,7 +767,7 @@ export class MountEntry {
       const entry = await context.statPath(first)
       if (entry !== null && entry.type === FileType.DIRECTORY) extension = null
     }
-    return [this.resolveCascade(cmdName, extension, this.cmds, this.generalCmds), extension]
+    return this.resolveCascade(cmdName, extension, this.cmds, this.generalCmds)
   }
 
   /** `p` with this mount's backend key stamped on. */
@@ -853,16 +840,12 @@ export class MountEntry {
    */
   private commandOpts(
     cmdName: string,
-    extension: string | null,
     flags: Record<string, FlagValue>,
     context: ExecContext,
   ): CommandOpts {
-    const isFiletypeCmd =
-      extension !== null && extension !== '' && this.cmds.has(cmdKey(cmdName, extension))
     return {
       stdin: context.stdin ?? null,
       flags,
-      filetypeFns: isFiletypeCmd ? null : this.filetypeHandlers(cmdName),
       mountPrefix: rstripSlash(this.prefix),
       command: cmdName,
       cwd: context.cwd ?? ROOT_CWD,

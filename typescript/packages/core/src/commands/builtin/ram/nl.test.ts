@@ -34,7 +34,6 @@ async function runNl(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, [], {
     stdin,
     flags,
-    filetypeFns: null,
     io: commandIo(vfs),
     cwd: '/',
   })
@@ -127,7 +126,6 @@ describe('nl', () => {
     const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
       stdin: null,
       flags: {},
-      filetypeFns: null,
       io: commandIo(vfs),
       cwd: '/',
     })
