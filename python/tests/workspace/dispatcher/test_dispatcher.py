@@ -1718,9 +1718,14 @@ async def test_a_capped_stream_stops_at_the_cap(on_exceed):
 
 
 @pytest.mark.asyncio
-async def test_a_stream_closed_before_its_first_pull_closes_and_keeps_nothing():
+@pytest.mark.parametrize("cap", [None, Limit(max_bytes=15)])
+async def test_a_stream_closed_before_its_first_pull_closes_and_keeps_nothing(
+    cap,
+):
     tape = Tape()
     with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
+        if cap is not None:
+            ws.namespace.mount_for("/tape/a.txt").command_limits["read"] = cap
         stream, _ = await ws.dispatch("read", TAPE, stream=True)
         await stream.aclose()
         assert (tape.pulled, tape.closed) == (1, True)

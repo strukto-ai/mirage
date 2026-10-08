@@ -348,15 +348,21 @@ async def _capped(src: ByteSource, limit: Limit) -> AsyncIterator[bytes]:
 
     Nothing past the cap is pulled from ``src``. TRUNCATE ends the
     stream there; ERROR raises LimitExceededError at the pull that
-    crossed it.
+    crossed it. ``limit_result`` runs it to its empty first step,
+    inside the ``try``, so a caller that closes it before pulling still
+    closes ``src``.
 
     Args:
         src (ByteSource): the op's stream.
         limit (Limit): resolved op limit.
     """
     io = IOResult()
-    async for chunk in _bounded_stream(src, io, limit):
-        yield chunk
+    try:
+        yield b""
+        async for chunk in _bounded_stream(src, io, limit):
+            yield chunk
+    finally:
+        await close_quietly(src)
     if io.stderr:
         message = (await io.stderr_str()).strip()
         if io.exit_code != 0:
@@ -382,7 +388,9 @@ async def limit_result(result, limit: Limit | None):
     if limit.max_bytes is None and limit.max_lines is None:
         return result
     if hasattr(result, "__aiter__"):
-        return _capped(result, limit)
+        capped = _capped(result, limit)
+        await capped.__anext__()
+        return capped
     if not isinstance(result, (bytes, bytearray)):
         return result
     data, sg_io = await apply_limit(bytes(result), limit)

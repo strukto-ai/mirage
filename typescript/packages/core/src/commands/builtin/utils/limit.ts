@@ -14,7 +14,7 @@
 
 import { concat } from '../../../io/cachable_iterator.ts'
 import { chunks } from '../../../io/cooperative.ts'
-import { ensureStream } from '../../../io/stream.ts'
+import { closeQuietly, ensureStream } from '../../../io/stream.ts'
 import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
 import { type Limit, OnExceed } from '../../../types.ts'
 import { LimitExceededError } from '../../errors.ts'
@@ -317,11 +317,18 @@ export async function guardOutput(
 /**
  * A streamed op result cut at its cap as it is pulled. Nothing past the cap is
  * pulled from `src`: TRUNCATE ends the stream there, ERROR throws
- * LimitExceededError at the pull that crossed it. Mirrors Python's `_capped`.
+ * LimitExceededError at the pull that crossed it. `limitResult` runs it to its
+ * empty first step, inside the `try`, so a caller that closes it before
+ * pulling still closes `src`. Mirrors Python's `_capped`.
  */
-async function* capped(src: ByteSource, limit: Limit): AsyncIterableIterator<Uint8Array> {
+async function* capped(src: ByteSource, limit: Limit): AsyncGenerator<Uint8Array> {
   const io = new IOResult()
-  yield* boundedStream(src, io, limit)
+  try {
+    yield new Uint8Array()
+    yield* boundedStream(src, io, limit)
+  } finally {
+    await closeQuietly(src)
+  }
   if (io.exitCode !== 0) {
     throw new LimitExceededError(DEC.decode(await materialize(io.stderr)).trim())
   }
@@ -331,7 +338,11 @@ export async function limitResult(result: unknown, limit: Limit | null): Promise
   if (limit === null) return result
   if (limit.maxBytes === null && limit.maxLines === null) return result
   const isStream = result !== null && typeof result === 'object' && Symbol.asyncIterator in result
-  if (isStream) return capped(result as ByteSource, limit)
+  if (isStream) {
+    const stream = capped(result as ByteSource, limit)
+    await stream.next()
+    return stream
+  }
   if (!(result instanceof Uint8Array)) return result
   const [data, sgIo] = await applyLimit(result, limit)
   if (sgIo.exitCode !== 0) {

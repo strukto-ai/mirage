@@ -1622,21 +1622,27 @@ describe('a streamed read', () => {
     }
   })
 
-  it('closes and keeps nothing when closed before its first pull', async () => {
-    const tape = new Tape()
-    const ws = new Workspace({ '/tape': tape }, { mode: MountMode.WRITE })
-    try {
-      const stream = (await ws.dispatch('read', TAPE, [], {
-        stream: true,
-      })) as AsyncGenerator<Uint8Array>
-      await stream.return(undefined)
-      expect([tape.pulled, tape.closed]).toEqual([1, true])
-      await ws.dispatch('read', TAPE)
-      expect(tape.reads).toBe(1)
-    } finally {
-      await ws.close()
-    }
-  })
+  it.each([[null], [new Limit({ maxBytes: 15 })]])(
+    'closes and keeps nothing when closed before its first pull (cap %o)',
+    async (cap) => {
+      const tape = new Tape()
+      const ws = new Workspace(
+        { '/tape': cap === null ? tape : [tape, MountMode.WRITE, { read: cap }] },
+        { mode: MountMode.WRITE },
+      )
+      try {
+        const stream = (await ws.dispatch('read', TAPE, [], {
+          stream: true,
+        })) as AsyncGenerator<Uint8Array>
+        await stream.return(undefined)
+        expect([tape.pulled, tape.closed]).toEqual([1, true])
+        await ws.dispatch('read', TAPE)
+        expect(tape.reads).toBe(1)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
 
   it('keeps none of itself when a write lands during it', async () => {
     const tape = new Tape()
