@@ -33,7 +33,7 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
-    "@aws-sdk/client-s3": "^3.0.0",
+    "@aws-sdk/client-s3": "^3.1116.0",
     "@aws-sdk/s3-request-presigner": "^3.0.0",
     "@daytona/sdk": "^0.207.0",
     "@lancedb/lancedb": "^0.30.0",
