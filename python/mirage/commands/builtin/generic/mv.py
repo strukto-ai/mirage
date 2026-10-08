@@ -655,7 +655,12 @@ async def mv_generic(
             try:
                 await strategy.rename(src, target)
             except FS_ERRORS as exc:
-                inner = inner_suffix(src, exc)
+                # A stale key inside a walk is named; other refusals, the operand.
+                inner = (
+                    inner_suffix(src, exc)
+                    if isinstance(exc, StaleWriteError)
+                    else ""
+                )
                 # Copy landed, source delete lost: GNU's cross-device unlink failure.
                 if isinstance(exc, StaleWriteError) and exc.landed:
                     errors.append(

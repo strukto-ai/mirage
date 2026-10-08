@@ -551,7 +551,9 @@ export async function mvGeneric(
         await strategy.rename(src, target)
       } catch (err) {
         if (!isFsError(err)) throw err
-        const inner = innerSuffix(src, err)
+        // A stale key inside a walk is named; other refusals, the operand.
+        const stale = (err as { code?: unknown } | null)?.code === 'STALE_WRITE'
+        const inner = stale ? innerSuffix(src, err) : ''
         const from = withInner(src.rawPath, inner)
         if (isLandedMove(err)) {
           // Copy landed, source delete lost: GNU's cross-device unlink failure.
