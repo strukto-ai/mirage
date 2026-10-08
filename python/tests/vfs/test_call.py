@@ -101,13 +101,18 @@ def test_a_mark_declares_and_an_override_keeps_it():
     assert declared(Shelf, "helper") is None
 
 
-async def move(path: PathSpec, dst: PathSpec) -> None:
+async def discard(path: PathSpec) -> None:
     return None
 
 
-def test_only_rename_declares_a_rename():
-    with pytest.raises(TypeError, match="move: only rename"):
-        vfs_call(effect=Effect.RENAME)(move)
+@pytest.mark.parametrize(
+    ("effect", "names"),
+    [(Effect.REMOVE, "unlink and rmdir"), (Effect.RENAME, "rename")],
+)
+def test_only_the_posix_calls_remove_or_move_a_name(effect, names):
+    refusal = f"discard: only {names} may declare {effect.name}"
+    with pytest.raises(TypeError, match=refusal):
+        vfs_call(effect=effect)(discard)
 
 
 # What each built-in function declares. The TypeScript twin

@@ -17,6 +17,13 @@ import { type Declaration, Effect, Target } from './types.ts'
 
 const MARK = Symbol.for('mirage.vfsCall')
 
+// Removing or moving a name is what these calls do, and the door's link,
+// overlay and cache bookkeeping for it is keyed on their names.
+const NAMED: Partial<Record<Effect, readonly string[]>> = {
+  [Effect.REMOVE]: ['unlink', 'rmdir'],
+  [Effect.RENAME]: ['rename'],
+}
+
 interface Marked {
   [MARK]?: Declaration
 }
@@ -33,9 +40,12 @@ interface Marked {
  *
  * The built-in functions' marks are where the door's op classes come from:
  * which ops follow a link, create a name, run one at a time per path or stamp
- * an mtime is read off what they declare here. Only `rename` declares RENAME:
- * the door moves the hides, links and cache below a source to a destination,
- * and only `rename(path, dst)` names both. `target` is the kind of entry the
+ * an mtime is read off what they declare here. REMOVE belongs to `unlink` and
+ * `rmdir` and RENAME to `rename`: what the door does around them (a link
+ * removed rather than followed, the hides, links and cache below a moved
+ * directory) is keyed on those names, so another function declaring either is
+ * refused. A VFS that deletes or moves defines those functions. `target` is the
+ * kind of entry the
  * path names (any when omitted) and `creates` marks a WRITE that makes a
  * missing file, as open(2) with O_CREAT. Mirrors Python's `vfs_call`.
  */
@@ -50,8 +60,11 @@ export function vfsCall(options: { effect: Effect; target?: Target; creates?: bo
     context: ClassMethodDecoratorContext,
   ): void {
     const name = String(context.name)
-    if (mark.effect === Effect.RENAME && name !== 'rename') {
-      throw new TypeError(`${name}: only rename declares RENAME`)
+    const names = NAMED[mark.effect] ?? [name]
+    if (!names.includes(name)) {
+      throw new TypeError(
+        `${name}: only ${names.join(' and ')} may declare ${mark.effect.toUpperCase()}`,
+      )
     }
     ;(method as Marked)[MARK] = mark
   }

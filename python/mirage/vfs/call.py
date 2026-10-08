@@ -21,6 +21,10 @@ Fn = TypeVar("Fn", bound=Callable[..., Any])
 
 _MARK = "__vfs_call__"
 
+# Removing or moving a name is what these calls do, and the door's link,
+# overlay and cache bookkeeping for it is keyed on their names.
+_NAMED = {Effect.REMOVE: ("unlink", "rmdir"), Effect.RENAME: ("rename",)}
+
 
 def vfs_call(
     *, effect: Effect, target: Target = Target.ANY, creates: bool = False
@@ -36,10 +40,12 @@ def vfs_call(
 
     The built-in functions' marks are where the door's op classes come
     from: which ops follow a link, create a name, run one at a time per
-    path or stamp an mtime is read off what they declare here. Only
-    ``rename`` declares RENAME: the door moves the hides, links and
-    cache below a source to a destination, and only ``rename(path, dst)``
-    names both.
+    path or stamp an mtime is read off what they declare here. REMOVE
+    belongs to ``unlink`` and ``rmdir`` and RENAME to ``rename``: what
+    the door does around them (a link removed rather than followed, the
+    hides, links and cache below a moved directory) is keyed on those
+    names, so another function declaring either is refused. A VFS that
+    deletes or moves defines those functions.
 
     Args:
         effect (Effect): what the call does to the mount.
@@ -49,8 +55,12 @@ def vfs_call(
     """
 
     def mark(fn: Fn) -> Fn:
-        if effect is Effect.RENAME and fn.__name__ != "rename":
-            raise TypeError(f"{fn.__name__}: only rename declares RENAME")
+        names = _NAMED.get(effect, (fn.__name__,))
+        if fn.__name__ not in names:
+            raise TypeError(
+                f"{fn.__name__}: only {' and '.join(names)} may declare"
+                f" {effect.name}"
+            )
         setattr(fn, _MARK, Declaration(effect, target, creates))
         return fn
 

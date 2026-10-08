@@ -113,16 +113,19 @@ describe('declarations', () => {
     })
   })
 
-  it('lets only rename declare a rename', () => {
+  it.each([
+    [Effect.REMOVE, 'unlink and rmdir'],
+    [Effect.RENAME, 'rename'],
+  ] as const)('lets only the posix calls declare %s', (effect, names) => {
     expect(() => {
-      class Mover extends BaseVFS {
-        @vfsCall({ effect: Effect.RENAME })
-        move(): Promise<void> {
+      class Discarding extends BaseVFS {
+        @vfsCall({ effect })
+        discard(): Promise<void> {
           return Promise.resolve()
         }
       }
-      return Mover
-    }).toThrow('move: only rename declares RENAME')
+      return Discarding
+    }).toThrow(`discard: only ${names} may declare ${effect.toUpperCase()}`)
   })
 
   it('keeps the names that match every filter', () => {
