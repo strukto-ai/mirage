@@ -1094,6 +1094,28 @@ async def test_clone_with_an_unknown_mount_key_is_a_bad_request():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "write, status",
+    [("conditional", 400), ("bogus", 400), (True, 400), (None, 201)],
+)
+async def test_clone_judges_an_override_write_policy(write, status):
+    # A refused write policy is the caller's mistake; null leaves the saved one.
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
+        r = await client.post("/v1/workspaces", json=_minimal_config())
+        wid = r.json()["id"]
+        block = {"vfs": "ram", "write": write}
+        r = await client.post(
+            f"/v1/workspaces/{wid}/clone",
+            json={"override": {"mounts": {"/": block}}},
+        )
+        assert r.status_code == status, r.text
+
+
+@pytest.mark.asyncio
 async def test_create_with_a_bad_disk_mount_is_a_bad_request(tmp_path):
     app, _ = _make_app_with_short_grace(grace=10.0)
     transport = ASGITransport(app=app)

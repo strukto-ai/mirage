@@ -17,23 +17,14 @@ import json
 from collections.abc import Iterable
 from typing import Any
 
-from mirage.core.s3.client import _client_kwargs, async_session, is_not_found
+from mirage.core.s3.client import (
+    _client_kwargs,
+    async_session,
+    is_condition_lost,
+    is_not_found,
+)
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.record.types import generation_of
-
-
-def _is_condition_lost_error(exc: Exception) -> bool:
-    """True when a conditional write lost: the object changed since the
-    read (412) or a concurrent conditional write is in flight (409)."""
-    if hasattr(exc, "response"):
-        code = exc.response.get("Error", {}).get("Code")
-        return code in (
-            "412",
-            "PreconditionFailed",
-            "409",
-            "ConditionalRequestConflict",
-        )
-    return False
 
 
 class S3RecordClient:
@@ -115,7 +106,7 @@ class S3RecordClient:
                 **condition,
             )
         except Exception as exc:
-            if _is_condition_lost_error(exc):
+            if is_condition_lost(exc):
                 return False
             raise
         return True

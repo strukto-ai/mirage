@@ -1,5 +1,5 @@
 {
-  "note": "Workspace configs both loaders must accept, for every block that is not a permission verb: mounts, cache, index, store, clis, console and the top level. The counterpart to rejected.json, and the reason it exists: TypeScript checks keys against hand-written tables that mirror Python's pydantic models, so a field added on the Python side would be silently refused by TypeScript until a config using it turned up. Every key of every block appears in the accepted set at least once, which turns that drift into a failing test. The three verbs of a role's commands block have a file each (allow.json, ask.json, deny.json), because a rule grammar accepted for one verb and refused for another is exactly the kind of drift a single mixed file hides. Values are only as real as validation demands \u2014 no VFS is built and no script is read, both loaders stop at the shape.",
+  "note": "Workspace configs both loaders must accept, for every block that is not a permission verb: mounts, cache, index, store, clis, console and the top level. The counterpart to rejected.json, and the reason it exists: TypeScript checks keys against hand-written tables that mirror Python's pydantic models, so a field added on the Python side would be silently refused by TypeScript until a config using it turned up. Every key of every block appears in the accepted set at least once, which turns that drift into a failing test. The three verbs of a role's commands block have a file each (allow.json, ask.json, deny.json), because a rule grammar accepted for one verb and refused for another is exactly the kind of drift a single mixed file hides. Values are only as real as validation demands — no VFS is built and no script is read, both loaders stop at the shape.",
   "cases": [
     {
       "name": "top level: every key",
@@ -150,10 +150,35 @@
             "mountpoint": "/mnt/d",
             "read": "bounded",
             "ttl": 600,
+            "write": "unconditional",
             "index": {
               "type": "ram",
               "ttl": 37
             }
+          }
+        }
+      }
+    },
+    {
+      "name": "write policy: spellings and the workspace default",
+      "config": {
+        "write": "conditional",
+        "mounts": {
+          "/a": {
+            "vfs": "s3",
+            "config": {
+              "bucket": "b"
+            },
+            "mode": "write",
+            "write": "CONDITIONAL"
+          },
+          "/b": {
+            "vfs": "ram",
+            "write": ""
+          },
+          "/c": {
+            "vfs": "ram",
+            "write": "unconditional"
           }
         }
       }

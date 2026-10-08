@@ -37,7 +37,7 @@ from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
-from mirage.types import PathSpec
+from mirage.types import CheckFn, PathSpec
 from mirage.view.types import NamespaceView, SessionView
 
 
@@ -54,6 +54,7 @@ async def run_relay(
     stdin: ByteSource | None = None,
     cwd: str = "/",
     argv: tuple[str, ...] = (),
+    check_unlink: CheckFn | None = None,
 ) -> CrossResult:
     """Run a command whose work must see every operand at once.
 
@@ -89,6 +90,8 @@ async def run_relay(
         cwd (str): The session's working directory, which cp resolves a
             typed link source against.
         argv (tuple[str, ...]): Original argument spellings for diagnostics.
+        check_unlink (CheckFn | None): Refuses a move's source whose
+            mount cannot condition the delete (mv).
     """
     if cmd_name not in RELAY_COMMANDS:
         raise ValueError(f"Unsupported cross-mount relay command: {cmd_name}")
@@ -117,7 +120,7 @@ async def run_relay(
         )
     if cmd_name == Cmd.MV:
         return await run_mv(
-            scopes, flag_kwargs, dispatch, storage_key, ns, stdin
+            scopes, flag_kwargs, dispatch, storage_key, ns, stdin, check_unlink
         )
     if cmd_name == Cmd.TAR:
         return await run_tar(

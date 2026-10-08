@@ -18,6 +18,7 @@ import type { PathSpec } from '../../types.ts'
 import { loadOptionalPeer } from '../../utils/optional_peer.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
+import { CONDITION_LOST_CODES } from './constants.ts'
 
 export function s3Key(path: string, config: S3Config): string {
   return kp.apply(config.keyPrefix ?? '', path)
@@ -129,6 +130,21 @@ export function isNotFoundError(err: unknown): boolean {
   if (e.name === 'NoSuchKey' || e.name === 'NotFound') return true
   if (e.Code === 'NoSuchKey' || e.Code === '404') return true
   return e.$metadata?.httpStatusCode === 404
+}
+
+/**
+ * Whether a conditional request lost: the object changed since the version
+ * sent (412), or another conditional write is in flight (409). Keyed on the
+ * error's code, so any other 409 or 412, and auth, missing-key and transport
+ * failures, keep their own meaning; a bodiless reply (named Unknown) is
+ * judged on its status. Mirrors Python's `is_condition_lost`.
+ */
+export function isConditionLost(err: unknown): boolean {
+  if (err === null || typeof err !== 'object') return false
+  const e = err as { name?: string; $metadata?: { httpStatusCode?: number } }
+  if (e.name !== undefined && CONDITION_LOST_CODES.has(e.name)) return true
+  const status = e.$metadata?.httpStatusCode
+  return e.name === 'Unknown' && status !== undefined && CONDITION_LOST_CODES.has(String(status))
 }
 
 export async function streamToBuffer(stream: unknown): Promise<Uint8Array> {

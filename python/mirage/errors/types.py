@@ -32,6 +32,9 @@ class FsCondition(StrEnum):
     ``NO_XATTR`` is "attribute not set", which POSIX names ENOATTR on
     macOS and ENODATA on Linux. ``EBADF`` is the shell's own: no mount
     raises it, only a standard input that is closed or write-only.
+    ``STALE_WRITE`` is a lost conditional write: it carries the host's
+    ESTALE number but its own phrase and its own class, so a kernel
+    ESTALE from a disk or NFS mount keeps "Stale file handle".
     """
 
     EBADF = "ebadf"
@@ -51,6 +54,7 @@ class FsCondition(StrEnum):
     EROFS = "erofs"
     EFBIG = "efbig"
     NO_XATTR = "no_xattr"
+    STALE_WRITE = "stale_write"
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +116,24 @@ class FileTooLargeError(OSError):
     a command chokepoint renders ``<cmd>: <path>: File too large`` and
     moves on to its next operand. Mirrors the TS ``efbig``.
     """
+
+
+class StaleWriteError(OSError):
+    """A conditional write the backend refused: the file changed since it
+    was read.
+
+    Raised when a ``write: conditional`` mount's precondition (the
+    version mirage last saw) no longer holds. Stamped like the
+    other per-operand errors, so a command renders ``<cmd>: <path>:
+    changed since it was read; read it again before writing`` and moves
+    on. A direct OSError subclass, never PermissionError or
+    FileNotFoundError, so no read-failure exit code applies to it.
+    ``landed`` marks a move whose copy landed and whose source's delete
+    lost, which ``mv`` reports as a failed removal. Mirrors the TS
+    ``staleWrite``.
+    """
+
+    landed: bool = False
 
 
 class BadDescriptorError(OSError):

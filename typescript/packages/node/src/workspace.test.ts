@@ -18,14 +18,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { MountMode, PathSpec, ReadPolicy } from '@struktoai/mirage-core/types'
+import { MountMode, PathSpec, ReadPolicy, WritePolicy } from '@struktoai/mirage-core/types'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { DiskAccessor } from './accessor/disk.ts'
 import { DiskEventHook } from './core/disk/watch/hook.ts'
 import { DiskVFS } from './vfs/disk/disk.ts'
 import { InlineGitHub } from './vfs/fixtures/github.ts'
 import { buildVfs } from './vfs/registry.ts'
-import { tmpRoot } from './test-utils.ts'
+import { conditionalS3, s3Vfs, tmpRoot } from './test-utils.ts'
 import { Workspace } from './workspace.ts'
 
 describe('@struktoai/mirage-node Workspace', () => {
@@ -236,5 +236,51 @@ describe('a host folder removal reported by the disk watcher', () => {
     expect((await ws.shell('ls /d/day/sub')).exitCode).not.toBe(0)
     expect((await ws.shell('ls /d/day/empty')).exitCode).not.toBe(0)
     expect((await ws.shell('ls /d/day')).exitCode).not.toBe(0)
+  })
+})
+
+describe('the write policy at the workspace doors', () => {
+  const built: Workspace[] = []
+  function track(ws: Workspace): Workspace {
+    built.push(ws)
+    return ws
+  }
+  afterEach(async () => {
+    for (const ws of built.splice(0).reverse()) await ws.close()
+  })
+
+  it.each([
+    ['names', {}, s3Vfs, 'conditional', WritePolicy.CONDITIONAL],
+    ['cannot honour', {}, () => new RAMVFS(), 'conditional', 'ram does not'],
+    ['inherits', { write: WritePolicy.CONDITIONAL }, s3Vfs, undefined, WritePolicy.CONDITIONAL],
+    ['inherits on null', { write: WritePolicy.CONDITIONAL }, s3Vfs, null, WritePolicy.CONDITIONAL],
+    ['keeps nothing', { cacheLimit: 0 }, s3Vfs, 'conditional', 'caches reads'],
+  ] as const)(
+    'judges an added mount on its write policy: %s',
+    (_name, options, vfs, write, expected) => {
+      // The wire string, not the enum: the programmatic door coerces first.
+      const ws = track(new Workspace({}, { mode: MountMode.WRITE, ...options }))
+      const add = () => ws.addMount('/m', vfs(), MountMode.WRITE, undefined, null, undefined, write)
+      if (expected === WritePolicy.CONDITIONAL) expect(add().write).toBe(expected)
+      else expect(add).toThrow(expected)
+    },
+  )
+
+  it('keeps the host-built mounts unconditional under a conditional default', async () => {
+    const ws = track(
+      new Workspace({ '/s3': s3Vfs() }, { mode: MountMode.WRITE, write: WritePolicy.CONDITIONAL }),
+    )
+    expect(ws.mount('/s3/').write).toBe(WritePolicy.CONDITIONAL)
+    for (const prefix of ['/dev/', '/', '/.bash_history/', '/usr/bin/']) {
+      expect(ws.mount(prefix).write, prefix).toBe(WritePolicy.UNCONDITIONAL)
+    }
+    expect((await ws.shell('echo x > /dev/null')).exitCode).toBe(0)
+  })
+
+  it('refuses a conditional mount when the cache keeps nothing', () => {
+    // A zero cache limit keeps nothing, so no write would have a version.
+    expect(() => new Workspace({ '/s3': conditionalS3() }, { cacheLimit: 0 })).toThrow(
+      'caches reads',
+    )
   })
 })

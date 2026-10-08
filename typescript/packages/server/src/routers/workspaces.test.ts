@@ -555,6 +555,31 @@ describe('workspaces router', () => {
     await app.close()
   })
 
+  it.each([
+    ['conditional', 400],
+    ['bogus', 400],
+    [true, 400],
+    [null, 201],
+  ] as const)(
+    'POST /v1/workspaces/:id/clone judges an override write %j',
+    async (write, status) => {
+      // A refused write policy is the caller's mistake; null leaves the saved one.
+      const app = buildApp()
+      await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: { id: 'src-w', config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } },
+      })
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/src-w/clone',
+        payload: { override: { mounts: { '/': { vfs: 'ram', write } } } },
+      })
+      expect(res.statusCode, res.body).toBe(status)
+      await app.close()
+    },
+  )
+
   it('POST /v1/workspaces 400s for a bad mount config', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mirage-create-disk-'))
     const app = buildApp()

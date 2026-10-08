@@ -61,6 +61,7 @@ export async function runRelay(
   // against.
   cwd = '/',
   argv: readonly string[] = [],
+  checkUnlink?: (path: PathSpec) => void,
 ): Promise<CrossResult> {
   if (!RELAY_COMMANDS.has(cmdName))
     throw new Error(`Unsupported cross-mount relay command: ${cmdName}`)
@@ -70,7 +71,9 @@ export async function runRelay(
   if (cmdName === 'wc') return runWc(scopes, flagKwargs, dispatch, runSingle, cwd, ns, stdin)
   if (cmdName === 'ls') return runLs(scopes, flagKwargs, dispatch, ns, sessionView)
   if (cmdName === 'cp') return runCp(scopes, flagKwargs, dispatch, storageKey, ns, cwd, stdin)
-  if (cmdName === 'mv') return runMv(scopes, flagKwargs, dispatch, storageKey, ns, stdin)
+  if (cmdName === 'mv') {
+    return runMv(scopes, flagKwargs, dispatch, storageKey, ns, stdin, checkUnlink)
+  }
   if (cmdName === 'tar') return runTar(scopes, textArgs, flagKwargs, dispatch, ns, stdin)
   if (cmdName === 'tee') return runTee(scopes, flagKwargs, dispatch, stdin)
   if (cmdName === 'unzip') return runUnzip(scopes, textArgs, flagKwargs, dispatch)

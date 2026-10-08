@@ -19,13 +19,15 @@ import { find as findCore } from '@struktoai/mirage-core/core/s3/find'
 import { rmR as rmRCore } from '@struktoai/mirage-core/core/s3/rm'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec } from '@struktoai/mirage-core/types'
+import { writeConditions } from '@struktoai/mirage-core/workspace/mount/write_policy'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { HttpProxyAgent } from 'http-proxy-agent'
 import { HttpsProxyAgent } from 'https-proxy-agent'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { S3VFS } from './s3.ts'
 import type { S3Config } from './config.ts'
 import { installS3Mock, type S3Mock } from './mock.ts'
+import { s3Vfs } from '../../test-utils.ts'
 
 // S3 tests run against an in-memory mock of the AWS SDK v3 S3Client (via
 // aws-sdk-client-mock). No external service required.
@@ -234,5 +236,60 @@ describe('S3VFS (mocked integration)', () => {
       const results = await findCore(vfs.accessor, mkPath('/sz/'), { minSize: 10 })
       expect(results).toEqual(['/sz', '/sz/big'])
     })
+  })
+})
+
+describe('an s3 mount judged on its declared endpoint', () => {
+  const names = ['AWS_ENDPOINT_URL', 'AWS_ENDPOINT_URL_S3', 'AWS_IGNORE_CONFIGURED_ENDPOINT_URLS']
+  function clearEndpointEnv(): void {
+    for (const n of names) vi.stubEnv(n, undefined)
+  }
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+  const AWS = ['copy', 'delete', 'put']
+  const MINIO = ['put']
+
+  it.each([
+    ['the S3 variable', { AWS_ENDPOINT_URL_S3: 'http://minio.local:9000' }, MINIO],
+    ['the global variable', { AWS_ENDPOINT_URL: 'http://minio.local:9000' }, MINIO],
+    [
+      'an empty S3 variable falls through',
+      { AWS_ENDPOINT_URL_S3: '', AWS_ENDPOINT_URL: 'http://minio.local:9000' },
+      MINIO,
+    ],
+    [
+      'the ignore flag',
+      {
+        AWS_ENDPOINT_URL_S3: 'http://minio.local:9000',
+        AWS_IGNORE_CONFIGURED_ENDPOINT_URLS: 'true',
+      },
+      AWS,
+    ],
+    ['nothing configured', {}, AWS],
+  ] as const)('%s', (_name, env, expected) => {
+    // The declared endpoint, else the env as it was when the mount was built.
+    clearEndpointEnv()
+    for (const [n, v] of Object.entries(env)) vi.stubEnv(n, v)
+    const vfs = s3Vfs()
+    clearEndpointEnv()
+    expect([...writeConditions(vfs)].sort()).toEqual(expected)
+  })
+
+  it('judges the endpoint its client uses', () => {
+    // One declared at build pins the client; without one, a later env one is judged.
+    clearEndpointEnv()
+    vi.stubEnv('AWS_ENDPOINT_URL', 'http://minio.local:9000')
+    const pinned = s3Vfs()
+    vi.stubEnv('AWS_ENDPOINT_URL', undefined)
+    const plain = s3Vfs()
+    expect([pinned.config.endpoint, pinned.accessor.config.endpoint]).toEqual([
+      undefined,
+      'http://minio.local:9000',
+    ])
+    expect([...writeConditions(pinned)].sort()).toEqual(MINIO)
+    expect([...writeConditions(plain)].sort()).toEqual(AWS)
+    vi.stubEnv('AWS_ENDPOINT_URL', 'http://minio.local:9000')
+    expect([...writeConditions(plain)].sort()).toEqual(MINIO)
   })
 })

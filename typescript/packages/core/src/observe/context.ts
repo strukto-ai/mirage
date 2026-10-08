@@ -14,7 +14,9 @@
 
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { ContextCall } from '../utils/async_context.ts'
-import { OpRecord } from './record.ts'
+import { OpRecord, RecordIndex, STAMP_FINGERPRINT_OPS } from './record.ts'
+import { underPath } from '../utils/key_prefix.ts'
+import type { PathSpec } from '../types.ts'
 
 interface RecordingState {
   records: OpRecord[]
@@ -61,6 +63,124 @@ export function captureRecordingContext(): ContextCall[] {
 export async function commandRecords<T>(fn: (records: OpRecord[]) => Promise<T>): Promise<T> {
   const mine: OpRecord[] = []
   return commandSink.run(mine, () => fn(mine))
+}
+
+/** One lost path's mark. Mirrors Python's `LostMark`. */
+export interface LostMark {
+  /** Where in the line's records it was lost. */
+  readonly at: number
+  /** Its place among the line's marks, from 1. */
+  readonly order: number
+  /** The version its write lost on, if any. */
+  readonly version: string | null
+}
+
+/**
+ * The paths whose conditional write lost on a line. A lost path's cached
+ * copy was dropped; nothing the line read of it before the loss may be
+ * cached again. The version the write lost on is the one a retry sends, so
+ * it is refused again until a read. A read or write of the path after the
+ * loss names the bytes now there, and lifts the mark. Mirrors Python's
+ * `LostPaths`, which rides the recorder; here it is keyed by the line's
+ * records, since `applyIo` runs after the recording scope ends.
+ */
+export class LostPaths {
+  readonly marks = new Map<string, LostMark>()
+  /** The marks made so far. */
+  count = 0
+
+  constructor(private readonly records: readonly OpRecord[]) {}
+
+  mark(key: string, version: string | null = null): void {
+    this.count += 1
+    this.marks.set(key, {
+      at: this.records.length,
+      order: this.count,
+      version: version !== null && version !== '' ? version : null,
+    })
+  }
+
+  /**
+   * Lift the marks a removal or move of `key` (and, with `subtree`, below it)
+   * ended: only those made by the time it began (`upto`, the `count` then), so
+   * a refusal another command of the line made while it ran stays.
+   */
+  lift(key: string, upto: number, subtree = false): void {
+    for (const [marked, mark] of [...this.marks]) {
+      const covered = marked === key || (subtree && underPath(marked, key))
+      if (covered && mark.order <= upto) this.marks.delete(marked)
+    }
+  }
+
+  /** The version a write to `key` lost on, while it is still lost. */
+  version(key: string): string | null {
+    return this.holds(key) ? (this.marks.get(key)?.version ?? null) : null
+  }
+
+  holds(key: string): boolean {
+    const mark = this.marks.get(key)
+    if (mark === undefined) return false
+    return !this.records
+      .slice(mark.at)
+      .some((rec) => rec.path === key && STAMP_FINGERPRINT_OPS.has(rec.op))
+  }
+}
+
+/**
+ * The version the running line itself names for `key`, with whether the line
+ * knows `key` at all. A lost path names the version its write lost on;
+ * otherwise the newest version record does, a stamp its token and a
+ * retraction none. Mirrors Python's `line_version`.
+ */
+export function lineVersion(
+  index: RecordIndex,
+  lost: LostPaths | null,
+  key: string,
+): [boolean, string | null] {
+  if (lost?.holds(key) === true) return [true, lost.version(key)]
+  const rec = index.newestVersion(key)
+  if (rec === null) return [false, null]
+  const fingerprint = STAMP_FINGERPRINT_OPS.has(rec.op) ? (rec.fingerprint ?? '') : ''
+  return [true, fingerprint !== '' ? fingerprint : null]
+}
+
+const lostByLine = new WeakMap<readonly OpRecord[], LostPaths>()
+const indexByLine = new WeakMap<readonly OpRecord[], RecordIndex>()
+
+/** The version index of the line whose records these are; one per line. */
+export function recordIndex(records: readonly OpRecord[]): RecordIndex {
+  let index = indexByLine.get(records)
+  if (index === undefined) {
+    index = new RecordIndex(records)
+    indexByLine.set(records, index)
+  }
+  return index
+}
+
+/** The lost paths of the line whose records these are, null outside a line. */
+export function lostPaths(records: readonly OpRecord[] | undefined): LostPaths | null {
+  if (records === undefined) return null
+  let lost = lostByLine.get(records)
+  if (lost === undefined) {
+    lost = new LostPaths(records)
+    lostByLine.set(records, lost)
+  }
+  return lost
+}
+
+/** Mark `key` lost on the running line, if one is recording. */
+export function markLost(path: PathSpec, version: string | null = null): void {
+  lostPaths(storage.getStore()?.records)?.mark(path.virtual, version)
+}
+
+/** The running line's marks so far, for a later `liftLost`. Mirrors Python's `lost_count`. */
+export function lostCount(): number {
+  return lostPaths(storage.getStore()?.records)?.count ?? 0
+}
+
+/** Lift the running line's marks a removal or move of `key` ended. Mirrors Python's `lift_lost`. */
+export function liftLost(path: PathSpec, upto: number, subtree = false): void {
+  lostPaths(storage.getStore()?.records)?.lift(path.virtual, upto, subtree)
 }
 
 export function activeRecords(): readonly OpRecord[] | undefined {

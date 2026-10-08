@@ -46,6 +46,7 @@ describe('the preview1 wire table', () => {
       EROFS: 69,
       EFBIG: 22,
       NO_XATTR: 58,
+      STALE_WRITE: 72,
     })
   })
 })

@@ -1,5 +1,5 @@
 {
-  "note": "Workspace configs both loaders must refuse. Python forbids extra keys on every config block (config.py's ConfigDict(extra='forbid')); the TypeScript loader mirrors those tables in server/src/config.ts. A config that loads in one language and not the other is the bug this fixture exists to catch, so the spellings here are Python's canonical snake_case ones \u2014 a camelCase alias TypeScript would otherwise accept for free is just as unportable as a typo.",
+  "note": "Workspace configs both loaders must refuse. Python forbids extra keys on every config block (config.py's ConfigDict(extra='forbid')); the TypeScript loader mirrors those tables in server/src/config.ts. A config that loads in one language and not the other is the bug this fixture exists to catch, so the spellings here are Python's canonical snake_case ones — a camelCase alias TypeScript would otherwise accept for free is just as unportable as a typo. A case may name an `error`: a phrase both loaders' refusals must contain.",
   "cases": [
     {
       "name": "mount block: mount_point for mountpoint",
@@ -29,6 +29,79 @@
           "/d": {
             "vfs": "ram",
             "read": "banana"
+          }
+        }
+      }
+    },
+    {
+      "name": "mount block: an unknown write policy",
+      "error": "unknown write policy 'banana'",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "write": "banana"
+          }
+        }
+      }
+    },
+    {
+      "name": "mount block: a write policy that is a bool",
+      "error": "unknown write policy true;",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "write": true
+          }
+        }
+      }
+    },
+    {
+      "name": "mount block: a write policy that is a number",
+      "error": "unknown write policy 1;",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "write": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "workspace: an unknown write policy",
+      "error": "unknown write policy 'banana'",
+      "config": {
+        "write": "banana",
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        }
+      }
+    },
+    {
+      "name": "workspace: a write policy that is a bool",
+      "error": "unknown write policy true;",
+      "config": {
+        "write": true,
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        }
+      }
+    },
+    {
+      "name": "mount block: an unknown read and write policy, read named",
+      "error": "unknown read policy 'banana'",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "read": "banana",
+            "write": "banana"
           }
         }
       }

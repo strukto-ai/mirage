@@ -15,6 +15,7 @@
 import { writeFileSync } from 'node:fs'
 import { type ReadSpec } from '@struktoai/mirage-node'
 import { resolveReadSpec } from '@struktoai/mirage-core/workspace/mount/read_policy'
+import { coerceWritePolicy } from '@struktoai/mirage-core/workspace/mount/write_policy'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { ConcurrencyLimiter } from '@struktoai/mirage-core/concurrency/limiter'
 import { ADAPTERS, openConsistency } from './adapters/index.ts'
@@ -295,7 +296,7 @@ export async function runTarget(
     // is the silent downgrade this suite exists to catch.
     const spec: ReadSpec = resolveReadSpec(c.read, c.ttl)
     const run = await runConsistencyCase(
-      () => openConsistency(target, spec, mountReadOf(c)),
+      () => openConsistency(target, spec, mountReadOf(c), coerceWritePolicy(c.write)),
       c,
       target,
     )

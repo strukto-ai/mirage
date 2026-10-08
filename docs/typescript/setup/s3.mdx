@@ -40,6 +40,8 @@ console.log(res.stdoutText)
 
 If `~/.aws/credentials` is configured, you can omit `accessKeyId`/`secretAccessKey` and the AWS SDK picks up the default profile.
 
+Under [`write: conditional`](/home/yaml#the-write-policy) a write carries the version of the file mirage read, and S3 refuses it when the file has changed since. The endpoint decides which writes can be conditioned: AWS's conditions every write, copy and delete; any other `endpoint` (or `AWS_ENDPOINT_URL_S3`/`AWS_ENDPOINT_URL`) only a write, so mirage refuses what would copy or delete there. An endpoint set only in an AWS profile is not read: give a non-AWS server its `endpoint`. A browser mount signed by presigned URLs cannot carry a condition, so it cannot declare `write: conditional`.
+
 ## Browser (presigned URLs)
 
 ```bash

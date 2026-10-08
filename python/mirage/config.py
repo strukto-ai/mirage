@@ -49,6 +49,7 @@ from mirage.types import (
     MountBackend,
     MountMode,
     ReadPolicy,
+    WritePolicy,
     parse_mount_mode,
 )
 from mirage.utils.yaml import parse_yaml
@@ -61,6 +62,7 @@ from mirage.workspace.mount.read_policy import (
     resolve_read_spec,
 )
 from mirage.workspace.mount.spec import Mount
+from mirage.workspace.mount.write_policy import coerce_write_policy
 from mirage.workspace.store import (
     DEFAULT_STATE_ROOT,
     DiskWorkspaceStateStore,
@@ -359,6 +361,8 @@ class MountBlock(BaseModel):
     # at workspace level it would sit beside `index: {ttl:}`.
     read: ReadPolicy | None = None
     ttl: int | None = None
+    # Overrides the workspace `write:` as `mode` does.
+    write: WritePolicy | None = None
     # Replaces the workspace `index:` whole; nothing is inherited.
     index: IndexBlock | None = None
 
@@ -375,6 +379,13 @@ class MountBlock(BaseModel):
         if v is None:
             return v
         return coerce_read_policy(v)
+
+    @field_validator("write", mode="before")
+    @classmethod
+    def _v_write(cls, v):
+        if v is None:
+            return v
+        return coerce_write_policy(v)
 
     @field_validator("ttl", mode="before")
     @classmethod
@@ -691,6 +702,8 @@ class WorkspaceConfig(BaseModel):
     # deliberately no workspace-level bound: `ttl:` exists only inside a
     # mount block, where it cannot be confused with `index: {ttl:}`.
     read: ReadPolicy | None = None
+    # The write policy a mount inherits when it declares none.
+    write: WritePolicy | None = None
     default_session_id: str | None = None
     default_agent_id: str | None = None
     workspace_id: str | None = None
@@ -722,6 +735,13 @@ class WorkspaceConfig(BaseModel):
         if v is None:
             return v
         return coerce_read_policy(v)
+
+    @field_validator("write", mode="before")
+    @classmethod
+    def _v_write_default(cls, v):
+        if v is None:
+            return v
+        return coerce_write_policy(v)
 
     @model_validator(mode="after")
     def _v_profile(self) -> "WorkspaceConfig":
@@ -763,6 +783,11 @@ class WorkspaceConfig(BaseModel):
                 mode=mode,
                 command_limits=block.command_limits,
                 read=read,
+                write=(
+                    block.write
+                    if block.write is not None
+                    else coerce_write_policy(self.write)
+                ),
                 vfs_ref=block.vfs,
                 index=(
                     _build_index_config(block.index)
@@ -775,6 +800,7 @@ class WorkspaceConfig(BaseModel):
             "command_limits": self.command_limits,
             "mode": self.mode,
             "read": default_read,
+            "write": self.write,
             "session_id": self.default_session_id,
             "agent_id": self.default_agent_id,
         }

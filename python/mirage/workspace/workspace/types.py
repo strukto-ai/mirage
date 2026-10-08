@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import TypeAlias
 
 from mirage.cache.index import IndexConfig
-from mirage.types import Limit, MountBackend, MountMode, ReadSpec
+from mirage.types import Limit, MountBackend, MountMode, ReadSpec, WritePolicy
 from mirage.vfs.base import BaseVFS
 from mirage.workspace.mount.spec import Mount
 
@@ -41,6 +41,7 @@ class MountSpec:
     vfs: BaseVFS
     mode: MountMode
     read: ReadSpec
+    write: WritePolicy = WritePolicy.UNCONDITIONAL
     backend: MountBackend = MountBackend.WORKSPACE
     mountpoint: str | None = None
     command_limits: dict[str, Limit] = field(default_factory=dict)
